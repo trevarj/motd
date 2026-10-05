@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -72,6 +71,7 @@ import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MutedActivityBadge
 import io.github.trevarj.motd.ui.components.NetworkChip
+import io.github.trevarj.motd.ui.components.SenderLabel
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
@@ -675,38 +675,6 @@ private fun PresenceBadge(
                 }
             }
         }
-    }
-}
-
-/**
- * Sender label chip for channel previews: nick-tinted rounded chip (mirrors
- * [NetworkChip] metrics), no colon so a nick mention in the text no longer reads
- * as a double `nick: nick:`. Dimmed to match the message-preview prominence:
- * the nick hue stays opaque while weight tracks the row's unread state, so
- * the label reads as part of the preview line rather than a louder element.
- */
-@Composable
-internal fun SenderLabel(
-    sender: String,
-    color: Color,
-    unread: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier =
-            modifier
-                .widthIn(max = 92.dp)
-                .background(MaterialTheme.colorScheme.surfaceContainerLow, MotdShapes.tag)
-                .padding(horizontal = 6.dp, vertical = 1.dp),
-    ) {
-        Text(
-            text = sender,
-            color = color,
-            fontWeight = if (unread) FontWeight.Medium else FontWeight.Normal,
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 

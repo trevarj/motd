@@ -9,9 +9,11 @@ import android.os.Bundle
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -156,6 +158,23 @@ class RequiredHeadlessE2eTest {
             )
         val bufferId = runBlocking { BufferProbe(bootstrap.seams.buffers(), milestones).awaitJoinedChannel(network.childId, bootstrap.args.channel) }
         ChatListRobot(compose).open(bufferId)
+        compose.onNodeWithTag("chat_composer_field", useUnmergedTree = true).assertIsDisplayed()
+        val pillBounds =
+            compose.onNodeWithTag("chat_composer_pill", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val primaryActionBounds =
+            compose
+                .onNode(hasTestTag("chat_composer_send") or hasTestTag("chat_composer_voice"), useUnmergedTree = true)
+                .getUnclippedBoundsInRoot()
+        val primaryActionHeight = primaryActionBounds.bottom - primaryActionBounds.top
+        assertEquals(48.dp, primaryActionHeight)
+        assertTrue("Default floating pill must reserve its primary-action insets", pillBounds.bottom - pillBounds.top >= 56.dp)
+        assertTrue(primaryActionBounds.left >= pillBounds.left && primaryActionBounds.right <= pillBounds.right - 4.dp)
+        assertTrue(primaryActionBounds.top >= pillBounds.top + 4.dp)
+        assertEquals(pillBounds.bottom - 4.dp, primaryActionBounds.bottom)
+        val timelineBounds = compose.onNodeWithTag("chat_timeline").getUnclippedBoundsInRoot()
+        val bottomHostBounds = compose.onNodeWithTag("chat_bottom_host").getUnclippedBoundsInRoot()
+        assertEquals("The real message viewport continues behind the floating input", bottomHostBounds.bottom, timelineBounds.bottom)
+        assertTrue(timelineBounds.bottom > pillBounds.top)
         val token = "required${bootstrap.args.runId.filter(Char::isLetterOrDigit).takeLast(16)}"
         val probe = MessageLifecycleProbe(bootstrap.seams.search(), milestones)
         val canonical =

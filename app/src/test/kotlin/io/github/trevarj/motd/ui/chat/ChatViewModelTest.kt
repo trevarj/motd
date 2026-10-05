@@ -214,6 +214,147 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun composerNicknameUsesLiveThenPersistedThenConfiguredIdentity() =
+        runTest {
+            db.networkDao().update(network.copy(nick = "ConfiguredNick"))
+            val manager = FakeConnectionManager(network.id, state = IrcClientState.Disconnected)
+            val vm = viewModel(channel, manager)
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.state.collect() }
+            runCurrent()
+            assertEquals("ConfiguredNick", vm.state.value.composerNick)
+
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(network.id, selfNick = "OfflineNick"))
+            runCurrent()
+            assertEquals("OfflineNick", vm.state.value.composerNick)
+
+            manager.publishState(network.id, IrcClientState.Ready("ServerNick", emptySet(), emptyMap()))
+            runCurrent()
+            assertEquals("ServerNick", vm.state.value.composerNick)
+
+            manager.publishState(network.id, IrcClientState.Ready("ChangedNick", emptySet(), emptyMap()))
+            runCurrent()
+            assertEquals("ChangedNick", vm.state.value.composerNick)
+
+            // EventProcessor persists self-NICK in production; the fake only publishes transport state.
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(network.id, selfNick = "ChangedNick"))
+            manager.publishState(network.id, IrcClientState.Disconnected)
+            runCurrent()
+            assertEquals("ChangedNick", vm.state.value.composerNick)
+
+            manager.publishState(network.id, IrcClientState.Ready(" \t", emptySet(), emptyMap()))
+            runCurrent()
+            assertEquals("ChangedNick", vm.state.value.composerNick)
+
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(network.id, selfNick = " \t"))
+            runCurrent()
+            assertEquals("ConfiguredNick", vm.state.value.composerNick)
+
+            db.networkDao().update(network.copy(nick = " \t"))
+            runCurrent()
+            assertNull(vm.state.value.composerNick)
+        }
+
+    @Test
+    fun composerNicknameStaysBoundToItsChannelOrQueryNetwork() =
+        runTest {
+            val otherNetwork =
+                network
+                    .copy(id = 0, name = "other", nick = "OtherConfigured")
+                    .let { it.copy(id = db.networkDao().insert(it)) }
+            val otherQuery =
+                query
+                    .copy(id = 0, networkId = otherNetwork.id, name = "QueryPeer", displayName = "Query title")
+                    .let { it.copy(id = db.bufferDao().insert(it)) }
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(network.id, selfNick = "LocalSelf"))
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(otherNetwork.id, selfNick = "OtherSelf"))
+            val manager = FakeConnectionManager(network.id, state = IrcClientState.Disconnected)
+            val otherManager = FakeConnectionManager(otherNetwork.id, state = IrcClientState.Disconnected)
+            val channelVm = viewModel(channel, manager)
+            val queryVm = viewModel(query, manager)
+            val otherVm = viewModel(otherQuery, otherManager)
+            for (vm in listOf(channelVm, queryVm, otherVm)) {
+                backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.state.collect() }
+            }
+            runCurrent()
+            assertEquals("LocalSelf", channelVm.state.value.composerNick)
+            assertEquals("LocalSelf", queryVm.state.value.composerNick)
+            assertEquals("OtherSelf", otherVm.state.value.composerNick)
+
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(network.id, selfNick = null))
+            runCurrent()
+            assertEquals("me", channelVm.state.value.composerNick)
+            assertEquals("me", queryVm.state.value.composerNick)
+
+            db.networkDao().update(network.copy(nick = ""))
+            manager.publishState(otherNetwork.id, IrcClientState.Ready("OtherLive", emptySet(), emptyMap()))
+            runCurrent()
+            assertNull(channelVm.state.value.composerNick)
+            assertNull(queryVm.state.value.composerNick)
+            assertEquals("OtherSelf", otherVm.state.value.composerNick)
+
+            // Rebinding a buffer must not retain either fallback from its previous network.
+            val buffers = FakeBufferRepository(channel)
+            val reboundVm = viewModel(channel, manager, buffers = buffers)
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { reboundVm.state.collect() }
+            runCurrent()
+            assertNull(reboundVm.state.value.composerNick)
+            buffers.update(otherQuery)
+            runCurrent()
+            assertEquals("OtherLive", reboundVm.state.value.composerNick)
+            manager.publishState(otherNetwork.id, IrcClientState.Disconnected)
+            runCurrent()
+            assertEquals("OtherSelf", reboundVm.state.value.composerNick)
+            buffers.update(channel)
+            runCurrent()
+            assertNull(reboundVm.state.value.composerNick)
+
+            val unavailableVm =
+                viewModel(
+                    channel,
+                    manager,
+                    routeBufferId = Long.MAX_VALUE,
+                    buffers = FakeBufferRepository(channel),
+                )
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { unavailableVm.state.collect() }
+            runCurrent()
+            assertNull(unavailableVm.state.value.buffer)
+            assertNull(unavailableVm.state.value.composerNick)
+        }
+
+    @Test
+    fun composerNicknameNeverPublishesAnotherNetworksLiveNickDuringRebind() =
+        runTest {
+            val otherNetwork =
+                network
+                    .copy(id = 0, name = "other", nick = "OtherConfigured")
+                    .let { it.copy(id = db.networkDao().insert(it)) }
+            val otherQuery =
+                query
+                    .copy(id = 0, networkId = otherNetwork.id, name = "QueryPeer", displayName = "Query title")
+                    .let { it.copy(id = db.bufferDao().insert(it)) }
+            val manager = FakeConnectionManager(network.id, state = IrcClientState.Ready("LocalLive", emptySet(), emptyMap()))
+            manager.connectionActivity.value =
+                manager.connectionActivity.value.copy(states = manager.connectionActivity.value.states + (otherNetwork.id to IrcClientState.Disconnected))
+            val buffers = FakeBufferRepository(channel)
+            val vm = viewModel(channel, manager, buffers = buffers)
+            val observed = mutableListOf<ChatState>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.state.collect { observed += it } }
+            runCurrent()
+            assertEquals("LocalLive", vm.state.value.composerNick)
+            buffers.update(otherQuery)
+            runCurrent()
+            assertEquals("OtherConfigured", vm.state.value.composerNick)
+            buffers.update(channel)
+            runCurrent()
+            assertEquals("LocalLive", vm.state.value.composerNick)
+            for (snapshot in observed) {
+                val nick = snapshot.composerNick ?: continue
+                val expected = if (snapshot.buffer?.networkId == network.id) "LocalLive" else "OtherConfigured"
+                assertEquals("Nickname must belong to the emitted buffer network", expected, nick)
+            }
+        }
+
+    @Test
     fun aiApplyPreservesReplyAndPersistsOnlyTheCurrentRevision() =
         runTest {
             val vm = viewModel(channel, FakeConnectionManager(network.id))

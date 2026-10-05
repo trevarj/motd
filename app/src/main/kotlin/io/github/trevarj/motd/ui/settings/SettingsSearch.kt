@@ -156,6 +156,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_folder_layout, R.string.settings_folder_layout_desc, "folders tabs inline chat list", SettingsSearchPage.APPEARANCE, SettingsTarget.FOLDER_LAYOUT),
         spec(R.string.settings_show_folder_chats_in_all, R.string.settings_show_folder_chats_in_all_desc, "folders all assigned unassigned chat list", SettingsSearchPage.APPEARANCE, SettingsTarget.SHOW_FOLDER_CHATS_IN_ALL),
         spec(R.string.settings_density, R.string.settings_density_comfortable_desc, "layout compact two line bubbles", SettingsSearchPage.APPEARANCE, SettingsTarget.MESSAGE_STYLE),
+        spec(R.string.settings_composer_style, R.string.settings_composer_style_desc, "input composer default large nickname nick compact pill floating", SettingsSearchPage.APPEARANCE, SettingsTarget.COMPOSER_STYLE),
         spec(R.string.settings_avatar_style, R.string.settings_avatar_irc_sprite_desc, "monogram initials sprite", SettingsSearchPage.APPEARANCE, SettingsTarget.AVATAR_STYLE),
         spec(R.string.settings_show_timestamps, R.string.settings_show_timestamps_desc, "time", SettingsSearchPage.APPEARANCE, SettingsTarget.TIMESTAMPS),
         spec(R.string.settings_time_format, R.string.settings_time_format_custom_help, "12 24 clock", SettingsSearchPage.APPEARANCE, SettingsTarget.TIME_FORMAT),

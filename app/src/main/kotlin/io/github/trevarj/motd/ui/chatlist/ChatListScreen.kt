@@ -190,6 +190,7 @@ import io.github.trevarj.motd.ui.components.HistoryIncompleteBadge
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
+import io.github.trevarj.motd.ui.components.SenderLabel
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdMotion

@@ -708,6 +708,19 @@
     <string name="chat_composer_replying_to">Replying to %1$s</string>
     <string name="chat_composer_cancel_reply">Cancel reply</string>
     <string name="chat_composer_attachment">Add attachment</string>
+    <string name="chat_composer_emoji_help">Open the emoji picker to add an emoji.</string>
+    <string name="chat_format_bold_help">Toggle bold for selected text or new typing.</string>
+    <string name="chat_format_italic_help">Toggle italic for selected text or new typing.</string>
+    <string name="chat_format_underline_help">Toggle underline for selected text or new typing.</string>
+    <string name="chat_format_monospace_help">Toggle monospace for selected text or new typing.</string>
+    <string name="chat_format_color_help">Choose text and background colors for selected text or new typing.</string>
+    <string name="chat_format_clear_help">Remove styles and colors from selected text, or reset new typing.</string>
+    <string name="chat_composer_attachment_help">Open attachment options to choose a file or upload text.</string>
+    <string name="chat_composer_ai_help">Open AI text tools for the current draft.</string>
+    <string name="chat_composer_expand_help">Make more room to edit the draft with formatting tools.</string>
+    <string name="chat_composer_collapse_help">Return to the smaller input without changing the draft.</string>
+    <string name="chat_format_markdown_help">Convert Markdown in the message body to IRC formatting, e.g. **bold**.</string>
+    <string name="chat_composer_upload_draft_help">Review and upload the current draft as text, then replace it with the uploaded link.</string>
     <string name="chat_command_me">Send an action</string>
     <string name="chat_command_join">Join a channel</string>
     <string name="chat_command_part">Leave this channel</string>
@@ -862,6 +875,14 @@
          tagged so lint (warningsAsErrors) stays green mid-wave.
          WP-U4 strips the markers once the usages exist. -->
     <string name="settings_density">Message style</string>
+    <string name="settings_composer_style">Input style</string>
+    <string name="settings_composer_style_desc">Choose the input layout for IRC chats.</string>
+    <string name="settings_composer_style_comfortable">Default</string>
+    <string name="settings_composer_style_comfortable_desc">Floating pill with familiar controls.</string>
+    <string name="settings_composer_style_large">Large</string>
+    <string name="settings_composer_style_large_desc">Roomy input with tools always visible above.</string>
+    <string name="settings_composer_style_compact">Nickname</string>
+    <string name="settings_composer_style_compact_desc">Small floating pill with your nickname and tools tucked away.</string>
     <string name="settings_ui_font_size">Interface text</string>
     <string name="settings_ui_font_size_desc">Menus, settings, navigation, and app controls</string>
     <string name="settings_conversation_font_size">Conversation text</string>

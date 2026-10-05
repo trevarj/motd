@@ -747,6 +747,18 @@ class ChatModelsTest {
         )
     }
 
+    @Test fun `bottom host occlusion excludes covered reverse-layout rows from display`() {
+        // Bottom padding is host (68) + ordinary timeline inset (8): visible offsets start at -76.
+        assertFalse(timelineItemIsVisible(-60, 40, -76, 524, bottomOcclusionPx = 68))
+        assertFalse(timelineItemIsVisible(-48, 40, -76, 524, bottomOcclusionPx = 68))
+        assertTrue(timelineItemIsVisible(-47, 40, -76, 524, bottomOcclusionPx = 68))
+        assertTrue(timelineItemIsVisible(0, 40, -76, 524, bottomOcclusionPx = 68))
+        assertFalse(timelineItemIsVisible(524, 40, -76, 524, bottomOcclusionPx = 68))
+        assertFalse(timelineItemIsVisible(0, 0, -76, 524, bottomOcclusionPx = 68))
+        // A standalone list has no overlay and keeps its original visible policy.
+        assertTrue(timelineItemIsVisible(-60, 40, -76, 524))
+    }
+
     @Test fun `entry veil stays down until positioning resolves one way or another`() {
         // Pending entry with no timeout: the timeline stays hidden rather than flashing the bottom.
         assertFalse(

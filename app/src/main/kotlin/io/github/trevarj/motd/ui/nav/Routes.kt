@@ -76,6 +76,7 @@ enum class SettingsTarget {
     FOLDER_LAYOUT,
     SHOW_FOLDER_CHATS_IN_ALL,
     MESSAGE_STYLE,
+    COMPOSER_STYLE,
     AVATAR_STYLE,
     TIMESTAMPS,
     TIME_FORMAT,

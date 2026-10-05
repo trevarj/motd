@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -129,6 +130,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -197,6 +199,7 @@ import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
+import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
@@ -564,6 +567,7 @@ fun ChatScreen(
         conversationFontScalePercent = appearance.conversationFontScalePercent,
         messageSpacing = appearance.messageSpacing,
         bubbleCornerStyle = appearance.bubbleCornerStyle,
+        composerStyle = appearance.composerStyle,
         showComposerEmoji = settings.showComposerEmoji,
         showComposerFormattingTools = settings.showComposerFormattingTools,
         visibleReplyPrefix = replyConfig.visibleChannelPrefix,
@@ -1159,6 +1163,7 @@ fun ChatContent(
     onReadAloudOptions: () -> Unit = {},
     onReadAloudSaveOptions: (ReadAloudSelection) -> Unit = {},
     onReadAloudPreview: (ReadAloudSelection) -> Unit = {},
+    composerStyle: ComposerStyle = ComposerStyle.COMFORTABLE,
 ) {
     val dickordEnabled = LocalDickordLabsEnabled.current
     val buffer = state.buffer
@@ -1188,6 +1193,13 @@ fun ChatContent(
             }
         }
     val listState = rememberLazyListState()
+    // Keep Scaffold's stable measure-updated padding, not a post-measure height snapshot.
+    var bottomHostPadding by remember { mutableStateOf<PaddingValues?>(null) }
+    val bottomHostDensity by rememberUpdatedState(LocalDensity.current)
+    val readBottomHostHeightPx =
+        remember {
+            { with(bottomHostDensity) { bottomHostPadding?.calculateBottomPadding()?.roundToPx() ?: 0 } }
+        }
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
     var liveEntryIds by remember(state.buffer?.id) { mutableStateOf(emptySet<Long>()) }
     val presenceMode = state.conversationPresence.effective
@@ -2141,10 +2153,13 @@ fun ChatContent(
     // wrong "already seen".
     fun recordFurthestDisplayed() {
         if (!initialPositionSettled) return
+        val layout = listState.layoutInfo
+        val bottomHostHeightPx = readBottomHostHeightPx()
         val deepest =
-            listState.layoutInfo.visibleItemsInfo
-                .lastOrNull()
-                ?.index ?: return
+            layout.visibleItemsInfo
+                .lastOrNull {
+                    timelineItemIsVisible(it.offset, it.size, layout.viewportStartOffset, layout.viewportEndOffset, bottomHostHeightPx)
+                }?.index ?: return
         val anchor =
             displayedDepthAnchor(
                 deepestVisibleIndex = deepest,
@@ -2230,11 +2245,20 @@ fun ChatContent(
             return@LaunchedEffect
         }
         snapshotFlow {
-            val visible = listState.layoutInfo.visibleItemsInfo
-            if (visible.isEmpty()) {
+            val layout = listState.layoutInfo
+            val bottomHostHeightPx = readBottomHostHeightPx()
+            val first =
+                layout.visibleItemsInfo.firstOrNull {
+                    timelineItemIsVisible(it.offset, it.size, layout.viewportStartOffset, layout.viewportEndOffset, bottomHostHeightPx)
+                }
+            val last =
+                layout.visibleItemsInfo.lastOrNull {
+                    timelineItemIsVisible(it.offset, it.size, layout.viewportStartOffset, layout.viewportEndOffset, bottomHostHeightPx)
+                }
+            if (first == null || last == null) {
                 null
             } else {
-                val newestIndex = visible.first().index
+                val newestIndex = first.index
                 // Peek the newer edge INSIDE the snapshot read, not after it. The reader's position
                 // is that row's IDENTITY, and a placeholder resolving under a stationary viewport
                 // changes the identity without changing any index — this effect is edge-triggered,
@@ -2242,7 +2266,7 @@ fun ChatContent(
                 // seam the viewport could not name would wait forever.
                 Triple(
                     newestIndex,
-                    visible.last().index,
+                    last.index,
                     viewportAnchorAt(newestIndex, items.itemCount, items::peek),
                 )
             }
@@ -2282,13 +2306,19 @@ fun ChatContent(
     // Raw ignored tails do not make the user leave the meaningful bottom of the conversation.
     val atBottom by remember(listState, items, visibilityPolicy) {
         derivedStateOf {
-            isAtEffectiveBottom(
-                firstVisibleIndex = listState.firstVisibleItemIndex,
-                firstVisibleOffset = listState.firstVisibleItemScrollOffset,
-                itemCount = items.itemCount,
-                peek = items::peek,
-                policy = visibilityPolicy,
-            )
+            val layout = listState.layoutInfo
+            val bottomHostHeightPx = readBottomHostHeightPx()
+            // A first/stale measure with no host clearance cannot prove that newest is readable.
+            bottomHostHeightPx > 0 &&
+                layout.beforeContentPadding >= bottomHostHeightPx &&
+                layout.viewportEndOffset > layout.viewportStartOffset + bottomHostHeightPx &&
+                isAtEffectiveBottom(
+                    firstVisibleIndex = listState.firstVisibleItemIndex,
+                    firstVisibleOffset = listState.firstVisibleItemScrollOffset,
+                    itemCount = items.itemCount,
+                    peek = items::peek,
+                    policy = visibilityPolicy,
+                )
         }
     }
     ReportMessageViewport(
@@ -2299,6 +2329,7 @@ fun ChatContent(
         scopeId = state.buffer?.id,
         followingAtBottom = autoFollow.following && atBottom,
         onAnchor = onViewportRefreshAnchor,
+        bottomContentPadding = bottomHostPadding,
     )
 
     // Newest row the timeline has actually placed on screen. Neither rawNewestAnchor (the room's
@@ -2310,7 +2341,12 @@ fun ChatContent(
     }
     LaunchedEffect(items, listState, visibilityPolicy) {
         snapshotFlow {
-            val laidOut = listState.layoutInfo.visibleItemsInfo.firstOrNull()
+            val layout = listState.layoutInfo
+            val bottomHostHeightPx = readBottomHostHeightPx()
+            val laidOut =
+                layout.visibleItemsInfo.firstOrNull {
+                    timelineItemIsVisible(it.offset, it.size, layout.viewportStartOffset, layout.viewportEndOffset, bottomHostHeightPx)
+                }
             renderedBottomAnchor(
                 renderedIndex = laidOut?.index ?: -1,
                 renderedKey = laidOut?.key,
@@ -3069,11 +3105,235 @@ fun ChatContent(
                 }
             ConversationTypography(conversationFontScalePercent) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        Box(modifier = Modifier.weight(1f)) {
-                            // Subtle IRC-themed wallpaper layered UNDER the message list only (never over the
-                            // composer). NONE renders the plain theme background; MessageList is untouched.
-                            ChatWallpaperBackground(chatWallpaper, modifier = Modifier.matchParentSize())
+                    ChatWallpaperBackground(chatWallpaper, modifier = Modifier.matchParentSize())
+                    Scaffold(
+                        modifier = Modifier.fillMaxSize(),
+                        contentWindowInsets = WindowInsets(0),
+                        containerColor = Color.Transparent,
+                        bottomBar = {
+                            Column(
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .testTag("chat_bottom_host"),
+                            ) {
+                                val isChannelBuffer = state.buffer?.type == BufferType.CHANNEL
+                                val completions =
+                                    remember(composerText, memberNicks, recentSpeakers, isChannelBuffer) {
+                                        autocompleteFor(
+                                            composerText,
+                                            memberNicks,
+                                            recentSpeakers,
+                                            nickNormalizer,
+                                            isChannel = isChannelBuffer,
+                                        )
+                                    }
+                                val needsMemberCompletion =
+                                    remember(composerText) {
+                                        composerNeedsMemberNicks(composerText)
+                                    }
+                                LaunchedEffect(needsMemberCompletion) {
+                                    if (needsMemberCompletion) onNeedMembers()
+                                }
+                                // Debounce the SHOW so fast typing doesn't flash the suggestion panel on every
+                                // keystroke: only reveal completions after a brief pause. Hiding stays immediate
+                                // (an empty result clears the panel at once) so the panel never lingers stale.
+                                var showAutocomplete by remember { mutableStateOf(false) }
+                                LaunchedEffect(completions) {
+                                    if (completions.isEmpty()) {
+                                        showAutocomplete = false
+                                    } else {
+                                        kotlinx.coroutines.delay(AUTOCOMPLETE_SHOW_DEBOUNCE_MS)
+                                        showAutocomplete = true
+                                    }
+                                }
+                                // Keyed on the buffer like the sibling composer state so the panel's held exit
+                                // content never leaks across a buffer switch.
+                                key(traceBufferId) {
+                                    VoiceComposerPanel(
+                                        state = voiceState,
+                                        playbackState = audioPlaybackState,
+                                        onDelete = onVoiceDelete,
+                                        onCancelRecording = onVoiceHoldCancel,
+                                        onStopRecording = onVoiceHoldStop,
+                                        onSend = onVoiceSend,
+                                        onPreview = { attachment -> onAudioToggle(AudioPlaybackRequest(attachment, null)) },
+                                        onPreviewSeek = { attachment, positionMs -> onAudioSeek(attachment, positionMs) },
+                                        onToggleEncryption = onVoiceToggleEncryption,
+                                        onDestinationSelected = onVoiceDestinationSelected,
+                                        onErrorDismissed = onVoiceErrorDismissed,
+                                    )
+                                }
+                                // The buffer stays non-null while a rejoin animates the banner out, so the exiting
+                                // content can keep reading it without snapshotting.
+                                AnimatedVisibility(
+                                    visible = state.parted,
+                                    enter = expandVertically(animationSpec = MotdMotion.contentSize) + fadeIn(MotdMotion.fadeIn),
+                                    exit = shrinkVertically(animationSpec = MotdMotion.contentSize) + fadeOut(MotdMotion.microFadeOut),
+                                ) {
+                                    PartedChannelBanner(
+                                        channel = conversationLabel.orEmpty(),
+                                        onRejoin = onRejoin,
+                                    )
+                                }
+                                if (eligibleEbooksRoomId != null) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        TextButton(
+                                            onClick = { ebooksHelpOpen = true },
+                                            modifier = Modifier.weight(1f).testTag("chat_ebooks_help"),
+                                        ) { Text("Book search · How it works") }
+                                        TextButton(
+                                            onClick = {
+                                                pickingEbooksRoomId = eligibleEbooksRoomId
+                                                ebooksResultsPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+                                            },
+                                            modifier = Modifier.testTag("chat_ebooks_open_results"),
+                                        ) { Text("Open results ZIP") }
+                                    }
+                                    TextButton(
+                                        onClick = { ebooksOffersOpen = true },
+                                        modifier = Modifier.fillMaxWidth().testTag("chat_ebooks_dcc_offers"),
+                                    ) {
+                                        Text(
+                                            if (visibleEbooksOffers.isEmpty()) {
+                                                "DCC offers (0) · No offers yet"
+                                            } else {
+                                                "DCC offers (${visibleEbooksOffers.size})"
+                                            },
+                                        )
+                                    }
+                                }
+                                Composer(
+                                    value = composerText,
+                                    onAi = if (aiTextEnabled && plainIrcText(composerText.text).isNotBlank()) onAiComposer else null,
+                                    onValueChange = {
+                                        val wasBlank = composerText.text.isBlank()
+                                        composerText = it
+                                        onDraftChanged(it.text)
+                                        if (it.text.isNotBlank()) {
+                                            onTyping(true)
+                                        } else if (!wasBlank) {
+                                            onTyping(false)
+                                        }
+                                    },
+                                    onSend = {
+                                        val text = composerText.text
+                                        if (plainIrcText(text).isNotBlank() && !isEbooksSearchOnly(text)) {
+                                            if (isLongDraft(text)) {
+                                                AutoFollowTrace.record("long_draft_prompt_open", traceBufferId, traceSessionId)
+                                                longDraftPrompt = true
+                                            } else {
+                                                AutoFollowTrace.record("composer_submit", traceBufferId, traceSessionId) {
+                                                    "long_draft=false"
+                                                }
+                                                flightAnchors.captureLaunch()
+                                                // Empty the field on the tap frame. The ViewModel still owns the
+                                                // durable draft and republishes it if the send never lands, so this
+                                                // is presentation only -- notifying onDraftChanged here would count
+                                                // as an edit and make the submission itself stale.
+                                                composerText = TextFieldValue("")
+                                                onSubmit(text)
+                                                scope.launch {
+                                                    scrollToNewest(animate = true, reason = "composer_send_action")
+                                                }
+                                            }
+                                        }
+                                    },
+                                    enabled = composerEnabled,
+                                    sendEnabled = !isEbooksSearchOnly(composerText.text),
+                                    composerStyle = composerStyle,
+                                    currentNick = state.composerNick,
+                                    onFieldPositioned = { flightAnchors.composerField = it },
+                                    onFieldTextPositioned = { flightAnchors.composerTextOrigin = it },
+                                    // Keep the reply content mounted while its banner exits, but start that exit on
+                                    // the send tap rather than after persistence clears the durable draft.
+                                    reply =
+                                        outgoingFlight?.let { flight ->
+                                            flight.replyText?.let {
+                                                ComposerReply(
+                                                    dickordNickLabel(flight.replySender.orEmpty(), activeDickordChannel),
+                                                    it,
+                                                )
+                                            }
+                                        } ?: state.replyTo?.let {
+                                            ComposerReply(dickordNickLabel(it.sender, activeDickordChannel), it.text)
+                                        },
+                                    replyVisible = outgoingFlight?.replyText == null,
+                                    replyWarning =
+                                        state.replyTo
+                                            ?.takeIf { state.replySenderNotInChannel && outgoingFlight == null }
+                                            ?.let {
+                                                stringResource(
+                                                    R.string.chat_reply_sender_not_in_channel,
+                                                    dickordNickLabel(it.sender, activeDickordChannel),
+                                                )
+                                            },
+                                    onCancelReply = { onSetReply(null) },
+                                    // SERVER buffers send raw commands; hint that in the placeholder.
+                                    // Held blank while a flight is airborne: the ghost is born over the input box
+                                    // at exactly the field-text origin, and the placeholder appearing beneath the
+                                    // departing line read as two texts fighting for the same spot.
+                                    placeholder =
+                                        when {
+                                            outgoingFlight != null -> ""
+                                            isServerBuffer -> stringResource(R.string.chat_server_composer_hint)
+                                            else -> stringResource(R.string.chat_composer_placeholder)
+                                        },
+                                    showEmojiTool = showComposerEmoji,
+                                    showFormattingTools = showComposerFormattingTools,
+                                    knownNicks = knownNicks,
+                                    identityRules = identityRules,
+                                    ircFormattingEnabled =
+                                        !isServerBuffer &&
+                                            !state.buffer?.displayName.equals("BouncerServ", ignoreCase = true),
+                                    onAttachment = {
+                                        uploadCurrentDraftDirectly = false
+                                        attachmentSheetOpen = true
+                                    },
+                                    onImageContent = { uri, mime ->
+                                        if (attachmentSheetOpen) {
+                                            false
+                                        } else {
+                                            sharedFile = PendingShare.File(uri, mime)
+                                            uploadCurrentDraftDirectly = false
+                                            attachmentSheetOpen = true
+                                            true
+                                        }
+                                    },
+                                    onUploadDraft = {
+                                        uploadCurrentDraftDirectly = true
+                                        attachmentSheetOpen = true
+                                    },
+                                    voiceEnabled = voiceEnabled && voiceState.staged == null && composerText.text.isBlank(),
+                                    voiceRecording = voiceState.recording != null,
+                                    onVoiceHoldStart = onVoiceHoldStart,
+                                    onVoiceAccessibilityStart = onVoiceAccessibilityStart,
+                                    onVoiceHoldStop = onVoiceHoldStop,
+                                    onVoiceHoldCancel = onVoiceHoldCancel,
+                                    onVoiceLock = onVoiceLock,
+                                    autocomplete =
+                                        if (showAutocomplete && completions.isNotEmpty()) {
+                                            {
+                                                AutocompletePanel(
+                                                    candidates = completions.map { it.display },
+                                                    isCommand = completions.firstOrNull()?.isCommand == true,
+                                                    networkId = state.buffer?.networkId,
+                                                    onPick = { picked ->
+                                                        composerText = applyPick(composerText, picked)
+                                                        onDraftChanged(composerText.text)
+                                                    },
+                                                )
+                                            }
+                                        } else {
+                                            null
+                                        },
+                                )
+                            }
+                        },
+                    ) { innerPadding ->
+                        // Scaffold measures the host before the full-area timeline in this same pass.
+                        if (bottomHostPadding !== innerPadding) bottomHostPadding = innerPadding
+                        Box(modifier = Modifier.fillMaxSize()) {
                             CompositionLocalProvider(LocalSpacing provides conversationSpacing) {
                                 Box(
                                     modifier =
@@ -3165,6 +3425,7 @@ fun ChatContent(
                                             items = items,
                                             listState = listState,
                                             pagingHintsEnabled = initialPositionSettled,
+                                            bottomContentPadding = innerPadding,
                                             onTranslateMessage = onTranslateMessage,
                                             liveEntryIds = liveEntryIds,
                                             onLiveEntryConsumed = onLiveEntryConsumed,
@@ -3278,6 +3539,7 @@ fun ChatContent(
                                     icon = Icons.Outlined.Forum,
                                     title = stringResource(R.string.chat_empty_title),
                                     message = stringResource(R.string.chat_empty_message),
+                                    modifier = Modifier.padding(innerPadding),
                                     ghostRows = true,
                                 )
                             }
@@ -3296,7 +3558,7 @@ fun ChatContent(
                                     onJumpToNewest()
                                     scope.launch { scrollToNewest(animate = true, reason = "jump_fab") }
                                 },
-                                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                                modifier = Modifier.align(Alignment.BottomEnd).padding(innerPadding).padding(end = 16.dp, bottom = 16.dp),
                             )
 
                             if (compactHeader) {
@@ -3304,6 +3566,7 @@ fun ChatContent(
                                     modifier =
                                         Modifier
                                             .align(Alignment.BottomEnd)
+                                            .padding(innerPadding)
                                             .padding(end = 16.dp, bottom = 16.dp + MotdSizes.floatingActionButton + 8.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
@@ -3386,216 +3649,6 @@ fun ChatContent(
                                 },
                             )
                         }
-
-                        val isChannelBuffer = state.buffer?.type == BufferType.CHANNEL
-                        val completions =
-                            remember(composerText, memberNicks, recentSpeakers, isChannelBuffer) {
-                                autocompleteFor(
-                                    composerText,
-                                    memberNicks,
-                                    recentSpeakers,
-                                    nickNormalizer,
-                                    isChannel = isChannelBuffer,
-                                )
-                            }
-                        val needsMemberCompletion =
-                            remember(composerText) {
-                                composerNeedsMemberNicks(composerText)
-                            }
-                        LaunchedEffect(needsMemberCompletion) {
-                            if (needsMemberCompletion) onNeedMembers()
-                        }
-                        // Debounce the SHOW so fast typing doesn't flash the suggestion panel on every
-                        // keystroke: only reveal completions after a brief pause. Hiding stays immediate
-                        // (an empty result clears the panel at once) so the panel never lingers stale.
-                        var showAutocomplete by remember { mutableStateOf(false) }
-                        LaunchedEffect(completions) {
-                            if (completions.isEmpty()) {
-                                showAutocomplete = false
-                            } else {
-                                kotlinx.coroutines.delay(AUTOCOMPLETE_SHOW_DEBOUNCE_MS)
-                                showAutocomplete = true
-                            }
-                        }
-                        // Keyed on the buffer like the sibling composer state so the panel's held exit
-                        // content never leaks across a buffer switch.
-                        key(traceBufferId) {
-                            VoiceComposerPanel(
-                                state = voiceState,
-                                playbackState = audioPlaybackState,
-                                onDelete = onVoiceDelete,
-                                onCancelRecording = onVoiceHoldCancel,
-                                onStopRecording = onVoiceHoldStop,
-                                onSend = onVoiceSend,
-                                onPreview = { attachment -> onAudioToggle(AudioPlaybackRequest(attachment, null)) },
-                                onPreviewSeek = { attachment, positionMs -> onAudioSeek(attachment, positionMs) },
-                                onToggleEncryption = onVoiceToggleEncryption,
-                                onDestinationSelected = onVoiceDestinationSelected,
-                                onErrorDismissed = onVoiceErrorDismissed,
-                            )
-                        }
-                        // The buffer stays non-null while a rejoin animates the banner out, so the exiting
-                        // content can keep reading it without snapshotting.
-                        AnimatedVisibility(
-                            visible = state.parted,
-                            enter = expandVertically(animationSpec = MotdMotion.contentSize) + fadeIn(MotdMotion.fadeIn),
-                            exit = shrinkVertically(animationSpec = MotdMotion.contentSize) + fadeOut(MotdMotion.microFadeOut),
-                        ) {
-                            PartedChannelBanner(
-                                channel = conversationLabel.orEmpty(),
-                                onRejoin = onRejoin,
-                            )
-                        }
-                        if (eligibleEbooksRoomId != null) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                TextButton(
-                                    onClick = { ebooksHelpOpen = true },
-                                    modifier = Modifier.weight(1f).testTag("chat_ebooks_help"),
-                                ) { Text("Book search · How it works") }
-                                TextButton(
-                                    onClick = {
-                                        pickingEbooksRoomId = eligibleEbooksRoomId
-                                        ebooksResultsPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
-                                    },
-                                    modifier = Modifier.testTag("chat_ebooks_open_results"),
-                                ) { Text("Open results ZIP") }
-                            }
-                            TextButton(
-                                onClick = { ebooksOffersOpen = true },
-                                modifier = Modifier.fillMaxWidth().testTag("chat_ebooks_dcc_offers"),
-                            ) {
-                                Text(
-                                    if (visibleEbooksOffers.isEmpty()) {
-                                        "DCC offers (0) · No offers yet"
-                                    } else {
-                                        "DCC offers (${visibleEbooksOffers.size})"
-                                    },
-                                )
-                            }
-                        }
-                        Composer(
-                            value = composerText,
-                            onAi = if (aiTextEnabled && plainIrcText(composerText.text).isNotBlank()) onAiComposer else null,
-                            onValueChange = {
-                                val wasBlank = composerText.text.isBlank()
-                                composerText = it
-                                onDraftChanged(it.text)
-                                if (it.text.isNotBlank()) {
-                                    onTyping(true)
-                                } else if (!wasBlank) {
-                                    onTyping(false)
-                                }
-                            },
-                            onSend = {
-                                val text = composerText.text
-                                if (plainIrcText(text).isNotBlank() && !isEbooksSearchOnly(text)) {
-                                    if (isLongDraft(text)) {
-                                        AutoFollowTrace.record("long_draft_prompt_open", traceBufferId, traceSessionId)
-                                        longDraftPrompt = true
-                                    } else {
-                                        AutoFollowTrace.record("composer_submit", traceBufferId, traceSessionId) {
-                                            "long_draft=false"
-                                        }
-                                        flightAnchors.captureLaunch()
-                                        // Empty the field on the tap frame. The ViewModel still owns the
-                                        // durable draft and republishes it if the send never lands, so this
-                                        // is presentation only -- notifying onDraftChanged here would count
-                                        // as an edit and make the submission itself stale.
-                                        composerText = TextFieldValue("")
-                                        onSubmit(text)
-                                        scope.launch {
-                                            scrollToNewest(animate = true, reason = "composer_send_action")
-                                        }
-                                    }
-                                }
-                            },
-                            enabled = composerEnabled,
-                            sendEnabled = !isEbooksSearchOnly(composerText.text),
-                            onFieldPositioned = { flightAnchors.composerField = it },
-                            onFieldTextPositioned = { flightAnchors.composerTextOrigin = it },
-                            // Keep the reply content mounted while its banner exits, but start that exit on
-                            // the send tap rather than after persistence clears the durable draft.
-                            reply =
-                                outgoingFlight?.let { flight ->
-                                    flight.replyText?.let {
-                                        ComposerReply(
-                                            dickordNickLabel(flight.replySender.orEmpty(), activeDickordChannel),
-                                            it,
-                                        )
-                                    }
-                                } ?: state.replyTo?.let {
-                                    ComposerReply(dickordNickLabel(it.sender, activeDickordChannel), it.text)
-                                },
-                            replyVisible = outgoingFlight?.replyText == null,
-                            replyWarning =
-                                state.replyTo
-                                    ?.takeIf { state.replySenderNotInChannel && outgoingFlight == null }
-                                    ?.let {
-                                        stringResource(
-                                            R.string.chat_reply_sender_not_in_channel,
-                                            dickordNickLabel(it.sender, activeDickordChannel),
-                                        )
-                                    },
-                            onCancelReply = { onSetReply(null) },
-                            // SERVER buffers send raw commands; hint that in the placeholder.
-                            // Held blank while a flight is airborne: the ghost is born over the input box
-                            // at exactly the field-text origin, and the placeholder appearing beneath the
-                            // departing line read as two texts fighting for the same spot.
-                            placeholder =
-                                when {
-                                    outgoingFlight != null -> ""
-                                    isServerBuffer -> stringResource(R.string.chat_server_composer_hint)
-                                    else -> stringResource(R.string.chat_composer_placeholder)
-                                },
-                            showEmojiTool = showComposerEmoji,
-                            showFormattingTools = showComposerFormattingTools,
-                            knownNicks = knownNicks,
-                            identityRules = identityRules,
-                            ircFormattingEnabled =
-                                !isServerBuffer &&
-                                    !state.buffer?.displayName.equals("BouncerServ", ignoreCase = true),
-                            onAttachment = {
-                                uploadCurrentDraftDirectly = false
-                                attachmentSheetOpen = true
-                            },
-                            onImageContent = { uri, mime ->
-                                if (attachmentSheetOpen) {
-                                    false
-                                } else {
-                                    sharedFile = PendingShare.File(uri, mime)
-                                    uploadCurrentDraftDirectly = false
-                                    attachmentSheetOpen = true
-                                    true
-                                }
-                            },
-                            onUploadDraft = {
-                                uploadCurrentDraftDirectly = true
-                                attachmentSheetOpen = true
-                            },
-                            voiceEnabled = voiceEnabled && voiceState.staged == null && composerText.text.isBlank(),
-                            voiceRecording = voiceState.recording != null,
-                            onVoiceHoldStart = onVoiceHoldStart,
-                            onVoiceAccessibilityStart = onVoiceAccessibilityStart,
-                            onVoiceHoldStop = onVoiceHoldStop,
-                            onVoiceHoldCancel = onVoiceHoldCancel,
-                            onVoiceLock = onVoiceLock,
-                            autocomplete =
-                                if (showAutocomplete && completions.isNotEmpty()) {
-                                    {
-                                        AutocompletePanel(
-                                            candidates = completions.map { it.display },
-                                            isCommand = completions.firstOrNull()?.isCommand == true,
-                                            networkId = state.buffer?.networkId,
-                                            onPick = { picked ->
-                                                composerText = applyPick(composerText, picked)
-                                                onDraftChanged(composerText.text)
-                                            },
-                                        )
-                                    }
-                                } else {
-                                    null
-                                },
-                        )
                     }
                     // The ghost overlay draws ABOVE the composer layer: a sent bubble materializes over
                     // the input box -- the morph pins its real body to the still-warm field text --
@@ -4009,22 +4062,29 @@ internal fun ReportMessageViewport(
     scopeId: Long?,
     followingAtBottom: Boolean,
     onAnchor: (ViewportRefreshAnchor?) -> Unit,
+    bottomContentPadding: PaddingValues? = null,
 ) {
     val latestOnAnchor by rememberUpdatedState(onAnchor)
     var lastVisibleIndex by remember(items, listState, scopeId) { mutableStateOf<Int?>(null) }
     var lastItemCount by remember(items, listState, scopeId) { mutableIntStateOf(-1) }
+    val latestBottomPadding by rememberUpdatedState(bottomContentPadding)
+    val latestDensity by rememberUpdatedState(LocalDensity.current)
     LaunchedEffect(items, listState, policy, followingAtBottom, enabled, scopeId) {
         if (!enabled) return@LaunchedEffect
         snapshotFlow {
             val layout = listState.layoutInfo
+            val bottomOcclusionPx = latestBottomPadding?.let { with(latestDensity) { it.calculateBottomPadding().roundToPx() } } ?: 0
             val snapshot = items.itemSnapshotList
             var newestVisible = false
             var row: MessageEntity? = null
             for (visible in layout.visibleItemsInfo) {
-                if (
-                    visible.size <= 0 ||
-                    visible.offset >= layout.viewportEndOffset ||
-                    visible.offset + visible.size <= layout.viewportStartOffset
+                if (!timelineItemIsVisible(
+                        visible.offset,
+                        visible.size,
+                        layout.viewportStartOffset,
+                        layout.viewportEndOffset,
+                        bottomOcclusionPx,
+                    )
                 ) {
                     continue
                 }
@@ -4044,7 +4104,11 @@ internal fun ReportMessageViewport(
                     row != null -> ViewportRefreshAnchor.Parked(row.id)
                     else -> null
                 }
-            Triple(layout.visibleItemsInfo.firstOrNull()?.index, anchor, items.itemCount)
+            val firstVisible =
+                layout.visibleItemsInfo.firstOrNull {
+                    timelineItemIsVisible(it.offset, it.size, layout.viewportStartOffset, layout.viewportEndOffset, bottomOcclusionPx)
+                }
+            Triple(firstVisible?.index, anchor, items.itemCount)
         }.distinctUntilChanged().collect { (index, anchor, count) ->
             if (anchor != null || (index != null && lastVisibleIndex != null && index != lastVisibleIndex && count == lastItemCount)) {
                 latestOnAnchor(anchor)
@@ -4054,6 +4118,18 @@ internal fun ReportMessageViewport(
         }
     }
 }
+
+// Reverse-layout offsets start at the padded bottom. Rows may draw under the host, not count as read there.
+internal fun timelineItemIsVisible(
+    itemOffset: Int,
+    itemSize: Int,
+    viewportStartOffset: Int,
+    viewportEndOffset: Int,
+    bottomOcclusionPx: Int = 0,
+): Boolean =
+    itemSize > 0 &&
+        itemOffset < viewportEndOffset &&
+        itemOffset + itemSize > viewportStartOffset + bottomOcclusionPx
 
 /**
  * Pixel delta for [androidx.compose.foundation.gestures.ScrollableState.scrollBy] that top-aligns

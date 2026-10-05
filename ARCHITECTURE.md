@@ -44,6 +44,18 @@ flowchart TD
   behind its own repository or preference contract.
 - UI observes repositories and ViewModel state. Connection and protocol actions
   go through `ConnectionManager` instead of constructing IRC clients in screens.
+- Appearance's input style is an IRC-only preference shared by channel, query,
+  and server buffers. Default, Large, and Nickname use one editor/draft path;
+  Nickname's network-owned identity is decoration, never submitted text.
+  The input host overlays the full timeline; matching scroll padding keeps the
+  newest row clear, and fully covered rows do not advance read state. Default and
+  Nickname keep tools/send/record inside their floating pills; Large keeps its
+  separate action. Agentwire always uses Default. Stored enum names are unchanged.
+  Opening tools expands the same floating pill around one horizontally scrolling
+  row. Markdown and draft upload are direct actions, not an overflow menu.
+  Large keeps its separate top toolbar.
+  Toolbar long-press shows the action name and purpose, with a Markdown example;
+  normal taps perform actions. Voice recording retains its separate hold gesture.
 - TLS policy, Android KeyChain integration, proxy selection, and embedded
   obfuscation are injected at the `:app` boundary so `:irc` stays pure JVM.
 - Each saved network owns its own ordered post-connect commands. `ConnectionActor`

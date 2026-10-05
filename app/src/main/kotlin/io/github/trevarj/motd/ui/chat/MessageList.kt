@@ -74,6 +74,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.ItemSnapshotList
@@ -396,6 +397,8 @@ fun MessageList(
     // Entry's exact target owns paging demand until it is positioned.
     pagingHintsEnabled: Boolean = true,
     onTranslateMessage: ((MessageEntity) -> Unit)? = null,
+    // Reserve the overlaid bottom host without truncating the scrollable/drawn viewport.
+    bottomContentPadding: PaddingValues? = null,
 ) {
     val dickordEnabled = LocalDickordLabsEnabled.current
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
@@ -449,6 +452,23 @@ fun MessageList(
             if (index != null && index < items.itemCount) items[index]
         }
     }
+    val timelineContentPadding =
+        remember(bottomContentPadding) {
+            if (bottomContentPadding == null) {
+                PaddingValues(vertical = 8.dp)
+            } else {
+                // LazyColumn reads this getter during measure, after Scaffold measures the host.
+                object : PaddingValues {
+                    override fun calculateLeftPadding(layoutDirection: LayoutDirection): Dp = 0.dp
+
+                    override fun calculateTopPadding(): Dp = 8.dp
+
+                    override fun calculateRightPadding(layoutDirection: LayoutDirection): Dp = 0.dp
+
+                    override fun calculateBottomPadding(): Dp = 8.dp + bottomContentPadding.calculateBottomPadding()
+                }
+            }
+        }
     LazyColumn(
         state = listState,
         reverseLayout = true,
@@ -463,7 +483,7 @@ fun MessageList(
                 // vacated space exists at the foot before the landing row can open its own gap.
                 .graphicsLayer { translationY = -listShift() }
                 .testTag("chat_timeline"),
-        contentPadding = PaddingValues(vertical = 8.dp),
+        contentPadding = timelineContentPadding,
     ) {
         // The seam stays inside its newer row, so the reverse index continues to name exactly
         // one Paging slot. Paging owns the namespace for placeholders; loaded IDs stay Long keys.

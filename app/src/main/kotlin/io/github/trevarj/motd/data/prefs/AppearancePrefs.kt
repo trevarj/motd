@@ -178,6 +178,8 @@ const val DEFAULT_CUSTOM_TIME_FORMAT = "dd/MM/yyyy - HH:mm:ss"
 
 enum class MessageSpacing { COMPACT, DEFAULT, RELAXED }
 
+enum class ComposerStyle { COMFORTABLE, LARGE, COMPACT }
+
 enum class BubbleCornerStyle { ROUNDED, SUBTLE, SQUARE }
 
 enum class LauncherIcon { DEFAULT, MONO, TERMINAL, GRUVBOX, CATPPUCCIN, NORD, LIGHT }
@@ -210,6 +212,7 @@ data class AppearanceConfig(
     // Display name of a user-imported custom font file; empty means nothing imported. The font
     // binary itself lives in CustomFontStore, not DataStore or backups.
     val customFontName: String = "",
+    val composerStyle: ComposerStyle = ComposerStyle.COMFORTABLE,
 )
 
 interface AppearancePrefs {
@@ -236,6 +239,8 @@ interface AppearancePrefs {
     suspend fun setCustomTimeFormatPattern(pattern: String)
 
     suspend fun setMessageSpacing(spacing: MessageSpacing)
+
+    suspend fun setComposerStyle(style: ComposerStyle)
 
     suspend fun setBubbleCornerStyle(style: BubbleCornerStyle)
 

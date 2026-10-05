@@ -50,6 +50,16 @@ class SettingsSearchTest {
     }
 
     @Test
+    fun composerStyleKeywordsOpenAppearanceInputStyle() {
+        val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
+        val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.COMPOSER_STYLE)
+
+        listOf("input", "composer", "default", "large", "nickname", "nick", "compact", "pill", "floating").forEach { query ->
+            assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
+        }
+    }
+
+    @Test
     fun `sound controls search opens the dedicated sound page`() {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
         val destination = SettingsSearchDestination.Page(SettingsSearchPage.CHAT_SOUNDS, SettingsTarget.CHAT_SOUNDS)

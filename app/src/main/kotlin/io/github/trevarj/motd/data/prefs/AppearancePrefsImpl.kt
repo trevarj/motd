@@ -25,6 +25,7 @@ private val SHOW_TIMESTAMPS = booleanPreferencesKey("show_timestamps_v1")
 private val TIME_FORMAT = stringPreferencesKey("time_format_v1")
 private val CUSTOM_TIME_FORMAT_PATTERN = stringPreferencesKey("custom_time_format_pattern_v1")
 private val MESSAGE_SPACING = stringPreferencesKey("message_spacing_v1")
+private val COMPOSER_STYLE = stringPreferencesKey("composer_style_v1")
 private val BUBBLE_CORNER_STYLE = stringPreferencesKey("bubble_corner_style_v1")
 private val CHAT_SHADOWS_ENABLED = booleanPreferencesKey("chat_shadows_enabled_v1")
 private val LAUNCHER_ICON = stringPreferencesKey("launcher_icon_v1")
@@ -91,6 +92,9 @@ class AppearancePrefsImpl
                     messageSpacing =
                         prefs[MESSAGE_SPACING]?.let { runCatching { MessageSpacing.valueOf(it) }.getOrNull() }
                             ?: MessageSpacing.DEFAULT,
+                    composerStyle =
+                        prefs[COMPOSER_STYLE]?.let { runCatching { ComposerStyle.valueOf(it) }.getOrNull() }
+                            ?: ComposerStyle.COMFORTABLE,
                     bubbleCornerStyle =
                         prefs[BUBBLE_CORNER_STYLE]
                             ?.let { runCatching { BubbleCornerStyle.valueOf(it) }.getOrNull() }
@@ -156,6 +160,10 @@ class AppearancePrefsImpl
 
         override suspend fun setMessageSpacing(spacing: MessageSpacing) {
             store.edit { it[MESSAGE_SPACING] = spacing.name }
+        }
+
+        override suspend fun setComposerStyle(style: ComposerStyle) {
+            store.edit { it[COMPOSER_STYLE] = style.name }
         }
 
         override suspend fun setBubbleCornerStyle(style: BubbleCornerStyle) {

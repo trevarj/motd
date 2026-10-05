@@ -121,6 +121,7 @@ import io.github.trevarj.motd.ai.AiFeature
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioPlaybackState
+import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.irc.agentwire.AgentwireTopicDefect
 import io.github.trevarj.motd.irc.format.markdownToIrcFormatting
 import io.github.trevarj.motd.irc.format.plainIrcText
@@ -1375,6 +1376,7 @@ internal fun AgentwireContextComposer(
         showEmojiTool = showComposerEmoji,
         showFormattingTools = showComposerFormattingTools,
         voiceEnabled = false,
+        composerStyle = ComposerStyle.COMFORTABLE,
     )
 }
 
@@ -1451,6 +1453,7 @@ internal fun AgentwireComposer(
                 onVoiceHoldStop = onVoiceHoldStop,
                 onVoiceHoldCancel = onVoiceHoldCancel,
                 onVoiceLock = onVoiceLock,
+                composerStyle = ComposerStyle.COMFORTABLE,
             )
         }
     }

@@ -60,6 +60,28 @@ class AppearancePrefsTest {
             assertEquals(LauncherIcon.GRUVBOX, config.launcherIcon)
         }
 
+    @Test fun composerStyleRoundTripsAndFallsBackToComfortable() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val key = stringPreferencesKey("composer_style_v1")
+            context.appearanceDataStore.edit { it.remove(key) }
+            assertEquals(ComposerStyle.COMFORTABLE, prefs.config.first().composerStyle)
+            assertEquals(ComposerStyle.COMFORTABLE, Json.decodeFromString<AppearanceConfig>("""{}""").composerStyle)
+
+            try {
+                prefs.setComposerStyle(ComposerStyle.LARGE)
+                assertEquals(ComposerStyle.LARGE, AppearancePrefsImpl(context).config.first().composerStyle)
+                prefs.setComposerStyle(ComposerStyle.COMPACT)
+                assertEquals(ComposerStyle.COMPACT, AppearancePrefsImpl(context).config.first().composerStyle)
+                assertEquals(ComposerStyle.COMPACT.name, context.appearanceDataStore.data.first()[key])
+
+                context.appearanceDataStore.edit { it[key] = "not-a-composer-style" }
+                assertEquals(ComposerStyle.COMFORTABLE, prefs.config.first().composerStyle)
+            } finally {
+                context.appearanceDataStore.edit { it.remove(key) }
+            }
+        }
+
     @Test fun customFontName_roundTrips() =
         runTest {
             // The data-class default (empty) is covered by defaults_areSystemAndMotdAtFifty; this

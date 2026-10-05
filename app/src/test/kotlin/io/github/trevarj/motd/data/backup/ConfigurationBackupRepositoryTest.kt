@@ -23,6 +23,7 @@ import io.github.trevarj.motd.data.prefs.ChatSoundPrefs
 import io.github.trevarj.motd.data.prefs.ChatSoundTone
 import io.github.trevarj.motd.data.prefs.ChatSoundVoice
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
+import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
@@ -390,7 +391,7 @@ class ConfigurationBackupRepositoryTest {
             gesturePrefs.setMenu(GestureMenuConfig())
         }
 
-    /** Stage-1 appearance fields (font, timestamps, spacing, bubbles, launcher icon) travel with a backup. */
+    /** Appearance fields travel with a backup, including the independent IRC input style. */
     @Test
     fun newAppearanceFieldsRoundTripThroughExportAndImport() =
         runTest {
@@ -403,6 +404,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setTimeFormat(TimeFormat.CUSTOM)
             appearancePrefs.setCustomTimeFormatPattern("yyyy-MM-dd HH:mm:ss")
             appearancePrefs.setMessageSpacing(MessageSpacing.RELAXED)
+            appearancePrefs.setComposerStyle(ComposerStyle.COMPACT)
             appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.SQUARE)
             appearancePrefs.setChatShadowsEnabled(false)
             appearancePrefs.setLauncherIcon(LauncherIcon.GRUVBOX)
@@ -420,6 +422,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setTimeFormat(TimeFormat.AUTO)
             appearancePrefs.setCustomTimeFormatPattern("HH:mm")
             appearancePrefs.setMessageSpacing(MessageSpacing.DEFAULT)
+            appearancePrefs.setComposerStyle(ComposerStyle.COMFORTABLE)
             appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.ROUNDED)
             appearancePrefs.setChatShadowsEnabled(true)
             appearancePrefs.setLauncherIcon(LauncherIcon.DEFAULT)
@@ -434,6 +437,7 @@ class ConfigurationBackupRepositoryTest {
             assertEquals(TimeFormat.CUSTOM, config.timeFormat)
             assertEquals("yyyy-MM-dd HH:mm:ss", config.customTimeFormatPattern)
             assertEquals(MessageSpacing.RELAXED, config.messageSpacing)
+            assertEquals(ComposerStyle.COMPACT, config.composerStyle)
             assertEquals(BubbleCornerStyle.SQUARE, config.bubbleCornerStyle)
             assertEquals(false, config.chatShadowsEnabled)
             assertEquals(LauncherIcon.GRUVBOX, config.launcherIcon)
@@ -444,6 +448,37 @@ class ConfigurationBackupRepositoryTest {
                     .exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 2_000L)
                     .contains("\"RETRO_CHAT\""),
             )
+        }
+
+    @Test
+    fun olderAppearanceBackupDefaultsComposerStyleToComfortable() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val appearancePrefs = AppearancePrefsImpl(context)
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                appearancePrefs.setComposerStyle(ComposerStyle.COMPACT)
+                val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                val oldRaw = raw.replace(Regex(""",\s*"composerStyle"\s*:\s*"COMPACT""""), "")
+                assertFalse(oldRaw.contains("composerStyle"))
+
+                backup.import(oldRaw, importMode = BackupImportMode.MERGE)
+                assertEquals(ComposerStyle.COMFORTABLE, appearancePrefs.config.first().composerStyle)
+
+                val withoutAppearance =
+                    raw.replace(
+                        Regex(""",?\s*"appearance"\s*:\s*\{.*?\}(?=,\s*"contentPreviews")""", RegexOption.DOT_MATCHES_ALL),
+                        "",
+                    )
+                assertFalse(withoutAppearance.contains("\"appearance\""))
+                appearancePrefs.setComposerStyle(ComposerStyle.LARGE)
+                backup.import(withoutAppearance, importMode = BackupImportMode.MERGE)
+                assertEquals(ComposerStyle.LARGE, appearancePrefs.config.first().composerStyle)
+            } finally {
+                appearancePrefs.setComposerStyle(ComposerStyle.COMFORTABLE)
+                db.close()
+            }
         }
 
     @Test

@@ -63,15 +63,18 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.data.prefs.FONT_SCALE_STEP_PERCENT
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
@@ -88,6 +91,7 @@ import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.systemPartner
 import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
 import io.github.trevarj.motd.ui.chat.ChatWallpaperPicker
+import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.ConversationTypography
@@ -138,6 +142,7 @@ fun AppearanceSettingsScreen(
         onFollowSystem = viewModel::setFollowSystem,
         onDynamicColor = viewModel::setDynamicColor,
         onLayoutDensity = viewModel::setLayoutDensity,
+        onComposerStyle = viewModel::setComposerStyle,
         onFolderDisplayMode = viewModel::setFolderDisplayMode,
         onShowFolderChatsInAll = viewModel::setShowFolderChatsInAll,
         onAvatarStyle = viewModel::setAvatarStyle,
@@ -171,6 +176,7 @@ fun AppearanceSettingsContent(
     onFollowSystem: (Boolean) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
     onLayoutDensity: (LayoutDensity) -> Unit,
+    onComposerStyle: (ComposerStyle) -> Unit,
     onFolderDisplayMode: (FolderDisplayMode) -> Unit,
     onShowFolderChatsInAll: (Boolean) -> Unit = {},
     onAvatarStyle: (AvatarStyle) -> Unit,
@@ -412,6 +418,16 @@ fun AppearanceSettingsContent(
                 )
             }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.COMPOSER_STYLE.name) { targetModifier ->
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_composer_style),
+                    value = composerStyleLabel(previewAppearance.composerStyle),
+                    summary = stringResource(R.string.settings_composer_style_desc),
+                    modifier = targetModifier.testTag("settings_composer_style_picker"),
+                    onClick = { choiceSheet = AppearanceChoice.COMPOSER_STYLE },
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             ChatLayoutPreview(
                 settings = previewSettings,
                 appearance = previewAppearance,
@@ -554,6 +570,10 @@ fun AppearanceSettingsContent(
                 previewDensity = it
                 onLayoutDensity(it)
             },
+            onComposerStyle = {
+                previewAppearance = previewAppearance.copy(composerStyle = it)
+                onComposerStyle(it)
+            },
             onFolderDisplayMode = onFolderDisplayMode,
             onAvatar = {
                 previewSettings = previewSettings.copy(avatarStyle = it)
@@ -592,7 +612,7 @@ fun AppearanceSettingsContent(
     }
 }
 
-private enum class AppearanceChoice { PALETTE, FOLDER_LAYOUT, DENSITY, AVATAR, TIME, SPACING, BUBBLES, LAUNCHER }
+private enum class AppearanceChoice { PALETTE, FOLDER_LAYOUT, DENSITY, COMPOSER_STYLE, AVATAR, TIME, SPACING, BUBBLES, LAUNCHER }
 
 @Composable
 private fun ChatLayoutPreview(
@@ -691,6 +711,58 @@ private fun ChatLayoutPreview(
     }
 }
 
+@Composable
+private fun ComposerStylePreview(
+    settings: Settings,
+    appearance: AppearanceConfig,
+    customFontFile: File?,
+    tag: String,
+) {
+    val sample = stringResource(R.string.settings_chat_preview_message)
+    var draft by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(sample)) }
+    val styleLabel = composerStyleLabel(appearance.composerStyle)
+    MotdTheme(
+        themePreset = appearance.theme,
+        trueBlack = appearance.trueBlack,
+        dynamicColor = settings.dynamicColor,
+        followSystem = appearance.followSystem,
+        layoutDensity = settings.layoutDensity,
+        nickColorsEnabled = settings.nickColorsEnabled,
+        nickColorPalette = settings.nickColorPalette,
+        nickColorOverrides = settings.nickColorOverrides,
+        avatarStyle = settings.avatarStyle,
+        uiFontScalePercent = appearance.uiFontScalePercent,
+        fontChoice = appearance.fontChoice,
+        customFontFile = customFontFile,
+        timestampConfig =
+            TimestampConfig(
+                show = appearance.showTimestamps,
+                format = appearance.timeFormat,
+                customPattern = appearance.customTimeFormatPattern,
+            ),
+        messageSpacing = appearance.messageSpacing,
+        bubbleCornerStyle = appearance.bubbleCornerStyle,
+        chatShadowsEnabled = appearance.chatShadowsEnabled,
+        syncSystemBars = false,
+    ) {
+        ConversationTypography(appearance.conversationFontScalePercent) {
+            Composer(
+                value = draft,
+                onValueChange = { draft = it },
+                onSend = {},
+                enabled = true,
+                sendEnabled = false,
+                showEmojiTool = settings.showComposerEmoji,
+                showFormattingTools = settings.showComposerFormattingTools,
+                ircFormattingEnabled = true,
+                composerStyle = appearance.composerStyle,
+                currentNick = "alex",
+                modifier = Modifier.fillMaxWidth().testTag(tag).semantics { stateDescription = styleLabel },
+            )
+        }
+    }
+}
+
 private const val PREVIEW_MESSAGE_TIME_MILLIS = 1_704_110_040_000L
 
 @Composable
@@ -705,6 +777,7 @@ private fun AppearanceChoiceSheet(
     previewShadows: Boolean,
     onPalette: (NickColorPalette) -> Unit,
     onDensity: (LayoutDensity) -> Unit,
+    onComposerStyle: (ComposerStyle) -> Unit,
     onFolderDisplayMode: (FolderDisplayMode) -> Unit,
     onAvatar: (AvatarStyle) -> Unit,
     onTime: (TimeFormat) -> Unit,
@@ -759,6 +832,24 @@ private fun AppearanceChoiceSheet(
                         previewShadows,
                         "settings_chat_preview_sheet",
                     )
+                },
+            )
+        }
+
+        AppearanceChoice.COMPOSER_STYLE -> {
+            SingleChoiceSheet(
+                title = stringResource(R.string.settings_composer_style),
+                selected = appearance.composerStyle,
+                options =
+                    ComposerStyle.entries.map {
+                        ChoiceOption(it, composerStyleLabel(it), composerStyleDescription(it), "settings_composer_style_${it.name.lowercase()}")
+                    },
+                onSelect = onComposerStyle,
+                onDismiss = onDismiss,
+                tag = "settings_composer_style_sheet",
+                dismissOnSelect = false,
+                footer = {
+                    ComposerStylePreview(settings, appearance, customFontFile, "settings_composer_preview_sheet")
                 },
             )
         }
@@ -899,6 +990,26 @@ private fun densityDescription(value: LayoutDensity): String =
             LayoutDensity.COMPACT -> R.string.settings_density_compact_desc
             LayoutDensity.COMFORTABLE -> R.string.settings_density_comfortable_desc
             LayoutDensity.TWO_LINE -> R.string.settings_density_two_line_desc
+        },
+    )
+
+@Composable
+private fun composerStyleLabel(value: ComposerStyle): String =
+    stringResource(
+        when (value) {
+            ComposerStyle.COMFORTABLE -> R.string.settings_composer_style_comfortable
+            ComposerStyle.LARGE -> R.string.settings_composer_style_large
+            ComposerStyle.COMPACT -> R.string.settings_composer_style_compact
+        },
+    )
+
+@Composable
+private fun composerStyleDescription(value: ComposerStyle): String =
+    stringResource(
+        when (value) {
+            ComposerStyle.COMFORTABLE -> R.string.settings_composer_style_comfortable_desc
+            ComposerStyle.LARGE -> R.string.settings_composer_style_large_desc
+            ComposerStyle.COMPACT -> R.string.settings_composer_style_compact_desc
         },
     )
 
@@ -1362,6 +1473,7 @@ private fun AppearanceSettingsPreview() {
             onFollowSystem = {},
             onDynamicColor = {},
             onLayoutDensity = {},
+            onComposerStyle = {},
             onFolderDisplayMode = {},
             onAvatarStyle = {},
             onNickColorsEnabled = {},
@@ -1396,6 +1508,7 @@ private fun AppearanceSettingsMinTextPreview() {
             onFollowSystem = {},
             onDynamicColor = {},
             onLayoutDensity = {},
+            onComposerStyle = {},
             onFolderDisplayMode = {},
             onAvatarStyle = {},
             onNickColorsEnabled = {},
@@ -1430,6 +1543,7 @@ private fun AppearanceSettingsMaxTextPreview() {
             onFollowSystem = {},
             onDynamicColor = {},
             onLayoutDensity = {},
+            onComposerStyle = {},
             onFolderDisplayMode = {},
             onAvatarStyle = {},
             onNickColorsEnabled = {},

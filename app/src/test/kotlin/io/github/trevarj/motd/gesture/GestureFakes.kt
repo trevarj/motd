@@ -15,6 +15,7 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaper
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncDepth
@@ -257,6 +258,10 @@ internal class FakeAppearance(
     }
 
     override suspend fun setMessageSpacing(spacing: MessageSpacing) = Unit
+
+    override suspend fun setComposerStyle(style: ComposerStyle) {
+        state.value = state.value.copy(composerStyle = style)
+    }
 
     override suspend fun setChatShadowsEnabled(enabled: Boolean) {
         state.value = state.value.copy(chatShadowsEnabled = enabled)

@@ -15,16 +15,24 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -33,6 +41,7 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -71,6 +80,7 @@ import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityOptionsCompat
 import androidx.paging.PagingData
@@ -96,7 +106,9 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
 import io.github.trevarj.motd.dcc.EbooksResultCache
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -114,11 +126,14 @@ import io.github.trevarj.motd.ui.chat.ChatState
 import io.github.trevarj.motd.ui.chat.ComposerDraftState
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chat.EntryPositionState
+import io.github.trevarj.motd.ui.chat.MessageList
 import io.github.trevarj.motd.ui.chat.MessageUrlCache
 import io.github.trevarj.motd.ui.chat.OutgoingFlight
 import io.github.trevarj.motd.ui.chat.SendFlightAnchors
 import io.github.trevarj.motd.ui.chat.SendFlightMotion
 import io.github.trevarj.motd.ui.chat.SendFlightOverlay
+import io.github.trevarj.motd.ui.chat.VoiceMessageUiState
+import io.github.trevarj.motd.ui.chat.VoiceRecordingUi
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.theme.MotdMotion
@@ -281,6 +296,11 @@ class ComposerSendClearUiTest {
         showImages: Boolean = true,
         showLinkPreviews: Boolean = true,
         onTranslateMessage: ((MessageEntity) -> Unit)? = null,
+        composerStyle: () -> ComposerStyle = { ComposerStyle.COMFORTABLE },
+        memberNicks: List<String> = emptyList(),
+        contentHeight: () -> Dp? = { null },
+        voiceState: () -> VoiceMessageUiState = { VoiceMessageUiState() },
+        onViewportRefreshAnchor: (ViewportRefreshAnchor?) -> Unit = {},
         onSubmit: (String) -> Unit,
     ) {
         compose.setContent {
@@ -292,55 +312,65 @@ class ComposerSendClearUiTest {
                 LocalDickordLabsEnabled provides dickordEnabled(),
             ) {
                 MotdTheme(layoutDensity = layoutDensity()) {
-                    ChatContent(
-                        state =
-                            ChatState(
-                                buffer = chatBuffer(),
-                                connState = liveConnection?.invoke() ?: connectionState,
-                                memberCount = memberCount,
-                                replyTo = replyTo(),
-                                parted = parted,
-                            ),
-                        items = items,
-                        composerEnabled = true,
-                        onBack = onBack,
-                        showBack = showBack,
-                        onOpenConversationList = onOpenConversationList,
-                        historySyncStatus = historySyncStatus,
-                        onOpenChannelInfo = onOpenChannelInfo,
-                        ebooksHelperRoomId = ebooksHelperRoomId(),
-                        ebooksDccOffers = ebooksDccOffers(),
-                        onAcceptDccTransfer = onAcceptDccTransfer,
-                        onRejectDccTransfer = onRejectDccTransfer,
-                        onRemoveDccTransfer = onRemoveDccTransfer,
-                        onSaveDccToDownloads = onSaveDccToDownloads,
-                        onOpenSearch = onOpenSearch,
-                        onOpenImage = {},
-                        onInviteUser = onInviteUser,
-                        nickNormalizer = { it.lowercase() },
-                        onSubmit = onSubmit,
-                        onTyping = {},
-                        onSetReply = {},
-                        onReact = { _, _ -> },
-                        onRetry = {},
-                        loadPreview = { _, _ -> null },
-                        onAudioToggle = onAudioToggle,
-                        composerDraft = draft(),
-                        aiTextEnabled = aiEnabled(),
-                        aiTextState = aiState(),
-                        onAiComposer = onAi,
-                        onTranslateMessage = onTranslateMessage,
-                        outgoingFlight = outgoingFlight(),
-                        onDraftChanged = onDraftChanged,
-                        onFlightSettled = onFlightSettled,
-                        entryState = entryState,
-                        onInitialPositionHandled = onInitialPositionHandled,
-                        rawNewestAnchor = rawNewestAnchor,
-                        onMarkRead = onMarkRead,
-                        showImages = showImages,
-                        showLinkPreviews = showLinkPreviews,
-                    )
-                    aiSheet()
+                    Box(
+                        Modifier
+                            .then(contentHeight()?.let { Modifier.height(it).fillMaxWidth() } ?: Modifier.fillMaxSize())
+                            .testTag("chat_surface_root"),
+                    ) {
+                        ChatContent(
+                            state =
+                                ChatState(
+                                    buffer = chatBuffer(),
+                                    connState = liveConnection?.invoke() ?: connectionState,
+                                    memberCount = memberCount,
+                                    replyTo = replyTo(),
+                                    parted = parted,
+                                ),
+                            items = items,
+                            composerEnabled = true,
+                            onBack = onBack,
+                            showBack = showBack,
+                            onOpenConversationList = onOpenConversationList,
+                            historySyncStatus = historySyncStatus,
+                            onOpenChannelInfo = onOpenChannelInfo,
+                            ebooksHelperRoomId = ebooksHelperRoomId(),
+                            ebooksDccOffers = ebooksDccOffers(),
+                            onAcceptDccTransfer = onAcceptDccTransfer,
+                            onRejectDccTransfer = onRejectDccTransfer,
+                            onRemoveDccTransfer = onRemoveDccTransfer,
+                            onSaveDccToDownloads = onSaveDccToDownloads,
+                            onOpenSearch = onOpenSearch,
+                            onOpenImage = {},
+                            onInviteUser = onInviteUser,
+                            nickNormalizer = { it.lowercase() },
+                            onSubmit = onSubmit,
+                            onTyping = {},
+                            onSetReply = {},
+                            onReact = { _, _ -> },
+                            onRetry = {},
+                            loadPreview = { _, _ -> null },
+                            onAudioToggle = onAudioToggle,
+                            composerDraft = draft(),
+                            aiTextEnabled = aiEnabled(),
+                            aiTextState = aiState(),
+                            onAiComposer = onAi,
+                            onTranslateMessage = onTranslateMessage,
+                            outgoingFlight = outgoingFlight(),
+                            onDraftChanged = onDraftChanged,
+                            onFlightSettled = onFlightSettled,
+                            entryState = entryState,
+                            onInitialPositionHandled = onInitialPositionHandled,
+                            rawNewestAnchor = rawNewestAnchor,
+                            onMarkRead = onMarkRead,
+                            showImages = showImages,
+                            showLinkPreviews = showLinkPreviews,
+                            composerStyle = composerStyle(),
+                            memberNicks = memberNicks,
+                            voiceState = voiceState(),
+                            onViewportRefreshAnchor = onViewportRefreshAnchor,
+                        )
+                        aiSheet()
+                    }
                 }
             }
         }
@@ -916,6 +946,267 @@ class ComposerSendClearUiTest {
                 timelineOrder = id,
             )
         }
+
+    @Test
+    fun timelineDrawsBehindComposerAndKeepsNewestAboveHost() {
+        var style by mutableStateOf(ComposerStyle.COMFORTABLE)
+        var draft by mutableStateOf(ComposerDraftState("hello", hydrated = true, revision = 1))
+        val submitted = mutableListOf<String>()
+        val read = mutableListOf<TimelineAnchor>()
+        val viewportAnchors = mutableListOf<ViewportRefreshAnchor?>()
+        setContent(
+            draft = { draft },
+            composerStyle = { style },
+            pages = flowOf(PagingData.from(headerHistory())),
+            rawNewestAnchor = TimelineAnchor(100_000, 100, 100),
+            onMarkRead = { read += it },
+            onViewportRefreshAnchor = { viewportAnchors += it },
+            onDraftChanged = { draft = draft.copy(text = it, revision = draft.revision + 1) },
+            onSubmit = submitted::add,
+        )
+        val timeline = compose.onNodeWithTag("chat_timeline")
+
+        for (selectedStyle in ComposerStyle.entries) {
+            compose.runOnIdle {
+                style = selectedStyle
+                draft = draft.copy(text = "hello", revision = draft.revision + 1)
+            }
+            timeline.performScrollToIndex(0)
+            compose.waitForIdle()
+            val viewport = timeline.getUnclippedBoundsInRoot()
+            val host = compose.onNodeWithTag("chat_bottom_host").getUnclippedBoundsInRoot()
+            val pill = compose.onNodeWithTag("chat_composer_pill").getUnclippedBoundsInRoot()
+            val newest = compose.onNodeWithTag("chat_message_header-100", useUnmergedTree = true).getUnclippedBoundsInRoot()
+            assertEquals(host.bottom.value, viewport.bottom.value, 0.5f)
+            assertTrue("$selectedStyle: actual viewport $viewport must continue behind pill $pill", viewport.bottom > pill.top)
+            assertTrue("$selectedStyle: newest $newest must rest above occupied host $host", newest.bottom <= host.top)
+            assertEquals("$selectedStyle: retain the timeline's ordinary bottom breathing room", 8f, (host.top - newest.bottom).value, 1f)
+            if (selectedStyle != ComposerStyle.LARGE) compose.onNodeWithTag("chat_composer_tools").performClick()
+            val toolbar = compose.onNodeWithTag("chat_composer_format_toolbar").fetchSemanticsNode()
+            assertTrue("$selectedStyle exposes one native scrolling tools row", toolbar.config.contains(SemanticsActions.ScrollBy))
+            val toolsHost = compose.onNodeWithTag("chat_bottom_host").getUnclippedBoundsInRoot()
+            val toolsNewest = compose.onNodeWithTag("chat_message_header-100", useUnmergedTree = true).getUnclippedBoundsInRoot()
+            assertTrue("$selectedStyle: newest $toolsNewest must clear the measured tools host $toolsHost", toolsNewest.bottom <= toolsHost.top)
+            assertEquals("$selectedStyle: tools retain ordinary bottom breathing room", 8f, (toolsHost.top - toolsNewest.bottom).value, 1f)
+            if (selectedStyle != ComposerStyle.LARGE) {
+                compose.onNodeWithTag("chat_composer_tools").performClick()
+                compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
+            }
+
+            timeline.performScrollToIndex(50)
+            compose.waitForIdle()
+            val marksBeforeScroll = compose.runOnIdle { read.size }
+            val crossingRow = compose.onNodeWithTag("chat_message_header-50", useUnmergedTree = true)
+            val beforeRow = crossingRow.getUnclippedBoundsInRoot()
+            val beforePill = compose.onNodeWithTag("chat_composer_pill").getUnclippedBoundsInRoot()
+            // Center the real row under this style's pill, rather than assuming a toolbar height.
+            val dragDp = ((beforePill.top.value + beforePill.bottom.value) - (beforeRow.top.value + beforeRow.bottom.value)) / 2f
+            val touchSlopPx =
+                android.view.ViewConfiguration
+                    .get(RuntimeEnvironment.getApplication())
+                    .scaledTouchSlop
+                    .toFloat()
+            timeline.performTouchInput {
+                down(center)
+                moveBy(Offset(0f, dragDp.dp.toPx() + touchSlopPx))
+                advanceEventTime(200)
+                up()
+            }
+            compose.waitForIdle()
+            val crossed = crossingRow.getUnclippedBoundsInRoot()
+            val floatingPill = compose.onNodeWithTag("chat_composer_pill").getUnclippedBoundsInRoot()
+            val crossedViewport = timeline.getUnclippedBoundsInRoot()
+            val crossedHost = compose.onNodeWithTag("chat_bottom_host").getUnclippedBoundsInRoot()
+            val geometry = "style=$selectedStyle beforeRow=$beforeRow row=$crossed timeline=$crossedViewport pill=$floatingPill host=$crossedHost dragDp=$dragDp touchSlopPx=$touchSlopPx"
+            assertTrue("An older row must scroll through the bar's actual bounds: $geometry", crossed.bottom > floatingPill.top && crossed.top < floatingPill.bottom)
+            assertTrue("The crossed row must remain within the full timeline viewport: $geometry", crossed.top < crossedViewport.bottom)
+            compose.runOnIdle { assertEquals("Scrolling behind the host must not mark history read", marksBeforeScroll, read.size) }
+            val parked = compose.runOnIdle { viewportAnchors.last() as ViewportRefreshAnchor.Parked }
+            val parkedRow = compose.onNodeWithTag("chat_message_header-${parked.id}", useUnmergedTree = true).getUnclippedBoundsInRoot()
+            val occupiedHost = compose.onNodeWithTag("chat_bottom_host").getUnclippedBoundsInRoot()
+            assertTrue("Refresh/read viewport must name a row visible above the host", parkedRow.top < occupiedHost.top)
+            for (tag in listOf("chat_scroll_to_bottom_fab", "chat_compact_actions", "chat_compact_back")) {
+                val action = compose.onNodeWithTag(tag).assertIsDisplayed().getUnclippedBoundsInRoot()
+                val occupied = compose.onNodeWithTag("chat_bottom_host").getUnclippedBoundsInRoot()
+                assertTrue("$tag must clear the occupied bottom host", action.bottom < occupied.top)
+            }
+            // Physical hit testing, not the semantics click action: the composer wins over the row below.
+            compose.onNodeWithTag("chat_composer_send").assertIsEnabled().performTouchInput { click(center) }
+            compose.runOnIdle { assertEquals("hello", submitted.last()) }
+            compose
+                .onNodeWithTag("chat_composer_field")
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
+        }
+        compose.runOnIdle { assertEquals(3, submitted.size) }
+    }
+
+    @Test
+    fun nativeBottomPaddingTracksEachMeasuredPaneAndHostChange() {
+        val paneHeight = mutableStateOf(800.dp)
+        val hostHeight = mutableStateOf(368.dp)
+        var pixelsPerDp = 0f
+        lateinit var timeline: LazyListState
+        compose.setContent {
+            val density = LocalDensity.current
+            pixelsPerDp = density.density
+            val items = remember { flowOf(PagingData.from(headerHistory())) }.collectAsLazyPagingItems()
+            val listState = rememberLazyListState()
+            SideEffect { timeline = listState }
+            MotdTheme(dynamicColor = false) {
+                Scaffold(
+                    modifier = Modifier.height(paneHeight.value).fillMaxWidth(),
+                    contentWindowInsets = WindowInsets(0),
+                    bottomBar = { Box(Modifier.height(hostHeight.value).fillMaxWidth()) },
+                ) { padding ->
+                    MessageList(
+                        items = items,
+                        listState = listState,
+                        networkId = buffer.networkId,
+                        readMarkerTime = null,
+                        bottomContentPadding = padding,
+                        onLongPress = {},
+                        onReply = {},
+                        onReact = { _, _ -> },
+                        onImageClick = {},
+                        onRetry = {},
+                        loadPreview = { _, _ -> null },
+                        richContentReady = false,
+                        showImages = false,
+                        showLinkPreviews = false,
+                        onOpenLink = {},
+                        modifier =
+                            Modifier.drawWithContent {
+                                val layout = listState.layoutInfo
+                                val expectedPane = with(density) { paneHeight.value.roundToPx() }
+                                val expectedPadding = with(density) { (hostHeight.value + 8.dp).roundToPx() }
+                                // Native layout may place a cached child before remeasuring it in the
+                                // same traversal; only the final geometry reaching paint is user-visible.
+                                assertEquals("The viewport must retain the entire measured pane", expectedPane, layout.viewportSize.height)
+                                assertEquals("The list must use this measure's host height, not the previous frame", expectedPadding, layout.beforeContentPadding)
+                                drawContent()
+                            },
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+        val restingNewestFoot = compose.runOnIdle { timeline.layoutInfo.viewportSize.height - timeline.layoutInfo.beforeContentPadding }
+        // Complementary keyboard/picker travel must keep the newest foot still on every paint.
+        for ((pane, host) in listOf(780 to 348, 740 to 308, 700 to 268, 740 to 308, 780 to 348, 800 to 368)) {
+            compose.runOnIdle {
+                paneHeight.value = pane.dp
+                hostHeight.value = host.dp
+            }
+            // Native placement requires Android traversal, not only advancing the Compose clock.
+            compose.waitForIdle()
+            compose.runOnIdle {
+                assertEquals(Math.round(pane * pixelsPerDp), timeline.layoutInfo.viewportSize.height)
+                assertEquals(Math.round((host + 8) * pixelsPerDp), timeline.layoutInfo.beforeContentPadding)
+                assertEquals(restingNewestFoot, timeline.layoutInfo.viewportSize.height - timeline.layoutInfo.beforeContentPadding)
+            }
+        }
+        // A multiline clear changes only host height; the same native getter must still remeasure.
+        compose.runOnIdle { hostHeight.value = 148.dp }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(Math.round(156 * pixelsPerDp), timeline.layoutInfo.beforeContentPadding)
+        }
+    }
+
+    @Test
+    fun measuredBottomHostTracksDraftReplyToolsPickerAndLowerPanels() {
+        var draft by mutableStateOf(ComposerDraftState(hydrated = true, revision = 1))
+        var reply by mutableStateOf<MessageEntity?>(null)
+        var ebooksRoom by mutableStateOf<Long?>(null)
+        var voice by mutableStateOf(VoiceMessageUiState())
+        var contentHeight by mutableStateOf<Dp?>(null)
+        setContent(
+            draft = { draft },
+            pages = flowOf(PagingData.from(headerHistory())),
+            chatBuffer = { ebooksBuffer },
+            replyTo = { reply },
+            parted = true,
+            ebooksHelperRoomId = { ebooksRoom },
+            voiceState = { voice },
+            contentHeight = { contentHeight },
+            memberNicks = listOf("alice", "alex"),
+            onDraftChanged = { draft = draft.copy(text = it, revision = draft.revision + 1) },
+            onSubmit = {},
+        )
+        val timeline = compose.onNodeWithTag("chat_timeline")
+
+        fun assertNewestAboveHost(): Float {
+            timeline.performScrollToIndex(0)
+            compose.waitForIdle()
+            val viewport = timeline.getUnclippedBoundsInRoot()
+            val host = compose.onNodeWithTag("chat_bottom_host").getUnclippedBoundsInRoot()
+            val newest = compose.onNodeWithTag("chat_message_header-100", useUnmergedTree = true).getUnclippedBoundsInRoot()
+            assertEquals(host.bottom.value, viewport.bottom.value, 0.5f)
+            assertTrue("Measured content padding must clear every occupied lower panel", newest.bottom <= host.top)
+            return (host.bottom - host.top).value
+        }
+
+        fun assertPanelCleared(tag: String) {
+            val panel = compose.onNodeWithTag(tag).assertIsDisplayed().getUnclippedBoundsInRoot()
+            val host = compose.onNodeWithTag("chat_bottom_host").getUnclippedBoundsInRoot()
+            val newest = compose.onNodeWithTag("chat_message_header-100", useUnmergedTree = true).getUnclippedBoundsInRoot()
+            assertTrue("$tag must be included in the measured bottom host", panel.top >= host.top && panel.bottom <= host.bottom)
+            assertTrue("$tag must not cover the resting newest message", newest.bottom <= host.top)
+        }
+        val collapsed = assertNewestAboveHost()
+        assertPanelCleared("chat_parted_banner")
+        compose.runOnIdle { draft = draft.copy(text = "first\nsecond\nthird", revision = draft.revision + 1) }
+        val multiline = assertNewestAboveHost()
+        assertTrue("A multiline draft must increase the occupied host", multiline > collapsed)
+        compose.runOnIdle { reply = headerHistory().first().copy(text = "Reply context") }
+        val withReply = assertNewestAboveHost()
+        assertTrue("The reply banner must increase the occupied host", withReply > multiline)
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        val withTools = assertNewestAboveHost()
+        assertTrue("Visible formatting tools must increase the occupied host", withTools > withReply)
+        val expandedPill = compose.onNodeWithTag("chat_composer_pill").assertIsDisplayed().getUnclippedBoundsInRoot()
+        val tools = compose.onNodeWithTag("chat_composer_format_toolbar").getUnclippedBoundsInRoot()
+        val newest = compose.onNodeWithTag("chat_message_header-100", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("The pill must grow around the tools", tools.top >= expandedPill.top && tools.bottom <= expandedPill.bottom)
+        assertTrue("The newest row must clear the expanded shared pill", newest.bottom <= expandedPill.top)
+        compose.onNodeWithTag("chat_composer_emoji").performClick()
+        compose.onNodeWithTag("chat_composer_emoji_picker").assertIsDisplayed()
+        val withPicker = assertNewestAboveHost()
+        assertTrue("The picker replacement must increase the occupied host", withPicker > withReply)
+        val row = compose.onNodeWithTag("chat_composer_input_row").getUnclippedBoundsInRoot()
+        val picker = compose.onNodeWithTag("chat_composer_emoji_panel").getUnclippedBoundsInRoot()
+        assertEquals((row.bottom + 6.dp).value, picker.top.value, 0.5f)
+        compose.onNodeWithTag("chat_composer_field").performTouchInput { click(center) }
+        compose.waitForIdle()
+        assertEquals(withReply, assertNewestAboveHost(), 1f)
+        compose.onNodeWithTag("chat_composer_field").assertTextEquals("first\nsecond\nthird")
+        compose.runOnIdle { ebooksRoom = buffer.id }
+        val withEbooks = assertNewestAboveHost()
+        assertPanelCleared("chat_ebooks_help")
+        assertPanelCleared("chat_ebooks_open_results")
+        assertPanelCleared("chat_ebooks_dcc_offers")
+        assertTrue("Eligible ebooks controls must increase the occupied host", withEbooks > withReply)
+        compose.runOnIdle { voice = VoiceMessageUiState(recording = VoiceRecordingUi(elapsedMs = 1_000, locked = true)) }
+        assertTrue("The recording panel must increase the occupied host", assertNewestAboveHost() > withEbooks)
+        assertPanelCleared("voice_recording_panel")
+        compose.runOnIdle {
+            voice = VoiceMessageUiState()
+            ebooksRoom = null
+            reply = null
+            draft = draft.copy(text = "al", revision = draft.revision + 1)
+        }
+        // Autocomplete is a Popup above the host, not part of its measured content inset.
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("autocomplete_panel").fetchSemanticsNodes().isNotEmpty() }
+        val hostBeforePopup = assertNewestAboveHost()
+        val popup = compose.onNodeWithTag("autocomplete_panel").getUnclippedBoundsInRoot()
+        val inputRow = compose.onNodeWithTag("chat_composer_input_row").getUnclippedBoundsInRoot()
+        assertTrue(popup.bottom <= inputRow.top)
+        assertEquals(collapsed, hostBeforePopup, 1f)
+        // This is the same available-height change that consumed IME insets impose on ChatContent.
+        compose.runOnIdle { contentHeight = 580.dp }
+        assertEquals(collapsed, assertNewestAboveHost(), 1f)
+        compose.onNodeWithTag("chat_composer_field").assertTextEquals("al")
+    }
 
     @Test
     fun historyHeaderAnimatesPreservesItsAnchorAndRestoresOnlyAtLatest() {

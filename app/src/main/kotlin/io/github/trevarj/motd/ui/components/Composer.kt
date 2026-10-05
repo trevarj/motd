@@ -14,6 +14,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.content.consume
@@ -24,8 +25,10 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,6 +40,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -66,13 +70,12 @@ import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.TextSnippet
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Mood
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -158,6 +161,7 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.emoji2.emojipicker.EmojiPickerView
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.IrcEditorDocument
 import io.github.trevarj.motd.irc.format.IrcTextStyle
@@ -179,6 +183,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.ceil
 import androidx.compose.foundation.lazy.items as lazyItems
 
 data class ComposerReply(
@@ -419,6 +424,8 @@ fun Composer(
     knownNicks: Set<String> = emptySet(),
     identityRules: IrcIdentityRules = IrcIdentityRules(),
     ircFormattingEnabled: Boolean = false,
+    composerStyle: ComposerStyle = ComposerStyle.COMFORTABLE,
+    currentNick: String? = null,
 ) {
     val initialEditor = remember { IrcEditorDocument.fromRaw(value.text, value.selection.start, value.selection.end) }
     val textFieldState =
@@ -503,17 +510,31 @@ fun Composer(
     var selectedForeground by remember { mutableStateOf<Int?>(null) }
     var selectedBackground by remember { mutableStateOf<Int?>(null) }
     val hasDraftText = plainIrcText(editorValue.text).isNotEmpty()
-    val showToolsButton = composerToolsAvailable(showEmojiTool, showFormattingTools, ircFormattingEnabled)
-    val toolsSurfaceVisible = toolsOpen || ircFormattingEnabled && expanded
+    val relocatedTools = composerStyle != ComposerStyle.COMFORTABLE
+    val formattingToolsVisible = ircFormattingEnabled && (showFormattingTools || expanded)
+    val expandAvailable = ircFormattingEnabled && (hasDraftText || expanded)
+    val toolbarHasActions =
+        showEmojiTool || formattingToolsVisible || ircFormattingEnabled && onUploadDraft != null ||
+            relocatedTools && (onAttachment != null || onAi != null || expandAvailable)
+    val showToolsButton =
+        when (composerStyle) {
+            ComposerStyle.COMFORTABLE -> composerToolsAvailable(showEmojiTool, showFormattingTools, ircFormattingEnabled)
+            ComposerStyle.LARGE -> false
+            ComposerStyle.COMPACT -> toolbarHasActions
+        }
+    val transientToolsVisible = toolsOpen || ircFormattingEnabled && expanded
+    val toolsSurfaceVisible = toolbarHasActions && (composerStyle == ComposerStyle.LARGE || transientToolsVisible)
     // Toolbar touches can hide platform selection handles before their click callback runs. Retain
     // the latest field-owned visible range so formatting still targets the user's selection.
     var toolbarSelection by remember { mutableStateOf(editorValue.selection) }
     LaunchedEffect(editorValue.selection, inputFocused, toolsSurfaceVisible) {
         if (inputFocused || !toolsSurfaceVisible) toolbarSelection = editorValue.selection
     }
+    // A persistent toolbar must also follow authoritative clears while the field is unfocused.
+    LaunchedEffect(editorValue.text) { toolbarSelection = editorValue.selection }
     val toolsRotation by
         animateFloatAsState(
-            targetValue = composerToolsRotation(toolsSurfaceVisible),
+            targetValue = composerToolsRotation(transientToolsVisible),
             animationSpec = MotdMotion.microFadeIn,
             label = "composer_tools_rotation",
         )
@@ -521,6 +542,28 @@ fun Composer(
         if (!showToolsButton) toolsOpen = false
     }
     val editorDensity = LocalDensity.current
+    val collapsedVerticalPadding =
+        when (composerStyle) {
+            ComposerStyle.COMFORTABLE -> 6.dp
+            ComposerStyle.LARGE -> 12.dp
+            ComposerStyle.COMPACT -> 4.dp
+        }
+    val floatingPill = composerStyle != ComposerStyle.LARGE
+    val primaryInset = if (composerStyle == ComposerStyle.COMPACT) 2.dp else 4.dp
+    val collapsedMinimumHeight = if (floatingPill) 48.dp + primaryInset * 2 else 48.dp
+    val lineHeightPx =
+        with(LocalDensity.current) {
+            ceil(
+                MaterialTheme.typography.bodyLarge.lineHeight
+                    .toPx(),
+            ).toInt()
+        }
+    var textContentHeightPx by remember(lineHeightPx) { mutableIntStateOf(lineHeightPx) }
+    var editorTextLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val editorScrollState = rememberScrollState()
+    var editorViewportHeightPx by remember { mutableIntStateOf(0) }
+    var nickHeightPx by remember { mutableIntStateOf(0) }
+    val selfNick = currentNick?.takeIf { composerStyle == ComposerStyle.COMPACT && it.isNotBlank() }
     val expandedHeight =
         (
             minOf(
@@ -717,7 +760,7 @@ fun Composer(
 
     // Dismiss transient surfaces before leaving chat.
     BackHandler(
-        enabled = colorSheetVisible || toolsSurfaceVisible || emojiPickerSession?.phase == EmojiPickerPhase.OPEN,
+        enabled = colorSheetVisible || transientToolsVisible || emojiPickerSession?.phase == EmojiPickerPhase.OPEN,
     ) {
         when {
             colorSheetVisible -> {
@@ -728,9 +771,115 @@ fun Composer(
                 dismissEmojiPicker()
             }
 
-            toolsSurfaceVisible -> {
+            transientToolsVisible -> {
                 toolsOpen = false
                 expanded = false
+            }
+        }
+    }
+
+    val attachmentAction =
+        onAttachment?.let { attach ->
+            {
+                emojiPickerSession = null
+                keyboard?.hide()
+                focusManager.clearFocus(force = true)
+                attach()
+            }
+        }
+    val toggleExpandedAction: (() -> Unit)? = if (expandAvailable) ({ expanded = !expanded }) else null
+
+    @Composable
+    fun ToolsButton() {
+        IconButton(
+            onClick = {
+                if (transientToolsVisible) {
+                    toolsOpen = false
+                    expanded = false
+                } else {
+                    if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) dismissEmojiPicker()
+                    toolsOpen = true
+                }
+            },
+            modifier =
+                Modifier
+                    .size(48.dp)
+                    .testTag("chat_composer_tools")
+                    .semantics { selected = transientToolsVisible },
+        ) {
+            Icon(
+                Icons.Filled.Add,
+                contentDescription =
+                    stringResource(
+                        if (transientToolsVisible) R.string.chat_composer_tools_close else R.string.chat_composer_tools_open,
+                    ),
+                modifier = Modifier.graphicsLayer { rotationZ = toolsRotation },
+                tint =
+                    if (transientToolsVisible) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    @Composable
+    fun PrimaryAction(modifier: Modifier = Modifier) {
+        val canSend = enabled && sendEnabled && plainIrcText(editorValue.text).isNotBlank()
+        Column(
+            modifier = modifier,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            // Send and voice remain fixed 48.dp round buttons.
+            Crossfade(
+                targetState = canSend || !voiceEnabled,
+                animationSpec = MotdMotion.microFadeIn,
+                label = "composer_action",
+            ) { showSend ->
+                if (showSend) {
+                    FilledIconButton(
+                        onClick = {
+                            dismissEmojiPicker()
+                            toolsOpen = false
+                            expanded = false
+                            onSend()
+                        },
+                        enabled = canSend,
+                        modifier = Modifier.size(48.dp).testTag("chat_composer_send"),
+                        shape = CircleShape,
+                        colors =
+                            IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f),
+                            ),
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Send,
+                                stringResource(R.string.chat_composer_send),
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
+                } else {
+                    VoiceRecordButton(
+                        enabled = enabled,
+                        recording = voiceRecording,
+                        onHoldStart = {
+                            dismissEmojiPicker()
+                            onVoiceHoldStart()
+                        },
+                        onAccessibilityStart = {
+                            dismissEmojiPicker()
+                            onVoiceAccessibilityStart()
+                        },
+                        onHoldStop = onVoiceHoldStop,
+                        onHoldCancel = onVoiceHoldCancel,
+                        onLock = onVoiceLock,
+                    )
+                }
             }
         }
     }
@@ -764,11 +913,13 @@ fun Composer(
     ) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 3.dp,
+            color = if (floatingPill) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = if (floatingPill) 0.dp else 3.dp,
         ) {
             Column {
-                HorizontalDivider(thickness = Dp.Hairline, color = MaterialTheme.colorScheme.outlineVariant)
+                if (!floatingPill) {
+                    HorizontalDivider(thickness = Dp.Hairline, color = MaterialTheme.colorScheme.outlineVariant)
+                }
 
                 AnimatedVisibility(
                     visible = replyVisible && reply != null,
@@ -794,258 +945,277 @@ fun Composer(
                     }
                 }
 
-                AnimatedVisibility(
-                    visible = toolsSurfaceVisible,
-                    enter = expandVertically(animationSpec = MotdMotion.contentSize),
-                    exit = shrinkVertically(animationSpec = MotdMotion.contentSize),
+                Box(
+                    Modifier.then(
+                        if (floatingPill) {
+                            Modifier.padding(horizontal = 8.dp, vertical = if (composerStyle == ComposerStyle.COMPACT) 4.dp else 6.dp)
+                        } else {
+                            Modifier
+                        },
+                    ),
                 ) {
-                    ComposerToolsToolbar(
-                        value = editorValue.copy(selection = toolbarSelection),
-                        document = editorDocument,
-                        showEmoji = showEmojiTool,
-                        showFormatting = ircFormattingEnabled && (showFormattingTools || expanded),
-                        onEmoji = {
-                            toolsOpen = false
-                            expanded = false
-                            openEmojiPicker()
-                        },
-                        onToggle = { currentDocument, selection, style ->
-                            publishDocument(currentDocument.toggleStyle(selection.start, selection.end, style))
-                        },
-                        onColor = ::openColorSheet,
-                        onClear = { currentDocument, selection ->
-                            publishDocument(currentDocument.clearFormatting(selection.start, selection.end))
-                        },
-                        onMarkdown = { currentDocument, range ->
-                            val next = currentDocument.formatMarkdown(range.start, range.end)
-                            val caret = range.end + next.text.length - currentDocument.text.length
-                            publishDocument(next, TextRange(caret))
-                        },
-                        onUploadDraft =
-                            onUploadDraft?.takeIf { ircFormattingEnabled }?.let { upload ->
-                                {
-                                    keyboard?.hide()
-                                    focusManager.clearFocus(force = true)
-                                    upload()
-                                }
-                            },
-                    )
-                }
-
-                Row(
-                    modifier =
-                        Modifier
-                            .testTag("chat_composer_input_row")
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.Bottom,
-                ) {
-                    Surface(
-                        modifier = Modifier.weight(1f).testTag("chat_composer_input_area"),
-                        shape = MotdShapes.composer,
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ) {
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            if (showToolsButton) {
-                                IconButton(
-                                    onClick = {
-                                        if (toolsSurfaceVisible) {
-                                            toolsOpen = false
-                                            expanded = false
-                                        } else {
-                                            if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) dismissEmojiPicker()
-                                            toolsOpen = true
-                                        }
-                                    },
-                                    modifier =
-                                        Modifier
-                                            .size(48.dp)
-                                            .testTag("chat_composer_tools")
-                                            .semantics { selected = toolsSurfaceVisible },
-                                ) {
-                                    Icon(
-                                        Icons.Filled.Add,
-                                        contentDescription =
-                                            stringResource(
-                                                if (toolsSurfaceVisible) {
-                                                    R.string.chat_composer_tools_close
-                                                } else {
-                                                    R.string.chat_composer_tools_open
-                                                },
-                                            ),
-                                        modifier = Modifier.graphicsLayer { rotationZ = toolsRotation },
-                                        tint =
-                                            if (toolsSurfaceVisible) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            },
-                                    )
-                                }
-                            }
-
-                            Box(
-                                Modifier
-                                    .weight(1f)
-                                    .onGloballyPositioned { onFieldPositioned(it.boundsInWindow()) },
-                            ) {
-                                ComposerTextField(
-                                    state = textFieldState,
-                                    document = editorDocument,
-                                    knownNicks = knownNicks,
-                                    identityRules = identityRules,
-                                    placeholder = placeholder,
-                                    onFocusChanged = { inputFocused = it },
-                                    onFocused = { dismissEmojiPicker() },
-                                    modifier = Modifier.fillMaxWidth().focusRequester(focusRequester).then(imageContentModifier),
-                                    onTextPositioned = onFieldTextPositioned,
-                                    contentStartPadding = if (showToolsButton) 4.dp else 16.dp,
-                                    ircFormattingEnabled = ircFormattingEnabled,
-                                    expanded = expanded,
-                                    expandedHeight = expandedHeight,
-                                    onColor = {
-                                        selectedRange()?.let { openColorSheet(editorDocument, it) }
-                                    },
-                                    onToggleStyle = { style, start, end ->
-                                        publishDocument(editorDocument.toggleStyle(start, end, style))
-                                    },
-                                    onClearFormatting = { start, end ->
-                                        publishDocument(editorDocument.clearFormatting(start, end))
-                                    },
-                                )
-
-                                // A physical tap on the text field while the picker is open should
-                                // perform the same seamless handoff as the emoji toggle. Letting the
-                                // field receive that tap directly can make Android show the keyboard
-                                // before the complementary panel has been installed.
-                                if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) {
-                                    Box(
-                                        modifier =
-                                            Modifier
-                                                .matchParentSize()
-                                                .clickable { dismissEmojiPicker() }
-                                                .semantics {
-                                                    contentDescription = closeEmojiPickerDescription
-                                                },
-                                    )
-                                }
-                            }
-
-                            if (onAi != null) {
-                                IconButton(
-                                    onClick = onAi,
-                                    modifier = Modifier.size(48.dp).testTag("chat_composer_ai"),
-                                ) {
-                                    Icon(
-                                        Icons.Filled.AutoFixHigh,
-                                        contentDescription = stringResource(R.string.ai_text_tools),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(start = 12.dp).size(20.dp),
-                                    )
-                                }
-                            }
-
-                            when {
-                                ircFormattingEnabled && (hasDraftText || expanded) -> {
-                                    IconButton(
-                                        onClick = { expanded = !expanded },
-                                        modifier =
-                                            Modifier
-                                                .size(48.dp)
-                                                .testTag("chat_composer_format_expand")
-                                                .semantics { selected = expanded },
-                                    ) {
-                                        Icon(
-                                            if (expanded) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
-                                            contentDescription = if (expanded) "Collapse rich editor" else "Expand rich editor",
-                                            tint =
-                                                if (expanded) {
-                                                    MaterialTheme.colorScheme.primary
-                                                } else {
-                                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                                },
-                                        )
-                                    }
-                                }
-
-                                onAttachment != null -> {
-                                    IconButton(
-                                        onClick = {
-                                            emojiPickerSession = null
+                    if (floatingPill) {
+                        Surface(
+                            modifier = Modifier.matchParentSize().testTag("chat_composer_pill"),
+                            shape = MotdShapes.composer,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ) {}
+                    }
+                    Column {
+                        AnimatedVisibility(
+                            visible = toolsSurfaceVisible,
+                            enter = expandVertically(animationSpec = MotdMotion.contentSize),
+                            exit = shrinkVertically(animationSpec = MotdMotion.contentSize),
+                        ) {
+                            ComposerToolsToolbar(
+                                value = editorValue.copy(selection = toolbarSelection),
+                                document = editorDocument,
+                                showEmoji = showEmojiTool,
+                                showFormatting = formattingToolsVisible,
+                                onEmoji = {
+                                    toolsOpen = false
+                                    expanded = false
+                                    openEmojiPicker()
+                                },
+                                onToggle = { currentDocument, selection, style ->
+                                    publishDocument(currentDocument.toggleStyle(selection.start, selection.end, style))
+                                },
+                                onColor = ::openColorSheet,
+                                onClear = { currentDocument, selection ->
+                                    publishDocument(currentDocument.clearFormatting(selection.start, selection.end))
+                                },
+                                onMarkdown = { currentDocument, range ->
+                                    val next = currentDocument.formatMarkdown(range.start, range.end)
+                                    val caret = range.end + next.text.length - currentDocument.text.length
+                                    publishDocument(next, TextRange(caret))
+                                },
+                                onUploadDraft =
+                                    onUploadDraft?.takeIf { ircFormattingEnabled }?.let { upload ->
+                                        {
                                             keyboard?.hide()
                                             focusManager.clearFocus(force = true)
-                                            onAttachment()
-                                        },
-                                        modifier = Modifier.size(48.dp).testTag("chat_composer_attachment"),
-                                    ) {
-                                        Icon(
-                                            Icons.Outlined.AttachFile,
-                                            contentDescription = stringResource(R.string.chat_composer_attachment),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                }
-                            }
+                                            upload()
+                                        }
+                                    },
+                                onAttachment = if (relocatedTools) attachmentAction else null,
+                                onAi = if (relocatedTools) onAi else null,
+                                onToggleExpanded = if (relocatedTools) toggleExpandedAction else null,
+                                expanded = expanded,
+                            )
                         }
-                    }
 
-                    val canSend = enabled && sendEnabled && plainIrcText(editorValue.text).isNotBlank()
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        // Send and voice remain fixed 48.dp round buttons.
-                        Crossfade(
-                            targetState = canSend || !voiceEnabled,
-                            animationSpec = MotdMotion.microFadeIn,
-                            label = "composer_action",
-                        ) { showSend ->
-                            if (showSend) {
-                                FilledIconButton(
-                                    onClick = {
-                                        dismissEmojiPicker()
-                                        toolsOpen = false
-                                        expanded = false
-                                        onSend()
-                                    },
-                                    enabled = canSend,
-                                    modifier = Modifier.size(48.dp).testTag("chat_composer_send"),
-                                    shape = CircleShape,
-                                    colors =
-                                        IconButtonDefaults.filledIconButtonColors(
-                                            containerColor = MaterialTheme.colorScheme.primary,
-                                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                                            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f),
-                                        ),
+                        Row(
+                            modifier =
+                                Modifier
+                                    .testTag("chat_composer_input_row")
+                                    .then(if (floatingPill) Modifier else Modifier.padding(horizontal = 8.dp, vertical = 6.dp)),
+                            horizontalArrangement = Arrangement.spacedBy(if (composerStyle == ComposerStyle.COMPACT) 4.dp else 8.dp),
+                            verticalAlignment = Alignment.Bottom,
+                        ) {
+                            BoxWithConstraints(Modifier.weight(1f)) {
+                                val nicknameMaxWidth = minOf(92.dp, maxWidth * 0.30f)
+                                if (!floatingPill) {
+                                    val viewportHeight = with(density) { editorViewportHeightPx.toDp() }
+                                    val naturalHeight = with(density) { textContentHeightPx.toDp() } + collapsedVerticalPadding * 2
+                                    Surface(
+                                        modifier =
+                                            Modifier
+                                                .align(Alignment.Center)
+                                                .fillMaxWidth()
+                                                .height(
+                                                    if (expanded) {
+                                                        expandedHeight
+                                                    } else {
+                                                        naturalHeight.coerceAtMost(
+                                                            if (editorViewportHeightPx > 0) viewportHeight else maxOf(collapsedMinimumHeight, naturalHeight),
+                                                        )
+                                                    },
+                                                ).testTag("chat_composer_pill"),
+                                        shape = MotdShapes.card,
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    ) {}
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().testTag("chat_composer_input_area"),
+                                    verticalAlignment = Alignment.Top,
                                 ) {
+                                    if (floatingPill && showToolsButton) {
+                                        Box(
+                                            Modifier
+                                                .align(Alignment.Bottom)
+                                                .padding(start = primaryInset, top = primaryInset, bottom = primaryInset),
+                                        ) { ToolsButton() }
+                                    }
+                                    if (selfNick != null) {
+                                        val paddingPx = with(density) { collapsedVerticalPadding.toPx() }
+                                        val visibleTextHeight =
+                                            minOf(
+                                                textContentHeightPx.toFloat(),
+                                                (editorViewportHeightPx - paddingPx * 2).coerceAtLeast(0f),
+                                            )
+                                        val firstLineTop =
+                                            if (expanded) {
+                                                with(density) { 8.dp.toPx() }
+                                            } else {
+                                                (editorViewportHeightPx - visibleTextHeight) / 2
+                                            }
+                                        val visibleLineCenter =
+                                            editorTextLayout?.let { layout ->
+                                                val scroll = editorScrollState.value.toFloat()
+                                                val line = layout.getLineForVerticalPosition(scroll)
+                                                (layout.getLineTop(line) + layout.getLineBottom(line)) / 2 - scroll
+                                            } ?: lineHeightPx / 2f
+                                        val nickTop =
+                                            with(density) {
+                                                (firstLineTop + visibleLineCenter - nickHeightPx / 2f).coerceAtLeast(0f).toDp()
+                                            }
+                                        Box(Modifier.padding(start = 8.dp, top = nickTop)) {
+                                            SenderLabel(
+                                                sender = selfNick,
+                                                color = LocalNickColors.current.nick(selfNick, MaterialTheme.colorScheme.onSurfaceVariant),
+                                                unread = false,
+                                                modifier =
+                                                    Modifier
+                                                        .widthIn(max = nicknameMaxWidth)
+                                                        .onSizeChanged { if (nickHeightPx != it.height) nickHeightPx = it.height }
+                                                        .testTag("chat_composer_self_nick"),
+                                            )
+                                        }
+                                        Spacer(Modifier.width(6.dp))
+                                    }
+
                                     Box(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center,
+                                        Modifier
+                                            .weight(1f)
+                                            .onGloballyPositioned { onFieldPositioned(it.boundsInWindow()) }
+                                            .onSizeChanged { if (editorViewportHeightPx != it.height) editorViewportHeightPx = it.height },
                                     ) {
-                                        Icon(
-                                            Icons.AutoMirrored.Filled.Send,
-                                            stringResource(R.string.chat_composer_send),
-                                            modifier = Modifier.size(24.dp),
+                                        ComposerTextField(
+                                            state = textFieldState,
+                                            document = editorDocument,
+                                            knownNicks = knownNicks,
+                                            identityRules = identityRules,
+                                            placeholder = placeholder,
+                                            onFocusChanged = { inputFocused = it },
+                                            onFocused = { dismissEmojiPicker() },
+                                            modifier =
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(min = collapsedMinimumHeight)
+                                                    .focusRequester(focusRequester)
+                                                    .then(imageContentModifier),
+                                            onTextPositioned = onFieldTextPositioned,
+                                            contentStartPadding =
+                                                when (composerStyle) {
+                                                    ComposerStyle.COMFORTABLE -> if (showToolsButton) 4.dp else 16.dp
+                                                    ComposerStyle.LARGE -> 12.dp
+                                                    ComposerStyle.COMPACT -> if (selfNick != null) 0.dp else 8.dp
+                                                },
+                                            contentEndPadding =
+                                                when (composerStyle) {
+                                                    ComposerStyle.COMFORTABLE -> 4.dp
+                                                    ComposerStyle.LARGE -> 12.dp
+                                                    ComposerStyle.COMPACT -> 8.dp
+                                                },
+                                            collapsedVerticalPadding = collapsedVerticalPadding,
+                                            onTextContentHeight = { if (textContentHeightPx != it) textContentHeightPx = it },
+                                            onTextLayout = { if (editorTextLayout != it) editorTextLayout = it },
+                                            scrollState = editorScrollState,
+                                            ircFormattingEnabled = ircFormattingEnabled,
+                                            expanded = expanded,
+                                            expandedHeight = expandedHeight,
+                                            onColor = {
+                                                selectedRange()?.let { openColorSheet(editorDocument, it) }
+                                            },
+                                            onToggleStyle = { style, start, end ->
+                                                publishDocument(editorDocument.toggleStyle(start, end, style))
+                                            },
+                                            onClearFormatting = { start, end ->
+                                                publishDocument(editorDocument.clearFormatting(start, end))
+                                            },
+                                        )
+
+                                        // A physical tap on the text field while the picker is open should
+                                        // perform the same seamless handoff as the emoji toggle. Letting the
+                                        // field receive that tap directly can make Android show the keyboard
+                                        // before the complementary panel has been installed.
+                                        if (emojiPickerSession?.phase == EmojiPickerPhase.OPEN) {
+                                            Box(
+                                                modifier =
+                                                    Modifier
+                                                        .matchParentSize()
+                                                        .clickable { dismissEmojiPicker() }
+                                                        .semantics {
+                                                            contentDescription = closeEmojiPickerDescription
+                                                        },
+                                            )
+                                        }
+                                    }
+
+                                    val actionBand = Modifier.align(Alignment.Bottom).padding(vertical = primaryInset)
+                                    Row(actionBand) {
+                                        if (!relocatedTools && onAi != null) {
+                                            IconButton(
+                                                onClick = onAi,
+                                                modifier = Modifier.size(48.dp).testTag("chat_composer_ai"),
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.AutoFixHigh,
+                                                    contentDescription = stringResource(R.string.ai_text_tools),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.padding(start = 12.dp).size(20.dp),
+                                                )
+                                            }
+                                        }
+
+                                        when {
+                                            !relocatedTools && toggleExpandedAction != null -> {
+                                                IconButton(
+                                                    onClick = toggleExpandedAction,
+                                                    modifier =
+                                                        Modifier
+                                                            .size(48.dp)
+                                                            .testTag("chat_composer_format_expand")
+                                                            .semantics { selected = expanded },
+                                                ) {
+                                                    Icon(
+                                                        if (expanded) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                                                        contentDescription = if (expanded) "Collapse rich editor" else "Expand rich editor",
+                                                        tint =
+                                                            if (expanded) {
+                                                                MaterialTheme.colorScheme.primary
+                                                            } else {
+                                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                                            },
+                                                    )
+                                                }
+                                            }
+
+                                            !relocatedTools && attachmentAction != null -> {
+                                                IconButton(
+                                                    onClick = attachmentAction,
+                                                    modifier = Modifier.size(48.dp).testTag("chat_composer_attachment"),
+                                                ) {
+                                                    Icon(
+                                                        Icons.Outlined.AttachFile,
+                                                        contentDescription = stringResource(R.string.chat_composer_attachment),
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (floatingPill) {
+                                        PrimaryAction(
+                                            Modifier
+                                                .align(Alignment.Bottom)
+                                                .padding(end = primaryInset, top = primaryInset, bottom = primaryInset),
                                         )
                                     }
                                 }
-                            } else {
-                                VoiceRecordButton(
-                                    enabled = enabled,
-                                    recording = voiceRecording,
-                                    onHoldStart = {
-                                        dismissEmojiPicker()
-                                        onVoiceHoldStart()
-                                    },
-                                    onAccessibilityStart = {
-                                        dismissEmojiPicker()
-                                        onVoiceAccessibilityStart()
-                                    },
-                                    onHoldStop = onVoiceHoldStop,
-                                    onHoldCancel = onVoiceHoldCancel,
-                                    onLock = onVoiceLock,
-                                )
                             }
+
+                            if (!floatingPill) PrimaryAction()
                         }
                     }
                 }
@@ -1105,6 +1275,10 @@ private fun ComposerToolsToolbar(
     onClear: (IrcEditorDocument, TextRange) -> Unit,
     onMarkdown: (IrcEditorDocument, TextRange) -> Unit,
     onUploadDraft: (() -> Unit)?,
+    onAttachment: (() -> Unit)?,
+    onAi: (() -> Unit)?,
+    onToggleExpanded: (() -> Unit)?,
+    expanded: Boolean,
 ) {
     val allowed = messageFormattingRange(value.text)
     val allowedEnd = allowed?.last?.plus(1)
@@ -1116,7 +1290,6 @@ private fun ComposerToolsToolbar(
     val currentDocument = rememberUpdatedState(document)
     val currentSelection = rememberUpdatedState(selection)
     val haptics = LocalHapticFeedback.current
-    var overflowExpanded by remember { mutableStateOf(false) }
     Row(
         modifier =
             Modifier
@@ -1131,6 +1304,7 @@ private fun ComposerToolsToolbar(
         @Composable
         fun ToolButton(
             label: String,
+            description: String,
             icon: androidx.compose.ui.graphics.vector.ImageVector,
             tag: String,
             enabled: Boolean = true,
@@ -1141,7 +1315,11 @@ private fun ComposerToolsToolbar(
                 positionProvider =
                     androidx.compose.material3.TooltipDefaults
                         .rememberTooltipPositionProvider(androidx.compose.material3.TooltipAnchorPosition.Above),
-                tooltip = { PlainTooltip { Text(label) } },
+                tooltip = {
+                    PlainTooltip(modifier = Modifier.testTag("${tag}_tooltip")) {
+                        Text("$label\n$description")
+                    }
+                },
                 state = rememberTooltipState(),
             ) {
                 IconButton(
@@ -1174,12 +1352,14 @@ private fun ComposerToolsToolbar(
         fun FormatButton(
             style: IrcTextStyle?,
             label: String,
+            description: String,
             icon: androidx.compose.ui.graphics.vector.ImageVector,
             tag: String,
             onClick: () -> Unit,
         ) {
             ToolButton(
                 label = label,
+                description = description,
                 icon = icon,
                 tag = tag,
                 enabled = selection != null,
@@ -1191,70 +1371,121 @@ private fun ComposerToolsToolbar(
         if (showEmoji) {
             ToolButton(
                 label = stringResource(R.string.chat_composer_emoji),
+                description = stringResource(R.string.chat_composer_emoji_help),
                 icon = Icons.Outlined.Mood,
                 tag = "chat_composer_emoji",
                 onClick = onEmoji,
             )
         }
         if (showFormatting) {
-            FormatButton(IrcTextStyle.BOLD, "Bold", Icons.Filled.FormatBold, "chat_format_bold") {
+            FormatButton(
+                IrcTextStyle.BOLD,
+                "Bold",
+                stringResource(R.string.chat_format_bold_help),
+                Icons.Filled.FormatBold,
+                "chat_format_bold",
+            ) {
                 currentSelection.value?.let { onToggle(currentDocument.value, it, IrcTextStyle.BOLD) }
             }
-            FormatButton(IrcTextStyle.ITALIC, "Italic", Icons.Filled.FormatItalic, "chat_format_italic") {
+            FormatButton(
+                IrcTextStyle.ITALIC,
+                "Italic",
+                stringResource(R.string.chat_format_italic_help),
+                Icons.Filled.FormatItalic,
+                "chat_format_italic",
+            ) {
                 currentSelection.value?.let { onToggle(currentDocument.value, it, IrcTextStyle.ITALIC) }
             }
-            FormatButton(IrcTextStyle.UNDERLINE, "Underline", Icons.Filled.FormatUnderlined, "chat_format_underline") {
+            FormatButton(
+                IrcTextStyle.UNDERLINE,
+                "Underline",
+                stringResource(R.string.chat_format_underline_help),
+                Icons.Filled.FormatUnderlined,
+                "chat_format_underline",
+            ) {
                 currentSelection.value?.let { onToggle(currentDocument.value, it, IrcTextStyle.UNDERLINE) }
             }
-            FormatButton(IrcTextStyle.MONOSPACE, "Monospace", Icons.Filled.Code, "chat_format_monospace") {
+            FormatButton(
+                IrcTextStyle.MONOSPACE,
+                "Monospace",
+                stringResource(R.string.chat_format_monospace_help),
+                Icons.Filled.Code,
+                "chat_format_monospace",
+            ) {
                 currentSelection.value?.let { onToggle(currentDocument.value, it, IrcTextStyle.MONOSPACE) }
             }
-            FormatButton(null, "Color", Icons.Filled.FormatColorText, "chat_format_color") {
+            FormatButton(
+                null,
+                "Color",
+                stringResource(R.string.chat_format_color_help),
+                Icons.Filled.FormatColorText,
+                "chat_format_color",
+            ) {
                 currentSelection.value?.let { onColor(currentDocument.value, it) }
             }
-            FormatButton(null, "Clear formatting", Icons.Filled.FormatClear, "chat_format_clear") {
+            FormatButton(
+                null,
+                "Clear formatting",
+                stringResource(R.string.chat_format_clear_help),
+                Icons.Filled.FormatClear,
+                "chat_format_clear",
+            ) {
                 currentSelection.value?.let { onClear(currentDocument.value, it) }
             }
         }
-        if (showFormatting || onUploadDraft != null) {
-            Box {
-                IconButton(
-                    onClick = { overflowExpanded = true },
-                    modifier = Modifier.size(48.dp).testTag("chat_composer_overflow"),
-                ) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "More composer actions")
-                }
-                DropdownMenu(
-                    expanded = overflowExpanded,
-                    onDismissRequest = { overflowExpanded = false },
-                ) {
-                    if (showFormatting) {
-                        DropdownMenuItem(
-                            text = { Text("Format Markdown") },
-                            onClick = {
-                                overflowExpanded = false
-                                if (allowed != null && allowedEnd != null) {
-                                    onMarkdown(currentDocument.value, TextRange(allowed.first, allowedEnd))
-                                }
-                            },
-                            enabled = allowed != null,
-                            modifier = Modifier.testTag("chat_format_markdown"),
-                            leadingIcon = { Icon(Icons.Filled.AutoFixHigh, contentDescription = null) },
-                        )
+        onAttachment?.let { attach ->
+            ToolButton(
+                label = stringResource(R.string.chat_composer_attachment),
+                description = stringResource(R.string.chat_composer_attachment_help),
+                icon = Icons.Outlined.AttachFile,
+                tag = "chat_composer_attachment",
+                onClick = attach,
+            )
+        }
+        onAi?.let { ai ->
+            ToolButton(
+                label = stringResource(R.string.ai_text_tools),
+                description = stringResource(R.string.chat_composer_ai_help),
+                icon = Icons.Filled.AutoFixHigh,
+                tag = "chat_composer_ai",
+                onClick = ai,
+            )
+        }
+        onToggleExpanded?.let { toggle ->
+            ToolButton(
+                label = if (expanded) "Collapse rich editor" else "Expand rich editor",
+                description =
+                    stringResource(
+                        if (expanded) R.string.chat_composer_collapse_help else R.string.chat_composer_expand_help,
+                    ),
+                icon = if (expanded) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                tag = "chat_composer_format_expand",
+                isSelected = expanded,
+                onClick = toggle,
+            )
+        }
+        if (showFormatting) {
+            ToolButton(
+                label = "Format Markdown",
+                description = stringResource(R.string.chat_format_markdown_help),
+                icon = Icons.Filled.TextSnippet,
+                tag = "chat_format_markdown",
+                enabled = allowed != null,
+                onClick = {
+                    if (allowed != null && allowedEnd != null) {
+                        onMarkdown(currentDocument.value, TextRange(allowed.first, allowedEnd))
                     }
-                    onUploadDraft?.let { upload ->
-                        DropdownMenuItem(
-                            text = { Text("Upload current draft") },
-                            onClick = {
-                                overflowExpanded = false
-                                upload()
-                            },
-                            modifier = Modifier.testTag("chat_composer_upload_draft"),
-                            leadingIcon = { Icon(Icons.Outlined.AttachFile, contentDescription = null) },
-                        )
-                    }
-                }
-            }
+                },
+            )
+        }
+        onUploadDraft?.let { upload ->
+            ToolButton(
+                label = "Upload current draft",
+                description = stringResource(R.string.chat_composer_upload_draft_help),
+                icon = Icons.Filled.UploadFile,
+                tag = "chat_composer_upload_draft",
+                onClick = upload,
+            )
         }
     }
 }
@@ -1656,6 +1887,11 @@ private fun ComposerTextField(
     modifier: Modifier = Modifier,
     onTextPositioned: (Offset) -> Unit = {},
     contentStartPadding: Dp = 4.dp,
+    contentEndPadding: Dp = 4.dp,
+    collapsedVerticalPadding: Dp,
+    onTextContentHeight: (Int) -> Unit,
+    onTextLayout: (TextLayoutResult) -> Unit,
+    scrollState: ScrollState,
     ircFormattingEnabled: Boolean = false,
     expanded: Boolean = false,
     expandedHeight: Dp = 148.dp,
@@ -1796,7 +2032,16 @@ private fun ComposerTextField(
             ),
         lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = if (expanded) Int.MAX_VALUE else 6),
         outputTransformation = outputTransformation,
-        onTextLayout = { getResult -> textLayout = getResult() },
+        scrollState = scrollState,
+        onTextLayout = { getResult ->
+            textLayout = getResult()
+            textLayout?.let { layout ->
+                if (layout.lineCount > 0) {
+                    onTextContentHeight(ceil(layout.getLineBottom(layout.lineCount - 1) - layout.getLineTop(0)).toInt())
+                    onTextLayout(layout)
+                }
+            }
+        },
         decorator = { inner ->
             Box(
                 modifier =
@@ -1804,14 +2049,20 @@ private fun ComposerTextField(
                         .fillMaxWidth()
                         .padding(
                             start = contentStartPadding,
-                            end = 4.dp,
-                            top = if (expanded) 8.dp else 12.dp,
-                            bottom = if (expanded) 4.dp else 12.dp,
+                            end = contentEndPadding,
+                            top = if (expanded) 8.dp else collapsedVerticalPadding,
+                            bottom = if (expanded) 4.dp else collapsedVerticalPadding,
                         ),
                 contentAlignment = if (expanded) Alignment.TopStart else Alignment.CenterStart,
             ) {
                 if (state.text.isEmpty()) {
-                    Text(placeholder, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        placeholder,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
                 Box(
                     modifier =

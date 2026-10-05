@@ -148,7 +148,7 @@ private const val MAX_REACTION_WINDOW_MSGIDS = 500
 
 /**
  * Single UI state for the chat screen. `pagingFlow` is the cached message stream;
- * `replyTo`/`typingNicks`/`connState` drive the composer + header. `members` feeds autocomplete.
+ * `replyTo`/`typingNicks`/`connState`/`composerNick` drive the composer + header. `members` feeds autocomplete.
  */
 data class ChatState(
     val buffer: BufferEntity? = null,
@@ -166,6 +166,7 @@ data class ChatState(
     // True for a CHANNEL buffer we are no longer a member of (server-confirmed or reflected self-PART).
     // Drives the "You're not in #channel — Rejoin" banner and disables the composer.
     val parted: Boolean = false,
+    val composerNick: String? = null,
 )
 
 data class ComposerDraftState(
@@ -982,6 +983,14 @@ class ChatViewModel
                     } ?: flowOf(null)
                 }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+        private val composerNetwork =
+            buffer
+                .map { it?.networkId }
+                .distinctUntilChanged()
+                .flatMapLatest { networkId ->
+                    networkId?.let(networkDao::observeById) ?: flowOf(null)
+                }
+
         /** Live ISUPPORT wins while connected; persisted rules keep offline rendering deterministic. */
         val identityRules: StateFlow<IrcIdentityRules> =
             combine(
@@ -1186,6 +1195,21 @@ class ChatViewModel
                     presence = presence,
                     parted = buffer?.type == BufferType.CHANNEL && !buffer.joined && buffer.pendingCloseAt == null,
                 )
+            }.let { assembled ->
+                combine(assembled, persistedIdentity, composerNetwork, connectionManager.connectionActivity) { current, persisted, network, activity ->
+                    val networkId = current.buffer?.networkId
+                    current.copy(
+                        composerNick =
+                            if (networkId == null) {
+                                null
+                            } else {
+                                // The separately collected connState can still belong to the previous buffer.
+                                (activity.states[networkId] as? IrcClientState.Ready)?.nick?.takeIf { it.isNotBlank() }
+                                    ?: persisted?.takeIf { it.networkId == networkId }?.selfNick?.takeIf { it.isNotBlank() }
+                                    ?: network?.takeIf { it.id == networkId }?.nick?.takeIf { it.isNotBlank() }
+                            },
+                    )
+                }
             }.combine(conversationLayout) { current, layout ->
                 current.copy(conversationLayout = layout)
             }.combine(conversationPresence) { current, presence ->

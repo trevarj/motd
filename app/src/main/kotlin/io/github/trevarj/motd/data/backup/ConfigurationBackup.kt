@@ -550,6 +550,7 @@ class ConfigurationBackupRepositoryImpl
                 appearancePrefs.setTimeFormat(it.timeFormat)
                 appearancePrefs.setCustomTimeFormatPattern(it.customTimeFormatPattern)
                 appearancePrefs.setMessageSpacing(it.messageSpacing)
+                appearancePrefs.setComposerStyle(it.composerStyle)
                 appearancePrefs.setBubbleCornerStyle(it.bubbleCornerStyle)
                 appearancePrefs.setChatShadowsEnabled(it.chatShadowsEnabled)
                 appearancePrefs.setLauncherIcon(it.launcherIcon)
