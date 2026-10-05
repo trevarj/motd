@@ -52,6 +52,9 @@ flowchart TD
   displaces the count; a thin progress bar adds no text row. Full reasons remain in the inspector.
   Only the static headline announces politely. Healthy idle hides; archive/invitations promote
   connection activity only, while the Material inspector remains global and preserves list modes.
+  A separately labeled hide button only changes saveable screen-local banner visibility; new issues,
+  progress and mode changes never restore it. Both list and selection overflow menus offer restoration
+  while hidden, beside the always-available inspector. Hiding acknowledges nothing or changes source state.
   Connection-only notices retain their three-second grace; presented history waiting bypasses it.
   The existing history anti-flash/minimum-visible presenter also gates per-row queued cues.
 - `ChatListViewModel` eagerly captures observed connection/history failures even without screen

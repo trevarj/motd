@@ -15,8 +15,12 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.assertTouchHeightIsEqualTo
+import androidx.compose.ui.test.assertTouchWidthIsEqualTo
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -133,6 +137,201 @@ class NetworkActivityUiTest {
         compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Libera: bad certificate")
     }
 
+    @Test fun hideAndRestoreBannerKeepsInspectorAndLatestActivityAvailable() {
+        val fullReason = "Server rejected authentication. " + "Keep every detail inspectable. ".repeat(8) + "END OF REASON"
+        val snapshot =
+            mutableStateOf(
+                activity(listOf(issue(fullReason), issue("Queued history still retains this full error", 7, false, 2))).copy(
+                    networks = listOf(NetworkActivityNetwork(1, "Libera", IrcClientState.Failed(fullReason, true), listOf(NetworkActivityChat(7, "#kotlin", HistorySyncStatus.Queued)))),
+                ),
+            )
+        val chrome = mutableStateOf<ChatListSyncChrome>(ChatListSyncChrome.Syncing(12, 42, true))
+        val calls = mutableListOf<NetworkActivityAction>()
+        setList(
+            activity = { snapshot.value },
+            chrome = { chrome.value },
+            listState = ChatListState(rows = (7L..12L).map { row().copy(bufferId = it, displayName = "#chat-$it") }, networks = listOf(network), loading = false),
+            onAction = { _, action -> calls += action },
+        )
+        compose.onNodeWithTag("chatlist_more").performClick()
+        compose.onNodeWithTag("chatlist_show_network_activity_banner").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_network_activity").performClick()
+        compose.onNodeWithTag("network_activity_close").performClick()
+        assertEquals(
+            listOf("Open network activity"),
+            compose.onNodeWithTag("chatlist_status_banner").fetchSemanticsNode().config[SemanticsProperties.ContentDescription],
+        )
+        compose
+            .onNodeWithContentDescription("Hide network activity banner")
+            .assertTouchHeightIsEqualTo(48.dp)
+            .assertTouchWidthIsEqualTo(48.dp)
+        val beforeHide = snapshot.value
+        // Real pointer input must be consumed by Hide, not also open its clickable parent.
+        compose.onNodeWithTag("chatlist_status_hide").performTouchInput { click() }
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        compose.onNodeWithTag("network_activity_sheet").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_row_7").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(beforeHide, snapshot.value)
+            assertEquals(emptyList<NetworkActivityAction>(), calls)
+        }
+
+        compose.onNodeWithTag("chatlist_more").performClick()
+        compose.onNodeWithTag("chatlist_show_network_activity_banner").assertTextEquals("Show network activity banner")
+        compose.onNodeWithTag("chatlist_network_activity").performClick()
+        compose.onNodeWithTag("network_activity_sheet").assertIsDisplayed()
+        compose.onNodeWithText("#kotlin: Queued for history sync").assertIsDisplayed()
+        for ((episode, reason) in listOf(1 to fullReason, 2 to "Queued history still retains this full error")) {
+            compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_issue_${episode}_reason"))
+            compose.onNodeWithTag("network_activity_issue_${episode}_reason", true).assertTextEquals(reason)
+        }
+        compose.runOnIdle {
+            snapshot.value =
+                snapshot.value.copy(
+                    active = snapshot.value.active + issue("New failure while hidden", buffer = 9, fatal = true, episode = 3).copy(chatName = "#chat-9"),
+                    networks = snapshot.value.networks.map { it.copy(history = listOf(NetworkActivityChat(7, "#kotlin", HistorySyncStatus.Syncing))) },
+                )
+            chrome.value = ChatListSyncChrome.Syncing(31, 42, true)
+        }
+        compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_network_1"))
+        compose.onNodeWithText("#kotlin: Syncing history…").assertIsDisplayed()
+        compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_issue_3_reason"))
+        compose.onNodeWithTag("network_activity_issue_3_reason", true).assertTextEquals("New failure while hidden")
+        compose.onNodeWithTag("network_activity_close").performClick()
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        // Let healthy idle and a new episode pass while hidden; neither may auto-restore it.
+        val latest = snapshot.value.copy(active = snapshot.value.active.filter { it.episodeId != 1L })
+        compose.runOnIdle {
+            snapshot.value = activity(emptyList())
+            chrome.value = ChatListSyncChrome.Hidden
+        }
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        compose.runOnIdle {
+            snapshot.value = latest
+            chrome.value = ChatListSyncChrome.Syncing(32, 42, true)
+        }
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_more").performClick()
+        compose.onNodeWithTag("chatlist_show_network_activity_banner").performClick()
+        compose.onNodeWithTag("chatlist_network_activity").assertDoesNotExist()
+        compose.onNodeWithTag("network_activity_sheet").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("#chat-9 on Libera: New failure while hidden")
+        compose.onNodeWithTag("chatlist_status_issue_count", true).assertTextEquals("2 issues")
+        compose.onNodeWithTag("chatlist_status_count", true).assertTextEquals("32/42")
+        val progress = compose.onNodeWithTag("chatlist_status_progress", true).fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo]
+        assertEquals(32f / 42, progress.current, 0.001f)
+        compose.runOnIdle {
+            assertEquals(latest, snapshot.value)
+            assertEquals(emptyList<NetworkActivityAction>(), calls)
+            assertFalse(snapshot.value.active.any { it.acknowledged })
+        }
+        compose.onNodeWithTag("chatlist_more").performClick()
+        compose.onNodeWithTag("chatlist_show_network_activity_banner").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_network_activity").performClick()
+        compose.onNodeWithTag("network_activity_sheet").assertIsDisplayed()
+    }
+
+    @Test fun hiddenBannerSurvivesSaveableRecreationAndRestoresExplicitly() {
+        val restoration = StateRestorationTester(compose)
+        val snapshot = mutableStateOf(activity())
+        restoration.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatListContent(state = ChatListState(networks = listOf(network), loading = false), networkActivity = snapshot.value, connectionNoticeVisible = true, onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {}, onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> }, onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> })
+            }
+        }
+        compose.onNodeWithTag("chatlist_status_hide").performClick()
+        restoration.emulateSavedInstanceStateRestore()
+        compose.runOnIdle { snapshot.value = activity(listOf(issue("Failure after recreation", episode = 2))) }
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_more").performClick()
+        compose.onNodeWithTag("chatlist_network_activity").performClick()
+        compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_issue_2_reason"))
+        compose.onNodeWithTag("network_activity_issue_2_reason", true).assertTextEquals("Failure after recreation")
+        compose.onNodeWithTag("network_activity_close").performClick()
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_more").performClick()
+        compose.onNodeWithTag("chatlist_show_network_activity_banner").performClick()
+        compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Libera: Failure after recreation")
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("chatlist_status_banner").assertIsDisplayed()
+    }
+
+    @Test fun scopedAndSelectionOverflowRestoreWithoutChangingArchiveOrInvitationMode() {
+        val calls = mutableListOf<NetworkActivityAction>()
+        val invitation = ChatListInvitation(11, 111, 1, "Libera", "alice", "#other", "invite", InviteState.PENDING, 1)
+        setList(
+            activity = { activity(listOf(issue(), issue("Full history reason in every mode", 7, false, 2))) },
+            chrome = { ChatListSyncChrome.Syncing(1, 3) },
+            listState = ChatListState(rows = listOf(row()), archivedRows = listOf(row(true).copy(bufferId = 8)), invitations = listOf(invitation), networks = listOf(network), selectedNetworkId = 1, loading = false),
+            onAction = { _, action -> calls += action },
+        )
+        compose.onNodeWithTag("chatlist_status_hide").performClick()
+        compose.onNodeWithTag("chatlist_more").performClick()
+        compose.onNodeWithTag("chatlist_network_activity").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_show_network_activity_banner").performClick()
+        compose.onNodeWithTag("chatlist_status_banner").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_network_activity").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_status_hide").performClick()
+        compose.onNodeWithTag("chatlist_row_7").performTouchInput { longClick() }
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_selection_more").performClick()
+        compose.onNodeWithTag("chatlist_show_network_activity_banner").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_network_activity").performClick()
+        compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_issue_2_reason"))
+        compose.onNodeWithTag("network_activity_issue_2_reason", true).assertTextEquals("Full history reason in every mode")
+        compose.onNodeWithTag("network_activity_close").performClick()
+        compose.onNodeWithTag("chatlist_selection_top_app_bar").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_selection_more").performClick()
+        compose.onNodeWithTag("chatlist_show_network_activity_banner").performClick()
+        compose.onNodeWithTag("chatlist_network_activity").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_selection_top_app_bar").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_status_count", true).assertTextEquals("1/3")
+        compose.onNodeWithTag("chatlist_status_hide").performClick()
+        compose.onNodeWithTag("chatlist_selection_close").performClick()
+        val revealLabel = ApplicationProvider.getApplicationContext<Context>().getString(R.string.chatlist_archived_reveal_action)
+        val reveal =
+            compose
+                .onNodeWithTag("chatlist_archive_pull_target")
+                .fetchSemanticsNode()
+                .config[SemanticsActions.CustomActions]
+                .single { it.label == revealLabel }
+        compose.runOnIdle { check(reveal.action()) }
+        compose.onNodeWithTag("chatlist_archived_folder").performClick()
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_network_activity").performClick()
+        compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_issue_2_reason"))
+        compose.onNodeWithTag("network_activity_issue_2_reason", true).assertTextEquals("Full history reason in every mode")
+        compose.onNodeWithTag("network_activity_close").performClick()
+        compose.onNodeWithText("Archived Chats").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_8").performTouchInput { longClick() }
+        compose.onNodeWithTag("chatlist_selection_more").performClick()
+        compose.onNodeWithTag("chatlist_show_network_activity_banner").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_network_activity").performClick()
+        compose.onNodeWithTag("network_activity_close").performClick()
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_selection_top_app_bar").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_selection_more").performClick()
+        compose.onNodeWithTag("chatlist_show_network_activity_banner").performClick()
+        compose.onNodeWithTag("chatlist_selection_top_app_bar").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_status_issue_count", true).assertTextEquals("1 issue")
+        compose.onNodeWithTag("chatlist_status_progress", true).assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_status_hide").performClick()
+        compose.onNodeWithTag("chatlist_selection_close").performClick()
+        compose.onNodeWithText("Archived Chats").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_selection_close").performClick()
+        compose.onNodeWithTag("chatlist_invitations_folder").performClick()
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_network_activity").performClick()
+        compose.onNodeWithTag("network_activity_close").performClick()
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_selection_close").performClick()
+        compose.onNodeWithTag("chatlist_more").performClick()
+        compose.onNodeWithTag("chatlist_show_network_activity_banner").performClick()
+        compose.onNodeWithTag("chatlist_status_count", true).assertTextEquals("1/3")
+        compose.runOnIdle { assertEquals(emptyList<NetworkActivityAction>(), calls) }
+    }
+
     @Test fun narrowBannerKeepsTwoTextRowsAndReservesProgressFraction() {
         val longReason = "Authentication rejected with a detailed reason. ".repeat(12)
         val snapshot =
@@ -147,7 +346,7 @@ class NetworkActivityUiTest {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 Box(Modifier.width(240.dp)) {
-                    NetworkActivityBanner(snapshot, ChatListSyncChrome.Syncing(12, 42, true), connectionNoticeVisible = true, includeHistory = true, onInspect = {})
+                    NetworkActivityBanner(snapshot, ChatListSyncChrome.Syncing(12, 42, true), connectionNoticeVisible = true, includeHistory = true, onInspect = {}, onHide = {})
                 }
             }
         }
@@ -473,7 +672,7 @@ class NetworkActivityUiTest {
     @Test fun waitingBypassesConnectionGraceAndDescribesQueuedHistory() {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
-                NetworkActivityBanner(NetworkActivityState(networks = listOf(NetworkActivityNetwork(1, "Libera", IrcClientState.Connecting))), ChatListSyncChrome.Waiting(5), connectionNoticeVisible = true, includeHistory = true, onInspect = {})
+                NetworkActivityBanner(NetworkActivityState(networks = listOf(NetworkActivityNetwork(1, "Libera", IrcClientState.Connecting))), ChatListSyncChrome.Waiting(5), connectionNoticeVisible = true, includeHistory = true, onInspect = {}, onHide = {})
             }
         }
         compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Connecting to Libera…")

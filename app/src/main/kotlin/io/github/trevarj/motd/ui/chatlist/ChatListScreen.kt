@@ -421,6 +421,7 @@ fun ChatListContent(
     var showFolderAssignment by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showActivitySheet by remember { mutableStateOf(false) }
+    var bannerVisible by rememberSaveable { mutableStateOf(true) }
     val activitySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -737,6 +738,16 @@ fun ChatListContent(
                                                         showActivitySheet = true
                                                     },
                                                 )
+                                                if (!bannerVisible) {
+                                                    DropdownMenuItem(
+                                                        text = { Text(stringResource(R.string.network_activity_show_banner)) },
+                                                        modifier = Modifier.testTag("chatlist_show_network_activity_banner"),
+                                                        onClick = {
+                                                            overflowOpen = false
+                                                            bannerVisible = true
+                                                        },
+                                                    )
+                                                }
                                                 if (dottedSelectedRows.isNotEmpty()) {
                                                     DropdownMenuItem(
                                                         text = {
@@ -818,6 +829,16 @@ fun ChatListContent(
                                                         showActivitySheet = true
                                                     },
                                                 )
+                                                if (!bannerVisible) {
+                                                    DropdownMenuItem(
+                                                        text = { Text(stringResource(R.string.network_activity_show_banner)) },
+                                                        modifier = Modifier.testTag("chatlist_show_network_activity_banner"),
+                                                        onClick = {
+                                                            moreOpen = false
+                                                            bannerVisible = true
+                                                        },
+                                                    )
+                                                }
                                                 DropdownMenuItem(
                                                     text = { Text(stringResource(R.string.folders_manage)) },
                                                     leadingIcon = { Icon(Icons.Outlined.FolderOpen, contentDescription = null) },
@@ -880,13 +901,16 @@ fun ChatListContent(
         ) { padding ->
             Box(modifier = Modifier.fillMaxSize().padding(padding)) {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    NetworkActivityBanner(
-                        activity = networkActivity,
-                        chrome = syncChrome,
-                        connectionNoticeVisible = if (archiveMode || invitationMode) connectionOnlyNoticeVisible else connectionNoticeVisible,
-                        includeHistory = !archiveMode && !invitationMode,
-                        onInspect = { showActivitySheet = true },
-                    )
+                    if (bannerVisible) {
+                        NetworkActivityBanner(
+                            activity = networkActivity,
+                            chrome = syncChrome,
+                            connectionNoticeVisible = if (archiveMode || invitationMode) connectionOnlyNoticeVisible else connectionNoticeVisible,
+                            includeHistory = !archiveMode && !invitationMode,
+                            onInspect = { showActivitySheet = true },
+                            onHide = { bannerVisible = false },
+                        )
+                    }
 
                     // Active-scope chip: keeps the filter discoverable/escapable without the drawer.
                     AnimatedVisibility(

@@ -15,9 +15,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -47,7 +48,7 @@ import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import java.text.DateFormat
 import java.util.Date
 
-/** One inspection affordance. Errors never replace engine progress or suppress another issue. */
+/** Inspectable banner with independent visibility control; errors never replace engine progress. */
 @Composable
 fun NetworkActivityBanner(
     activity: NetworkActivityState,
@@ -55,6 +56,7 @@ fun NetworkActivityBanner(
     connectionNoticeVisible: Boolean,
     includeHistory: Boolean,
     onInspect: () -> Unit,
+    onHide: () -> Unit,
 ) {
     val issues = activity.active.filter { !it.acknowledged && (includeHistory || it.bufferId == null) }
     val headlineIssue = issues.filter { it.bufferId != null || connectionNoticeVisible || it.fatal }.minWithOrNull(compareByDescending<NetworkActivityIssue> { it.severity }.thenBy { it.episodeId })
@@ -85,7 +87,9 @@ fun NetworkActivityBanner(
                 // A separate merge boundary keeps progress/count changes out of the live button.
                 Text(headline, modifier = Modifier.weight(1f).testTag("chatlist_status_label").semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (issues.isNotEmpty()) Text(pluralStringResource(R.plurals.network_activity_issue_count, issues.size, issues.size), style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("chatlist_status_issue_count"), maxLines = 1, softWrap = false)
-                Icon(Icons.Filled.ExpandMore, contentDescription = null, modifier = Modifier.size(20.dp))
+                IconButton(onClick = onHide, modifier = Modifier.size(48.dp).testTag("chatlist_status_hide")) {
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.network_activity_hide_banner))
+                }
             }
             val supporting =
                 buildList {
