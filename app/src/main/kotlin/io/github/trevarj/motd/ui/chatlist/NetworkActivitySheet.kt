@@ -100,7 +100,7 @@ fun NetworkActivityBanner(
             }
             val supporting =
                 buildList {
-                    if (activity.networks.size > 1) add(stringResource(R.string.network_activity_connected_count, connected, activity.networks.size))
+                    if (activity.networks.size > 1) add(pluralStringResource(R.plurals.network_activity_connected_count, activity.networks.size, connected, activity.networks.size))
                     if (headlineIssue != null && connecting != null) add(stringResource(R.string.network_activity_connecting_to, connecting.name))
                     if (sync is ChatListSyncChrome.Waiting && (headlineIssue != null || connecting != null)) add(stringResource(R.string.network_activity_queued))
                     if (sync is ChatListSyncChrome.Syncing && (headlineIssue != null || connecting != null)) add(stringResource(if (sync.backfill) R.string.network_activity_backfilling else R.string.network_activity_syncing))

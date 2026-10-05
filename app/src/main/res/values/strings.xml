@@ -48,7 +48,10 @@
         <item quantity="one">%1$d issue</item>
         <item quantity="other">%1$d issues</item>
     </plurals>
-    <string name="network_activity_connected_count">%1$d/%2$d networks connected</string>
+    <plurals name="network_activity_connected_count">
+        <item quantity="one">%1$d/%2$d network connected</item>
+        <item quantity="other">%1$d/%2$d networks connected</item>
+    </plurals>
     <string name="network_activity_progress_count">%1$d/%2$d</string>
     <string name="network_activity_connecting_to">Connecting to %1$s…</string>
     <string name="network_activity_registering_to">Registering with %1$s…</string>
