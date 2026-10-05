@@ -2651,17 +2651,6 @@ fun ChatContent(
     val conversationActionsMenu: @Composable () -> Unit = {
         DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, modifier = Modifier.testTag("chat_overflow_menu")) {
             if (compactHeader) {
-                if (showBack) {
-                    DropdownMenuItem(
-                        modifier = Modifier.testTag("chat_compact_back"),
-                        text = { Text(stringResource(R.string.chat_back)) },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null) },
-                        onClick = {
-                            overflowOpen = false
-                            onBack()
-                        },
-                    )
-                }
                 if (titleClickLabel != null) {
                     DropdownMenuItem(
                         modifier = Modifier.testTag("chat_compact_details"),
@@ -3311,19 +3300,33 @@ fun ChatContent(
                             )
 
                             if (compactHeader) {
-                                Box(
+                                Column(
                                     modifier =
                                         Modifier
                                             .align(Alignment.BottomEnd)
                                             .padding(end = 16.dp, bottom = 16.dp + MotdSizes.floatingActionButton + 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    FloatingActionButton(
-                                        onClick = { overflowOpen = true },
-                                        modifier = Modifier.size(48.dp).testTag("chat_compact_actions"),
-                                    ) {
-                                        Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
+                                    Box {
+                                        FloatingActionButton(
+                                            onClick = { overflowOpen = true },
+                                            modifier = Modifier.size(MotdSizes.floatingActionButton).testTag("chat_compact_actions"),
+                                        ) {
+                                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
+                                        }
+                                        conversationActionsMenu()
                                     }
-                                    conversationActionsMenu()
+                                    if (showBack) {
+                                        FloatingActionButton(
+                                            onClick = onBack,
+                                            modifier = Modifier.size(MotdSizes.floatingActionButton).testTag("chat_compact_back"),
+                                        ) {
+                                            Icon(
+                                                Icons.AutoMirrored.Filled.ArrowBack,
+                                                contentDescription = stringResource(R.string.chat_back),
+                                            )
+                                        }
+                                    }
                                 }
                             }
 
