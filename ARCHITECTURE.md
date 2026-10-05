@@ -44,6 +44,7 @@ flowchart TD
   behind its own repository or preference contract.
 - UI observes repositories and ViewModel state. Connection and protocol actions
   go through `ConnectionManager` instead of constructing IRC clients in screens.
+- Chat-list folder tabs share one native, non-clickable Material3 capsule (`MotdShapes.channelAvatar`, `surfaceContainerHigh`, 2dp shadow), inset 8dp horizontally and 4dp vertically from the Scaffold. Its fixed 10dp inner scroll-viewport gutters plus each pill's 2dp inset preserve the rows' 20dp avatar/content alignment at both scroll ends; 2dp inter-tab spacing, 48dp touch targets and selected `primaryContainer` pills remain unchanged.
 - The chat list has one compact, inspectable network-activity banner. The highest-severity,
   oldest unacknowledged connection/history issue wins; connection, waiting and sync summaries
   support it without rotation. Engine progress remains visible independently of failures.

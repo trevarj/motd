@@ -101,6 +101,7 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -1262,90 +1263,101 @@ private fun FolderTabStrip(
     onOpenDickord: () -> Unit,
     onOpenMentions: () -> Unit,
 ) {
-    Row(
+    Surface(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface)
-                .horizontalScroll(rememberScrollState())
-                .selectableGroup()
-                .testTag("chatlist_folder_tabs"),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .testTag("chatlist_folder_capsule"),
+        shape = MotdShapes.channelAvatar,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shadowElevation = 2.dp,
     ) {
-        if (showAllTab) {
-            FolderPillTab(
-                selected = selectedFolderId == null,
-                onClick = { onSelect(null) },
-                tag = "chatlist_folder_tab_all",
-            ) {
-                FolderTabLabel(
-                    name = stringResource(R.string.folders_all),
-                    summary = allSummary,
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp)
+                    .horizontalScroll(rememberScrollState())
+                    .selectableGroup()
+                    .testTag("chatlist_folder_tabs"),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            if (showAllTab) {
+                FolderPillTab(
                     selected = selectedFolderId == null,
-                    pillTag = "chatlist_folder_tab_pill_all",
-                    icon = { Icon(Icons.Outlined.Forum, contentDescription = null, modifier = Modifier.size(20.dp)) },
-                )
-            }
-        }
-        if (mentionsEnabled) {
-            FolderPillTab(
-                selected = false,
-                onClick = onOpenMentions,
-                tag = "chatlist_folder_tab_mentions",
-            ) {
-                Row(
-                    modifier = Modifier.testTag("chatlist_folder_tab_pill_mentions").padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    onClick = { onSelect(null) },
+                    tag = "chatlist_folder_tab_all",
                 ) {
-                    Icon(Icons.Outlined.AlternateEmail, contentDescription = null, modifier = Modifier.size(20.dp))
-                    Text(stringResource(R.string.mentions_title), style = MaterialTheme.typography.labelLarge)
-                    if (mentionsCount > 0) MentionBadge(mentionsCount, lowerBound = mentionsIncomplete)
+                    FolderTabLabel(
+                        name = stringResource(R.string.folders_all),
+                        summary = allSummary,
+                        selected = selectedFolderId == null,
+                        pillTag = "chatlist_folder_tab_pill_all",
+                        icon = { Icon(Icons.Outlined.Forum, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                    )
                 }
             }
-        }
-        dickordSummary?.let { summary ->
-            FolderPillTab(
-                selected = false,
-                onClick = onOpenDickord,
-                tag = "chatlist_folder_tab_discord",
-            ) {
-                FolderTabLabel(
-                    name = stringResource(R.string.dickord_badge),
-                    summary = summary,
+            if (mentionsEnabled) {
+                FolderPillTab(
                     selected = false,
-                    pillTag = "chatlist_folder_tab_pill_discord",
-                    icon = {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_discord),
-                            contentDescription = null,
-                            modifier = Modifier.width(24.dp).height(18.dp),
-                        )
-                    },
-                )
+                    onClick = onOpenMentions,
+                    tag = "chatlist_folder_tab_mentions",
+                ) {
+                    Row(
+                        modifier = Modifier.testTag("chatlist_folder_tab_pill_mentions").padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.AlternateEmail, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Text(stringResource(R.string.mentions_title), style = MaterialTheme.typography.labelLarge)
+                        if (mentionsCount > 0) MentionBadge(mentionsCount, lowerBound = mentionsIncomplete)
+                    }
+                }
             }
-        }
-        folders.forEach { folder ->
-            val selected = selectedFolderId == folder.folder.id
-            FolderPillTab(
-                selected = selected,
-                onClick = { onSelect(folder.folder.id) },
-                tag = "chatlist_folder_tab_${folder.folder.id}",
-            ) {
-                FolderTabLabel(
-                    name = folder.folder.displayName,
-                    summary = folder.summary,
+            dickordSummary?.let { summary ->
+                FolderPillTab(
+                    selected = false,
+                    onClick = onOpenDickord,
+                    tag = "chatlist_folder_tab_discord",
+                ) {
+                    FolderTabLabel(
+                        name = stringResource(R.string.dickord_badge),
+                        summary = summary,
+                        selected = false,
+                        pillTag = "chatlist_folder_tab_pill_discord",
+                        icon = {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_discord),
+                                contentDescription = null,
+                                modifier = Modifier.width(24.dp).height(18.dp),
+                            )
+                        },
+                    )
+                }
+            }
+            folders.forEach { folder ->
+                val selected = selectedFolderId == folder.folder.id
+                FolderPillTab(
                     selected = selected,
-                    pillTag = "chatlist_folder_tab_pill_${folder.folder.id}",
-                    icon = {
-                        FolderIcon(
-                            FolderIconRef(folder.folder.iconKind, folder.folder.iconKey),
-                            contentDescription = null,
-                            tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp).testTag("chatlist_folder_tab_icon_${folder.folder.id}"),
-                        )
-                    },
-                )
+                    onClick = { onSelect(folder.folder.id) },
+                    tag = "chatlist_folder_tab_${folder.folder.id}",
+                ) {
+                    FolderTabLabel(
+                        name = folder.folder.displayName,
+                        summary = folder.summary,
+                        selected = selected,
+                        pillTag = "chatlist_folder_tab_pill_${folder.folder.id}",
+                        icon = {
+                            FolderIcon(
+                                FolderIconRef(folder.folder.iconKind, folder.folder.iconKey),
+                                contentDescription = null,
+                                tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp).testTag("chatlist_folder_tab_icon_${folder.folder.id}"),
+                            )
+                        },
+                    )
+                }
             }
         }
     }
