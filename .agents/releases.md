@@ -7,8 +7,15 @@ automation in `.github/workflows/release.yml` is authoritative.
 
 1. Inspect the branch, status, staged diff, and recent tags. Do not include
    unrelated work or assume uncommitted user changes should be released.
-2. Run only the nearest local checks from [`testing.md`](testing.md). Do not
-   duplicate hosted release parity or run local emulator E2E.
+2. Run the nearest local checks from [`testing.md`](testing.md). Only when
+   cutting a release, also perform focused actual-emulator visual verification:
+   inspect fresh screenshots of changed surfaces, exercise changed UI
+   interactions, and capture/inspect a short MP4 for interaction/navigation
+   transitions. Inspect the rendered states and both sides of transitions, not
+   just capture-file existence. Reuse an owned warm emulator and its app data
+   via [`../test/e2e/README.md`](../test/e2e/README.md); report concrete blockers
+   and unverified behavior. Routine feature/fix work does not run these checks.
+   Do not duplicate hosted release parity or run full local emulator E2E suites.
 3. Push the candidate commit and require the complete `Required CI` workflow—including
    its `headless` E2E job and final `gate` job—to pass before tagging. Confirm the
    Android job's **Build and verify signed release APK** step succeeded; a green

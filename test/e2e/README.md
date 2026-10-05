@@ -11,7 +11,7 @@ setup and teardown deliberately clear application data.
 
 | Mode | Best for | Entry point |
 | --- | --- | --- |
-| Focused visual warm loop | Required local visual verification for UI changes | Persistent owned emulator; commands below |
+| Focused visual warm loop | Required local visual verification only when cutting a release | Persistent owned emulator; commands below |
 | Fast headless emulator | CI failure reproduction when lower-level checks cannot validate behavior | `./test/e2e/headless.sh fast` |
 | Full headless emulator | Local A-H, J, R, then teardown shell-runbook sweep | `./test/e2e/headless.sh full` |
 | Public screenshot showcase | Public asset capture attempt; current setup caveats below | `./test/e2e/headless.sh showcase` |
@@ -58,13 +58,15 @@ keeping UI-state coverage continuous without coupling those cases to Soju or an 
 
 ## Focused visual warm loop
 
-For UI changes, before handoff inspect fresh current-surface PNGs, exercise the
-changed interaction, and capture/inspect a short MP4 for interaction/navigation
-transitions. Nearest behavior tests still apply. Non-UI changes need no emulator;
+Only when cutting a release, inspect fresh current-surface PNGs on the actual
+emulator, exercise changed UI interactions, and capture/inspect a short MP4 for
+interaction/navigation transitions. Routine feature/fix work does not run these
+emulator, screenshot, or video checks. Nearest behavior tests still apply;
 local `fast`/`full` suites are not routine and hosted CI is unchanged.
 
-Start one owned session from the repository root. Keep these exports for its
-whole lifecycle; use unoccupied ports, never kill another session to free them.
+Reuse an owned warm emulator and its app data, or start one owned session from
+the repository root. Keep these exports for its whole lifecycle; use unoccupied
+ports, never kill another session to free them.
 The fresh temporary namespace avoids existing AVD/app state and tracked artwork.
 The wrapper enters the separate opt-in `.#emulator` runtime only when needed.
 
@@ -85,9 +87,10 @@ nix develop
 ```
 
 In that Nix shell, pin the owned emulator before sourcing only `lib.sh`, not the
-credential-bearing `.envrc`. Repeat the build/install/resume commands after
-edits; keep onboarding and app data, with no `pm clear` or reseeding unless the
-changed scenario needs a reset.
+credential-bearing `.envrc`. During release verification, repeat the
+build/install/resume commands after edits to the release candidate; keep
+onboarding and app data, with no `pm clear` or reseeding unless the changed
+scenario needs a reset.
 
 ```sh
 set -euo pipefail
@@ -172,7 +175,8 @@ use fictional fixture data, keep artifacts private in the temporary directory,
 and do not upload raw dumps/logcat or overwrite tracked `screenshots/`.
 Report what was visibly checked, artifact paths, and any blocker/unverified
 behavior. A recording failure is not completed transition verification.
-Keep the session alive for warm edits; when finished, exit the Nix shell and run
+Keep the session alive for release verification edits; when finished, exit the
+Nix shell and run
 `nix develop -c ./test/e2e/headless.sh down` with the same exports. This stops
 only the owned emulator/stack and preserves its AVD and capture artifacts;
 do not use `reset` for the warm loop.

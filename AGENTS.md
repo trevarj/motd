@@ -86,12 +86,13 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
   an individual job fails, inspect its existing diagnostics and begin fixing it
   immediately rather than waiting for aggregate `gate`; remaining coverage
   continues normally.
-- For UI changes, focused actual-emulator visual verification is required before
-  handoff: inspect fresh PNGs of the changed surface, exercise its interaction,
-  and capture/inspect a short MP4 for interaction or navigation transitions.
-  Reuse a persistent owned emulator and app data; follow the warm loop in
-  [`test/e2e/README.md`](test/e2e/README.md). Nearest tests remain required;
-  non-UI changes do not require an emulator.
+- Only when cutting a release, focused actual-emulator visual verification is
+  required: inspect fresh PNGs of the changed surface, exercise changed UI
+  interactions, and capture/inspect a short MP4 for interaction or navigation
+  transitions. Reuse a persistent owned emulator and app data; follow the warm
+  loop in [`test/e2e/README.md`](test/e2e/README.md) and the
+  [`release preflight`](.agents/releases.md). Routine feature/fix work does not
+  run these emulator, screenshot, or video checks; nearest tests remain required.
 - Full local emulator E2E suites are not routine. Before committing a change
   that affects a journey covered by `RequiredHeadlessE2eTest`, inspect and update
   that journey in the same commit and run `:app:compileE2eAndroidTestKotlin`.

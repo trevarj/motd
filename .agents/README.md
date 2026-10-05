@@ -44,12 +44,12 @@ connection ownership, or module boundaries.
    instrumentation journeys, and `:app:assembleDebug` when resources, manifest,
    packaging, or an actual APK require it. Do not automatically append an
    unfiltered suite, Android lint, APK assembly, or a full pre-push gate.
-   UI changes require focused actual-emulator visual checks before handoff:
-   inspect fresh current-surface PNGs, exercise the changed interaction, and
-   capture/inspect a short MP4 for interaction/navigation transitions. Reuse the
-   owned warm session in [`../test/e2e/README.md`](../test/e2e/README.md).
-   Non-UI changes need no emulator; full local E2E suites remain non-routine,
-   and physical-device validation requires explicit maintainer authorization.
+   Routine feature/fix work does not run local emulator, screenshot, or video
+   verification. Only when cutting a release, perform the focused actual-emulator
+   checks in [`releases.md`](releases.md), reusing the owned warm session in
+   [`../test/e2e/README.md`](../test/e2e/README.md). Full local E2E suites remain
+   non-routine, and physical-device validation requires explicit maintainer
+   authorization.
    `./tools/prepush.sh` is only an explicitly requested diagnostic for broader
    failures, requires a clean committed tree, and accepts
    `MOTD_PREFLIGHT_BASE=<ref>` to override `origin/main`; it is not a handoff/push
