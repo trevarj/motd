@@ -54,6 +54,7 @@ import kotlinx.coroutines.flow.SharingStarted.Companion.WhileSubscribed
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -225,6 +226,20 @@ class ChatListViewModel
         private val activityRecovery = ChatListActivityRecovery(bufferRepository)
         val recoveringActivityIds: StateFlow<Set<Long>> = activityRecovery.activeIds
 
+        private val networkActivityLedger = NetworkActivityLedger()
+        private val _networkActivity = MutableStateFlow(NetworkActivityState())
+        val networkActivity: StateFlow<NetworkActivityState> = _networkActivity.asStateFlow()
+        private val activityBuffers =
+            combine(historyResync.syncStatuses, networkActivity) { statuses, activity ->
+                (statuses.keys + activity.active.mapNotNull(NetworkActivityIssue::bufferId) + activity.recent.mapNotNull(NetworkActivityIssue::bufferId)).sorted()
+            }.distinctUntilChanged().flatMapLatest { ids ->
+                if (ids.isEmpty()) {
+                    flowOf(emptyMap<Long, BufferEntity?>())
+                } else {
+                    combine(ids.map { id -> bufferRepository.observeBuffer(id).map { id to it } }) { entries -> entries.toMap() }
+                }
+            }
+
         // Aggregate header chrome, debounced so a fast pass never flashes. Engine-owned counts; the
         // driver's clock is elapsed real time, which keeps the windows honest across Doze.
         val syncChrome: StateFlow<ChatListSyncChrome> =
@@ -234,7 +249,7 @@ class ChatListViewModel
                 ::syncChromeSnapshot,
             ).distinctUntilChanged()
                 .presentSyncChrome(SystemClock::elapsedRealtime)
-                .stateIn(viewModelScope, WhileSubscribed(5_000), ChatListSyncChrome.Hidden)
+                .stateIn(viewModelScope, SharingStarted.Eagerly, ChatListSyncChrome.Hidden)
 
         // Deliberately kept out of the [state] combine: the enum map already defeats a retried
         // Failed's reason-string churn, but folding it into ChatListState would still recompose every
@@ -244,9 +259,44 @@ class ChatListViewModel
             combine(
                 historyResync.syncStatuses,
                 syncChrome.map { it != ChatListSyncChrome.Hidden }.distinctUntilChanged(),
-                ::chatListSyncIndicators,
-            ).distinctUntilChanged()
+                networkActivity,
+            ) { statuses, visible, activity ->
+                val acknowledgedBuffers =
+                    activity.active
+                        .filter { it.bufferId != null }
+                        .groupBy { it.bufferId }
+                        .filterValues { issues -> issues.all { it.acknowledged } }
+                        .keys
+                chatListSyncIndicators(statuses, visible).filterNot { (id, indicator) -> id in acknowledgedBuffers && indicator == ChatListSyncIndicator.ERROR }
+            }.distinctUntilChanged()
                 .stateIn(viewModelScope, WhileSubscribed(5_000), emptyMap())
+
+        val connectionNoticeVisible: StateFlow<Boolean> =
+            combine(networkActivity, syncChrome, ::Pair)
+                .presentNetworkActivity(SystemClock::elapsedRealtime)
+                .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+        val connectionOnlyNoticeVisible: StateFlow<Boolean> =
+            networkActivity
+                .map { it to ChatListSyncChrome.Hidden }
+                .presentNetworkActivity(SystemClock::elapsedRealtime)
+                .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+        init {
+            // ponytail: snapshots capture observed failures, not an exhaustive protocol log.
+            // Eager ownership continues while a phone chat has disposed the list's collectors.
+            viewModelScope.launch {
+                combine(
+                    networkRepository.observeNetworks(),
+                    connectionManager.connectionStates,
+                    historyResync.syncStatuses,
+                    activityBuffers,
+                    connectionManager.certPrompts,
+                ) { networks, connections, statuses, buffers, prompts ->
+                    networkActivityLedger.observe(networks, connections, statuses, buffers, prompts.mapTo(mutableSetOf()) { it.networkId }, System.currentTimeMillis())
+                }.collect { _networkActivity.value = it }
+            }
+        }
 
         // Scope selection survives config changes; null = unified list (default).
         private val selection = MutableStateFlow(savedStateHandle.get<Long?>(KEY_SELECTED))
@@ -636,12 +686,19 @@ class ChatListViewModel
 
         fun connect(networkId: Long) = viewModelScope.launch { connectionManager.connect(networkId) }
 
-        fun disconnect(networkId: Long) = viewModelScope.launch { connectionManager.disconnect(networkId) }
+        fun disconnect(networkId: Long) =
+            viewModelScope.launch {
+                _networkActivity.value = networkActivityLedger.stop(networkId)
+                connectionManager.disconnect(networkId)
+            }
 
         /** Global go-offline: disconnect every network (in-memory intent, resets on restart). */
         fun goOffline() =
             viewModelScope.launch {
-                state.value.networks.forEach { connectionManager.disconnect(it.id) }
+                state.value.networks.forEach {
+                    _networkActivity.value = networkActivityLedger.stop(it.id)
+                    connectionManager.disconnect(it.id)
+                }
             }
 
         /** Global go-online: connect everything (explicit "connect all", may include autoConnect=false). */
@@ -656,6 +713,98 @@ class ChatListViewModel
             onOpen: (Long) -> Unit,
         ) = viewModelScope.launch {
             onOpen(connectionManager.ensureServerBuffer(networkId))
+        }
+
+        /** Inspector actions carry the observed episode/revision so stale sheets cannot act anew. */
+        fun networkActivityAction(
+            issue: NetworkActivityIssue,
+            action: NetworkActivityAction,
+            onOpenBuffer: (Long) -> Unit,
+            onOpenSettings: (Long) -> Unit,
+        ) = viewModelScope.launch {
+            val navigation = action == NetworkActivityAction.SETTINGS || action == NetworkActivityAction.SERVER_MESSAGES || action == NetworkActivityAction.OPEN_CHAT
+            val current = networkActivityLedger.current(issue, includeRecent = navigation) ?: return@launch
+            if (networkRepository.networkById(current.networkId) == null) return@launch
+            if (networkActivityLedger.current(issue, includeRecent = navigation) == null) return@launch
+            if (current.disposition == null) {
+                val reported = networkActivity.value.networks.firstOrNull { it.id == current.networkId } ?: return@launch
+                if (current.bufferId == null) {
+                    if (reported.connection != connectionManager.connectionStates.value[current.networkId]) return@launch
+                } else if (reported.history.firstOrNull { it.bufferId == current.bufferId }?.status != historyResync.syncStatuses.value[current.bufferId]) {
+                    return@launch
+                }
+            }
+            when (action) {
+                NetworkActivityAction.ACKNOWLEDGE -> {
+                    val settled =
+                        if (current.bufferId == null) {
+                            connectionManager.connectionStates.value[current.networkId] is IrcClientState.Failed
+                        } else {
+                            historyResync.syncStatuses.value[current.bufferId].let { it is HistorySyncStatus.Failed || it is HistorySyncStatus.Partial }
+                        }
+                    // Acknowledgement is local presentation, not source dismissal or recovery.
+                    if (settled) _networkActivity.value = networkActivityLedger.acknowledge(issue)
+                }
+
+                NetworkActivityAction.CONNECT -> {
+                    if (connectionManager.certPrompts.value.none { it.networkId == current.networkId }) connectionManager.connect(current.networkId)
+                }
+
+                NetworkActivityAction.SETTINGS -> {
+                    onOpenSettings(current.networkId)
+                }
+
+                NetworkActivityAction.SERVER_MESSAGES -> {
+                    val id = connectionManager.ensureServerBuffer(current.networkId)
+                    if (networkActivityLedger.current(issue, includeRecent = true) != null && networkRepository.networkById(current.networkId) != null) onOpenBuffer(id)
+                }
+
+                NetworkActivityAction.OPEN_CHAT, NetworkActivityAction.RETRY_HISTORY -> {
+                    val bufferId = current.bufferId ?: return@launch
+                    val id = bufferRepository.canonicalBufferId(bufferId) ?: return@launch
+                    val room = bufferRepository.observeBuffer(id).first()?.takeUnless { it.dismissed || it.pendingCloseAt != null } ?: return@launch
+                    if (networkActivityLedger.current(issue, includeRecent = navigation) == null) return@launch
+                    if (action == NetworkActivityAction.OPEN_CHAT) {
+                        onOpenBuffer(id)
+                    } else {
+                        val status = historyResync.syncStatuses.value[bufferId]
+                        if (status !is HistorySyncStatus.Failed && status !is HistorySyncStatus.Partial) return@launch
+                        val client = connectionManager.clientFor(room.networkId) ?: return@launch
+                        if (connectionManager.connectionStates.value[room.networkId] !is IrcClientState.Ready) return@launch
+                        // The coordinator owns settlement. A return value alone cannot prove the
+                        // published status's generation survived dismissal or a superseding pass.
+                        historyResync.reconcileBuffer(room, client, isCurrent = { connectionManager.clientFor(room.networkId) === client })
+                    }
+                }
+            }
+        }
+
+        fun networkActivityNetworkAction(
+            networkId: Long,
+            action: NetworkActivityAction,
+            onOpenBuffer: (Long) -> Unit,
+            onOpenSettings: (Long) -> Unit,
+        ) = viewModelScope.launch {
+            if (networkRepository.networkById(networkId) == null) return@launch
+            when (action) {
+                NetworkActivityAction.CONNECT -> {
+                    val live = connectionManager.connectionStates.value[networkId]
+                    if (live is IrcClientState.Ready || live == IrcClientState.Connecting || live == IrcClientState.Registering) return@launch
+                    if (connectionManager.certPrompts.value.none { it.networkId == networkId }) connectionManager.connect(networkId)
+                }
+
+                NetworkActivityAction.SETTINGS -> {
+                    onOpenSettings(networkId)
+                }
+
+                NetworkActivityAction.SERVER_MESSAGES -> {
+                    onOpenBuffer(connectionManager.ensureServerBuffer(networkId))
+                }
+
+                else -> {
+                    Unit
+                }
+            }
         }
 
         /** Mark every currently unread chat in the current drawer scope through one Room snapshot. */

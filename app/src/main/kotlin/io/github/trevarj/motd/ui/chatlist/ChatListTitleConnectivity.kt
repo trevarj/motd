@@ -17,11 +17,11 @@ import kotlinx.coroutines.flow.transformLatest
  * republishes Connecting there — see ConnectionActor) all mean the same actionable thing from the
  * list: "sockets are coming up". Everything else is deliberately someone else's chrome:
  *  - a terminal [IrcClientState.Failed] (fatal or awaiting cert trust) is not progress, and
- *    painting a spinner over it would misreport it — the ConnectionBanner and drawer carry the
+ *    painting a spinner over it would misreport it — the network-activity banner and drawer carry the
  *    reason;
  *  - a plain [IrcClientState.Disconnected] is quiescent (a manually disconnected network), not an
  *    episode;
- *  - history sync already has the aggregate header and per-row badges; repeating it in the title
+ *  - history sync already has the unified activity banner and per-row badges; repeating it in the title
  *    would be a second spinner for the same fact.
  *
  * The predicate is the one the status notification's `statusNotificationShape` already uses for
@@ -54,7 +54,7 @@ internal fun titleConnectingSnapshot(
  * - A re-connect that begins during the minimum-visible hold continues the same episode: the cue
  *   simply stays up, with no fresh appearance moment.
  *
- * Not the ConnectionBanner's 3 s grace on purpose: the banner interrupts with a full-width line and
+ * Not the activity banner's 3 s grace on purpose: the banner interrupts with a full-width line and
  * earns a long fuse, while this is a 12 dp glyph after the title — cheap enough to tell the truth
  * early, which is the point during a multi-second bouncer bring-up.
  */

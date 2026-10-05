@@ -49,12 +49,15 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 /**
  * Covers durable channel-close requests, immediate local-only deletion, and the row actions that
  * report back to the screen (archive overrides, unmute backlog dismissal).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
 class ChatListDeleteTest {
     /** Records the delete calls; other reads return empty streams (state is not under test here). */
     private open class FakeBufferRepository : BufferRepository {

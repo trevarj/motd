@@ -50,12 +50,15 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 /**
  * markSelectedRead is the explicit per-selection counterpart to markCurrentScopeRead: unlike the
  * mark-all sweep, it must reach a muted buffer, since the user hand-picked it on purpose.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
 class ChatListMarkSelectedReadTest {
     private class FakeBufferRepository(
         private val rows: Flow<List<ChatListRow>>,

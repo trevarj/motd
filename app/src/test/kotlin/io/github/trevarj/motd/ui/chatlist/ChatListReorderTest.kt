@@ -54,12 +54,15 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 /**
  * Manual drawer ordering as the user experiences it: when a move is written, what the drawer shows
  * between the write and Room catching up, and what a drag leaves behind when it ends.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
 class ChatListReorderTest {
     /** Records every reorder write and only publishes it when the test says Room caught up. */
     private class FakeNetworkRepository(

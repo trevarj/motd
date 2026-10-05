@@ -1,0 +1,228 @@
+package io.github.trevarj.motd.ui.chatlist
+
+import io.github.trevarj.motd.data.db.BufferEntity
+import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.service.HistorySyncStatus
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class NetworkActivityTest {
+    private val ledger = NetworkActivityLedger()
+    private val networks = listOf(network(1), network(2))
+    private val buffers = mapOf(10L to room(10, 1), 20L to room(20, 2))
+    private var now = 1_000L
+
+    private fun observe(
+        connections: Map<Long, IrcClientState> = emptyMap(),
+        history: Map<Long, HistorySyncStatus> = emptyMap(),
+        saved: List<NetworkEntity> = networks,
+        rooms: Map<Long, BufferEntity?> = buffers,
+    ) = ledger.observe(saved, connections, history, rooms, emptySet(), now++)
+
+    private fun failure(
+        reason: String = "timeout",
+        fatal: Boolean = false,
+    ) = IrcClientState.Failed(reason, fatal)
+
+    private fun ready() = IrcClientState.Ready("me", emptySet(), emptyMap())
+
+    @Test fun retriesAndUnknownAbsenceRetainUntilReady() {
+        val first = observe(mapOf(1L to failure())).active.single()
+        val absent = observe().active.single()
+        assertEquals(first.episodeId, absent.episodeId)
+        assertEquals("timeout", absent.reason)
+        assertFalse(absent.settled)
+        for (state in listOf(IrcClientState.Connecting, IrcClientState.Registering)) {
+            val retry = observe(mapOf(1L to state))
+            assertTrue(retry.active.single().retrying)
+            assertTrue(retry.recent.isEmpty())
+        }
+        val recovered = observe(mapOf(1L to ready()))
+        assertTrue(recovered.active.isEmpty())
+        assertEquals(NetworkActivityDisposition.CONNECTED, recovered.recent.single().disposition)
+        assertEquals(recovered.recent, observe(mapOf(1L to ready())).recent)
+    }
+
+    @Test fun repeatedSnapshotsDeduplicateDistinctCausesRemainAndReentryCounts() {
+        val first = observe(mapOf(1L to failure("first"))).active.single()
+        assertEquals(first, observe(mapOf(1L to failure("first"))).active.single())
+        val distinct = observe(mapOf(1L to failure("second")))
+        assertEquals(listOf("first", "second"), distinct.active.map { it.reason })
+        observe(mapOf(1L to IrcClientState.Connecting))
+        val repeated = observe(mapOf(1L to failure("first"))).active.first()
+        assertEquals(first.episodeId, repeated.episodeId)
+        assertEquals(first.firstSeen, repeated.firstSeen)
+        assertEquals(2, repeated.occurrences)
+        assertTrue(repeated.lastSeen > first.lastSeen)
+    }
+
+    @Test fun acknowledgementHidesPromotionNotRecordAndStaleActionsCannotAcknowledge() {
+        val original = observe(mapOf(1L to failure())).active.single()
+        val acknowledged = ledger.acknowledge(original)
+        assertEquals(0, acknowledged.unacknowledgedCount)
+        assertTrue(acknowledged.active.single().acknowledged)
+        assertEquals(0, observe(mapOf(1L to failure())).unacknowledgedCount)
+        observe(mapOf(1L to IrcClientState.Connecting))
+        assertNull(ledger.current(original))
+        val retried = observe(mapOf(1L to failure()))
+        assertFalse(retried.active.single().acknowledged)
+        assertEquals(1, ledger.acknowledge(original).unacknowledgedCount)
+        observe(mapOf(1L to ready()))
+        val later = observe(mapOf(1L to failure()))
+        assertNotEquals(original.episodeId, later.active.single().episodeId)
+        assertEquals(1, ledger.acknowledge(original).unacknowledgedCount)
+    }
+
+    @Test fun intentionalStopAndDeletionAreNotRecovery() {
+        observe(mapOf(1L to failure()), mapOf(10L to HistorySyncStatus.Failed("history")))
+        val stopped = ledger.stop(1)
+        assertTrue(stopped.active.isEmpty())
+        assertEquals(setOf(NetworkActivityDisposition.STOPPED), stopped.recent.map { it.disposition }.toSet())
+        assertTrue(observe(mapOf(1L to failure()), mapOf(10L to HistorySyncStatus.Failed("history"))).active.isEmpty())
+        observe(mapOf(2L to failure()))
+        val removed = observe(saved = networks.take(1))
+        assertEquals(NetworkActivityDisposition.REMOVED, removed.recent.first().disposition)
+    }
+
+    @Test fun historyReasonsSurviveRetryAndUnavailableAndDisappearanceStayHonest() {
+        val full = "CHATHISTORY failed: server explanation\nwith all details"
+        val first = observe(history = mapOf(10L to HistorySyncStatus.Failed(full))).active.single()
+        for (status in listOf(HistorySyncStatus.Queued, HistorySyncStatus.AwaitingConnection, HistorySyncStatus.Syncing)) {
+            val retry = observe(history = mapOf(10L to status))
+            assertEquals(full, retry.active.single().reason)
+            assertEquals(first.episodeId, retry.active.single().episodeId)
+            assertTrue(retry.active.single().retrying)
+            assertFalse(
+                ledger
+                    .acknowledge(first)
+                    .active
+                    .single()
+                    .acknowledged,
+            )
+        }
+        assertEquals(2, observe(history = mapOf(10L to HistorySyncStatus.Failed(full))).active.single().occurrences)
+        val partial = observe(history = mapOf(10L to HistorySyncStatus.Partial("partial reason")))
+        assertEquals(2, partial.active.size)
+        assertEquals(NetworkActivityKind.HISTORY_PARTIAL, partial.active.last().kind)
+        val unavailable = observe(history = mapOf(10L to HistorySyncStatus.Unavailable))
+        assertTrue(unavailable.active.isEmpty())
+        assertTrue(unavailable.recent.all { it.disposition == NetworkActivityDisposition.UNAVAILABLE })
+        observe(history = mapOf(20L to HistorySyncStatus.Partial("missing")))
+        assertEquals(NetworkActivityDisposition.NO_LONGER_REPORTED, observe().recent.first().disposition)
+    }
+
+    @Test fun historySeverityChangesKeepOneCauseEpisodeAndInvalidateOldActions() {
+        val first = observe(history = mapOf(10L to HistorySyncStatus.Partial("same cause"))).active.single()
+        assertEquals(NetworkActivityKind.HISTORY_PARTIAL, first.kind)
+        assertEquals(1, first.severity)
+        val failed = observe(history = mapOf(10L to HistorySyncStatus.Failed("same cause"))).active.single()
+        assertEquals(first.episodeId, failed.episodeId)
+        assertEquals(first.firstSeen, failed.firstSeen)
+        assertEquals(NetworkActivityKind.HISTORY_FAILED, failed.kind)
+        assertEquals(2, failed.severity)
+        assertTrue(failed.revision > first.revision)
+        assertNull(ledger.current(first))
+        val partialAgain = observe(history = mapOf(10L to HistorySyncStatus.Partial("same cause"))).active.single()
+        assertEquals(first.episodeId, partialAgain.episodeId)
+        assertEquals(first.firstSeen, partialAgain.firstSeen)
+        assertEquals(NetworkActivityKind.HISTORY_PARTIAL, partialAgain.kind)
+        assertEquals(1, partialAgain.severity)
+        assertTrue(partialAgain.revision > failed.revision)
+        assertNull(ledger.current(failed))
+        assertEquals(partialAgain, observe(history = mapOf(10L to HistorySyncStatus.Partial("same cause"))).active.single())
+        val distinct = observe(history = mapOf(10L to HistorySyncStatus.Failed("different cause")))
+        assertEquals(2, distinct.active.size)
+        assertTrue(distinct.recent.isEmpty())
+    }
+
+    @Test fun redirectMetadataKeepsStatusKeyIdentityAndDoesNotManufactureSettlement() {
+        val status = mapOf(10L to HistorySyncStatus.Failed("same source failure"))
+        val beforeMerge = observe(history = status).active.single()
+        val redirected = buffers + (10L to room(11, 1))
+        val afterMerge = observe(history = status, rooms = redirected)
+        assertEquals(beforeMerge.episodeId, afterMerge.active.single().episodeId)
+        assertEquals(10L, afterMerge.active.single().bufferId)
+        assertEquals("#chat11", afterMerge.active.single().chatName)
+        assertEquals(1, afterMerge.active.single().occurrences)
+        assertTrue(afterMerge.recent.isEmpty())
+        val unchanged = observe(mapOf(1L to ready()), status, rooms = redirected)
+        assertEquals(afterMerge.active, unchanged.active)
+        assertTrue(unchanged.recent.isEmpty())
+        assertTrue(
+            ledger
+                .acknowledge(unchanged.active.single())
+                .active
+                .single()
+                .acknowledged,
+        )
+        val fresh = NetworkActivityLedger()
+        val first = fresh.observe(networks, emptyMap(), status, redirected, emptySet(), now)
+        assertEquals(10L, first.active.single().bufferId)
+        assertEquals(first.active, fresh.observe(networks, emptyMap(), status, redirected, emptySet(), now + 1).active)
+    }
+
+    @Test fun removedChatRetiresButArchivedChatDoesNot() {
+        observe(history = mapOf(10L to HistorySyncStatus.Failed("failure")))
+        assertEquals(1, observe(history = mapOf(10L to HistorySyncStatus.Failed("failure")), rooms = buffers + (10L to room(10, 1).copy(archived = true))).active.size)
+        assertEquals(NetworkActivityDisposition.REMOVED, observe(history = mapOf(10L to HistorySyncStatus.Failed("failure")), rooms = buffers + (10L to null)).recent.single().disposition)
+    }
+
+    @Test fun recentNavigationKeepsDispositionButDisablesDeletedTargets() {
+        observe(history = mapOf(10L to HistorySyncStatus.Partial("partial")))
+        val ended = observe().recent.single()
+        assertEquals(NetworkActivityDisposition.NO_LONGER_REPORTED, ended.disposition)
+        assertEquals(ended, ledger.current(ended, includeRecent = true))
+        assertNull(ledger.current(ended))
+        val removed = observe(rooms = buffers + (10L to null)).recent.single()
+        assertEquals(NetworkActivityDisposition.NO_LONGER_REPORTED, removed.disposition)
+        assertFalse(removed.targetAvailable)
+        assertNull(ledger.current(ended, includeRecent = true))
+    }
+
+    @Test fun recentIsNewestFirstCappedTwentyAndActiveIsNeverEvicted() {
+        observe(mapOf(2L to failure("keep")))
+        repeat(25) { index ->
+            observe(mapOf(1L to failure("failure $index"), 2L to failure("keep")))
+            observe(mapOf(1L to ready(), 2L to failure("keep")))
+        }
+        val state = observe(mapOf(1L to ready(), 2L to failure("keep")))
+        assertEquals(20, state.recent.size)
+        assertEquals("failure 24", state.recent.first().reason)
+        assertEquals("failure 5", state.recent.last().reason)
+        assertEquals("keep", state.active.single().reason)
+        assertEquals(1, state.active.single().occurrences)
+        assertTrue(NetworkActivityLedger().observe(networks, emptyMap(), emptyMap(), buffers, emptySet(), now).recent.isEmpty())
+        repeat(25) { index -> observe(mapOf(1L to ready(), 2L to failure("active cause $index"))) }
+        val manyActive = observe(mapOf(1L to ready(), 2L to failure("active cause 24")))
+        assertEquals(26, manyActive.active.size)
+        assertEquals(20, manyActive.recent.size)
+    }
+
+    @Test fun connectionGraceSurvivesRepresentationsAndWaitingOpensCombinedEpisode() {
+        val presenter = NetworkActivityPresenter()
+        val connecting = NetworkActivityState(networks = listOf(NetworkActivityNetwork(1, "Libera", IrcClientState.Connecting)))
+        assertFalse(presenter.resolve(connecting, ChatListSyncChrome.Hidden, 0))
+        assertEquals(3_000L, presenter.nextDeadline(0))
+        val registering = connecting.copy(networks = listOf(NetworkActivityNetwork(1, "Libera", IrcClientState.Registering)))
+        assertFalse(presenter.resolve(registering, ChatListSyncChrome.Hidden, 2_999))
+        assertTrue(presenter.resolve(registering, ChatListSyncChrome.Hidden, 3_000))
+        assertTrue(presenter.resolve(registering, ChatListSyncChrome.Waiting(2), 3_100))
+        assertTrue(presenter.resolve(connecting, ChatListSyncChrome.Hidden, 3_200))
+        assertFalse(presenter.resolve(NetworkActivityState(), ChatListSyncChrome.Hidden, 3_300))
+        assertFalse(presenter.resolve(connecting, ChatListSyncChrome.Hidden, 3_400))
+    }
+
+    private fun network(id: Long) = NetworkEntity(id = id, name = "Network $id", role = NetworkRole.DIRECT, host = "irc.test", port = 6697, nick = "me", username = "me", realname = "Me")
+
+    private fun room(
+        id: Long,
+        network: Long,
+    ) = BufferEntity(id = id, networkId = network, name = "#chat$id", displayName = "#chat$id", type = BufferType.CHANNEL)
+}

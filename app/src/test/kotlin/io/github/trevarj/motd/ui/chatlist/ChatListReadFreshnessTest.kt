@@ -9,6 +9,7 @@ import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.GlobalFeedPrefs
@@ -25,7 +26,9 @@ import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NoopHistoryGapFiller
 import io.github.trevarj.motd.irc.client.IrcClient
+import io.github.trevarj.motd.irc.client.IrcClientConfig
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.transport.TransportFactory
 import io.github.trevarj.motd.service.AppVisibility
 import io.github.trevarj.motd.service.BufferReadMarker
 import io.github.trevarj.motd.service.CertPrompt
@@ -37,10 +40,12 @@ import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
 import io.github.trevarj.motd.testing.NoopConnectionManager
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -57,6 +62,8 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
 /**
  * What the chat list is holding at the instant navigation composes it again.
@@ -66,6 +73,7 @@ import org.junit.Test
  * against `state.value`, because that single read IS the pane's first frame.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
 class ChatListReadFreshnessTest {
     private class FakeBufferRepository(
         private val rows: Flow<List<ChatListRow>>,
@@ -226,13 +234,17 @@ class ChatListReadFreshnessTest {
         visibility: AppVisibility,
         dickordEnabled: Flow<Boolean> = flowOf(false),
         invitations: Flow<List<InvitationEventRow>> = flowOf(emptyList()),
+        connections: ConnectionManager = FakeConnectionManager(),
+        networks: NetworkRepository = FakeNetworkRepository(),
+        buffers: BufferRepository = FakeBufferRepository(rows, invitations),
+        resync: HistoryResyncController? = null,
     ) = ChatListViewModel(
-        bufferRepository = FakeBufferRepository(rows, invitations),
-        networkRepository = FakeNetworkRepository(),
-        connectionManager = FakeConnectionManager(),
+        bufferRepository = buffers,
+        networkRepository = networks,
+        connectionManager = connections,
         gapFiller = NoopHistoryGapFiller,
         historyResync =
-            object : HistoryResyncController {
+            resync ?: object : HistoryResyncController {
                 override fun syncStatus(bufferId: Long) = flowOf<HistorySyncStatus>(HistorySyncStatus.Idle)
 
                 override suspend fun reconcileBuffer(
@@ -434,6 +446,391 @@ class ChatListReadFreshnessTest {
                     .first { it.bufferId == 2L }
                     .folderId,
             )
+            pane.cancel()
+        }
+
+    @Test
+    fun networkActivityCapturesWithoutScreenSubscribersAndAcknowledgementKeepsRawReason() =
+        runTest {
+            val network = NetworkEntity(id = 1, name = "Libera", role = NetworkRole.DIRECT, host = "irc.test", port = 6697, nick = "me", username = "me", realname = "Me")
+            val networks =
+                object : NetworkRepository by FakeNetworkRepository() {
+                    override fun observeNetworks() = flowOf(listOf(network))
+
+                    override suspend fun networkById(id: Long) = network.takeIf { it.id == id }
+                }
+            val connections = FakeConnectionManager()
+            val statuses = MutableStateFlow<Map<Long, HistorySyncStatus>>(emptyMap())
+            val room = BufferEntity(id = 7, networkId = 1, name = "#kotlin", displayName = "#kotlin", type = BufferType.CHANNEL)
+            val buffers =
+                object : BufferRepository by FakeBufferRepository(flowOf(emptyList())) {
+                    override fun observeBuffer(id: Long) = flowOf(room.takeIf { it.id == id })
+                }
+            val resync =
+                object : HistoryResyncController {
+                    override val syncStatuses = statuses
+
+                    override suspend fun reconcileBuffer(
+                        buffer: BufferEntity,
+                        client: IrcClient,
+                        preserveUnread: Boolean,
+                        isCurrent: () -> Boolean,
+                    ) = HistoryResyncState.Idle
+
+                    override suspend fun reconcilePendingMessage(
+                        buffer: BufferEntity,
+                        client: IrcClient,
+                        isCurrent: () -> Boolean,
+                    ) = HistoryResyncState.Idle
+                }
+            val model = vm(flowOf(emptyList()), FakeAppVisibility(false), connections = connections, networks = networks, buffers = buffers, resync = resync)
+            runCurrent()
+            // No state, chrome or ledger collectors: the retained entry owns capture, not its UI.
+            connections.connectionStates.value = mapOf(1L to IrcClientState.Failed("full connection reason", true))
+            statuses.value = mapOf(7L to HistorySyncStatus.Failed("full history reason"))
+            runCurrent()
+            assertEquals(2, model.networkActivity.value.unacknowledgedCount)
+            backgroundScope.launch { model.syncIndicators.collect {} }
+            runCurrent()
+            assertEquals(ChatListSyncIndicator.ERROR, model.syncIndicators.value[7])
+            val history =
+                model.networkActivity.value.active
+                    .single { it.bufferId == 7L }
+            model.networkActivityAction(history, NetworkActivityAction.ACKNOWLEDGE, {}, {})
+            runCurrent()
+            assertEquals(HistorySyncStatus.Failed("full history reason"), statuses.value[7])
+            assertEquals(
+                "full history reason",
+                model.networkActivity.value.active
+                    .single { it.bufferId == 7L }
+                    .reason,
+            )
+            assertEquals(1, model.networkActivity.value.unacknowledgedCount)
+            assertEquals(null, model.syncIndicators.value[7])
+            statuses.value = mapOf(7L to HistorySyncStatus.Syncing)
+            runCurrent()
+            assertEquals(ChatListSyncIndicator.SYNCING, model.syncIndicators.value[7])
+            statuses.value = mapOf(7L to HistorySyncStatus.Failed("full history reason"))
+            runCurrent()
+            assertEquals(2, model.networkActivity.value.unacknowledgedCount)
+            assertEquals(ChatListSyncIndicator.ERROR, model.syncIndicators.value[7])
+            model.networkActivityAction(history, NetworkActivityAction.ACKNOWLEDGE, {}, {})
+            runCurrent()
+            assertEquals(2, model.networkActivity.value.unacknowledgedCount)
+            connections.connectionStates.value = mapOf(1L to IrcClientState.Ready("me", emptySet(), emptyMap()))
+            statuses.value = emptyMap()
+            runCurrent()
+            assertEquals(
+                setOf(NetworkActivityDisposition.CONNECTED, NetworkActivityDisposition.NO_LONGER_REPORTED),
+                model.networkActivity.value.recent
+                    .map { it.disposition }
+                    .toSet(),
+            )
+            val fresh = vm(flowOf(emptyList()), FakeAppVisibility(false), connections = connections, networks = networks, buffers = buffers, resync = resync)
+            runCurrent()
+            assertEquals(emptyList<NetworkActivityIssue>(), fresh.networkActivity.value.recent)
+        }
+
+    @Test
+    fun networkActivityOpenChatUsesCanonicalBufferAndRejectsStaleOrDeletedTargets() =
+        runTest {
+            val network = NetworkEntity(id = 1, name = "Libera", role = NetworkRole.DIRECT, host = "irc.test", port = 6697, nick = "me", username = "me", realname = "Me")
+            var saved: NetworkEntity? = network
+            val networks =
+                object : NetworkRepository by FakeNetworkRepository() {
+                    override fun observeNetworks() = flowOf(listOf(network))
+
+                    override suspend fun networkById(id: Long) = saved?.takeIf { it.id == id }
+                }
+            val statuses = MutableStateFlow<Map<Long, HistorySyncStatus>>(mapOf(7L to HistorySyncStatus.Failed("original")))
+            val projectedRoom = MutableStateFlow(BufferEntity(id = 8, networkId = 1, name = "#kotlin", displayName = "#kotlin", type = BufferType.CHANNEL))
+            val buffers =
+                object : BufferRepository by FakeBufferRepository(flowOf(emptyList())) {
+                    override suspend fun canonicalBufferId(id: Long) = if (id == 7L) 8L else id
+
+                    override fun observeBuffer(id: Long) = projectedRoom
+                }
+            val resync =
+                object : HistoryResyncController {
+                    override val syncStatuses = statuses
+
+                    override suspend fun reconcileBuffer(
+                        buffer: BufferEntity,
+                        client: IrcClient,
+                        preserveUnread: Boolean,
+                        isCurrent: () -> Boolean,
+                    ) = HistoryResyncState.Idle
+
+                    override suspend fun reconcilePendingMessage(
+                        buffer: BufferEntity,
+                        client: IrcClient,
+                        isCurrent: () -> Boolean,
+                    ) = HistoryResyncState.Idle
+                }
+            val model = vm(flowOf(emptyList()), FakeAppVisibility(false), networks = networks, buffers = buffers, resync = resync)
+            runCurrent()
+            val original =
+                model.networkActivity.value.active
+                    .single()
+            assertEquals(7L, original.bufferId)
+            projectedRoom.value = projectedRoom.value.copy(displayName = "#merged")
+            runCurrent()
+            assertEquals(
+                original.episodeId,
+                model.networkActivity.value.active
+                    .single()
+                    .episodeId,
+            )
+            assertEquals(
+                1,
+                model.networkActivity.value.active
+                    .single()
+                    .occurrences,
+            )
+            assertEquals(emptyList<NetworkActivityIssue>(), model.networkActivity.value.recent)
+            model.networkActivityAction(original, NetworkActivityAction.ACKNOWLEDGE, {}, {})
+            runCurrent()
+            val acknowledged =
+                model.networkActivity.value.active
+                    .single()
+            assertEquals(true, acknowledged.acknowledged)
+            assertEquals(HistorySyncStatus.Failed("original"), statuses.value[7L])
+            val opened = mutableListOf<Long>()
+            model.networkActivityAction(acknowledged, NetworkActivityAction.OPEN_CHAT, opened::add, {})
+            runCurrent()
+            assertEquals(listOf(8L), opened)
+            statuses.value = mapOf(7L to HistorySyncStatus.Partial("different cause"))
+            runCurrent()
+            model.networkActivityAction(acknowledged, NetworkActivityAction.OPEN_CHAT, opened::add, {})
+            runCurrent()
+            assertEquals(listOf(8L), opened)
+            saved = null
+            model.networkActivityAction(
+                model.networkActivity.value.active
+                    .last(),
+                NetworkActivityAction.OPEN_CHAT,
+                opened::add,
+                {},
+            )
+            runCurrent()
+            assertEquals(listOf(8L), opened)
+        }
+
+    @Test
+    fun networkActivityRetryReusesCanonicalCurrentClientAndDoesNotInventResolutionFromReturn() =
+        runTest {
+            val network = NetworkEntity(id = 1, name = "Libera", role = NetworkRole.DIRECT, host = "irc.test", port = 6697, nick = "me", username = "me", realname = "Me")
+            val networks =
+                object : NetworkRepository by FakeNetworkRepository() {
+                    override fun observeNetworks() = flowOf(listOf(network))
+
+                    override suspend fun networkById(id: Long) = network.takeIf { it.id == id }
+                }
+            val originalClient = IrcClient(IrcClientConfig("irc.test", 6697, true, "me", "me", "Me"), TransportFactory { _, _, _, _, _ -> error("Controller owns reconciliation") }, backgroundScope)
+            var currentClient: IrcClient? = originalClient
+            val connections =
+                object : NoopConnectionManager() {
+                    override val connectionStates = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to IrcClientState.Ready("me", emptySet(), emptyMap())))
+
+                    override fun clientFor(networkId: Long) = currentClient.takeIf { networkId == 1L }
+                }
+            val statuses = MutableStateFlow<Map<Long, HistorySyncStatus>>(mapOf(7L to HistorySyncStatus.Partial("full partial reason")))
+            val buffers =
+                object : BufferRepository by FakeBufferRepository(flowOf(emptyList())) {
+                    override suspend fun canonicalBufferId(id: Long) = if (id == 7L) 8L else id
+
+                    override fun observeBuffer(id: Long) = flowOf(BufferEntity(id = if (id == 7L) 8L else id, networkId = 1, name = "#kotlin", displayName = "#kotlin", type = BufferType.CHANNEL))
+                }
+            var calls = 0
+            val resync =
+                object : HistoryResyncController {
+                    override val syncStatuses = statuses
+
+                    override suspend fun reconcileBuffer(
+                        buffer: BufferEntity,
+                        client: IrcClient,
+                        preserveUnread: Boolean,
+                        isCurrent: () -> Boolean,
+                    ): HistoryResyncState {
+                        calls++
+                        assertEquals(8L, buffer.id)
+                        assertEquals(originalClient, client)
+                        assertEquals(true, isCurrent())
+                        currentClient = null
+                        assertEquals(false, isCurrent())
+                        return HistoryResyncState.UpToDate
+                    }
+
+                    override suspend fun reconcilePendingMessage(
+                        buffer: BufferEntity,
+                        client: IrcClient,
+                        isCurrent: () -> Boolean,
+                    ) = HistoryResyncState.Idle
+                }
+            val model = vm(flowOf(emptyList()), FakeAppVisibility(false), connections = connections, networks = networks, buffers = buffers, resync = resync)
+            runCurrent()
+            val issue =
+                model.networkActivity.value.active
+                    .single()
+            assertEquals(7L, issue.bufferId)
+            model.networkActivityAction(issue, NetworkActivityAction.RETRY_HISTORY, {}, {})
+            runCurrent()
+            assertEquals(1, calls)
+            assertEquals(
+                "full partial reason",
+                model.networkActivity.value.active
+                    .single()
+                    .reason,
+            )
+            assertEquals(emptyList<NetworkActivityIssue>(), model.networkActivity.value.recent)
+            model.networkActivityAction(issue, NetworkActivityAction.RETRY_HISTORY, {}, {})
+            runCurrent()
+            assertEquals(1, calls)
+        }
+
+    @Test
+    fun networkActivityConnectNeverBypassesPendingCertificateAndGoOfflineRetiresExplicitly() =
+        runTest {
+            val network = NetworkEntity(id = 1, name = "Libera", role = NetworkRole.DIRECT, host = "irc.test", port = 6697, nick = "me", username = "me", realname = "Me")
+            val networks =
+                object : NetworkRepository by FakeNetworkRepository() {
+                    override fun observeNetworks() = flowOf(listOf(network))
+
+                    override suspend fun networkById(id: Long) = network.takeIf { it.id == id }
+                }
+            var connects = 0
+            var disconnects = 0
+            val connections =
+                object : NoopConnectionManager() {
+                    override val connectionStates = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to IrcClientState.Failed("certificate reason", true)))
+                    override val certPrompts = MutableStateFlow(listOf(CertPrompt(1, "irc.test", 6697, "fingerprint", "subject", "issuer", 0, 1, false)))
+
+                    override suspend fun connect(networkId: Long) {
+                        connects++
+                    }
+
+                    override suspend fun disconnect(networkId: Long) {
+                        disconnects++
+                    }
+                }
+            val model = vm(flowOf(emptyList()), FakeAppVisibility(false), connections = connections, networks = networks)
+            val pane = composePane(model)
+            runCurrent()
+            model.networkActivityAction(
+                model.networkActivity.value.active
+                    .single(),
+                NetworkActivityAction.CONNECT,
+                {},
+                {},
+            )
+            model.networkActivityNetworkAction(1, NetworkActivityAction.CONNECT, {}, {})
+            runCurrent()
+            assertEquals(0, connects)
+            assertEquals(1, connections.certPrompts.value.size)
+            model.goOffline()
+            runCurrent()
+            assertEquals(1, disconnects)
+            assertEquals(emptyList<NetworkActivityIssue>(), model.networkActivity.value.active)
+            assertEquals(
+                NetworkActivityDisposition.STOPPED,
+                model.networkActivity.value.recent
+                    .single()
+                    .disposition,
+            )
+            pane.cancel()
+        }
+
+    @Test
+    fun delayedNetworkActivityConnectDoesNotRestartReadyOrProgressingSocket() =
+        runTest {
+            val network = NetworkEntity(id = 1, name = "Libera", role = NetworkRole.DIRECT, host = "irc.test", port = 6697, nick = "me", username = "me", realname = "Me")
+            var lookupGate = CompletableDeferred<Unit>()
+            val networks =
+                object : NetworkRepository by FakeNetworkRepository() {
+                    override fun observeNetworks() = flowOf(listOf(network))
+
+                    override suspend fun networkById(id: Long): NetworkEntity? {
+                        lookupGate.await()
+                        return network.takeIf { it.id == id }
+                    }
+                }
+            var connects = 0
+            val connections =
+                object : NoopConnectionManager() {
+                    override val connectionStates = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to IrcClientState.Failed("timeout", false)))
+
+                    override suspend fun connect(networkId: Long) {
+                        connects++
+                    }
+                }
+            val model = vm(flowOf(emptyList()), FakeAppVisibility(false), networks = networks, connections = connections)
+            runCurrent()
+            for (live in listOf(IrcClientState.Connecting, IrcClientState.Registering, IrcClientState.Ready("me", emptySet(), emptyMap()))) {
+                connections.connectionStates.value = mapOf(1L to IrcClientState.Failed("timeout", false))
+                lookupGate = CompletableDeferred()
+                model.networkActivityNetworkAction(1, NetworkActivityAction.CONNECT, {}, {})
+                runCurrent()
+                connections.connectionStates.value = mapOf(1L to live)
+                lookupGate.complete(Unit)
+                runCurrent()
+                assertEquals(0, connects)
+            }
+            connections.connectionStates.value = mapOf(1L to IrcClientState.Disconnected)
+            model.networkActivityNetworkAction(1, NetworkActivityAction.CONNECT, {}, {})
+            runCurrent()
+            assertEquals(1, connects)
+        }
+
+    @Test
+    fun goOfflineUsesDrawerNetworksEvenWhileActivityBufferMetadataHasNotEmitted() =
+        runTest {
+            val network = NetworkEntity(id = 1, name = "Libera", role = NetworkRole.DIRECT, host = "irc.test", port = 6697, nick = "me", username = "me", realname = "Me")
+            val networks =
+                object : NetworkRepository by FakeNetworkRepository() {
+                    override fun observeNetworks() = flowOf(listOf(network))
+                }
+            val disconnected = mutableListOf<Long>()
+            val connections =
+                object : NoopConnectionManager() {
+                    override val connectionStates = MutableStateFlow<Map<Long, IrcClientState>>(mapOf(1L to IrcClientState.Ready("me", emptySet(), emptyMap())))
+
+                    override suspend fun disconnect(networkId: Long) {
+                        disconnected += networkId
+                    }
+                }
+            val metadata = MutableSharedFlow<BufferEntity?>()
+            val buffers =
+                object : BufferRepository by FakeBufferRepository(flowOf(emptyList())) {
+                    override fun observeBuffer(id: Long): Flow<BufferEntity?> = metadata
+                }
+            val resync =
+                object : HistoryResyncController {
+                    override val syncStatuses = MutableStateFlow<Map<Long, HistorySyncStatus>>(mapOf(7L to HistorySyncStatus.Failed("awaiting metadata")))
+
+                    override suspend fun reconcileBuffer(
+                        buffer: BufferEntity,
+                        client: IrcClient,
+                        preserveUnread: Boolean,
+                        isCurrent: () -> Boolean,
+                    ) = HistoryResyncState.Idle
+
+                    override suspend fun reconcilePendingMessage(
+                        buffer: BufferEntity,
+                        client: IrcClient,
+                        isCurrent: () -> Boolean,
+                    ) = HistoryResyncState.Idle
+                }
+            val model = vm(flowOf(emptyList()), FakeAppVisibility(false), networks = networks, connections = connections, buffers = buffers, resync = resync)
+            val pane = composePane(model)
+            assertEquals(
+                listOf(1L),
+                model.state.value.networks
+                    .map { it.id },
+            )
+            assertEquals(emptyList<NetworkActivityNetwork>(), model.networkActivity.value.networks)
+            model.goOffline()
+            runCurrent()
+            assertEquals(listOf(1L), disconnected)
             pane.cancel()
         }
 }

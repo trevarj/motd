@@ -12,7 +12,6 @@ import com.airbnb.lottie.compose.LottieDynamicProperty
 import com.airbnb.lottie.model.KeyPath
 import com.airbnb.lottie.value.LottieFrameInfo
 import io.github.trevarj.motd.R
-import io.github.trevarj.motd.ui.chatlist.SyncStateFrames
 import io.github.trevarj.motd.ui.theme.lottieFillColor
 import io.github.trevarj.motd.ui.theme.lottieStrokeColor
 import org.junit.Assert.assertEquals
@@ -164,26 +163,20 @@ class LottieAssetsTest {
         assertTrue(failed.resolves("cross", "**"))
     }
 
-    @Test fun `the connection asset spans both banner beats`() {
+    @Test fun `the connection asset spans both beats`() {
         val composition = load(R.raw.connection_state)
 
         assertEquals(0f, composition.startFrame, 0f)
-        assertEquals(ConnectionStateFrames.Total.toFloat(), composition.endFrame, END_FRAME_TOLERANCE)
+        assertEquals(63f, composition.endFrame, END_FRAME_TOLERANCE)
         assertTrue(composition.resolves("arc", "**"))
         assertTrue(composition.resolves("check", "**"))
     }
 
-    @Test fun `the resolve beat is short enough to survive the banner exit fade`() {
-        // 63 frames total at 60fps: a 900ms arc loop plus a resolve that lands inside the banner's
-        // own 140ms fade-out. A longer resolve would draw the check after the row is invisible.
-        assertEquals(63f, load(R.raw.connection_state).endFrame, END_FRAME_TOLERANCE)
-    }
-
-    @Test fun `the sync asset spans both header beats`() {
+    @Test fun `the sync asset spans both beats`() {
         val composition = load(R.raw.sync_state)
 
         assertEquals(0f, composition.startFrame, 0f)
-        assertEquals(SyncStateFrames.Total.toFloat(), composition.endFrame, END_FRAME_TOLERANCE)
+        assertEquals(39f, composition.endFrame, END_FRAME_TOLERANCE)
         assertTrue(composition.resolves("dots", "**"))
         assertTrue(composition.resolves("check", "**"))
     }
@@ -230,9 +223,9 @@ class LottieAssetsTest {
                 lottieStrokeColor(ARGB, KeyPath("clock", "**")),
                 lottieStrokeColor(ARGB, KeyPath("check", "**")),
                 lottieStrokeColor(ARGB, KeyPath("cross", "**")),
-                // ConnectionBanner.
+                // Connection asset.
                 lottieStrokeColor(ARGB, KeyPath("arc", "**")),
-                // ChatListSyncHeader: dots are fills, the check is a stroke.
+                // Sync asset: dots are fills, the check is a stroke.
                 lottieFillColor(ARGB, KeyPath("dots", "**")),
                 // EmptyState's ghost rows.
                 lottieFillColor(ARGB, KeyPath("ghost_row_1", "**")),
@@ -300,25 +293,25 @@ class LottieAssetsTest {
         }
     }
 
-    @Test fun `the connection banner paints the arc then the check`() {
+    @Test fun `the connection asset paints the arc then the check`() {
         val properties =
             listOf(
                 lottieStrokeColor(INK_A, KeyPath("arc", "**")),
                 lottieStrokeColor(INK_B, KeyPath("check", "**")),
             )
 
-        render(R.raw.connection_state, frame = ConnectionStateFrames.ConnectingFirst, properties = properties).run {
+        render(R.raw.connection_state, frame = 0, properties = properties).run {
             assertPainted(INK_A)
             // The check's trim is still at zero: the resolve beat has not begun.
             assertAbsent(INK_B)
         }
-        render(R.raw.connection_state, frame = ConnectionStateFrames.ResolveLast - 1, properties = properties).run {
+        render(R.raw.connection_state, frame = 62, properties = properties).run {
             assertPainted(INK_B)
             assertAbsent(INK_A)
         }
     }
 
-    @Test fun `the sync header paints filled dots then a stroked check`() {
+    @Test fun `the sync asset paints filled dots then a stroked check`() {
         // The one asset in the set that mixes both helpers: swapping them renders grey and nothing
         // else would notice.
         val properties =
@@ -327,11 +320,11 @@ class LottieAssetsTest {
                 lottieStrokeColor(INK_B, KeyPath("check", "**")),
             )
 
-        render(R.raw.sync_state, frame = SyncStateFrames.SyncingFirst, properties = properties).run {
+        render(R.raw.sync_state, frame = 0, properties = properties).run {
             assertPainted(INK_A)
             assertAbsent(INK_B)
         }
-        render(R.raw.sync_state, frame = SyncStateFrames.ResolveLast - 1, properties = properties).run {
+        render(R.raw.sync_state, frame = 38, properties = properties).run {
             assertPainted(INK_B)
             assertAbsent(INK_A)
         }

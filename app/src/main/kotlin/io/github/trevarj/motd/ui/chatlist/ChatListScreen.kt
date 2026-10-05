@@ -183,7 +183,6 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AudioPlaybackViewModel
-import io.github.trevarj.motd.ui.components.ConnectionBanner
 import io.github.trevarj.motd.ui.components.EmptyState
 import io.github.trevarj.motd.ui.components.FolderIcon
 import io.github.trevarj.motd.ui.components.HistoryIncompleteBadge
@@ -238,6 +237,9 @@ fun ChatListScreen(
     val syncChrome by viewModel.syncChrome.collectAsStateWithLifecycle()
     val titleConnecting by viewModel.titleConnecting.collectAsStateWithLifecycle()
     val recoveringActivityIds by viewModel.recoveringActivityIds.collectAsStateWithLifecycle()
+    val networkActivity by viewModel.networkActivity.collectAsStateWithLifecycle()
+    val connectionNoticeVisible by viewModel.connectionNoticeVisible.collectAsStateWithLifecycle()
+    val connectionOnlyNoticeVisible by viewModel.connectionOnlyNoticeVisible.collectAsStateWithLifecycle()
     val nickSuggestions by viewModel.nickSuggestions.collectAsStateWithLifecycle()
 
     // Fresh installs enter onboarding once state is loaded; a durable skip keeps the empty main UI.
@@ -262,6 +264,11 @@ fun ChatListScreen(
         syncIndicators = syncIndicators,
         syncChrome = syncChrome,
         recoveringActivityIds = recoveringActivityIds,
+        networkActivity = networkActivity,
+        connectionNoticeVisible = connectionNoticeVisible,
+        connectionOnlyNoticeVisible = connectionOnlyNoticeVisible,
+        onActivityAction = { issue, action -> viewModel.networkActivityAction(issue, action, onOpenBuffer, onOpenNetworkSettings) },
+        onActivityNetworkAction = { id, action -> viewModel.networkActivityNetworkAction(id, action, onOpenBuffer, onOpenNetworkSettings) },
         titleConnecting = titleConnecting,
         snackbarHostState = snackbarHostState,
         audioPlaybackState = audioPlaybackState,
@@ -400,6 +407,11 @@ fun ChatListContent(
     selectedBufferId: Long? = null,
     nickSuggestions: NickSuggestions = NickSuggestions(),
     onNickSuggestionQuery: (Long?, String) -> Unit = { _, _ -> },
+    networkActivity: NetworkActivityState = NetworkActivityState(),
+    connectionNoticeVisible: Boolean = false,
+    connectionOnlyNoticeVisible: Boolean = connectionNoticeVisible,
+    onActivityAction: (NetworkActivityIssue, NetworkActivityAction) -> Unit = { _, _ -> },
+    onActivityNetworkAction: (Long, NetworkActivityAction) -> Unit = { _, _ -> },
 ) {
     var archiveMode by rememberSaveable { mutableStateOf(false) }
     val swipeAction = if (archiveMode) ChatListSwipeAction.ARCHIVE else state.chatListSwipeAction
@@ -408,6 +420,8 @@ fun ChatListContent(
     var showMarkAllReadDialog by remember { mutableStateOf(false) }
     var showFolderAssignment by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showActivitySheet by remember { mutableStateOf(false) }
+    val activitySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     // The per-row network tag is redundant once the list is scoped to one network.
@@ -505,7 +519,7 @@ fun ChatListContent(
     }
 
     // One ordered Back policy keeps drawer, transient selection, and archive mode independent.
-    BackHandler(enabled = drawerState.isOpen || selectionActive || archiveMode || invitationMode) {
+    BackHandler(enabled = !showActivitySheet && (drawerState.isOpen || selectionActive || archiveMode || invitationMode)) {
         when {
             drawerState.isOpen -> scope.launch { drawerState.close() }
             selectionActive -> selectedIds = emptyList()
@@ -715,6 +729,14 @@ fun ChatListContent(
                                                 Icon(Icons.Filled.MoreVert, stringResource(R.string.chatlist_more_actions))
                                             }
                                             DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                                                DropdownMenuItem(
+                                                    text = { Text(stringResource(R.string.network_activity_title)) },
+                                                    modifier = Modifier.testTag("chatlist_network_activity"),
+                                                    onClick = {
+                                                        overflowOpen = false
+                                                        showActivitySheet = true
+                                                    },
+                                                )
                                                 if (dottedSelectedRows.isNotEmpty()) {
                                                     DropdownMenuItem(
                                                         text = {
@@ -789,6 +811,14 @@ fun ChatListContent(
                                             }
                                             DropdownMenu(moreOpen, { moreOpen = false }) {
                                                 DropdownMenuItem(
+                                                    text = { Text(stringResource(R.string.network_activity_title)) },
+                                                    modifier = Modifier.testTag("chatlist_network_activity"),
+                                                    onClick = {
+                                                        moreOpen = false
+                                                        showActivitySheet = true
+                                                    },
+                                                )
+                                                DropdownMenuItem(
                                                     text = { Text(stringResource(R.string.folders_manage)) },
                                                     leadingIcon = { Icon(Icons.Outlined.FolderOpen, contentDescription = null) },
                                                     onClick = {
@@ -821,7 +851,12 @@ fun ChatListContent(
                                         }
                                     }
 
-                                    ChatListTopBarMode.INVITATIONS, ChatListTopBarMode.ARCHIVE -> {}
+                                    ChatListTopBarMode.INVITATIONS, ChatListTopBarMode.ARCHIVE -> {
+                                        TextButton(
+                                            onClick = { showActivitySheet = true },
+                                            modifier = Modifier.heightIn(min = 48.dp).testTag("chatlist_network_activity"),
+                                        ) { Text(stringResource(R.string.network_activity_title)) }
+                                    }
                                 }
                             }
                         }
@@ -845,16 +880,13 @@ fun ChatListContent(
         ) { padding ->
             Box(modifier = Modifier.fillMaxSize().padding(padding)) {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    ConnectionBanner(
-                        states = state.connection,
-                        networkName = { id -> state.networks.firstOrNull { it.id == id }?.name },
+                    NetworkActivityBanner(
+                        activity = networkActivity,
+                        chrome = syncChrome,
+                        connectionNoticeVisible = if (archiveMode || invitationMode) connectionOnlyNoticeVisible else connectionNoticeVisible,
+                        includeHistory = !archiveMode && !invitationMode,
+                        onInspect = { showActivitySheet = true },
                     )
-
-                    // Aggregate history-sync line, pinned above the list. Scoped views (archive,
-                    // invitations) deliberately omit it: it reports on the whole app, not on them.
-                    if (!archiveMode && !invitationMode) {
-                        ChatListSyncHeader(chrome = syncChrome)
-                    }
 
                     // Active-scope chip: keeps the filter discoverable/escapable without the drawer.
                     AnimatedVisibility(
@@ -990,6 +1022,31 @@ fun ChatListContent(
                 )
             }
         }
+    }
+
+    if (showActivitySheet) {
+        fun closeActivityThen(action: () -> Unit) {
+            scope.launch {
+                activitySheetState.hide()
+                showActivitySheet = false
+                action()
+            }
+        }
+        NetworkActivitySheet(
+            activity = networkActivity,
+            sheetState = activitySheetState,
+            onDismiss = { showActivitySheet = false },
+            onIssueAction = { issue, action ->
+                if (action == NetworkActivityAction.ACKNOWLEDGE) {
+                    onActivityAction(issue, action)
+                } else {
+                    closeActivityThen { onActivityAction(issue, action) }
+                }
+            },
+            onConnect = { id -> closeActivityThen { onActivityNetworkAction(id, NetworkActivityAction.CONNECT) } },
+            onSettings = { id -> closeActivityThen { onActivityNetworkAction(id, NetworkActivityAction.SETTINGS) } },
+            onServerMessages = { id -> closeActivityThen { onActivityNetworkAction(id, NetworkActivityAction.SERVER_MESSAGES) } },
+        )
     }
 
     if (showFolderAssignment && selectedRows.isNotEmpty()) {
@@ -2608,7 +2665,7 @@ internal fun ChatListDefaultTitle(titleConnecting: Boolean) {
  * [visible] is the presenter-resolved value from [TitleConnectingPresenter], so this composable
  * carries no timing of its own — a sub-grace reconnect never reaches it. No liveRegion, matching
  * the chat title's spinner: reconnects recur, and announcing each would spam TalkBack; the
- * ConnectionBanner remains the announcing surface for connection trouble.
+ * NetworkActivityBanner remains the announcing surface for connection trouble.
  */
 @Composable
 internal fun ChatListTitleConnectingSpinner(

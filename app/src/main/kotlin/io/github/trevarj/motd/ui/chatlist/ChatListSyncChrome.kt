@@ -16,12 +16,12 @@ import kotlinx.coroutines.flow.transformLatest
  */
 internal const val SYNC_CHROME_APPEARANCE_DELAY_MS = 500L
 
-/** Once shown, the header stays up this long even if the pass settles immediately after. */
+/** Once shown, history chrome stays visible this long even if the pass settles immediately after. */
 internal const val SYNC_CHROME_MIN_VISIBLE_MS = 1_000L
 
 /**
- * Aggregate chat-list sync chrome: one gate driving both the pinned header and the per-row queued
- * cues, so the list never shows dimmed rings without the line that explains them.
+ * Aggregate chat-list sync chrome: one gate driving the unified banner's history content and the
+ * per-row queued cues, so the list never shows dimmed rings without the line that explains them.
  *
  * What reaches this gate is already filtered upstream, and deliberately so. A catch-up pass
  * publishes progress only once it is both eligible (its connection actually died, or has never
@@ -36,7 +36,7 @@ sealed interface ChatListSyncChrome {
     data class Syncing(
         val done: Int,
         val total: Int,
-        /** Some live pass is a user-requested window fetch, so the header says "backfilling". */
+        /** Some live pass is a user-requested window fetch, so the banner says "backfilling". */
         val backfill: Boolean = false,
     ) : ChatListSyncChrome
 
@@ -139,8 +139,8 @@ internal class SyncChromePresenter {
 /**
  * Drives [SyncChromePresenter] off raw snapshots: each snapshot resolves immediately and then again
  * at the presenter's pending deadline, so an appearance grace or a minimum-visible hold still
- * settles when no further engine emission arrives. A fresh presenter per collection keeps the
- * windows scoped to the subscription rather than to the ViewModel's lifetime.
+ * settles when no further engine emission arrives. A fresh presenter belongs to each collection;
+ * the chat-list ViewModel's eager subscription keeps these windows alive while its screen is away.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 internal fun Flow<ChatListSyncChrome>.presentSyncChrome(nowMs: () -> Long): Flow<ChatListSyncChrome> =

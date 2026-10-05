@@ -44,6 +44,31 @@ flowchart TD
   behind its own repository or preference contract.
 - UI observes repositories and ViewModel state. Connection and protocol actions
   go through `ConnectionManager` instead of constructing IRC clients in screens.
+- The chat list has one compact, inspectable network-activity banner. The highest-severity,
+  oldest unacknowledged connection/history issue wins; connection, waiting and sync summaries
+  support it without rotation. Engine progress remains visible independently of failures.
+  Banner text occupies at most two single-line rows: an ellipsized headline with issue badge, then
+  an ellipsized supporting summary with a separately reserved inline fraction. Summary overflow never
+  displaces the count; a thin progress bar adds no text row. Full reasons remain in the inspector.
+  Only the static headline announces politely. Healthy idle hides; archive/invitations promote
+  connection activity only, while the Material inspector remains global and preserves list modes.
+  Connection-only notices retain their three-second grace; presented history waiting bypasses it.
+  The existing history anti-flash/minimum-visible presenter also gates per-row queued cues.
+- `ChatListViewModel` eagerly captures observed connection/history failures even without screen
+  subscribers. Its session is the retained chat-list navigation entry, not process lifetime.
+  A small in-memory ledger groups target, connection/history family and exact cause, counts failure
+  reentry (not duplicate snapshots), retains every active cause through retry, and caps newest-first
+  recent activity at 20. Failed/Partial are history severities: switching them updates the same episode.
+  Acknowledgement is explicit, settled-only and episode/revision guarded: it hides promotion and
+  the history error badge, never source status or unresolved detail. A later failure reentry surfaces
+  again. Closing the inspector acknowledges nothing; actions hide it before navigation.
+  Recent records retain their honest disposition and usable navigation; later target deletion disables
+  their actions without rewriting the earlier recovery outcome. The inspector is available in every mode.
+  Ready proves Connected; deliberate offline and deletion mean Stopped/Removed. History disappearance
+  means No longer reported, not repaired; Unavailable is not recovery. History Retry reuses canonical
+  buffers and the current-client guarded reconciliation API. Certificate consent stays separate.
+  History issue identity follows the source status-map key even when repository observation returns
+  a redirected canonical room; navigation and reconciliation resolve that canonical target at action time.
 - Appearance's input style is an IRC-only preference shared by channel, query,
   and server buffers. Default, Large, and Nickname use one editor/draft path;
   Nickname's network-owned identity is decoration, never submitted text.
