@@ -1,0 +1,1 @@
+Chat list backgrounds now blend with chat rows and the title bar. Folder tabs float over scrolling chats, with a distinct capsule and a clearer selected-folder color.
