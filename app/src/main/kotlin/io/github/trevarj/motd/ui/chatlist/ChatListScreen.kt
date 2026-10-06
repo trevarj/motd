@@ -1267,7 +1267,7 @@ private fun FolderTabStrip(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .padding(horizontal = 20.dp, vertical = 4.dp)
                 .testTag("chatlist_folder_capsule"),
         shape = MotdShapes.channelAvatar,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,

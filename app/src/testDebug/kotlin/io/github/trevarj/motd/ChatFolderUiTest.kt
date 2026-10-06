@@ -378,8 +378,8 @@ class ChatFolderUiTest {
             val capsuleNode = capsule.fetchSemanticsNode()
             val bounds = capsuleNode.boundsInRoot
             val viewport = compose.onNodeWithTag("chatlist_folder_tabs").fetchSemanticsNode().boundsInRoot
-            val outerInset = with(compose.density) { 8.dp.toPx() }
-            val viewportInset = with(compose.density) { 18.dp.toPx() }
+            val outerInset = with(compose.density) { 20.dp.toPx() }
+            val viewportInset = with(compose.density) { 30.dp.toPx() }
             val sampleInset = with(compose.density) { 1.dp.toPx() }
             assertEquals(rootBounds.left + outerInset, bounds.left, 0.5f)
             assertEquals(rootBounds.right - outerInset, bounds.right, 0.5f)
@@ -465,9 +465,10 @@ class ChatFolderUiTest {
             assertTrue("The fixture must overflow the folder viewport", scrollRange.maxValue() > 0f)
             assertEquals(0f, scrollRange.value(), 0.5f)
         }
-        val gutter = with(compose.density) { 20.dp.toPx() }
+        val outerInset = with(compose.density) { 20.dp.toPx() }
         val rowInset = with(compose.density) { 12.dp.toPx() }
         val pillInset = with(compose.density) { 2.dp.toPx() }
+        val capsule = compose.onNodeWithTag("chatlist_folder_capsule").fetchSemanticsNode().boundsInRoot
         val firstPill = compose.onNodeWithTag("chatlist_folder_tab_pill_1", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val firstRow =
             compose
@@ -475,9 +476,10 @@ class ChatFolderUiTest {
                 .assertIsDisplayed()
                 .fetchSemanticsNode()
                 .boundsInRoot
-        assertEquals("The visible pill starts at the avatar edge", firstRow.left + rowInset, firstPill.left, 0.5f)
-        assertEquals("The leading gutter is 20dp", gutter, firstPill.left - rootBounds.left, 0.5f)
-        assertEquals("The pill retains its inset inside the fixed viewport", viewportBounds.left + pillInset, firstPill.left, 0.5f)
+        assertEquals("The capsule starts at the avatar edge", firstRow.left + rowInset, capsule.left, 0.5f)
+        assertEquals("The capsule has a 20dp leading scaffold gutter", outerInset, capsule.left - rootBounds.left, 0.5f)
+        assertEquals("The first folder button stays inset inside the capsule", capsule.left + with(compose.density) { 12.dp.toPx() }, firstPill.left, 0.5f)
+        assertEquals("The first folder button follows the scroll viewport", viewportBounds.left + pillInset, firstPill.left, 0.5f)
 
         // Reach the last tab before clicking: offscreen touch targets are not clickable.
         strip.performSemanticsAction(SemanticsActions.ScrollBy) { assertTrue(it(scrollRange.maxValue(), 0f)) }
@@ -499,8 +501,9 @@ class ChatFolderUiTest {
                 .assertIsDisplayed()
                 .fetchSemanticsNode()
                 .boundsInRoot
-        assertEquals("The last visible pill ends at the row content edge", lastRow.right - rowInset, lastPill.right, 0.5f)
-        assertEquals("The trailing gutter is 20dp at maximum overflow scroll", gutter, rootBounds.right - lastPill.right, 0.5f)
+        val lastCapsule = compose.onNodeWithTag("chatlist_folder_capsule").fetchSemanticsNode().boundsInRoot
+        assertEquals("The capsule ends at the avatar edge", lastRow.right - rowInset, lastCapsule.right, 0.5f)
+        assertEquals("The trailing capsule gutter is 20dp", outerInset, rootBounds.right - lastCapsule.right, 0.5f)
         assertEquals("The last pill retains its inset inside the fixed viewport", viewportBounds.right - pillInset, lastPill.right, 0.5f)
     }
 
