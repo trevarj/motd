@@ -1604,6 +1604,80 @@ class IrcClientTest {
         }
 
     @Test
+    fun `bouncer fallback applies late welcome nick before synthetic self join`() =
+        runTest {
+            val ft = FakeTransport()
+            val client =
+                IrcClient(
+                    config(SaslMechanism.PLAIN, "quaff/matrix2051", "secret").copy(
+                        nick = "quaff",
+                        username = "quaff",
+                    ),
+                    ft.factory(),
+                    clientScope(),
+                )
+            val events = mutableListOf<IrcEvent>()
+            val job = launch { client.broadcastEvents.toList(events) }
+            runCurrent()
+            client.start()
+            runCurrent()
+            ft.feed(":srv CAP * LS :$fullLs")
+            runCurrent()
+            val initialCaps = ft.sent.first { it.startsWith("CAP REQ :") }.substringAfter("CAP REQ :")
+            ft.feed(":srv CAP quaff ACK :$initialCaps")
+            runCurrent()
+            ft.feed("AUTHENTICATE +")
+            runCurrent()
+            ft.feed(":srv 903 quaff :SASL authentication successful")
+            runCurrent()
+            assertTrue(ft.sent.contains("CAP END"))
+            assertTrue(ft.sent.none { it.startsWith("BOUNCER BIND") })
+
+            // soju mutates child capabilities before sending the upstream's authoritative nick.
+            ft.feed(":srv CAP quaff DEL :extended-monitor")
+            runCurrent()
+            val fallback = client.state.value as IrcClientState.Ready
+            assertEquals("quaff", fallback.nick)
+            assertEquals("quaff", events.filterIsInstance<IrcEvent.Registered>().single().nick)
+            events.clear()
+
+            val actual = "matrixnick:matrix.example"
+            val welcome = ":srv 001 $actual :Welcome to soju, $actual"
+            ft.feed(welcome)
+            ft.feed(":$actual!user@host JOIN #room")
+            ft.feed(":quaff!peer@host JOIN #peer")
+            runCurrent()
+
+            val corrected = IrcEvent.Registered(actual, fallback.caps, fallback.isupport)
+            assertEquals(fallback.copy(nick = actual), client.state.value)
+            assertEquals(corrected, events[0])
+            assertEquals(IrcEvent.Raw(IrcMessage.parse(welcome)), events[1])
+            val joins = events.filterIsInstance<IrcEvent.Joined>()
+            assertEquals(2, joins.size)
+            assertEquals(joins, events.drop(2))
+            assertEquals(actual, joins[0].nick)
+            assertTrue(joins[0].isSelf)
+            assertFalse(joins[1].isSelf)
+            assertEquals(setOf("#room"), client.joinedChannels.value)
+
+            // A repeated welcome stays Raw, while late 005 retains the corrected identity.
+            ft.feed(welcome)
+            ft.feed(":srv 005 $actual CHANTYPES=# CASEMAPPING=ascii :are supported")
+            runCurrent()
+            val ready = client.state.value as IrcClientState.Ready
+            assertEquals(actual, ready.nick)
+            assertEquals("#", ready.isupport["CHANTYPES"])
+            assertEquals("ascii", ready.isupport["CASEMAPPING"])
+            assertEquals(
+                listOf(corrected, IrcEvent.Registered(actual, fallback.caps, ready.isupport)),
+                events.filterIsInstance<IrcEvent.Registered>(),
+            )
+            assertEquals(2, events.filterIsInstance<IrcEvent.Raw>().count { it.message.command == "001" })
+            assertEquals(setOf("#room"), client.joinedChannels.value)
+            job.cancelAndJoin()
+        }
+
+    @Test
     fun `bouncer fallback has message-tags before ready so typing works immediately`() =
         runTest {
             val ft = FakeTransport()

@@ -569,6 +569,17 @@ class IrcClient(
             return
         }
 
+        // A bouncer may publish Ready before 001; the upstream's authoritative nick still wins.
+        if (msg.command == "001") {
+            val nick = msg.params.firstOrNull()?.takeIf { it.isNotBlank() }
+            val current = _state.value as? IrcClientState.Ready
+            if (nick != null && current != null && nick != current.nick) {
+                selfNick.set(nick)
+                _state.value = current.copy(nick = nick)
+                publish(criticalEvents, IrcEvent.Registered(nick, current.caps, current.isupport))
+            }
+        }
+
         // 005 normally arrives after 001. Keep Ready's snapshot current so app-owned feature
         // gates (notably CLIENTTAGDENY) do not operate on the empty registration-time map.
         if (msg.command == "005") updateRuntimeIsupport(msg, criticalEvents)

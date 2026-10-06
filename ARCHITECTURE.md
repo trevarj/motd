@@ -42,6 +42,10 @@ flowchart TD
 - `EventProcessor` is the only component that writes IRC-derived state to Room.
   Feature-local persistence, such as preferences and upload history, remains
   behind its own repository or preference contract.
+- A late IRC `001` after bouncer fallback Ready updates `IrcClient`'s self nick
+  before mapping following JOINs. Exact identity changes publish `Registered`
+  with current CAP/ISUPPORT snapshots for persistence; the welcome remains `Raw`,
+  and late `005` retains the corrected nick.
 - UI observes repositories and ViewModel state. Connection and protocol actions
   go through `ConnectionManager` instead of constructing IRC clients in screens.
 - Chat-list folder tabs share one native, non-clickable Material3 capsule (`MotdShapes.channelAvatar`, `surfaceContainerHigh`, 2dp shadow), inset 20dp horizontally and 4dp vertically from the Scaffold. Its fixed 10dp inner scroll-viewport gutters plus each pill's 2dp inset keep folder buttons inset within the avatar-aligned capsule; 2dp inter-tab spacing, 48dp touch targets and selected `primaryContainer` pills remain unchanged.
