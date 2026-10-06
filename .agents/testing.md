@@ -97,6 +97,10 @@ builds only the release variant, verifies its native contents and cryptographic
 signature, and rejects forbidden signing-block metadata. It is not a routine UI
 handoff prerequisite or an invitation to run the full pre-push gate.
 
+The hosted Android tier has a 45-minute wall-clock budget for sequential cold
+release packaging, lint, debug/E2E artifact builds, and cleanup; all checks remain
+required.
+
 Keep the existing debug/E2E artifact coverage in a separate invocation:
 
 ```sh

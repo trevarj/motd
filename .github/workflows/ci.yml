@@ -112,7 +112,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    # Allow sequential cold release packaging, lint, debug/E2E artifacts, and cleanup.
+    timeout-minutes: 45
     env:
       GRADLE_OPTS: -Dorg.gradle.daemon=false
     steps:
