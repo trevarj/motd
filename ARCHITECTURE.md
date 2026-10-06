@@ -48,7 +48,7 @@ flowchart TD
   and late `005` retains the corrected nick.
 - UI observes repositories and ViewModel state. Connection and protocol actions
   go through `ConnectionManager` instead of constructing IRC clients in screens.
-- Chat-list folder tabs share one native, non-clickable Material3 capsule (`MotdShapes.channelAvatar`, `surfaceContainerHigh`, 2dp shadow), inset 20dp horizontally and 4dp vertically from the Scaffold. Its fixed 10dp inner scroll-viewport gutters plus each pill's 2dp inset keep folder buttons inset within the avatar-aligned capsule; 2dp inter-tab spacing, 48dp touch targets and selected `primaryContainer` pills remain unchanged.
+- The chat-list Scaffold canvas and chat rows use theme `surface`, matching the top bar's original unscrolled `surface`; its scrolled `surfaceContainerLow` remains unchanged. After any network-activity banner and active-scope chip, folder tabs overlay the scrolling chat viewport on an unpainted, transparent strip; the measured tab-and-pinned-mentions header is reserved only for the list's initial position, so rows can scroll beneath it. A separate `surfaceContainerHigh` capsule carries the tabs, and the selected pill uses the stronger `primary`/`onPrimary` colors.
 - The chat list has one compact, inspectable network-activity banner. The highest-severity,
   oldest unacknowledged connection/history issue wins; connection, waiting and sync summaries
   support it without rotation. Engine progress remains visible independently of failures.

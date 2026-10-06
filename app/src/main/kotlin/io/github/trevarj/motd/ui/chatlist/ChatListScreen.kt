@@ -101,7 +101,6 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -141,6 +140,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
@@ -616,6 +616,7 @@ fun ChatListContent(
     ) {
         Scaffold(
             modifier = Modifier.testTag("screen_chat_list"),
+            containerColor = MaterialTheme.colorScheme.surface,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 ChatListTopBar(
@@ -955,111 +956,132 @@ fun ChatListContent(
                         )
                     }
 
-                    if (!archiveMode && !invitationMode && (folderTabs.isNotEmpty() || state.dickordEnabled || mentionsAsTab)) {
-                        FolderTabStrip(
-                            folders = folderTabs,
-                            allSummary = summarizeFolder(allTabRows),
-                            showAllTab = showAllTab,
-                            dickordSummary = state.dickordUnreadSummary,
-                            mentionsEnabled = mentionsAsTab,
-                            mentionsCount = state.allMentions,
-                            mentionsIncomplete = state.allMentionsIncomplete,
-                            selectedFolderId = effectiveFolderId,
-                            onSelect = { folderId ->
-                                if (folderId != effectiveFolderId) {
-                                    selectedIds = emptyList()
-                                    selectedFolderId = folderId
-                                    tabChangeSignal++
-                                }
-                            },
-                            onOpenDickord = {
-                                selectedIds = emptyList()
-                                onOpenDickord()
-                            },
-                            onOpenMentions = {
-                                selectedIds = emptyList()
-                                onOpenMentions()
-                            },
-                        )
-                    }
-
-                    if (!archiveMode && !invitationMode && state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.CHAT_LIST) {
-                        MentionsPinnedRow(state.allMentions, state.allMentionsIncomplete, onOpenMentions)
-                    }
-
+                    val folderTabsVisible = !archiveMode && !invitationMode && (folderTabs.isNotEmpty() || state.dickordEnabled || mentionsAsTab)
+                    val pinnedMentionsVisible =
+                        !archiveMode && !invitationMode && state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.CHAT_LIST
                     val hasInvitationRoute = state.invitations.any(ChatListInvitation::actionable)
                     val portalOnly =
                         !archiveMode &&
                             state.dickordEnabled &&
                             (state.dickordUnreadSummary?.visibleCount ?: 0) > 0
-                    if (!invitationMode && !shouldRenderChatList(archiveMode, state.rows, state.archivedRows) && !hasInvitationRoute && !state.loading) {
-                        val noNetworks = !archiveMode && state.networks.isEmpty()
-                        EmptyState(
-                            icon = if (archiveMode) Icons.Outlined.Archive else Icons.Outlined.Forum,
-                            title =
-                                stringResource(
+                    val showEmptyState =
+                        !invitationMode && !shouldRenderChatList(archiveMode, state.rows, state.archivedRows) && !hasInvitationRoute && !state.loading
+                    var folderHeaderHeightPx by remember { mutableIntStateOf(0) }
+                    val folderHeaderHeight = with(LocalDensity.current) { folderHeaderHeightPx.toDp() }
+
+                    if (!folderTabsVisible && pinnedMentionsVisible) {
+                        MentionsPinnedRow(state.allMentions, state.allMentionsIncomplete, onOpenMentions)
+                    }
+
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        if (showEmptyState) {
+                            EmptyState(
+                                icon = if (archiveMode) Icons.Outlined.Archive else Icons.Outlined.Forum,
+                                title =
+                                    stringResource(
+                                        when {
+                                            portalOnly -> R.string.dickord_portal_list_hint
+                                            !archiveMode && state.networks.isEmpty() -> R.string.chatlist_no_networks_title
+                                            archiveMode -> R.string.chatlist_archived_empty_title
+                                            state.selectedNetworkId != null -> R.string.chatlist_scoped_empty_title
+                                            else -> R.string.chatlist_empty_title
+                                        },
+                                    ),
+                                message =
                                     when {
-                                        portalOnly -> R.string.dickord_portal_list_hint
-                                        noNetworks -> R.string.chatlist_no_networks_title
-                                        archiveMode -> R.string.chatlist_archived_empty_title
-                                        state.selectedNetworkId != null -> R.string.chatlist_scoped_empty_title
-                                        else -> R.string.chatlist_empty_title
+                                        archiveMode || portalOnly -> null
+                                        state.networks.isEmpty() -> stringResource(R.string.chatlist_no_networks_message)
+                                        state.selectedNetworkId != null -> stringResource(R.string.chatlist_scoped_empty_message)
+                                        else -> stringResource(R.string.chatlist_empty_message)
                                     },
-                                ),
-                            message =
-                                when {
-                                    archiveMode || portalOnly -> null
-                                    noNetworks -> stringResource(R.string.chatlist_no_networks_message)
-                                    state.selectedNetworkId != null -> stringResource(R.string.chatlist_scoped_empty_message)
-                                    else -> stringResource(R.string.chatlist_empty_message)
+                                modifier = Modifier.padding(top = if (folderTabsVisible) folderHeaderHeight else 0.dp),
+                                actionLabel = if (!archiveMode && state.networks.isEmpty()) stringResource(R.string.drawer_add_network) else null,
+                                onAction = if (!archiveMode && state.networks.isEmpty()) onOpenAddNetwork else null,
+                                // The list that has no rows is exactly what the ghost rows stand in for.
+                                ghostRows = true,
+                            )
+                        } else {
+                            ChatList(
+                                rows = displayedRows,
+                                archivedRows = if (effectiveFolderId == null || archiveMode || invitationMode) state.archivedRows else emptyList(),
+                                folders = if (state.folderDisplayMode == FolderDisplayMode.INLINE) state.folders else emptyList(),
+                                invitations = if (effectiveFolderId == null || archiveMode || invitationMode) state.invitations else emptyList(),
+                                archiveMode = archiveMode,
+                                swipeAction = swipeAction,
+                                invitationMode = invitationMode,
+                                archiveRevealSignal = archiveRevealSignal,
+                                onOpenArchive = { archiveMode = true },
+                                onOpenInvitations = { invitationMode = true },
+                                onAcceptInvitation = onAcceptInvitation,
+                                onIgnoreInvitation = onIgnoreInvitation,
+                                presence = state.queryPresence,
+                                syncIndicators = syncIndicators,
+                                recoveringActivityIds = recoveringActivityIds,
+                                friends = state.friends,
+                                fools = state.fools,
+                                multiNetwork = showNetworkChip,
+                                onOpenBuffer = onOpenBuffer,
+                                onSwipe = { row ->
+                                    val ids = listOf(row.bufferId)
+                                    when (swipeAction) {
+                                        ChatListSwipeAction.ARCHIVE -> setArchivedFromSwipe(ids, !archiveMode)
+                                        ChatListSwipeAction.MARK_READ -> onMarkSelectedRead(ids)
+                                        ChatListSwipeAction.MUTE -> onSetMuted(ids, !row.muted)
+                                        ChatListSwipeAction.PIN -> onSetPinned(ids, !row.pinned)
+                                        ChatListSwipeAction.DELETE -> swipeRemoval = row
+                                        ChatListSwipeAction.NONE -> Unit
+                                    }
                                 },
-                            actionLabel = if (noNetworks) stringResource(R.string.drawer_add_network) else null,
-                            onAction = if (noNetworks) onOpenAddNetwork else null,
-                            // The list that has no rows is exactly what the ghost rows stand in for.
-                            ghostRows = true,
-                        )
-                    } else {
-                        ChatList(
-                            rows = displayedRows,
-                            archivedRows = if (effectiveFolderId == null || archiveMode || invitationMode) state.archivedRows else emptyList(),
-                            folders = if (state.folderDisplayMode == FolderDisplayMode.INLINE) state.folders else emptyList(),
-                            invitations = if (effectiveFolderId == null || archiveMode || invitationMode) state.invitations else emptyList(),
-                            archiveMode = archiveMode,
-                            swipeAction = swipeAction,
-                            invitationMode = invitationMode,
-                            archiveRevealSignal = archiveRevealSignal,
-                            onOpenArchive = { archiveMode = true },
-                            onOpenInvitations = { invitationMode = true },
-                            onAcceptInvitation = onAcceptInvitation,
-                            onIgnoreInvitation = onIgnoreInvitation,
-                            presence = state.queryPresence,
-                            syncIndicators = syncIndicators,
-                            recoveringActivityIds = recoveringActivityIds,
-                            friends = state.friends,
-                            fools = state.fools,
-                            multiNetwork = showNetworkChip,
-                            onOpenBuffer = onOpenBuffer,
-                            onSwipe = { row ->
-                                val ids = listOf(row.bufferId)
-                                when (swipeAction) {
-                                    ChatListSwipeAction.ARCHIVE -> setArchivedFromSwipe(ids, !archiveMode)
-                                    ChatListSwipeAction.MARK_READ -> onMarkSelectedRead(ids)
-                                    ChatListSwipeAction.MUTE -> onSetMuted(ids, !row.muted)
-                                    ChatListSwipeAction.PIN -> onSetPinned(ids, !row.pinned)
-                                    ChatListSwipeAction.DELETE -> swipeRemoval = row
-                                    ChatListSwipeAction.NONE -> Unit
-                                }
-                            },
-                            onSetFolderExpanded = onSetFolderExpanded,
-                            onOpenFolderEditor = onOpenFolderEditor,
-                            activeBufferId = selectedBufferId,
-                            selectedIds = selectedIds.toSet(),
-                            selectionActive = selectionActive,
-                            onToggleSelection = { id -> selectedIds = toggleSelectedId(selectedIds, id) },
-                            onStartSelection = { id -> selectedIds = addSelectedId(selectedIds, id) },
-                            onRemoveSelection = { ids -> selectedIds = selectedIds.filterNot(ids::contains) },
-                            scrollToTopSignal = tabChangeSignal,
-                        )
+                                onSetFolderExpanded = onSetFolderExpanded,
+                                onOpenFolderEditor = onOpenFolderEditor,
+                                activeBufferId = selectedBufferId,
+                                selectedIds = selectedIds.toSet(),
+                                selectionActive = selectionActive,
+                                onToggleSelection = { id -> selectedIds = toggleSelectedId(selectedIds, id) },
+                                onStartSelection = { id -> selectedIds = addSelectedId(selectedIds, id) },
+                                onRemoveSelection = { ids -> selectedIds = selectedIds.filterNot(ids::contains) },
+                                scrollToTopSignal = tabChangeSignal,
+                                topContentPaddingPx = if (folderTabsVisible) folderHeaderHeightPx else 0,
+                            )
+                        }
+
+                        if (folderTabsVisible) {
+                            Column(
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .align(Alignment.TopStart)
+                                        .onSizeChanged { folderHeaderHeightPx = it.height }
+                                        .testTag("chatlist_folder_overlay"),
+                            ) {
+                                FolderTabStrip(
+                                    folders = folderTabs,
+                                    allSummary = summarizeFolder(allTabRows),
+                                    showAllTab = showAllTab,
+                                    dickordSummary = state.dickordUnreadSummary,
+                                    mentionsEnabled = mentionsAsTab,
+                                    mentionsCount = state.allMentions,
+                                    mentionsIncomplete = state.allMentionsIncomplete,
+                                    selectedFolderId = effectiveFolderId,
+                                    onSelect = { folderId ->
+                                        if (folderId != effectiveFolderId) {
+                                            selectedIds = emptyList()
+                                            selectedFolderId = folderId
+                                            tabChangeSignal++
+                                        }
+                                    },
+                                    onOpenDickord = {
+                                        selectedIds = emptyList()
+                                        onOpenDickord()
+                                    },
+                                    onOpenMentions = {
+                                        selectedIds = emptyList()
+                                        onOpenMentions()
+                                    },
+                                )
+                                if (pinnedMentionsVisible) MentionsPinnedRow(state.allMentions, state.allMentionsIncomplete, onOpenMentions)
+                            }
+                        }
                     }
                 }
                 AudioMiniPlayer(
@@ -1263,15 +1285,13 @@ private fun FolderTabStrip(
     onOpenDickord: () -> Unit,
     onOpenMentions: () -> Unit,
 ) {
-    Surface(
+    Box(
         modifier =
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 4.dp)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh, MotdShapes.channelAvatar)
                 .testTag("chatlist_folder_capsule"),
-        shape = MotdShapes.channelAvatar,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shadowElevation = 2.dp,
     ) {
         Row(
             modifier =
@@ -1352,7 +1372,7 @@ private fun FolderTabStrip(
                             FolderIcon(
                                 FolderIconRef(folder.folder.iconKind, folder.folder.iconKey),
                                 contentDescription = null,
-                                tint = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp).testTag("chatlist_folder_tab_icon_${folder.folder.id}"),
                             )
                         },
@@ -1394,7 +1414,7 @@ private fun FolderPillTab(
     content: @Composable () -> Unit,
 ) {
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
-    val contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+    val contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
     LaunchedEffect(selected) {
         if (selected) bringIntoViewRequester.bringIntoView()
     }
@@ -1426,7 +1446,7 @@ private fun FolderTabLabel(
     Row(
         modifier =
             Modifier
-                .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, MotdShapes.channelAvatar)
+                .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent, MotdShapes.channelAvatar)
                 .testTag(pillTag)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1589,6 +1609,7 @@ private fun ChatList(
     onStartSelection: (Long) -> Unit,
     onRemoveSelection: (Collection<Long>) -> Unit,
     scrollToTopSignal: Int,
+    topContentPaddingPx: Int,
 ) {
     // Pinned rows escape folders; non-empty folders follow in manual order, then legacy tiers.
     val presentation =
@@ -1849,17 +1870,6 @@ private fun ChatList(
     ) {
         ArchiveAccessibilityAnnouncement(archiveAnnouncement)
 
-        if (archivedOnly) {
-            Box(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .height(archiveFolderHeight),
-            ) {
-                ArchivedChatsFolder(archivedRows.size, onOpenArchive)
-            }
-        }
-
         LazyColumn(
             state = listState,
             modifier =
@@ -1874,7 +1884,7 @@ private fun ChatList(
                                 else -> 0f
                             }
                     },
-            contentPadding = PaddingValues(bottom = 88.dp),
+            contentPadding = PaddingValues(top = with(LocalDensity.current) { topContentPaddingPx.toDp() }, bottom = 88.dp),
         ) {
             if (invitationMode) {
                 if (invitations.isEmpty()) {
@@ -2124,12 +2134,24 @@ private fun ChatList(
             }
         }
 
+        if (archivedOnly) {
+            Box(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = with(LocalDensity.current) { topContentPaddingPx.toDp() })
+                        .height(archiveFolderHeight),
+            ) {
+                ArchivedChatsFolder(archivedRows.size, onOpenArchive)
+            }
+        }
+
         if (archiveFolderPullEligible && archiveDisplayExposurePx > 0f) {
             val overlayModifier =
                 Modifier
                     .fillMaxWidth()
                     .height(archiveFolderHeight)
-                    .graphicsLayer { translationY = archiveDisplayExposurePx - archiveFolderGeometry.rowPx }
+                    .graphicsLayer { translationY = topContentPaddingPx + archiveDisplayExposurePx - archiveFolderGeometry.rowPx }
             ArchiveFolderPullOverlay(
                 phase = archivePullState.phase,
                 exposurePx = archiveDisplayExposurePx,
