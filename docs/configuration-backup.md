@@ -37,6 +37,8 @@ export. Envelope metadata is authenticated as associated data.
   runtime/cache state
 - Android KeyChain aliases. A network that used a client certificate is imported
   disconnected until the user selects a certificate on the destination device.
+- Custom wallpaper image files and their private local filenames. The retained builtin wallpaper
+  and intensity travel instead; importing a backup restores that builtin fallback.
 
 ## Import
 

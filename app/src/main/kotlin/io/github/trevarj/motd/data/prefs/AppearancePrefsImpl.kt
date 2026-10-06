@@ -18,6 +18,7 @@ private val TRUE_BLACK = booleanPreferencesKey("true_black_v1")
 private val FOLLOW_SYSTEM = booleanPreferencesKey("follow_system_v1")
 private val WALLPAPER = stringPreferencesKey("wallpaper_preset_v1")
 private val WALLPAPER_INTENSITY = intPreferencesKey("wallpaper_intensity_v1")
+private val WALLPAPER_IMAGE = stringPreferencesKey("wallpaper_local_image_v1")
 private val UI_FONT_SCALE = intPreferencesKey("ui_font_scale_percent_v1")
 private val CONVERSATION_FONT_SCALE = intPreferencesKey("conversation_font_scale_percent_v1")
 private val FONT_CHOICE = stringPreferencesKey("font_choice_v1")
@@ -68,6 +69,7 @@ class AppearancePrefsImpl
                             preset =
                                 chatWallpaperPresetFromStored(prefs[WALLPAPER]),
                             intensity = (prefs[WALLPAPER_INTENSITY] ?: DEFAULT_WALLPAPER_INTENSITY).coerceIn(0, 100),
+                            localImageName = prefs[WALLPAPER_IMAGE],
                         ),
                     uiFontScalePercent =
                         normalizeFontScalePercent(
@@ -131,6 +133,8 @@ class AppearancePrefsImpl
             store.edit {
                 it[WALLPAPER] = normalized.preset.name
                 it[WALLPAPER_INTENSITY] = normalized.intensity
+                normalized.localImageName?.let { name -> it[WALLPAPER_IMAGE] = name }
+                    ?: it.remove(WALLPAPER_IMAGE)
             }
         }
 

@@ -1917,10 +1917,16 @@
     <string name="settings_wallpaper_retro_chat_desc">Buddy lists, away messages, and IRC nostalgia.</string>
     <string name="settings_wallpaper_memes">Memes</string>
     <string name="settings_wallpaper_memes_desc">Chaotic classics from the early internet.</string>
-    <string name="settings_wallpaper_intensity">Pattern intensity</string>
+    <string name="settings_wallpaper_intensity">Wallpaper intensity</string>
     <string name="settings_wallpaper_preview_incoming">The background stays quiet.</string>
     <string name="settings_wallpaper_preview_outgoing">And still feels like IRC.</string>
     <string name="settings_wallpaper_done">Done</string>
+    <string name="settings_wallpaper_custom">Custom image</string>
+    <string name="settings_wallpaper_import">Import image</string>
+    <string name="settings_wallpaper_change">Change image</string>
+    <string name="settings_wallpaper_remove">Remove image</string>
+    <string name="settings_wallpaper_importing">Importing image…</string>
+    <string name="settings_wallpaper_invalid">Could not save wallpaper. Choose a valid image up to 20 MiB.</string>
 
     <string name="settings_app_icon_section">App icon</string>
     <string name="settings_app_icon_default">Default</string>

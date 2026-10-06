@@ -186,6 +186,20 @@ class AppearancePrefsTest {
             assertEquals(WallpaperSelection(ChatWallpaperPreset.RETRO_GAMING, 0), prefs.config.first().wallpaper)
         }
 
+    @Test fun customWallpaperPersistsAtomicallyAndBuiltinSelectionClearsLocalReference() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val selection = WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 500, "12345678-1234-1234-1234-123456789abc.image")
+            prefs.setWallpaper(selection)
+            assertEquals(selection.copy(intensity = 100), AppearancePrefsImpl(context).config.first().wallpaper)
+            for (preset in listOf(ChatWallpaperPreset.MEMES, ChatWallpaperPreset.NONE)) {
+                prefs.setWallpaper(selection)
+                prefs.setWallpaper(selection.copy(preset = preset, intensity = 73, localImageName = null))
+                assertEquals(WallpaperSelection(preset, 73), AppearancePrefsImpl(context).config.first().wallpaper)
+                assertEquals(null, context.appearanceDataStore.data.first()[stringPreferencesKey("wallpaper_local_image_v1")])
+            }
+        }
+
     @Test fun storedWallpaperAliasesAndUnknownsResolveToTheNewCollection() {
         val expected =
             mapOf(
@@ -212,7 +226,7 @@ class AppearancePrefsTest {
         )
         assertEquals(
             """{"preset":"RETRO_CHAT","intensity":73}""",
-            jsonWithDefaults.encodeToString(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73)),
+            jsonWithDefaults.encodeToString(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, "private-wallpaper.image")),
         )
     }
 

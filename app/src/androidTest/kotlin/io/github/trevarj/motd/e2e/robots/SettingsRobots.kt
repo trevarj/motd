@@ -5,6 +5,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.ComposeTestRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
 
 internal class SettingsRobot(
@@ -35,6 +36,19 @@ internal class SettingsRobot(
         assertDisplayed("settings_avatar_style_sheet")
         click("settings_avatar_style_irc_sprite")
         awaitTagGone("settings_avatar_style_sheet")
+    }
+
+    fun selectWallpaperAndIntensity() {
+        scrollToAndClick("settings_wallpaper_picker")
+        assertDisplayed("settings_wallpaper_sheet")
+        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_preset_deep_space")
+        click("settings_wallpaper_preset_deep_space")
+        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_intensity")
+        compose.onNodeWithTag("settings_wallpaper_intensity").performSemanticsAction(SemanticsActions.SetProgress) { it(80f) }
+        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_done")
+        click("settings_wallpaper_done")
+        awaitTagGone("settings_wallpaper_sheet")
+        assertDisplayed("settings_wallpaper_picker")
     }
 
     fun returnToRoot() {

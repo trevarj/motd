@@ -1,20 +1,29 @@
 package io.github.trevarj.motd.ui.chat
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -29,7 +38,10 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,13 +66,22 @@ fun ChatWallpaperPicker(
     current: WallpaperSelection,
     onChange: (WallpaperSelection) -> Unit,
     modifier: Modifier = Modifier,
+    onImportImage: (Uri) -> Unit = {},
+    importedSelection: WallpaperSelection? = null,
+    importing: Boolean = false,
 ) {
     var showEditor by remember { mutableStateOf(false) }
+    val launcher =
+        rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            uri?.let(onImportImage)
+        }
     ListItem(
         headlineContent = { Text(stringResource(R.string.settings_wallpaper)) },
         supportingContent = {
             Text(
-                if (current.preset == ChatWallpaperPreset.NONE) {
+                if (current.localImageName != null) {
+                    "${stringResource(R.string.settings_wallpaper_custom)} · ${current.intensity}%"
+                } else if (current.preset == ChatWallpaperPreset.NONE) {
                     wallpaperLabel(current.preset)
                 } else {
                     "${wallpaperLabel(current.preset)} · ${current.intensity}%"
@@ -76,6 +97,9 @@ fun ChatWallpaperPicker(
             current = current,
             onDismiss = { showEditor = false },
             onChange = onChange,
+            onImport = { launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            importedSelection = importedSelection,
+            importing = importing,
         )
     }
 }
@@ -86,53 +110,102 @@ private fun WallpaperEditorSheet(
     current: WallpaperSelection,
     onDismiss: () -> Unit,
     onChange: (WallpaperSelection) -> Unit,
+    onImport: () -> Unit,
+    importedSelection: WallpaperSelection?,
+    importing: Boolean,
 ) {
     // Keep the active edit local so delayed preference emissions cannot rewind a slider drag.
     var selection by remember { mutableStateOf(current.normalized()) }
+    val importAtOpen = remember { importedSelection }
+    LaunchedEffect(importedSelection) {
+        // Only an explicit successful import may replace the active edit, never stale preferences.
+        importedSelection?.takeIf { it != importAtOpen }?.let { selection = it.normalized() }
+    }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val gridState = rememberLazyGridState()
 
     fun updateSelection(next: WallpaperSelection) {
         selection = next.normalized()
         onChange(selection)
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("settings_wallpaper_sheet")) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        modifier = Modifier.testTag("settings_wallpaper_sheet"),
+    ) {
         SheetSystemBars()
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-            Text(stringResource(R.string.settings_wallpaper), style = MaterialTheme.typography.titleLarge)
-            WallpaperPreview(selection, Modifier.fillMaxWidth().height(190.dp).padding(top = 14.dp))
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth().height(330.dp).padding(top = 14.dp),
-            ) {
-                items(ChatWallpaperPreset.entries) { preset ->
-                    WallpaperCard(
-                        preset = preset,
-                        intensity = selection.intensity,
-                        selected = selection.preset == preset,
-                        onClick = { updateSelection(selection.copy(preset = preset)) },
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            state = gridState,
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 680.dp)
+                    .selectableGroup()
+                    .testTag("settings_wallpaper_list"),
+        ) {
+            item(key = "title", span = { GridItemSpan(maxLineSpan) }) {
+                Text(stringResource(R.string.settings_wallpaper), style = MaterialTheme.typography.titleLarge)
+            }
+            item(key = "preview", span = { GridItemSpan(maxLineSpan) }) {
+                WallpaperPreview(selection, Modifier.fillMaxWidth().height(190.dp).testTag("settings_wallpaper_preview"))
+            }
+            item(key = "custom", span = { GridItemSpan(maxLineSpan) }) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onImport, enabled = !importing, modifier = Modifier.weight(1f).testTag("settings_wallpaper_custom")) {
+                        Text(
+                            stringResource(
+                                when {
+                                    importing -> R.string.settings_wallpaper_importing
+                                    selection.localImageName != null -> R.string.settings_wallpaper_change
+                                    else -> R.string.settings_wallpaper_import
+                                },
+                            ),
+                        )
+                    }
+                    TextButton(
+                        onClick = { updateSelection(selection.copy(localImageName = null)) },
+                        enabled = !importing && selection.localImageName != null,
+                        modifier = Modifier.weight(1f).testTag("settings_wallpaper_remove"),
+                    ) {
+                        Text(stringResource(R.string.settings_wallpaper_remove))
+                    }
+                }
+            }
+            items(ChatWallpaperPreset.entries, key = { it.name }) { preset ->
+                WallpaperCard(
+                    preset = preset,
+                    intensity = selection.intensity,
+                    selected = selection.localImageName == null && selection.preset == preset,
+                    enabled = !importing,
+                    onClick = { updateSelection(selection.copy(preset = preset, localImageName = null)) },
+                )
+            }
+            item(key = "intensity", span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.settings_wallpaper_intensity), modifier = Modifier.weight(1f))
+                        Text("${selection.intensity}%", fontWeight = FontWeight.SemiBold)
+                    }
+                    Slider(
+                        value = selection.intensity.toFloat(),
+                        onValueChange = { updateSelection(selection.copy(intensity = it.roundToInt())) },
+                        valueRange = 0f..100f,
+                        steps = 19,
+                        enabled = !importing && (selection.localImageName != null || selection.preset != ChatWallpaperPreset.NONE),
+                        modifier = Modifier.testTag("settings_wallpaper_intensity"),
                     )
                 }
             }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.settings_wallpaper_intensity), modifier = Modifier.weight(1f))
-                Text("${selection.intensity}%", fontWeight = FontWeight.SemiBold)
-            }
-            Slider(
-                value = selection.intensity.toFloat(),
-                onValueChange = { updateSelection(selection.copy(intensity = it.roundToInt())) },
-                valueRange = 0f..100f,
-                steps = 19,
-                enabled = selection.preset != ChatWallpaperPreset.NONE,
-                modifier = Modifier.testTag("settings_wallpaper_intensity"),
-            )
-            Row(
-                Modifier.fillMaxWidth().padding(bottom = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
-            ) {
-                Button(onClick = onDismiss, modifier = Modifier.testTag("settings_wallpaper_done")) {
-                    Text(stringResource(R.string.settings_wallpaper_done))
+            item(key = "done", span = { GridItemSpan(maxLineSpan) }) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    Button(onClick = onDismiss, modifier = Modifier.testTag("settings_wallpaper_done")) {
+                        Text(stringResource(R.string.settings_wallpaper_done))
+                    }
                 }
             }
         }
@@ -170,12 +243,13 @@ private fun WallpaperCard(
     preset: ChatWallpaperPreset,
     intensity: Int,
     selected: Boolean,
+    enabled: Boolean,
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(16.dp)
     val border = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
     Column(
-        Modifier.selectable(selected = selected, role = Role.RadioButton, onClick = onClick).testTag("settings_wallpaper_preset_${preset.name.lowercase()}"),
+        Modifier.selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick).testTag("settings_wallpaper_preset_${preset.name.lowercase()}"),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
@@ -198,9 +272,14 @@ private fun WallpaperCard(
             }
         }
         Text(wallpaperLabel(preset), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 5.dp))
-        wallpaperDescription(preset)?.let {
-            Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        Text(
+            wallpaperDescription(preset).orEmpty(),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.height(20.dp),
+        )
     }
 }
 

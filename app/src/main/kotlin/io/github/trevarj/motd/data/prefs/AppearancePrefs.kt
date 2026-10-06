@@ -3,6 +3,7 @@ package io.github.trevarj.motd.data.prefs
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
@@ -188,6 +189,8 @@ enum class LauncherIcon { DEFAULT, MONO, TERMINAL, GRUVBOX, CATPPUCCIN, NORD, LI
 data class WallpaperSelection(
     val preset: ChatWallpaperPreset = ChatWallpaperPreset.MOTD,
     val intensity: Int = DEFAULT_WALLPAPER_INTENSITY,
+    // Local-only; portable backups retain the builtin fallback instead of a private file reference.
+    @Transient val localImageName: String? = null,
 ) {
     fun normalized() = copy(intensity = intensity.coerceIn(0, 100))
 }

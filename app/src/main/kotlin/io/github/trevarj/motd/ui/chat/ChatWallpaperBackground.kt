@@ -10,6 +10,7 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
 import android.graphics.Shader
 import android.util.LruCache
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -27,12 +28,16 @@ import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.core.graphics.scale
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
+import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.theme.contrastSafeOverlay
 import kotlinx.coroutines.Dispatchers
@@ -41,19 +46,45 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import android.graphics.Color as AndroidColor
 
-/** Theme-adaptive gradient plus a stable, repeated monochrome PNG tile. */
+/** Full-color private image, or theme-adaptive gradient with a repeated monochrome builtin tile. */
 @Composable
 fun ChatWallpaperBackground(
     wallpaper: WallpaperSelection,
     modifier: Modifier = Modifier,
     tilePeriodDp: Float = WALLPAPER_TILE_PERIOD_DP,
 ) {
+    val context = LocalContext.current
+    if (wallpaper.localImageName != null) {
+        val file = remember(wallpaper.localImageName) { CustomWallpaperStore.resolve(context, wallpaper.localImageName) }
+        var loaded by remember(wallpaper.localImageName) { mutableStateOf(false) }
+        Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            if (!loaded) ChatWallpaperBackground(wallpaper.copy(localImageName = null), Modifier.matchParentSize(), tilePeriodDp)
+            if (file != null) {
+                AsyncImage(
+                    model =
+                        remember(file) {
+                            ImageRequest
+                                .Builder(context)
+                                .data(file)
+                                .crossfade(false)
+                                .build()
+                        },
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    alpha = wallpaperInkAlpha(wallpaper.intensity),
+                    onSuccess = { loaded = true },
+                    onError = { loaded = false },
+                    modifier = Modifier.matchParentSize(),
+                )
+            }
+        }
+        return
+    }
     if (wallpaper.preset == ChatWallpaperPreset.NONE) {
         Box(modifier)
         return
     }
 
-    val context = LocalContext.current
     val density = LocalDensity.current.density
     val requestedTileKey =
         remember(wallpaper.preset, density, tilePeriodDp) {
@@ -126,7 +157,7 @@ fun ChatWallpaperBackground(
 /** Warm the selected full-size motif before a chat destination needs to draw it. */
 @Composable
 internal fun PreloadChatWallpaperTile(wallpaper: WallpaperSelection) {
-    if (wallpaper.preset == ChatWallpaperPreset.NONE) return
+    if (wallpaper.localImageName != null || wallpaper.preset == ChatWallpaperPreset.NONE) return
     val assets = LocalContext.current.assets
     val density = LocalDensity.current.density
     val key = remember(wallpaper.preset, density) { wallpaperTileKey(wallpaper.preset, density) }

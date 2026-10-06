@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ComposerStyle
+import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.LauncherIcon
@@ -21,13 +22,21 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 
@@ -45,11 +54,19 @@ class AppearanceSettingsViewModel
         private val settingsRepository: SettingsRepository,
         private val appearancePrefs: AppearancePrefs,
         private val customFontStore: CustomFontStore,
+        private val customWallpaperStore: CustomWallpaperStore,
     ) : ViewModel() {
         private val _customFontImportEvents = MutableSharedFlow<CustomFontImportEvent>()
         val customFontImportEvents = _customFontImportEvents.asSharedFlow()
         val fontRevision: StateFlow<Long> = customFontStore.revision
         val customFontFile: File? get() = customFontStore.installedFile()
+        private val wallpaperMutex = Mutex()
+        private val _wallpaperImporting = MutableStateFlow(false)
+        val wallpaperImporting: StateFlow<Boolean> = _wallpaperImporting
+        private val _importedWallpaper = MutableSharedFlow<WallpaperSelection>()
+        val importedWallpaper = _importedWallpaper.asSharedFlow()
+        private val _wallpaperFailures = MutableSharedFlow<Unit>()
+        val wallpaperFailures = _wallpaperFailures.asSharedFlow()
 
         val state =
             combine(settingsRepository.settings, appearancePrefs.config, ::AppearanceSettingsUiState)
@@ -77,7 +94,57 @@ class AppearanceSettingsViewModel
 
         fun setNickColorPalette(value: NickColorPalette) = launch { settingsRepository.setNickColorPalette(value) }
 
-        fun setWallpaper(value: WallpaperSelection) = launch { appearancePrefs.setWallpaper(value) }
+        fun setWallpaper(value: WallpaperSelection) =
+            viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                wallpaperMutex.withLock {
+                    val previous = appearancePrefs.config.first().wallpaper
+                    // A queued slider callback must not resurrect a file replaced by an import.
+                    if (value.localImageName != null && value.localImageName != previous.localImageName) return@withLock
+                    try {
+                        withContext(NonCancellable) {
+                            appearancePrefs.setWallpaper(value)
+                            if (previous.localImageName != value.localImageName) customWallpaperStore.delete(previous.localImageName)
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        _wallpaperFailures.emit(Unit)
+                    }
+                }
+            }
+
+        fun importWallpaper(uri: Uri) =
+            viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                if (_wallpaperImporting.value) return@launch
+                _wallpaperImporting.value = true
+                try {
+                    wallpaperMutex.withLock {
+                        var uncommittedName: String? = null
+                        try {
+                            val previous = appearancePrefs.config.first().wallpaper
+                            val name = customWallpaperStore.import(uri).getOrThrow().also { uncommittedName = it }
+                            // Complete persistence/rollback even if the screen closes after copying.
+                            withContext(NonCancellable) {
+                                val selection = previous.copy(localImageName = name)
+                                appearancePrefs.setWallpaper(selection)
+                                uncommittedName = null
+                                customWallpaperStore.delete(previous.localImageName)
+                                _importedWallpaper.emit(selection)
+                            }
+                        } finally {
+                            uncommittedName?.let { name ->
+                                withContext(NonCancellable) { customWallpaperStore.delete(name) }
+                            }
+                        }
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    _wallpaperFailures.emit(Unit)
+                } finally {
+                    _wallpaperImporting.value = false
+                }
+            }
 
         fun setUiFontScale(value: Int) = launch { appearancePrefs.setUiFontScale(value) }
 

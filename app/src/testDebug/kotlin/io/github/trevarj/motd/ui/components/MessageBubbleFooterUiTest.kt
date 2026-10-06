@@ -1,5 +1,8 @@
 package io.github.trevarj.motd.ui.components
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,18 +37,21 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.TimestampConfig
 import io.github.trevarj.motd.ui.theme.contrastRatio
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -56,6 +62,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -338,43 +345,67 @@ class MessageBubbleFooterUiTest {
 
     @Test
     fun opaqueRowsProtectTextFromFullIntensityWallpaperWithoutHidingItOutsideRows() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val store = CustomWallpaperStore(context)
+        val source = File.createTempFile("wallpaper-contrast", ".png", context.cacheDir)
+        val bitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.MAGENTA) }
+        try {
+            source.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        } finally {
+            bitmap.recycle()
+        }
+        val image = runBlocking { store.import(Uri.fromFile(source)).getOrThrow() }
         val density = mutableStateOf(LayoutDensity.COMPACT)
         val kind = mutableStateOf(MessageKind.PRIVMSG)
         val intensity = mutableStateOf(100)
-        compose.setContent { ContrastSample(density = density.value, kind = kind.value, wallpaperIntensity = intensity.value) }
-        for (layout in listOf(LayoutDensity.COMPACT, LayoutDensity.TWO_LINE)) {
-            for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.ACTION)) {
-                compose.runOnIdle {
-                    density.value = layout
-                    kind.value = messageKind
-                    intensity.value = 100
-                }
-                val sample = compose.onNodeWithTag("contrast_sample")
-                val sampleBounds = sample.fetchSemanticsNode().boundsInRoot
-                val row = compose.onNodeWithTag("contrast_message", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-                val top = (row.top - sampleBounds.top).toInt()
-                val bottom = (row.bottom - sampleBounds.top).toInt()
-                // Wait for real asynchronously decoded artwork, not just the pale gradient.
-                compose.waitUntil(timeoutMillis = 5_000) {
-                    val pixels = sample.captureToImage().toPixelMap()
-                    (0 until pixels.width).any { x ->
-                        (0 until top - 8).any { y -> pixels[x, y].luminance() < 0.5f }
+        val localImage = mutableStateOf<String?>(null)
+        compose.setContent {
+            ContrastSample(density = density.value, kind = kind.value, wallpaperIntensity = intensity.value, wallpaperImage = localImage.value)
+        }
+        try {
+            for (name in listOf(null, image)) {
+                compose.runOnIdle { localImage.value = name }
+                for (layout in listOf(LayoutDensity.COMPACT, LayoutDensity.TWO_LINE)) {
+                    for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.ACTION)) {
+                        compose.runOnIdle {
+                            density.value = layout
+                            kind.value = messageKind
+                            intensity.value = 100
+                        }
+                        val sample = compose.onNodeWithTag("contrast_sample")
+                        val sampleBounds = sample.fetchSemanticsNode().boundsInRoot
+                        val row = compose.onNodeWithTag("contrast_message", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                        val top = (row.top - sampleBounds.top).toInt()
+                        val bottom = (row.bottom - sampleBounds.top).toInt()
+                        compose.waitUntil(timeoutMillis = 5_000) {
+                            val pixels = sample.captureToImage().toPixelMap()
+                            if (name == null) {
+                                (0 until pixels.width).any { x ->
+                                    (0 until top - 8).any { y -> pixels[x, y].luminance() < 0.5f }
+                                }
+                            } else {
+                                pixels[pixels.width / 2, 8] == Color.Magenta
+                            }
+                        }
+                        val fullInk = sample.captureToImage().toPixelMap()
+                        assertPaintedTextContrast("$layout $messageKind wallpaper=100", compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true))
+                        compose.runOnIdle { intensity.value = 0 }
+                        val noInk = sample.captureToImage().toPixelMap()
+                        for (x in 8 until fullInk.width - 8) {
+                            for (y in top + 2 until bottom - 2) {
+                                assertEquals("$layout $messageKind wallpaper leaked under row at $x,$y", noInk[x, y], fullInk[x, y])
+                            }
+                        }
+                        assertTrue(
+                            "$layout $messageKind must leave full-intensity wallpaper visible outside the row",
+                            (0 until fullInk.width).any { x -> (0 until top - 8).any { y -> noInk[x, y] != fullInk[x, y] } },
+                        )
                     }
                 }
-                val fullInk = sample.captureToImage().toPixelMap()
-                assertPaintedTextContrast("$layout $messageKind wallpaper=100", compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true))
-                compose.runOnIdle { intensity.value = 0 }
-                val noInk = sample.captureToImage().toPixelMap()
-                for (x in 8 until fullInk.width - 8) {
-                    for (y in top + 2 until bottom - 2) {
-                        assertEquals("$layout $messageKind wallpaper leaked under row at $x,$y", noInk[x, y], fullInk[x, y])
-                    }
-                }
-                assertTrue(
-                    "$layout $messageKind must leave full-intensity wallpaper visible outside the row",
-                    (0 until fullInk.width).any { x -> (0 until top - 8).any { y -> noInk[x, y] != fullInk[x, y] } },
-                )
             }
+        } finally {
+            runBlocking { store.delete(image) }
+            source.delete()
         }
     }
 
@@ -385,6 +416,7 @@ class MessageBubbleFooterUiTest {
         hasMention: Boolean = false,
         density: LayoutDensity = LayoutDensity.COMFORTABLE,
         wallpaperIntensity: Int? = null,
+        wallpaperImage: String? = null,
         reply: ReplyPreviewData? = null,
     ) {
         MotdTheme(
@@ -401,7 +433,7 @@ class MessageBubbleFooterUiTest {
                     .background(MaterialTheme.colorScheme.background)
                     .testTag("contrast_sample"),
             ) {
-                wallpaperIntensity?.let { ChatWallpaperBackground(WallpaperSelection(ChatWallpaperPreset.MOTD, it)) }
+                wallpaperIntensity?.let { ChatWallpaperBackground(WallpaperSelection(ChatWallpaperPreset.MOTD, it, wallpaperImage)) }
                 Column(Modifier.padding(top = 96.dp)) {
                     MessageBubble(
                         sender = "alice",

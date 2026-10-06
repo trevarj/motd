@@ -408,7 +408,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.SQUARE)
             appearancePrefs.setChatShadowsEnabled(false)
             appearancePrefs.setLauncherIcon(LauncherIcon.GRUVBOX)
-            appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73))
+            appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, "12345678-1234-1234-1234-123456789abc.image"))
             // Only the display name travels; the font binary itself is not part of the backup payload.
             appearancePrefs.setCustomFontName("Iosevka Term.ttf")
 
@@ -416,6 +416,8 @@ class ConfigurationBackupRepositoryTest {
                 source
                     .exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
                     .replace("\"RETRO_CHAT\"", "\"CHATTER\"")
+            assertFalse(raw.contains("12345678-1234-1234-1234-123456789abc.image"))
+            assertFalse(raw.contains("localImageName"))
 
             appearancePrefs.setFontChoice(FontChoice.SYSTEM)
             appearancePrefs.setShowTimestamps(true)

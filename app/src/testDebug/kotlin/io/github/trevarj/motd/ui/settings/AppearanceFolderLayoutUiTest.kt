@@ -17,6 +17,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import io.github.trevarj.motd.UiDispatcherResetRule
@@ -311,6 +312,45 @@ class AppearanceFolderLayoutUiTest {
         compose.onNodeWithText(expectedTime, useUnmergedTree = true).assertIsDisplayed()
     }
 
+    @Test
+    fun wallpaperPreviewKeepsImmediateEditsAcrossStaleEmissionsAndExplicitImport() {
+        val appearance = mutableStateOf(AppearanceConfig())
+        val imported = mutableStateOf<WallpaperSelection?>(null)
+        var changes = 0
+        setContent(
+            appearanceProvider = { appearance.value },
+            importedWallpaperProvider = { imported.value },
+            onWallpaper = {
+                changes++
+                appearance.value =
+                    AppearanceConfig(
+                        wallpaper = WallpaperSelection(ChatWallpaperPreset.NONE, 30),
+                        chatShadowsEnabled = changes % 2 == 1,
+                    )
+            },
+        )
+        compose.onNodeWithTag("settings_wallpaper_picker").performScrollTo().performClick()
+        val list = compose.onNodeWithTag("settings_wallpaper_list")
+        list.performScrollToNode(hasTestTag("settings_wallpaper_preset_deep_space"))
+        compose.onNodeWithTag("settings_wallpaper_preset_deep_space").performClick()
+        list.performScrollToNode(hasTestTag("settings_wallpaper_intensity"))
+        compose.onNodeWithTag("settings_wallpaper_intensity").performSemanticsAction(SemanticsActions.SetProgress) { it(80f) }
+        compose.runOnIdle {
+            imported.value = WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80, "12345678-1234-1234-1234-123456789abc.image")
+        }
+        list.performScrollToNode(hasTestTag("settings_wallpaper_remove"))
+        compose.onNodeWithTag("settings_wallpaper_remove").assertIsEnabled()
+        list.performScrollToNode(hasTestTag("settings_wallpaper_done"))
+        compose.onNodeWithTag("settings_wallpaper_done").performClick()
+        compose.onNodeWithTag("settings_chat_preview_inline_wallpaper_custom_80").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("settings_wallpaper_picker").performScrollTo().performClick()
+        list.performScrollToNode(hasTestTag("settings_wallpaper_remove"))
+        compose.onNodeWithTag("settings_wallpaper_remove").performClick()
+        list.performScrollToNode(hasTestTag("settings_wallpaper_done"))
+        compose.onNodeWithTag("settings_wallpaper_done").performClick()
+        compose.onNodeWithTag("settings_chat_preview_inline_wallpaper_deep_space_80").performScrollTo().assertIsDisplayed()
+    }
+
     private fun dismissSheet(tag: String) {
         val sheet = hasTestTag(tag)
         val dismissAction = SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and (sheet or hasAnyAncestor(sheet))
@@ -332,6 +372,8 @@ class AppearanceFolderLayoutUiTest {
         onMessageSpacing: (MessageSpacing) -> Unit = {},
         onBubbleCornerStyle: (BubbleCornerStyle) -> Unit = {},
         onChatShadowsEnabled: (Boolean) -> Unit = {},
+        onWallpaper: (WallpaperSelection) -> Unit = {},
+        importedWallpaperProvider: () -> WallpaperSelection? = { null },
     ) {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
@@ -351,7 +393,8 @@ class AppearanceFolderLayoutUiTest {
                     onAvatarStyle = onAvatarStyle,
                     onNickColorsEnabled = {},
                     onNickColorPalette = {},
-                    onWallpaper = {},
+                    onWallpaper = onWallpaper,
+                    importedWallpaper = importedWallpaperProvider(),
                     onUiFontScale = {},
                     onConversationFontScale = {},
                     onFontChoice = {},

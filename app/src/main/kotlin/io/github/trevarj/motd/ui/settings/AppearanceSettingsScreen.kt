@@ -87,6 +87,7 @@ import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.systemPartner
 import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
@@ -116,6 +117,15 @@ fun AppearanceSettingsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val wallpaperFailedMessage = stringResource(R.string.settings_wallpaper_invalid)
+    val wallpaperImporting by viewModel.wallpaperImporting.collectAsStateWithLifecycle()
+    var importedWallpaper by remember { mutableStateOf<WallpaperSelection?>(null) }
+    LaunchedEffect(viewModel) {
+        viewModel.importedWallpaper.collect { importedWallpaper = it }
+    }
+    LaunchedEffect(viewModel, wallpaperFailedMessage) {
+        viewModel.wallpaperFailures.collect { snackbarHostState.showSnackbar(wallpaperFailedMessage) }
+    }
     val importFailedMessage = stringResource(R.string.settings_font_custom_invalid)
     // Success is already visible in the picker row (it selects and shows the file name); only the
     // failure case needs transient scaffold feedback; success is visible in selected font row.
@@ -149,6 +159,9 @@ fun AppearanceSettingsScreen(
         onNickColorsEnabled = viewModel::setNickColorsEnabled,
         onNickColorPalette = viewModel::setNickColorPalette,
         onWallpaper = viewModel::setWallpaper,
+        onImportWallpaper = viewModel::importWallpaper,
+        importedWallpaper = importedWallpaper,
+        wallpaperImporting = wallpaperImporting,
         onUiFontScale = viewModel::setUiFontScale,
         onConversationFontScale = viewModel::setConversationFontScale,
         onFontChoice = viewModel::setFontChoice,
@@ -195,6 +208,9 @@ fun AppearanceSettingsContent(
     onLauncherIcon: (LauncherIcon) -> Unit,
     customFontFile: File? = null,
     onImportCustomFont: (Uri) -> Unit = {},
+    onImportWallpaper: (Uri) -> Unit = {},
+    importedWallpaper: WallpaperSelection? = null,
+    wallpaperImporting: Boolean = false,
     target: SettingsTarget? = null,
     snackbarHostState: SnackbarHostState? = null,
 ) {
@@ -208,12 +224,22 @@ fun AppearanceSettingsContent(
     var previewShadows by rememberSaveable { mutableStateOf(appearance.chatShadowsEnabled) }
     var previewSettings by remember { mutableStateOf(settings) }
     var previewAppearance by remember { mutableStateOf(appearance) }
+    var pendingWallpaper by remember { mutableStateOf<WallpaperSelection?>(null) }
     LaunchedEffect(settings.layoutDensity) { previewDensity = settings.layoutDensity }
     LaunchedEffect(appearance.messageSpacing) { previewSpacing = appearance.messageSpacing }
     LaunchedEffect(appearance.bubbleCornerStyle) { previewCorners = appearance.bubbleCornerStyle }
     LaunchedEffect(appearance.chatShadowsEnabled) { previewShadows = appearance.chatShadowsEnabled }
     LaunchedEffect(settings) { previewSettings = settings }
-    LaunchedEffect(appearance) { previewAppearance = appearance }
+    LaunchedEffect(appearance) {
+        if (appearance.wallpaper == pendingWallpaper) pendingWallpaper = null
+        previewAppearance = appearance.copy(wallpaper = pendingWallpaper ?: appearance.wallpaper)
+    }
+    LaunchedEffect(importedWallpaper) {
+        importedWallpaper?.let {
+            pendingWallpaper = it
+            previewAppearance = previewAppearance.copy(wallpaper = it)
+        }
+    }
     val followSystemAvailable = appearance.theme.systemPartner != null
     val trueBlackAvailable =
         appearance.theme == ColorThemePreset.SYSTEM ||
@@ -523,9 +549,13 @@ fun AppearanceSettingsContent(
                 ChatWallpaperPicker(
                     current = previewAppearance.wallpaper,
                     onChange = {
+                        pendingWallpaper = it
                         previewAppearance = previewAppearance.copy(wallpaper = it)
                         onWallpaper(it)
                     },
+                    onImportImage = onImportWallpaper,
+                    importedSelection = importedWallpaper,
+                    importing = wallpaperImporting,
                 )
             }
         }
@@ -662,9 +692,16 @@ private fun ChatLayoutPreview(
                 shape = MotdShapes.card,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
+                val wallpaperKind =
+                    if (appearance.wallpaper.localImageName == null) {
+                        appearance.wallpaper.preset.name
+                            .lowercase()
+                    } else {
+                        "custom"
+                    }
                 Box(
                     Modifier.testTag(
-                        "${tagPrefix}_wallpaper_${appearance.wallpaper.preset.name.lowercase()}_${appearance.wallpaper.intensity}",
+                        "${tagPrefix}_wallpaper_${wallpaperKind}_${appearance.wallpaper.intensity}",
                     ),
                 ) {
                     ChatWallpaperBackground(appearance.wallpaper, Modifier.matchParentSize())
