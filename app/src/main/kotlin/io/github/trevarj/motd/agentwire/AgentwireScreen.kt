@@ -162,9 +162,8 @@ fun AgentwireGateScreen(
     }
     when {
         state.gate == AgentwireGate.LOADING -> {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 48.dp))
-            }
+            // ponytail: wait for classification without flashing ordinary chat or a loading bar.
+            Box(Modifier.fillMaxSize())
         }
 
         state.gate == AgentwireGate.ORDINARY || state.transcriptOverride -> {

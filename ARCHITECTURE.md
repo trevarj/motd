@@ -203,6 +203,9 @@ flowchart TD
   caches and never enter IRC history. Legacy transcription and installed Android
   voice settings survive migration; retired model files/directories remain unused
   in private storage rather than being automatically deleted.
+- Chat routing waits on Agentwire classification with a blank full-size gate, not
+  a progress bar or ordinary chat. Agentwire sync, history and running-tool
+  progress indicators remain visible after classification.
 - When Agentwire Labs is enabled, Agentwire Summary prepares catch-up or thread
   context for an existing session. Frozen visible messages and coverage disclosures stay in memory until the user
   chooses an Agentwire channel, reviews its authenticated session, and presses
