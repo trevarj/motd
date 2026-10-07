@@ -7,18 +7,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Lan
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -41,11 +43,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.dismiss
 import androidx.compose.ui.semantics.heading
@@ -55,7 +59,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.irc.event.IrcClientState
-import io.github.trevarj.motd.ui.theme.LocalSpacing
+import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import java.text.DateFormat
@@ -77,15 +81,12 @@ fun NetworkActivityBanner(
     val sync = chrome.takeIf { includeHistory } ?: ChatListSyncChrome.Hidden
     val headline =
         when {
-            headlineIssue != null -> issueTitle(headlineIssue)
-            connecting != null -> stringResource(if (connecting.connection == IrcClientState.Registering) R.string.network_activity_registering_to else R.string.network_activity_connecting_to, connecting.name)
-            sync is ChatListSyncChrome.Waiting -> stringResource(R.string.network_activity_waiting)
-            sync is ChatListSyncChrome.Syncing -> stringResource(if (sync.backfill) R.string.network_activity_backfilling else R.string.network_activity_syncing)
+            headlineIssue != null -> R.string.network_activity_attention
+            connecting != null -> R.string.network_activity_connecting
+            sync is ChatListSyncChrome.Syncing -> R.string.network_activity_syncing
             else -> return
         }
     val inspect = stringResource(R.string.network_activity_open)
-    val connected = activity.networks.count { it.connection is IrcClientState.Ready }
-    val spacing = LocalSpacing.current
     val dismissState = rememberSwipeToDismissBoxState()
     var hideRequested by rememberSaveable { mutableStateOf(false) }
     val hide = {
@@ -98,12 +99,12 @@ fun NetworkActivityBanner(
     SwipeToDismissBox(
         state = dismissState,
         backgroundContent = {},
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
         onDismiss = { hide() },
     ) {
         Surface(
             shape = MotdShapes.card,
-            color = if (headlineIssue != null && headlineIssue.severity > 1) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
             modifier =
                 Modifier
                     .fillMaxWidth()
@@ -118,48 +119,90 @@ fun NetworkActivityBanner(
                         }
                     },
         ) {
-            Box {
-                Row(Modifier.padding(horizontal = 12.dp, vertical = spacing.chatListVPad), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Box(Modifier.size(spacing.chatListAvatar).testTag("chatlist_status_icon"), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Outlined.Lan, contentDescription = null)
-                    }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // A separate merge boundary keeps progress/count changes out of the live button.
-                            Text(headline, modifier = Modifier.weight(1f).testTag("chatlist_status_label").semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            if (issues.isNotEmpty()) Text(pluralStringResource(R.plurals.network_activity_issue_count, issues.size, issues.size), style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("chatlist_status_issue_count"), maxLines = 1, softWrap = false)
-                        }
-                        val supporting =
-                            buildList {
-                                if (activity.networks.size > 1) add(pluralStringResource(R.plurals.network_activity_connected_count, activity.networks.size, connected, activity.networks.size))
-                                if (headlineIssue != null && connecting != null) add(stringResource(R.string.network_activity_connecting_to, connecting.name))
-                                if (sync is ChatListSyncChrome.Waiting && (headlineIssue != null || connecting != null)) add(stringResource(R.string.network_activity_queued))
-                                if (sync is ChatListSyncChrome.Syncing && (headlineIssue != null || connecting != null)) add(stringResource(if (sync.backfill) R.string.network_activity_backfilling else R.string.network_activity_syncing))
-                            }
-                        if (supporting.isNotEmpty() || sync is ChatListSyncChrome.Syncing) {
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (supporting.isNotEmpty()) {
-                                    Text(supporting.joinToString(" · "), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).testTag("chatlist_status_summary"), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                } else {
-                                    Spacer(Modifier.weight(1f))
-                                }
-                                if (sync is ChatListSyncChrome.Syncing) {
-                                    Text(stringResource(R.string.network_activity_progress_count, sync.done, sync.total), style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("chatlist_status_count"), maxLines = 1, softWrap = false)
-                                }
-                            }
-                        }
-                    }
-                }
-                if (sync is ChatListSyncChrome.Syncing) {
-                    LinearProgressIndicator(
-                        progress = { if (sync.total > 0) (sync.done.toFloat() / sync.total).coerceIn(0f, 1f) else 0f },
+            Row(
+                Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(
+                    when (headline) {
+                        R.string.network_activity_attention -> Icons.Outlined.Warning
+                        R.string.network_activity_connecting -> Icons.Outlined.Lan
+                        else -> Icons.Outlined.History
+                    },
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp).testTag("chatlist_status_glyph"),
+                    tint = if (headlineIssue != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        stringResource(R.string.network_activity_title),
+                        modifier = Modifier.testTag("chatlist_status_title"),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    // Keep changing status separate from the static title, badge and progress.
+                    Text(
+                        stringResource(headline),
                         modifier =
                             Modifier
-                                .align(Alignment.BottomCenter)
                                 .fillMaxWidth()
-                                .height(2.dp)
-                                .testTag("chatlist_status_progress"),
+                                .testTag("chatlist_status_label")
+                                .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
+                }
+                if (sync is ChatListSyncChrome.Syncing) {
+                    val progressLabel = stringResource(R.string.network_activity_history_sync_progress)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.History,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp).testTag("chatlist_status_progress_history"),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        LinearProgressIndicator(
+                            // Preserve the engine contract: a pass with no known total starts at zero.
+                            progress = { if (sync.total > 0) (sync.done.toFloat() / sync.total).coerceIn(0f, 1f) else 0f },
+                            modifier =
+                                Modifier
+                                    .width(28.dp)
+                                    .height(2.dp)
+                                    .testTag("chatlist_status_progress")
+                                    .semantics { contentDescription = progressLabel },
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f),
+                            strokeCap = StrokeCap.Round,
+                            gapSize = 0.dp,
+                            drawStopIndicator = {},
+                        )
+                    }
+                }
+                if (issues.isNotEmpty()) {
+                    val issueCount = pluralStringResource(R.plurals.network_activity_issue_count, issues.size, issues.size)
+                    Surface(
+                        shape = MotdShapes.pill,
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        modifier =
+                            Modifier
+                                .testTag("chatlist_status_issue_count")
+                                .clearAndSetSemantics { contentDescription = issueCount },
+                    ) {
+                        Text(
+                            issues.size.toString(),
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
                 }
             }
         }
@@ -249,6 +292,8 @@ private fun ActivityNetwork(
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(network.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(connectionLabel(network.connection), style = MaterialTheme.typography.bodySmall)
+            if (network.history.any { it.status == HistorySyncStatus.AwaitingConnection }) Text(stringResource(R.string.chatlist_sync_waiting), style = MaterialTheme.typography.bodySmall)
+            if (network.history.any { it.status == HistorySyncStatus.Queued }) Text(stringResource(R.string.chatlist_sync_queued), style = MaterialTheme.typography.bodySmall)
             if (network.certificatePending) Text(stringResource(R.string.network_activity_certificate_pending), style = MaterialTheme.typography.bodySmall)
         }
         Box {
@@ -342,14 +387,6 @@ private fun ActivityAction(
     onClick: () -> Unit,
 ) {
     TextButton(onClick = onClick, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp).testTag(tag).semantics { contentDescription = description }) { Text(text) }
-}
-
-@Composable
-private fun issueTitle(issue: NetworkActivityIssue): String {
-    // Only the headline is shortened; the ledger and selectable inspector retain the exact cause.
-    val firstLine = issue.reason.substringBefore('\n')
-    val summary = if (firstLine.length > 160) firstLine.take(157) + "…" else firstLine
-    return if (issue.chatName == null) stringResource(R.string.network_activity_network_reason, issue.networkName, summary) else stringResource(R.string.network_activity_chat_reason, issue.chatName, issue.networkName, summary)
 }
 
 @Composable

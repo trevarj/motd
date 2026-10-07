@@ -49,15 +49,28 @@ flowchart TD
 - UI observes repositories and ViewModel state. Connection and protocol actions
   go through `ConnectionManager` instead of constructing IRC clients in screens.
 - The chat-list Scaffold canvas and chat rows use theme `surface`, matching the top bar's original unscrolled `surface`; its scrolled `surfaceContainerLow` remains unchanged. After any network-activity banner and active-scope chip, folder tabs overlay the scrolling chat viewport on an unpainted, transparent strip; the measured tab-and-pinned-mentions header is reserved only for the list's initial position, so rows can scroll beneath it. A separate `surfaceContainerHigh` capsule carries the tabs, and the selected pill uses the stronger `primary`/`onPrimary` colors.
-- The chat list has one compact, inspectable network-activity banner, shaped and spaced like a
-  chat card: 8dp horizontal/2dp vertical outer margins, the shared 16dp card shape, 12dp inner
-  horizontal padding and density-scaled chat-list vertical padding/avatar-sized network icon.
-  The highest-severity, oldest unacknowledged connection/history issue wins; connection, waiting and sync summaries
-  support it without rotation. Engine progress remains visible independently of failures.
-  Banner text occupies at most two single-line rows: an ellipsized headline with issue badge, then
-  an ellipsized supporting summary with a separately reserved inline fraction. Summary overflow never
-  displaces the count; a thin progress bar adds no text row. Full reasons remain in the inspector.
-  Only the static headline announces politely. Healthy idle hides; archive/invitations promote
+- The chat list has one compact, inspectable network-activity banner matching the folder
+  capsule's 8dp horizontal/4dp vertical outer margins and 48dp resting height at normal font
+  scale, independently of compact/comfortable chat-row density. It keeps the shared 16dp
+  card shape, 12dp inner horizontal padding and a compact 24dp glyph without an avatar host.
+  The static localized `Network activity` title uses `bodyMedium` typography (14sp/20sp);
+  one Connecting/Syncing/Needs attention status underneath uses `labelMedium` (12sp/16sp).
+  A 2dp line gap gives 38dp of content with balanced 5dp top/bottom insets in 48dp; minimum rather than fixed
+  height lets larger accessible fonts grow the card. Unacknowledged issues retain a numeric,
+  plural-labeled badge beside the title.
+  The highest-severity, oldest eligible issue wins before visible connection activity and syncing.
+  Waiting alone does not make the card eligible; pending work remains visible as per-network
+  waiting/queued summaries in the global inspector, without changing per-row waiting cues.
+  The card stays on neutral `surfaceContainerHighest`, with only the warning glyph error-tinted.
+  Engine progress remains visible independently of failures: a centered 48dp cue pairs a muted
+  decorative 16dp history glyph, a 4dp gap and a rounded 28dp-wide, 2dp native track.
+  Its localized `History sync progress` label retains native range semantics, without fractions,
+  an end-stop marker, a third text row, or text overlap.
+  Progress is clamped to 0–1; a pass with no known total retains zero progress.
+  No network names, totals, failure reasons or supporting text appear on the banner;
+  detailed network/chat statuses and exact reasons remain in the inspector.
+  Only the changing current-status line announces politely, independently of the static title,
+  issue count and progress. Healthy idle hides; archive/invitations promote
   connection activity only, while the Material inspector remains global and preserves list modes.
   Swiping the card in either direction or its labeled accessibility dismiss action latches the
   process-local `NetworkActivityBannerSession` hidden; tapping still opens the inspector.

@@ -36,7 +36,7 @@ sealed interface ChatListSyncChrome {
     data class Syncing(
         val done: Int,
         val total: Int,
-        /** Some live pass is a user-requested window fetch, so the banner says "backfilling". */
+        /** Some live pass is a user-requested window fetch rather than reconnect catch-up. */
         val backfill: Boolean = false,
     ) : ChatListSyncChrome
 

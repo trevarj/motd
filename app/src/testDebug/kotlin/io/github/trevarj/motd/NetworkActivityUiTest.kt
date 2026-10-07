@@ -2,9 +2,9 @@ package io.github.trevarj.motd
 
 import android.content.Context
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsActions
@@ -44,16 +45,19 @@ import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.ChatFolderEntity
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.GlobalFeedPrefs
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
@@ -72,7 +76,6 @@ import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.testing.NoopConnectionManager
 import io.github.trevarj.motd.ui.chatlist.ChatListContent
 import io.github.trevarj.motd.ui.chatlist.ChatListInvitation
-import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
 import io.github.trevarj.motd.ui.chatlist.ChatListState
 import io.github.trevarj.motd.ui.chatlist.ChatListSyncChrome
 import io.github.trevarj.motd.ui.chatlist.ChatListViewModel
@@ -87,7 +90,6 @@ import io.github.trevarj.motd.ui.chatlist.NetworkActivityNetwork
 import io.github.trevarj.motd.ui.chatlist.NetworkActivityState
 import io.github.trevarj.motd.ui.chatlist.fakeDickordLabsPrefs
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import io.github.trevarj.motd.ui.theme.spacingFor
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
@@ -283,23 +285,26 @@ class NetworkActivityUiTest {
         }
     }
 
-    @Test fun oneBannerKeepsErrorAndIndependentProgressWithOnlyHeadlineLive() {
+    @Test fun oneQuietBannerKeepsIndependentProgressWithOnlyStatusLive() {
         val chrome = mutableStateOf<ChatListSyncChrome>(ChatListSyncChrome.Syncing(12, 42, true))
         setList(chrome = { chrome.value })
         compose.onAllNodesWithTag("chatlist_status_banner").assertCountEquals(1)
-        compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Libera: bad certificate")
-        compose.onNodeWithTag("chatlist_status_count", true).assertTextEquals("12/42")
+        compose.onNodeWithTag("chatlist_status_title", true).assertTextEquals("Network activity")
+        compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Needs attention")
+        compose.onNodeWithTag("chatlist_status_issue_count", true).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("1 issue")))
+        compose.onNodeWithText("12/42", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("Libera: bad certificate", useUnmergedTree = true).assertDoesNotExist()
         val progress = compose.onNodeWithTag("chatlist_status_progress", true).fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo]
         assertEquals(12f / 42, progress.current, 0.001f)
+        assertEquals(0f..1f, progress.range)
+        compose
+            .onNodeWithTag("chatlist_status_progress", true)
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("History sync progress")))
+        val historyCue = compose.onNodeWithTag("chatlist_status_progress_history", true)
+        historyCue.assertIsDisplayed()
+        assertFalse(historyCue.fetchSemanticsNode().config.contains(SemanticsProperties.ContentDescription))
         assertEquals(LiveRegionMode.Polite, compose.onNodeWithTag("chatlist_status_label", true).fetchSemanticsNode().config[SemanticsProperties.LiveRegion])
-        assertFalse(
-            compose
-                .onNodeWithTag("chatlist_status_banner")
-                .fetchSemanticsNode()
-                .config
-                .contains(SemanticsProperties.LiveRegion),
-        )
-        for (tag in listOf("chatlist_status_count", "chatlist_status_progress", "chatlist_status_summary")) {
+        for (tag in listOf("chatlist_status_banner", "chatlist_status_title", "chatlist_status_progress", "chatlist_status_progress_history", "chatlist_status_issue_count")) {
             assertFalse(
                 compose
                     .onNodeWithTag(tag, true)
@@ -309,8 +314,22 @@ class NetworkActivityUiTest {
             )
         }
         compose.runOnIdle { chrome.value = ChatListSyncChrome.Syncing(13, 42, true) }
-        compose.onNodeWithTag("chatlist_status_count", true).assertTextEquals("13/42")
-        compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Libera: bad certificate")
+        assertEquals(
+            13f / 42,
+            compose
+                .onNodeWithTag("chatlist_status_progress", true)
+                .fetchSemanticsNode()
+                .config[SemanticsProperties.ProgressBarRangeInfo]
+                .current,
+            0.001f,
+        )
+        compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Needs attention")
+        compose.onNodeWithTag("chatlist_status_title", true).assertTextEquals("Network activity")
+        val status = compose.onNodeWithTag("chatlist_status_label", true).fetchSemanticsNode().config
+        assertFalse(status.contains(SemanticsProperties.ProgressBarRangeInfo))
+        assertFalse(status.contains(SemanticsProperties.ContentDescription))
+        compose.onNodeWithTag("chatlist_status_banner").performClick()
+        compose.onNodeWithTag("network_activity_issue_1_reason", true).assertTextEquals("bad certificate")
     }
 
     @Test fun shortSwipeCancelsAndTouchTapStillInspects() {
@@ -382,36 +401,125 @@ class NetworkActivityUiTest {
         }
     }
 
-    @Test fun bannerSharesChatCardGeometryAcrossCompactAndComfortableDensity() {
+    @Test fun bannerMatchesActualFolderCapsuleAcrossCompactAndComfortableDensity() {
         val density = mutableStateOf(LayoutDensity.COMPACT)
         compose.setContent {
             MotdTheme(dynamicColor = false, layoutDensity = density.value) {
-                Column(Modifier.width(280.dp).testTag("banner_geometry_host")) {
-                    NetworkActivityBanner(activity(), ChatListSyncChrome.Syncing(1, 3), connectionNoticeVisible = true, includeHistory = true, onInspect = {}, onHide = {})
-                    ChatListRowItem(row(), showNetworkChip = false, onClick = {}, onLongClick = {})
+                Box(Modifier.width(280.dp).testTag("banner_geometry_host")) {
+                    ChatListContent(
+                        state =
+                            ChatListState(
+                                rows = listOf(row().copy(folderId = 1)),
+                                networks = listOf(network),
+                                folders = listOf(ChatFolderEntity(id = 1, displayName = "Dev", normalizedName = "dev", ordering = 0, expanded = false)),
+                                folderDisplayMode = FolderDisplayMode.TABS,
+                                loading = false,
+                            ),
+                        networkActivity = activity(),
+                        syncChrome = ChatListSyncChrome.Syncing(1, 3),
+                        connectionNoticeVisible = true,
+                        onOpenBuffer = {},
+                        onOpenSettings = {},
+                        onOpenSearch = {},
+                        onSetPinned = { _, _ -> },
+                        onSetMuted = { _, _ -> },
+                        onJoinChannel = { _, _, _ -> },
+                        onMessageUser = { _, _ -> },
+                    )
                 }
             }
         }
         for (mode in listOf(LayoutDensity.COMPACT, LayoutDensity.COMFORTABLE)) {
             compose.runOnIdle { density.value = mode }
             val banner = compose.onNodeWithTag("chatlist_status_banner").getUnclippedBoundsInRoot()
-            val card = compose.onNodeWithTag("chatlist_row_7").getUnclippedBoundsInRoot()
+            val capsule = compose.onNodeWithTag("chatlist_folder_capsule").getUnclippedBoundsInRoot()
             val host = compose.onNodeWithTag("banner_geometry_host", true).getUnclippedBoundsInRoot()
-            val icon = compose.onNodeWithTag("chatlist_status_icon", true).getUnclippedBoundsInRoot()
-            val headline = compose.onNodeWithTag("chatlist_status_label", true).getUnclippedBoundsInRoot()
-            val spacing = spacingFor(mode)
-            assertEquals(card.left, banner.left)
-            assertEquals(card.right, banner.right)
-            assertEquals(card.bottom - card.top, banner.bottom - banner.top)
+            val glyph = compose.onNodeWithTag("chatlist_status_glyph", true).getUnclippedBoundsInRoot()
+            val title = compose.onNodeWithTag("chatlist_status_title", true).getUnclippedBoundsInRoot()
+            val status = compose.onNodeWithTag("chatlist_status_label", true).getUnclippedBoundsInRoot()
+            val badge = compose.onNodeWithTag("chatlist_status_issue_count", true).getUnclippedBoundsInRoot()
+            assertEquals((banner.top + banner.bottom) / 2, (badge.top + badge.bottom) / 2)
+            assertEquals(banner.right - 12.dp, badge.right)
+            assertEquals(capsule.left, banner.left)
+            assertEquals(capsule.right, banner.right)
+            assertEquals(capsule.bottom - capsule.top, banner.bottom - banner.top)
+            assertEquals(48.dp, banner.bottom - banner.top)
             assertEquals(host.left + 8.dp, banner.left)
             assertEquals(host.right - 8.dp, banner.right)
-            assertEquals(host.top + 2.dp, banner.top)
-            assertEquals(banner.bottom + 4.dp, card.top)
-            assertEquals(banner.left + 12.dp, icon.left)
-            assertEquals(spacing.chatListAvatar, icon.right - icon.left)
-            assertEquals(spacing.chatListAvatar, icon.bottom - icon.top)
-            assertEquals((banner.top + banner.bottom) / 2, (icon.top + icon.bottom) / 2)
-            assertEquals(icon.right + 12.dp, headline.left)
+            assertEquals(banner.bottom + 8.dp, capsule.top)
+            compose.onNodeWithTag("chatlist_status_icon", true).assertDoesNotExist()
+            assertEquals(banner.left + 12.dp, glyph.left)
+            assertEquals(24.dp, glyph.right - glyph.left)
+            assertEquals(24.dp, glyph.bottom - glyph.top)
+            assertEquals((banner.top + banner.bottom) / 2, (glyph.top + glyph.bottom) / 2)
+            assertEquals(glyph.right + 12.dp, title.left)
+            assertEquals(title.left, status.left)
+            assertEquals(banner.top + 5.dp, title.top)
+            assertEquals(20.dp, title.bottom - title.top)
+            assertEquals(title.bottom + 2.dp, status.top)
+            assertEquals(16.dp, status.bottom - status.top)
+            assertEquals(38.dp, status.bottom - title.top)
+            assertEquals(banner.bottom - 5.dp, status.bottom)
+            val progress = compose.onNodeWithTag("chatlist_status_progress", true).getUnclippedBoundsInRoot()
+            val historyCue = compose.onNodeWithTag("chatlist_status_progress_history", true).getUnclippedBoundsInRoot()
+            assertEquals(status.right + 12.dp, historyCue.left)
+            assertEquals(16.dp, historyCue.right - historyCue.left)
+            assertEquals(16.dp, historyCue.bottom - historyCue.top)
+            assertEquals(historyCue.right + 4.dp, progress.left)
+            assertEquals(badge.left - 12.dp, progress.right)
+            assertEquals(28.dp, progress.right - progress.left)
+            assertEquals(48.dp, progress.right - historyCue.left)
+            // Material expands progress semantics vertically around the centered painted 2dp track.
+            val progressCenter = (progress.top + progress.bottom) / 2
+            assertEquals((banner.top + banner.bottom) / 2, progressCenter)
+            assertEquals((badge.top + badge.bottom) / 2, progressCenter)
+            assertEquals(progressCenter, (historyCue.top + historyCue.bottom) / 2)
+        }
+    }
+
+    @Test fun bannerGrowsWithAccessibleFontScaleAndKeepsBothLinesInsideCard() {
+        val fontScale = mutableStateOf(1f)
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale.value)) {
+                MotdTheme(dynamicColor = false) {
+                    Box(Modifier.width(280.dp).testTag("banner_font_host")) {
+                        NetworkActivityBanner(activity(), ChatListSyncChrome.Syncing(1, 3), connectionNoticeVisible = true, includeHistory = true, onInspect = {}, onHide = {})
+                    }
+                }
+            }
+        }
+        val restingHeight = compose.onNodeWithTag("chatlist_status_banner").getUnclippedBoundsInRoot().let { it.bottom - it.top }
+        val restingBanner = compose.onNodeWithTag("chatlist_status_banner").getUnclippedBoundsInRoot()
+        val restingProgress = compose.onNodeWithTag("chatlist_status_progress", true).getUnclippedBoundsInRoot()
+        val restingBadge = compose.onNodeWithTag("chatlist_status_issue_count", true).getUnclippedBoundsInRoot()
+        assertEquals((restingBanner.top + restingBanner.bottom) / 2, (restingProgress.top + restingProgress.bottom) / 2)
+        assertEquals((restingBadge.top + restingBadge.bottom) / 2, (restingProgress.top + restingProgress.bottom) / 2)
+        compose.runOnIdle { fontScale.value = 2f }
+        val banner = compose.onNodeWithTag("chatlist_status_banner").getUnclippedBoundsInRoot()
+        val host = compose.onNodeWithTag("banner_font_host", true).getUnclippedBoundsInRoot()
+        val title = compose.onNodeWithTag("chatlist_status_title", true).getUnclippedBoundsInRoot()
+        val status = compose.onNodeWithTag("chatlist_status_label", true).getUnclippedBoundsInRoot()
+        val badge = compose.onNodeWithTag("chatlist_status_issue_count", true).getUnclippedBoundsInRoot()
+        assertEquals((banner.top + banner.bottom) / 2, (badge.top + badge.bottom) / 2)
+        assertEquals(banner.right - 12.dp, badge.right)
+        check(badge.top >= banner.top && badge.bottom <= banner.bottom)
+        val progress = compose.onNodeWithTag("chatlist_status_progress", true).getUnclippedBoundsInRoot()
+        assertEquals(badge.left - 12.dp, progress.right)
+        assertEquals((banner.top + banner.bottom) / 2, (progress.top + progress.bottom) / 2)
+        assertEquals((badge.top + badge.bottom) / 2, (progress.top + progress.bottom) / 2)
+        val historyCue = compose.onNodeWithTag("chatlist_status_progress_history", true).getUnclippedBoundsInRoot()
+        assertEquals(status.right + 12.dp, historyCue.left)
+        assertEquals(historyCue.right + 4.dp, progress.left)
+        assertEquals(28.dp, progress.right - progress.left)
+        check(status.right > status.left && title.right <= historyCue.left - 12.dp)
+        check(banner.bottom - banner.top > restingHeight)
+        assertEquals(host.top + 4.dp, banner.top)
+        assertEquals(host.bottom - 4.dp, banner.bottom)
+        check(title.top >= banner.top && title.bottom + 2.dp <= status.top && status.bottom <= banner.bottom)
+        for (tag in listOf("chatlist_status_title", "chatlist_status_label")) {
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithTag(tag, true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertEquals(1, layouts.single().lineCount)
         }
     }
 
@@ -435,10 +543,9 @@ class NetworkActivityUiTest {
         compose.onNodeWithTag("chatlist_show_network_activity_banner").assertDoesNotExist()
         compose.onNodeWithTag("chatlist_network_activity").performClick()
         compose.onNodeWithTag("network_activity_close").performClick()
-        assertEquals(
-            listOf("Open network activity"),
-            compose.onNodeWithTag("chatlist_status_banner").fetchSemanticsNode().config[SemanticsProperties.ContentDescription],
-        )
+        val bannerDescription = compose.onNodeWithTag("chatlist_status_banner").fetchSemanticsNode().config[SemanticsProperties.ContentDescription]
+        check("Open network activity" in bannerDescription)
+        compose.onNodeWithTag("chatlist_status_issue_count", true).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("2 issues")))
         compose.onNodeWithTag("chatlist_status_hide").assertDoesNotExist()
         compose.onNodeWithContentDescription("Hide network activity banner").assertDoesNotExist()
         assertEquals(
@@ -584,7 +691,7 @@ class NetworkActivityUiTest {
                 current.value.networkActivity.value.active
                     .isNotEmpty()
             }
-            compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Libera: failure after hide")
+            compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Needs attention")
             compose.onNodeWithTag("chatlist_status_banner").assertIsDisplayed()
             compose.onNodeWithTag("chatlist_more_network_activity_new_dot", true).assertDoesNotExist()
             compose.runOnIdle { connections.connectionStates.value = mapOf(1L to ready) }
@@ -601,7 +708,6 @@ class NetworkActivityUiTest {
             }
             compose.onNodeWithTag("chatlist_status_banner").assertIsDisplayed()
             compose.runOnIdle { chrome.value = ChatListSyncChrome.Syncing(1, 3) }
-            compose.onNodeWithTag("chatlist_status_count", true).assertTextEquals("1/3")
             compose.onNodeWithTag("chatlist_status_progress", true).assertIsDisplayed()
             compose.runOnIdle { connections.connectionStates.value = mapOf(1L to ready) }
             compose.waitUntil(5_000) {
@@ -695,80 +801,89 @@ class NetworkActivityUiTest {
         compose.runOnIdle { assertEquals(emptyList<NetworkActivityAction>(), calls) }
     }
 
-    @Test fun narrowBannerKeepsTwoTextRowsAndReservesProgressFraction() {
+    @Test fun narrowBannerKeepsSingleReadableStatusAndNeutralIssueSurfaceWithInsetProgress() {
         val longReason = "Authentication rejected with a detailed reason. ".repeat(12)
         val snapshot =
             activity(listOf(issue(longReason))).copy(
                 networks =
                     listOf(
                         NetworkActivityNetwork(1, "Libera", IrcClientState.Failed(longReason, true)),
-                        NetworkActivityNetwork(2, "A very long network display name that must not displace the progress count", IrcClientState.Connecting),
+                        NetworkActivityNetwork(2, "A very long network display name", IrcClientState.Connecting),
                         NetworkActivityNetwork(3, "OFTC", ready),
                     ),
             )
+        val density = mutableStateOf(LayoutDensity.COMPACT)
+        var neutral = 0
+        var primary = 0
+        var warning = 0
         compose.setContent {
-            MotdTheme(dynamicColor = false) {
+            MotdTheme(dynamicColor = false, layoutDensity = density.value) {
+                neutral = MaterialTheme.colorScheme.surfaceContainerHighest.toArgb()
+                primary = MaterialTheme.colorScheme.primary.toArgb()
+                warning = MaterialTheme.colorScheme.error.toArgb()
                 Box(Modifier.width(280.dp)) {
                     NetworkActivityBanner(snapshot, ChatListSyncChrome.Syncing(12, 42, true), connectionNoticeVisible = true, includeHistory = true, onInspect = {}, onHide = {})
                 }
             }
         }
+        for (mode in listOf(LayoutDensity.COMPACT, LayoutDensity.COMFORTABLE)) {
+            compose.runOnIdle { density.value = mode }
+            val label = compose.onNodeWithTag("chatlist_status_label", true)
+            label.assertTextEquals("Needs attention")
+            val title = compose.onNodeWithTag("chatlist_status_title", true).assertTextEquals("Network activity")
+            for (line in listOf(title, label)) {
+                val layouts = mutableListOf<TextLayoutResult>()
+                line.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                check(layouts.single().lineCount == 1 && !layouts.single().isLineEllipsized(0))
+            }
+            compose.onNodeWithText("12/42", useUnmergedTree = true).assertDoesNotExist()
+            compose.onNodeWithText("2/3 networks connected", useUnmergedTree = true).assertDoesNotExist()
+            compose.onNodeWithText(longReason, useUnmergedTree = true).assertDoesNotExist()
+            val textNodes =
+                compose
+                    .onAllNodes(
+                        hasAnyAncestor(hasTestTag("chatlist_status_banner")) and
+                            !hasAnyAncestor(hasTestTag("chatlist_status_issue_count")) and
+                            SemanticsMatcher.keyIsDefined(SemanticsProperties.Text),
+                        useUnmergedTree = true,
+                    ).fetchSemanticsNodes()
+            assertEquals(2, textNodes.size)
+            val banner = compose.onNodeWithTag("chatlist_status_banner")
+            val bounds = banner.fetchSemanticsNode().boundsInRoot
+            val progress = compose.onNodeWithTag("chatlist_status_progress", true).fetchSemanticsNode().boundsInRoot
+            val labelBounds = label.fetchSemanticsNode().boundsInRoot
+            val historyCue = compose.onNodeWithTag("chatlist_status_progress_history", true).fetchSemanticsNode().boundsInRoot
+            check(historyCue.left > labelBounds.right && historyCue.right < progress.left && progress.right < bounds.right)
+            assertEquals(bounds.center.y, historyCue.center.y, 0.5f)
+            assertEquals(bounds.center.y, progress.center.y, 0.5f)
+            val pixels = banner.captureToImage().asAndroidBitmap()
+            assertEquals(neutral, pixels.getPixel(pixels.width / 2, 2))
+            val progressY = (progress.center.y - bounds.top).toInt()
+            val progressX = (progress.left - bounds.left + progress.width * 0.1f).toInt()
+            assertEquals(primary, pixels.getPixel(progressX, progressY))
+            // No end-stop dot, and no painted bottom-edge stripe.
+            assertEquals(neutral, pixels.getPixel(pixels.width / 2, pixels.height - 2))
+            val trackEnd = (progress.right - bounds.left - 6).toInt()
+            check(pixels.getPixel(trackEnd, progressY) != primary)
+            val glyph = compose.onNodeWithTag("chatlist_status_glyph", true).captureToImage().asAndroidBitmap()
+            check((0 until glyph.height).any { y -> (0 until glyph.width).any { x -> glyph.getPixel(x, y) == warning } })
+        }
+    }
 
-        fun layout(tag: String): TextLayoutResult {
-            val results = mutableListOf<TextLayoutResult>()
-            compose.onNodeWithTag(tag, true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(results) }
-            return results.single()
-        }
-        val headline = layout("chatlist_status_label")
-        val supporting = layout("chatlist_status_summary")
-        check(headline.lineCount <= 1)
-        check(supporting.lineCount <= 1)
-        check(headline.isLineEllipsized(0))
-        check(supporting.isLineEllipsized(0))
-        val count = compose.onNodeWithTag("chatlist_status_count", true)
-        count.assertIsDisplayed().assertTextEquals("12/42")
-        val fraction = layout("chatlist_status_count")
-        // String Text semantics reconstruct a parent-width paragraph, not its painted intrinsic
-        // frame. Protect the measured fraction's actual content extents instead of that frame.
-        check(fraction.lineCount == 1 && !fraction.isLineEllipsized(0)) {
-            "Fraction lines=${fraction.lineCount}, ellipsized=${fraction.isLineEllipsized(0)}"
-        }
-        check(fraction.getLineEnd(0, visibleEnd = true) == fraction.layoutInput.text.length) {
-            "Fraction visible end=${fraction.getLineEnd(0, visibleEnd = true)} of ${fraction.layoutInput.text.length}"
-        }
-        check(fraction.getLineLeft(0) >= 0f && fraction.getLineRight(0) <= fraction.size.width.toFloat()) {
-            "Fraction line ${fraction.getLineLeft(0)}..${fraction.getLineRight(0)} exceeds ${fraction.size.width}px"
-        }
-        for (offset in 0 until fraction.layoutInput.text.length) {
-            val glyph = fraction.getBoundingBox(offset)
-            check(glyph.left >= 0f && glyph.right <= fraction.size.width.toFloat()) {
-                "Fraction glyph $offset at ${glyph.left}..${glyph.right} exceeds ${fraction.size.width}px"
+    @Test fun progressSemanticsClampBoundariesAndUnknownTotalKeepsZero() {
+        val chrome = mutableStateOf<ChatListSyncChrome>(ChatListSyncChrome.Syncing(1, 3))
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                NetworkActivityBanner(activity(emptyList()), chrome.value, connectionNoticeVisible = false, includeHistory = true, onInspect = {}, onHide = {})
             }
         }
-        check(layout("chatlist_status_issue_count").lineCount <= 1)
-        assertFalse(count.fetchSemanticsNode().config.contains(SemanticsProperties.LiveRegion))
-        val summaryBounds = compose.onNodeWithTag("chatlist_status_summary", true).fetchSemanticsNode().boundsInRoot
-        check(
-            kotlin.math.abs(
-                summaryBounds.center.y -
-                    count
-                        .fetchSemanticsNode()
-                        .boundsInRoot.center.y,
-            ) <= 1f,
-        )
-        val textNodes =
-            compose
-                .onAllNodes(
-                    hasAnyAncestor(hasTestTag("chatlist_status_banner")) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Text),
-                    useUnmergedTree = true,
-                ).fetchSemanticsNodes()
-        val rows = mutableListOf<Float>()
-        for (node in textNodes.sortedBy { it.boundsInRoot.center.y }) {
-            val center = node.boundsInRoot.center.y
-            if (rows.none { kotlin.math.abs(it - center) <= 1f }) rows += center
+        for ((done, total, expected) in listOf(Triple(1, 3, 1f / 3), Triple(-1, 3, 0f), Triple(0, 3, 0f), Triple(3, 3, 1f), Triple(4, 3, 1f), Triple(0, 0, 0f), Triple(2, 0, 0f), Triple(2, -1, 0f))) {
+            compose.runOnIdle { chrome.value = ChatListSyncChrome.Syncing(done, total) }
+            compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Syncing")
+            val progress = compose.onNodeWithTag("chatlist_status_progress", true).fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo]
+            assertEquals(expected, progress.current, 0.001f)
+            assertEquals(0f..1f, progress.range)
         }
-        check(rows.size <= 2) { "Banner rendered ${rows.size} distinct text rows" }
-        compose.onNodeWithTag("chatlist_status_progress", true).assertIsDisplayed()
     }
 
     @Test fun connectActionClosesInspectorAndRecoversThroughTheViewModel() {
@@ -835,13 +950,59 @@ class NetworkActivityUiTest {
         }
     }
 
-    @Test fun highestSeverityThenOldestIssueWinsWithoutRotation() {
-        val advisory = issue("advisory", 7, false, 1).copy(kind = NetworkActivityKind.HISTORY_PARTIAL)
-        val ordinary = issue("timeout", fatal = false, episode = 2)
-        val fatal = issue("action required", episode = 3)
-        setList(activity = { activity(listOf(advisory, ordinary, fatal, issue("newer fatal", episode = 4))) })
-        compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Libera: action required")
-        compose.onNodeWithTag("chatlist_status_issue_count", true).assertTextEquals("4 issues")
+    @Test fun quietStatusPrecedenceAndConnectionGracePreserveEligibleIssues() {
+        val connecting = NetworkActivityNetwork(1, "Libera", IrcClientState.Connecting)
+        val state = mutableStateOf(activity(listOf(issue("fatal"), issue("history advisory", 7, false, 2).copy(kind = NetworkActivityKind.HISTORY_PARTIAL))).copy(networks = listOf(connecting)))
+        val chrome = mutableStateOf<ChatListSyncChrome>(ChatListSyncChrome.Waiting(5))
+        val connectionVisible = mutableStateOf(false)
+        val includeHistory = mutableStateOf(true)
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                NetworkActivityBanner(state.value, chrome.value, connectionVisible.value, includeHistory = includeHistory.value, onInspect = {}, onHide = {})
+            }
+        }
+        compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Needs attention")
+        compose.onNodeWithTag("chatlist_status_title", true).assertTextEquals("Network activity")
+        compose.onNodeWithTag("chatlist_status_issue_count", true).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("2 issues")))
+        compose.runOnIdle {
+            state.value = state.value.copy(active = state.value.active.filter { it.bufferId != null })
+            includeHistory.value = false
+        }
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        compose.runOnIdle { includeHistory.value = true }
+        compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Needs attention")
+        compose.runOnIdle { state.value = state.value.copy(active = listOf(issue("ordinary", fatal = false))) }
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        compose.runOnIdle { connectionVisible.value = true }
+        compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Needs attention")
+        compose.runOnIdle { state.value = state.value.copy(active = emptyList()) }
+        compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Connecting")
+        compose.runOnIdle { state.value = state.value.copy(networks = listOf(connecting.copy(connection = IrcClientState.Registering))) }
+        compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Connecting")
+        compose.runOnIdle { connectionVisible.value = false }
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        compose.runOnIdle { chrome.value = ChatListSyncChrome.Syncing(1, 3, true) }
+        compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Syncing")
+        compose.onNodeWithTag("chatlist_status_title", true).assertTextEquals("Network activity")
+        compose.onNodeWithTag("chatlist_status_label", true).assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+        compose.runOnIdle { chrome.value = ChatListSyncChrome.Hidden }
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+    }
+
+    @Test fun waitingOnlyHidesCardButInspectorShowsPendingNetworkWork() {
+        val pending = listOf(NetworkActivityChat(7, "#kotlin", HistorySyncStatus.AwaitingConnection), NetworkActivityChat(8, "#other", HistorySyncStatus.Queued))
+        val snapshot = activity(emptyList()).copy(networks = listOf(NetworkActivityNetwork(1, "Libera", IrcClientState.Disconnected, pending)))
+        setList(activity = { snapshot }, chrome = { ChatListSyncChrome.Waiting(2) })
+        compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_more").performClick()
+        compose.onNodeWithTag("chatlist_network_activity").performClick()
+        compose.onNodeWithTag("network_activity_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_network_1"))
+        compose.onNodeWithText("Libera").assertIsDisplayed()
+        compose.onNodeWithText("Waiting for a connection to sync history").assertIsDisplayed()
+        compose.onNodeWithText("Queued for history sync").assertIsDisplayed()
+        compose.onNodeWithText("#kotlin: Queued for history sync").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(pending, snapshot.networks.single().history) }
     }
 
     @Test fun healthyIdleHidesAndAcknowledgedRecordsDoNotPromoteButProgressStillDoes() {
@@ -983,7 +1144,7 @@ class NetworkActivityUiTest {
         compose.onNodeWithTag("chatlist_archived_folder").performClick()
         compose.onNodeWithTag("chatlist_status_banner").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_status_progress", true).assertDoesNotExist()
-        compose.onNodeWithTag("chatlist_status_issue_count", true).assertTextEquals("1 issue")
+        compose.onNodeWithTag("chatlist_status_issue_count", true).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("1 issue")))
         compose.onNodeWithTag("chatlist_status_banner").performClick()
         compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_network_2"))
         compose.onNodeWithTag("network_activity_network_2").assertIsDisplayed()
@@ -1002,16 +1163,6 @@ class NetworkActivityUiTest {
         compose.runOnIdle { state.value = state.value.copy(active = listOf(issue())) }
         compose.onNodeWithTag("chatlist_status_banner").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_status_progress", true).assertDoesNotExist()
-    }
-
-    @Test fun waitingBypassesConnectionGraceAndDescribesQueuedHistory() {
-        compose.setContent {
-            MotdTheme(dynamicColor = false) {
-                NetworkActivityBanner(NetworkActivityState(networks = listOf(NetworkActivityNetwork(1, "Libera", IrcClientState.Connecting))), ChatListSyncChrome.Waiting(5), connectionNoticeVisible = true, includeHistory = true, onInspect = {}, onHide = {})
-            }
-        }
-        compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Connecting to Libera…")
-        compose.onNodeWithTag("chatlist_status_summary", true).assertTextEquals(ApplicationProvider.getApplicationContext<Context>().getString(R.string.network_activity_queued))
     }
 
     @Test fun sheetForegroundsCurrentIssuesAndCollapsesClearableRecent() {

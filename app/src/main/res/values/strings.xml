@@ -23,6 +23,7 @@
     <string name="network_activity_new">New network activity</string>
     <string name="network_activity_open">Open network activity</string>
     <string name="network_activity_hide_banner">Hide network activity banner</string>
+    <string name="network_activity_history_sync_progress">History sync progress</string>
     <string name="network_activity_close">Close</string>
     <string name="network_activity_current">Networks</string>
     <string name="network_activity_active">Current issues · %1$d</string>
@@ -48,28 +49,17 @@
         <item quantity="one">%1$d issue</item>
         <item quantity="other">%1$d issues</item>
     </plurals>
-    <plurals name="network_activity_connected_count">
-        <item quantity="one">%1$d/%2$d network connected</item>
-        <item quantity="other">%1$d/%2$d networks connected</item>
-    </plurals>
-    <string name="network_activity_progress_count">%1$d/%2$d</string>
-    <string name="network_activity_connecting_to">Connecting to %1$s…</string>
-    <string name="network_activity_registering_to">Registering with %1$s…</string>
     <string name="network_activity_connecting">Connecting</string>
+    <string name="network_activity_attention">Needs attention</string>
     <string name="network_activity_registering">Registering</string>
     <string name="network_activity_connected">Connected</string>
     <string name="network_activity_offline">Offline</string>
-    <string name="network_activity_syncing">Syncing history…</string>
-    <string name="network_activity_backfilling">Backfilling history…</string>
-    <string name="network_activity_waiting">Waiting for connection…</string>
-    <string name="network_activity_queued">Queued for history sync</string>
+    <string name="network_activity_syncing">Syncing</string>
     <string name="network_activity_unavailable">History unavailable</string>
     <string name="network_activity_certificate_pending">Certificate decision pending in the security dialog</string>
     <string name="network_activity_connection_issue">Connection failed</string>
     <string name="network_activity_history_failed">History sync failed</string>
     <string name="network_activity_history_partial">History may be incomplete</string>
-    <string name="network_activity_network_reason">%1$s: %2$s</string>
-    <string name="network_activity_chat_reason">%1$s on %2$s: %3$s</string>
     <string name="network_activity_chat_target">%1$s on %2$s</string>
     <string name="network_activity_times">First: %1$s · Last: %2$s · Occurrences: %3$d</string>
     <string name="network_activity_retrying">Recovery in progress · original issue retained</string>
