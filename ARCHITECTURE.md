@@ -49,6 +49,11 @@ flowchart TD
 - UI observes repositories and ViewModel state. Connection and protocol actions
   go through `ConnectionManager` instead of constructing IRC clients in screens.
 - The chat-list Scaffold canvas and chat rows use theme `surface`, matching the top bar's original unscrolled `surface`; its scrolled `surfaceContainerLow` remains unchanged. After any network-activity banner and active-scope chip, folder tabs overlay the scrolling chat viewport on an unpainted, transparent strip; the measured tab-and-pinned-mentions header is reserved only for the list's initial position, so rows can scroll beneath it. A separate `surfaceContainerHigh` capsule carries the tabs, and the selected pill uses the stronger `primary`/`onPrimary` colors.
+- Archive pull hints, the revealed folder and the archive-only route share the chat-card
+  8dp horizontal/2dp vertical gutters, 16dp shape, 12dp inner inset and density-scaled
+  avatar host/vertical padding. `titleMedium` labels may wrap at accessible font scales;
+  their shared measured extent, including gutters, drives both pull geometry and list
+  translation. The resting fill matches unread chat cards; armed feedback uses `primaryContainer`.
 - The chat list has one compact, inspectable network-activity banner matching the folder
   capsule's 8dp horizontal/4dp vertical outer margins and 48dp resting height at normal font
   scale, independently of compact/comfortable chat-row density. It keeps the shared 16dp

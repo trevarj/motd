@@ -1,7 +1,14 @@
 package io.github.trevarj.motd
 
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -10,7 +17,9 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -18,15 +27,20 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.ui.chatlist.ArchiveAccessibilityAnnouncement
 import io.github.trevarj.motd.ui.chatlist.ChatListContent
 import io.github.trevarj.motd.ui.chatlist.ChatListDefaultTitle
@@ -34,6 +48,7 @@ import io.github.trevarj.motd.ui.chatlist.ChatListInvitation
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
 import io.github.trevarj.motd.ui.chatlist.ChatListState
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.spacingFor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -175,6 +190,134 @@ class ChatListSelectionUiTest {
                 .text
         assertTrue(title.startsWith("motd"))
         assertEquals(0, compose.onAllNodesWithText("/motd").fetchSemanticsNodes().size)
+    }
+
+    @Test fun archive_cards_match_chat_geometry_across_density_and_large_fonts() {
+        val density = mutableStateOf(LayoutDensity.COMPACT)
+        val fontScale = mutableStateOf(1f)
+        val active = row()
+        val state =
+            mutableStateOf(
+                ChatListState(
+                    rows = listOf(active),
+                    archivedRows = listOf(row().copy(bufferId = 2, archived = true)),
+                    loading = false,
+                ),
+            )
+        lateinit var colors: ColorScheme
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale.value)) {
+                MotdTheme(dynamicColor = false, layoutDensity = density.value) {
+                    colors = MaterialTheme.colorScheme
+                    ChatListContent(
+                        state = state.value,
+                        onOpenBuffer = {},
+                        onOpenSettings = {},
+                        onOpenSearch = {},
+                        onSetPinned = { _, _ -> },
+                        onSetMuted = { _, _ -> },
+                        onJoinChannel = { _, _, _ -> },
+                        onMessageUser = { _, _ -> },
+                    )
+                }
+            }
+        }
+
+        for (mode in listOf(LayoutDensity.COMPACT, LayoutDensity.COMFORTABLE)) {
+            val spacing = spacingFor(mode)
+            var restingHeight = 0.dp
+            for (scale in listOf(1f, 2f)) {
+                compose.runOnIdle {
+                    density.value = mode
+                    fontScale.value = scale
+                    state.value = state.value.copy(rows = listOf(active))
+                }
+                val initialRow = compose.onNodeWithTag("chatlist_row_1").getUnclippedBoundsInRoot()
+                val chatTitle = compose.onNodeWithText("alice", useUnmergedTree = true).getUnclippedBoundsInRoot()
+                val chatLayouts = mutableListOf<TextLayoutResult>()
+                compose.onNodeWithText("alice", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) {
+                    it(chatLayouts)
+                }
+                val reveal =
+                    compose
+                        .onNodeWithTag("chatlist_archive_pull_target")
+                        .fetchSemanticsNode()
+                        .config[SemanticsActions.CustomActions]
+                        .single { it.label == "Reveal archived chats" }
+                compose.runOnIdle { assertTrue(reveal.action()) }
+
+                val folder = compose.onNodeWithTag("chatlist_archived_folder").assertIsDisplayed()
+                val card = folder.getUnclippedBoundsInRoot()
+                val viewport = compose.onNodeWithTag("chatlist_archive_pull_target").getUnclippedBoundsInRoot()
+                val shiftedRow = compose.onNodeWithTag("chatlist_row_1").getUnclippedBoundsInRoot()
+                val iconHost = compose.onNodeWithTag("chatlist_archived_icon_host", true).getUnclippedBoundsInRoot()
+                val glyph = compose.onNodeWithTag("chatlist_archived_glyph", true).getUnclippedBoundsInRoot()
+                val titleHost = compose.onNodeWithTag("chatlist_archived_title_host", true).getUnclippedBoundsInRoot()
+                val title = compose.onNodeWithText("Archived Chats (1)", useUnmergedTree = true).getUnclippedBoundsInRoot()
+                assertEquals(viewport.left + 8.dp, card.left)
+                assertEquals(viewport.right - 8.dp, card.right)
+                assertEquals(initialRow.left, card.left)
+                assertEquals(initialRow.right, card.right)
+                assertEquals(initialRow.top, card.top)
+                assertEquals(card.bottom + 4.dp, shiftedRow.top)
+                assertEquals(card.bottom - card.top + 4.dp, shiftedRow.top - initialRow.top)
+                assertEquals(card.left + 12.dp, iconHost.left)
+                assertEquals(spacing.chatListAvatar, iconHost.right - iconHost.left)
+                assertEquals(spacing.chatListAvatar, iconHost.bottom - iconHost.top)
+                assertEquals((card.top + card.bottom) / 2, (iconHost.top + iconHost.bottom) / 2)
+                assertEquals(24.dp, glyph.right - glyph.left)
+                assertEquals(24.dp, glyph.bottom - glyph.top)
+                assertEquals((iconHost.left + iconHost.right) / 2, (glyph.left + glyph.right) / 2)
+                assertEquals((iconHost.top + iconHost.bottom) / 2, (glyph.top + glyph.bottom) / 2)
+                assertEquals(iconHost.right + 12.dp, title.left)
+                assertEquals(chatTitle.left, title.left)
+                assertEquals(card.right - 12.dp, titleHost.right)
+                assertEquals((card.top + card.bottom) / 2, (title.top + title.bottom) / 2)
+                assertEquals(
+                    maxOf(spacing.chatListAvatar, titleHost.bottom - titleHost.top) + spacing.chatListVPad * 2,
+                    card.bottom - card.top,
+                )
+                assertTrue(title.top >= card.top + spacing.chatListVPad)
+                assertTrue(title.bottom <= card.bottom - spacing.chatListVPad)
+                val archiveLayouts = mutableListOf<TextLayoutResult>()
+                compose.onNodeWithText("Archived Chats (1)", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) {
+                    it(archiveLayouts)
+                }
+                val archiveLayout = archiveLayouts.single()
+                val chatTextStyle = chatLayouts.single().layoutInput.style
+                assertEquals(chatTextStyle.fontSize, archiveLayout.layoutInput.style.fontSize)
+                assertEquals(chatTextStyle.lineHeight, archiveLayout.layoutInput.style.lineHeight)
+                val layoutDiagnostic =
+                    "$mode fontScale=$scale size=${archiveLayout.size} paragraph=${archiveLayout.multiParagraph.width}x${archiveLayout.multiParagraph.height} " +
+                        "constraints=${archiveLayout.layoutInput.constraints} title=$title card=$card viewport=$viewport"
+                // String-text semantics rebuild at max width; compare painted lines, not paragraph width.
+                assertTrue("The archive count overflows vertically: $layoutDiagnostic", !archiveLayout.didOverflowHeight)
+                assertEquals(archiveLayout.layoutInput.text.length, archiveLayout.getLineEnd(archiveLayout.lineCount - 1))
+                for (line in 0 until archiveLayout.lineCount) {
+                    val left = archiveLayout.getLineLeft(line)
+                    val right = archiveLayout.getLineRight(line)
+                    assertTrue(
+                        "Archive line $line ($left..$right) clips its measured width: $layoutDiagnostic",
+                        left >= 0f && right <= archiveLayout.size.width,
+                    )
+                    assertTrue("Archive line $line is ellipsized: $layoutDiagnostic", !archiveLayout.isLineEllipsized(line))
+                }
+                if (scale == 1f) {
+                    restingHeight = card.bottom - card.top
+                } else {
+                    assertTrue("The archive extent must grow with wrapped accessible text", card.bottom - card.top > restingHeight)
+                }
+                val pixels = folder.captureToImage().asAndroidBitmap()
+                val sampleInset = with(compose.density) { 8.dp.roundToPx() }
+                assertEquals(lerp(colors.surface, colors.primaryContainer, .20f).toArgb(), pixels.getPixel(pixels.width - sampleInset, pixels.height / 2))
+                assertEquals("The card keeps rounded, unpainted corners", colors.surface.toArgb(), pixels.getPixel(0, 0))
+
+                compose.runOnIdle { state.value = state.value.copy(rows = emptyList()) }
+                val onlyCard = compose.onNodeWithTag("chatlist_archived_folder").assertIsDisplayed().getUnclippedBoundsInRoot()
+                assertEquals("Archive-only uses the same complete card extent and gutters", card, onlyCard)
+                assertEquals(title, compose.onNodeWithText("Archived Chats (1)", useUnmergedTree = true).getUnclippedBoundsInRoot())
+            }
+        }
     }
 
     @Test fun empty_archive_uses_archive_specific_copy_without_connection_prompt() {

@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -194,6 +195,7 @@ import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.SenderLabel
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -1670,8 +1672,8 @@ private fun ChatList(
     }
     val hasActiveRows = rows.isNotEmpty() || actionableInvitationCount > 0
     val hasArchivedRows = archivedRows.isNotEmpty()
-    val archiveFolderHeight = 56.dp
-    val archiveFolderGeometry = ArchiveFolderPullGeometry(with(LocalDensity.current) { archiveFolderHeight.toPx() })
+    var archiveFolderHeightPx by remember { mutableIntStateOf(0) }
+    val archiveFolderGeometry = ArchiveFolderPullGeometry(archiveFolderHeightPx.toFloat())
     val archiveFolderPullEligible = !archiveMode && !invitationMode && hasActiveRows && hasArchivedRows
     val archivedOnly = !archiveMode && !invitationMode && !hasActiveRows && hasArchivedRows
     var archivePullState by remember { mutableStateOf(ArchiveFolderPullState()) }
@@ -1757,8 +1759,8 @@ private fun ChatList(
 
     DisposableEffect(Unit) { onDispose { archiveSettleJob?.cancel() } }
 
-    LaunchedEffect(archiveRevealSignal, archiveFolderPullEligible, archivedOnly) {
-        if (archiveRevealSignal == handledArchiveRevealSignal || archiveMode) return@LaunchedEffect
+    LaunchedEffect(archiveRevealSignal, archiveFolderPullEligible, archivedOnly, archiveFolderGeometry) {
+        if (archiveRevealSignal == handledArchiveRevealSignal || archiveMode || !archiveFolderGeometry.isValid) return@LaunchedEffect
         if (archivedOnly) {
             handledArchiveRevealSignal = archiveRevealSignal
             return@LaunchedEffect
@@ -1770,7 +1772,7 @@ private fun ChatList(
     }
 
     val archiveFolderPullConnection =
-        remember(archiveFolderPullEligible, archiveSettling) {
+        remember(archiveFolderPullEligible, archiveSettling, archiveFolderGeometry) {
             object : NestedScrollConnection {
                 override fun onPreScroll(
                     available: Offset,
@@ -1838,7 +1840,7 @@ private fun ChatList(
                 .fillMaxSize()
                 .clipToBounds()
                 .nestedScroll(archiveFolderPullConnection)
-                .pointerInput(archiveFolderPullEligible, archiveFolderRevealed) {
+                .pointerInput(archiveFolderPullEligible, archiveFolderRevealed, archiveFolderGeometry) {
                     // Once revealed, leave taps to the folder and use nested scroll to hide it.
                     if (!archiveFolderPullEligible || archiveFolderRevealed) return@pointerInput
                     awaitEachGesture {
@@ -2141,31 +2143,42 @@ private fun ChatList(
             }
         }
 
-        if (archivedOnly) {
-            Box(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(top = with(LocalDensity.current) { topContentPaddingPx.toDp() })
-                        .height(archiveFolderHeight),
-            ) {
-                ArchivedChatsFolder(archivedRows.size, onOpenArchive)
-            }
-        }
-
-        if (archiveFolderPullEligible && archiveDisplayExposurePx > 0f) {
-            val overlayModifier =
-                Modifier
-                    .fillMaxWidth()
-                    .height(archiveFolderHeight)
-                    .graphicsLayer { translationY = topContentPaddingPx + archiveDisplayExposurePx - archiveFolderGeometry.rowPx }
+        if (archivedOnly || archiveFolderPullEligible) {
             ArchiveFolderPullOverlay(
-                phase = archivePullState.phase,
-                exposurePx = archiveDisplayExposurePx,
+                phase = if (archivedOnly) ArchiveFolderPullPhase.REVEALED else archivePullState.phase,
+                exposurePx = if (archivedOnly) archiveFolderGeometry.rowPx else archiveDisplayExposurePx,
                 geometry = archiveFolderGeometry,
                 archivedCount = archivedRows.size,
                 onOpenArchive = onOpenArchive,
-                modifier = overlayModifier,
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .onSizeChanged { size ->
+                            val previousHeight = archiveFolderHeightPx
+                            archiveFolderHeightPx = size.height
+                            if (previousHeight > 0 && previousHeight != size.height) {
+                                val scale = size.height.toFloat() / previousHeight
+                                archivePullState = archivePullState.copy(exposurePx = archivePullState.exposurePx * scale)
+                                archiveDisplayExposurePx *= scale
+                                if (archiveSettling) {
+                                    archiveSettleJob?.cancel()
+                                    archiveSettleJob = null
+                                    archiveSettling = false
+                                    archiveDisplayExposurePx =
+                                        if (archivePullState.phase == ArchiveFolderPullPhase.REVEALED) size.height.toFloat() else 0f
+                                }
+                            }
+                        }.graphicsLayer {
+                            translationY =
+                                topContentPaddingPx +
+                                if (archivedOnly) 0f else archiveDisplayExposurePx - archiveFolderGeometry.rowPx
+                        }.then(
+                            if (!archivedOnly && archiveDisplayExposurePx <= 0f) {
+                                Modifier.clearAndSetSemantics { }
+                            } else {
+                                Modifier
+                            },
+                        ),
             )
         }
 
@@ -2364,27 +2377,105 @@ private fun InvitationListItem(
 }
 
 @Composable
-private fun ArchivedChatsFolder(
+private fun ArchiveFolderCard(
     count: Int,
+    phase: ArchiveFolderPullPhase,
+    activeProgress: Float,
     onOpenArchive: () -> Unit,
-    contentColor: Color = MaterialTheme.colorScheme.onSurface,
+    modifier: Modifier = Modifier,
 ) {
+    val spacing = LocalSpacing.current
+    val committed = phase == ArchiveFolderPullPhase.REVEALED
+    val pullBackground = chatListRowContainer(ChatListRowVisualState.UNREAD, MaterialTheme.colorScheme)
+    val backgroundColor = lerp(pullBackground, MaterialTheme.colorScheme.primaryContainer, activeProgress)
+    val contentColor = lerp(MaterialTheme.colorScheme.onSurface, MaterialTheme.colorScheme.onPrimaryContainer, activeProgress)
+    val hint = stringResource(R.string.chatlist_archived_pull_hint)
+    val armedPrompt = stringResource(R.string.chatlist_archived_pull_armed)
     Row(
         modifier =
-            Modifier
+            modifier
                 .fillMaxWidth()
-                .clickable(onClick = onOpenArchive)
-                .testTag("chatlist_archived_folder")
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(horizontal = 8.dp, vertical = 2.dp)
+                .clip(MotdShapes.card)
+                .background(backgroundColor)
+                .then(
+                    if (committed) {
+                        Modifier.clickable(onClick = onOpenArchive).testTag("chatlist_archived_folder")
+                    } else {
+                        Modifier
+                            .clearAndSetSemantics { stateDescription = if (phase == ArchiveFolderPullPhase.ARMED) armedPrompt else hint }
+                            .testTag("chatlist_archived_pull_${phase.name.lowercase()}")
+                    },
+                ).defaultMinSize(minHeight = 48.dp)
+                .padding(horizontal = 12.dp, vertical = spacing.chatListVPad),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Outlined.Archive, contentDescription = null, tint = contentColor)
-        Text(
-            text = stringResource(R.string.chatlist_archived_chats_count, count),
-            modifier = Modifier.padding(start = 16.dp),
-            fontWeight = FontWeight.Medium,
-            color = contentColor,
-        )
+        Box(
+            modifier =
+                Modifier
+                    .size(spacing.chatListAvatar)
+                    .background(contentColor.copy(alpha = .14f), CircleShape)
+                    .testTag("chatlist_archived_icon_host"),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (committed) Icons.Outlined.Archive else Icons.Filled.ExpandMore,
+                contentDescription = null,
+                tint = contentColor,
+                modifier =
+                    Modifier
+                        .size(if (committed) 24.dp else 18.dp)
+                        .graphicsLayer { rotationZ = if (committed) 0f else 180f * activeProgress }
+                        .testTag("chatlist_archived_glyph"),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        // Measure all labels together so pulling, release and archive-only never change extent.
+        Box(
+            modifier = Modifier.weight(1f).testTag("chatlist_archived_title_host"),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Text(
+                text = stringResource(R.string.chatlist_archived_chats_count, count),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+                color = contentColor,
+                modifier =
+                    Modifier
+                        .graphicsLayer { alpha = if (committed) 1f else 0f }
+                        .then(if (committed) Modifier else Modifier.clearAndSetSemantics { }),
+            )
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+                color = contentColor,
+                modifier =
+                    Modifier
+                        .clearAndSetSemantics { }
+                        .graphicsLayer {
+                            alpha = if (committed) 0f else 1f - activeProgress
+                            translationY = if (committed) 0f else -8.dp.toPx() * activeProgress
+                            scaleX = if (committed) 1f else 1f - .1f * activeProgress
+                            scaleY = scaleX
+                        },
+            )
+            Text(
+                text = armedPrompt,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+                color = contentColor,
+                modifier =
+                    Modifier
+                        .clearAndSetSemantics { }
+                        .graphicsLayer {
+                            alpha = if (committed) 0f else activeProgress
+                            translationY = if (committed) 0f else 8.dp.toPx() * (1f - activeProgress)
+                            scaleX = if (committed) 1f else .9f + .1f * activeProgress
+                            scaleY = scaleX
+                        },
+            )
+        }
     }
 }
 
@@ -2404,92 +2495,16 @@ private fun ArchiveFolderPullOverlay(
         animationSpec = tween(durationMillis = 230, easing = FastOutLinearInEasing),
         label = "archive pull color",
     )
-    val activeBackground = MaterialTheme.colorScheme.primaryContainer
-    val pullBackground = MaterialTheme.colorScheme.background
-    val inactiveContent = MaterialTheme.colorScheme.onSurface
-    val activeContent = MaterialTheme.colorScheme.onPrimaryContainer
-    val backgroundColor = lerp(pullBackground, activeBackground, activeProgress)
-    val contentColor = lerp(inactiveContent, activeContent, activeProgress)
-    val prompt =
-        stringResource(
-            if (armed) R.string.chatlist_archived_pull_armed else R.string.chatlist_archived_pull_hint,
-        )
-    Box(
+    ArchiveFolderCard(
+        count = archivedCount,
+        phase = phase,
+        activeProgress = activeProgress,
+        onOpenArchive = onOpenArchive,
         modifier =
-            modifier
-                .fillMaxWidth()
-                .graphicsLayer {
-                    alpha = if (armed || committed) 1f else archiveFolderPullHintAlpha(exposurePx, geometry)
-                }.background(backgroundColor),
-    ) {
-        if (committed) {
-            // Keep rendering the same pull surface after release so the list never changes shape.
-            ArchivedChatsFolder(
-                count = archivedCount,
-                onOpenArchive = onOpenArchive,
-                contentColor = contentColor,
-            )
-        } else {
-            Row(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .clearAndSetSemantics { stateDescription = prompt }
-                        .testTag("chatlist_archived_pull_${phase.name.lowercase()}")
-                        .padding(horizontal = 20.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier =
-                        Modifier
-                            .size(24.dp)
-                            .background(contentColor.copy(alpha = .14f), CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Filled.ExpandMore,
-                        contentDescription = null,
-                        tint = contentColor,
-                        modifier =
-                            Modifier
-                                .size(18.dp)
-                                .graphicsLayer { rotationZ = 180f * activeProgress },
-                    )
-                }
-                Box(
-                    modifier =
-                        Modifier
-                            .weight(1f)
-                            .padding(start = 16.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.chatlist_archived_pull_hint),
-                        color = contentColor,
-                        fontWeight = FontWeight.Medium,
-                        modifier =
-                            Modifier.graphicsLayer {
-                                alpha = 1f - activeProgress
-                                translationY = -8.dp.toPx() * activeProgress
-                                scaleX = 1f - .1f * activeProgress
-                                scaleY = scaleX
-                            },
-                    )
-                    Text(
-                        text = stringResource(R.string.chatlist_archived_pull_armed),
-                        color = contentColor,
-                        fontWeight = FontWeight.Medium,
-                        modifier =
-                            Modifier.graphicsLayer {
-                                alpha = activeProgress
-                                translationY = 8.dp.toPx() * (1f - activeProgress)
-                                scaleX = .9f + .1f * activeProgress
-                                scaleY = scaleX
-                            },
-                    )
-                }
-            }
-        }
-    }
+            modifier.graphicsLayer {
+                alpha = if (armed || committed) 1f else archiveFolderPullHintAlpha(exposurePx, geometry)
+            },
+    )
 }
 
 internal const val CHAT_LIST_SWIPE_THRESHOLD_FRACTION = 0.60f

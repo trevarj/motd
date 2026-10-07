@@ -442,14 +442,10 @@ class ChatFolderUiTest {
         ) {
             val description = resources.getQuantityString(if (mention) R.plurals.badge_mention else R.plurals.badge_unread, count, count)
             val tab = compose.onNodeWithTag(tabTag).assertIsDisplayed()
-            val tabBounds = tab.fetchSemanticsNode().boundsInRoot
-            val badgeBounds =
+            val badge =
                 compose
                     .onNode(hasContentDescription(description) and hasAnyAncestor(hasTestTag(tabTag)), useUnmergedTree = true)
                     .assertIsDisplayed()
-                    .fetchSemanticsNode()
-                    .boundsInRoot
-            val pixels = tab.captureToImage().asAndroidBitmap()
             val background =
                 when {
                     mention -> colors.secondary
@@ -464,13 +460,22 @@ class ChatFolderUiTest {
                 }
             var backgroundVisible = false
             var foregroundVisible = false
-            for (x in (badgeBounds.left - tabBounds.left).toInt() until (badgeBounds.right - tabBounds.left).toInt()) {
-                for (y in (badgeBounds.top - tabBounds.top).toInt() until (badgeBounds.bottom - tabBounds.top).toInt()) {
-                    val color = pixels.getPixel(x, y)
-                    if (color == foreground.toArgb()) foregroundVisible = true
-                    if (color == background.toArgb()) backgroundVisible = true
+            // Badge semantics/layout can precede the native repaint after text and palette changes.
+            compose.waitUntil(timeoutMillis = 5_000) {
+                val pixels = tab.captureToImage().asAndroidBitmap()
+                val tabBounds = tab.fetchSemanticsNode().boundsInRoot
+                val badgeBounds = badge.fetchSemanticsNode().boundsInRoot
+                backgroundVisible = false
+                foregroundVisible = false
+                for (x in (badgeBounds.left - tabBounds.left).toInt() until (badgeBounds.right - tabBounds.left).toInt()) {
+                    for (y in (badgeBounds.top - tabBounds.top).toInt() until (badgeBounds.bottom - tabBounds.top).toInt()) {
+                        val color = pixels.getPixel(x, y)
+                        if (color == foreground.toArgb()) foregroundVisible = true
+                        if (color == background.toArgb()) backgroundVisible = true
+                    }
+                    if (foregroundVisible && backgroundVisible) break
                 }
-                if (foregroundVisible && backgroundVisible) break
+                backgroundVisible && foregroundVisible
             }
             assertTrue("The count chip uses the expected fill on $tabTag", backgroundVisible)
             assertTrue("The count chip uses the expected text color on $tabTag", foregroundVisible)
@@ -487,8 +492,6 @@ class ChatFolderUiTest {
         compose.runOnIdle {
             state.value = state.value.copy(rows = state.value.rows.map { if (it.folderId == 7L) it.copy(mentionCount = 2) else it })
         }
-        compose.mainClock.advanceTimeBy(1_000)
-        compose.waitForIdle()
         compose.onNodeWithTag("chatlist_folder_tab_7").assertIsSelected()
         assertBadgeColors("chatlist_folder_tab_7", 2, mention = true)
         assertBadgeColors("chatlist_folder_tab_all", 2, mention = true)
