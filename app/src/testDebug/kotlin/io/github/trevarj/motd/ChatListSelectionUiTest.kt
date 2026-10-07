@@ -5,6 +5,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
@@ -42,6 +44,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.ui.chatlist.ArchiveAccessibilityAnnouncement
+import io.github.trevarj.motd.ui.chatlist.ArchiveFolderPull
 import io.github.trevarj.motd.ui.chatlist.ChatListContent
 import io.github.trevarj.motd.ui.chatlist.ChatListDefaultTitle
 import io.github.trevarj.motd.ui.chatlist.ChatListInvitation
@@ -57,6 +60,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowSystemClock
+import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -190,6 +195,137 @@ class ChatListSelectionUiTest {
                 .text
         assertTrue(title.startsWith("motd"))
         assertEquals(0, compose.onAllNodesWithText("/motd").fetchSemanticsNodes().size)
+    }
+
+    @Test fun archive_pull_reveals_while_held_after_early_release_and_cancel_settle_back() {
+        assertTouchPullOpensArchive(changeGeometryDuringPull = false)
+    }
+
+    @Test fun archive_pull_hold_survives_layout_density_remeasurement() {
+        assertTouchPullOpensArchive(changeGeometryDuringPull = true)
+    }
+
+    @Test fun archive_pull_completed_reveal_survives_native_cancel_and_queued_drag() {
+        assertTouchPullOpensArchive(changeGeometryDuringPull = false, finishWithCancel = true)
+    }
+
+    private fun advanceArchivePullClock(millis: Long) {
+        compose.runOnUiThread { ShadowSystemClock.advanceBy(Duration.ofMillis(millis)) }
+        compose.mainClock.advanceTimeBy(millis, ignoreFrameDuration = true)
+        compose.waitForIdle()
+    }
+
+    private fun assertTouchPullOpensArchive(
+        changeGeometryDuringPull: Boolean,
+        finishWithCancel: Boolean = false,
+    ) {
+        val density = mutableStateOf(LayoutDensity.COMPACT)
+        val state =
+            ChatListState(
+                rows = (1L..20L).map { row().copy(bufferId = it) },
+                archivedRows = listOf(row().copy(bufferId = 99, displayName = "archived", archived = true)),
+                loading = false,
+            )
+        compose.setContent {
+            MotdTheme(dynamicColor = false, layoutDensity = density.value) {
+                ChatListContent(
+                    state = state,
+                    onOpenBuffer = {},
+                    onOpenSettings = {},
+                    onOpenSearch = {},
+                    onSetPinned = { _, _ -> },
+                    onSetMuted = { _, _ -> },
+                    onJoinChannel = { _, _, _ -> },
+                    onMessageUser = { _, _ -> },
+                )
+            }
+        }
+
+        val rowBounds = compose.onNodeWithTag("chatlist_row_1").getUnclippedBoundsInRoot()
+        val initialHeight = rowBounds.bottom - rowBounds.top
+        compose.mainClock.autoAdvance = false
+
+        fun assertArmed() {
+            // The pull card deliberately clears its test tag from accessibility semantics.
+            compose
+                .onNode(
+                    SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Keep holding…"),
+                    useUnmergedTree = true,
+                ).assertIsDisplayed()
+            compose.onNodeWithTag("chatlist_archived_folder").assertDoesNotExist()
+        }
+
+        if (!changeGeometryDuringPull && !finishWithCancel) {
+            compose.onNodeWithTag("chatlist_rows").performTouchInput {
+                down(center)
+                moveBy(Offset(0f, initialHeight.toPx() / 4f))
+                moveBy(Offset(0f, initialHeight.toPx() / 4f))
+            }
+            advanceArchivePullClock(32)
+            assertTrue(compose.onNodeWithTag("chatlist_row_1").getUnclippedBoundsInRoot().top > rowBounds.top)
+            compose.onNodeWithTag("chatlist_rows").performTouchInput { up() }
+            advanceArchivePullClock(ArchiveFolderPull.HoldMillis + 200)
+            compose.onNodeWithTag("chatlist_archived_folder").assertDoesNotExist()
+            assertEquals(rowBounds, compose.onNodeWithTag("chatlist_row_1").getUnclippedBoundsInRoot())
+
+            for (cancelled in listOf(false, true)) {
+                compose.onNodeWithTag("chatlist_rows").performTouchInput {
+                    down(center)
+                    moveBy(Offset(0f, initialHeight.toPx()))
+                    moveBy(Offset(0f, initialHeight.toPx()))
+                }
+                advanceArchivePullClock(32)
+                assertArmed()
+                advanceArchivePullClock(ArchiveFolderPull.HoldMillis / 2)
+                assertArmed()
+                compose.onNodeWithTag("chatlist_rows").performTouchInput {
+                    if (cancelled) cancel() else up()
+                }
+                advanceArchivePullClock(ArchiveFolderPull.HoldMillis + 200)
+                compose.onNodeWithTag("chatlist_archived_folder").assertDoesNotExist()
+                assertEquals(rowBounds, compose.onNodeWithTag("chatlist_row_1").getUnclippedBoundsInRoot())
+            }
+        }
+
+        compose.onNodeWithTag("chatlist_rows").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, initialHeight.toPx()))
+            moveBy(Offset(0f, initialHeight.toPx()))
+        }
+        advanceArchivePullClock(32)
+        assertArmed()
+        advanceArchivePullClock(ArchiveFolderPull.HoldMillis / 2)
+        assertArmed()
+        if (changeGeometryDuringPull) {
+            compose.runOnUiThread {
+                density.value = LayoutDensity.COMFORTABLE
+                // A paused Compose clock does not pump global snapshot apply notifications.
+                Snapshot.sendApplyNotifications()
+            }
+            // Compose, then measure; each frame also drains Android layout via waitForIdle.
+            advanceArchivePullClock(16)
+            advanceArchivePullClock(16)
+            val changedBounds = compose.onNodeWithTag("chatlist_row_1").getUnclippedBoundsInRoot()
+            assertTrue(changedBounds.bottom - changedBounds.top > initialHeight)
+            assertArmed()
+        }
+        // More than 1200ms from arming, but less than a restarted hold after remeasurement.
+        advanceArchivePullClock(ArchiveFolderPull.HoldMillis / 2)
+        val revealed = compose.onNodeWithTag("chatlist_archived_folder").assertIsDisplayed().getUnclippedBoundsInRoot()
+        val shiftedRow = compose.onNodeWithTag("chatlist_row_1").getUnclippedBoundsInRoot()
+        compose.onNodeWithTag("chatlist_rows").performTouchInput {
+            // Batch a final upward drag with termination: it cannot hide or scroll the completed pull.
+            moveBy(Offset(0f, -initialHeight.toPx() * 2))
+            if (finishWithCancel) cancel() else up()
+        }
+        advanceArchivePullClock(600)
+        assertEquals(revealed, compose.onNodeWithTag("chatlist_archived_folder").assertIsDisplayed().getUnclippedBoundsInRoot())
+        assertEquals(shiftedRow, compose.onNodeWithTag("chatlist_row_1").getUnclippedBoundsInRoot())
+        compose.mainClock.autoAdvance = true
+        compose.onNodeWithTag("chatlist_archived_folder").performTouchInput { click() }
+        compose.onNodeWithText("Archived Chats").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_99").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_1").assertDoesNotExist()
     }
 
     @Test fun archive_cards_match_chat_geometry_across_density_and_large_fonts() {

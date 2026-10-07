@@ -53,13 +53,12 @@ internal fun shouldShowArchiveFolder(
 /** Fixed Telegram-style archive pull measurements expressed as row-relative geometry. */
 internal object ArchiveFolderPull {
     const val RowDp = 56f
-    const val DwellStartDp = 4f
     const val HintStartDp = 16f
     const val ArmRatio = .85f
     const val DisarmRatio = .70f
+    const val HoldMillis = 1200L
     const val BeyondRowResistance = .2f
     const val ExtraDp = 16f
-    const val DwellMillis = 200L
 }
 
 /** Pixel geometry supplied by Compose; invalid geometry makes the reducer safely inert. */
@@ -67,7 +66,6 @@ internal data class ArchiveFolderPullGeometry(
     val rowPx: Float,
 ) {
     val isValid: Boolean get() = rowPx.isFinite() && rowPx > 0f
-    val dwellStartPx: Float get() = rowPx * (ArchiveFolderPull.DwellStartDp / ArchiveFolderPull.RowDp)
     val hintStartPx: Float get() = rowPx * (ArchiveFolderPull.HintStartDp / ArchiveFolderPull.RowDp)
     val armPx: Float get() = rowPx * ArchiveFolderPull.ArmRatio
     val disarmPx: Float get() = rowPx * ArchiveFolderPull.DisarmRatio
@@ -84,7 +82,7 @@ internal data class ArchiveFolderPullState(
     val phase: ArchiveFolderPullPhase = ArchiveFolderPullPhase.HIDDEN,
     val gestureActive: Boolean = false,
     val gestureId: Long = 0L,
-    val dwellStartedAtMs: Long? = null,
+    val holdStartedAtMs: Long? = null,
     val hapticEmitted: Boolean = false,
     val gestureStartedRevealed: Boolean = false,
 )
@@ -103,6 +101,7 @@ internal sealed interface ArchiveFolderPullEvent {
 
     data class Tick(
         val timestampMs: Long,
+        val gestureId: Long,
     ) : ArchiveFolderPullEvent
 
     data class Release(
@@ -121,6 +120,8 @@ internal sealed interface ArchiveFolderPullEvent {
 internal sealed interface ArchiveFolderPullEffect {
     data object HapticThresholdActivated : ArchiveFolderPullEffect
 
+    data object HapticRevealActivated : ArchiveFolderPullEffect
+
     data object AnnounceShown : ArchiveFolderPullEffect
 
     data object AnnounceHidden : ArchiveFolderPullEffect
@@ -134,8 +135,9 @@ internal data class ArchiveFolderPullResult(
 )
 
 /**
- * Timestamped pure state machine. Only an active direct user gesture can change exposure. The
- * visual uses a 1:1 row range and a 0.2x, 16dp-capped continuation after that row.
+ * Pure state machine. Crossing 85% emits threshold feedback; holding there (or above the 70%
+ * disarm boundary) continuously for 1200ms reveals while still pressed. The visual uses a 1:1
+ * measured row range and a 0.2x, 16dp-capped continuation after that row.
  */
 internal fun reduceArchiveFolderPull(
     state: ArchiveFolderPullState,
@@ -159,7 +161,7 @@ internal fun reduceArchiveFolderPull(
         return input.copy(
             exposurePx = if (phase == ArchiveFolderPullPhase.REVEALED) geometry.rowPx else exposure,
             phase = phase,
-            dwellStartedAtMs = if (exposure >= geometry.dwellStartPx) input.dwellStartedAtMs else null,
+            holdStartedAtMs = if (phase == ArchiveFolderPullPhase.ARMED) input.holdStartedAtMs else null,
         )
     }
 
@@ -171,8 +173,8 @@ internal fun reduceArchiveFolderPull(
                 current.copy(
                     gestureActive = current.phase != ArchiveFolderPullPhase.REVEALED,
                     gestureId = current.gestureId + 1,
-                    dwellStartedAtMs = null,
                     hapticEmitted = false,
+                    holdStartedAtMs = null,
                     gestureStartedRevealed = current.phase == ArchiveFolderPullPhase.REVEALED,
                 ),
             )
@@ -184,49 +186,48 @@ internal fun reduceArchiveFolderPull(
             ) {
                 return ArchiveFolderPullResult(current)
             }
+            if (current.phase == ArchiveFolderPullPhase.REVEALED) return ArchiveFolderPullResult(current, event.deltaY)
 
             val rawBefore = exposureToRaw(current.exposurePx, geometry)
             val rawAfter = (rawBefore + event.deltaY).coerceIn(0f, exposureToRaw(geometry.maxExposurePx, geometry))
             val exposure = rawToExposure(rawAfter, geometry)
-            val dwellStart =
-                when {
-                    exposure < geometry.dwellStartPx -> null
-                    current.dwellStartedAtMs == null -> event.timestampMs
-                    else -> current.dwellStartedAtMs
-                }
             return evaluateArming(
-                current.copy(exposurePx = exposure, dwellStartedAtMs = dwellStart),
-                event.timestampMs,
+                current.copy(exposurePx = exposure),
                 geometry,
+                event.timestampMs,
                 rawAfter - rawBefore,
             )
         }
 
         is ArchiveFolderPullEvent.Tick -> {
-            if (!current.gestureActive || event.timestampMs < 0L) return ArchiveFolderPullResult(current)
-            return evaluateArming(current, event.timestampMs, geometry)
+            val holdStart = current.holdStartedAtMs
+            if (!current.gestureActive || current.phase != ArchiveFolderPullPhase.ARMED ||
+                event.gestureId != current.gestureId || holdStart == null ||
+                event.timestampMs < holdStart || event.timestampMs - holdStart < ArchiveFolderPull.HoldMillis
+            ) {
+                return ArchiveFolderPullResult(current)
+            }
+            return ArchiveFolderPullResult(
+                current.copy(
+                    exposurePx = geometry.rowPx,
+                    phase = ArchiveFolderPullPhase.REVEALED,
+                    holdStartedAtMs = null,
+                ),
+                effects = listOf(ArchiveFolderPullEffect.HapticRevealActivated, ArchiveFolderPullEffect.AnnounceShown),
+            )
         }
 
         is ArchiveFolderPullEvent.Release -> {
             if (!current.gestureActive || event.timestampMs < 0L) return ArchiveFolderPullResult(current)
-            return if (current.phase == ArchiveFolderPullPhase.ARMED) {
-                ArchiveFolderPullResult(
-                    current.copy(
-                        exposurePx = geometry.rowPx,
-                        phase = ArchiveFolderPullPhase.REVEALED,
-                        gestureActive = false,
-                        dwellStartedAtMs = null,
-                    ),
-                    effects = listOf(ArchiveFolderPullEffect.AnnounceShown),
-                )
-            } else {
-                ArchiveFolderPullResult(hidden())
-            }
+            return ArchiveFolderPullResult(
+                if (current.phase == ArchiveFolderPullPhase.REVEALED) current.copy(gestureActive = false) else hidden(),
+            )
         }
 
         ArchiveFolderPullEvent.Cancel -> {
-            val keepRevealed = current.phase == ArchiveFolderPullPhase.REVEALED && current.gestureStartedRevealed
-            return ArchiveFolderPullResult(if (keepRevealed) current.copy(gestureActive = false) else hidden())
+            return ArchiveFolderPullResult(
+                if (current.phase == ArchiveFolderPullPhase.REVEALED) current.copy(gestureActive = false) else hidden(),
+            )
         }
 
         ArchiveFolderPullEvent.RevealedRowHidden -> {
@@ -244,7 +245,7 @@ internal fun reduceArchiveFolderPull(
                         exposurePx = geometry.rowPx,
                         phase = ArchiveFolderPullPhase.REVEALED,
                         gestureActive = false,
-                        dwellStartedAtMs = null,
+                        gestureStartedRevealed = true,
                     ),
                     effects = listOf(ArchiveFolderPullEffect.AnnounceShown),
                 )
@@ -304,26 +305,26 @@ internal fun scrollRevealedArchiveFolder(
 
 private fun evaluateArming(
     input: ArchiveFolderPullState,
-    timestampMs: Long,
     geometry: ArchiveFolderPullGeometry,
-    consumedY: Float = 0f,
+    timestampMs: Long,
+    consumedY: Float,
 ): ArchiveFolderPullResult {
     val state =
         if (input.phase == ArchiveFolderPullPhase.ARMED && input.exposurePx < geometry.disarmPx) {
-            input.copy(phase = if (input.exposurePx <= 0f) ArchiveFolderPullPhase.HIDDEN else ArchiveFolderPullPhase.PULLING)
+            input.copy(
+                phase = if (input.exposurePx <= 0f) ArchiveFolderPullPhase.HIDDEN else ArchiveFolderPullPhase.PULLING,
+                holdStartedAtMs = null,
+            )
         } else if (input.exposurePx <= 0f) {
-            input.copy(phase = ArchiveFolderPullPhase.HIDDEN)
+            input.copy(phase = ArchiveFolderPullPhase.HIDDEN, holdStartedAtMs = null)
         } else if (input.phase != ArchiveFolderPullPhase.ARMED) {
             input.copy(phase = ArchiveFolderPullPhase.PULLING)
         } else {
             input
         }
-    val eligible =
-        state.phase != ArchiveFolderPullPhase.ARMED &&
-            state.exposurePx >= geometry.armPx &&
-            state.dwellStartedAtMs != null && timestampMs - state.dwellStartedAtMs >= ArchiveFolderPull.DwellMillis
+    val eligible = state.phase != ArchiveFolderPullPhase.ARMED && state.exposurePx >= geometry.armPx
     return if (eligible) {
-        val armed = state.copy(phase = ArchiveFolderPullPhase.ARMED)
+        val armed = state.copy(phase = ArchiveFolderPullPhase.ARMED, holdStartedAtMs = timestampMs)
         ArchiveFolderPullResult(
             armed.copy(hapticEmitted = true),
             consumedY,

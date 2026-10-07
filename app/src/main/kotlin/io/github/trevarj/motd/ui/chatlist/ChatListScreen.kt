@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chatlist
 
 import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
@@ -138,7 +139,6 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
@@ -1673,13 +1673,16 @@ private fun ChatList(
     val hasActiveRows = rows.isNotEmpty() || actionableInvitationCount > 0
     val hasArchivedRows = archivedRows.isNotEmpty()
     var archiveFolderHeightPx by remember { mutableIntStateOf(0) }
-    val archiveFolderGeometry = ArchiveFolderPullGeometry(archiveFolderHeightPx.toFloat())
+    // Input can arrive after measurement but before the next recomposition.
+    val archiveFolderGeometry by remember { derivedStateOf { ArchiveFolderPullGeometry(archiveFolderHeightPx.toFloat()) } }
     val archiveFolderPullEligible = !archiveMode && !invitationMode && hasActiveRows && hasArchivedRows
     val archivedOnly = !archiveMode && !invitationMode && !hasActiveRows && hasArchivedRows
     var archivePullState by remember { mutableStateOf(ArchiveFolderPullState()) }
+    var archivePendingRelease by remember { mutableStateOf<ArchiveFolderPullEvent.Release?>(null) }
     var archiveDisplayExposurePx by remember { mutableFloatStateOf(0f) }
     var archiveSettling by remember { mutableStateOf(false) }
     var archiveSettleJob by remember { mutableStateOf<Job?>(null) }
+    var archiveHoldJob by remember { mutableStateOf<Job?>(null) }
     var archiveAnnouncement by remember { mutableStateOf<String?>(null) }
     var handledArchiveRevealSignal by remember { mutableStateOf(archiveRevealSignal) }
     val view = LocalView.current
@@ -1687,11 +1690,36 @@ private fun ChatList(
     val archivedHiddenAnnouncement = stringResource(R.string.chatlist_archived_hidden_announcement)
 
     fun dispatchArchiveEvent(event: ArchiveFolderPullEvent): ArchiveFolderPullResult {
+        val previousHoldStart = archivePullState.holdStartedAtMs
+        val previousGestureId = archivePullState.gestureId
         val result = reduceArchiveFolderPull(archivePullState, event, archiveFolderGeometry)
         archivePullState = result.state
+        val holdStart = result.state.holdStartedAtMs
+        if (result.state.phase != ArchiveFolderPullPhase.ARMED || !result.state.gestureActive ||
+            holdStart != previousHoldStart || result.state.gestureId != previousGestureId
+        ) {
+            archiveHoldJob?.cancel()
+            archiveHoldJob = null
+            if (holdStart != null && result.state.gestureActive && archivePendingRelease == null) {
+                val gestureId = result.state.gestureId
+                archiveHoldJob =
+                    scope.launch {
+                        delay((ArchiveFolderPull.HoldMillis - (SystemClock.uptimeMillis() - holdStart)).coerceAtLeast(0L))
+                        // Read live state and measured geometry, not the frame that armed the pull.
+                        if (archivePendingRelease == null && archivePullState.gestureActive &&
+                            archivePullState.gestureId == gestureId && archivePullState.holdStartedAtMs == holdStart
+                        ) {
+                            archiveHoldJob = null
+                            val revealed = dispatchArchiveEvent(ArchiveFolderPullEvent.Tick(SystemClock.uptimeMillis(), gestureId))
+                            archiveDisplayExposurePx = revealed.state.exposurePx
+                        }
+                    }
+            }
+        }
         result.effects.forEach { effect ->
             when (effect) {
                 ArchiveFolderPullEffect.HapticThresholdActivated -> view.performThresholdHaptic()
+                ArchiveFolderPullEffect.HapticRevealActivated -> ViewCompat.performHapticFeedback(view, HapticFeedbackConstantsCompat.CONFIRM)
                 ArchiveFolderPullEffect.AnnounceShown -> archiveAnnouncement = archivedRevealedAnnouncement
                 ArchiveFolderPullEffect.AnnounceHidden -> archiveAnnouncement = archivedHiddenAnnouncement
             }
@@ -1740,6 +1768,7 @@ private fun ChatList(
 
     LaunchedEffect(archiveFolderPullEligible) {
         if (!archiveFolderPullEligible) {
+            archivePendingRelease = null
             archiveSettleJob?.cancel()
             archiveSettleJob = null
             archiveSettling = false
@@ -1748,16 +1777,12 @@ private fun ChatList(
         }
     }
 
-    LaunchedEffect(archivePullState.gestureActive, archivePullState.phase, archivePullState.dwellStartedAtMs, archivePullState.exposurePx) {
-        val dwellStart = archivePullState.dwellStartedAtMs
-        if (archivePullState.gestureActive && archivePullState.phase != ArchiveFolderPullPhase.ARMED && dwellStart != null) {
-            delay((ArchiveFolderPull.DwellMillis - (SystemClock.uptimeMillis() - dwellStart)).coerceAtLeast(0L))
-            val result = dispatchArchiveEvent(ArchiveFolderPullEvent.Tick(SystemClock.uptimeMillis()))
-            archiveDisplayExposurePx = result.state.exposurePx
+    DisposableEffect(Unit) {
+        onDispose {
+            archiveHoldJob?.cancel()
+            archiveSettleJob?.cancel()
         }
     }
-
-    DisposableEffect(Unit) { onDispose { archiveSettleJob?.cancel() } }
 
     LaunchedEffect(archiveRevealSignal, archiveFolderPullEligible, archivedOnly, archiveFolderGeometry) {
         if (archiveRevealSignal == handledArchiveRevealSignal || archiveMode || !archiveFolderGeometry.isValid) return@LaunchedEffect
@@ -1771,14 +1796,23 @@ private fun ChatList(
         handledArchiveRevealSignal = archiveRevealSignal
     }
 
+    val currentDispatchArchiveEvent by rememberUpdatedState(::dispatchArchiveEvent)
+    val currentApplyArchiveFolderPull by rememberUpdatedState(::applyArchiveFolderPull)
+    val currentSettleArchivePull by rememberUpdatedState(::settleArchivePull)
+    val currentArchiveFolderPullEligible by rememberUpdatedState(archiveFolderPullEligible)
     val archiveFolderPullConnection =
-        remember(archiveFolderPullEligible, archiveSettling, archiveFolderGeometry) {
+        remember {
             object : NestedScrollConnection {
                 override fun onPreScroll(
                     available: Offset,
                     source: NestedScrollSource,
                 ): Offset {
-                    if (source != NestedScrollSource.UserInput || !archiveFolderPullEligible || archiveSettling) return Offset.Zero
+                    if (source != NestedScrollSource.UserInput || !currentArchiveFolderPullEligible) return Offset.Zero
+                    // The completed pull owns its queued deltas until the next pointer-down.
+                    if (archivePullState.phase == ArchiveFolderPullPhase.REVEALED && !archivePullState.gestureStartedRevealed) {
+                        return Offset(0f, available.y)
+                    }
+                    if (archiveSettling) return Offset.Zero
                     if (available.y < 0f && archivePullState.phase == ArchiveFolderPullPhase.REVEALED) {
                         val result =
                             scrollRevealedArchiveFolder(
@@ -1787,11 +1821,11 @@ private fun ChatList(
                                 archiveFolderGeometry,
                             )
                         archiveDisplayExposurePx = result.exposurePx
-                        if (result.hidden) dispatchArchiveEvent(ArchiveFolderPullEvent.RevealedRowHidden)
+                        if (result.hidden) currentDispatchArchiveEvent(ArchiveFolderPullEvent.RevealedRowHidden)
                         return Offset(0f, result.consumedY)
                     }
                     return if (available.y < 0f && archivePullState.gestureActive && archiveDisplayExposurePx > 0f) {
-                        Offset(0f, applyArchiveFolderPull(available.y, atTop = true))
+                        Offset(0f, currentApplyArchiveFolderPull(available.y, true))
                     } else {
                         Offset.Zero
                     }
@@ -1802,7 +1836,11 @@ private fun ChatList(
                     available: Offset,
                     source: NestedScrollSource,
                 ): Offset {
-                    if (source != NestedScrollSource.UserInput || !archiveFolderPullEligible || archiveSettling) return Offset.Zero
+                    if (source != NestedScrollSource.UserInput || !currentArchiveFolderPullEligible) return Offset.Zero
+                    if (archivePullState.phase == ArchiveFolderPullPhase.REVEALED && !archivePullState.gestureStartedRevealed) {
+                        return Offset(0f, available.y)
+                    }
+                    if (archiveSettling) return Offset.Zero
                     if (available.y > 0f && !listState.canScrollBackward &&
                         archivePullState.phase == ArchiveFolderPullPhase.REVEALED
                     ) {
@@ -1816,13 +1854,23 @@ private fun ChatList(
                         return Offset(0f, result.consumedY)
                     }
                     return if (available.y > 0f && !listState.canScrollBackward && archivePullState.gestureActive) {
-                        Offset(0f, applyArchiveFolderPull(available.y, atTop = true))
+                        Offset(0f, currentApplyArchiveFolderPull(available.y, true))
                     } else {
                         Offset.Zero
                     }
                 }
 
-                override suspend fun onPreFling(available: Velocity): Velocity = Velocity.Zero
+                override suspend fun onPreFling(available: Velocity): Velocity {
+                    // LazyColumn drains its queued user deltas before this callback, including
+                    // the final move batched with pointer-up. A cancel never queues a release.
+                    val release = archivePendingRelease
+                    if (currentArchiveFolderPullEligible && release != null) {
+                        archivePendingRelease = null
+                        val result = currentDispatchArchiveEvent(release)
+                        currentSettleArchivePull(archiveFolderPullSettleTarget(result.state, archiveFolderGeometry))
+                    }
+                    return if (archivePullState.phase == ArchiveFolderPullPhase.REVEALED && !archivePullState.gestureStartedRevealed) available else Velocity.Zero
+                }
 
                 override suspend fun onPostFling(
                     consumed: Velocity,
@@ -1830,8 +1878,6 @@ private fun ChatList(
                 ): Velocity = Velocity.Zero
             }
         }
-    val currentDispatchArchiveEvent by rememberUpdatedState(::dispatchArchiveEvent)
-    val archiveFolderRevealed = archivePullState.phase == ArchiveFolderPullPhase.REVEALED
     val revealArchiveActionLabel = stringResource(R.string.chatlist_archived_reveal_action)
 
     Box(
@@ -1840,29 +1886,63 @@ private fun ChatList(
                 .fillMaxSize()
                 .clipToBounds()
                 .nestedScroll(archiveFolderPullConnection)
-                .pointerInput(archiveFolderPullEligible, archiveFolderRevealed, archiveFolderGeometry) {
-                    // Once revealed, leave taps to the folder and use nested scroll to hide it.
-                    if (!archiveFolderPullEligible || archiveFolderRevealed) return@pointerInput
-                    awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        archiveSettleJob?.cancel()
-                        archiveSettleJob = null
-                        archiveSettling = false
-                        currentDispatchArchiveEvent(ArchiveFolderPullEvent.StartGesture(SystemClock.uptimeMillis()))
-                        // Observe release after children without treating LazyColumn drag consumption as
-                        // cancellation. The observer never consumes input from scrolling or row taps.
-                        var pointerEvent = awaitPointerEvent(PointerEventPass.Final)
-                        while (pointerEvent.changes.any { it.pressed }) {
-                            pointerEvent = awaitPointerEvent(PointerEventPass.Final)
-                        }
-                        val event =
-                            if (pointerEvent.type == PointerEventType.Release) {
-                                ArchiveFolderPullEvent.Release(SystemClock.uptimeMillis())
-                            } else {
-                                ArchiveFolderPullEvent.Cancel
+                .pointerInput(archiveFolderPullEligible) {
+                    if (!archiveFolderPullEligible) return@pointerInput
+                    try {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            // A fresh gesture may tap or scroll a completed folder; the reveal gesture may not.
+                            if (archivePullState.phase == ArchiveFolderPullPhase.REVEALED) {
+                                currentDispatchArchiveEvent(ArchiveFolderPullEvent.StartGesture(SystemClock.uptimeMillis()))
+                                return@awaitEachGesture
                             }
-                        val result = currentDispatchArchiveEvent(event)
-                        settleArchivePull(archiveFolderPullSettleTarget(result.state, archiveFolderGeometry))
+                            archiveSettleJob?.cancel()
+                            archiveSettleJob = null
+                            archiveSettling = false
+                            archivePendingRelease = null
+                            currentDispatchArchiveEvent(ArchiveFolderPullEvent.StartGesture(SystemClock.uptimeMillis()))
+                            // Measurement and armed feedback must not restart this release observer.
+                            // Child drag consumption is scrolling, not cancellation; never consume here.
+                            var scrollDragObserved = false
+                            var pointerEvent = awaitPointerEvent(PointerEventPass.Final)
+                            while (pointerEvent.changes.any { it.pressed }) {
+                                if (
+                                    pointerEvent.changes.any {
+                                        it.isConsumed && abs(it.position.y - it.previousPosition.y) > abs(it.position.x - it.previousPosition.x)
+                                    }
+                                ) {
+                                    scrollDragObserved = true
+                                }
+                                pointerEvent = awaitPointerEvent(PointerEventPass.Final)
+                            }
+                            // Stop holding at the real UP/CANCEL, before queued list deltas drain.
+                            archiveHoldJob?.cancel()
+                            archiveHoldJob = null
+                            // Compose synthesizes a Release without a native event for ACTION_CANCEL.
+                            // Native UP and CANCEL finish the gesture without activating an unfinished hold.
+                            // Consumption identifies a queued list drag, not cancellation.
+                            val event =
+                                if (pointerEvent.motionEvent?.actionMasked == MotionEvent.ACTION_UP) {
+                                    ArchiveFolderPullEvent.Release(SystemClock.uptimeMillis())
+                                } else {
+                                    ArchiveFolderPullEvent.Cancel
+                                }
+                            if (event is ArchiveFolderPullEvent.Release && scrollDragObserved) {
+                                archivePendingRelease = event
+                            } else {
+                                archivePendingRelease = null
+                                val result = currentDispatchArchiveEvent(event)
+                                currentSettleArchivePull(archiveFolderPullSettleTarget(result.state, archiveFolderGeometry))
+                            }
+                        }
+                    } finally {
+                        archiveHoldJob?.cancel()
+                        archiveHoldJob = null
+                        archivePendingRelease = null
+                        if (archivePullState.gestureActive) {
+                            val result = currentDispatchArchiveEvent(ArchiveFolderPullEvent.Cancel)
+                            archiveDisplayExposurePx = result.state.exposurePx
+                        }
                     }
                 }.semantics {
                     if (archiveFolderPullEligible && archivePullState.phase != ArchiveFolderPullPhase.REVEALED) {
@@ -2430,7 +2510,7 @@ private fun ArchiveFolderCard(
             )
         }
         Spacer(Modifier.width(12.dp))
-        // Measure all labels together so pulling, release and archive-only never change extent.
+        // Measure all labels together so pulling, holding and archive-only never change extent.
         Box(
             modifier = Modifier.weight(1f).testTag("chatlist_archived_title_host"),
             contentAlignment = Alignment.CenterStart,

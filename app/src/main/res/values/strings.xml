@@ -1829,7 +1829,7 @@
     <string name="chatlist_archived_chats">Archived Chats</string>
     <string name="chatlist_archived_chats_count">Archived Chats (%1$d)</string>
     <string name="chatlist_archived_pull_hint">Keep pulling to reveal archived chats</string>
-    <string name="chatlist_archived_pull_armed">Release to reveal archived chats</string>
+    <string name="chatlist_archived_pull_armed">Keep holding…</string>
     <string name="chatlist_archived_reveal_action">Reveal archived chats</string>
     <string name="chatlist_archived_revealed_announcement">Archived chats revealed</string>
     <string name="chatlist_archived_hidden_announcement">Archived chats hidden</string>

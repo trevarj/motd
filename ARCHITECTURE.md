@@ -54,6 +54,19 @@ flowchart TD
   avatar host/vertical padding. `titleMedium` labels may wrap at accessible font scales;
   their shared measured extent, including gutters, drives both pull geometry and list
   translation. The resting fill matches unread chat cards; armed feedback uses `primaryContainer`.
+  Pull input reads that measurement live, including before the first recomposition, and keeps
+  one release observer/nested-scroll connection across card remeasurement and armed feedback.
+  Pulling through 85% of the measured row emits the first haptic and “Keep holding…”;
+  1200ms continuously above the 70% disarm boundary reveals the folder while still held,
+  with distinct confirmation feedback and an accessibility announcement. Disarm/rearm
+  restarts the hold but never repeats the first tick within one gesture. Real pointer-up
+  and native cancellation stop the timer synchronously; unfinished pulls settle hidden,
+  while a completed reveal survives either. Consumed vertical drags finish release at
+  nested pre-fling after queued deltas drain; the successful gesture cannot scroll or hide
+  its newly revealed card. Remeasurement keeps the hold deadline and uses live geometry. Exposure
+  stays 1:1 through one row, then uses 0.2x resistance with a row-scaled 16dp cap. Settling reuses
+  `MotdMotion`'s distance-scaled 200–300ms quintic ease-out. Eligibility loss or pointer-lifecycle
+  cancellation resets an unfinished pull; card remeasurement does not.
 - The chat list has one compact, inspectable network-activity banner matching the folder
   capsule's 8dp horizontal/4dp vertical outer margins and 48dp resting height at normal font
   scale, independently of compact/comfortable chat-row density. It keeps the shared 16dp

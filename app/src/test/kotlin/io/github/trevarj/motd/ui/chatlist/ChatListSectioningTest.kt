@@ -207,58 +207,134 @@ class ChatListSectioningTest {
     }
 
     @Test
-    fun `dwell is continuous and stationary tick arms only after time and distance`() {
+    fun `archive pull emits threshold then distinct activation after continuous hold`() {
         val started = reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.StartGesture(0)).state
-        val near = reduce(started, ArchiveFolderPullEvent.DragDelta(4f, 10, ArchiveFolderPullSource.USER_INPUT, true)).state
-        assertEquals(10L, near.dwellStartedAtMs)
-        val reset = reduce(near, ArchiveFolderPullEvent.DragDelta(-1f, 20, ArchiveFolderPullSource.USER_INPUT, true)).state
-        assertEquals(null, reset.dwellStartedAtMs)
-        val ready = reduce(reset, ArchiveFolderPullEvent.DragDelta(50f, 30, ArchiveFolderPullSource.USER_INPUT, true)).state
-        assertEquals(30L, ready.dwellStartedAtMs)
-        assertEquals(ArchiveFolderPullPhase.PULLING, reduce(ready, ArchiveFolderPullEvent.Tick(229)).state.phase)
-        val armed = reduce(ready, ArchiveFolderPullEvent.Tick(230))
+        val below = reduce(started, ArchiveFolderPullEvent.DragDelta(pullGeometry.armPx - 1f, 10, ArchiveFolderPullSource.USER_INPUT, true))
+        assertEquals(ArchiveFolderPullPhase.PULLING, below.state.phase)
+        assertTrue(below.effects.isEmpty())
+        assertEquals(null, below.state.holdStartedAtMs)
+        assertEquals(below.state, reduce(below.state, ArchiveFolderPullEvent.Tick(1_000, below.state.gestureId)).state)
+
+        val armed = reduce(below.state, ArchiveFolderPullEvent.DragDelta(1f, 20, ArchiveFolderPullSource.USER_INPUT, true))
         assertEquals(ArchiveFolderPullPhase.ARMED, armed.state.phase)
+        assertEquals(20L, armed.state.holdStartedAtMs)
         assertEquals(listOf(ArchiveFolderPullEffect.HapticThresholdActivated), armed.effects)
-    }
+        assertTrue(armed.state.hapticEmitted)
+        val early = reduce(armed.state, ArchiveFolderPullEvent.Tick(20 + ArchiveFolderPull.HoldMillis - 1, armed.state.gestureId))
+        assertEquals(armed.state, early.state)
+        assertTrue(early.effects.isEmpty())
 
-    @Test
-    fun `distance before time and time before distance both require both thresholds`() {
-        val started = reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.StartGesture(0)).state
-        val far = reduce(started, ArchiveFolderPullEvent.DragDelta(56f, 0, ArchiveFolderPullSource.USER_INPUT, true)).state
-        assertEquals(ArchiveFolderPullPhase.PULLING, reduce(far, ArchiveFolderPullEvent.Tick(199)).state.phase)
-        assertEquals(ArchiveFolderPullPhase.ARMED, reduce(far, ArchiveFolderPullEvent.Tick(200)).state.phase)
-
-        val slow = reduce(started, ArchiveFolderPullEvent.DragDelta(4f, 0, ArchiveFolderPullSource.USER_INPUT, true)).state
-        val waited = reduce(slow, ArchiveFolderPullEvent.Tick(300)).state
-        assertEquals(ArchiveFolderPullPhase.PULLING, waited.phase)
-        assertEquals(ArchiveFolderPullPhase.ARMED, reduce(waited, ArchiveFolderPullEvent.DragDelta(44f, 300, ArchiveFolderPullSource.USER_INPUT, true)).state.phase)
-    }
-
-    @Test
-    fun `armed hysteresis and haptic latch survive a disarm rearm`() {
-        val started = reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.StartGesture(0)).state
-        val pulled = reduce(started, ArchiveFolderPullEvent.DragDelta(56f, 0, ArchiveFolderPullSource.USER_INPUT, true)).state
-        val armed = reduce(pulled, ArchiveFolderPullEvent.Tick(200)).state
-        assertEquals(ArchiveFolderPullPhase.ARMED, armed.phase)
-        val disarmed = reduce(armed, ArchiveFolderPullEvent.DragDelta(-17f, 201, ArchiveFolderPullSource.USER_INPUT, true)).state
-        assertEquals(ArchiveFolderPullPhase.PULLING, disarmed.phase)
-        val rearmed = reduce(disarmed, ArchiveFolderPullEvent.DragDelta(17f, 202, ArchiveFolderPullSource.USER_INPUT, true))
-        assertEquals(ArchiveFolderPullPhase.ARMED, rearmed.state.phase)
-        assertTrue(rearmed.effects.isEmpty())
-    }
-
-    @Test
-    fun `release commits only armed and cancel never commits`() {
-        val started = reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.StartGesture(0)).state
-        val pulling = reduce(started, ArchiveFolderPullEvent.DragDelta(56f, 0, ArchiveFolderPullSource.USER_INPUT, true)).state
-        assertEquals(ArchiveFolderPullPhase.HIDDEN, reduce(pulling, ArchiveFolderPullEvent.Release(100)).state.phase)
-
-        val far = reduce(started, ArchiveFolderPullEvent.DragDelta(56f, 0, ArchiveFolderPullSource.USER_INPUT, true)).state
-        val armed = reduce(far, ArchiveFolderPullEvent.Tick(200)).state
-        val revealed = reduce(armed, ArchiveFolderPullEvent.Release(201))
+        val revealed = reduce(armed.state, ArchiveFolderPullEvent.Tick(20 + ArchiveFolderPull.HoldMillis, armed.state.gestureId))
         assertEquals(ArchiveFolderPullPhase.REVEALED, revealed.state.phase)
-        assertEquals(listOf(ArchiveFolderPullEffect.AnnounceShown), revealed.effects)
-        assertEquals(ArchiveFolderPullPhase.HIDDEN, reduce(armed, ArchiveFolderPullEvent.Cancel).state.phase)
+        assertEquals(pullGeometry.rowPx, revealed.state.exposurePx, 0f)
+        assertTrue(revealed.state.gestureActive)
+        assertEquals(null, revealed.state.holdStartedAtMs)
+        assertEquals(
+            listOf(ArchiveFolderPullEffect.HapticRevealActivated, ArchiveFolderPullEffect.AnnounceShown),
+            revealed.effects,
+        )
+        assertTrue(reduce(revealed.state, ArchiveFolderPullEvent.Tick(ArchiveFolderPull.HoldMillis + 100, revealed.state.gestureId)).effects.isEmpty())
+    }
+
+    @Test
+    fun `a new gesture can emit threshold haptic again`() {
+        val started = reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.StartGesture(0)).state
+        val armed = reduce(started, ArchiveFolderPullEvent.DragDelta(56f, 0, ArchiveFolderPullSource.USER_INPUT, true)).state
+        val cancelled = reduce(armed, ArchiveFolderPullEvent.Cancel).state
+        val restarted = reduce(cancelled, ArchiveFolderPullEvent.StartGesture(0)).state
+        assertFalse(restarted.hapticEmitted)
+
+        val rearmed = reduce(restarted, ArchiveFolderPullEvent.DragDelta(56f, 0, ArchiveFolderPullSource.USER_INPUT, true))
+        assertEquals(ArchiveFolderPullPhase.ARMED, rearmed.state.phase)
+        assertEquals(listOf(ArchiveFolderPullEffect.HapticThresholdActivated), rearmed.effects)
+        assertEquals(rearmed.state, reduce(rearmed.state, ArchiveFolderPullEvent.Tick(ArchiveFolderPull.HoldMillis + 1_000, armed.gestureId)).state)
+    }
+
+    @Test
+    fun `armed hysteresis restarts continuous hold without repeating threshold haptic`() {
+        val started = reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.StartGesture(0)).state
+        val armed = reduce(started, ArchiveFolderPullEvent.DragDelta(56f, 10, ArchiveFolderPullSource.USER_INPUT, true)).state
+        assertEquals(ArchiveFolderPullPhase.ARMED, armed.phase)
+
+        val boundary = reduce(armed, ArchiveFolderPullEvent.DragDelta(pullGeometry.disarmPx - armed.exposurePx, 100, ArchiveFolderPullSource.USER_INPUT, true))
+        assertEquals(ArchiveFolderPullPhase.ARMED, boundary.state.phase)
+        assertEquals(10L, boundary.state.holdStartedAtMs)
+        assertTrue(boundary.effects.isEmpty())
+        assertEquals(ArchiveFolderPullPhase.REVEALED, reduce(boundary.state, ArchiveFolderPullEvent.Tick(10 + ArchiveFolderPull.HoldMillis, armed.gestureId)).state.phase)
+        val disarmed = reduce(boundary.state, ArchiveFolderPullEvent.DragDelta(-1f, 150, ArchiveFolderPullSource.USER_INPUT, true)).state
+        assertEquals(ArchiveFolderPullPhase.PULLING, disarmed.phase)
+        assertEquals(null, disarmed.holdStartedAtMs)
+        assertTrue(disarmed.hapticEmitted)
+        assertEquals(disarmed, reduce(disarmed, ArchiveFolderPullEvent.Tick(ArchiveFolderPull.HoldMillis + 1_000, disarmed.gestureId)).state)
+
+        val rearmed = reduce(disarmed, ArchiveFolderPullEvent.DragDelta(pullGeometry.armPx - disarmed.exposurePx, 200, ArchiveFolderPullSource.USER_INPUT, true))
+        assertEquals(ArchiveFolderPullPhase.ARMED, rearmed.state.phase)
+        assertEquals(200L, rearmed.state.holdStartedAtMs)
+        assertTrue(rearmed.effects.isEmpty())
+        val further = reduce(rearmed.state, ArchiveFolderPullEvent.DragDelta(1f, 300, ArchiveFolderPullSource.USER_INPUT, true))
+        assertEquals(200L, further.state.holdStartedAtMs)
+        assertTrue(further.effects.isEmpty())
+        assertEquals(further.state, reduce(further.state, ArchiveFolderPullEvent.Tick(200 + ArchiveFolderPull.HoldMillis - 1, further.state.gestureId)).state)
+        assertEquals(
+            listOf(ArchiveFolderPullEffect.HapticRevealActivated, ArchiveFolderPullEffect.AnnounceShown),
+            reduce(further.state, ArchiveFolderPullEvent.Tick(200 + ArchiveFolderPull.HoldMillis, further.state.gestureId)).effects,
+        )
+    }
+
+    @Test
+    fun `early release cancellation and reset cannot reveal later`() {
+        val started = reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.StartGesture(0)).state
+        val pulling = reduce(started, ArchiveFolderPullEvent.DragDelta(pullGeometry.armPx - 1f, 0, ArchiveFolderPullSource.USER_INPUT, true)).state
+        val armed = reduce(started, ArchiveFolderPullEvent.DragDelta(56f, 0, ArchiveFolderPullSource.USER_INPUT, true)).state
+        for (state in listOf(pulling, armed)) {
+            for (event in listOf(ArchiveFolderPullEvent.Release(ArchiveFolderPull.HoldMillis - 1), ArchiveFolderPullEvent.Cancel, ArchiveFolderPullEvent.Reset)) {
+                val ended = reduce(state, event)
+                assertEquals(ArchiveFolderPullPhase.HIDDEN, ended.state.phase)
+                assertEquals(0f, ended.state.exposurePx, 0f)
+                assertFalse(ended.state.gestureActive)
+                assertEquals(null, ended.state.holdStartedAtMs)
+                assertTrue(ended.effects.isEmpty())
+                assertEquals(ended.state, reduce(ended.state, ArchiveFolderPullEvent.Tick(ArchiveFolderPull.HoldMillis + 1_000, state.gestureId)).state)
+            }
+        }
+        assertEquals(ArchiveFolderPullState(), reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.Tick(1_000, 0)).state)
+    }
+
+    @Test
+    fun `successful held reveal ignores queued drag and survives release or cancellation`() {
+        val started = reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.StartGesture(0)).state
+        val armed = reduce(started, ArchiveFolderPullEvent.DragDelta(56f, 0, ArchiveFolderPullSource.USER_INPUT, true)).state
+        val revealed = reduce(armed, ArchiveFolderPullEvent.Tick(ArchiveFolderPull.HoldMillis, armed.gestureId)).state
+        for (delta in listOf(-200f, 200f)) {
+            val queued = reduce(revealed, ArchiveFolderPullEvent.DragDelta(delta, ArchiveFolderPull.HoldMillis + 1, ArchiveFolderPullSource.USER_INPUT, true))
+            assertEquals(revealed, queued.state)
+            assertEquals(delta, queued.consumedY, 0f)
+            assertTrue(queued.effects.isEmpty())
+        }
+        for (event in listOf(ArchiveFolderPullEvent.Release(ArchiveFolderPull.HoldMillis + 1), ArchiveFolderPullEvent.Cancel)) {
+            val ended = reduce(revealed, event)
+            assertEquals(ArchiveFolderPullPhase.REVEALED, ended.state.phase)
+            assertEquals(pullGeometry.rowPx, ended.state.exposurePx, 0f)
+            assertFalse(ended.state.gestureActive)
+            assertTrue(ended.effects.isEmpty())
+        }
+    }
+
+    @Test
+    fun `held remeasurement preserves deadline and reveals at latest row height`() {
+        val started = reduce(ArchiveFolderPullState(), ArchiveFolderPullEvent.StartGesture(0)).state
+        val armed = reduce(started, ArchiveFolderPullEvent.DragDelta(56f, 20, ArchiveFolderPullSource.USER_INPUT, true)).state
+        val geometry = ArchiveFolderPullGeometry(112f)
+        val resized = armed.copy(exposurePx = armed.exposurePx * 2)
+        val early = reduceArchiveFolderPull(resized, ArchiveFolderPullEvent.Tick(20 + ArchiveFolderPull.HoldMillis - 1, armed.gestureId), geometry)
+        assertEquals(resized, early.state)
+        val revealed = reduceArchiveFolderPull(early.state, ArchiveFolderPullEvent.Tick(20 + ArchiveFolderPull.HoldMillis, armed.gestureId), geometry)
+        assertEquals(ArchiveFolderPullPhase.REVEALED, revealed.state.phase)
+        assertEquals(112f, revealed.state.exposurePx, 0f)
+        assertEquals(
+            listOf(ArchiveFolderPullEffect.HapticRevealActivated, ArchiveFolderPullEffect.AnnounceShown),
+            revealed.effects,
+        )
     }
 
     @Test
