@@ -49,15 +49,18 @@ flowchart TD
 - UI observes repositories and ViewModel state. Connection and protocol actions
   go through `ConnectionManager` instead of constructing IRC clients in screens.
 - The chat-list Scaffold canvas and chat rows use theme `surface`, matching the top bar's original unscrolled `surface`; its scrolled `surfaceContainerLow` remains unchanged. After any network-activity banner and active-scope chip, folder tabs overlay the scrolling chat viewport on an unpainted, transparent strip; the measured tab-and-pinned-mentions header is reserved only for the list's initial position, so rows can scroll beneath it. A separate `surfaceContainerHigh` capsule carries the tabs, and the selected pill uses the stronger `primary`/`onPrimary` colors.
-- The chat list has one compact, inspectable network-activity banner. The highest-severity,
-  oldest unacknowledged connection/history issue wins; connection, waiting and sync summaries
+- The chat list has one compact, inspectable network-activity banner, shaped and spaced like a
+  chat card: 8dp horizontal/2dp vertical outer margins, the shared 16dp card shape, 12dp inner
+  horizontal padding and density-scaled chat-list vertical padding/avatar-sized network icon.
+  The highest-severity, oldest unacknowledged connection/history issue wins; connection, waiting and sync summaries
   support it without rotation. Engine progress remains visible independently of failures.
   Banner text occupies at most two single-line rows: an ellipsized headline with issue badge, then
   an ellipsized supporting summary with a separately reserved inline fraction. Summary overflow never
   displaces the count; a thin progress bar adds no text row. Full reasons remain in the inspector.
   Only the static headline announces politely. Healthy idle hides; archive/invitations promote
   connection activity only, while the Material inspector remains global and preserves list modes.
-  A separately labeled hide button latches the process-local `NetworkActivityBannerSession` hidden.
+  Swiping the card in either direction or its labeled accessibility dismiss action latches the
+  process-local `NetworkActivityBannerSession` hidden; tapping still opens the inspector.
   New issues, navigation entries, progress, rotation and warm Activity relaunch never restore it;
   a genuinely new process starts unhidden and uses the normal startup/sync eligibility gates.
   Neither overflow menu offers restoration; the inspector is always available.

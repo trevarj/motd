@@ -2,14 +2,17 @@ package io.github.trevarj.motd
 
 import android.content.Context
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -23,6 +26,7 @@ import androidx.compose.ui.test.assertTouchHeightIsEqualTo
 import androidx.compose.ui.test.assertTouchWidthIsEqualTo
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -36,6 +40,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.SavedStateHandle
@@ -48,6 +55,7 @@ import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.GlobalFeedPrefs
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
 import io.github.trevarj.motd.data.sync.NoopHistoryGapFiller
 import io.github.trevarj.motd.gesture.FakeBuffers
@@ -64,6 +72,7 @@ import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.testing.NoopConnectionManager
 import io.github.trevarj.motd.ui.chatlist.ChatListContent
 import io.github.trevarj.motd.ui.chatlist.ChatListInvitation
+import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
 import io.github.trevarj.motd.ui.chatlist.ChatListState
 import io.github.trevarj.motd.ui.chatlist.ChatListSyncChrome
 import io.github.trevarj.motd.ui.chatlist.ChatListViewModel
@@ -78,6 +87,7 @@ import io.github.trevarj.motd.ui.chatlist.NetworkActivityNetwork
 import io.github.trevarj.motd.ui.chatlist.NetworkActivityState
 import io.github.trevarj.motd.ui.chatlist.fakeDickordLabsPrefs
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.spacingFor
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
@@ -152,7 +162,7 @@ class NetworkActivityUiTest {
             }
             compose.waitUntil(5_000) { model.hasUnseenNetworkActivity.value }
             compose.onNodeWithTag("chatlist_more_network_activity_new_dot", true).assertDoesNotExist()
-            compose.onNodeWithTag("chatlist_status_hide").performClick()
+            compose.onNodeWithTag("chatlist_status_banner").performTouchInput { swipeLeft() }
             compose.waitUntil(5_000) { !model.hasUnseenNetworkActivity.value }
             compose.onNodeWithTag("chatlist_more_network_activity_new_dot", true).assertDoesNotExist()
             compose.onNodeWithTag("chatlist_more").performClick()
@@ -303,6 +313,108 @@ class NetworkActivityUiTest {
         compose.onNodeWithTag("chatlist_status_label", true).assertTextEquals("Libera: bad certificate")
     }
 
+    @Test fun shortSwipeCancelsAndTouchTapStillInspects() {
+        var seenCalls = 0
+        setList(onSeen = { seenCalls++ })
+        compose.onNodeWithTag("chatlist_status_banner").performTouchInput {
+            swipe(center, center.copy(x = center.x - width * 0.08f), durationMillis = 1_000)
+        }
+        compose.onNodeWithTag("chatlist_status_banner").assertIsDisplayed()
+        compose.onNodeWithTag("network_activity_sheet").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, seenCalls) }
+        compose.onNodeWithTag("chatlist_status_banner").performTouchInput { click() }
+        compose.onNodeWithTag("network_activity_sheet").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(1, seenCalls) }
+        compose.onNodeWithTag("network_activity_close").performClick()
+        compose.onNodeWithTag("chatlist_status_banner").assertIsDisplayed()
+    }
+
+    @Test fun bothSwipeDirectionsHideOnceEvenAcrossUpdatesAndRestoration() {
+        val direction = mutableStateOf(0)
+        val chrome = mutableStateOf<ChatListSyncChrome>(ChatListSyncChrome.Syncing(1, 3))
+        val restoration = StateRestorationTester(compose)
+        var hides = 0
+        var inspections = 0
+        restoration.setContent {
+            MotdTheme(dynamicColor = false) {
+                key(direction.value) {
+                    NetworkActivityBanner(activity(), chrome.value, connectionNoticeVisible = true, includeHistory = true, onInspect = { inspections++ }, onHide = { hides++ })
+                }
+            }
+        }
+        compose.onNodeWithTag("chatlist_status_banner").performTouchInput { swipeLeft() }
+        compose.runOnIdle {
+            assertEquals(1, hides)
+            assertEquals(0, inspections)
+            chrome.value = ChatListSyncChrome.Syncing(2, 3)
+        }
+        restoration.emulateSavedInstanceStateRestore()
+        compose.runOnIdle {
+            assertEquals(1, hides)
+            direction.value = 1
+        }
+        compose.onNodeWithTag("chatlist_status_banner").performTouchInput { swipeRight() }
+        compose.runOnIdle {
+            assertEquals(2, hides)
+            assertEquals(0, inspections)
+            chrome.value = ChatListSyncChrome.Syncing(3, 3)
+        }
+        restoration.emulateSavedInstanceStateRestore()
+        compose.runOnIdle { assertEquals(2, hides) }
+    }
+
+    @Test fun accessibilityDismissUsesTheSameHideOnceWithoutInspection() {
+        val restoration = StateRestorationTester(compose)
+        var hides = 0
+        var inspections = 0
+        restoration.setContent {
+            MotdTheme(dynamicColor = false) {
+                NetworkActivityBanner(activity(), ChatListSyncChrome.Syncing(1, 3), connectionNoticeVisible = true, includeHistory = true, onInspect = { inspections++ }, onHide = { hides++ })
+            }
+        }
+        compose.onNodeWithTag("chatlist_status_banner").performSemanticsAction(SemanticsActions.Dismiss)
+        compose.onNodeWithTag("chatlist_status_banner").performSemanticsAction(SemanticsActions.Dismiss)
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("chatlist_status_banner").performSemanticsAction(SemanticsActions.Dismiss)
+        compose.runOnIdle {
+            assertEquals(1, hides)
+            assertEquals(0, inspections)
+        }
+    }
+
+    @Test fun bannerSharesChatCardGeometryAcrossCompactAndComfortableDensity() {
+        val density = mutableStateOf(LayoutDensity.COMPACT)
+        compose.setContent {
+            MotdTheme(dynamicColor = false, layoutDensity = density.value) {
+                Column(Modifier.width(280.dp).testTag("banner_geometry_host")) {
+                    NetworkActivityBanner(activity(), ChatListSyncChrome.Syncing(1, 3), connectionNoticeVisible = true, includeHistory = true, onInspect = {}, onHide = {})
+                    ChatListRowItem(row(), showNetworkChip = false, onClick = {}, onLongClick = {})
+                }
+            }
+        }
+        for (mode in listOf(LayoutDensity.COMPACT, LayoutDensity.COMFORTABLE)) {
+            compose.runOnIdle { density.value = mode }
+            val banner = compose.onNodeWithTag("chatlist_status_banner").getUnclippedBoundsInRoot()
+            val card = compose.onNodeWithTag("chatlist_row_7").getUnclippedBoundsInRoot()
+            val host = compose.onNodeWithTag("banner_geometry_host", true).getUnclippedBoundsInRoot()
+            val icon = compose.onNodeWithTag("chatlist_status_icon", true).getUnclippedBoundsInRoot()
+            val headline = compose.onNodeWithTag("chatlist_status_label", true).getUnclippedBoundsInRoot()
+            val spacing = spacingFor(mode)
+            assertEquals(card.left, banner.left)
+            assertEquals(card.right, banner.right)
+            assertEquals(card.bottom - card.top, banner.bottom - banner.top)
+            assertEquals(host.left + 8.dp, banner.left)
+            assertEquals(host.right - 8.dp, banner.right)
+            assertEquals(host.top + 2.dp, banner.top)
+            assertEquals(banner.bottom + 4.dp, card.top)
+            assertEquals(banner.left + 12.dp, icon.left)
+            assertEquals(spacing.chatListAvatar, icon.right - icon.left)
+            assertEquals(spacing.chatListAvatar, icon.bottom - icon.top)
+            assertEquals((banner.top + banner.bottom) / 2, (icon.top + icon.bottom) / 2)
+            assertEquals(icon.right + 12.dp, headline.left)
+        }
+    }
+
     @Test fun hideKeepsInspectorAndLatestActivityAvailableWithoutRestore() {
         val fullReason = "Server rejected authentication. " + "Keep every detail inspectable. ".repeat(8) + "END OF REASON"
         val snapshot =
@@ -327,13 +439,19 @@ class NetworkActivityUiTest {
             listOf("Open network activity"),
             compose.onNodeWithTag("chatlist_status_banner").fetchSemanticsNode().config[SemanticsProperties.ContentDescription],
         )
-        compose
-            .onNodeWithContentDescription("Hide network activity banner")
-            .assertTouchHeightIsEqualTo(48.dp)
-            .assertTouchWidthIsEqualTo(48.dp)
+        compose.onNodeWithTag("chatlist_status_hide").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Hide network activity banner").assertDoesNotExist()
+        assertEquals(
+            "Hide network activity banner",
+            compose
+                .onNodeWithTag("chatlist_status_banner")
+                .fetchSemanticsNode()
+                .config[SemanticsActions.Dismiss]
+                .label,
+        )
         val beforeHide = snapshot.value
-        // Real pointer input must be consumed by Hide, not also open its clickable parent.
-        compose.onNodeWithTag("chatlist_status_hide").performTouchInput { click() }
+        // A swipe hides without also opening its clickable card.
+        compose.onNodeWithTag("chatlist_status_banner").performTouchInput { swipeRight() }
         compose.onNodeWithTag("chatlist_status_banner").assertDoesNotExist()
         compose.onNodeWithTag("network_activity_sheet").assertDoesNotExist()
         compose.onNodeWithTag("chatlist_row_7").assertIsDisplayed()
@@ -435,7 +553,7 @@ class NetworkActivityUiTest {
                     .isNotEmpty()
             }
             compose.onNodeWithTag("chatlist_status_banner").assertIsDisplayed()
-            compose.onNodeWithTag("chatlist_status_hide").performClick()
+            compose.onNodeWithTag("chatlist_status_banner").performTouchInput { swipeLeft() }
             compose.waitUntil(5_000) { !current.value.hasUnseenNetworkActivity.value }
             compose.runOnIdle { connections.connectionStates.value = mapOf(1L to IrcClientState.Failed("failure after hide", true)) }
             compose.waitUntil(5_000) { current.value.hasUnseenNetworkActivity.value }
@@ -510,7 +628,7 @@ class NetworkActivityUiTest {
             onAction = { _, action -> calls += action },
             onSeen = { seenCalls++ },
         )
-        compose.onNodeWithTag("chatlist_status_hide").performClick()
+        compose.onNodeWithTag("chatlist_status_banner").performTouchInput { swipeRight() }
         compose.onNodeWithTag("chatlist_more").performClick()
         compose.onNodeWithTag("chatlist_show_network_activity_banner").assertDoesNotExist()
         compose.onNodeWithTag("chatlist_network_activity_icon", true).assertIsDisplayed()
@@ -590,7 +708,7 @@ class NetworkActivityUiTest {
             )
         compose.setContent {
             MotdTheme(dynamicColor = false) {
-                Box(Modifier.width(240.dp)) {
+                Box(Modifier.width(280.dp)) {
                     NetworkActivityBanner(snapshot, ChatListSyncChrome.Syncing(12, 42, true), connectionNoticeVisible = true, includeHistory = true, onInspect = {}, onHide = {})
                 }
             }
@@ -919,7 +1037,7 @@ class NetworkActivityUiTest {
         }, onClearRecent = {
             snapshot.value = snapshot.value.copy(recent = emptyList())
         }, onNetworkAction = { id, action -> networkActions += id to action })
-        compose.onNodeWithTag("chatlist_status_hide").performClick()
+        compose.onNodeWithTag("chatlist_status_banner").performTouchInput { swipeLeft() }
         compose.onNodeWithTag("chatlist_more_network_activity_new_dot", true).assertIsDisplayed()
         compose.onNodeWithTag("chatlist_more").performClick()
         compose.onNodeWithTag("chatlist_network_activity").performClick()
