@@ -332,22 +332,15 @@ class ChatFolderUiTest {
         val plainFill = pillPixel(folderTag)
         assertNotEquals(plainFill, selectedFill)
         assertEquals(colors.primary.toArgb(), selectedFill)
-        assertEquals(colors.surfaceContainerHigh.toArgb(), plainFill)
+        assertEquals(colors.surface.toArgb(), plainFill)
 
         val strip = compose.onNodeWithTag("chatlist_folder_tabs")
         val stripBounds = strip.fetchSemanticsNode().boundsInRoot
         val pillBounds = compose.onNodeWithTag(allTag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val pixels = strip.captureToImage().asAndroidBitmap()
-        val left = (pillBounds.left - stripBounds.left).toInt()
-        val top = (pillBounds.top - stripBounds.top).toInt()
         val center = ((pillBounds.left + pillBounds.right) / 2 - stripBounds.left).toInt()
-        assertEquals(colors.surfaceContainerHigh.toArgb(), pixels.getPixel(center, 0))
-        assertEquals(colors.surfaceContainerHigh.toArgb(), pixels.getPixel(center, pixels.height - 1))
-        val cornerInset = with(compose.density) { 2.dp.toPx().toInt() }
-        val shoulderInset = with(compose.density) { 7.dp.toPx().toInt() }
-        // The avatar-like corner reaches the top edge sooner than a fully round capsule.
-        assertEquals(plainFill, pixels.getPixel(left + cornerInset, top + cornerInset))
-        assertEquals(selectedFill, pixels.getPixel(left + shoulderInset, top + cornerInset))
+        assertEquals(plainFill, pixels.getPixel(center, 0))
+        assertEquals(plainFill, pixels.getPixel(center, pixels.height - 1))
         val root = compose.onRoot()
         val rootBounds = root.fetchSemanticsNode().boundsInRoot
         val overlay = compose.onNodeWithTag("chatlist_folder_overlay").fetchSemanticsNode().boundsInRoot
@@ -379,14 +372,14 @@ class ChatFolderUiTest {
             y: Float,
         ) = pixelsUnderStrip.getPixel((x - rootBounds.left).toInt(), (y - rootBounds.top).toInt())
 
-        val underStripX = rootBounds.left + with(compose.density) { 18.dp.toPx() }
+        val underStripX = rootBounds.left + with(compose.density) { 4.dp.toPx() }
         val underStripY = overlay.top + with(compose.density) { 28.dp.toPx() }
         assertTrue(underStripY in shiftedRow.top..shiftedRow.bottom)
         assertEquals("The transparent strip reveals the moving chat row", colors.surface.toArgb(), rootPixel(underStripX, underStripY))
         val capsuleBounds = compose.onNodeWithTag("chatlist_folder_capsule").fetchSemanticsNode().boundsInRoot
         assertEquals(
-            "The shared capsule remains visible above the row",
-            colors.surfaceContainerHigh.toArgb(),
+            "The shared capsule matches the chat card surface",
+            colors.surface.toArgb(),
             rootPixel(capsuleBounds.right - with(compose.density) { 8.dp.toPx() }, underStripY),
         )
         val selectedBounds = compose.onNodeWithTag(allTag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
@@ -414,7 +407,88 @@ class ChatFolderUiTest {
     }
 
     @Test
-    fun folder_strip_keeps_transparent_backdrop_and_distinct_capsule_in_light_and_dark_themes() {
+    fun selected_folder_and_all_tabs_invert_unread_badges_without_changing_mentions() {
+        val colors =
+            lightColorScheme(
+                primary = Color(0xFF3322CC),
+                onPrimary = Color.White,
+                secondary = Color(0xFF005544),
+                onSecondary = Color(0xFFFFCCAA),
+            )
+        val state =
+            mutableStateOf(
+                ChatListState(
+                    rows = listOf(row(1, folderId = 7).copy(unreadCount = 8), row(2, folderId = 8).copy(unreadCount = 8)),
+                    folders = listOf(folder(7, "First"), folder(8, "Second")),
+                    folderDisplayMode = FolderDisplayMode.TABS,
+                    loading = false,
+                ),
+            )
+        setContent(state, colorScheme = colors)
+        val resources = ApplicationProvider.getApplicationContext<Context>().resources
+
+        fun assertBadgeColors(
+            tabTag: String,
+            count: Int,
+            inverted: Boolean = false,
+            mention: Boolean = false,
+        ) {
+            val description = resources.getQuantityString(if (mention) R.plurals.badge_mention else R.plurals.badge_unread, count, count)
+            val tab = compose.onNodeWithTag(tabTag).assertIsDisplayed()
+            val tabBounds = tab.fetchSemanticsNode().boundsInRoot
+            val badgeBounds =
+                compose
+                    .onNode(hasContentDescription(description) and hasAnyAncestor(hasTestTag(tabTag)), useUnmergedTree = true)
+                    .assertIsDisplayed()
+                    .fetchSemanticsNode()
+                    .boundsInRoot
+            val pixels = tab.captureToImage().asAndroidBitmap()
+            val background =
+                when {
+                    mention -> colors.secondary
+                    inverted -> colors.onPrimary
+                    else -> colors.primary
+                }
+            val foreground =
+                when {
+                    mention -> colors.onSecondary
+                    inverted -> colors.primary
+                    else -> colors.onPrimary
+                }
+            var backgroundVisible = false
+            var foregroundVisible = false
+            for (x in (badgeBounds.left - tabBounds.left).toInt() until (badgeBounds.right - tabBounds.left).toInt()) {
+                for (y in (badgeBounds.top - tabBounds.top).toInt() until (badgeBounds.bottom - tabBounds.top).toInt()) {
+                    val color = pixels.getPixel(x, y)
+                    if (color == foreground.toArgb()) foregroundVisible = true
+                    if (color == background.toArgb()) backgroundVisible = true
+                }
+                if (foregroundVisible && backgroundVisible) break
+            }
+            assertTrue("The count chip uses the expected fill on $tabTag", backgroundVisible)
+            assertTrue("The count chip uses the expected text color on $tabTag", foregroundVisible)
+        }
+
+        compose.onNodeWithTag("chatlist_folder_tab_all").assertIsSelected()
+        assertBadgeColors("chatlist_folder_tab_all", 16, inverted = true)
+        assertBadgeColors("chatlist_folder_tab_7", 8)
+        compose.onNodeWithTag("chatlist_folder_tab_7").performClick().assertIsSelected()
+        assertBadgeColors("chatlist_folder_tab_all", 16)
+        assertBadgeColors("chatlist_folder_tab_7", 8, inverted = true)
+        assertBadgeColors("chatlist_folder_tab_8", 8)
+
+        compose.runOnIdle {
+            state.value = state.value.copy(rows = state.value.rows.map { if (it.folderId == 7L) it.copy(mentionCount = 2) else it })
+        }
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.waitForIdle()
+        compose.onNodeWithTag("chatlist_folder_tab_7").assertIsSelected()
+        assertBadgeColors("chatlist_folder_tab_7", 2, mention = true)
+        assertBadgeColors("chatlist_folder_tab_all", 2, mention = true)
+    }
+
+    @Test
+    fun folder_strip_keeps_transparent_backdrop_and_capsule_matching_chat_card_in_light_and_dark_themes() {
         val preset = mutableStateOf(ColorThemePreset.LIGHT)
         lateinit var colors: ColorScheme
         val state =
@@ -453,14 +527,20 @@ class ChatFolderUiTest {
             val capsuleNode = capsule.fetchSemanticsNode()
             val bounds = capsuleNode.boundsInRoot
             val viewport = compose.onNodeWithTag("chatlist_folder_tabs").fetchSemanticsNode().boundsInRoot
-            val outerInset = with(compose.density) { 20.dp.toPx() }
-            val viewportInset = with(compose.density) { 30.dp.toPx() }
+            val outerInset = with(compose.density) { 8.dp.toPx() }
             val sampleInset = with(compose.density) { 1.dp.toPx() }
             assertEquals(rootBounds.left + outerInset, bounds.left, 0.5f)
             assertEquals(rootBounds.right - outerInset, bounds.right, 0.5f)
-            assertEquals(rootBounds.left + viewportInset, viewport.left, 0.5f)
-            assertEquals(rootBounds.right - viewportInset, viewport.right, 0.5f)
+            assertEquals(rootBounds.left + outerInset, viewport.left, 0.5f)
+            assertEquals(rootBounds.right - outerInset, viewport.right, 0.5f)
             assertTrue("The shared surface must not consume tab selection", !capsuleNode.config.contains(SemanticsActions.OnClick))
+            val overlayBounds = compose.onNodeWithTag("chatlist_folder_overlay").fetchSemanticsNode().boundsInRoot
+            assertEquals(
+                "The capsule keeps 4dp of transparent padding above and below",
+                with(compose.density) { 8.dp.toPx() },
+                overlayBounds.height - bounds.height,
+                0.5f,
+            )
 
             val pixels = root.captureToImage().asAndroidBitmap()
 
@@ -471,7 +551,6 @@ class ChatFolderUiTest {
 
             val centerY = (bounds.top + bounds.bottom) / 2
             assertEquals("The transparent strip shows the unified chat surface", colors.surface.toArgb(), pixel(rootBounds.left + sampleInset, centerY))
-            assertEquals("The shared capsule uses a distinct elevated surface", colors.surfaceContainerHigh.toArgb(), pixel(bounds.left + 2 * sampleInset, centerY))
             val topBar = compose.onNodeWithTag("chatlist_top_app_bar").fetchSemanticsNode().boundsInRoot
             assertEquals("The title bar retains its original surface color", colors.surface.toArgb(), pixel(topBar.left + sampleInset, (topBar.top + topBar.bottom) / 2))
             compose.onNodeWithTag("chatlist_folder_tab_all").assertIsSelected()
@@ -482,12 +561,30 @@ class ChatFolderUiTest {
                     .fetchSemanticsNode()
                     .boundsInRoot
             assertEquals("The selected pill uses the stronger theme primary color", colors.primary.toArgb(), pixel((selected.left + selected.right) / 2, selected.top + 2 * sampleInset))
+            val tabBounds = compose.onNodeWithTag("chatlist_folder_tab_all").fetchSemanticsNode().boundsInRoot
+            val pillInset = with(compose.density) { 4.dp.toPx() }
+            assertEquals("The clickable tab retains its original 48dp height", with(compose.density) { 48.dp.toPx() }, tabBounds.height, 0.5f)
+            assertEquals("The selected pill is 40dp tall", with(compose.density) { 40.dp.toPx() }, selected.height, 0.5f)
+            assertEquals("The first pill starts at the chat avatar's 12dp inset inside the card", bounds.left + with(compose.density) { 12.dp.toPx() }, selected.left, 0.5f)
+            assertEquals("The tab adds no horizontal inset around its pill", tabBounds.left, selected.left, 0.5f)
+            assertEquals(tabBounds.right, selected.right, 0.5f)
+            assertEquals("The selected pill is inset 4dp from the tab top", pillInset, selected.top - tabBounds.top, 0.5f)
+            assertEquals("The selected pill is inset 4dp from the tab bottom", pillInset, tabBounds.bottom - selected.bottom, 0.5f)
+            assertEquals("The leading capsule inset stays unselected", colors.surface.toArgb(), pixel(bounds.left + sampleInset, centerY))
+            assertEquals("The upper capsule inset stays unselected", colors.surface.toArgb(), pixel((selected.left + selected.right) / 2, bounds.top + sampleInset))
+            assertEquals("The lower capsule inset stays unselected", colors.surface.toArgb(), pixel((selected.left + selected.right) / 2, bounds.bottom - sampleInset))
+            val mentionsTab = compose.onNodeWithTag("chatlist_folder_tab_mentions").fetchSemanticsNode().boundsInRoot
+            val mentionsPill = compose.onNodeWithTag("chatlist_folder_tab_pill_mentions", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertEquals("Mentions keeps the same 48dp target", tabBounds.height, mentionsTab.height, 0.5f)
+            assertEquals("Mentions keeps the same 40dp content geometry", selected.height, mentionsPill.height, 0.5f)
+            assertEquals(pillInset, mentionsPill.top - mentionsTab.top, 0.5f)
+            assertEquals(pillInset, mentionsTab.bottom - mentionsPill.bottom, 0.5f)
             compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
         }
     }
 
     @Test
-    fun folder_tabs_keep_pills_close_with_full_touch_targets() {
+    fun folder_tabs_keep_content_sized_pills_with_4dp_gaps_and_48dp_targets() {
         val folders = listOf(folder(7, "First"), folder(8, "Second"))
         val state =
             mutableStateOf(
@@ -504,14 +601,24 @@ class ChatFolderUiTest {
         val tabTags = listOf("chatlist_folder_tab_all", "chatlist_folder_tab_7", "chatlist_folder_tab_8")
         val pillBounds = pillTags.map { compose.onNodeWithTag(it, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot }
         val touchBounds = tabTags.map { compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot }
-        val maxPillGap = with(compose.density) { 12.dp.toPx() }
+        val pillInset = with(compose.density) { 4.dp.toPx() }
         val minTouchHeight = with(compose.density) { 48.dp.toPx() }
+        val minPillHeight = with(compose.density) { 40.dp.toPx() }
         pillBounds.zipWithNext().forEach { (left, right) ->
-            assertTrue("Adjacent pills should have less than 12dp between them", right.left - left.right < maxPillGap)
+            assertEquals("Adjacent visible pills have a consistent 4dp gap", pillInset, right.left - left.right, 0.5f)
         }
-        touchBounds.forEach { bounds ->
-            assertTrue("Each tab should retain a 48dp touch target", bounds.height >= minTouchHeight)
+        touchBounds.zip(pillBounds).forEach { (target, pill) ->
+            assertEquals("Each tab should be 48dp tall", minTouchHeight, target.height, 0.5f)
+            assertEquals("Each visible pill should be 40dp tall", minPillHeight, pill.height, 0.5f)
+            assertEquals(pillInset, pill.top - target.top, 0.5f)
+            assertEquals(pillInset, target.bottom - pill.bottom, 0.5f)
+            assertEquals("Targets add no horizontal padding", target.width, pill.width, 0.5f)
         }
+        assertTrue("Tab widths follow their label content, not equal shares of the capsule", pillBounds[2].width > pillBounds[1].width)
+        val icon = compose.onNodeWithTag("chatlist_folder_tab_icon_7", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val originalIconSize = with(compose.density) { 20.dp.toPx() }
+        assertEquals("Folder icons keep their original 20dp width", originalIconSize, icon.width, 0.5f)
+        assertEquals("Folder icons keep their original 20dp height", originalIconSize, icon.height, 0.5f)
     }
 
     @Test
@@ -540,10 +647,10 @@ class ChatFolderUiTest {
             assertTrue("The fixture must overflow the folder viewport", scrollRange.maxValue() > 0f)
             assertEquals(0f, scrollRange.value(), 0.5f)
         }
-        val outerInset = with(compose.density) { 20.dp.toPx() }
+        val outerInset = with(compose.density) { 8.dp.toPx() }
         val rowInset = with(compose.density) { 12.dp.toPx() }
-        val pillInset = with(compose.density) { 2.dp.toPx() }
         val capsule = compose.onNodeWithTag("chatlist_folder_capsule").fetchSemanticsNode().boundsInRoot
+        val firstTab = compose.onNodeWithTag("chatlist_folder_tab_1").fetchSemanticsNode().boundsInRoot
         val firstPill = compose.onNodeWithTag("chatlist_folder_tab_pill_1", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val firstRow =
             compose
@@ -551,10 +658,13 @@ class ChatFolderUiTest {
                 .assertIsDisplayed()
                 .fetchSemanticsNode()
                 .boundsInRoot
-        assertEquals("The capsule starts at the avatar edge", firstRow.left + rowInset, capsule.left, 0.5f)
-        assertEquals("The capsule has a 20dp leading scaffold gutter", outerInset, capsule.left - rootBounds.left, 0.5f)
-        assertEquals("The first folder button stays inset inside the capsule", capsule.left + with(compose.density) { 12.dp.toPx() }, firstPill.left, 0.5f)
-        assertEquals("The first folder button follows the scroll viewport", viewportBounds.left + pillInset, firstPill.left, 0.5f)
+        assertEquals("The capsule starts at the chat card's outer edge", firstRow.left, capsule.left, 0.5f)
+        assertEquals("The capsule ends at the chat card's outer edge", firstRow.right, capsule.right, 0.5f)
+        assertEquals("The capsule has an 8dp leading scaffold gutter", outerInset, capsule.left - rootBounds.left, 0.5f)
+        assertEquals("The first visible pill starts at the avatar's left edge", firstRow.left + rowInset, firstPill.left, 0.5f)
+        assertEquals("The first visible pill starts 12dp inside the capsule", capsule.left + rowInset, firstPill.left, 0.5f)
+        assertEquals("The first folder target starts with its pill", firstPill.left, firstTab.left, 0.5f)
+        assertEquals("The first folder target is inset 12dp from the scroll viewport", viewportBounds.left + rowInset, firstTab.left, 0.5f)
 
         // Reach the last tab before clicking: offscreen touch targets are not clickable.
         strip.performSemanticsAction(SemanticsActions.ScrollBy) { assertTrue(it(scrollRange.maxValue(), 0f)) }
@@ -564,12 +674,13 @@ class ChatFolderUiTest {
         strip.performSemanticsAction(SemanticsActions.ScrollBy) { assertTrue(it(scrollRange.maxValue(), 0f)) }
         compose.waitForIdle()
         compose.runOnIdle { assertEquals(scrollRange.maxValue(), scrollRange.value(), 0.5f) }
-        val lastPill =
+        val lastTab =
             compose
-                .onNodeWithTag("chatlist_folder_tab_pill_12", useUnmergedTree = true)
+                .onNodeWithTag("chatlist_folder_tab_12")
                 .assertIsDisplayed()
                 .fetchSemanticsNode()
                 .boundsInRoot
+        val lastPill = compose.onNodeWithTag("chatlist_folder_tab_pill_12", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val lastRow =
             compose
                 .onNodeWithTag("chatlist_row_12")
@@ -577,13 +688,17 @@ class ChatFolderUiTest {
                 .fetchSemanticsNode()
                 .boundsInRoot
         val lastCapsule = compose.onNodeWithTag("chatlist_folder_capsule").fetchSemanticsNode().boundsInRoot
-        assertEquals("The capsule ends at the avatar edge", lastRow.right - rowInset, lastCapsule.right, 0.5f)
-        assertEquals("The trailing capsule gutter is 20dp", outerInset, rootBounds.right - lastCapsule.right, 0.5f)
-        assertEquals("The last pill retains its inset inside the fixed viewport", viewportBounds.right - pillInset, lastPill.right, 0.5f)
+        assertEquals("The capsule starts at the chat card's outer edge after scrolling", lastRow.left, lastCapsule.left, 0.5f)
+        assertEquals("The capsule ends at the chat card's outer edge after scrolling", lastRow.right, lastCapsule.right, 0.5f)
+        assertEquals("The trailing capsule gutter is 8dp", outerInset, rootBounds.right - lastCapsule.right, 0.5f)
+        assertEquals("The last visible pill ends at the symmetric chat content inset", lastRow.right - rowInset, lastPill.right, 0.5f)
+        assertEquals("The last visible pill ends 12dp inside the capsule", lastCapsule.right - rowInset, lastPill.right, 0.5f)
+        assertEquals("The last folder target ends with its pill", lastPill.right, lastTab.right, 0.5f)
+        assertEquals("The last tab keeps the trailing 12dp viewport inset", viewportBounds.right - rowInset, lastTab.right, 0.5f)
     }
 
     @Test
-    fun folder_tab_edge_tap_preserves_full_touch_target() {
+    fun folder_tab_edge_taps_preserve_48dp_target_outside_visible_pill() {
         val state =
             mutableStateOf(
                 ChatListState(
@@ -594,15 +709,22 @@ class ChatFolderUiTest {
                 ),
             )
         setContent(state)
-
         val tab = compose.onNodeWithTag("chatlist_folder_tab_7")
+
         val bounds = tab.fetchSemanticsNode().boundsInRoot
         val minTouchHeight = with(compose.density) { 48.dp.toPx() }
-        assertTrue(bounds.height >= minTouchHeight)
+        assertEquals(minTouchHeight, bounds.height, 0.5f)
         assertEquals(MotdShapes.channelAvatar, tab.fetchSemanticsNode().config[SemanticsProperties.Shape])
+        val pill = compose.onNodeWithTag("chatlist_folder_tab_pill_7", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val pillInset = with(compose.density) { 4.dp.toPx() }
+        assertEquals(pillInset, pill.top - bounds.top, 0.5f)
+        assertEquals(pillInset, bounds.bottom - pill.bottom, 0.5f)
 
-        // The top edge stays tappable even though the visible pill is shorter than the target.
+        // The target remains tappable above and below the visible pill.
         tab.performTouchInput { click(Offset(center.x, 2f)) }
+        tab.assertIsSelected()
+        compose.onNodeWithTag("chatlist_folder_tab_all").performClick().assertIsSelected()
+        tab.performTouchInput { click(Offset(center.x, height - 2f)) }
         tab.assertIsSelected()
     }
 

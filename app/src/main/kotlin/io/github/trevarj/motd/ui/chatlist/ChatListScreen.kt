@@ -1289,19 +1289,19 @@ private fun FolderTabStrip(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 4.dp)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh, MotdShapes.channelAvatar)
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .background(MaterialTheme.colorScheme.surface, MotdShapes.channelAvatar)
                 .testTag("chatlist_folder_capsule"),
     ) {
         Row(
             modifier =
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 10.dp)
                     .horizontalScroll(rememberScrollState())
                     .selectableGroup()
-                    .testTag("chatlist_folder_tabs"),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    .testTag("chatlist_folder_tabs")
+                    .padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             if (showAllTab) {
                 FolderPillTab(
@@ -1325,7 +1325,11 @@ private fun FolderTabStrip(
                     tag = "chatlist_folder_tab_mentions",
                 ) {
                     Row(
-                        modifier = Modifier.testTag("chatlist_folder_tab_pill_mentions").padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier =
+                            Modifier
+                                .testTag("chatlist_folder_tab_pill_mentions")
+                                .heightIn(min = 40.dp)
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -1425,7 +1429,6 @@ private fun FolderPillTab(
                 .clip(MotdShapes.channelAvatar)
                 .selectable(selected = selected, onClick = onClick, role = Role.Tab)
                 .heightIn(min = 48.dp)
-                .padding(horizontal = 2.dp)
                 .testTag(tag),
         contentAlignment = Alignment.Center,
     ) {
@@ -1446,8 +1449,9 @@ private fun FolderTabLabel(
     Row(
         modifier =
             Modifier
-                .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent, MotdShapes.channelAvatar)
                 .testTag(pillTag)
+                .heightIn(min = 40.dp)
+                .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent, MotdShapes.channelAvatar)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1461,15 +1465,18 @@ private fun FolderTabLabel(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        FolderActivityBadge(summary)
+        FolderActivityBadge(summary, selected = selected)
     }
 }
 
 @Composable
-private fun FolderActivityBadge(summary: ChatFolderSummary) {
+private fun FolderActivityBadge(
+    summary: ChatFolderSummary,
+    selected: Boolean = false,
+) {
     when {
         summary.mentionCount > 0 -> MentionBadge(count = summary.mentionCount, lowerBound = summary.mentionIncomplete)
-        summary.unreadCount > 0 -> UnreadBadge(count = summary.unreadCount, lowerBound = summary.unreadIncomplete)
+        summary.unreadCount > 0 -> UnreadBadge(count = summary.unreadCount, lowerBound = summary.unreadIncomplete, inverted = selected)
         summary.advertisedActivity -> AdvertisedActivityDot()
         summary.unreadIncomplete || summary.mentionIncomplete -> HistoryIncompleteBadge()
     }
