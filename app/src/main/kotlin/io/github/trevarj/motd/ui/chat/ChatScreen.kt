@@ -3084,17 +3084,8 @@ fun ChatContent(
             }
         },
     ) { padding ->
-        // TopAppBar owns the status-bar inset. The chat surface draws edge-to-edge horizontally,
-        // while these consuming modifiers keep the composer above navigation and animated IME
-        // insets without double-padding their overlap.
-        Box(
-            modifier =
-                Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .navigationBarsPadding()
-                    .imePadding(),
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            ChatWallpaperBackground(chatWallpaper, modifier = Modifier.matchParentSize())
             // No composition-phase IME read here on purpose: the composer samples the animated inset
             // in its own measure phase, so the whole timeline stays skippable while the keyboard
             // animates instead of recomposing once per frame.
@@ -3132,8 +3123,17 @@ fun ChatContent(
                     shift
                 }
             ConversationTypography(conversationFontScalePercent) {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    ChatWallpaperBackground(chatWallpaper, modifier = Modifier.matchParentSize())
+                // TopAppBar owns the status-bar inset. Only the foreground follows Scaffold padding;
+                // the wallpaper keeps a fixed origin and size while the header and IME animate.
+                // Consuming navigation/IME insets keeps the composer clear without double-padding.
+                Box(
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .padding(padding)
+                            .navigationBarsPadding()
+                            .imePadding(),
+                ) {
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
                         contentWindowInsets = WindowInsets(0),

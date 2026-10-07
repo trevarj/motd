@@ -2,6 +2,7 @@ package io.github.trevarj.motd
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalActivityResultRegistryOwner
@@ -88,6 +89,8 @@ import androidx.paging.LoadStates
 import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.room.Room
+import coil.Coil
+import coil.ImageLoader
 import io.github.trevarj.motd.ai.AiCustomStyle
 import io.github.trevarj.motd.ai.AiRuntimeFailure
 import io.github.trevarj.motd.ai.AiTranslationTarget
@@ -108,8 +111,11 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ComposerStyle
+import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
 import io.github.trevarj.motd.dcc.EbooksResultCache
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
@@ -147,6 +153,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -157,6 +164,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
+import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -293,6 +301,7 @@ class ComposerSendClearUiTest {
         aiSheet: @Composable () -> Unit = {},
         dickordEnabled: () -> Boolean = { false },
         layoutDensity: () -> LayoutDensity = { LayoutDensity.COMFORTABLE },
+        chatWallpaper: WallpaperSelection = WallpaperSelection(),
         onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
         initialTarget: () -> ChatPositionTarget? = { null },
         entryState: () -> EntryPositionState = { EntryPositionState.Settled },
@@ -374,6 +383,7 @@ class ComposerSendClearUiTest {
                             showImages = showImages,
                             showLinkPreviews = showLinkPreviews,
                             composerStyle = composerStyle(),
+                            chatWallpaper = chatWallpaper,
                             memberNicks = memberNicks,
                             voiceState = voiceState(),
                             onViewportRefreshAnchor = onViewportRefreshAnchor,
@@ -1337,6 +1347,100 @@ class ComposerSendClearUiTest {
             assertEquals(null, target)
             assertEquals(EntryPositionState.Settled, entry)
         }
+    }
+
+    @Test
+    fun nativeBuiltinWallpaperStaysFixedWhileHistoryHeaderResizes() {
+        assertWallpaperAnchoredDuringHeaderResize(WallpaperSelection(ChatWallpaperPreset.MOTD, 100))
+    }
+
+    @Test
+    fun nativeCroppedImageWallpaperStaysFixedWhileHistoryHeaderResizes() {
+        val context = RuntimeEnvironment.getApplication()
+        val directory = File(context.filesDir, CustomWallpaperStore.DIRECTORY).apply { mkdirs() }
+        val file = File(directory, "${UUID.randomUUID()}.image")
+        val bitmap = Bitmap.createBitmap(128, 256, Bitmap.Config.ARGB_8888)
+        for (y in 0 until bitmap.height) {
+            for (x in 0 until bitmap.width) {
+                bitmap.setPixel(x, y, android.graphics.Color.rgb(x * 255 / 127, y, 255 - y))
+            }
+        }
+        try {
+            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        } finally {
+            bitmap.recycle()
+        }
+        val originalLoader = Coil.imageLoader(context)
+        val loader = ImageLoader.Builder(context).allowHardware(false).build()
+        Coil.setImageLoader(loader)
+        try {
+            assertWallpaperAnchoredDuringHeaderResize(WallpaperSelection(ChatWallpaperPreset.NONE, 100, file.name))
+        } finally {
+            Coil.setImageLoader(originalLoader)
+            loader.shutdown()
+            file.delete()
+        }
+    }
+
+    private fun assertWallpaperAnchoredDuringHeaderResize(wallpaper: WallpaperSelection) {
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            pages = flowOf(PagingData.from(headerHistory())),
+            chatWallpaper = wallpaper,
+            onSubmit = {},
+        )
+        val root = compose.onNodeWithTag("chat_surface_root")
+        val rootBounds = root.fetchSemanticsNode().boundsInRoot
+        val bar = compose.onNodeWithTag("chat_top_app_bar", useUnmergedTree = true)
+        val timeline = compose.onNodeWithTag("chat_timeline")
+
+        fun headerHeight(): Float {
+            val bounds = bar.getUnclippedBoundsInRoot()
+            return (bounds.bottom - bounds.top).value
+        }
+
+        fun wallpaperPixels(): IntArray {
+            assertEquals("The screen capture origin must not follow the header", rootBounds, root.fetchSemanticsNode().boundsInRoot)
+            val screen = root.captureToImage().asAndroidBitmap()
+            // Short fixture bubbles stay left; this fixed screen patch avoids chrome and messages.
+            val width = screen.width / 8
+            val height = screen.height / 4
+            return IntArray(width * height).also {
+                screen.getPixels(it, 0, width, screen.width * 3 / 4, screen.height / 4, width, height)
+            }
+        }
+
+        // Wait for the real asynchronous tile/image, not a flat loading background or gradient.
+        compose.waitUntil(10_000) {
+            val pixels = wallpaperPixels()
+            pixels.maxOf { it and 255 } - pixels.minOf { it and 255 } > 32
+        }
+        val expandedPixels = wallpaperPixels()
+        val expandedHeight = headerHeight()
+        compose.mainClock.autoAdvance = false
+        timeline.performScrollToIndex(50)
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(64)
+        compose.waitForIdle()
+        val intermediateHeight = headerHeight()
+        assertTrue("The real titlebar must be partway through collapse", intermediateHeight < expandedHeight - 1f && intermediateHeight > expandedHeight - 27f)
+        assertArrayEquals("Wallpaper moved during titlebar collapse", expandedPixels, wallpaperPixels())
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        val collapsedHeight = headerHeight()
+        assertEquals("The real titlebar must finish collapsing", 28f, expandedHeight - collapsedHeight, 1f)
+        assertArrayEquals("Wallpaper moved with the collapsed titlebar", expandedPixels, wallpaperPixels())
+        timeline.performScrollToIndex(0)
+        compose.mainClock.advanceTimeBy(64)
+        compose.waitForIdle()
+        val expandingHeight = headerHeight()
+        assertTrue("Returning to latest must resize the real titlebar", expandingHeight > collapsedHeight + 1f && expandingHeight < expandedHeight - 1f)
+        assertArrayEquals("Wallpaper moved during titlebar reexpansion", expandedPixels, wallpaperPixels())
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        assertEquals("Latest must restore the expanded titlebar", expandedHeight, headerHeight(), 0.5f)
+        assertArrayEquals("Wallpaper moved after titlebar reexpansion", expandedPixels, wallpaperPixels())
+        compose.mainClock.autoAdvance = true
     }
 
     @Test
