@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -293,18 +294,19 @@ class ChatFolderUiTest {
     }
 
     @Test
-    fun folder_tabs_show_only_selected_pill_without_underline_or_separator() {
+    fun folder_tabs_share_unread_card_fill_with_only_selected_pill_and_no_underline_or_separator() {
         val colors =
             lightColorScheme(
                 surface = Color(0xFFABCDEF),
                 surfaceContainerHigh = Color(0xFFDDEEFF),
+                primaryContainer = Color(0xFFEE8844),
                 primary = Color(0xFF3322CC),
                 onPrimary = Color.White,
             )
         val state =
             mutableStateOf(
                 ChatListState(
-                    rows = (1L..20L).map { id -> row(id, "#room$id", folderId = if (id % 2 == 1L) 7L else null) },
+                    rows = (1L..20L).map { id -> row(id, "#room$id", folderId = if (id % 2 == 1L) 7L else null).copy(unreadCount = if (id == 1L) 1 else 0) },
                     folders = listOf(folder()),
                     folderDisplayMode = FolderDisplayMode.TABS,
                     mentionsEnabled = true,
@@ -332,7 +334,12 @@ class ChatFolderUiTest {
         val plainFill = pillPixel(folderTag)
         assertNotEquals(plainFill, selectedFill)
         assertEquals(colors.primary.toArgb(), selectedFill)
-        assertEquals(colors.surface.toArgb(), plainFill)
+        val unreadFill = lerp(colors.surface, colors.primaryContainer, 0.20f).toArgb()
+        assertEquals(unreadFill, plainFill)
+        val unreadRowPixels = compose.onNodeWithTag("chatlist_row_1").captureToImage().asAndroidBitmap()
+        val unreadRowFill = unreadRowPixels.getPixel(unreadRowPixels.width / 2, 2)
+        assertEquals("The unread row uses the unread card tint", unreadFill, unreadRowFill)
+        assertEquals("Unselected tabs reveal the capsule's unread card tint", unreadRowFill, plainFill)
 
         val strip = compose.onNodeWithTag("chatlist_folder_tabs")
         val stripBounds = strip.fetchSemanticsNode().boundsInRoot
@@ -378,8 +385,8 @@ class ChatFolderUiTest {
         assertEquals("The transparent strip reveals the moving chat row", colors.surface.toArgb(), rootPixel(underStripX, underStripY))
         val capsuleBounds = compose.onNodeWithTag("chatlist_folder_capsule").fetchSemanticsNode().boundsInRoot
         assertEquals(
-            "The shared capsule matches the chat card surface",
-            colors.surface.toArgb(),
+            "The shared capsule matches the actual unread chat card surface",
+            unreadRowFill,
             rootPixel(capsuleBounds.right - with(compose.density) { 8.dp.toPx() }, underStripY),
         )
         val selectedBounds = compose.onNodeWithTag(allTag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
@@ -488,7 +495,7 @@ class ChatFolderUiTest {
     }
 
     @Test
-    fun folder_strip_keeps_transparent_backdrop_and_capsule_matching_chat_card_in_light_and_dark_themes() {
+    fun folder_strip_keeps_transparent_backdrop_and_capsule_matching_unread_chat_card_in_light_and_dark_themes() {
         val preset = mutableStateOf(ColorThemePreset.LIGHT)
         lateinit var colors: ColorScheme
         val state =
@@ -570,9 +577,10 @@ class ChatFolderUiTest {
             assertEquals(tabBounds.right, selected.right, 0.5f)
             assertEquals("The selected pill is inset 4dp from the tab top", pillInset, selected.top - tabBounds.top, 0.5f)
             assertEquals("The selected pill is inset 4dp from the tab bottom", pillInset, tabBounds.bottom - selected.bottom, 0.5f)
-            assertEquals("The leading capsule inset stays unselected", colors.surface.toArgb(), pixel(bounds.left + sampleInset, centerY))
-            assertEquals("The upper capsule inset stays unselected", colors.surface.toArgb(), pixel((selected.left + selected.right) / 2, bounds.top + sampleInset))
-            assertEquals("The lower capsule inset stays unselected", colors.surface.toArgb(), pixel((selected.left + selected.right) / 2, bounds.bottom - sampleInset))
+            val unreadFill = lerp(colors.surface, colors.primaryContainer, 0.20f).toArgb()
+            assertEquals("The leading capsule inset uses the unread card tint", unreadFill, pixel(bounds.left + sampleInset, centerY))
+            assertEquals("The upper capsule inset uses the unread card tint", unreadFill, pixel((selected.left + selected.right) / 2, bounds.top + sampleInset))
+            assertEquals("The lower capsule inset uses the unread card tint", unreadFill, pixel((selected.left + selected.right) / 2, bounds.bottom - sampleInset))
             val mentionsTab = compose.onNodeWithTag("chatlist_folder_tab_mentions").fetchSemanticsNode().boundsInRoot
             val mentionsPill = compose.onNodeWithTag("chatlist_folder_tab_pill_mentions", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
             assertEquals("Mentions keeps the same 48dp target", tabBounds.height, mentionsTab.height, 0.5f)

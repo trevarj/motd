@@ -1290,7 +1290,7 @@ private fun FolderTabStrip(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 4.dp)
-                .background(MaterialTheme.colorScheme.surface, MotdShapes.channelAvatar)
+                .background(chatListRowContainer(ChatListRowVisualState.UNREAD, MaterialTheme.colorScheme), MotdShapes.channelAvatar)
                 .testTag("chatlist_folder_capsule"),
     ) {
         Row(
