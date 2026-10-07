@@ -1,0 +1,5 @@
+- Added custom wallpapers and stationary chat backgrounds.
+- Aligned folder and archive cards, with a two-stage 1.2-second hold.
+- Made network status compact and swipe-dismissable.
+- Smart filters show common chatters' status updates and recent joins.
+- Made opening chats smoother.
