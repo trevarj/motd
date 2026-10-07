@@ -55,13 +55,13 @@ enum class ChatListSwipeAction { ARCHIVE, MARK_READ, MUTE, PIN, DELETE, NONE }
 internal fun chatListSwipeActionFromPreference(saved: String?): ChatListSwipeAction = saved?.let { runCatching { ChatListSwipeAction.valueOf(it) }.getOrNull() } ?: ChatListSwipeAction.ARCHIVE
 
 /**
- * How presence events (join/part/quit and nick changes) are presented in a conversation.
+ * How presence events (join/part/quit, nick changes, away and back) are presented in a conversation.
  *
- * [SMART] is the default: a presence row is shown only when that user actually took part in the
- * conversation, defined as having sent a message in the same room within [SMART_PRESENCE_WINDOW_MS]
- * before the event. Your own presence rows always survive, so "you joined" still anchors a fresh
- * buffer. This mirrors Halloy's `server_messages.smart` and removes the bulk of large-channel noise
- * without losing the events that carry meaning.
+ * [SMART] is the default: a presence row is shown when that user sent a conversation message in
+ * the same room within [SMART_PRESENCE_WINDOW_MS] before the event, or at least
+ * [SMART_PRESENCE_COMMON_MIN_MESSAGES] conversation messages within
+ * [SMART_PRESENCE_COMMON_WINDOW_MS] before it. Your own presence rows always survive, so
+ * "you joined" still anchors a fresh buffer. Later speech never reveals an earlier presence row.
  *
  * Netsplit/netjoin rows are aggregates covering many users at once, so they are already condensed to
  * a single row and are not subject to the smart test; only [HIDDEN] removes them.
@@ -70,6 +70,12 @@ enum class PresenceMode { ALL, SMART, HIDDEN }
 
 /** Window a user's last message keeps their presence events visible under [PresenceMode.SMART]. */
 const val SMART_PRESENCE_WINDOW_MS: Long = 5 * 60 * 1000
+
+/** Longer participation window for common chatters under [PresenceMode.SMART]. */
+const val SMART_PRESENCE_COMMON_WINDOW_MS: Long = 7 * 24 * 60 * 60 * 1000L
+
+/** Conversation messages in the common-chatter window required to keep presence events visible. */
+const val SMART_PRESENCE_COMMON_MIN_MESSAGES: Int = 5
 
 /**
  * Decode the stored presence preference. Installations predating this setting carry the former

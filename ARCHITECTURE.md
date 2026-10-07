@@ -123,6 +123,12 @@ flowchart TD
   bottom restores expanded chrome and waits for that layout before consuming the target.
   Target consumption preserves the final header, viewport and unread placement; settled
   reader scrolls still animate, and latest stays expanded.
+- Smart presence uses one shared SQL predicate for the timeline, positional counts,
+  and anchors: a normalized actor must have sent a conversation message in the same
+  room within the preceding five minutes, or at least five within the preceding
+  seven days. Both windows include their lower time bound and exclude future speech.
+  Own presence and netsplit/netjoin aggregates remain visible; Hide all still removes
+  every presence kind. Presence never becomes preview, activity, or unread content.
 - TLS policy, Android KeyChain integration, proxy selection, and embedded
   obfuscation are injected at the `:app` boundary so `:irc` stays pure JVM.
 - Each saved network owns its own ordered post-connect commands. `ConnectionActor`

@@ -30,6 +30,7 @@ class SmartPresenceVisibilityTest {
     private var nextKey = 0
 
     private val base = 1_700_000_000_000L
+    private val commonWindowMs = 7 * 24 * 60 * 60 * 1000L
 
     @Before
     fun setUp() =
@@ -49,6 +50,7 @@ class SmartPresenceVisibilityTest {
         atOffsetMs: Long,
         isSelf: Boolean = false,
         room: Long = bufferId,
+        normalizedActor: String = sender,
     ) {
         db.messageDao().insertAll(
             listOf(
@@ -60,7 +62,7 @@ class SmartPresenceVisibilityTest {
                     dedupKey = "key-${nextKey++}",
                     kind = kind,
                     isSelf = isSelf,
-                ),
+                ).copy(normalizedActor = normalizedActor),
             ),
         )
     }
@@ -149,6 +151,108 @@ class SmartPresenceVisibilityTest {
                     MessageKind.AWAY to "alice",
                     MessageKind.PRIVMSG to "alice",
                 ),
+                visibleKinds(PresenceMode.SMART),
+            )
+        }
+
+    @Test
+    fun `smart keeps away and back for a common chatter beyond five minutes`() =
+        runTest {
+            repeat(5) { insert(MessageKind.PRIVMSG, "alice", -600_000L + it * 1_000) }
+            insert(MessageKind.AWAY, "alice", 0)
+            insert(MessageKind.BACK, "alice", 1_000)
+
+            val rows = visibleRows(PresenceMode.SMART)
+            assertEquals(
+                listOf(MessageKind.BACK, MessageKind.AWAY) + List(5) { MessageKind.PRIVMSG },
+                rows.map { it.kind },
+            )
+            val reader = MessageVisibilityReader(db)
+            val spec = MessageVisibilitySpec(presenceMode = PresenceMode.SMART)
+            val lastSpeech = rows.first { it.kind == MessageKind.PRIVMSG }
+            assertEquals(2, reader.countTimelineNewer(bufferId, lastSpeech.serverTime, lastSpeech.id, spec))
+            assertEquals(rows.first().id, reader.latestEffectiveAnchor(bufferId, spec)?.id)
+            assertEquals(5, visibleRows(PresenceMode.HIDDEN).size)
+        }
+
+    @Test
+    fun `smart common chatter requires five conversation rows from that actor`() =
+        runTest {
+            repeat(4) { insert(MessageKind.PRIVMSG, "four", -600_000L + it * 1_000) }
+            insert(MessageKind.JOIN, "four", -500_000)
+            listOf(
+                MessageKind.PRIVMSG,
+                MessageKind.NOTICE,
+                MessageKind.ACTION,
+                MessageKind.PRIVMSG,
+                MessageKind.NOTICE,
+            ).forEachIndexed { index, kind -> insert(kind, "five", -600_000L + index * 1_000) }
+            insert(MessageKind.AWAY, "four", 0)
+            insert(MessageKind.AWAY, "five", 1_000)
+
+            assertEquals(
+                listOf(MessageKind.AWAY to "five"),
+                visibleKinds(PresenceMode.SMART).filter { it.first == MessageKind.AWAY },
+            )
+        }
+
+    @Test
+    fun `smart common chatter includes seven day boundary but excludes older speech`() =
+        runTest {
+            repeat(4) {
+                insert(MessageKind.PRIVMSG, "boundary", -600_000L + it * 1_000)
+                insert(MessageKind.PRIVMSG, "expired", -600_000L + it * 1_000)
+            }
+            insert(MessageKind.PRIVMSG, "boundary", -commonWindowMs)
+            insert(MessageKind.PRIVMSG, "expired", -commonWindowMs - 1)
+            insert(MessageKind.AWAY, "boundary", 0)
+            insert(MessageKind.AWAY, "expired", 0)
+
+            assertEquals(
+                listOf(MessageKind.AWAY to "boundary"),
+                visibleKinds(PresenceMode.SMART).filter { it.first == MessageKind.AWAY },
+            )
+        }
+
+    @Test
+    fun `smart common chatter does not combine speech across rooms`() =
+        runTest {
+            repeat(4) { insert(MessageKind.PRIVMSG, "split", -600_000L + it * 1_000) }
+            insert(MessageKind.PRIVMSG, "split", -600_000, room = otherBufferId)
+            repeat(5) { insert(MessageKind.PRIVMSG, "elsewhere", -600_000L + it * 1_000, room = otherBufferId) }
+            insert(MessageKind.AWAY, "split", 0)
+            insert(MessageKind.BACK, "elsewhere", 1_000)
+
+            assertEquals(
+                List(4) { MessageKind.PRIVMSG to "split" },
+                visibleKinds(PresenceMode.SMART),
+            )
+        }
+
+    @Test
+    fun `smart common chatter ignores the fifth message after a presence row`() =
+        runTest {
+            repeat(4) { insert(MessageKind.PRIVMSG, "alice", -600_000L + it * 1_000) }
+            insert(MessageKind.AWAY, "alice", 0)
+            assertEquals(4, visibleRows(PresenceMode.SMART).size)
+            insert(MessageKind.PRIVMSG, "alice", 1_000)
+
+            assertEquals(
+                List(5) { MessageKind.PRIVMSG to "alice" },
+                visibleKinds(PresenceMode.SMART),
+            )
+        }
+
+    @Test
+    fun `smart common chatter matches normalized actor rather than display nick`() =
+        runTest {
+            repeat(5) {
+                insert(MessageKind.PRIVMSG, "Alice", -600_000L + it * 1_000, normalizedActor = "alice")
+            }
+            insert(MessageKind.AWAY, "ALICE", 0, normalizedActor = "alice")
+
+            assertEquals(
+                listOf(MessageKind.AWAY to "ALICE") + List(5) { MessageKind.PRIVMSG to "Alice" },
                 visibleKinds(PresenceMode.SMART),
             )
         }

@@ -6,6 +6,8 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_COMMON_MIN_MESSAGES
+import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_COMMON_WINDOW_MS
 import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_WINDOW_MS
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
@@ -13,7 +15,7 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 
 /**
  * Presence events attributable to one user. These carry that user's `normalizedActor`, which is what
- * makes the smart test ([PresenceMode.SMART]) possible: "did this actor speak here recently".
+ * makes the smart test ([PresenceMode.SMART]) possible: "is this actor a recent or common chatter here".
  */
 val ACTOR_PRESENCE_KINDS: Set<MessageKind> =
     setOf(
@@ -176,16 +178,17 @@ internal class MessageVisibilitySql(
     private fun redactionVisibility(alias: String): String = if (spec.showRedactedMessages) TRUE else "${column(alias, "kind")} != '${MessageKind.REDACTED.name}'"
 
     /**
-     * Keep an actor-attributable presence row only when that actor took part in the conversation:
-     * they sent a message in the same room within [SMART_PRESENCE_WINDOW_MS] before the event.
-     * Backward-looking only, matching Halloy, so a row's visibility never changes as later messages
-     * arrive — a forward-looking window would make already-rendered rows appear and disappear.
+     * Keep an actor-attributable presence row for a recent or common chatter in the same room:
+     * one conversation message within [SMART_PRESENCE_WINDOW_MS], or at least
+     * [SMART_PRESENCE_COMMON_MIN_MESSAGES] within [SMART_PRESENCE_COMMON_WINDOW_MS] before the event.
+     * Both windows look backward only; later speech never reveals an earlier presence row.
      *
      * Our own presence rows are always kept: "you joined" anchors a freshly opened buffer even
      * before anything has been said. Aggregate netsplit/netjoin rows have no single actor and are
      * left alone here; only HIDDEN drops them.
      *
-     * The correlated lookup is a covering seek on (bufferId, normalizedActor, serverTime).
+     * The (bufferId, normalizedActor, serverTime) index bounds both lookups; the common-chatter
+     * seek stops at the threshold instead of counting every matching message in the window.
      */
     private fun smartPresence(alias: String): String {
         val kind = column(alias, "kind")
@@ -197,7 +200,14 @@ internal class MessageVisibilitySql(
             "AND spoke.normalizedActor = ${column(alias, "normalizedActor")} " +
             "AND spoke.kind IN ($CONVERSATION_KIND_SQL) " +
             "AND spoke.serverTime <= $serverTime " +
-            "AND spoke.serverTime >= $serverTime - $SMART_PRESENCE_WINDOW_MS))"
+            "AND spoke.serverTime >= $serverTime - $SMART_PRESENCE_WINDOW_MS) " +
+            "OR EXISTS (SELECT 1 FROM messages spoke " +
+            "WHERE spoke.bufferId = ${column(alias, "bufferId")} " +
+            "AND spoke.normalizedActor = ${column(alias, "normalizedActor")} " +
+            "AND spoke.kind IN ($CONVERSATION_KIND_SQL) " +
+            "AND spoke.serverTime <= $serverTime " +
+            "AND spoke.serverTime >= $serverTime - $SMART_PRESENCE_COMMON_WINDOW_MS " +
+            "LIMIT 1 OFFSET ${SMART_PRESENCE_COMMON_MIN_MESSAGES - 1}))"
     }
 
     private fun notFool(alias: String): String = if (alias == "m") defaultNotFoolPredicate else buildNotFoolPredicate(alias)
