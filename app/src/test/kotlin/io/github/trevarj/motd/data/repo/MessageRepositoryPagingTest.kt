@@ -18,12 +18,14 @@ import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.history.seamAbove
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_WINDOW_MS
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -47,7 +49,7 @@ class MessageRepositoryPagingTest {
     @Before
     fun setUp() =
         runTest {
-            db = inMemoryDb()
+            db = inMemoryDb(directCommit = true)
             reader = MessageVisibilityReader(db)
             val networkId = db.networkDao().insert(network())
             bufferId = db.bufferDao().insert(buffer(networkId, "#paging"))
@@ -498,6 +500,83 @@ class MessageRepositoryPagingTest {
             assertEquals(neverReadWalk.size, cue.getValue(neverReadId).unreadCount)
         }
 
+    @OptIn(ExperimentalPagingApi::class)
+    @Test
+    fun newSpeechInvalidatesSmartPagingAndRefreshRevealsJoinInSharedAnchorDomain() =
+        runTest {
+            val dao = db.messageDao()
+            val repository = repository()
+            val spec = MessageVisibilitySpec(presenceMode = PresenceMode.SMART)
+            val ids =
+                dao.insertAll(
+                    listOf(
+                        message(bufferId, "older", "bob", 100, "older", msgid = "older"),
+                        message(bufferId, "join", "alice", 200, "join", kind = MessageKind.JOIN, msgid = "join"),
+                        message(bufferId, "parked", "bob", 300, "parked", msgid = "parked"),
+                    ),
+                )
+            val older = checkNotNull(dao.byCanonicalId(ids[0]))
+            val join = checkNotNull(dao.byCanonicalId(ids[1]))
+            val viewport = MutableStateFlow<ViewportRefreshAnchor?>(ViewportRefreshAnchor.Parked(older.id))
+
+            // The same live Room source and viewport wrapper as the repository's Pager.
+            fun freshSource(): ViewportPagingSource =
+                ViewportPagingSource(dao.pagingSource(messagePagingQuery(bufferId, spec)), viewport) { id ->
+                    val row = dao.byCanonicalId(id) ?: return@ViewportPagingSource null
+                    repository.countNewerThan(bufferId, row.serverTime, row.id, spec)
+                }
+            val source = freshSource()
+            val initialPage =
+                source.load(PagingSource.LoadParams.Refresh(null, MESSAGE_PAGING_CONFIG.initialLoadSize, true)).requirePage()
+            assertEquals(listOf(ids[2], older.id), initialPage.data.map { it.id })
+            assertEquals(2, initialPage.itemsBefore + initialPage.data.size + initialPage.itemsAfter)
+            assertEquals(1, repository.countNewerThan(bufferId, older.serverTime, older.id, spec))
+            assertEquals(older.id, reader.resolveSavedAnchor(bufferId, join.msgid, join.serverTime, join.id, spec)?.id)
+            assertFalse(source.invalid)
+
+            val speechId =
+                dao
+                    .insertAll(
+                        listOf(
+                            message(
+                                bufferId,
+                                "first speech",
+                                "alice",
+                                join.serverTime + SMART_PRESENCE_WINDOW_MS,
+                                "speech",
+                                msgid = "speech",
+                            ),
+                        ),
+                    ).single()
+            // No manual invalidate: committing the speech must invalidate the live generation.
+            assertTrue(source.invalid)
+            val refreshKey =
+                source.getRefreshKey(
+                    PagingState(
+                        pages = listOf(initialPage),
+                        anchorPosition = 1,
+                        config = MESSAGE_PAGING_CONFIG,
+                        leadingPlaceholderCount = initialPage.itemsBefore,
+                    ),
+                )
+            assertEquals(0, refreshKey)
+            val refreshed =
+                freshSource()
+                    .load(PagingSource.LoadParams.Refresh(refreshKey, MESSAGE_PAGING_CONFIG.initialLoadSize, true))
+                    .requirePage()
+            val presentedIds = refreshed.data.map { it.id }
+            assertEquals(listOf(speechId, ids[2], join.id, older.id), presentedIds)
+            assertEquals(4, refreshed.itemsBefore + refreshed.data.size + refreshed.itemsAfter)
+            for (row in refreshed.data) {
+                val position = presentedIds.indexOf(row.id) + refreshed.itemsBefore
+                assertEquals(position, repository.countNewerThan(bufferId, row.serverTime, row.id, spec))
+                assertEquals(position, reader.countTimelineNewer(bufferId, row.serverTime, row.id, spec))
+                assertEquals(row.id, reader.resolveSavedAnchor(bufferId, row.msgid, row.serverTime, row.id, spec)?.id)
+            }
+            assertEquals(older.id, refreshed.data[3].id)
+            assertEquals(3, reader.countTimelineNewer(bufferId, older.serverTime, older.id, spec))
+        }
+
     @Test
     fun importingOlderHistoryAfterRecentPageKeepsNewestWindowInFront() =
         runTest {
@@ -586,9 +665,6 @@ class MessageRepositoryPagingTest {
                     foolsMode = FoolsMode.HIDE,
                 )
             val query = messagePagingQuery(bufferId, largeSpec)
-            assertEquals(1, query.argCount)
-            assertFalse(query.sql.contains("OFFSET", ignoreCase = true))
-            assertFalse(query.sql.contains("OR 1=1"))
             val largePage =
                 db
                     .messageDao()

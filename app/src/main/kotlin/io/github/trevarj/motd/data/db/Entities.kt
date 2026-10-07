@@ -423,7 +423,7 @@ data class RoomAliasEntity(
         Index(value = ["bufferId", "msgid"]),
         Index(value = ["bufferId", "replyToMsgid", "replyToEventId"]),
         Index(value = ["bufferId", "pendingLabel"]),
-        // Smart presence filtering asks "did this actor speak in this room just before the event";
+        // Smart presence checks this actor's speech here before an event or shortly after a JOIN;
         // without an actor-leading index that lookup degrades to a serverTime range scan per row.
         Index(value = ["bufferId", "normalizedActor", "serverTime"]),
         // The global feed orders every room's rows together. Every other index here is

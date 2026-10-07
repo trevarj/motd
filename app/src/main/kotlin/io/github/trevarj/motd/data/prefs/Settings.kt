@@ -60,15 +60,16 @@ internal fun chatListSwipeActionFromPreference(saved: String?): ChatListSwipeAct
  * [SMART] is the default: a presence row is shown when that user sent a conversation message in
  * the same room within [SMART_PRESENCE_WINDOW_MS] before the event, or at least
  * [SMART_PRESENCE_COMMON_MIN_MESSAGES] conversation messages within
- * [SMART_PRESENCE_COMMON_WINDOW_MS] before it. Your own presence rows always survive, so
- * "you joined" still anchors a fresh buffer. Later speech never reveals an earlier presence row.
+ * [SMART_PRESENCE_COMMON_WINDOW_MS] before it. A JOIN is also revealed when that user speaks
+ * after it in the same room within [SMART_PRESENCE_WINDOW_MS]; other presence kinds do not look
+ * forward. Your own presence rows always survive, so "you joined" still anchors a fresh buffer.
  *
  * Netsplit/netjoin rows are aggregates covering many users at once, so they are already condensed to
  * a single row and are not subject to the smart test; only [HIDDEN] removes them.
  */
 enum class PresenceMode { ALL, SMART, HIDDEN }
 
-/** Window a user's last message keeps their presence events visible under [PresenceMode.SMART]. */
+/** Recent speech window for presence, also the following-speech window for JOIN under SMART. */
 const val SMART_PRESENCE_WINDOW_MS: Long = 5 * 60 * 1000
 
 /** Longer participation window for common chatters under [PresenceMode.SMART]. */

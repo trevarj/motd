@@ -988,7 +988,7 @@
     <string name="settings_presence_all">Show all</string>
     <string name="settings_presence_all_desc">Every join, leave, rename, away, and back event.</string>
     <string name="settings_presence_smart">Smart</string>
-    <string name="settings_presence_smart_desc">Changes from people who spoke here in the last 5 minutes or sent at least 5 messages here in the preceding 7 days, plus yours.</string>
+    <string name="settings_presence_smart_desc">Changes from people who spoke here in the preceding 5 minutes or sent at least 5 messages here in the preceding 7 days, plus yours. Joins also appear when they speak here within the following 5 minutes.</string>
     <string name="settings_presence_hidden">Hide all</string>
     <string name="settings_presence_hidden_desc">No presence-change events.</string>
     <string name="chat_presence_title">Presence changes</string>

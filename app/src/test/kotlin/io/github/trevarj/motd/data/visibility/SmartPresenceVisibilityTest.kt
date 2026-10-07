@@ -113,11 +113,54 @@ class SmartPresenceVisibilityTest {
             assertEquals(listOf(MessageKind.PRIVMSG to "alice"), visibleKinds(PresenceMode.SMART))
         }
 
-    /** Backward-looking only: speaking after the event must not retroactively reveal it. */
     @Test
-    fun `smart ignores speech that happened after the presence row`() =
+    fun `smart reveals a join only after its normalized actor speaks`() =
+        runTest {
+            insert(MessageKind.JOIN, "ALICE", 0, normalizedActor = "alice")
+            assertEquals(emptyList<Pair<MessageKind, String>>(), visibleKinds(PresenceMode.SMART))
+
+            insert(MessageKind.PRIVMSG, "Alice", 1_000, normalizedActor = "alice")
+
+            assertEquals(
+                listOf(MessageKind.PRIVMSG to "Alice", MessageKind.JOIN to "ALICE"),
+                visibleKinds(PresenceMode.SMART),
+            )
+            assertEquals(listOf(MessageKind.PRIVMSG to "Alice"), visibleKinds(PresenceMode.HIDDEN))
+        }
+
+    @Test
+    fun `smart forward join window includes five minutes but excludes one millisecond later`() =
+        runTest {
+            insert(MessageKind.JOIN, "boundary", 0)
+            insert(MessageKind.JOIN, "expired", 0)
+            insert(MessageKind.NOTICE, "boundary", SMART_PRESENCE_WINDOW_MS)
+            insert(MessageKind.ACTION, "expired", SMART_PRESENCE_WINDOW_MS + 1)
+
+            assertEquals(
+                listOf(
+                    MessageKind.ACTION to "expired",
+                    MessageKind.NOTICE to "boundary",
+                    MessageKind.JOIN to "boundary",
+                ),
+                visibleKinds(PresenceMode.SMART),
+            )
+        }
+
+    @Test
+    fun `smart forward join speech must match actor and room`() =
         runTest {
             insert(MessageKind.JOIN, "alice", 0)
+            insert(MessageKind.PRIVMSG, "alice", 1_000, normalizedActor = "bob")
+            insert(MessageKind.PRIVMSG, "alice", 1_000, room = otherBufferId)
+
+            assertEquals(listOf(MessageKind.PRIVMSG to "alice"), visibleKinds(PresenceMode.SMART))
+        }
+
+    @Test
+    fun `smart ignores future speech for non join presence`() =
+        runTest {
+            listOf(MessageKind.PART, MessageKind.QUIT, MessageKind.NICK, MessageKind.AWAY, MessageKind.BACK)
+                .forEachIndexed { index, kind -> insert(kind, "alice", index.toLong()) }
             insert(MessageKind.PRIVMSG, "alice", 1_000)
 
             assertEquals(listOf(MessageKind.PRIVMSG to "alice"), visibleKinds(PresenceMode.SMART))

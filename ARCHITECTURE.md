@@ -126,7 +126,11 @@ flowchart TD
 - Smart presence uses one shared SQL predicate for the timeline, positional counts,
   and anchors: a normalized actor must have sent a conversation message in the same
   room within the preceding five minutes, or at least five within the preceding
-  seven days. Both windows include their lower time bound and exclude future speech.
+  seven days. Both backward windows include their lower time bound. JOIN additionally
+  becomes visible when that actor speaks after it within five minutes (inclusive).
+  Same-time speech retains the existing timestamp-inclusive backward eligibility.
+  Other presence kinds do not look forward. New speech invalidates Room paging,
+  revealing the earlier JOIN in the same positional-count and saved-anchor domain.
   Own presence and netsplit/netjoin aggregates remain visible; Hide all still removes
   every presence kind. Presence never becomes preview, activity, or unread content.
 - TLS policy, Android KeyChain integration, proxy selection, and embedded
