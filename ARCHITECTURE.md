@@ -171,6 +171,9 @@ flowchart TD
   revealing the earlier JOIN in the same positional-count and saved-anchor domain.
   Own presence and netsplit/netjoin aggregates remain visible; Hide all still removes
   every presence kind. Presence never becomes preview, activity, or unread content.
+  Speech evidence uses the covering `(bufferId, normalizedActor, kind, serverTime)` index:
+  conversation-kind seeks exclude presence churn before either time window is scanned,
+  keeping exact entry counts and paging refreshes bounded by speech rather than join/part history.
 - TLS policy, Android KeyChain integration, proxy selection, and embedded
   obfuscation are injected at the `:app` boundary so `:irc` stays pure JVM.
 - Each saved network owns its own ordered post-connect commands. `ConnectionActor`

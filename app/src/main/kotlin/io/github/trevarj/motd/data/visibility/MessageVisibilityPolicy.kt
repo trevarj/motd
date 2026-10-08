@@ -189,8 +189,8 @@ internal class MessageVisibilitySql(
      * before anything has been said. Aggregate netsplit/netjoin rows have no single actor and are
      * left alone here; only HIDDEN drops them.
      *
-     * The (bufferId, normalizedActor, serverTime) index bounds all lookups; the common-chatter
-     * seek stops at the threshold instead of counting every matching message in the window.
+     * The (bufferId, normalizedActor, kind, serverTime) covering index seeks conversation evidence
+     * without scanning presence churn; the common-chatter seek stops at the five-message threshold.
      */
     private fun smartPresence(alias: String): String {
         val kind = column(alias, "kind")

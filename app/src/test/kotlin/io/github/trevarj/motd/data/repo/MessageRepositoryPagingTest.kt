@@ -336,6 +336,92 @@ class MessageRepositoryPagingTest {
         }
 
     @Test
+    fun smartPresenceChurnKeepsUnreadEntrySavedAnchorsAndAcknowledgedRefreshExact() =
+        runTest {
+            val dao = db.messageDao()
+            val totalRows = 50_000
+            val base = 1_700_000_000_000L
+            val presenceKinds = listOf(MessageKind.JOIN, MessageKind.PART, MessageKind.QUIT, MessageKind.AWAY, MessageKind.BACK, MessageKind.NICK)
+            val conversationKinds = listOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)
+            val expectedIds = mutableListOf<Long>()
+            // Nearly six days of repeated silent-actor churn used to be rescanned for every
+            // presence row by the seven-day common-chatter lookup, including each paging count.
+            for (start in 1..totalRows step 500) {
+                val ordinals = start until minOf(start + 500, totalRows + 1)
+                val ids =
+                    dao.insertAll(
+                        ordinals.map { ordinal ->
+                            val conversation = ordinal % 5 == 0
+                            message(
+                                bufferId,
+                                "row-$ordinal",
+                                if (conversation) "speaker-${ordinal % 100}" else "lurker-${ordinal % 40}",
+                                base + ordinal * 10_000L,
+                                "row-$ordinal",
+                                kind = if (conversation) conversationKinds[ordinal % 3] else presenceKinds[ordinal % 6],
+                                msgid = "row-$ordinal",
+                            )
+                        },
+                    )
+                expectedIds += ordinals.zip(ids).filter { (ordinal, _) -> ordinal % 5 == 0 }.map { it.second }
+            }
+            val tail = base + totalRows * 10_000L + SMART_PRESENCE_WINDOW_MS
+            val tailIds =
+                dao.insertAll(
+                    listOf(
+                        // This actor's last speech is older than five minutes, but they are common.
+                        message(bufferId, "common", "SPEAKER-0", tail + 10_000, "common", kind = MessageKind.BACK, msgid = "common")
+                            .copy(normalizedActor = "speaker-0"),
+                        message(bufferId, "join", "starter", tail + 20_000, "join", kind = MessageKind.JOIN, msgid = "join"),
+                        message(bufferId, "part", "starter", tail + 20_000, "part", kind = MessageKind.PART, msgid = "part"),
+                        message(bufferId, "speech", "starter", tail + 20_000 + SMART_PRESENCE_WINDOW_MS, "speech", msgid = "speech"),
+                        message(bufferId, "own join", "me", tail + 30_000 + SMART_PRESENCE_WINDOW_MS, "own-join", kind = MessageKind.JOIN, isSelf = true),
+                        message(bufferId, "aggregate", "", tail + 40_000 + SMART_PRESENCE_WINDOW_MS, "aggregate", kind = MessageKind.NETJOIN),
+                        message(bufferId, "pending", "me", tail + 50_000 + SMART_PRESENCE_WINDOW_MS, "pending", isSelf = true, pendingLabel = "send-label"),
+                    ),
+                )
+            expectedIds += listOf(0, 1, 3, 4, 5, 6).map { tailIds[it] }
+            val presentedIds = expectedIds.asReversed()
+            val spec = MessageVisibilitySpec(presenceMode = PresenceMode.SMART)
+            val repository = repository()
+            val marker = checkNotNull(dao.byMsgid(bufferId, "row-12345"))
+            val unread = checkNotNull(reader.firstVisibleUnreadAnchor(bufferId, TimelineAnchor(marker.serverTime, marker.id, marker.timelineOrder), spec))
+            val target = checkNotNull(dao.byMsgid(bufferId, "row-12350"))
+            assertEquals(target.id, unread.eventId)
+            val targetIndex = presentedIds.indexOf(target.id)
+            assertEquals(7_536, targetIndex)
+            assertEquals(targetIndex, repository.countNewerThan(bufferId, target.serverTime, target.id, spec))
+            assertEquals(targetIndex, reader.countTimelineNewer(bufferId, unread, spec))
+            assertEquals(target.id, reader.resolveSavedAnchor(bufferId, target.msgid, target.serverTime, target.id, spec)?.id)
+            val common = checkNotNull(dao.byCanonicalId(tailIds[0]))
+            assertEquals(common.id, reader.resolveSavedAnchor(bufferId, common.msgid, common.serverTime, common.id, spec)?.id)
+            assertEquals(presentedIds, dao.rawMessages(messagePagingQuery(bufferId, spec)).map { it.id })
+
+            val source = dao.pagingSource(messagePagingQuery(bufferId, spec))
+            val page = source.load(PagingSource.LoadParams.Refresh(targetIndex, MESSAGE_PAGING_CONFIG.initialLoadSize, true)).requirePage()
+            assertEquals(target.id, page.data[targetIndex - page.itemsBefore].id)
+            assertEquals(presentedIds.subList(page.itemsBefore, page.itemsBefore + page.data.size), page.data.map { it.id })
+            assertEquals(10_006, page.itemsBefore + page.data.size + page.itemsAfter)
+
+            // Echo acknowledgement must reach a fresh Room page as the same canonical row.
+            val pending = checkNotNull(dao.byCanonicalId(tailIds[6]))
+            assertEquals("send-label", pending.pendingLabel)
+            dao.update(pending.copy(pendingLabel = null, msgid = "confirmed"))
+            assertTrue(source.invalid)
+            val refreshed =
+                dao
+                    .pagingSource(messagePagingQuery(bufferId, spec))
+                    .load(PagingSource.LoadParams.Refresh(0, MESSAGE_PAGING_CONFIG.initialLoadSize, true))
+                    .requirePage()
+            assertEquals(presentedIds.take(refreshed.data.size), refreshed.data.map { it.id })
+            assertEquals(10_006, refreshed.itemsBefore + refreshed.data.size + refreshed.itemsAfter)
+            assertEquals(pending.id, refreshed.data.first().id)
+            assertEquals("confirmed", refreshed.data.first().msgid)
+            assertNull(refreshed.data.first().pendingLabel)
+            assertEquals(targetIndex, repository.countNewerThan(bufferId, target.serverTime, target.id, spec))
+        }
+
+    @Test
     fun entryIndexIsOneDomainAcrossTheRepositoryAndTheVisibilityReader() =
         runTest {
             // The normal-entry rule (preferredEntryTarget) compares three indices that arrive by two

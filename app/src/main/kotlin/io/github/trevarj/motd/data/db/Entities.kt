@@ -423,9 +423,9 @@ data class RoomAliasEntity(
         Index(value = ["bufferId", "msgid"]),
         Index(value = ["bufferId", "replyToMsgid", "replyToEventId"]),
         Index(value = ["bufferId", "pendingLabel"]),
-        // Smart presence checks this actor's speech here before an event or shortly after a JOIN;
-        // without an actor-leading index that lookup degrades to a serverTime range scan per row.
-        Index(value = ["bufferId", "normalizedActor", "serverTime"]),
+        // Bound smart-presence evidence by conversation kind before seeking either time window;
+        // presence churn must not be scanned as possible speech, especially over seven days.
+        Index(value = ["bufferId", "normalizedActor", "kind", "serverTime"]),
         // The global feed orders every room's rows together. Every other index here is
         // bufferId-prefixed and cannot serve that scan, leaving it a full sort of the table.
         // (serverTime, id) only: timelineOrder is per-buffer and not comparable across buffers.

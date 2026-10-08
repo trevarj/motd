@@ -37,7 +37,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 45,
+    version = 46,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -1093,6 +1093,18 @@ val MIGRATION_44_45 =
         }
     }
 
+/** v45 -> v46 keeps smart-presence speech lookups out of an actor's presence history. */
+val MIGRATION_45_46 =
+    object : Migration(45, 46) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP INDEX IF EXISTS index_messages_bufferId_normalizedActor_serverTime")
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_messages_bufferId_normalizedActor_kind_serverTime " +
+                    "ON messages(bufferId, normalizedActor, kind, serverTime)",
+            )
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1150,6 +1162,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_42_43,
         MIGRATION_43_44,
         MIGRATION_44_45,
+        MIGRATION_45_46,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"
