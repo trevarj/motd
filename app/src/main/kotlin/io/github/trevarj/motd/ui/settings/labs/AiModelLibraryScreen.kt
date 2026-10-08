@@ -359,6 +359,11 @@ private fun RecommendedModels() {
         SettingsDivider()
         ExternalModelLink(R.string.ai_link_openai_whisper, R.string.ai_link_openai_whisper_summary, R.string.ai_url_openai_whisper, "ai_link_openai_whisper") { context.startActivity(Intent(Intent.ACTION_VIEW, it.toUri())) }
     }
+    SettingsGroup(title = stringResource(R.string.ai_text_model_information)) {
+        ExternalModelLink(R.string.ai_link_qwen, R.string.ai_link_qwen_summary, R.string.ai_url_qwen, "ai_link_qwen") { context.startActivity(Intent(Intent.ACTION_VIEW, it.toUri())) }
+        SettingsDivider()
+        ExternalModelLink(R.string.ai_link_qwen_gguf, R.string.ai_link_qwen_gguf_summary, R.string.ai_url_qwen_gguf, "ai_link_qwen_gguf") { context.startActivity(Intent(Intent.ACTION_VIEW, it.toUri())) }
+    }
 }
 
 @Composable

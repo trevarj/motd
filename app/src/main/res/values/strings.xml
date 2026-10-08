@@ -373,7 +373,9 @@
     <string name="labs_agentwire_url" translatable="false">https://github.com/trevarj/agentwire</string>
     <string name="labs_dickord_section">Bridges</string>
     <string name="labs_dickord">Dickord mode</string>
-    <string name="labs_dickord_desc">Open Discord-style server and DM navigation for your Dickord chats, using your Motd theme.</string>
+    <string name="labs_dickord_desc">Browse Discord servers and DMs connected through the Dickord Discord-to-IRC bridge, using your Motd theme.</string>
+    <string name="labs_dickord_project">Dickord project</string>
+    <string name="labs_dickord_url" translatable="false">https://github.com/trevarj/dickord</string>
     <string name="labs_ebooks">Book search (#ebooks)</string>
     <string name="labs_ebooks_desc">Show search guidance in IRC Highway #ebooks. Requests are sent as ordinary chat; file offers still need an explicit DCC save.</string>
     <string name="dickord_badge">Discord</string>
@@ -531,6 +533,13 @@
     <string name="ai_link_openai_whisper_summary">MIT · Original Whisper project and model information.</string>
     <string name="ai_url_whisper_cpp_models" translatable="false">https://huggingface.co/ggerganov/whisper.cpp/tree/main</string>
     <string name="ai_url_openai_whisper" translatable="false">https://github.com/openai/whisper</string>
+    <string name="ai_text_model_information">Text model information</string>
+    <string name="ai_link_qwen">Qwen3.5-2B model information</string>
+    <string name="ai_link_qwen_summary">Apache-2.0 · Model card for the original Qwen text model.</string>
+    <string name="ai_link_qwen_gguf">Packaged Qwen3.5-2B GGUF information</string>
+    <string name="ai_link_qwen_gguf_summary">Apache-2.0 · Model card for the Unsloth GGUF used by text tools.</string>
+    <string name="ai_url_qwen" translatable="false">https://huggingface.co/Qwen/Qwen3.5-2B</string>
+    <string name="ai_url_qwen_gguf" translatable="false">https://huggingface.co/unsloth/Qwen3.5-2B-GGUF</string>
     <string name="ai_error_source_permission">Permission to read the selected model was denied.</string>
     <string name="ai_error_source_open">The selected model could not be opened.</string>
     <string name="ai_error_source_read">The selected model could not be read.</string>

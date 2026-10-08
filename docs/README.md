@@ -60,6 +60,10 @@ toolbar. Large accessibility text can grow the strip rather than being clipped.
 Chat-list tabs use the same theme surface as the title bar and chat rows.
 The selected tab retains its distinct pill highlight.
 
+Labs → Dickord mode provides Discord-style navigation for the
+[Dickord Discord-to-IRC bridge](https://github.com/trevarj/dickord). Its project link
+stays available with the mode off; the private repository requires authorized GitHub access.
+
 Dickord audio attachments render one inline player instead of a redundant URL
 bubble. Captions and unrelated links remain; the complete signed audio link and
 conversation details stay available in the player's Details sheet.
@@ -79,6 +83,10 @@ Labs → AI → Composer text tools is default-off. Set up the exact Qwen artifa
 through the disclosed Download or selected-file import, assign it, then explicitly
 enable the feature. Setup uses network metadata; drafts, styles and generated text
 are processed locally and are not uploaded. Opening a tool never downloads weights.
+The AI model library also links to the original
+[Qwen3.5-2B model card](https://huggingface.co/Qwen/Qwen3.5-2B) and the
+[packaged Unsloth GGUF model card](https://huggingface.co/unsloth/Qwen3.5-2B-GGUF).
+These information links do not start setup, download weights, or enable a Lab.
 
 For a nonblank draft, tap the compact AI wand inside the composer input area,
 beside the expand or attachment button, to open correction, writing styles and

@@ -302,6 +302,38 @@ class AiLabsScreenUiTest {
     }
 
     @Test
+    fun `Dickord project link is available with the mode off or on without changing Labs`() {
+        val application = ApplicationProvider.getApplicationContext<Context>() as Application
+        var enabled by mutableStateOf(false)
+        var toggleRequests = 0
+        compose.setContent {
+            MotdTheme {
+                LabsContent(
+                    state = LabsUiState(dickordEnabled = enabled),
+                    onBack = {},
+                    onGesturesChanged = { toggleRequests++ },
+                    onAgentwireChanged = { toggleRequests++ },
+                    onGlobalFeedChanged = { toggleRequests++ },
+                    onDickordChanged = { toggleRequests++ },
+                    onEbooksChanged = { toggleRequests++ },
+                    target = SettingsTarget.DICKORD,
+                )
+            }
+        }
+
+        listOf(false, true).forEach { modeEnabled ->
+            compose.runOnIdle { enabled = modeEnabled }
+            compose.onNodeWithTag("labs_dickord_project", useUnmergedTree = true).performScrollTo().performClick()
+            val intent = shadowOf(application).nextStartedActivity
+            assertEquals(Intent.ACTION_VIEW, intent.action)
+            assertEquals("https://github.com/trevarj/dickord", intent.dataString)
+            val toggle = compose.onNodeWithTag("labs_dickord_switch_row", useUnmergedTree = true).performScrollTo()
+            if (modeEnabled) toggle.assertIsOn() else toggle.assertIsOff()
+            assertEquals(0, toggleRequests)
+        }
+    }
+
+    @Test
     fun `voice setup selects a model before enabling and rejects invalid settings`() {
         val transcription = model('c')
         var raw by mutableStateOf(
@@ -498,16 +530,18 @@ class AiLabsScreenUiTest {
     }
 
     @Test
-    fun `Whisper model links open only the approved upstream addresses`() {
+    fun `model information links open only approved addresses without starting setup`() {
         val application = ApplicationProvider.getApplicationContext<Context>() as Application
+        var setupRequests = 0
         compose.setContent {
             MotdTheme {
                 AiModelLibraryContent(
                     state = deriveAiLabsUiState(AiLabsState(), null, false),
                     onBack = {},
-                    onImport = { _, _ -> },
+                    onImport = { _, _ -> setupRequests++ },
                     onUpdateTranscriptionSettings = { _, _ -> },
                     onDelete = {},
+                    onDownloadTextModel = { setupRequests++ },
                 )
             }
         }
@@ -515,6 +549,8 @@ class AiLabsScreenUiTest {
             listOf(
                 "ai_link_whisper_cpp" to "https://huggingface.co/ggerganov/whisper.cpp/tree/main",
                 "ai_link_openai_whisper" to "https://github.com/openai/whisper",
+                "ai_link_qwen" to "https://huggingface.co/Qwen/Qwen3.5-2B",
+                "ai_link_qwen_gguf" to "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF",
             )
 
         expected.forEach { (tag, url) ->
@@ -522,6 +558,9 @@ class AiLabsScreenUiTest {
             val intent = shadowOf(application).nextStartedActivity
             assertEquals(Intent.ACTION_VIEW, intent.action)
             assertEquals(url, intent.dataString)
+            compose.onNodeWithTag("ai_download_text_confirm", useUnmergedTree = true).assertDoesNotExist()
+            compose.onNodeWithTag("ai_model_library_empty", useUnmergedTree = true).assertExists()
+            assertEquals(0, setupRequests)
         }
     }
 

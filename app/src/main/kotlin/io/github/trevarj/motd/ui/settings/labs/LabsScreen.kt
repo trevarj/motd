@@ -71,6 +71,7 @@ fun LabsContent(
 ) {
     val context = LocalContext.current
     val agentwireUrl = stringResource(R.string.labs_agentwire_url)
+    val dickordUrl = stringResource(R.string.labs_dickord_url)
     SettingsScaffold(
         title = stringResource(R.string.settings_labs),
         onBack = onBack,
@@ -100,6 +101,13 @@ fun LabsContent(
                     checked = state.dickordEnabled,
                     onCheckedChange = onDickordChanged,
                     switchTag = "labs_dickord_switch",
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsNavigationRow(
+                    title = stringResource(R.string.labs_dickord_project),
+                    summary = dickordUrl,
+                    modifier = Modifier.testTag("labs_dickord_project"),
+                    onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, dickordUrl.toUri())) },
                 )
             }
         }
