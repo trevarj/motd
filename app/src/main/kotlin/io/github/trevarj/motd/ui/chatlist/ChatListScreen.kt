@@ -1479,8 +1479,8 @@ private fun FolderActivityBadge(
     when {
         summary.mentionCount > 0 -> MentionBadge(count = summary.mentionCount, lowerBound = summary.mentionIncomplete)
         summary.unreadCount > 0 -> UnreadBadge(count = summary.unreadCount, lowerBound = summary.unreadIncomplete, inverted = selected)
-        summary.advertisedActivity -> AdvertisedActivityDot()
-        summary.unreadIncomplete || summary.mentionIncomplete -> HistoryIncompleteBadge()
+        summary.advertisedActivity -> AdvertisedActivityDot(color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary)
+        summary.unreadIncomplete || summary.mentionIncomplete -> HistoryIncompleteBadge(color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

@@ -70,7 +70,10 @@ fun UnreadBadge(
  * only honest number here is none.
  */
 @Composable
-fun AdvertisedActivityDot(modifier: Modifier = Modifier) {
+fun AdvertisedActivityDot(
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+) {
     val cd = stringResource(R.string.badge_unread_pending)
     Box(
         modifier =
@@ -83,7 +86,7 @@ fun AdvertisedActivityDot(modifier: Modifier = Modifier) {
             modifier =
                 Modifier
                     .size(10.dp)
-                    .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    .background(color, CircleShape),
         )
     }
 }
@@ -94,12 +97,15 @@ fun AdvertisedActivityDot(modifier: Modifier = Modifier) {
  * claim that a chat message is waiting.
  */
 @Composable
-fun HistoryIncompleteBadge(modifier: Modifier = Modifier) {
+fun HistoryIncompleteBadge(
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
     val cd = stringResource(R.string.chat_history_partial_chip)
     Icon(
         imageVector = Icons.Outlined.History,
         contentDescription = cd,
-        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        tint = color,
         modifier =
             modifier
                 .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)

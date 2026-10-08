@@ -498,6 +498,91 @@ class ChatFolderUiTest {
     }
 
     @Test
+    fun selected_folder_countless_indicators_use_on_primary_without_changing_unselected_colors() {
+        val colors =
+            lightColorScheme(
+                primary = Color(0xFF3322CC),
+                onPrimary = Color.White,
+                onSurfaceVariant = Color(0xFF333333),
+            )
+        val state =
+            mutableStateOf(
+                ChatListState(
+                    rows =
+                        listOf(
+                            row(1, folderId = 7).copy(unreadCountIncomplete = true),
+                            row(2, folderId = 8).copy(mentionCountIncomplete = true),
+                        ),
+                    folders = listOf(folder(7, "A"), folder(8, "B")),
+                    folderDisplayMode = FolderDisplayMode.TABS,
+                    loading = false,
+                ),
+            )
+        setContent(state, colorScheme = colors)
+        val resources = ApplicationProvider.getApplicationContext<Context>().resources
+
+        fun assertIndicatorColor(
+            tabTag: String,
+            descriptionRes: Int,
+            expected: Color,
+        ) {
+            val description = resources.getString(descriptionRes)
+            val tab = compose.onNodeWithTag(tabTag).assert(hasContentDescription(description)).assertIsDisplayed()
+            val indicator =
+                compose
+                    .onNode(hasContentDescription(description) and hasAnyAncestor(hasTestTag(tabTag)), useUnmergedTree = true)
+                    .assertIsDisplayed()
+            var expectedVisible = false
+            // Scan only the indicator: the leading icon and label also use onPrimary.
+            compose.waitUntil(timeoutMillis = 5_000) {
+                val pixels = tab.captureToImage().asAndroidBitmap()
+                val tabBounds = tab.fetchSemanticsNode().boundsInRoot
+                val indicatorBounds = indicator.fetchSemanticsNode().boundsInRoot
+                expectedVisible = false
+                for (x in (indicatorBounds.left - tabBounds.left).toInt() until (indicatorBounds.right - tabBounds.left).toInt()) {
+                    for (y in (indicatorBounds.top - tabBounds.top).toInt() until (indicatorBounds.bottom - tabBounds.top).toInt()) {
+                        if (pixels.getPixel(x, y) == expected.toArgb()) expectedVisible = true
+                    }
+                    if (expectedVisible) break
+                }
+                expectedVisible
+            }
+            assertTrue("The activity indicator uses $expected on $tabTag", expectedVisible)
+        }
+
+        val history = R.string.chat_history_partial_chip
+        compose.onNodeWithTag("chatlist_folder_tab_all").assertIsSelected()
+        assertIndicatorColor("chatlist_folder_tab_7", history, colors.onSurfaceVariant)
+        assertIndicatorColor("chatlist_folder_tab_8", history, colors.onSurfaceVariant)
+        compose.onNodeWithTag("chatlist_folder_tab_7").performClick().assertIsSelected()
+        assertIndicatorColor("chatlist_folder_tab_7", history, colors.onPrimary)
+        assertIndicatorColor("chatlist_folder_tab_all", history, colors.onSurfaceVariant)
+        compose.onNodeWithTag("chatlist_folder_tab_8").performClick().assertIsSelected()
+        assertIndicatorColor("chatlist_folder_tab_8", history, colors.onPrimary)
+        assertIndicatorColor("chatlist_folder_tab_7", history, colors.onSurfaceVariant)
+        compose.onNodeWithTag("chatlist_folder_tab_all").performClick().assertIsSelected()
+        assertIndicatorColor("chatlist_folder_tab_all", history, colors.onPrimary)
+
+        compose.runOnIdle {
+            state.value =
+                state.value.copy(
+                    rows =
+                        state.value.rows.map {
+                            it.copy(unreadCountIncomplete = false, mentionCountIncomplete = false, advertisedUnread = true)
+                        },
+                )
+        }
+        val pending = R.string.badge_unread_pending
+        assertIndicatorColor("chatlist_folder_tab_7", pending, colors.primary)
+        assertIndicatorColor("chatlist_folder_tab_8", pending, colors.primary)
+        compose.onNodeWithTag("chatlist_folder_tab_7").performClick().assertIsSelected()
+        assertIndicatorColor("chatlist_folder_tab_7", pending, colors.onPrimary)
+        assertIndicatorColor("chatlist_folder_tab_all", pending, colors.primary)
+        compose.onNodeWithTag("chatlist_folder_tab_all").performClick().assertIsSelected()
+        assertIndicatorColor("chatlist_folder_tab_all", pending, colors.onPrimary)
+    }
+
+    @Test
     fun folder_strip_keeps_transparent_backdrop_and_capsule_matching_unread_chat_card_in_light_and_dark_themes() {
         val preset = mutableStateOf(ColorThemePreset.LIGHT)
         lateinit var colors: ColorScheme
