@@ -3697,8 +3697,21 @@ fun ChatContent(
                                         flightAnchors.hostOrigin = it.positionInWindow()
                                     },
                         ) {
+                            val flightMessage =
+                                outgoingFlight?.let { flight ->
+                                    val landingId = flightAnchors.landingRow?.first
+                                    items.itemSnapshotList.items.firstOrNull { row ->
+                                        if (flight.eventIds.isEmpty() && landingId != null) {
+                                            row.id == landingId
+                                        } else {
+                                            flight.matches(row)
+                                        }
+                                    }
+                                }
                             SendFlightOverlay(
                                 flight = outgoingFlight,
+                                pending = flightMessage == null || flightMessage.pendingLabel != null,
+                                failed = flightMessage?.failed == true,
                                 anchors = flightAnchors,
                                 motion = flightMotion,
                                 listShift = flightListShift,

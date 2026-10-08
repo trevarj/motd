@@ -244,6 +244,8 @@ internal fun sendFlightGhostTop(
 @Composable
 internal fun BoxScope.SendFlightOverlay(
     flight: OutgoingFlight?,
+    pending: Boolean,
+    failed: Boolean,
     anchors: SendFlightAnchors,
     motion: SendFlightMotion,
     listShift: () -> Float,
@@ -301,7 +303,8 @@ internal fun BoxScope.SendFlightOverlay(
             showSender = showSender,
             networkId = networkId,
             formattedTime = time,
-            pending = true,
+            pending = pending,
+            failed = failed,
             reply =
                 flight.replyText?.let {
                     ReplyPreviewData(flight.replySender.orEmpty(), it, flight.replyIrcFormattedText)

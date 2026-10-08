@@ -161,6 +161,10 @@ flowchart TD
   and reexpansion cannot translate builtin tiles or resize a cropped image.
   The transparent foreground alone consumes Scaffold, navigation-bar and IME
   padding; the send-flight overlay keeps its existing foreground coordinate origin.
+  Its status comes from the matching loaded canonical row, preferring accepted event IDs
+  over an established landing ID; without a known row it stays pending rather than
+  claiming a historical same-text confirmation. Echo/failure updates change the airborne
+  glyph without shortening the morph or taking ownership from the accessible real row.
 - Smart presence uses one shared SQL predicate for the timeline, positional counts,
   and anchors: a normalized actor must have sent a conversation message in the same
   room within the preceding five minutes, or at least five within the preceding

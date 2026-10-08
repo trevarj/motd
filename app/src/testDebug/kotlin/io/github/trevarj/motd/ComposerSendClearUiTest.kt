@@ -147,6 +147,7 @@ import io.github.trevarj.motd.ui.chat.VoiceMessageUiState
 import io.github.trevarj.motd.ui.chat.VoiceRecordingUi
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
+import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.flow.Flow
@@ -2459,40 +2460,46 @@ class ComposerSendClearUiTest {
         val motion = SendFlightMotion(morphEnabled = true)
         runBlocking { motion.morph.snapTo(1f) }
         var renderFlight by mutableStateOf(false)
+        var status by mutableStateOf(true to false)
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 val formatTime = rememberMessageTimeFormatter()
                 // Compare at the same window origin, not two separately rasterized stacked rows.
-                Box(
-                    Modifier
-                        .width(380.dp)
-                        .height(120.dp)
-                        .background(MaterialTheme.colorScheme.background)
-                        .testTag("bubble_sample"),
-                ) {
-                    if (!renderFlight) {
-                        MessageBubble(
-                            sender = nick,
-                            text = flight.text,
-                            timeMs = flight.launchedAtMs,
-                            isSelf = true,
-                            kind = MessageKind.PRIVMSG,
-                            showSender = true,
-                            formattedTime = formatTime(flight.launchedAtMs),
-                            pending = true,
-                        )
-                    } else {
-                        SendFlightOverlay(
-                            flight = flight,
-                            anchors = anchors,
-                            motion = motion,
-                            listShift = { 0f },
-                            selfNick = nick,
-                            showSender = true,
-                            networkId = null,
-                            knownNicks = emptySet(),
-                            identityRules = IrcIdentityRules(),
-                        )
+                CompositionLocalProvider(LocalLottieMotionEnabled provides false) {
+                    Box(
+                        Modifier
+                            .width(380.dp)
+                            .height(120.dp)
+                            .background(MaterialTheme.colorScheme.background)
+                            .testTag("bubble_sample"),
+                    ) {
+                        if (!renderFlight) {
+                            MessageBubble(
+                                sender = nick,
+                                text = flight.text,
+                                timeMs = flight.launchedAtMs,
+                                isSelf = true,
+                                kind = MessageKind.PRIVMSG,
+                                showSender = true,
+                                formattedTime = formatTime(flight.launchedAtMs),
+                                pending = status.first,
+                                failed = status.second,
+                            )
+                        } else {
+                            SendFlightOverlay(
+                                flight = flight,
+                                pending = status.first,
+                                failed = status.second,
+                                anchors = anchors,
+                                motion = motion,
+                                listShift = { 0f },
+                                selfNick = nick,
+                                showSender = true,
+                                networkId = null,
+                                knownNicks = emptySet(),
+                                identityRules = IrcIdentityRules(),
+                            )
+                        }
                     }
                 }
             }
@@ -2500,14 +2507,21 @@ class ComposerSendClearUiTest {
         compose.waitForIdle()
 
         val sample = compose.onNodeWithTag("bubble_sample")
-        val real = sample.captureToImage().asAndroidBitmap()
-        compose.onAllNodesWithText("hi", useUnmergedTree = true).assertCountEquals(1)
-        compose.runOnIdle { renderFlight = true }
-        compose.waitForIdle()
-        val airborne = sample.captureToImage().asAndroidBitmap()
-        assertTrue("A completed delayed morph must match the real formatted bubble", real.sameAs(airborne))
-        // The merged accessibility tree excludes the overlay's cleared semantics subtree.
-        compose.onAllNodesWithText("hi").assertCountEquals(0)
+        for (flags in listOf(true to false, false to false, true to true, false to true)) {
+            compose.runOnIdle {
+                status = flags
+                renderFlight = false
+            }
+            compose.waitForIdle()
+            val real = sample.captureToImage().asAndroidBitmap()
+            compose.onAllNodesWithText("hi", useUnmergedTree = true).assertCountEquals(1)
+            compose.runOnIdle { renderFlight = true }
+            compose.waitForIdle()
+            val airborne = sample.captureToImage().asAndroidBitmap()
+            assertTrue("The delayed ghost must match the real bubble with pending/failed=$flags", real.sameAs(airborne))
+            // The merged accessibility tree excludes the overlay's cleared semantics subtree.
+            compose.onAllNodesWithText("hi").assertCountEquals(0)
+        }
         assertEquals(0f, motion.progress.value, 0.001f)
     }
 
@@ -2551,6 +2565,8 @@ class ComposerSendClearUiTest {
                     ) {
                         SendFlightOverlay(
                             flight = flight,
+                            pending = true,
+                            failed = false,
                             anchors = anchors,
                             motion = motion,
                             listShift = { 0f },
@@ -2577,6 +2593,107 @@ class ComposerSendClearUiTest {
         assertTrue("The ghost must stay at its window launch position when the host moves", before.sameAs(after))
         assertEquals(0f, motion.lift.value, 0.001f)
         assertEquals(0f, motion.progress.value, 0.001f)
+    }
+
+    @Test
+    fun activeFlight_tracksCanonicalStatusBeforeLandingWithoutGuessingByText() {
+        val launchedAt = 1_000L
+        val pending =
+            MessageEntity(
+                id = 42,
+                bufferId = buffer.id,
+                serverTime = launchedAt + 1,
+                sender = "me",
+                kind = MessageKind.PRIVMSG,
+                text = "hello",
+                isSelf = true,
+                pendingLabel = "pending-42",
+                dedupKey = "pending-42",
+                serverTimeAuthoritative = false,
+                timelineOrder = 42,
+            )
+        // Keep the canonical row loaded but outside layout: the completed ghost stays airborne,
+        // and no real status glyph can account for a pixel change on the captured screen.
+        val history =
+            (100L downTo 51L).map { id ->
+                MessageEntity(
+                    id = id,
+                    bufferId = buffer.id,
+                    serverTime = launchedAt + id,
+                    sender = "other",
+                    kind = MessageKind.PRIVMSG,
+                    text = "history-$id",
+                    dedupKey = "history-$id",
+                    timelineOrder = id,
+                )
+            }
+        val confirmed = pending.copy(pendingLabel = null, serverTime = launchedAt - 100)
+        val pages = MutableStateFlow(PagingData.from(history + confirmed))
+        var flight by mutableStateOf(OutgoingFlight(token = 7, text = pending.text, launchedAtMs = launchedAt))
+        var settled = 0
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                CompositionLocalProvider(LocalLottieMotionEnabled provides false) {
+                    Box(Modifier.fillMaxSize().testTag("flight_status_screen")) {
+                        ChatContent(
+                            state = ChatState(buffer = buffer, connState = IrcClientState.Ready("me", emptySet(), emptyMap())),
+                            items = pages.collectAsLazyPagingItems(),
+                            composerEnabled = true,
+                            onBack = {},
+                            onOpenChannelInfo = {},
+                            onOpenSearch = {},
+                            onOpenImage = {},
+                            nickNormalizer = { it.lowercase() },
+                            onSubmit = {},
+                            onTyping = {},
+                            onSetReply = {},
+                            onReact = { _, _ -> },
+                            onRetry = {},
+                            loadPreview = { _, _ -> null },
+                            composerDraft = ComposerDraftState(hydrated = true),
+                            outgoingFlight = flight,
+                            onFlightSettled = { settled++ },
+                            entryState = EntryPositionState.Settled,
+                        )
+                    }
+                }
+            }
+        }
+
+        fun pixels(): Bitmap {
+            compose.waitForIdle()
+            compose.mainClock.advanceTimeBy(2_000)
+            compose.waitForIdle()
+            compose.runOnIdle { assertEquals("The offscreen row must not settle the flight", 0, settled) }
+            compose.onAllNodesWithText("hello").assertCountEquals(0)
+            return compose.onNodeWithTag("flight_status_screen").captureToImage().asAndroidBitmap()
+        }
+
+        val unknown = pixels()
+        compose.runOnIdle { pages.value = PagingData.from(history + pending) }
+        val sending = pixels()
+        assertTrue("Historical confirmed text without an identity must remain pending", unknown.sameAs(sending))
+        compose.runOnIdle { flight = flight.copy(eventIds = setOf(pending.id)) }
+        assertTrue("Acceptance alone must not paint a check", sending.sameAs(pixels()))
+
+        val unchangedStatuses = mutableListOf<String>()
+        compose.runOnIdle {
+            // Same token and ID; an echo may rewrite both its text and server timestamp.
+            pages.value = PagingData.from(history + confirmed.copy(text = "echo-rewritten"))
+        }
+        val sent = pixels()
+        if (sending.sameAs(sent)) unchangedStatuses += "confirmed"
+        compose.runOnIdle { pages.value = PagingData.from(history + pending.copy(failed = true)) }
+        val failed = pixels()
+        if (sending.sameAs(failed) || sent.sameAs(failed)) unchangedStatuses += "failed"
+        compose.runOnIdle { pages.value = PagingData.from(history + confirmed.copy(failed = true)) }
+        assertTrue("Failure must win whether or not the pending label remains", failed.sameAs(pixels()))
+        compose.runOnIdle { pages.value = PagingData.from(history + pending) }
+        assertTrue("Status must not be cached by flight token", sending.sameAs(pixels()))
+        compose.runOnIdle { pages.value = PagingData.from(history + confirmed.copy(id = 41)) }
+        assertTrue("A missing accepted ID must not claim a historical same-text row", sending.sameAs(pixels()))
+        assertEquals("The active production ghost must render each canonical status", emptyList<String>(), unchangedStatuses)
     }
 
     @Test
