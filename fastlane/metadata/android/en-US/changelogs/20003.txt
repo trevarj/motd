@@ -1,0 +1,4 @@
+- Open large channels and channels with unread messages faster.
+- See message send status update promptly.
+- Open project links from Labs.
+- Keep activity icons visible in the selected folder.
