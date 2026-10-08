@@ -534,9 +534,9 @@
     <string name="ai_url_whisper_cpp_models" translatable="false">https://huggingface.co/ggerganov/whisper.cpp/tree/main</string>
     <string name="ai_url_openai_whisper" translatable="false">https://github.com/openai/whisper</string>
     <string name="ai_text_model_information">Text model information</string>
-    <string name="ai_link_qwen">Qwen3.5-2B model information</string>
+    <string name="ai_link_qwen"><xliff:g id="text_model_name">Qwen3.5-2B</xliff:g> model information</string>
     <string name="ai_link_qwen_summary">Apache-2.0 · Model card for the original Qwen text model.</string>
-    <string name="ai_link_qwen_gguf">Packaged Qwen3.5-2B GGUF information</string>
+    <string name="ai_link_qwen_gguf">Packaged <xliff:g id="text_model_name">Qwen3.5-2B</xliff:g> GGUF information</string>
     <string name="ai_link_qwen_gguf_summary">Apache-2.0 · Model card for the Unsloth GGUF used by text tools.</string>
     <string name="ai_url_qwen" translatable="false">https://huggingface.co/Qwen/Qwen3.5-2B</string>
     <string name="ai_url_qwen_gguf" translatable="false">https://huggingface.co/unsloth/Qwen3.5-2B-GGUF</string>
