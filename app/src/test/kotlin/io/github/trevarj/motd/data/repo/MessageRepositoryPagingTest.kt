@@ -1,10 +1,13 @@
 package io.github.trevarj.motd.data.repo
 
+import android.content.Context
 import androidx.paging.ExperimentalPagingApi
 import androidx.paging.LoadType
 import androidx.paging.PagingSource
 import androidx.paging.PagingState
 import androidx.paging.RemoteMediator
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.EventRedirectEntity
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -24,11 +27,18 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -39,6 +49,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import kotlin.coroutines.CoroutineContext
 
 @RunWith(RobolectricTestRunner::class)
 class MessageRepositoryPagingTest {
@@ -63,7 +74,7 @@ class MessageRepositoryPagingTest {
         MessageRepositoryImpl(
             db.bufferDao(),
             db.networkIdentityDao(),
-            db.messageDao(),
+            db,
             db.reactionDao(),
             ChatHistoryMediatorFactory { _, _, _ -> error("paging is driven by the source directly here") },
             db.historyGapDao(),
@@ -189,7 +200,7 @@ class MessageRepositoryPagingTest {
                 MessageRepositoryImpl(
                     db.bufferDao(),
                     db.networkIdentityDao(),
-                    db.messageDao(),
+                    db,
                     db.reactionDao(),
                     ChatHistoryMediatorFactory { roomId, visibility, identityRules ->
                         mediatorRoomId = roomId
@@ -586,6 +597,115 @@ class MessageRepositoryPagingTest {
             assertEquals(neverReadWalk.size, cue.getValue(neverReadId).unreadCount)
         }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun echoDuringInitialRoomLoadHandoffInvalidatesThePendingPage() =
+        runTest {
+            val databaseTasks = ArrayDeque<Runnable>()
+            val databaseDispatcher =
+                object : CoroutineDispatcher() {
+                    override fun dispatch(
+                        context: CoroutineContext,
+                        block: Runnable,
+                    ) {
+                        databaseTasks.addLast(block)
+                    }
+                }
+
+            fun drainDatabase() {
+                while (databaseTasks.isNotEmpty()) databaseTasks.removeFirst().run()
+            }
+            val databaseScope = CoroutineScope(SupervisorJob() + databaseDispatcher)
+            var pageRead = false
+            val racingDb =
+                Room
+                    .inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext<Context>(), MotdDatabase::class.java)
+                    .allowMainThreadQueries()
+                    .setQueryCoroutineContext(databaseDispatcher)
+                    .setQueryCallback({ sql, _ ->
+                        if (sql.startsWith("SELECT * FROM (") && sql.contains("messages")) pageRead = true
+                    }, Runnable::run)
+                    .build()
+
+            fun readPageBeforeHandoff() {
+                pageRead = false
+                repeat(4) {
+                    if (!pageRead) {
+                        runCurrent()
+                        drainDatabase()
+                    }
+                }
+                assertTrue("Room must have read the page before confirmation", pageRead)
+            }
+            try {
+                val setup =
+                    databaseScope.async {
+                        val networkId = racingDb.networkDao().insert(network())
+                        val roomId = racingDb.bufferDao().insert(buffer(networkId, "#handoff"))
+                        val id =
+                            racingDb
+                                .messageDao()
+                                .insertAll(
+                                    listOf(message(roomId, "same-ID echo", "me", 100, "send", isSelf = true, pendingLabel = "send-label")),
+                                ).single()
+                        roomId to checkNotNull(racingDb.messageDao().byCanonicalId(id))
+                    }
+                drainDatabase()
+                val (roomId, pending) = setup.await()
+
+                fun source() =
+                    ViewportPagingSource(
+                        racingDb.messageDao().pagingSource(messagePagingQuery(roomId, MessageVisibilitySpec())),
+                        MutableStateFlow(ViewportRefreshAnchor.Newest),
+                        racingDb.invalidationTracker,
+                        ioDispatcher = databaseDispatcher,
+                    ) { null }
+                val source = source()
+                val loading =
+                    async(start = CoroutineStart.UNDISPATCHED) {
+                        source.load(PagingSource.LoadParams.Refresh(null, 50, true))
+                    }
+                // SQL has finished, but the load continuation has not resumed on its caller.
+                // Room 2.8.5 still has refreshComplete=false here and drops the echo invalidation.
+                readPageBeforeHandoff()
+                assertFalse(loading.isCompleted)
+                val confirmation =
+                    databaseScope.async {
+                        val confirmed = pending.copy(msgid = "canonical-echo", pendingLabel = null)
+                        racingDb.messageDao().update(confirmed)
+                        checkNotNull(racingDb.messageDao().byCanonicalId(pending.id))
+                    }
+                drainDatabase()
+                assertNull(confirmation.await().pendingLabel)
+                runCurrent()
+                val result = loading.await()
+                assertTrue(
+                    "The handoff must discard a page read before confirmation; got $result",
+                    result is PagingSource.LoadResult.Invalid,
+                )
+                assertTrue(source.invalid)
+                val refreshing =
+                    async(start = CoroutineStart.UNDISPATCHED) {
+                        source().load(PagingSource.LoadParams.Refresh(null, 50, true))
+                    }
+                readPageBeforeHandoff()
+                runCurrent()
+                val presented =
+                    refreshing
+                        .await()
+                        .requirePage()
+                        .data
+                        .single()
+                assertEquals(pending.id, presented.id)
+                assertEquals(pending.timelineOrder, presented.timelineOrder)
+                assertEquals("canonical-echo", presented.msgid)
+                assertNull(presented.pendingLabel)
+            } finally {
+                databaseScope.cancel()
+                racingDb.close()
+            }
+        }
+
     @OptIn(ExperimentalPagingApi::class)
     @Test
     fun newSpeechInvalidatesSmartPagingAndRefreshRevealsJoinInSharedAnchorDomain() =
@@ -607,7 +727,7 @@ class MessageRepositoryPagingTest {
 
             // The same live Room source and viewport wrapper as the repository's Pager.
             fun freshSource(): ViewportPagingSource =
-                ViewportPagingSource(dao.pagingSource(messagePagingQuery(bufferId, spec)), viewport) { id ->
+                ViewportPagingSource(dao.pagingSource(messagePagingQuery(bufferId, spec)), viewport, db.invalidationTracker) { id ->
                     val row = dao.byCanonicalId(id) ?: return@ViewportPagingSource null
                     repository.countNewerThan(bufferId, row.serverTime, row.id, spec)
                 }
@@ -844,7 +964,7 @@ class MessageRepositoryPagingTest {
                     }
                 }
             val room = roomSource()
-            val source = ViewportPagingSource(room, kotlinx.coroutines.flow.MutableStateFlow(null)) { null }
+            val source = ViewportPagingSource(room, kotlinx.coroutines.flow.MutableStateFlow(null), db.invalidationTracker) { null }
             val first = source.load(PagingSource.LoadParams.Refresh(0, 3, true)).requirePage()
             assertEquals(listOf(4L, 3L, 2L), first.data.map { it.id })
             val initialAppend = source.load(PagingSource.LoadParams.Append(3, 1, true)).requirePage()
@@ -869,7 +989,7 @@ class MessageRepositoryPagingTest {
             assertTrue(source.invalid)
             assertTrue(room.invalid)
 
-            val freshSource = ViewportPagingSource(roomSource(), kotlinx.coroutines.flow.MutableStateFlow(null)) { null }
+            val freshSource = ViewportPagingSource(roomSource(), kotlinx.coroutines.flow.MutableStateFlow(null), db.invalidationTracker) { null }
             val canonical = freshSource.load(PagingSource.LoadParams.Refresh(0, 5, true)).requirePage()
             val visibleIds = canonical.data.map { it.id }
             assertEquals(listOf(5L, 4L, 3L, 2L, 1L), visibleIds)

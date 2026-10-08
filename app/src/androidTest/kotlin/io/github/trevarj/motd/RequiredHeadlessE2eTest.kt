@@ -9,6 +9,8 @@ import android.os.Bundle
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -184,6 +186,11 @@ class RequiredHeadlessE2eTest {
                 }
             }
         TimelineRobot(compose).assertMessageVisible(canonical.tag())
+        val sentDescription = InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.chat_sent)
+        val canonicalSent = hasContentDescription(sentDescription) and hasAnyAncestor(hasTestTag(canonical.tag()))
+        compose.waitUntil("canonical row renders Sent without reopening", 20_000) {
+            runCatching { compose.onNode(canonicalSent, useUnmergedTree = true).assertIsDisplayed() }.isSuccess
+        }
         runBlocking {
             bootstrap.seams.connections().disconnect(network.childId)
             bootstrap.seams.connections().connect(network.childId)
@@ -201,6 +208,7 @@ class RequiredHeadlessE2eTest {
         val after = runBlocking { probe.awaitCanonical(token, bufferId) }
         assertEquals(canonical.id, after.id)
         TimelineRobot(compose).assertMessageVisible(after.tag())
+        compose.onNode(canonicalSent, useUnmergedTree = true).assertIsDisplayed()
 
         scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         ChatListRobot(compose).awaitTag("chatlist_row_$bufferId")

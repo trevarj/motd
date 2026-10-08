@@ -201,7 +201,7 @@ class AiTextViewModelTest {
                 availableBytes = { Long.MAX_VALUE },
                 allocateBytes = { _, _ -> },
             )
-        val messages = MessageRepositoryImpl(db.bufferDao(), db.networkIdentityDao(), db.messageDao(), db.reactionDao(), ChatHistoryMediatorFactory { _, _, _ -> error("no paging") }, db.historyGapDao())
+        val messages = MessageRepositoryImpl(db.bufferDao(), db.networkIdentityDao(), db, db.reactionDao(), ChatHistoryMediatorFactory { _, _, _ -> error("no paging") }, db.historyGapDao())
         val vm = AiTextViewModel(repository, coordinator, messages)
         runCurrent()
         return Fixture(vm, repository, text, store, db, room, directory)

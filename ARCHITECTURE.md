@@ -167,6 +167,10 @@ flowchart TD
   over an established landing ID; without a known row it stays pending rather than
   claiming a historical same-text confirmation. Echo/failure updates change the airborne
   glyph without shortening the morph or taking ownership from the accessible real row.
+- Timeline paging subscribes to native `messages` invalidation before reading a Room page.
+  A confirmation committed after the first SQL read but before its caller resumes discards that
+  generation; the replacement page keeps the canonical event ID and viewport/read anchors.
+  This covers Room 2.8.5's initial-load invalidation gap without a separate delivery-status store.
 - Smart presence uses one shared SQL predicate for the timeline, positional counts,
   and anchors: a normalized actor must have sent a conversation message in the same
   room within the preceding five minutes, or at least five within the preceding

@@ -262,7 +262,7 @@ class MessagePagingDemandUiTest {
             MessageRepositoryImpl(
                 db.bufferDao(),
                 db.networkIdentityDao(),
-                db.messageDao(),
+                db,
                 db.reactionDao(),
                 ChatHistoryMediatorFactory { _, _, _ ->
                     object : RemoteMediator<Int, MessageEntity>() {
@@ -471,7 +471,7 @@ class MessagePagingDemandUiTest {
             MessageRepositoryImpl(
                 db.bufferDao(),
                 db.networkIdentityDao(),
-                db.messageDao(),
+                db,
                 db.reactionDao(),
                 ChatHistoryMediatorFactory { _, _, _ ->
                     object : RemoteMediator<Int, MessageEntity>() {
@@ -611,7 +611,7 @@ class MessagePagingDemandUiTest {
             MessageRepositoryImpl(
                 db.bufferDao(),
                 db.networkIdentityDao(),
-                db.messageDao(),
+                db,
                 db.reactionDao(),
                 ChatHistoryMediatorFactory { _, _, _ ->
                     object : RemoteMediator<Int, MessageEntity>() {

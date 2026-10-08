@@ -123,7 +123,7 @@ class TimelineSeamPresentationTest {
         MessageRepositoryImpl(
             bufferDao = db.bufferDao(),
             networkIdentityDao = db.networkIdentityDao(),
-            messageDao = db.messageDao(),
+            db = db,
             reactionDao = db.reactionDao(),
             mediatorFactory = ChatHistoryMediatorFactory { _, _, _ -> error("paging not exercised") },
             historyGapDao = db.historyGapDao(),

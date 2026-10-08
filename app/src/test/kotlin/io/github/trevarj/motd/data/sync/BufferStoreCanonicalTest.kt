@@ -688,7 +688,7 @@ class BufferStoreCanonicalTest {
                 MessageRepositoryImpl(
                     db.bufferDao(),
                     db.networkIdentityDao(),
-                    db.messageDao(),
+                    db,
                     db.reactionDao(),
                     ChatHistoryMediatorFactory { roomId, _, _ ->
                         mediatorRoomId = roomId

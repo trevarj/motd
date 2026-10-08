@@ -6,11 +6,12 @@ import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.PagingSource
 import androidx.paging.PagingState
+import androidx.room.InvalidationTracker
 import androidx.sqlite.db.SimpleSQLiteQuery
 import io.github.trevarj.motd.data.db.BufferDao
 import io.github.trevarj.motd.data.db.HistoryGapDao
-import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.ReactionDao
 import io.github.trevarj.motd.data.db.ReactionEntity
@@ -25,6 +26,8 @@ import io.github.trevarj.motd.data.visibility.countTimelineNewerQuery
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.data.visibility.newestPresentedMessageQuery
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,6 +36,8 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 // Paging 3 stream backed by the local pagingSource, with a RemoteMediator supplied per buffer
@@ -43,15 +48,17 @@ class MessageRepositoryImpl
     constructor(
         private val bufferDao: BufferDao,
         private val networkIdentityDao: NetworkIdentityDao,
-        private val messageDao: MessageDao,
+        private val db: MotdDatabase,
         private val reactionDao: ReactionDao,
         private val mediatorFactory: ChatHistoryMediatorFactory,
         private val historyGapDao: HistoryGapDao,
         // Gap-edge geometry lives in :data.history and is shared with the mediator. It is a stateless
         // reader over messageDao, so the default keeps hand-built call sites (tests) unchanged while
         // Hilt supplies the same instance through GapAnchorResolver's own @Inject constructor.
-        private val gapAnchors: GapAnchorResolver = GapAnchorResolver(messageDao),
+        private val gapAnchors: GapAnchorResolver = GapAnchorResolver(db.messageDao()),
     ) : MessageRepository {
+        private val messageDao = db.messageDao()
+
         @OptIn(ExperimentalPagingApi::class)
         override fun messages(
             bufferId: Long,
@@ -85,6 +92,7 @@ class MessageRepositoryImpl
                                 messagePagingQuery(context.roomId, visibility, context.identityRules),
                             ),
                             viewport,
+                            db.invalidationTracker,
                         ) { id ->
                             val row =
                                 messageDao.rawMessage(
@@ -251,10 +259,17 @@ class MessageRepositoryImpl
 internal class ViewportPagingSource(
     private val room: PagingSource<Int, MessageEntity>,
     private val viewport: StateFlow<ViewportRefreshAnchor?>,
+    private val invalidationTracker: InvalidationTracker,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val resolveParkedIndex: suspend (Long) -> Int?,
 ) : PagingSource<Int, MessageEntity>() {
     // ponytail: remember loaded offsets for this generation; Room owns the actual rows and counts.
     private val loadedOffsets = HashMap<Long, Int>()
+    private val observing = AtomicBoolean(false)
+    private val observer =
+        object : InvalidationTracker.Observer("messages") {
+            override fun onInvalidated(tables: Set<String>) = invalidate()
+        }
 
     init {
         room.registerInvalidatedCallback { invalidate() }
@@ -267,6 +282,17 @@ internal class ViewportPagingSource(
     override fun getRefreshKey(state: PagingState<Int, MessageEntity>): Int? = if (viewport.value != null) 0 else room.getRefreshKey(state)
 
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, MessageEntity> {
+        // Room 2.8.5 drops invalidations until its first load returns to the caller. An echo can
+        // commit after SQL finishes but before that handoff; observe it before any page is read.
+        if (!observing.get()) {
+            withContext(ioDispatcher) {
+                if (observing.compareAndSet(false, true)) {
+                    invalidationTracker.addObserver(observer)
+                    // Registration cleans up even if Room invalidated us while adding the observer.
+                    registerInvalidatedCallback { invalidationTracker.removeObserver(observer) }
+                }
+            }
+        }
         val result =
             if (params !is LoadParams.Refresh || (params.key != null && params.key != 0)) {
                 room.load(params)

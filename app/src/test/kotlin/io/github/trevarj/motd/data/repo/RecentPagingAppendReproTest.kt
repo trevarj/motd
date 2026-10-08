@@ -271,7 +271,7 @@ class RecentPagingAppendReproTest {
         MessageRepositoryImpl(
             db.bufferDao(),
             db.networkIdentityDao(),
-            db.messageDao(),
+            db,
             db.reactionDao(),
             ChatHistoryMediatorFactory { roomId, visibility, identityRules ->
                 ChatHistoryRemoteMediator(
