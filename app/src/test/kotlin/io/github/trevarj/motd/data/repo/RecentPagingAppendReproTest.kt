@@ -53,6 +53,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -267,7 +268,7 @@ class RecentPagingAppendReproTest {
         )
     }
 
-    private fun repository(history: ChatHistoryRemoteMediator.HistorySource) =
+    private fun TestScope.repository(history: ChatHistoryRemoteMediator.HistorySource) =
         MessageRepositoryImpl(
             db.bufferDao(),
             db.networkIdentityDao(),
@@ -289,6 +290,8 @@ class RecentPagingAppendReproTest {
                 )
             },
             db.historyGapDao(),
+            // Observer registration must drain with the same scheduler as Paging.
+            ioDispatcher = StandardTestDispatcher(testScheduler),
         )
 
     private fun coordinator() =

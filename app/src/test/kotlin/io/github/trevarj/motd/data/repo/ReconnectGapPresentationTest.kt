@@ -37,6 +37,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -229,7 +230,7 @@ class ReconnectGapPresentationTest {
         override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse = ChatHistoryResponse.Messages(emptyList(), null, null, endOfHistory = true)
     }
 
-    private fun repository(history: ChatHistoryRemoteMediator.HistorySource = NoHistory) =
+    private fun TestScope.repository(history: ChatHistoryRemoteMediator.HistorySource = NoHistory) =
         MessageRepositoryImpl(
             db.bufferDao(),
             db.networkIdentityDao(),
@@ -250,6 +251,8 @@ class ReconnectGapPresentationTest {
                 )
             },
             db.historyGapDao(),
+            // Observer registration must drain with the same scheduler as Paging.
+            ioDispatcher = StandardTestDispatcher(testScheduler),
         )
 
     /**

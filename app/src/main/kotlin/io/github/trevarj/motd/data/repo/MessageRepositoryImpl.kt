@@ -25,6 +25,7 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilitySql
 import io.github.trevarj.motd.data.visibility.countTimelineNewerQuery
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.data.visibility.newestPresentedMessageQuery
+import io.github.trevarj.motd.di.IoDispatcher
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -56,6 +57,7 @@ class MessageRepositoryImpl
         // reader over messageDao, so the default keeps hand-built call sites (tests) unchanged while
         // Hilt supplies the same instance through GapAnchorResolver's own @Inject constructor.
         private val gapAnchors: GapAnchorResolver = GapAnchorResolver(db.messageDao()),
+        @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     ) : MessageRepository {
         private val messageDao = db.messageDao()
 
@@ -93,6 +95,7 @@ class MessageRepositoryImpl
                             ),
                             viewport,
                             db.invalidationTracker,
+                            ioDispatcher = ioDispatcher,
                         ) { id ->
                             val row =
                                 messageDao.rawMessage(

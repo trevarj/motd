@@ -47,6 +47,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -330,7 +331,7 @@ class FillPresentationStabilityTest {
 
     private fun scriptedHistory() = ScriptedHistory()
 
-    private fun repository() =
+    private fun TestScope.repository() =
         MessageRepositoryImpl(
             db.bufferDao(),
             db.networkIdentityDao(),
@@ -352,6 +353,8 @@ class FillPresentationStabilityTest {
                 )
             },
             db.historyGapDao(),
+            // Observer registration must drain with the same scheduler as Paging.
+            ioDispatcher = StandardTestDispatcher(testScheduler),
         )
 
     private suspend fun runAutopilot(history: ScriptedHistory) =

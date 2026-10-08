@@ -38,10 +38,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -234,7 +236,7 @@ class FreshInstallScrollbackTest {
         }
     }
 
-    private fun repository(history: ChatHistoryRemoteMediator.HistorySource) =
+    private fun TestScope.repository(history: ChatHistoryRemoteMediator.HistorySource) =
         MessageRepositoryImpl(
             db.bufferDao(),
             db.networkIdentityDao(),
@@ -256,6 +258,8 @@ class FreshInstallScrollbackTest {
                 )
             },
             db.historyGapDao(),
+            // Observer registration must drain with the same scheduler as Paging.
+            ioDispatcher = StandardTestDispatcher(testScheduler),
         )
 
     private fun differ() =
@@ -472,11 +476,12 @@ class FreshInstallScrollbackTest {
                         .messages(bufferId, MessageVisibilitySpec())
                         .collectLatest { differ.submitData(it) }
                 }
+                // advanceUntilIdle stops when only backgroundScope's queued IO remains.
                 repeat(4) {
-                    advanceUntilIdle()
+                    runCurrent()
                     if (differ.itemCount > 0) differ.getItem(differ.itemCount - 1)
                 }
-                advanceUntilIdle()
+                runCurrent()
 
                 val observed =
                     checkNotNull(timeline.lastOrNull { it.first }?.second) {
@@ -501,7 +506,7 @@ class FreshInstallScrollbackTest {
                 )
 
                 release.complete(Unit)
-                advanceUntilIdle()
+                runCurrent()
             } finally {
                 Dispatchers.resetMain()
             }
