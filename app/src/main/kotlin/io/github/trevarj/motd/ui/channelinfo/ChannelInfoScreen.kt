@@ -89,12 +89,15 @@ import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AvatarEditorSheet
 import io.github.trevarj.motd.ui.components.ChannelNotificationPresentation
 import io.github.trevarj.motd.ui.components.ChannelNotificationSheet
+import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.botDisplayName
 import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.neutralReadingInk
 import kotlinx.coroutines.launch
 
 /** Stateful entry: wires the ViewModel and drives navigation/leave. */
@@ -883,15 +886,20 @@ private fun ChannelHeader(
             ) {
                 val topic = buffer.topic?.takeIf { it.isNotBlank() }
                 if (topic != null) {
+                    val scheme = MaterialTheme.colorScheme
+                    val topicFill = scheme.background
+                    val readingInk = ensureContrast(neutralReadingInk(scheme), listOf(topicFill), MESSAGE_TEXT_CONTRAST)
                     Text(
                         text =
                             io.github.trevarj.motd.ui.components.linkifiedBody(
                                 text = topic,
                                 linkColor = MaterialTheme.colorScheme.primary,
                                 mentionsActive = false,
+                                containerColor = topicFill,
+                                contentColor = readingInk,
                             ),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = readingInk,
                         modifier = Modifier.weight(1f, fill = false).testTag("channelinfo_topic"),
                     )
                 }

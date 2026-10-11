@@ -33,6 +33,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -51,6 +52,8 @@ import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewKind
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.neutralReadingInk
 
 internal val LocalLinkPreviewAwaiting = staticCompositionLocalOf { false }
 internal val LocalLinkPreviewFailed = staticCompositionLocalOf { false }
@@ -161,6 +164,8 @@ private fun LinkPreviewContent(
     networkId: Long?,
     onClick: () -> Unit,
 ) {
+    val scheme = MaterialTheme.colorScheme
+    val readingInk = ensureContrast(neutralReadingInk(scheme), listOf(scheme.surfaceContainerHighest.compositeOver(scheme.background)), MESSAGE_TEXT_CONTRAST)
     Row(
         modifier =
             Modifier
@@ -186,7 +191,7 @@ private fun LinkPreviewContent(
                 text = preview.title ?: preview.url,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = readingInk,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -194,7 +199,7 @@ private fun LinkPreviewContent(
                 Text(
                     text = it,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = readingInk,
                     fontFamily = if (preview.kind == LinkPreviewKind.TEXT) FontFamily.Monospace else FontFamily.Default,
                     maxLines =
                         when (preview.kind) {

@@ -36,6 +36,9 @@ private val MotdDarkRaw =
 internal val MotdLightScheme: ColorScheme = accessibleColorScheme(MotdLightRaw, dark = false)
 internal val MotdDarkScheme: ColorScheme = accessibleColorScheme(MotdDarkRaw, dark = true)
 
+/** Reading ink follows the applied theme; renderers still fit it to the actual message fill. */
+internal fun neutralReadingInk(scheme: ColorScheme): Color = if (scheme.background.luminance() < 0.5f) Color(0xFFF5F5F5) else Color(0xFF171717)
+
 internal fun contrastRatio(
     a: Color,
     b: Color,

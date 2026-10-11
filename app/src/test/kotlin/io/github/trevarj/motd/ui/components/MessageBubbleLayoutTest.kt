@@ -12,7 +12,9 @@ import io.github.trevarj.motd.ui.theme.MotdDarkScheme
 import io.github.trevarj.motd.ui.theme.MotdLightScheme
 import io.github.trevarj.motd.ui.theme.accessibleColorScheme
 import io.github.trevarj.motd.ui.theme.contrastRatio
+import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.fixedThemeScheme
+import io.github.trevarj.motd.ui.theme.neutralReadingInk
 import io.github.trevarj.motd.ui.theme.semanticColors
 import io.github.trevarj.motd.ui.theme.withTrueBlackSurfaces
 import org.junit.Assert.assertEquals
@@ -56,6 +58,22 @@ class MessageBubbleLayoutTest {
         }
     }
 
+    @Test fun readingInk_usesAppliedThemeAndFitsActualFills() {
+        messageContrastSchemes().forEach { (name, scheme, dark) ->
+            val seed = neutralReadingInk(scheme)
+            assertEquals(name, if (dark) Color(0xFFF5F5F5) else Color(0xFF171717), seed)
+            val semantic = semanticColors(scheme, dark)
+            for (kind in listOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)) {
+                for (self in listOf(false, true)) {
+                    for (mention in listOf(false, true)) {
+                        val fill = messageBubbleRoleColors(scheme, self, mention, kind, semantic).container
+                        assertReadingContrast("$name neutral $kind self=$self mention=$mention", ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST), fill)
+                    }
+                }
+            }
+        }
+    }
+
     @Test fun midToneBubble_keepsItsFillAndUsesReadableFallback() {
         val fill = Color(0xFF777777)
         val scheme = MotdLightScheme.copy(primary = fill, primaryContainer = fill)
@@ -63,6 +81,7 @@ class MessageBubbleLayoutTest {
         assertEquals(fill, role.container)
         assertTrue(contrastRatio(Color.Black, fill) < 7.0 && contrastRatio(Color.White, fill) < 7.0)
         assertTrue(contrastRatio(role.content, fill) >= 4.5)
+        assertEquals(Color.Black, ensureContrast(neutralReadingInk(scheme), listOf(fill), MESSAGE_TEXT_CONTRAST))
     }
 }
 

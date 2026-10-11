@@ -17,6 +17,8 @@ import io.github.trevarj.motd.irc.format.IRC_REVERSE
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.theme.contrastRatio
+import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.neutralReadingInk
 import io.github.trevarj.motd.ui.theme.semanticColors
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -229,6 +231,7 @@ class MessageBubbleTextTest {
                 "$IRC_HEX_COLOR" + "FF0000,0000FF${IRC_REVERSE}reverse\u000f"
         messageContrastSchemes().forEach { (name, scheme, dark) ->
             val semantic = semanticColors(scheme, dark)
+            val readingInk = neutralReadingInk(scheme)
             val surfaces =
                 listOf(
                     "incoming" to messageBubbleRoleColors(scheme, false, false, MessageKind.PRIVMSG, semantic),
@@ -237,55 +240,59 @@ class MessageBubbleTextTest {
                     "notice/action" to messageBubbleRoleColors(scheme, false, false, MessageKind.ACTION, semantic),
                 )
             surfaces.forEach { (roleName, role) ->
+                val bodyColor = ensureContrast(readingInk, listOf(role.container), MESSAGE_TEXT_CONTRAST)
                 val body =
                     linkifiedBody(
                         raw,
                         scheme.primary,
                         mentionColor = { if (it == "bob") scheme.secondary else null },
                         codeBackground = scheme.surfaceVariant.copy(alpha = 0.72f),
-                        codeColor = scheme.onSurfaceVariant,
+                        codeColor = readingInk,
                         containerColor = role.container,
-                        contentColor = role.content,
+                        contentColor = bodyColor,
                     )
-                assertRenderedInks("$name $roleName", body, role.content, role.container)
+                assertRenderedInks("$name $roleName", body, bodyColor, role.container)
                 val previewFill = scheme.surfaceContainerHighest.copy(alpha = 0.6f).compositeOver(role.container)
-                val preview = mircFormattedText("\u000315grey\u000f \u000314,00paper", previewFill, role.content, MESSAGE_TEXT_CONTRAST)
-                assertRenderedInks("$name reply", preview, role.content, previewFill)
+                val previewColor = ensureContrast(readingInk, listOf(previewFill), MESSAGE_TEXT_CONTRAST)
+                val preview = mircFormattedText("quoted \u000315grey\u000f \u000314,00paper", previewFill, previewColor, MESSAGE_TEXT_CONTRAST)
+                assertRenderedInks("$name reply", preview, previewColor, previewFill)
             }
 
             // These are the solid flattened row fills, not a wallpaper composition.
             val rowFill = scheme.onSurfaceVariant.copy(alpha = 0.10f).compositeOver(scheme.background)
+            val rowColor = ensureContrast(readingInk, listOf(rowFill), MESSAGE_TEXT_CONTRAST)
             val compact =
                 buildCompactLine(
                     "bob",
                     raw,
                     MessageKind.PRIVMSG,
                     scheme.secondary,
-                    scheme.onSurface,
+                    rowColor,
                     scheme.primary,
                     scheme.primary.copy(alpha = 0.12f),
                     mentionColor = { if (it == "bob") scheme.secondary else null },
                     codeBackground = scheme.surfaceVariant.copy(alpha = 0.72f),
-                    codeColor = scheme.onSurfaceVariant,
+                    codeColor = readingInk,
                     containerColor = rowFill,
                 )
-            assertRenderedInks("$name compact/two-line", compact, scheme.onSurface, rowFill)
+            assertRenderedInks("$name compact/two-line", compact, rowColor, rowFill)
             val actionFill = semantic.warningContainer.copy(alpha = MENTION_ROW_TINT_ALPHA).compositeOver(scheme.background)
+            val actionColor = ensureContrast(readingInk, listOf(actionFill), MESSAGE_TEXT_CONTRAST)
             val action =
                 buildActionLine(
                     "bob",
                     raw,
                     scheme.tertiary,
                     scheme.secondary,
-                    scheme.onSurfaceVariant,
+                    actionColor,
                     scheme.primary,
                     friendTint = scheme.primary.copy(alpha = 0.12f),
                     mentionColor = { if (it == "bob") scheme.secondary else null },
                     codeBackground = scheme.surfaceVariant,
-                    codeColor = scheme.onSurfaceVariant,
+                    codeColor = readingInk,
                     containerColor = actionFill,
                 )
-            assertRenderedInks("$name action row", action, scheme.onSurfaceVariant, actionFill)
+            assertRenderedInks("$name action row", action, actionColor, actionFill)
         }
     }
 

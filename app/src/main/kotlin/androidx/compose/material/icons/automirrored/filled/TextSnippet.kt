@@ -14,28 +14,20 @@
  * limitations under the License.
  */
 
-package androidx.compose.material.icons.filled
+package androidx.compose.material.icons.automirrored.filled
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.materialIcon
 import androidx.compose.material.icons.materialPath
 import androidx.compose.ui.graphics.vector.ImageVector
-import kotlin.Deprecated
 
-@Deprecated(
-    "Use the AutoMirrored version at Icons.AutoMirrored.Filled.TextSnippet",
-    ReplaceWith(
-        "Icons.AutoMirrored.Filled.TextSnippet",
-        "androidx.compose.material.icons.automirrored.filled.TextSnippet",
-    ),
-)
-public val Icons.Filled.TextSnippet: ImageVector
+public val Icons.AutoMirrored.Filled.TextSnippet: ImageVector
     get() {
         if (_textSnippet != null) {
             return _textSnippet!!
         }
         _textSnippet =
-            materialIcon(name = "Filled.TextSnippet") {
+            materialIcon(name = "AutoMirrored.Filled.TextSnippet", autoMirror = true) {
                 materialPath {
                     moveTo(20.41f, 8.41f)
                     lineToRelative(-4.83f, -4.83f)

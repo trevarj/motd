@@ -1,27 +1,34 @@
 package io.github.trevarj.motd.agentwire
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import io.github.trevarj.motd.ai.text.TextTermination
 import io.github.trevarj.motd.ai.text.TextTransformResult
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.ui.ai.AiTextSheet
 import io.github.trevarj.motd.ui.ai.AiTextSource
 import io.github.trevarj.motd.ui.ai.AiTextUiState
 import io.github.trevarj.motd.ui.ai.source
+import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.ensureContrast
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -107,6 +114,10 @@ class AgentwireTimelineUiTest {
     @Test
     fun assistantMarkdownFormatsStreamingAndReplayWithoutChangingUserText() {
         val markdown = "- **eyeoh** ... **Coverage:** _complete_"
+        var preset by mutableStateOf(ColorThemePreset.AYU_LIGHT)
+        var assistantFill = Color.Unspecified
+        var userFill = Color.Unspecified
+        var metadataInk = Color.Unspecified
         var assistant by mutableStateOf(
             AgentwireTimelineItem(
                 id = "assistant",
@@ -121,7 +132,10 @@ class AgentwireTimelineUiTest {
         )
         val user = assistant.copy(id = "user", kind = "user.prompt", title = "You", body = markdown, running = false)
         compose.setContent {
-            MotdTheme(dynamicColor = false) {
+            MotdTheme(dynamicColor = false, themePreset = preset) {
+                assistantFill = MaterialTheme.colorScheme.surfaceContainerLow
+                userFill = MaterialTheme.colorScheme.primaryContainer
+                metadataInk = MaterialTheme.colorScheme.onSurfaceVariant
                 Column {
                     AgentwireTimelineCard(assistant, actionStatus = null, expandedOverride = null, onToggleExpanded = {})
                     AgentwireTimelineCard(user, actionStatus = null, expandedOverride = null, onToggleExpanded = {})
@@ -151,6 +165,7 @@ class AgentwireTimelineUiTest {
                     .filter { it.item.fontStyle == FontStyle.Italic }
                     .map { rendered.text.substring(it.start, it.end) },
             )
+            assertTrue(rendered.spanStyles.all { it.item.color == Color.Unspecified && it.item.background == Color.Unspecified })
             val prompt =
                 compose
                     .onNodeWithText(markdown, useUnmergedTree = true)
@@ -161,11 +176,60 @@ class AgentwireTimelineUiTest {
             assertTrue(prompt.spanStyles.isEmpty())
         }
 
-        compose.runOnIdle { assistant = assistant.copy(body = markdown) }
-        assertRenderedMarkdown()
-        compose.runOnIdle {
-            assistant = assistant.copy(kind = "assistant.completed", running = false, historical = true)
+        fun layoutOf(text: String): TextLayoutResult {
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithText(text, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            return layouts.single()
         }
-        assertRenderedMarkdown()
+
+        fun assertBodyInks(
+            assistantText: String,
+            seed: Color,
+        ) {
+            // Layout lookup settles palette recomposition before reading the captured card fills.
+            val assistantLayout = layoutOf(assistantText)
+            val userLayout = layoutOf(markdown)
+            assertEquals(ensureContrast(seed, listOf(assistantFill), MESSAGE_TEXT_CONTRAST), assistantLayout.layoutInput.style.color)
+            assertEquals(ensureContrast(seed, listOf(userFill), MESSAGE_TEXT_CONTRAST), userLayout.layoutInput.style.color)
+            val metadata = compose.onAllNodesWithText(agentwireTimestamp(0), substring = true, useUnmergedTree = true)
+            assertEquals(2, metadata.fetchSemanticsNodes().size)
+            for (index in 0..1) {
+                val layouts = mutableListOf<TextLayoutResult>()
+                metadata[index].performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                assertEquals(
+                    metadataInk,
+                    layouts
+                        .single()
+                        .layoutInput.style.color,
+                )
+            }
+        }
+        for (theme in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
+            val seed = if (theme == ColorThemePreset.AYU_LIGHT) Color(0xFF171717) else Color(0xFFF5F5F5)
+            compose.runOnIdle {
+                preset = theme
+                assistant = assistant.copy(kind = "assistant.delta", body = "- **eye", running = true, historical = false)
+            }
+            assertBodyInks("- **eye", seed)
+            compose.runOnIdle { assistant = assistant.copy(body = markdown) }
+            assertRenderedMarkdown()
+            assertBodyInks("- eyeoh ... Coverage: complete", seed)
+            compose.runOnIdle { assistant = assistant.copy(kind = "assistant.completed", running = false, historical = true) }
+            assertRenderedMarkdown()
+            assertBodyInks("- eyeoh ... Coverage: complete", seed)
+        }
+
+        compose.runOnIdle { assistant = assistant.copy(body = "**Ready** \u000315grey\u000f \u000314,00paper\u000f") }
+        for (theme in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
+            compose.runOnIdle { preset = theme }
+            val seed = if (theme == ColorThemePreset.AYU_LIGHT) Color(0xFF171717) else Color(0xFFF5F5F5)
+            assertBodyInks("Ready grey paper", seed)
+            val text = layoutOf("Ready grey paper").layoutInput.text
+            val grey = text.spanStyles.last { text.indexOf("grey") in it.start until it.end && it.item.color != Color.Unspecified }.item
+            assertEquals(ensureContrast(Color(0xFFD2D2D2), listOf(assistantFill), MESSAGE_TEXT_CONTRAST), grey.color)
+            val paper = text.spanStyles.last { text.indexOf("paper") in it.start until it.end && it.item.background != Color.Unspecified }.item
+            assertEquals(Color.White, paper.background)
+            assertEquals(ensureContrast(Color(0xFF7F7F7F), listOf(Color.White), MESSAGE_TEXT_CONTRAST), paper.color)
+        }
     }
 }

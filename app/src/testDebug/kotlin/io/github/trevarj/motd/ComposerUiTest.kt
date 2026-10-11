@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.core.content.FileProvider
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IrcColor
@@ -56,7 +57,10 @@ import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
+import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
+import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.ensureContrast
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -64,6 +68,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowContentResolver
@@ -274,8 +279,13 @@ class ComposerUiTest {
 
     @Test
     fun replyWarning_isAboveReplyContentAndInput() {
+        val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
+        var fill = Color.Unspecified
+        var senderInk = Color.Unspecified
         compose.setContent {
-            MotdTheme {
+            MotdTheme(dynamicColor = false, themePreset = preset.value) {
+                fill = MaterialTheme.colorScheme.surfaceContainerHigh
+                senderInk = LocalNickColors.current.nick("alice", MaterialTheme.colorScheme.primary)
                 Composer(
                     value = TextFieldValue("reply"),
                     onValueChange = {},
@@ -302,6 +312,27 @@ class ComposerUiTest {
         val input = compose.onNodeWithTag("chat_composer_input_row").fetchSemanticsNode().boundsInRoot
         assertTrue(warning.bottom <= reply.top)
         assertTrue(warning.bottom <= input.top)
+        val sender = RuntimeEnvironment.getApplication().getString(R.string.chat_composer_replying_to, "alice")
+        for (theme in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
+            compose.runOnIdle { preset.value = theme }
+            val seed = if (theme == ColorThemePreset.AYU_LIGHT) Color(0xFF171717) else Color(0xFFF5F5F5)
+            val bodyLayouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithText("original", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(bodyLayouts) }
+            assertEquals(
+                ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST),
+                bodyLayouts
+                    .single()
+                    .layoutInput.style.color,
+            )
+            val senderLayouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithText(sender, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(senderLayouts) }
+            assertEquals(
+                senderInk,
+                senderLayouts
+                    .single()
+                    .layoutInput.style.color,
+            )
+        }
     }
 
     @Test

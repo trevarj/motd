@@ -137,9 +137,12 @@ import io.github.trevarj.motd.ui.chat.VoiceMessageViewModel
 import io.github.trevarj.motd.ui.chat.VoiceRecordingPermissionGate
 import io.github.trevarj.motd.ui.chat.shouldShowNewestFab
 import io.github.trevarj.motd.ui.components.Composer
+import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.components.mircFormattedText
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.neutralReadingInk
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
@@ -1492,16 +1495,17 @@ internal fun AgentwireTimelineCard(
     // explicit fold choice, hoisted so it survives the item's lifecycle transitions.
     val collapsible = item.kind == "plan.updated" || item.kind == "usage.updated"
     val expanded = expandedOverride ?: (item.running || item.kind == "assistant.completed")
+    val cardColor =
+        if (item.kind == "user.prompt") {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        }
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
         colors =
             CardDefaults.cardColors(
-                containerColor =
-                    if (item.kind == "user.prompt") {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerLow
-                    },
+                containerColor = cardColor,
             ),
     ) {
         Column(
@@ -1554,9 +1558,18 @@ internal fun AgentwireTimelineCard(
             if (!collapsible || expanded) {
                 item.body?.let { body ->
                     val assistant = item.kind.startsWith("assistant.")
+                    val bodyInk = if (assistant || item.kind == "user.prompt") neutralReadingInk(MaterialTheme.colorScheme) else Color.Unspecified
+                    val bodyColor =
+                        remember(bodyInk, cardColor) {
+                            if (bodyInk == Color.Unspecified) bodyInk else ensureContrast(bodyInk, listOf(cardColor), MESSAGE_TEXT_CONTRAST)
+                        }
                     val text =
-                        remember(body, assistant) {
-                            if (assistant) mircFormattedText(markdownToIrcFormatting(body)) else AnnotatedString(body)
+                        remember(body, assistant, cardColor, bodyColor) {
+                            if (assistant) {
+                                mircFormattedText(markdownToIrcFormatting(body), cardColor, bodyColor, MESSAGE_TEXT_CONTRAST)
+                            } else {
+                                AnnotatedString(body)
+                            }
                         }
                     Text(
                         text,
@@ -1571,6 +1584,7 @@ internal fun AgentwireTimelineCard(
                                 } ?: Modifier,
                             ),
                         style = MaterialTheme.typography.bodyMedium,
+                        color = bodyColor,
                     )
                 }
             }

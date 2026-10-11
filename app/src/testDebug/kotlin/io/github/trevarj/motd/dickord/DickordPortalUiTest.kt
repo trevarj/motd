@@ -2,18 +2,25 @@ package io.github.trevarj.motd.dickord
 
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertWidthIsEqualTo
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
@@ -25,7 +32,10 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.trevarj.motd.R
@@ -33,9 +43,12 @@ import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
+import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.ensureContrast
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -55,6 +68,109 @@ class DickordPortalUiTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun guildAndPendingTitlesUseNeutralInkOnSelectedFillWithoutChangingIconsOrBadges() {
+        val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
+        val pending = mutableStateOf(false)
+        val selected = mutableStateOf(false)
+        val rowState = mutableStateOf(false to 2)
+        var fill = Color.Unspecified
+        var iconInk = Color.Unspecified
+        var badgeInk = Color.Unspecified
+        var mentionInk = Color.Unspecified
+        compose.setContent {
+            MotdTheme(dynamicColor = false, themePreset = preset.value) {
+                val scheme = MaterialTheme.colorScheme
+                val (muted, unread) = rowState.value
+                fill = (if (selected.value) scheme.secondaryContainer else Color.Transparent).compositeOver(scheme.surface)
+                iconInk = if (muted) scheme.onSurfaceVariant else scheme.primary
+                badgeInk = if (muted) scheme.onSurfaceVariant else scheme.onPrimary
+                mentionInk = scheme.onSecondary
+                val conversation =
+                    channel(11, 7, "Bridge A", "general", "101", muted = muted)
+                        .let { it.copy(row = it.row.copy(unreadCount = unread)) }
+                val group =
+                    if (pending.value) {
+                        pendingGroup(conversation.row)
+                    } else {
+                        serverGroup(7, "Bridge A", "100", "Example Server", listOf(conversation))
+                    }
+                DickordPortalContent(
+                    state = DickordPortalState(loading = false, enabled = true, groups = listOf(group), selectedGroupKey = group.key),
+                    selectedBufferId = if (selected.value) 11 else null,
+                )
+            }
+        }
+        val resources = InstrumentationRegistry.getInstrumentation().targetContext.resources
+        val rowMatcher = hasAnyAncestor(hasTestTag("dickord_conversation_11"))
+
+        fun assertBadgeInk(
+            label: String,
+            description: String,
+            ink: Color,
+        ) {
+            compose.onNode(rowMatcher and hasContentDescription(description), useUnmergedTree = true).assertIsDisplayed()
+            val layouts = mutableListOf<TextLayoutResult>()
+            // The unmerged tree retains CountBadge's text beneath its replacement a11y label.
+            compose
+                .onNode(
+                    rowMatcher and hasAnyAncestor(hasContentDescription(description)) and SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult),
+                    useUnmergedTree = true,
+                ).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertEquals(
+                label,
+                ink,
+                layouts
+                    .single()
+                    .layoutInput.style.color,
+            )
+        }
+        for (theme in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
+            val seed = if (theme == ColorThemePreset.AYU_LIGHT) Color(0xFF171717) else Color(0xFFF5F5F5)
+            for (pendingTitle in listOf(false, true)) {
+                for (isSelected in listOf(false, true)) {
+                    for (flags in listOf(false to 0, false to 2, true to 2)) {
+                        compose.runOnIdle {
+                            preset.value = theme
+                            pending.value = pendingTitle
+                            selected.value = isSelected
+                            rowState.value = flags
+                        }
+                        val label = "$theme pending=$pendingTitle selected=$isSelected $flags"
+                        val title = compose.onNodeWithText(if (pendingTitle) "Conversation 11" else "general", useUnmergedTree = true)
+                        val layouts = mutableListOf<TextLayoutResult>()
+                        title.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                        val style = layouts.single().layoutInput.style
+                        assertEquals("$label title ink", ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST), style.color)
+                        assertEquals("$label unread weight", if (!flags.first && flags.second > 0) FontWeight.Bold else FontWeight.Medium, style.fontWeight)
+                        val rowNode = compose.onNodeWithTag("dickord_conversation_11")
+                        val rowBounds = rowNode.fetchSemanticsNode().boundsInRoot
+                        val titleBounds = title.fetchSemanticsNode().boundsInRoot
+                        val pixels = rowNode.captureToImage().toPixelMap()
+                        assertEquals("$label painted row fill", fill, pixels[(titleBounds.left - rowBounds.left + 2).toInt(), (titleBounds.top - rowBounds.top - 2).toInt()])
+                        val iconRight = titleBounds.left - rowBounds.left - with(compose.density) { 10.dp.toPx() }
+                        val iconLeft = iconRight - with(compose.density) { 20.dp.toPx() }
+                        assertTrue(
+                            "$label forum icon retains semantic ink",
+                            (iconLeft.toInt() until iconRight.toInt()).any { x ->
+                                (0 until pixels.height).any { y -> pixels[x, y] == iconInk }
+                            },
+                        )
+                        if (flags.second > 0) {
+                            assertBadgeInk("$label activity/unread badge ink", resources.getQuantityString(R.plurals.badge_unread, 2, 2), badgeInk)
+                        }
+                        val mention = compose.onNode(rowMatcher and hasContentDescription(resources.getQuantityString(R.plurals.badge_mention, 1, 1)), useUnmergedTree = true)
+                        if (flags.first) {
+                            mention.assertDoesNotExist()
+                        } else {
+                            assertBadgeInk("$label mention badge ink", resources.getQuantityString(R.plurals.badge_mention, 1, 1), mentionInk)
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     @Test
     fun serverAndDmNavigationShowsExactLabelsAndReturnsRawBufferIds() {

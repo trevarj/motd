@@ -1,10 +1,13 @@
 package io.github.trevarj.motd.ui.search
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -18,6 +21,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontWeight
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.ai.text.TextTermination
 import io.github.trevarj.motd.ai.text.TextTransformResult
@@ -26,14 +31,23 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.SearchHit
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.irc.ext.SearchResultKind
 import io.github.trevarj.motd.ui.ai.AiTextSheet
 import io.github.trevarj.motd.ui.ai.AiTextSource
 import io.github.trevarj.motd.ui.ai.AiTextUiState
 import io.github.trevarj.motd.ui.ai.source
+import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
+import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
+import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.TimestampConfig
+import io.github.trevarj.motd.ui.theme.contrastRatio
+import io.github.trevarj.motd.ui.theme.ensureContrast
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -49,6 +63,86 @@ class SearchScreenUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun snippetsUseNeutralInkOnRowAndHighlightWithoutChangingSenderOrTimestamp() {
+        val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
+        val server = mutableStateOf(false)
+        val contrastingHighlight = mutableStateOf(false)
+        val text = "Reading matched MATCHED prose"
+        var fill = Color.Unspecified
+        var highlight = Color.Unspecified
+        var senderInk = Color.Unspecified
+        var timestampInk = Color.Unspecified
+        compose.setContent {
+            MotdTheme(
+                dynamicColor = false,
+                themePreset = preset.value,
+                timestampConfig = TimestampConfig(format = TimeFormat.CUSTOM, customPattern = "'Search time'"),
+            ) {
+                val scheme = MaterialTheme.colorScheme
+                val semantic = LocalMotdSemanticColors.current
+                fill = scheme.surfaceContainerLow.compositeOver(scheme.background)
+                highlight =
+                    if (contrastingHighlight.value) {
+                        if (preset.value == ColorThemePreset.AYU_LIGHT) Color(0xFF182836) else Color(0xFFF4E3D1)
+                    } else {
+                        semantic.warningContainer
+                    }
+                senderInk = LocalNickColors.current.nick("alice", scheme.onSurfaceVariant)
+                timestampInk = scheme.onSurfaceVariant
+                CompositionLocalProvider(LocalMotdSemanticColors provides semantic.copy(warningContainer = highlight)) {
+                    SearchContent(
+                        state =
+                            SearchUiState(
+                                rawQuery = "matched",
+                                scope = if (server.value) SearchScope.SERVER else SearchScope.ALL,
+                                groups = listOf(group(hit(1, "neutral", text))),
+                                server = ServerSearchState.Results(listOf(ServerHitUi(1, "alice", text, SearchResultKind.PRIVMSG, 1000, null)), false, 1),
+                            ),
+                        onQueryChange = {},
+                        onScopeChange = {},
+                        onBack = {},
+                        onOpenHit = {},
+                    )
+                }
+            }
+        }
+
+        fun layoutOf(value: String): TextLayoutResult {
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithText(value, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            return layouts.single()
+        }
+        for (theme in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
+            val seed = if (theme == ColorThemePreset.AYU_LIGHT) Color(0xFF171717) else Color(0xFFF5F5F5)
+            for (serverHit in listOf(false, true)) {
+                for (contrasting in listOf(false, true)) {
+                    compose.runOnIdle {
+                        preset.value = theme
+                        server.value = serverHit
+                        contrastingHighlight.value = contrasting
+                    }
+                    val layout = layoutOf(text)
+                    val label = "$theme server=$serverHit contrastingHighlight=$contrasting"
+                    assertEquals("$label prose", ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST), layout.layoutInput.style.color)
+                    val spans =
+                        layout.layoutInput.text.spanStyles
+                            .filter { it.item.background != Color.Unspecified }
+                    assertEquals("$label all case-insensitive hits", listOf(8, 16), spans.map { it.start })
+                    val highlightFill = highlight.compositeOver(fill)
+                    for (span in spans) {
+                        assertEquals("$label highlight background", highlight, span.item.background)
+                        assertEquals("$label highlight ink", ensureContrast(seed, listOf(highlightFill), MESSAGE_TEXT_CONTRAST), span.item.color)
+                        assertEquals("$label highlight emphasis", FontWeight.Bold, span.item.fontWeight)
+                        assertTrue("$label highlight contrast", contrastRatio(span.item.color, highlightFill) >= 4.5)
+                    }
+                    assertEquals("$label sender", senderInk, layoutOf("alice").layoutInput.style.color)
+                    assertEquals("$label timestamp", timestampInk, layoutOf("Search time").layoutInput.style.color)
+                }
+            }
+        }
+    }
 
     @Test
     fun localAndTransientServerHoldsUseFullSelectedText() {

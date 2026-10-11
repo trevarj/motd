@@ -3,7 +3,7 @@
   "coordinate": "androidx.compose.material:material-icons-extended:1.7.8",
   "coreCoordinate": "androidx.compose.material:material-icons-core:1.7.8",
   "source": "https://dl.google.com/dl/android/maven2/androidx/compose/material/material-icons-extended/1.7.8/material-icons-extended-1.7.8-sources.jar",
-  "acquisition": "Resolved :app:debugCompileClasspath sources through Gradle MCP read_dependency_sources; immutable normalized source CAS 77b7e782a519a3e074fc91e09d59334a.",
+  "acquisition": "Resolved :app:debugCompileClasspath sources through Gradle MCP read_dependency_sources; immutable normalized source CAS 77b7e782a519a3e074fc91e09d59334a. AutoMirrored.Filled.TextSnippet was acquired directly from the same Google Maven source archive (SHA-256 77b7e782a519a3e074fc91e09d59334ac1b815edd87d2e89c0c9ca7c95678e93).",
   "copyright": "Copyright 2025 The Android Open Source Project",
   "license": "Apache-2.0",
   "licenseFile": "LICENSE",
@@ -183,11 +183,6 @@
       "path": "androidx/compose/material/icons/filled/Stop.kt",
       "sha256": "f4307a9d19bfdc830e2a10b6bab9fd096ce514e404a8c3949b5c6481da9d4125",
       "upstreamSha256": "2f83b8de4aefe9b7591516b820bd8c8e43b0461518c816bad142936f58ea23cf"
-    },
-    {
-      "path": "androidx/compose/material/icons/filled/TextSnippet.kt",
-      "sha256": "a9b38b38710fd2be6aecf7e9403e4202b884f230625e6219d6ec70d2578f23e1",
-      "upstreamSha256": "e7a055682e4a6c2b883226db38f26f55dff98d90a7dbb3c2392e9c7e63506e1c"
     },
     {
       "path": "androidx/compose/material/icons/filled/UploadFile.kt",
@@ -653,6 +648,11 @@
       "path": "androidx/compose/material/icons/automirrored/filled/Reply.kt",
       "sha256": "3c849545dc7bad084f01ea674e487a1daba5c1e80f06dfe9ec9d29e975d1af9d",
       "upstreamSha256": "749d8b637391091efcd1a6ea7043af730299d106bb9746b0cffbb50c1477f130"
+    },
+    {
+      "path": "androidx/compose/material/icons/automirrored/filled/TextSnippet.kt",
+      "sha256": "aa01de647e1145e10d077bba5318c0ef66aa84f83954edf23426071391de3b72",
+      "upstreamSha256": "08899a90121c2527a5f2118a18a9f4a84f8310ddada269177c34346ef40ce353"
     },
     {
       "path": "androidx/compose/material/icons/automirrored/outlined/Chat.kt",

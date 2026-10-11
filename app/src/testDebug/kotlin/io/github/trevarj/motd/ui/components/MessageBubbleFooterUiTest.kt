@@ -20,6 +20,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toPixelMap
@@ -57,9 +58,12 @@ import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
+import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
+import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.TimestampConfig
 import io.github.trevarj.motd.ui.theme.contrastRatio
+import io.github.trevarj.motd.ui.theme.ensureContrast
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -401,6 +405,109 @@ class MessageBubbleFooterUiTest {
     }
 
     @Test
+    fun messageReadingInkIsNeutralAcrossDensitiesWithoutChangingTimestamps() {
+        val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
+        val density = mutableStateOf(LayoutDensity.COMFORTABLE)
+        val role = mutableStateOf(Triple(MessageKind.PRIVMSG, false, false))
+        var fill = Color.Unspecified
+        var codeFill = Color.Unspecified
+        var replyFill = Color.Unspecified
+        var timestampColor = Color.Unspecified
+        var linkColor = Color.Unspecified
+        var mentionColor = Color.Unspecified
+        compose.setContent {
+            MotdTheme(
+                dynamicColor = false,
+                themePreset = preset.value,
+                layoutDensity = density.value,
+                avatarStyle = AvatarStyle.NONE,
+                timestampConfig = TimestampConfig(show = true),
+            ) {
+                val scheme = MaterialTheme.colorScheme
+                val semantic = LocalMotdSemanticColors.current
+                val nicks = LocalNickColors.current
+                val (kind, self, mention) = role.value
+                val highlighted = mention && !self
+                val bubble = messageBubbleRoleColors(scheme, self, mention, kind, semantic)
+                val flatTint =
+                    when {
+                        kind == MessageKind.ACTION && highlighted -> semantic.warningContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
+                        kind == MessageKind.ACTION -> scheme.tertiaryContainer.copy(alpha = 0.22f)
+                        highlighted && density.value == LayoutDensity.COMPACT -> scheme.secondaryContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
+                        highlighted -> semantic.warningContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
+                        else -> nicks.nick("alice", scheme.onSurfaceVariant).copy(alpha = 0.10f)
+                    }
+                fill = if (density.value == LayoutDensity.COMFORTABLE) bubble.container else flatTint.compositeOver(scheme.background)
+                val legacyInk = if (density.value == LayoutDensity.COMFORTABLE) bubble.content else scheme.onSurfaceVariant
+                timestampColor = ensureContrast(legacyInk, listOf(fill), MESSAGE_TEXT_CONTRAST)
+                val codeBackground = scheme.surfaceVariant.copy(alpha = if (density.value == LayoutDensity.COMPACT && kind != MessageKind.ACTION) 0.72f else 1f)
+                codeFill = codeBackground.compositeOver(fill)
+                replyFill = scheme.surfaceContainerHighest.copy(alpha = 0.6f).compositeOver(fill)
+                val linkInk =
+                    if (density.value == LayoutDensity.COMFORTABLE && (kind == MessageKind.ACTION || kind == MessageKind.NOTICE || self || mention)) {
+                        bubble.content
+                    } else {
+                        scheme.primary
+                    }
+                linkColor = ensureContrast(linkInk, listOf(fill), MESSAGE_TEXT_CONTRAST)
+                mentionColor = ensureContrast(nicks.nick("bob", Color.Unspecified), listOf(fill), MESSAGE_TEXT_CONTRAST)
+                Surface(Modifier.width(380.dp)) {
+                    MessageBubble(
+                        sender = "alice",
+                        text = "Reading https://example.com @bob `code`",
+                        timeMs = 0,
+                        formattedTime = TIME,
+                        kind = kind,
+                        isSelf = self,
+                        hasMention = mention,
+                        // TWO_LINE continuations intentionally omit the timestamp-bearing header.
+                        showSender = true,
+                        knownNicks = setOf("bob"),
+                        reply = ReplyPreviewData("quoted", "Quoted reply"),
+                    )
+                }
+            }
+        }
+        val roles =
+            listOf(
+                Triple(MessageKind.PRIVMSG, false, false),
+                Triple(MessageKind.PRIVMSG, true, false),
+                Triple(MessageKind.PRIVMSG, false, true),
+                Triple(MessageKind.NOTICE, false, false),
+                Triple(MessageKind.ACTION, false, false),
+                Triple(MessageKind.ACTION, true, true),
+            )
+        for (theme in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
+            val seed = if (theme == ColorThemePreset.AYU_LIGHT) Color(0xFF171717) else Color(0xFFF5F5F5)
+            for (layout in listOf(LayoutDensity.COMFORTABLE, LayoutDensity.COMPACT, LayoutDensity.TWO_LINE)) {
+                for (messageRole in roles) {
+                    compose.runOnIdle {
+                        preset.value = theme
+                        density.value = layout
+                        role.value = messageRole
+                    }
+                    val label = "$theme $layout $messageRole"
+                    val body = compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true).textLayout()
+                    assertEquals("$label prose", ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST), body.inkAt("Reading"))
+                    assertEquals("$label code", ensureContrast(seed, listOf(codeFill), MESSAGE_TEXT_CONTRAST), body.inkAt("code"))
+                    assertEquals("$label link", linkColor, body.inkAt("https://"))
+                    assertEquals("$label mention", mentionColor, body.inkAt("@bob"))
+                    assertEquals(
+                        "$label timestamp",
+                        timestampColor,
+                        compose
+                            .onNodeWithText(TIME, useUnmergedTree = true)
+                            .textLayout()
+                            .layoutInput.style.color,
+                    )
+                    val quote = compose.onNodeWithText("Quoted reply", useUnmergedTree = true).textLayout()
+                    assertEquals("$label reply", ensureContrast(seed, listOf(replyFill), MESSAGE_TEXT_CONTRAST), quote.inkAt("Quoted"))
+                }
+            }
+        }
+    }
+
+    @Test
     fun ayuLightMessageTextUsesStrongerContrastOnItsActualFill() {
         val self = mutableStateOf(false)
         val kind = mutableStateOf(MessageKind.PRIVMSG)
@@ -608,6 +715,14 @@ class MessageBubbleFooterUiTest {
                 )
             }
         }
+    }
+
+    private fun TextLayoutResult.inkAt(word: String): Color {
+        val offset = layoutInput.text.indexOf(word)
+        assertTrue("Missing $word in ${layoutInput.text}", offset >= 0)
+        return layoutInput.text.spanStyles
+            .filter { offset in it.start until it.end && it.item.color != Color.Unspecified }
+            .fold(layoutInput.style.color) { _, span -> span.item.color }
     }
 
     private fun sent() = compose.onNodeWithContentDescription(RuntimeEnvironment.getApplication().getString(R.string.chat_sent), useUnmergedTree = true)

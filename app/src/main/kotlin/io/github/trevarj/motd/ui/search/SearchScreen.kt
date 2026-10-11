@@ -54,6 +54,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -89,6 +90,7 @@ import io.github.trevarj.motd.ui.ai.source
 import io.github.trevarj.motd.ui.chatlist.relativeChatTime
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.EmptyState
+import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.components.NetworkChip
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.components.resolveIs24Hour
@@ -98,6 +100,8 @@ import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.neutralReadingInk
 
 internal fun SearchUiState.serverTranslationBody(key: String): String? {
     val results = server as? ServerSearchState.Results ?: return null
@@ -643,6 +647,11 @@ private fun SearchRow(
     val is24Hour = resolveIs24Hour(timestampConfig.format, is24HourDevice)
     val formatTimestamp = rememberMessageTimeFormatter()
     val displaySender = dickordNickLabel(sender, LocalDickordLabsEnabled.current)
+    val scheme = MaterialTheme.colorScheme
+    val rowFill = scheme.surfaceContainerLow.compositeOver(scheme.background)
+    val readingInk = ensureContrast(neutralReadingInk(scheme), listOf(rowFill), MESSAGE_TEXT_CONTRAST)
+    val highlightColor = LocalMotdSemanticColors.current.warningContainer
+    val highlightInk = ensureContrast(neutralReadingInk(scheme), listOf(highlightColor.compositeOver(rowFill)), MESSAGE_TEXT_CONTRAST)
     Row(
         modifier =
             Modifier
@@ -674,8 +683,9 @@ private fun SearchRow(
                 color = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant),
             )
             Text(
-                text = highlightSnippet(text, query, LocalMotdSemanticColors.current.warningContainer),
+                text = highlightSnippet(text, query, highlightColor, highlightInk),
                 style = MaterialTheme.typography.bodyMedium,
+                color = readingInk,
                 maxLines = 3,
             )
         }
@@ -803,6 +813,7 @@ private fun highlightSnippet(
     text: String,
     query: String,
     highlightColor: Color,
+    highlightInk: Color,
 ): AnnotatedString {
     val terms = query.split(Regex("\\s+")).map { it.trim() }.filter { it.length >= 2 }
     if (terms.isEmpty()) return AnnotatedString(text)
@@ -814,7 +825,7 @@ private fun highlightSnippet(
             var idx = lower.indexOf(t)
             while (idx >= 0) {
                 addStyle(
-                    SpanStyle(fontWeight = FontWeight.Bold, background = highlightColor),
+                    SpanStyle(color = highlightInk, fontWeight = FontWeight.Bold, background = highlightColor),
                     idx,
                     idx + term.length,
                 )

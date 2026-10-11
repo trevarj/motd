@@ -58,6 +58,7 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.TextSnippet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Close
@@ -71,7 +72,6 @@ import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.TextSnippet
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Mood
@@ -178,6 +178,7 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.neutralReadingInk
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -1468,7 +1469,7 @@ private fun ComposerToolsToolbar(
             ToolButton(
                 label = "Format Markdown",
                 description = stringResource(R.string.chat_format_markdown_help),
-                icon = Icons.Filled.TextSnippet,
+                icon = Icons.AutoMirrored.Filled.TextSnippet,
                 tag = "chat_format_markdown",
                 enabled = allowed != null,
                 onClick = {
@@ -2212,10 +2213,13 @@ private fun ReplyBar(
     onCancel: () -> Unit,
 ) {
     val accent = LocalNickColors.current.nick(reply.sender, MaterialTheme.colorScheme.primary)
+    val fill = MaterialTheme.colorScheme.surfaceContainerHigh
+    val bodyInk = neutralReadingInk(MaterialTheme.colorScheme)
+    val bodyColor = remember(bodyInk, fill) { ensureContrast(bodyInk, listOf(fill), MESSAGE_TEXT_CONTRAST) }
     Surface(
         modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 68.dp, top = 8.dp),
         shape = MotdShapes.card,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = fill,
     ) {
         Row(
             modifier = Modifier.padding(start = 12.dp, end = 2.dp, top = 6.dp, bottom = 6.dp),
@@ -2238,7 +2242,7 @@ private fun ReplyBar(
                 Text(
                     reply.text,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = bodyColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

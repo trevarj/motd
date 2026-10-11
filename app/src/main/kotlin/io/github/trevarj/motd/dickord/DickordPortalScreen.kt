@@ -69,6 +69,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -93,11 +94,14 @@ import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.EmptyState
 import io.github.trevarj.motd.ui.components.HistoryIncompleteBadge
 import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
+import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MutedActivityBadge
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
+import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.neutralReadingInk
 
 private val noRemoteAvatars = RemoteAvatarState()
 
@@ -698,13 +702,16 @@ private fun DickordChannelRow(
     onLongClick: () -> Unit,
 ) {
     val badges = chatListBadgeState(row)
+    val scheme = MaterialTheme.colorScheme
+    val rowColor = if (selected) scheme.secondaryContainer else Color.Transparent
+    val readingInk = ensureContrast(neutralReadingInk(scheme), listOf(rowColor.compositeOver(scheme.surface)), MESSAGE_TEXT_CONTRAST)
     Row(
         modifier =
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 2.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                .background(rowColor)
                 .semantics { this.selected = selected }
                 .combinedClickable(onClick = onClick, onLongClick = onLongClick)
                 .defaultMinSize(minHeight = 48.dp)
@@ -722,7 +729,7 @@ private fun DickordChannelRow(
             text = title,
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = if (!row.muted && row.unreadCount > 0) FontWeight.Bold else FontWeight.Medium,
-            color = if (row.muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+            color = readingInk,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),

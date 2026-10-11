@@ -1,5 +1,10 @@
 package io.github.trevarj.motd
 
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -9,11 +14,18 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontFamily
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewKind
 import io.github.trevarj.motd.ui.components.LinkPreviewCard
+import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.ensureContrast
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -30,6 +42,80 @@ class LinkPreviewCardUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test fun titlesDescriptionsAndTextExcerptsUseNeutralInkWhileSiteAndFailureStaySemantic() {
+        val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
+        val kind = mutableStateOf(LinkPreviewKind.TEXT)
+        val contrastingFill = mutableStateOf(false)
+        val urlTitle = mutableStateOf(false)
+        val failed = mutableStateOf(false)
+        val url = "https://example.test/note"
+        var fill = Color.Unspecified
+        var siteInk = Color.Unspecified
+        var errorInk = Color.Unspecified
+        var failedLabel = ""
+        compose.setContent {
+            MotdTheme(dynamicColor = false, themePreset = preset.value) {
+                val scheme = MaterialTheme.colorScheme
+                val cardColor =
+                    if (contrastingFill.value) {
+                        if (preset.value == ColorThemePreset.AYU_LIGHT) Color(0xFF182836) else Color(0xFFF4E3D1)
+                    } else {
+                        scheme.surfaceContainerHighest
+                    }
+                fill = cardColor.compositeOver(scheme.background)
+                siteInk = scheme.primary
+                errorInk = scheme.error
+                failedLabel =
+                    androidx.compose.ui.res
+                        .stringResource(R.string.chat_link_preview_failed)
+                MaterialTheme(colorScheme = scheme.copy(surfaceContainerHighest = cardColor)) {
+                    LinkPreviewCard(
+                        preview =
+                            if (failed.value) {
+                                null
+                            } else {
+                                LinkPreview(url, if (urlTitle.value) null else "Reading title", "Reading description\nsecond line", null, "example.test", kind.value)
+                            },
+                        loading = false,
+                        failed = failed.value,
+                        onClick = {},
+                    )
+                }
+            }
+        }
+
+        fun layoutOf(text: String): TextLayoutResult {
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithText(text, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            return layouts.single()
+        }
+        for (theme in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
+            val seed = if (theme == ColorThemePreset.AYU_LIGHT) Color(0xFF171717) else Color(0xFFF5F5F5)
+            for (previewKind in LinkPreviewKind.entries) {
+                for (contrasting in listOf(false, true)) {
+                    compose.runOnIdle {
+                        preset.value = theme
+                        kind.value = previewKind
+                        contrastingFill.value = contrasting
+                        urlTitle.value = previewKind == LinkPreviewKind.FILE
+                        failed.value = false
+                    }
+                    val title = layoutOf(if (previewKind == LinkPreviewKind.FILE) url else "Reading title")
+                    val description = layoutOf("Reading description\nsecond line")
+                    val label = "$theme $previewKind contrastingFill=$contrasting"
+                    val readingInk = ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST)
+                    assertEquals("$label title", readingInk, title.layoutInput.style.color)
+                    assertEquals("$label description", readingInk, description.layoutInput.style.color)
+                    assertEquals("$label site metadata", siteInk, layoutOf("example.test").layoutInput.style.color)
+                    assertEquals("$label text excerpt font", if (previewKind == LinkPreviewKind.TEXT) FontFamily.Monospace else FontFamily.Default, description.layoutInput.style.fontFamily)
+                    if (previewKind == LinkPreviewKind.TEXT) compose.onNodeWithTag("link_preview_text_body", useUnmergedTree = true).assertIsDisplayed()
+                }
+            }
+            compose.runOnIdle { failed.value = true }
+            assertEquals("$theme failure status", errorInk, layoutOf(failedLabel).layoutInput.style.color)
+        }
+    }
 
     @Test fun text_preview_exposes_a_dedicated_body() {
         compose.setContent {

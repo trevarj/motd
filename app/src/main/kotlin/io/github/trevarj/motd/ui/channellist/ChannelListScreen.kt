@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -39,6 +40,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -53,8 +55,11 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.irc.client.ChannelListing
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.components.EmptyState
+import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.neutralReadingInk
 
 /**
  * Channel browser. LIST/ELIST-backed, scoped to [networkId].
@@ -303,6 +308,9 @@ private fun ChannelList(
     identityRules: io.github.trevarj.motd.irc.proto.IrcIdentityRules,
     onJoin: (String) -> Unit,
 ) {
+    val scheme = MaterialTheme.colorScheme
+    val topicFill = ListItemDefaults.colors().containerColor.compositeOver(scheme.background)
+    val readingInk = ensureContrast(neutralReadingInk(scheme), listOf(topicFill), MESSAGE_TEXT_CONTRAST)
     LazyColumn(Modifier.fillMaxSize()) {
         // Keyed by channel name for stable recomposition over large lists (cap 2000).
         items(listings, key = { it.name }) { listing ->
@@ -322,10 +330,13 @@ private fun ChannelList(
                                 text = listing.topic,
                                 linkColor = MaterialTheme.colorScheme.primary,
                                 mentionsActive = false,
+                                containerColor = topicFill,
+                                contentColor = readingInk,
                             ),
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.bodySmall,
+                            color = readingInk,
                         )
                     }
                 },

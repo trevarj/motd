@@ -37,6 +37,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -68,6 +69,7 @@ import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.HistoryIncompleteBadge
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
+import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MutedActivityBadge
 import io.github.trevarj.motd.ui.components.NetworkChip
@@ -83,6 +85,8 @@ import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.neutralReadingInk
 
 internal data class ChatListBadgeState(
     val mutedActivity: Int? = null,
@@ -243,6 +247,9 @@ fun ChatListRowItem(
         animationSpec = MotdMotion.colorFade,
         label = "chatlist_row_container",
     )
+    val paintedRow = rowContainer.compositeOver(MaterialTheme.colorScheme.surface)
+    val readingInk = neutralReadingInk(MaterialTheme.colorScheme)
+    val readingColor = remember(readingInk, paintedRow) { ensureContrast(readingInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
     val activeIndicator = MaterialTheme.colorScheme.primary
     val hideAvatar = avatarsHidden()
     val presenceDescription =
@@ -314,12 +321,7 @@ fun ChatListRowItem(
                     text = displayTitle ?: dickordChannelLabel(row.displayName, dickordEnabled),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = if (isUnread) FontWeight.Bold else FontWeight.Medium,
-                    color =
-                        when {
-                            row.muted -> MaterialTheme.colorScheme.onSurfaceVariant
-                            isFriend -> nickColor
-                            else -> MaterialTheme.colorScheme.onSurface
-                        },
+                    color = readingColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
@@ -439,12 +441,7 @@ fun ChatListRowItem(
                         },
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = if (isUnread) FontWeight.Medium else FontWeight.Normal,
-                    color =
-                        if (isUnread) {
-                            MaterialTheme.colorScheme.onSurface
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
+                    color = readingColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),

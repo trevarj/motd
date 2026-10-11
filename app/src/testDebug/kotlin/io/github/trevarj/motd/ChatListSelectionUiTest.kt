@@ -3,11 +3,14 @@ package io.github.trevarj.motd
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
@@ -34,6 +37,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.data.db.BufferType
@@ -42,7 +46,9 @@ import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.ui.chatlist.ArchiveAccessibilityAnnouncement
 import io.github.trevarj.motd.ui.chatlist.ArchiveFolderPull
 import io.github.trevarj.motd.ui.chatlist.ChatListContent
@@ -50,7 +56,13 @@ import io.github.trevarj.motd.ui.chatlist.ChatListDefaultTitle
 import io.github.trevarj.motd.ui.chatlist.ChatListInvitation
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
 import io.github.trevarj.motd.ui.chatlist.ChatListState
+import io.github.trevarj.motd.ui.chatlist.chatListRowContainer
+import io.github.trevarj.motd.ui.chatlist.chatListRowVisualState
+import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
+import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.TimestampConfig
+import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.spacingFor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -58,6 +70,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowSystemClock
@@ -82,6 +95,82 @@ class ChatListSelectionUiTest {
         compose
             .onNodeWithTag("chatlist_row_1")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
+    }
+
+    @Test fun title_and_preview_use_neutral_ink_without_changing_timestamp_sender_or_unread_weight() {
+        val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
+        val state = mutableStateOf(Triple(false, false, 0))
+        val voice = mutableStateOf(false)
+        var fill = Color.Unspecified
+        var timestampInk = Color.Unspecified
+        var senderInk = Color.Unspecified
+        compose.setContent {
+            MotdTheme(
+                dynamicColor = false,
+                themePreset = preset.value,
+                timestampConfig = TimestampConfig(format = TimeFormat.CUSTOM, customPattern = "'Preview time'"),
+            ) {
+                val scheme = MaterialTheme.colorScheme
+                val (selected, active, unread) = state.value
+                fill = chatListRowContainer(chatListRowVisualState(selected, active, unread > 0), scheme).compositeOver(scheme.surface)
+                timestampInk = scheme.onSurfaceVariant
+                senderInk = LocalNickColors.current.nick("alice", scheme.onSurfaceVariant)
+                Surface(color = scheme.surface) {
+                    ChatListRowItem(
+                        row().copy(
+                            type = BufferType.CHANNEL,
+                            displayName = "#reading",
+                            unreadCount = unread,
+                            lastMessageText = if (voice.value) "[voice 0:14 audio/ogg] https://files.example/voice.ogg" else "Reading preview",
+                        ),
+                        false,
+                        {},
+                        {},
+                        isFriend = true,
+                        selected = selected,
+                        active = active,
+                    )
+                }
+            }
+        }
+
+        fun layoutOf(text: String): TextLayoutResult {
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithText(text, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            return layouts.single()
+        }
+        val states =
+            listOf(
+                Triple(false, false, 0),
+                Triple(false, false, 1),
+                Triple(false, true, 0),
+                Triple(false, true, 1),
+                Triple(true, false, 0),
+                Triple(true, false, 1),
+            )
+        val voiceLabel = RuntimeEnvironment.getApplication().getString(R.string.chatlist_voice_message) + " · 0:14"
+        for (theme in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
+            val seed = if (theme == ColorThemePreset.AYU_LIGHT) Color(0xFF171717) else Color(0xFFF5F5F5)
+            for (rowState in states) {
+                for (audio in listOf(false, true)) {
+                    compose.runOnIdle {
+                        preset.value = theme
+                        state.value = rowState
+                        voice.value = audio
+                    }
+                    val title = layoutOf("#reading").layoutInput.style
+                    val preview = layoutOf(if (audio) voiceLabel else "Reading preview").layoutInput.style
+                    val label = "$theme $rowState voice=$audio"
+                    val readingInk = ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST)
+                    assertEquals("$label title", readingInk, title.color)
+                    assertEquals("$label preview", readingInk, preview.color)
+                    assertEquals("$label title unread weight", if (rowState.third > 0) FontWeight.Bold else FontWeight.Medium, title.fontWeight)
+                    assertEquals("$label preview unread weight", if (rowState.third > 0) FontWeight.Medium else FontWeight.Normal, preview.fontWeight)
+                    assertEquals("$label timestamp", timestampInk, layoutOf("Preview time").layoutInput.style.color)
+                    assertEquals("$label sender", senderInk, layoutOf("alice").layoutInput.style.color)
+                }
+            }
+        }
     }
 
     @Test fun invitation_folder_hides_after_all_are_handled_until_another_arrives() {
