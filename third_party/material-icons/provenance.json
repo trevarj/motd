@@ -1,0 +1,698 @@
+{
+  "component": "AndroidX Compose Material Icons (used extended vectors)",
+  "coordinate": "androidx.compose.material:material-icons-extended:1.7.8",
+  "coreCoordinate": "androidx.compose.material:material-icons-core:1.7.8",
+  "source": "https://dl.google.com/dl/android/maven2/androidx/compose/material/material-icons-extended/1.7.8/material-icons-extended-1.7.8-sources.jar",
+  "acquisition": "Resolved :app:debugCompileClasspath sources through Gradle MCP read_dependency_sources; immutable normalized source CAS 77b7e782a519a3e074fc91e09d59334a.",
+  "copyright": "Copyright 2025 The Android Open Source Project",
+  "license": "Apache-2.0",
+  "licenseFile": "LICENSE",
+  "changes": "Formatting only for repository ktlint. No vector geometry, API, RTL/autoMirror or lazy-cache changes; original packages, core definitions and callers are unchanged.",
+  "files": [
+    {
+      "path": "androidx/compose/material/icons/filled/ArrowDownward.kt",
+      "sha256": "9304434814ef5c3836f32012a1aa12cae88a258e90f69fd0989cbadd64c86eaa",
+      "upstreamSha256": "bdcfef1e2321f896a37a9f251b6d05596770eec275497eecd813caa3202d2d96"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/ArrowUpward.kt",
+      "sha256": "53b41b5730fb28dd0f4d7caf24eca1510494c46ef744293bf4f3bdec593d31c1",
+      "upstreamSha256": "0d466946f56e4b0d799d7685f6995b7f9e995d5d459abcc8a616b094478e595e"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/AutoFixHigh.kt",
+      "sha256": "e934c410d161af5a958739f220ddac690a79f6263d371fbb7c386c53face9431",
+      "upstreamSha256": "84c9a849e24f32bf74a36c388943f156da810a95b75d5c657847024f3aa4414b"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/Block.kt",
+      "sha256": "bf3f1aa1776004a98b6eba4bf9fe028fc945469579317975429adc92d4dbefa5",
+      "upstreamSha256": "1ddc179de2d2c9564b9ae1c2fff18798f3e3d758b52a9b110e88f6748bfb2278"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/Code.kt",
+      "sha256": "1261a8be80430050155f07ff8926cd8164c82d08d305ced2e6550383e006c354",
+      "upstreamSha256": "56a70aff884e51266b859866709f2b0ded2bfa4e0dc04bdf660f4cd26676fb9a"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/ContentCopy.kt",
+      "sha256": "08e1c1ada3c0d5fc74adc86e1963837e75c4d0dc84ade8c4277e0f52431386e2",
+      "upstreamSha256": "de2609e1fead4dd88dc2b9ebbce72e653ac54cee1dedb9ab90cb4518cdcac7ee"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/DeleteOutline.kt",
+      "sha256": "75c5d35f86a719e27dfd20060d931f6b781ea72a72e614923446ca8c119d4c22",
+      "upstreamSha256": "d60a25a0257a60b58d97ff14b530af7cc70497ec462e52e2f0f1ba2a090a8fd3"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/Download.kt",
+      "sha256": "5cc025d3404def645812a9b801edb5e22dadbea2e7e046756f280118f6b4ee4a",
+      "upstreamSha256": "101ba73be15cc1acf76b247269630aa01ccb9461a9c298dfdc87fab12833ed50"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/DragHandle.kt",
+      "sha256": "0f4bec25d2831b4082bceef5667689a1eec26ace9e7b41b9d9250cb23ebc69a2",
+      "upstreamSha256": "014c3e59f8519fb7da850db3720a95e8fb9cb26d50ca444d0774148e1dc08ddf"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/ExpandLess.kt",
+      "sha256": "874e6ae4edb4ae6c1bbf84e264acfd4647d5d3faddea01fa7ff12beff84c38da",
+      "upstreamSha256": "28d7509d1e6dfb10d8434e559eec6f284cd7f9a202107c558404eaa1d169e620"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/ExpandMore.kt",
+      "sha256": "3968bcdbc4ff7222d21a4927b83322cca436b603b364a3bdfa8ce81f0e73b49f",
+      "upstreamSha256": "a6051033fbe27548ceb443b44b2fdd045a038f66c04b3612c6962dcd6961589d"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/FlashOff.kt",
+      "sha256": "1692f9f3bdf917e330d7b15c0735a3ae1bda15460cab4a9808ad4f0d696f6ce9",
+      "upstreamSha256": "03e8ef296243d163fde3f86baa7d0f6e64acbb4f4cdef2b290c0b379059dd666"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/FlashOn.kt",
+      "sha256": "98f0aba6db7189705a7600eef88e44987d3db476b7633517c586e576bcc59642",
+      "upstreamSha256": "14ad540a2498dd2f28e97f2a7639fd81b993bf25a9d1046575c8370f5d6755b8"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/FormatBold.kt",
+      "sha256": "92591f30ff3d66a7d0e58c0c8f97ba2ed81ad83014c60d5c5d12f5dba65a77c1",
+      "upstreamSha256": "6af2256309c26d9a3688e1997705e1e7ebc8f141477e7841e5c7d23d379a42a2"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/FormatClear.kt",
+      "sha256": "48c7728465c0dbd407b5521081344b114d41bf30fd2a4890ed948c1ec59bf54f",
+      "upstreamSha256": "4ad92ca6402d06f0bc528f9fccf143d33da18aaabdfec3a45137bae01a18279d"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/FormatColorText.kt",
+      "sha256": "d831849ac2633fd321f149e1ea4d99fd8a95e1ddc20764a3d6fa3a7fb08bf26d",
+      "upstreamSha256": "c903141b75bfdc8f2c7aece968bf61de2c4864d8c71e4a940c49b0e34e329aa1"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/FormatItalic.kt",
+      "sha256": "2b3dd70741d390ccb2f73e2884a6fcbf5b8f7f9bf81234bb4ecf59d9224268d6",
+      "upstreamSha256": "36d691360dd8b989daa2950be10568e380667fef85ca3d1eacfe7e0f997e8362"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/FormatQuote.kt",
+      "sha256": "1f83dfffac59eaf53df981bc078966e7877d1bef19e5b906ee75242c5f9bd584",
+      "upstreamSha256": "d5d41a1e324be4d158b277392495fd839e7464069ca6cbc804fe9ce7a7859137"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/FormatUnderlined.kt",
+      "sha256": "1aca2d07d9b5f2901a72d07ed5b1f349dc407225fa26ac51bea5d08193fa3132",
+      "upstreamSha256": "72ee524e11706d5c5feb31b731cf2359d70058a606dc1eda43ef4746f54d2b73"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/Fullscreen.kt",
+      "sha256": "af0a2c84947ce3d229477f190dada40a7ee34f7dec9ab1fbd917a1b5352a82ad",
+      "upstreamSha256": "4e988e5927ebe4f6834fdbc5b8330f8ab3de0e29f8551fa0997522424fbf00b4"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/FullscreenExit.kt",
+      "sha256": "82f605085ee11689c8f4202e249daf4b3d1249b32e6dee9b2b7de4efcaac622e",
+      "upstreamSha256": "0437a3715ff426ad17681fc6ebbc5c14688beeea64ceb90fc1c3f6892b965a89"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/Gavel.kt",
+      "sha256": "f90208f89e58d5432d2fcca796d5e3d2f584f3808893bf1896b7eb3033958e6f",
+      "upstreamSha256": "3035900b58517830ebee7a669d2f0ce6847ae7678f15728c7aff1f9ca89fef5e"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/Mic.kt",
+      "sha256": "3fb141bb0e9b4067e828a2e5c1fc0ff41082d76402482e5df16d550509603757",
+      "upstreamSha256": "75ccf9523454cf244045eafba49d938eb1a3a4e56d6b03e5c9a70e45b27bfde1"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/NotificationsOff.kt",
+      "sha256": "7f85d7a9e6731bc7228259733ab9cc4fed1a9679a9777572b0c22cb7d31012ec",
+      "upstreamSha256": "d63ddcbee424642bb340dbb0d2f2955b50412447e9a8c9bf17d2efbbcb9131a8"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/Pause.kt",
+      "sha256": "0b2f8db9bf18f2bb3156bb1b2f9a2fec9a4b77499564cee2bb48e1c6db2e6db2",
+      "upstreamSha256": "dc09077e6071ef4f35bd5d0536185c81c1f18a8b939db8ab3d65d150a637878d"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/PlayCircle.kt",
+      "sha256": "12ca065c0b358786a230f43e74a79bd3fed9f05bbe7a6b7e9fcdc16a8e4c4600",
+      "upstreamSha256": "a53370e00c4e532718ce266179fd8c5254f89526a6054d257b130b57bbb9d72e"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/PushPin.kt",
+      "sha256": "bf5f8259e79c61b2f0b16e5a0c10fa09d5efad7068d34822f8ef2aa137c8588f",
+      "upstreamSha256": "0e2191a4e90f31b8c9f8437510b76034444b84e0bc55009c719f20e2309427cd"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/QrCode2.kt",
+      "sha256": "6d5e9e63e8c1eec94d9c2bbf5bc16b75cc3e83a409305e3b968e4bc0d0c76d8f",
+      "upstreamSha256": "56c4e7dc39eae88bdf945dd6d6e7da35ef0f23ae7e1c6ae9451ae252deb233d0"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/QrCodeScanner.kt",
+      "sha256": "6b936a3f0637476564500e266b4948f163d533b319b0c84985cdabf70fc713a3",
+      "upstreamSha256": "adf9a70b1842a179d208311ed6ebcffaf42e04a2942a8a9d13da757284de9a72"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/RecordVoiceOver.kt",
+      "sha256": "33e40f0184856eb4f4063f993a234c9dc70492692212225ea5004f5ed06d5c4b",
+      "upstreamSha256": "bb0e114a2733e8f1e35db3f63f12509c81b454a0f9e29ef39cd1d2d72b6b94f4"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/Schedule.kt",
+      "sha256": "a659ad417a45f5648c4b077547df0faf5a5ad844a46c31ca97a845ba4a50030c",
+      "upstreamSha256": "d19836f5a9777c9ee13cb929d74d050ee51c5d57ba655ea00012ad9580deb3eb"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/Shield.kt",
+      "sha256": "8661a269073a3f5d6cba42b80c822b896b701ed1e192ead33c8d3899afd998ff",
+      "upstreamSha256": "c40ddd05dbbfe95e3b909565d4539c3d0e6898e8ccf3e5211768eff6714c87c6"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/SkipNext.kt",
+      "sha256": "0f915a76409a07d7cfa7c1da6e449f8fb2e6b98e661d9d159ea8688b231e69dc",
+      "upstreamSha256": "9932d61e9ca3909cba0f598364c9d34c8334a9d963dbf862629db23412b09416"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/SkipPrevious.kt",
+      "sha256": "91098da89dba011892caaa1a10e82732ebcc42b1ffadc19675a5fa19dff59b0c",
+      "upstreamSha256": "62f30325285c3c1e3552e280628da57eeb5930a006d0a6dfc91277f847de44b9"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/Stop.kt",
+      "sha256": "f4307a9d19bfdc830e2a10b6bab9fd096ce514e404a8c3949b5c6481da9d4125",
+      "upstreamSha256": "2f83b8de4aefe9b7591516b820bd8c8e43b0461518c816bad142936f58ea23cf"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/TextSnippet.kt",
+      "sha256": "a9b38b38710fd2be6aecf7e9403e4202b884f230625e6219d6ec70d2578f23e1",
+      "upstreamSha256": "e7a055682e4a6c2b883226db38f26f55dff98d90a7dbb3c2392e9c7e63506e1c"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/UploadFile.kt",
+      "sha256": "a5900af65f8816ace5de931a1a0f3808f95551fb4a4ec71bcb201472f15586d2",
+      "upstreamSha256": "66f6485eab8c00e845f0bf9389ba571fc7a68b3abce62eadd3e981719fad79b1"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/Visibility.kt",
+      "sha256": "97adc92bd8e7c49693965d8cf6a8985e1ff559839c8a3f5b0a5909ece24312ea",
+      "upstreamSha256": "4f0492467b31ab8a690e33af6021b91c25976a82b2aaca78c54505251a66e53f"
+    },
+    {
+      "path": "androidx/compose/material/icons/filled/VisibilityOff.kt",
+      "sha256": "c4b74f97658f8f74d151f87efc7f9b26bd69ed70ffcf7408f738ca31a92879cd",
+      "upstreamSha256": "f21d8a3ca1c1d37aeb88e1abf44ed7fae4953da20ab347e7ffcef3176436d43c"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/AddCircleOutline.kt",
+      "sha256": "bd456f16c004f9be5435ad944e147e6f10ac4f5185b22b036751add13f9acd79",
+      "upstreamSha256": "31a73953d9c275060f084f5ea6e2086670282df32799e8d60567bad0fef2066b"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/AlternateEmail.kt",
+      "sha256": "4d7234c51d926f4f806396768c9478e32f9ba93271e14a3da38612a6f4589e89",
+      "upstreamSha256": "f82f3f095ebe257e3c665eec27d0ed57d8b1ba74bdb5ea0679a82a5377774272"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Apps.kt",
+      "sha256": "b08d25d2a1b6c5606a3068c0b815ec566d5417bb1a271327162053b163c6b110",
+      "upstreamSha256": "5c4a2a75460eb222a5c7b5922643782b4175c0d9cb7b4c3d4a20bb5debda422e"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Archive.kt",
+      "sha256": "3556104eff9533016289f86e47ac46fa9232c707419abf876ea93a3ba0a1040f",
+      "upstreamSha256": "7681c5ed1fc49bf20575a10beb2907a1a3a4c6c2e0bce9bb48ede8cf95bdbe4f"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/ArrowDownward.kt",
+      "sha256": "2bba1b87f1dc37aa2b8878231c2948cdcf4da73f6511ff70d5a033db4e2544bc",
+      "upstreamSha256": "f926fcdb31338848aa7932ae21d42a637cfc5de3bf0b6d6e290579b940db2e82"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/ArrowUpward.kt",
+      "sha256": "0dfed09781f0003de0d584a58e2d5a4bd0dca19876aa80ea43faef490924457a",
+      "upstreamSha256": "e59d426b9a93aa779634e7c2949866237d6d68bbf0509a38cb60aff860db4d54"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/AttachFile.kt",
+      "sha256": "767dce52120622dfc4279738ce495e83f2d8571e24c271791e0f66edd9d53a4a",
+      "upstreamSha256": "cb3e6d9f807d1f8492d2eaf7228f11c67246b7b83b7dcd16579eb8aca842367f"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/AutoAwesome.kt",
+      "sha256": "8c0c9e54567f499896e0bfe64d55c3ce0996728fdb2407f83a1c85f29648b04a",
+      "upstreamSha256": "1d5682bde420f4cbdaff4b07789b58a896154ebd8223f848bff082142605091f"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/AutoFixHigh.kt",
+      "sha256": "35eb597cb3a5e71ceda213ced1c169f99f51546f8c8f3e225e4d63a5bf48304b",
+      "upstreamSha256": "d9f53700ff7995a56ae1c6d69736f2c0e553d88de3a312798fc999e35aaa1d50"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Bedtime.kt",
+      "sha256": "62733b47f6779f4719381bdbe9e0eabb84002a8790575378a559562745b2650c",
+      "upstreamSha256": "31e0506b5c35dca917852d54dbe2de16d7c3c06b2ae0076b09b601671010bce6"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Block.kt",
+      "sha256": "ae4ce59e22d06d2770a490dcd14d83c99015c93ab8d3feeb3abd60fff2cae62d",
+      "upstreamSha256": "7417df4d6db0abed2dc4f13cfb33176f95135476ad8243e232791efe40a9d003"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Bolt.kt",
+      "sha256": "6dbd72460119e49b1d5c5d39a5a05e94e18b769323f6ba986067c815ab0fe0b6",
+      "upstreamSha256": "24c16b1d90887f02dcd8eb19bc8e4da59ad5d6e09dad50c04370e2080e557d7b"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/BusinessCenter.kt",
+      "sha256": "95de8aa9e7b5c456c573a705a1571e94b3276994cdf128230f8a1f235990d78b",
+      "upstreamSha256": "efd58e69745c61080d8e94477fd139c8d3e234008d021e73898418b3e6239560"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/ChatBubbleOutline.kt",
+      "sha256": "a7bb0d27cb125fa4eb5b5ba52b4cfbfeb1653b35bc9082d76c7846169078d908",
+      "upstreamSha256": "9825b88c2ca5c9f246501763a0e0b0e3b857e6b2ab30fb63e99d60e45beffba8"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/ChevronRight.kt",
+      "sha256": "9bae3e02a7465e95ae459011efa9eac3ffedf251c8fdff3b7ce492dee7be5e4d",
+      "upstreamSha256": "ee9deef748bcc4a04b723c528648d14b85b6a9ce850ca03729f14a0121de1da3"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Cloud.kt",
+      "sha256": "3f9f0df8d44267d72ca5795030329769065a17f29996dd0bf9ae4e5043074b26",
+      "upstreamSha256": "8a0411e11ad0d9ff502b89985c7b797aa0a92d896dd7e3996a5726543fa771ba"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/CloudOff.kt",
+      "sha256": "25865308414777dc44f78b2e18c2fa59f1ea58ca06c60a9a222638129d41616f",
+      "upstreamSha256": "3620cdc1c191c3c93b64375637e533dcc4990c8eef65f6abf89e95f167841e05"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/CloudUpload.kt",
+      "sha256": "c480438f225c340c38caa3327e4e8c26a3df314abb0ef14bae69850458aec87e",
+      "upstreamSha256": "d6d01bb580cdefd483bafa10c3cf6362539029a1baae254d883c483409938ef7"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Code.kt",
+      "sha256": "50588406e0735c6527e6078f7851be82a50aad0bce622bf70d6e109ff9a96546",
+      "upstreamSha256": "a8f94150cda4ac226bd6ef008b6b6a69c4af353447c7e966d5acab8282a9fa93"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/ColorLens.kt",
+      "sha256": "866c575030680e6e3a4644695c1ee3f7261e7c34009b86d34172cb106a7cc9fe",
+      "upstreamSha256": "9de2e3e36a0d579f83e6592568b9e65829c4ac81c2745b7058bdcd92c24d9b56"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Computer.kt",
+      "sha256": "240fd079a3a8367a458372c70b44fe45ce17ec2df569b9ded30a3a2b5e3fc74a",
+      "upstreamSha256": "99fce94e06c0ed6fbd86fa672e6981a7d38353bf98bc657bb157b48a62c12b6f"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/ContentCopy.kt",
+      "sha256": "4911349ac0f97a945dc2d5a955b9874bd9e0cd3d663fbc249b9f69c80dea894f",
+      "upstreamSha256": "f7ab4cb944da672eead5eb93edf2aad51a7ca20ac1b8e1deb7d2de2e99328b73"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/CreateNewFolder.kt",
+      "sha256": "bf9ce51ddb25d86a863abf9e054419a216564751e4e85b762fe274d4405c9029",
+      "upstreamSha256": "9e424e2461c335608e6a75eb1c80c2793035b25d2e890c1cf4352e8d0f5f08cb"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/DarkMode.kt",
+      "sha256": "37367699bb73c554e7e658fdd09db7af472623b1f5d4101b42e7cda4513f6124",
+      "upstreamSha256": "d945201ccaa1a9aae4adcbcd90b370826d84871db171eac4a81e933ef36711c6"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Description.kt",
+      "sha256": "144545750f81fc7b29de874f1f94104e2fde38dd1cec1b8d366e982f92c2e4d6",
+      "upstreamSha256": "1ef2e175e3b415c0bf29edf0e03fb8783bf0826a76e55e0acf709f67f6a1e7b0"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Dns.kt",
+      "sha256": "a3930579e2fd9b5620eecc8d51bc4b2b1b633b4a02f4aff2fb5d53ef29c064cb",
+      "upstreamSha256": "5a143f05255d66fd9888145b905764b28231757040683a26501ee131e5c5e8b2"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/DoneAll.kt",
+      "sha256": "51f49f96c75fe290e699ab37a2209dc08b5536515ee538289a294f84934569ce",
+      "upstreamSha256": "e6d4238104b52b84b7ed324ca84b9dbfd058d8fe5660c70bb153994185504155"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Download.kt",
+      "sha256": "410fd7d6812405768d47d3d4cea6fc449e3e08eb127602366803219e58ad599e",
+      "upstreamSha256": "97cdef0e4a7c10fede79966b715056b231782ecfc1f65ee4935933a176a8951e"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/DynamicFeed.kt",
+      "sha256": "0968beaddcfc49ba23b7e2e3441c424ef13893b9ca5ae6be50dc5c1d520e738b",
+      "upstreamSha256": "7c91c226f18ab8837d7af44d94017dee58cdcded34f744c4dc86ca3d4308961d"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Folder.kt",
+      "sha256": "468e67bdb25a600e6a77be19e7c5cbee6b60f13fc0843544ea0082179460e9c4",
+      "upstreamSha256": "199f8215f021668ad20ddf6b2379db4dbf34b0e8a64de4b20c38e630bc4844f5"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/FolderOff.kt",
+      "sha256": "31eb3e2caa65c26fdd21be5050226e799952d3a2215868f386b1a69f61ee84fc",
+      "upstreamSha256": "fbf5a540a65d18286f2c8d5d596b370a9e54ba05a5bfcfa0e0af714cb53af55d"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/FolderOpen.kt",
+      "sha256": "4eecb21afacae8a3c5ae194329b83d3f3b4454e6f5f99f57567edcc495652f72",
+      "upstreamSha256": "44692482968bae2dd2a5fc4270c141deabd3cad24bcdc733a47d177cc97c90d8"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Forum.kt",
+      "sha256": "8f798e830ee476c487c92600a8b745b182c6e3ea746805aa1472a75ead685474",
+      "upstreamSha256": "640424195d6cb237bd9ed77df9102a4b18e61c993b6a243aa69fc3f50d6ba43e"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Games.kt",
+      "sha256": "879235494c2ae986f3578af33e4edad3487c6c1fe1502859e0d5004fa7980fd3",
+      "upstreamSha256": "457efec26edc5495f3eb31e9bc8f437695c219c80ce72e45d44d7f788e4f3d1c"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Group.kt",
+      "sha256": "037b867cc01b28992826d7f0e20e549ce8b7fd6c724848465ddb9eb9cd122f88",
+      "upstreamSha256": "eb9fa4e57af0a3842c8724fd34b8470c11f285949e64f5ec58cb4ea50dcca6dd"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/GroupAdd.kt",
+      "sha256": "f26d812743196d7306e9a52c6e1148b5685190d64f605e748172cc3a9c612e0f",
+      "upstreamSha256": "83518b7721d15c545aa85f04d4330ad7b8d7f9dbe81a9052b2673c7d1220140a"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/History.kt",
+      "sha256": "73751d92d21852ced231bc177c919c8be4c01d21b941d83fa531b7730abbc8f6",
+      "upstreamSha256": "3c463fb992f2a4f55912c6f9428dfcfa4b5f23513a9fec78d08a40fb5d85d272"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Image.kt",
+      "sha256": "237e04f7a20460ecfb10edde49c5045e644d26776c60d6fe5474e560886fbb9d",
+      "upstreamSha256": "acc769c5ab3546eabd5dd53e11eb2e4288867ac0449e254443b8b568a0d20255"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/ImportExport.kt",
+      "sha256": "2f3e46eb141d8919b27c71abb85a4db652cae6f8c4b9c5f434722c282d98d3e6",
+      "upstreamSha256": "79a7019dcc1c9a49049890446c5950765a8b5d8a7d196e29208803846dae226a"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/InsertLink.kt",
+      "sha256": "23f57ecc601b8e6424cf3d550bc2a20a58406f89b17524c466a18c2db1f99edc",
+      "upstreamSha256": "6aa8a4f6ee06a0bf424ccf1c3cab40b923ca0c2b036a6fa6f5b8c3ecbd6713f8"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Lan.kt",
+      "sha256": "2a79a59a0ef79fd919918ee5f0f743c4fd2b9661f01296dbb2f5f07ef73fde58",
+      "upstreamSha256": "611b64f3fd1f8a30af82a8c80004bb62902d3a8e3f2c691518614e8b0656a679"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Language.kt",
+      "sha256": "60b88148898234f35f4b178f31caf4e8bbd9a30e7f6bdb11d7f2971283447f68",
+      "upstreamSha256": "202f08097a74d34a2bc7dc42f6b50c4e15e86f44740691c358b135734395d148"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/LightMode.kt",
+      "sha256": "76d582825a21e3a900144e29cab5fab593b94263c69d7814d205f704992186bb",
+      "upstreamSha256": "ed185febacf67cc3eb6ce82ad5f646d3e4e511cc88566448cc2789caeece3fcf"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Lightbulb.kt",
+      "sha256": "f677e12570ec84160db3e93b6295f3fef94fdf9fab0331993c9ecab97c7885d0",
+      "upstreamSha256": "0238f8e416462226b655fa77796c1221c97cef58213a161867a37ba3f3a01187"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Link.kt",
+      "sha256": "cc79ce1d0fa09d03c19b1bb96c87fe9f0d3bb4a28efc537981d5ce9391cc89a8",
+      "upstreamSha256": "7f3f8da12f1584f936d01c22c6427a223ceb764363c73afb33efffb0911cb469"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Mail.kt",
+      "sha256": "c3432461584bf29c95b4384e350652a2e8b48f8f8cc4afb6d73a3aebe76b628a",
+      "upstreamSha256": "7ac29dfb6a5b4bc5869bdaefdd26f9ab5aa9868c9d2a7df050eb8d6365e51dc0"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/MarkChatRead.kt",
+      "sha256": "c996036c15c455312836625461a68111d4f74f77e9674047d028dba53501529e",
+      "upstreamSha256": "3ab17f684042bda66ed5438f997aedb39b04f326d742fb338b1c497b1a00cab8"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/MarkChatUnread.kt",
+      "sha256": "8feb6b15d5419f656fda2ed80c3d7252c09271b527fbbe4a394b00dfa7d7c0ae",
+      "upstreamSha256": "ae341f4ad8a4700c046c074f983f116f5e1705dcae4c48c3fe2bd079418d84f4"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Memory.kt",
+      "sha256": "06ddbb4c3522d9b8407b2622bcddd55c2a822f9a3c9fad41e8e4c696f4fb5002",
+      "upstreamSha256": "a75229f0afd549559a7a9e9612ff63ea13533845b4ec818cb1e803e77b91d696"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Mic.kt",
+      "sha256": "d635eb7543226413e7ed92b5d4369534ad2c0a4fb87a267f6d1648c1eef564c7",
+      "upstreamSha256": "83091ad4e5aabfd9d19d9026aef80794a21d6088e246e53feaae995d27098ef7"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Mood.kt",
+      "sha256": "bf5df4a53476b531dcfa2d7fa8806ffdf71521f0eee77e6cfe497a1fb8fbb655",
+      "upstreamSha256": "610a7743e0b902e9ebab42578cdbd7fc6351524f307d74a28b2fd2486347033e"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/MoreHoriz.kt",
+      "sha256": "7a6217a277ccc182265ff2024d8db50f19488c32eb6d934edef49ae952870e44",
+      "upstreamSha256": "cb8a0f8ef063ec3a169c2fe9188c9e1747ffd059171027c2e482adfbac5e6543"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/MusicNote.kt",
+      "sha256": "a9b07b7b38b9a6987e5d121062f84eba1175e62d328b32a707dcc6b80e8f7af4",
+      "upstreamSha256": "5a26d8e96b274d0d86ab9e3525fd68bc570771fbf3a5df30d5c889f0157f834c"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/NotificationsActive.kt",
+      "sha256": "e79a478bb6d321665ac61205e0c79b4e7b63d57d25b5c40dfe58cda783ad9656",
+      "upstreamSha256": "14d7d156209b07e4bd1adb8e82648a7c3e0a5538aedc9d70f6cf571587f731dd"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/NotificationsOff.kt",
+      "sha256": "6eea6d95873796085984bb69202be7f7e0ea0ba417505be6ae56e7135ab4b687",
+      "upstreamSha256": "ebd84dfbb3a05bd3bb284aa5f231bee88eb1bac76529247ee22bd07b70c2c428"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Palette.kt",
+      "sha256": "39c24a241d9eebcc431e8ebca6770989768259ba830a5615c5df893470ecad2f",
+      "upstreamSha256": "8908ef0e8fc1f978bbe23d93f43d7aba93617d3c4d6d20a06c564d48be2dd830"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/People.kt",
+      "sha256": "d1f66ada60bb704f50d4b550caafdc5e347ab73a3d5aa56bd09ee238f1cf2b30",
+      "upstreamSha256": "5520091dfe81b610a38b3164abf5986468246b87b794fe4b36bd13ce6d14b24c"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/PeopleOutline.kt",
+      "sha256": "2db1374d1b49e6a848440d6068b0f3bc552c9245b7504b29071e2c6c8dfd71c4",
+      "upstreamSha256": "02773e22c9fa3a22df560a2def7d35a77b9a6112850b910a82da450d10883632"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/PersonOutline.kt",
+      "sha256": "18944371e3844c8121e7a1eb642a3be0410608ccc70525aa555f01cd2b3a2f03",
+      "upstreamSha256": "e1cad8949289b24b892b5feb3dbc64de25ef1a996a0135a976b1e9903eb137f7"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/PhotoCamera.kt",
+      "sha256": "c6b12266fd0218cbe14d668418d680f60b91ba7d72068207351726829422d5e2",
+      "upstreamSha256": "0900ec3be111f80cef76ae6d6e5502149ad45b24af4f94c773cc9dbec4343970"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/PowerSettingsNew.kt",
+      "sha256": "b0b8afc2571379790e03dadcb67f31eb6875122ea3c5a8a99b5eec07c6e10477",
+      "upstreamSha256": "12609a641e2837674ddf46ae57bef1c155464528b668d27da5e225b18c09930b"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Public.kt",
+      "sha256": "7541298fdecd17f18a728a48b02b81a29ca7a02a0dc1767d9aa3c05d8ccdb647",
+      "upstreamSha256": "3dd74f84d078404671400976b631987b03aa427166ce44f9174a18ad2ec41ee0"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/PushPin.kt",
+      "sha256": "90a08b35313dfbf51ca9db4e850efd9363570e2b98ff648ebbd8d61fedf826a3",
+      "upstreamSha256": "ca254250021a3c72b81206678ce16af5f53e68745df64fae5f9930aa80cea2a4"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/QuestionMark.kt",
+      "sha256": "eab50b30dd569f070d39e2d6aee510c199866af21b264a9f9cc631553c5d3857",
+      "upstreamSha256": "4479095aa678aa89e2c850293fb68c1a7153d2b98c588a1a3bc51384e32415ef"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/RecordVoiceOver.kt",
+      "sha256": "6e96ac4e7e947f9b24a8b6d4917e8b41a97a35ceb3ce2740607309677ee48982",
+      "upstreamSha256": "751b849177420b087db3ae1f5d978eb15127e79cfbf43b1156ad6f3c681e05ed"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Remove.kt",
+      "sha256": "7408d3d7429ad5a41ebb9c35bc307afdc317066745dfd887930c22b6b5814196",
+      "upstreamSha256": "683b0460bfa4659924d1fd1d8a56ebe839d55f55f969c786a1b085f3b69bcdab"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/School.kt",
+      "sha256": "d25c85223faa89435e53cf285f9a41d3a8f537253a7f983954faf99ea643eb3d",
+      "upstreamSha256": "63db8ea8c3c43cd858cac901a6dc61c61c029b3b819775abe70f133df409e1e4"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Science.kt",
+      "sha256": "8cfe6fbe258e63b23ea2283bd319f00f087850d0e58f84af2a3570327df28764",
+      "upstreamSha256": "3db07b95acf711aac07b89ebbf80b6344a64980bf63884ccd6277e4c354be858"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/SearchOff.kt",
+      "sha256": "b12ee0a41764464f2992b756d497e0e9ef67f3a89dd8adc577310bcde377beff",
+      "upstreamSha256": "18fc46283f74e9948316864e41524320dd683a0b066f0fd5a150922edede2f34"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Security.kt",
+      "sha256": "f4c94e18298d4b25f0143113fd07a20629405ee189b191e44a5014cfa4ddf6e6",
+      "upstreamSha256": "f2901a88039e812cf22572fad21cfcd6cf3b6f6a370ce603e79eb5b3ed92bdc1"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/SentimentSatisfiedAlt.kt",
+      "sha256": "d745231f954a457ea05bf97705deb95f5941536f83392cb06d6dfc2316ffc45b",
+      "upstreamSha256": "3f27dc917842a2f0ea27c0add1820f999bc68d6e8ad5a82953344a1c07739d66"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Spellcheck.kt",
+      "sha256": "a28f548edb4f3b97a57ae3f6a42dbdc12634a92df596d6a129e59e66c7ec1d42",
+      "upstreamSha256": "8edc533e7264236687c19ff63247a96a5d016c9b964c609917213ad71b9e24a3"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/SportsEsports.kt",
+      "sha256": "18b525d8a69a82a6703ea2956911af035e51ce7ece0d9e5cf2f21ce50e8db245",
+      "upstreamSha256": "169c97191dea27c1e2e0bc9ed2b16b1900cfb2a580f0025b55ff4fb54e769265"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/StarBorder.kt",
+      "sha256": "7670ce2ca1fff87333b958c817dde9d61aaf7c0c5747e6ddb96f197222408869",
+      "upstreamSha256": "985379b621f62096779be1584242eb82546242027be15e68473751d54ce9f1a3"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Style.kt",
+      "sha256": "7bf5e9e6f0c4aed3d0af909fc31378406b29754fc37836e76ceb981b648853fd",
+      "upstreamSha256": "615e5720581e14f95b4af6022582112994e4c344f336d0496dd5920da8950cae"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Sync.kt",
+      "sha256": "f0bb35c8d1edaa8e01c6aed2f145f188aab7332c1f317dd43d1073a7ec0db2a2",
+      "upstreamSha256": "187147e4cd2811e8ce5600afedd418cfa1bbb8d816fed863a9f4e06d2d2995f9"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Tag.kt",
+      "sha256": "89cc2c521999b3b185a2aeaf24e674ee2fbc25aef498e968d29d3a63718541c2",
+      "upstreamSha256": "6f9bd9074908ff7ffeebff9db2a48dbe11a0ab7f1181b0c7a817e7a534531205"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Terminal.kt",
+      "sha256": "05c354eb7d6cb51f78f5cb4f28501b6de68f38b0cca9a5441f87a09e9dc4757e",
+      "upstreamSha256": "aa59c8b89c5ef2c7921b651b470e5b4a8992d9354f8ff10bdf7fba2e01b1a165"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/TextFields.kt",
+      "sha256": "da015a30f294d0f662ea281aa7eead0581b7cc8bb74e023ef30f0488726c908c",
+      "upstreamSha256": "f35c2308dee151f5c3ab2bc9e9c0d5c0b5c9141c5793181eb76a6560d17eedc5"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Translate.kt",
+      "sha256": "2dc03b95c4ba82f790d0b181bd2f4acc26e563958c4e08b94ba7aa7fb47b204e",
+      "upstreamSha256": "6228623962545561716426d8c624f313f490b6eecb9df0a2ebe83c4db69b75ea"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/TravelExplore.kt",
+      "sha256": "4ed8aa638cbb5cc198676531dc32aa231795453a0b62e1b0901f2998b155b7af",
+      "upstreamSha256": "6b9fd994229ff1579b91b748797cc52eae538fcb7479826aa502124d472b6779"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Tune.kt",
+      "sha256": "0a786d430d5a6896133848561f471c80ab82543fe70859928db85e41ab664b45",
+      "upstreamSha256": "e9d2c8c63428cf7c05b0ab500753d3b216c3d5891b648b9170f479640f431a16"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Unarchive.kt",
+      "sha256": "e582ae59fb8cc4c6a31a80bfd0a5a359bf47bf8d2cb689aa867c89c3b8654312",
+      "upstreamSha256": "ccb47429d690be0b6853d37d7b42178d2f7d5691adc706ef85b93c3713824633"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/ViewAgenda.kt",
+      "sha256": "286088c430583011760cf4907b9986c35b28dd39ab588d81302eeb64ad496b9c",
+      "upstreamSha256": "0cf98ccde9c0c09fb817bfb1433fae15915bf0dc2effac5285221f5fe87ebada"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Visibility.kt",
+      "sha256": "7059ece8a88d0873e7c6c7f95e898c1957965b8b41e19ad18efde76441d47563",
+      "upstreamSha256": "004dc594eceb13e51c087e32700b2ab4f5e54c6010887dd04f380a8366c92d99"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/VisibilityOff.kt",
+      "sha256": "760dd821ad7cdee3260eb0bef294cb82eeb406daf4b82b5ef0ff80d77d98b2c3",
+      "upstreamSha256": "e5cc5e5954babcb280c4d775e27cc0922327cf0e769dc2e41cfc35559b6bf83e"
+    },
+    {
+      "path": "androidx/compose/material/icons/outlined/Work.kt",
+      "sha256": "f9d1a8c2d1ad0a428bbf587270ff86f30a2961e965440026da92b26ed758c56b",
+      "upstreamSha256": "58b75d25c2774aad174cb4ccc84212fbdcd93d0e2c62892278e3feaa03791752"
+    },
+    {
+      "path": "androidx/compose/material/icons/automirrored/filled/ArrowForwardIos.kt",
+      "sha256": "d3452b25d31b055a1379c09e3d2da3fbd236086f3a3d3e22c62a411246fcd6ed",
+      "upstreamSha256": "e562e4acaa35e394cb7f7ea9c8924181970e41db88c1f0147b67355b6b7352ac"
+    },
+    {
+      "path": "androidx/compose/material/icons/automirrored/filled/Login.kt",
+      "sha256": "bdcfee70fb120c19d76d2e210c3e033e598127d21007f5b985afe5efa12541e4",
+      "upstreamSha256": "e6000c64e827e6ddbc90a478d35ed5b8784685cd0e77840fa23b780a2c47184e"
+    },
+    {
+      "path": "androidx/compose/material/icons/automirrored/filled/Reply.kt",
+      "sha256": "3c849545dc7bad084f01ea674e487a1daba5c1e80f06dfe9ec9d29e975d1af9d",
+      "upstreamSha256": "749d8b637391091efcd1a6ea7043af730299d106bb9746b0cffbb50c1477f130"
+    },
+    {
+      "path": "androidx/compose/material/icons/automirrored/outlined/Chat.kt",
+      "sha256": "92f14f11c4bc3b89807a3d38dbf85f9b54ddd57f76dff8fea8e2c4c0d4594802",
+      "upstreamSha256": "38c5c32da387ce0d77beb036454db4c166633e20748c3fc347cdb7eafe4710e1"
+    },
+    {
+      "path": "androidx/compose/material/icons/automirrored/outlined/FormatIndentDecrease.kt",
+      "sha256": "5f5b4c60b695ed76504395922d6e633f7f974c88d1029df5cb6ef7ba09ebc717",
+      "upstreamSha256": "9e267ca443d5d3c786094ee77858e1accd534e94aa91f041da196201c53b5dc4"
+    },
+    {
+      "path": "androidx/compose/material/icons/automirrored/outlined/FormatIndentIncrease.kt",
+      "sha256": "00941d29be4eed6960664804fce7ee895f338117826999e3c79122e28a08a732",
+      "upstreamSha256": "e117718800fac6e8d8c9842fb7eeb07c2139c6975eb3caa21312a2e745f0cb54"
+    },
+    {
+      "path": "androidx/compose/material/icons/automirrored/outlined/InsertDriveFile.kt",
+      "sha256": "2d845464c4bac8ee453c62e76e22ec446a4d0e6503477e96d114f81937ed90b3",
+      "upstreamSha256": "67eab7bb56a210faea4755e8ed5a06eabb0354a749d9507b34dad265a4c74717"
+    },
+    {
+      "path": "androidx/compose/material/icons/automirrored/outlined/LastPage.kt",
+      "sha256": "8d0186a803523f4eaa3e3cd07baa3d87f1d03823398085cb77e371e8ba780973",
+      "upstreamSha256": "817e9f22c544157e0deff5b6b8b6e37d08407811c84e0658886a51e6d7891e23"
+    },
+    {
+      "path": "androidx/compose/material/icons/automirrored/outlined/Logout.kt",
+      "sha256": "3098a81bd757a8618b5cdb0f0bd5dac696e5d7d2228a7e7e75b97073764d46d7",
+      "upstreamSha256": "705db178e41c3528f53d1b3ccd977e40be4134bf79087959fe5a27bd0e44d3a5"
+    },
+    {
+      "path": "androidx/compose/material/icons/automirrored/outlined/Message.kt",
+      "sha256": "dd8cda5d47c9b8aa7b59eb12e68b8bdeb9c196b6848fd153c8e5257572c567c0",
+      "upstreamSha256": "ceaa40f99439057aec93da54679ae0cb7b76b213bc0cc9db118deb3207139533"
+    },
+    {
+      "path": "androidx/compose/material/icons/automirrored/outlined/OpenInNew.kt",
+      "sha256": "beb7e13ecdf51abccca86407c839ef401e092aac612af59b648ce69e4e0509e1",
+      "upstreamSha256": "08390029396b5b4781430e103434534fa2252e3a01197d0c3e921cdeb1f16586"
+    }
+  ]
+}

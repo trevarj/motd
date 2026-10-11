@@ -301,7 +301,7 @@ internal fun expandedWallpaperCoverage(
 
 internal fun assetName(preset: ChatWallpaperPreset): String =
     when (preset) {
-        ChatWallpaperPreset.NONE -> error("NONE has no PNG asset")
+        ChatWallpaperPreset.NONE -> error("NONE has no wallpaper asset")
         ChatWallpaperPreset.MOTD -> "motd.png"
         ChatWallpaperPreset.DEEP_SPACE -> "deep-space.png"
         ChatWallpaperPreset.RETRO_GAMING -> "retro-gaming.png"

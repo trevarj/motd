@@ -20,3 +20,8 @@ ANDROID_NDK_ARCHIVE_ROOT=android-ndk-r28c
 ANDROID_NDK_ARCHIVE_URL=https://dl.google.com/android/repository/android-ndk-r28c-linux.zip
 ANDROID_NDK_ARCHIVE_SHA1=a7b54a5de87fecd125a17d54f73c446199e72a64
 ANDROID_NDK_ARCHIVE_SHA256=dfb20d396df28ca02a8c708314b814a4d961dc9074f9a161932746f815aa552f
+# Only uTLS/REALITY and the command server's Clash traffic manager need feature tags.
+LIBBOX_BUILD_TAGS=with_utls,with_clash_api,badlinkname,tfogo_checklinkname0
+LIBBOX_ANDROID_API=23
+# APS2 is supported since API 23; RELR would break the application's API 26 floor.
+LIBBOX_EXTLDFLAGS=-Wl,--pack-dyn-relocs=android

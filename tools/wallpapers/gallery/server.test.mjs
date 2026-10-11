@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { buildGallery, resolveArtwork, themes } from "./server.mjs";
+import { buildGallery, createServer, resolveArtwork, themes } from "./server.mjs";
 
 function testRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "motd-wallpaper-gallery-"));
@@ -88,4 +88,52 @@ test("registered artwork cannot escape its approved directory through a symlink"
   fs.writeFileSync(outside, "private");
   fs.symlinkSync(outside, path.join(directory, "memes-v1.png"));
   assert.equal(resolveArtwork(root, "memes-v1"), null);
+});
+
+test("HTTP serves exact PNG finals and studies without exposing unregistered or escaped files", async t => {
+  const root = testRoot();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const finals = path.join(root, "app/src/main/assets/chat-wallpapers");
+  const atlases = path.join(root, "tools/wallpapers/atlases");
+  fs.mkdirSync(finals, { recursive: true });
+  fs.mkdirSync(atlases, { recursive: true });
+  const draftDir = writeManifest(root, JSON.stringify({ assets: [
+    { id: "linux-draft", theme: "linux", file: "linux-draft.png" },
+    { id: "unsafe", theme: "linux", file: "../outside.png" },
+    { id: "webp-draft", theme: "linux", file: "unregistered.webp" },
+  ] }));
+  const webp = Buffer.from("RIFF\u0004\u0000\u0000\u0000WEBP", "binary");
+  const png = Buffer.from("\u0089PNG\r\n\u001a\n", "binary");
+  fs.writeFileSync(path.join(finals, "linux.png"), png);
+  fs.writeFileSync(path.join(atlases, "linux.png"), png);
+  fs.writeFileSync(path.join(draftDir, "linux-draft.png"), png);
+  fs.writeFileSync(path.join(draftDir, "unregistered.webp"), webp);
+  const outside = path.join(root, "outside.png");
+  fs.writeFileSync(outside, png);
+  fs.symlinkSync(outside, path.join(finals, "deep-space.png"));
+  fs.writeFileSync(path.join(finals, "unregistered.png"), png);
+  fs.writeFileSync(path.join(finals, "memes.webp"), webp);
+  const server = createServer(root);
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  for (const [id, type, bytes] of [
+    ["linux-final", "image/png", png],
+    ["linux-atlas", "image/png", png],
+    ["linux-draft", "image/png", png],
+  ]) {
+    const response = await fetch(`${base}/api/artwork/${id}`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), type);
+    assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+    const head = await fetch(`${base}/api/artwork/${id}`, { method: "HEAD" });
+    assert.equal(head.status, 200);
+    assert.equal(head.headers.get("content-length"), String(bytes.length));
+    assert.equal((await head.arrayBuffer()).byteLength, 0);
+  }
+  for (const id of ["unsafe", "webp-draft", "unregistered-final", "deep-space-final", "memes-final", "..%2Foutside.png"]) {
+    assert.equal((await fetch(`${base}/api/artwork/${id}`)).status, 404);
+  }
+  assert.equal((await fetch(`${base}/api/artwork/linux-final`, { method: "POST" })).status, 405);
 });

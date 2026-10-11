@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { crc32, deflateSync } from "node:zlib";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const atlasDir = path.join(root, "tools/wallpapers/atlases");
@@ -200,23 +201,47 @@ function verifyPeriodicity(tile, scene, name) {
   if (ink < .025 || ink > .5) throw new Error(`${name}: unexpected ink coverage ${ink}`);
   return ink;
 }
-function encode(pixels, size) {
+function encodeProofPng(pixels, size) {
   return magick(["-size", `${size}x${size}`, "-depth", "8", "gray:-", "-alpha", "copy", "-channel", "RGB", "-evaluate", "set", "0", "+channel", "-depth", "8", "-strip", "-define", "png:color-type=4", "-define", "png:compression-level=9", "png:-"], pixels);
+}
+function pngChunk(type, data) {
+  const chunk = Buffer.allocUnsafe(data.length + 12);
+  chunk.writeUInt32BE(data.length, 0);
+  chunk.write(type, 4, 4, "ascii");
+  data.copy(chunk, 8);
+  chunk.writeUInt32BE(crc32(chunk.subarray(4, chunk.length - 4)), chunk.length - 4);
+  return chunk;
+}
+function encodeIndexedPng(pixels) {
+  // Alpha is the palette index: all 256 entries are black, with exact tRNS values 0..255.
+  // Keep PNG decoding/sampling semantics without quantizing antialiasing or shipping RGB bytes.
+  const header = Buffer.alloc(13), transparency = Buffer.allocUnsafe(256);
+  header.writeUInt32BE(TILE, 0); header.writeUInt32BE(TILE, 4);
+  header[8] = 8; header[9] = 3;
+  for (let alpha = 0; alpha < 256; alpha++) transparency[alpha] = alpha;
+  const scanlines = Buffer.alloc((TILE + 1) * TILE);
+  for (let row = 0; row < TILE; row++) pixels.copy(scanlines, row * (TILE + 1) + 1, row * TILE, (row + 1) * TILE);
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk("IHDR", header), pngChunk("PLTE", Buffer.alloc(256 * 3)),
+    pngChunk("tRNS", transparency), pngChunk("IDAT", deflateSync(scanlines, { level: 9 })),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
 }
 const outputs = [];
 for (const name of selectedNames) {
   const motifs = extractMotifs(name), details = extractMotifs("details", "details"), arrangement = arrange(name, motifs, details), placed = arrangement.placed;
   const pixels = periodicTile(placed), scene = independentScene(placed);
   const ink = verifyPeriodicity(pixels, scene, name);
-  const png = encode(pixels, TILE);
+  const png = encodeIndexedPng(pixels);
   const decoded = alphaImage(["png:-", "-alpha", "extract"], png);
-  if (decoded.width !== TILE || decoded.height !== TILE || !decoded.pixels.equals(pixels)) throw new Error(`${name}: PNG encoding changed the verified periodic alpha`);
+  if (decoded.width !== TILE || decoded.height !== TILE || !decoded.pixels.equals(pixels)) throw new Error(`${name}: indexed PNG encoding changed the verified periodic alpha`);
   const target = path.join(outDir, `${name}.png`);
   if (flags.has("--check") && (!fs.existsSync(target) || !fs.readFileSync(target).equals(png))) throw new Error(`Stale export: ${target}`);
   outputs.push({ target, png });
   if (flags.has("--preview")) {
     fs.mkdirSync(previewDir, { recursive: true });
-    const scenePng = encode(scene, TILE * 3);
+    const scenePng = encodeProofPng(scene, TILE * 3);
     fs.writeFileSync(path.join(previewDir, `${name}-3x3-white.png`), magick(["png:-", "-background", "white", "-alpha", "remove", "-alpha", "off", "-resize", "1536x1536", "png:-"], scenePng));
     fs.writeFileSync(path.join(previewDir, `${name}-3x3-dark.png`), magick(["png:-", "-channel", "RGB", "-evaluate", "set", "85%", "+channel", "-background", "#10131a", "-alpha", "remove", "-alpha", "off", "-resize", "1536x1536", "png:-"], scenePng));
     fs.writeFileSync(path.join(previewDir, `${name}-offset.png`), magick(["png:-", "-crop", `${TILE}x${TILE}+${TILE / 2}+${TILE / 2}`, "+repage", "-background", "white", "-alpha", "remove", "-alpha", "off", "-resize", "1024x1024", "png:-"], scenePng));

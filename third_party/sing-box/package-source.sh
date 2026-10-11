@@ -98,6 +98,7 @@ install -m 0644 "$root_dir/THIRD_PARTY_NOTICES.md" "$motd_dir/THIRD_PARTY_NOTICE
 install -m 0644 "$root_dir/flake.nix" "$motd_dir/flake.nix"
 install -m 0644 "$root_dir/flake.lock" "$motd_dir/flake.lock"
 install -m 0755 "$root_dir/third_party/sing-box/build-libbox.sh" "$motd_dir/third_party/sing-box/build-libbox.sh"
+install -m 0644 "$root_dir/third_party/sing-box/smoke-libbox.go" "$motd_dir/third_party/sing-box/smoke-libbox.go"
 install -m 0755 "$root_dir/third_party/sing-box/package-source.sh" "$motd_dir/third_party/sing-box/package-source.sh"
 install -m 0644 "$root_dir/third_party/sing-box/source.lock" "$motd_dir/third_party/sing-box/source.lock"
 install -m 0644 "$root_dir/third_party/sing-box/README.md" "$motd_dir/third_party/sing-box/README.md"
@@ -118,21 +119,22 @@ then use that toolchain (Nix's Go is bootstrap-only):
     cd motd
     mkdir -p /tmp/motd-go-toolchain
     tar -xf ../upstream/$(basename "$go_tar") -C /tmp/motd-go-toolchain
-    (cd /tmp/motd-go-toolchain/src && ./make.bash)
     nix develop .#libbox -c bash -c '
+      (cd /tmp/motd-go-toolchain/src && ./make.bash)
       export GOROOT=/tmp/motd-go-toolchain
       export PATH="\$GOROOT/bin:\$PATH"
       export LIBBOX_SOURCE_ARCHIVE=../upstream/$(basename "$sing_box_tar")
       export LIBBOX_ANDROID_SOURCE_ARCHIVE=../upstream/$(basename "$android_tar")
       export LIBBOX_GOMOBILE_SOURCE_ARCHIVE=../upstream/$(basename "$gomobile_tar")
       export LIBBOX_NDK_ARCHIVE=/path/to/android-ndk-r28c-linux.zip
-      exec ./third_party/sing-box/build-libbox.sh
+      exec bash ./third_party/sing-box/build-libbox.sh
     '
 EOF
 
 cat > "$package_dir/SOURCE-MANIFEST.txt" <<EOF
 release-tag=${release_tag}
 sing-box-version=${SING_BOX_VERSION}
+libbox-version=${SING_BOX_VERSION#v}
 sing-box-commit=${SING_BOX_COMMIT}
 sing-box-archive=$(basename "$sing_box_tar")
 sing-box-archive-sha256=${SING_BOX_GIT_ARCHIVE_SHA256}
@@ -148,6 +150,9 @@ go-commit=${GO_COMMIT}
 go-archive=$(basename "$go_tar")
 go-archive-sha256=${GO_GIT_ARCHIVE_SHA256}
 android-ndk-version=${ANDROID_NDK_VERSION}
+android-api=${LIBBOX_ANDROID_API}
+build-tags=${LIBBOX_BUILD_TAGS}
+external-ldflags=${LIBBOX_EXTLDFLAGS}
 EOF
 
 mkdir -p "$output_dir"

@@ -65,7 +65,7 @@ cd "$MOTD_ROOT"
 nix develop .#sprite-studies -c env WALLPAPER_THEME="$THEME" node tools/wallpapers/generate-wallpapers.mjs --check --preview
 # Changed/new atlas: EXPORTS THE ASSET and writes proofs; not read-only preview.
 nix develop .#sprite-studies -c env WALLPAPER_THEME="$THEME" node tools/wallpapers/generate-wallpapers.mjs --preview
-# After inspecting those proofs: recompute and byte-check the shipped PNG.
+# After inspecting those proofs: recompute and byte-check the shipped lossless indexed PNG.
 nix develop .#sprite-studies -c env WALLPAPER_THEME="$THEME" node tools/wallpapers/generate-wallpapers.mjs --check
 # Export without proofs, when requested.
 nix develop .#sprite-studies -c env WALLPAPER_THEME="$THEME" node tools/wallpapers/generate-wallpapers.mjs
@@ -84,8 +84,13 @@ this complements, not replaces, visual review. Do not copy opaque proof PNGs int
 
 ## Runtime and integration
 
-Export is lossless 2048×2048 black/8-bit-alpha PNG, RGBA when decoded; the actual
-encoder uses PNG grayscale+alpha color type 4, not forced RGBA color type 6.
+Export is lossless 2048×2048 black/8-bit-alpha indexed PNG, RGBA when decoded, with
+the approved alpha unchanged. The pinned Node encoder uses alpha as the 8-bit
+palette index, 256 black RGB entries, exact tRNS values 0..255, filter-zero scanlines,
+level-9 deflate and standard CRC32 from `node:zlib`. Do not quantize the palette.
+Keep PNG: Android's sampled WebP decoding changes rendered alpha even when the
+full-resolution source alpha is exact. Atlas inputs, historical masters and opaque
+inspection proofs remain PNG, with a separate ImageMagick PNG proof encoder.
 `ChatWallpaperBackground.kt` extracts `ALPHA_8`, repeats at 512dp (128dp thumbnails),
 tints ink with theme `onSurfaceVariant`, and applies intensity as direct opacity
 over a theme gradient (AMOLED stays black). Never bake tint, white fills, or a backdrop.

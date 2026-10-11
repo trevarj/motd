@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the vendorable libbox AAR from the exact sing-box source in source.lock.
-# Run through: nix develop .#libbox -c ./third_party/sing-box/build-libbox.sh
+# Run through: nix develop .#libbox -c bash ./third_party/sing-box/build-libbox.sh
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -249,14 +249,9 @@ if [[ "${LIBBOX_PREPARE_NDK_ONLY:-}" == "1" ]]; then
 fi
 
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/motd-libbox.XXXXXX")"
-patched_java_check_file=""
-java_check_backup=""
 patched_gomobile_env_file=""
 gomobile_env_backup=""
 cleanup_work_dir() {
-  if [[ -n "$patched_java_check_file" && -f "$java_check_backup" ]]; then
-    cp "$java_check_backup" "$patched_java_check_file"
-  fi
   if [[ -n "$patched_gomobile_env_file" && -f "$gomobile_env_backup" ]]; then
     cp "$gomobile_env_backup" "$patched_gomobile_env_file"
   fi
@@ -315,14 +310,6 @@ if [[ -n "$gomobile_source_archive" ]]; then
   gomobile_source_dir="$work_dir/gomobile"
   mkdir -p "$gomobile_source_dir"
   tar -xf "$gomobile_source_archive" -C "$gomobile_source_dir"
-  git -C "$gomobile_source_dir" init --quiet
-  git -C "$gomobile_source_dir" config user.name "motd source rebuild"
-  git -C "$gomobile_source_dir" config user.email "source-rebuild@invalid"
-  git -C "$gomobile_source_dir" add --all
-  GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
-    git -C "$gomobile_source_dir" -c commit.gpgSign=false \
-      commit --quiet --message "$GOMOBILE_VERSION source archive"
-  git -C "$gomobile_source_dir" tag "$GOMOBILE_VERSION"
   export GOMOBILE_SOURCE_DIR="$gomobile_source_dir"
 fi
 
@@ -350,18 +337,6 @@ if [[ -n "$source_archive" || -n "$android_source_archive" ]]; then
   mkdir -p "$android_dir"
   tar -xf "$android_source_archive" -C "$android_dir"
 
-  # Upstream's libbox builder derives the embedded version from `git describe`. A plain source
-  # archive intentionally contains no .git directory, so recreate deterministic local metadata
-  # and tag the verified tree. The commit identity is not provenance (the archive hashes above
-  # are); it only restores the v1.13.12 version string used by the original pinned build.
-  git -C "$source_dir" init --quiet
-  git -C "$source_dir" config user.name "motd source rebuild"
-  git -C "$source_dir" config user.email "source-rebuild@invalid"
-  git -C "$source_dir" add --all
-  GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
-    git -C "$source_dir" -c commit.gpgSign=false \
-      commit --quiet --message "$SING_BOX_VERSION source archive"
-  git -C "$source_dir" tag "$SING_BOX_VERSION"
 elif ((source_checkout)); then
   source_dir="$(cd "$source_dir" && pwd)"
   [[ -e "$source_dir/.git" ]] || {
@@ -434,27 +409,6 @@ else
     echo "Android submodule source archive verification failed" >&2
     exit 1
   }
-fi
-
-# sing-box v1.13.12 unnecessarily rejects newer JDKs before invoking gomobile. motd validates
-# the exact JDK above, then temporarily updates that guard without changing the pinned source
-# checkout or archive provenance. The original file is restored when the build exits.
-java_check_file="$source_dir/cmd/internal/build_libbox/main.go"
-[[ -f "$java_check_file" ]] || {
-  echo "sing-box Java version check is missing: $java_check_file" >&2
-  exit 1
-}
-java_check_backup="$work_dir/build-libbox-main.go"
-cp "$java_check_file" "$java_check_backup"
-patched_java_check_file="$java_check_file"
-if grep -F 'strings.Contains(javaVersion, "openjdk 17")' "$java_check_file" >/dev/null; then
-  sed -i \
-    -e 's/strings.Contains(javaVersion, "openjdk 17")/strings.Contains(javaVersion, "openjdk 21")/' \
-    -e 's/java version should be openjdk 17/java version should be openjdk 21/' \
-    "$java_check_file"
-elif ! grep -F 'strings.Contains(javaVersion, "openjdk 21")' "$java_check_file" >/dev/null; then
-  echo "unrecognized sing-box Java version check" >&2
-  exit 1
 fi
 
 [[ -f "$source_dir/go.mod" && -f "$source_dir/go.sum" ]] || {
@@ -532,17 +486,26 @@ done
 gomobile_path="$GOPATH/pkg/gomobile"
 rm -rf "$gomobile_path"
 mkdir -p "$gomobile_path"
+android_jar="${ANDROID_HOME:?Android SDK with platform 23 is required}/platforms/android-$LIBBOX_ANDROID_API/android.jar"
+[[ -f "$android_jar" ]] || {
+  echo "Android SDK platform $LIBBOX_ANDROID_API android.jar is required" >&2
+  exit 1
+}
 
 (
   cd "$source_dir"
-  # Equivalent to upstream `make lib_android`, with its documented
-  # build_libbox -platform selector passed through to gomobile.  The wrapper
-  # retains upstream tags, API levels, and generated Kotlin bindings.
-  go run ./cmd/internal/build_libbox -target android -platform "$android_platform"
+  # Bind the complete upstream libbox API with only motd's required features.
+  # Keep the upstream release flags and API 23 target; no legacy AAR is shipped.
+  gomobile bind -v -o "$work_dir/libbox.aar" \
+    -target "$android_platform" -androidapi "$LIBBOX_ANDROID_API" \
+    -bootclasspath "$android_jar" \
+    -javapkg=io.nekohasekai -libname=box -trimpath -buildvcs=false \
+    -ldflags "-X github.com/sagernet/sing-box/constant.Version=${SING_BOX_VERSION#v} -X internal/godebug.defaultGODEBUG=multipathtcp=0 -s -w -buildid= -checklinkname=0 -linkmode=external -extldflags=$LIBBOX_EXTLDFLAGS" \
+    -tags "$LIBBOX_BUILD_TAGS" ./experimental/libbox
 )
 
 mkdir -p "$output_dir"
-install -m 0644 "$source_dir/libbox.aar" "$output_dir/libbox.aar"
+install -m 0644 "$work_dir/libbox.aar" "$output_dir/libbox.aar"
 
 mapfile -t jni_entries < <(
   unzip -Z1 "$output_dir/libbox.aar" |
@@ -561,14 +524,23 @@ aar_sha256="$(sha256sum "$output_dir/libbox.aar" | cut -d ' ' -f1)"
 manifest="$output_dir/libbox-v${SING_BOX_VERSION#v}.manifest"
 cat > "$manifest" <<EOF
 sing-box-version=$SING_BOX_VERSION
+libbox-version=${SING_BOX_VERSION#v}
 sing-box-commit=$SING_BOX_COMMIT
 android-submodule-commit=$ANDROID_SUBMODULE_COMMIT
 go-version=$GO_VERSION
+go-commit=$GO_COMMIT
+go-source-archive-sha256=$GO_GIT_ARCHIVE_SHA256
 java-version=$JAVA_VERSION
 gomobile-version=$GOMOBILE_VERSION
 gomobile-commit=${GOMOBILE_COMMIT:-unknown}
 android-ndk-version=$ANDROID_NDK_VERSION
 build-platform=$android_platform
+android-api=$LIBBOX_ANDROID_API
+android-bootclasspath=platforms/android-$LIBBOX_ANDROID_API/android.jar
+build-tags=$LIBBOX_BUILD_TAGS
+go-build-flags=-trimpath -buildvcs=false
+go-ldflags=-X github.com/sagernet/sing-box/constant.Version=${SING_BOX_VERSION#v} -X internal/godebug.defaultGODEBUG=multipathtcp=0 -s -w -buildid= -checklinkname=0 -linkmode=external
+external-ldflags=$LIBBOX_EXTLDFLAGS
 abis=$abis
 libbox-aar-sha256=$aar_sha256
 EOF

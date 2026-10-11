@@ -456,7 +456,7 @@ val verifyLibboxArtifact =
         manifest.set(libboxManifest)
         expectedVersion.set("v1.13.12")
         expectedNdkVersion.set(libboxNdkVersion)
-        expectedSha256.set("3fdbd30eba2450935389c100efd88475721d44870bbab870340533ee4ba84977")
+        expectedSha256.set("9feeb74fb1312322dd1eb95e45e47f98d4c69b57ec9298d643a1e8dd076f419e")
         enforcePinnedSha256.set(!libboxSourceBuild)
     }
 

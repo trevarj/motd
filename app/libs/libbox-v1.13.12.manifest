@@ -1,11 +1,20 @@
 sing-box-version=v1.13.12
+libbox-version=1.13.12
 sing-box-commit=1086ab2563320e0da0c23b3a491d8dfa0939dff4
 android-submodule-commit=772879ce9cd37c29e377d4d44d0efee12662948d
 go-version=go1.25.12
+go-commit=d80d9a98f7e3a8f9b3a82d2c6079f84eb1101d46
+go-source-archive-sha256=2653ae05391b4d801715f49674a339bfc7ca81db35740dda89f3e3478b6cac60
 java-version=21
 gomobile-version=v0.1.12
 gomobile-commit=b2c30f47825831593d6980af8191527490f9c968
 android-ndk-version=28.2.13676358
 build-platform=android/arm64
+android-api=23
+android-bootclasspath=platforms/android-23/android.jar
+build-tags=with_utls,with_clash_api,badlinkname,tfogo_checklinkname0
+go-build-flags=-trimpath -buildvcs=false
+go-ldflags=-X github.com/sagernet/sing-box/constant.Version=1.13.12 -X internal/godebug.defaultGODEBUG=multipathtcp=0 -s -w -buildid= -checklinkname=0 -linkmode=external
+external-ldflags=-Wl,--pack-dyn-relocs=android
 abis=arm64-v8a
-libbox-aar-sha256=3fdbd30eba2450935389c100efd88475721d44870bbab870340533ee4ba84977
+libbox-aar-sha256=9feeb74fb1312322dd1eb95e45e47f98d4c69b57ec9298d643a1e8dd076f419e

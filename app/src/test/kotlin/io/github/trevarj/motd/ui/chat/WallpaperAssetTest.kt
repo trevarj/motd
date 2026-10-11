@@ -18,14 +18,20 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.GraphicsMode
+import java.security.MessageDigest
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class WallpaperAssetTest {
     private val assets = ApplicationProvider.getApplicationContext<Context>().assets
 
-    @Test fun everyPreset_isA2048TransparentPngWithInk() {
+    @Test fun everyPreset_isA2048TransparentPngWithTheApprovedAlpha() {
         ChatWallpaperPreset.entries.filterNot { it == ChatWallpaperPreset.NONE }.forEach { preset ->
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            assets.open("chat-wallpapers/${assetName(preset)}").use {
+                BitmapFactory.decodeStream(it, null, bounds)
+            }
+            assertEquals("$preset codec", "image/png", bounds.outMimeType)
             val bitmap =
                 assets.open("chat-wallpapers/${assetName(preset)}").use { input ->
                     BitmapFactory.decodeStream(input) ?: error("$preset failed to decode")
@@ -36,6 +42,7 @@ class WallpaperAssetTest {
                 val alpha = bitmapAlpha(bitmap)
                 assertTrue("$preset must contain visible ink", alpha.hasInk)
                 assertTrue("$preset must retain transparent space", alpha.hasTransparentPixels)
+                assertEquals("$preset approved alpha", approvedAlphaSha256(preset), alpha.sha256)
             } finally {
                 bitmap.recycle()
             }
@@ -109,7 +116,7 @@ class WallpaperAssetTest {
         }
     }
 
-    @Test fun sourceSamplingKeepsTheNearestUsefulPngResolution() {
+    @Test fun sourceSamplingKeepsTheNearestUsefulResolution() {
         assertEquals(4, wallpaperDecodeSampleSize(2048, 2048, 512))
         assertEquals(2, wallpaperDecodeSampleSize(2048, 2048, 1024))
         assertEquals(1, wallpaperDecodeSampleSize(2048, 2048, 1536))
@@ -154,6 +161,11 @@ class WallpaperAssetTest {
             return BitmapAlpha(
                 hasInk = pixels.any { it ushr 24 != 0 },
                 hasTransparentPixels = pixels.any { it ushr 24 == 0 },
+                sha256 =
+                    MessageDigest
+                        .getInstance("SHA-256")
+                        .digest(ByteArray(pixels.size) { (pixels[it] ushr 24).toByte() })
+                        .joinToString("") { "%02x".format(it.toInt() and 0xff) },
             )
         } finally {
             if (readable !== bitmap) readable.recycle()
@@ -163,7 +175,22 @@ class WallpaperAssetTest {
     private data class BitmapAlpha(
         val hasInk: Boolean,
         val hasTransparentPixels: Boolean,
+        val sha256: String,
     )
+
+    // SHA-256 of every row-major 8-bit alpha byte from the approved 2048px PNGs before re-encoding.
+    private fun approvedAlphaSha256(preset: ChatWallpaperPreset): String =
+        when (preset) {
+            ChatWallpaperPreset.MOTD -> "5de511565c96edaf8213d7da50f0dc4cfea1e3c87180a7719541f9fdfa98a6ad"
+            ChatWallpaperPreset.DEEP_SPACE -> "482222a5a77d4617215d30077af3b169463dd00f50b58a12c31f52cb3d1ac2e4"
+            ChatWallpaperPreset.RETRO_GAMING -> "69135cf871afda80d221270454a48da4e56d2dd1ae005d29a4ef4db17f56b06f"
+            ChatWallpaperPreset.RADIO_CLUB -> "7bb066ee8e00e707b8ccb64a2ef54d54a5488e9713bb52711d42459221c40bce"
+            ChatWallpaperPreset.INTERNET_ODDITIES -> "f6dfd2eef38f356d26bdae5d6f9dc1b35d86c34f420f6e2591e6942866171e2d"
+            ChatWallpaperPreset.RETRO_CHAT -> "2c1da3ee36e15c9f328a1ab0ad375f79af0e2cc7da35e7cb01ebcb1986505bd3"
+            ChatWallpaperPreset.MEMES -> "621b181952fa4c75cdcdf18458ea9246cbad829cf8f3d074f461b657027709be"
+            ChatWallpaperPreset.LINUX -> "d8ce022c61c9078279a65297d01d437fad92e800cff6c1f822386be89963b95e"
+            ChatWallpaperPreset.NONE -> error("NONE has no approved wallpaper alpha")
+        }
 
     private fun assertRepeatEdgesMatch(
         bitmap: Bitmap,

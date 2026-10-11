@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { themes } from './server.mjs';
 
 const out = path.resolve('build/wallpaper-previews/qa');
 await mkdir(out, { recursive: true });
@@ -62,14 +63,20 @@ const run = async () => {
   }
   assert.equal(await evaluate(`document.querySelectorAll('.theme-card').length`), 8);
   assert.equal(await evaluate(`document.querySelector('#inspector-heading').textContent`), 'MOTD');
-  assert.ok(await evaluate(`document.querySelectorAll('.theme-card.has-art').length`) >= 7);
+  assert.equal(await evaluate(`document.querySelectorAll('.theme-card.has-art').length`), 8);
   // Completed builtins default to their 2048 px final tiles. Their source atlases
   // remain separately inspectable and must never be presented as tiled wallpapers.
-  for (const [id, label] of [['linux', 'Linux']]) {
+  for (const { id, label } of themes) {
     await evaluate(`[...document.querySelectorAll('.theme-card')].find(el => el.querySelector('.card-name').textContent === ${JSON.stringify(label)}).click()`);
     assert.equal(await evaluate(`document.querySelector('#variant').value`), `${id}-final`);
     await evaluate(`document.querySelector('#original-art').decode()`);
     assert.equal(await evaluate(`document.querySelector('#original-art').naturalWidth`), 2048);
+    assert.equal(await evaluate(`document.querySelector('#original-art').naturalHeight`), 2048);
+    assert.deepEqual(await evaluate(`(async () => {
+      const response = await fetch(document.querySelector('#original-art').src);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return [response.headers.get('content-type'), [...bytes.slice(0, 8)], bytes[24], bytes[25]];
+    })()`), ['image/png', [137, 80, 78, 71, 13, 10, 26, 10], 8, 3], `${id} must serve an actual 8-bit indexed PNG final`);
     assert.equal(await evaluate(`document.querySelector('#tab-repeat').disabled`), false);
     assert.equal(await evaluate(`document.querySelector('#tab-chat').disabled`), false);
     await click('#tab-repeat');
@@ -170,7 +177,7 @@ const run = async () => {
   await evaluate(`document.querySelector('#panel-chat').scrollIntoView()`);
   await capture('mobile-chat');
   assert.deepEqual(exceptions, []);
-  console.log('PASS: gallery artworks, atlas previews, tabs, seam guides, three appearance modes, pure-black AMOLED, linear intensity, refresh, zoom, mobile layout, and no browser exceptions.');
+  console.log('PASS: all eight 2048px indexed PNG finals, atlas previews, tabs, seam guides, three appearance modes, pure-black AMOLED, linear intensity, refresh, zoom, mobile layout, and no browser exceptions.');
 };
 try {
   await Promise.race([run(), deadline]);

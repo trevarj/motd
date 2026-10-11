@@ -9,13 +9,19 @@ transport:
 - sing-box version: `v1.13.12`
 - Delivery: main Android application APK
 - ABI: `arm64-v8a` only; unsupported ABI variants are not built
-- SHA-256: `3fdbd30eba2450935389c100efd88475721d44870bbab870340533ee4ba84977`
+- SHA-256: `9feeb74fb1312322dd1eb95e45e47f98d4c69b57ec9298d643a1e8dd076f419e`
 - Build manifest: `app/libs/libbox-v1.13.12.manifest`
 - Source-build tool: [SagerNet/gomobile](https://github.com/SagerNet/gomobile),
   `v0.1.12` at commit
   `b2c30f47825831593d6980af8191527490f9c968`
 - Source archive SHA-256:
   `ecbdc425d07884ba2895985d77a1a5fb9c443f93ceb71acaa894ca7609a4322a`
+
+The build retains the full libbox bridge and Clash command APIs with
+`with_utls,with_clash_api,badlinkname,tfogo_checklinkname0`. Unused Naive,
+Tailscale, QUIC, WireGuard and gVisor features are omitted. Native linking uses
+API-23-compatible Android APS2 relocation packing, not RELR; the application's
+minimum Android API remains 26.
 
 ## Embedded transport: sing-box / libbox
 
@@ -127,3 +133,16 @@ release **v2.304**. Copyright 2020 The JetBrains Mono Project Authors
   [`JetBrainsMono-2.304.zip`](https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip)
 - Source archive SHA-256:
   `6f6376c6ed2960ea8a963cd7387ec9d76e3f629125bc33d1fdcd7eb7012f7bbf`
+
+## AndroidX Compose Material Icons
+
+The app retains 137 vector definitions from
+`androidx.compose.material:material-icons-extended:1.7.8`, limited to used
+properties absent from `material-icons-core`. Only source formatting is changed;
+vector geometry and RTL behavior are preserved. Copyright 2025 The Android Open
+Source Project, licensed under Apache-2.0.
+
+The [license](third_party/material-icons/LICENSE) and
+[source attribution and file digests](third_party/material-icons/provenance.json)
+are included in the source tree. The app depends on `material-icons-core`,
+not the extended catalog.

@@ -74,11 +74,12 @@ Expected: reject the atlas despite apparent transparency; require genuine alpha,
 complete 16 cells and transparent interiors/gutters. Final tile must wrap without
 blank corridors. Name white/dark 3×3 and offset proofs in export-qa; inspect both
 axes and four-way corner joins, contour continuity, density and phone legibility.
-Mention independent pixel equality and PNG-alpha roundtrip without claiming they
-ran. 2048² black/8-bit alpha, RGBA on decode (encoder is grayscale+alpha type 4),
+Mention independent pixel equality and exact PNG-alpha roundtrip without claiming they
+ran. 2048² black/8-bit alpha, RGBA on decode, unchanged approved alpha; indexed PNG uses
+all 256 black palette entries with tRNS 0..255, not alpha quantization. Atlas/proofs stay PNG.
 ALPHA_8 repeat at 512dp/128dp thumbnails, theme tint/direct intensity, no baked backdrop.
 Forbidden: accept checkerboards as alpha; whiten/remove only perimeter pixels
-as a seam fix; ship opaque QA proofs; insist encoder already uses PNG type 6.
+as a seam fix; ship opaque QA proofs; quantize antialias alpha or replace PNG with codec-dependent sampled WebP.
 
 ## Near-miss cases
 

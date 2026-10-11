@@ -169,6 +169,16 @@ validates NDK `28.2.13676358`, and rejects any JNI entry other than
 normal build; no redundant `go mod download` step is required. The shared
 F-Droid NDK is validated but not patched.
 
+The source builder now binds the complete upstream libbox package directly with
+the feature/linker pins in `source.lock`: `with_utls,with_clash_api,badlinkname,
+tfogo_checklinkname0`, API 23, and `-Wl,--pack-dyn-relocs=android` through Go's
+external linker. It omits unused Naive/Cronet, Tailscale, QUIC, WireGuard, and
+gVisor features, not the SOCKS/VLESS/REALITY/uTLS/WebSocket/TLS paths or command
+server bridge. APS2 relocations work below the app's unchanged API 26 minimum;
+no RELR or new F-Droid toolchain/recipe step is required. The generated manifest
+records the exact tags and flags. The complete-source asset includes the wrapper's
+gomobile environment fix and host smoke, while upstream checkouts are restored.
+
 The Gradle verifier stays strict for normal GitHub builds: the tracked AAR must
 match its pinned SHA-256. `motdLibboxSource=true` relaxes only that
 byte-for-byte comparison for a source rebuild; the manifest hash, libbox version

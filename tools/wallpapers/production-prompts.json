@@ -3,7 +3,26 @@
   "default": "motd",
   "sourceSize": "Per-atlas native dimensions are recorded in periodicAtlasGeneration.themes; earlier source masters are historical.",
   "exportSize": 2048,
-  "export": "Complete motifs extracted from transparent atlases, Lanczos-scaled and rotated, then deterministically packed with periodic edge/corner wrapping. Black RGB and 8-bit alpha in lossless PNG. Every export must match an independently composed 3x3 scene pixel-for-pixel and preserve that alpha after PNG decoding.",
+  "export": "Complete motifs extracted from transparent atlases, Lanczos-scaled and rotated, then deterministically packed with periodic edge/corner wrapping. Black RGB and exact 8-bit alpha in lossless indexed PNG: alpha is the palette index, all 256 RGB entries are black and tRNS is 0..255. Filter-zero scanlines, level-9 deflate and CRC32 use pinned node:zlib; no quantization or metadata. Every export must match an independently composed 3x3 scene pixel-for-pixel and preserve that alpha after PNG decoding. Source atlases, historical masters and ImageMagick proof images are unchanged.",
+  "exportEncodingChange": {
+    "date": "2026-10-11",
+    "change": "Re-encoding only: approved alpha and compositor/artwork unchanged. PNG retained because Android sampled WebP decoding changed rendered pixels despite exact full-resolution alpha.",
+    "encoder": "Pinned Node 22 node:zlib crc32 + deflateSync(level9); PNG 2048x2048, bit depth 8, color type 3, 256 all-black palette entries, exact tRNS 0..255, filter-zero scanlines, no metadata",
+    "originalPngBytes": 12229703,
+    "indexedPngBytes": 9808336,
+    "decodedAlphaBytesPerTile": 4194304,
+    "decodedAlphaMatchesOriginalPng": true,
+    "assets": [
+      {"id":"motd","originalPngBytes":1428510,"pngBytes":1177535,"pngSha256":"901e3c915e38acae96bc3c8d8b4b3c5ebf37703569ccf3d8c8e9845db0aaf102","alphaSha256":"5de511565c96edaf8213d7da50f0dc4cfea1e3c87180a7719541f9fdfa98a6ad"},
+      {"id":"deep-space","originalPngBytes":1468449,"pngBytes":1218071,"pngSha256":"186491007e23dd276e3b4ad1e332e5ab227aeee77b638619af1fe31eb99eaabc","alphaSha256":"482222a5a77d4617215d30077af3b169463dd00f50b58a12c31f52cb3d1ac2e4"},
+      {"id":"retro-gaming","originalPngBytes":1681459,"pngBytes":1320975,"pngSha256":"9f55a15b2de2d4559f801d21219eb6c628723052894e8566d43ac749f421cded","alphaSha256":"69135cf871afda80d221270454a48da4e56d2dd1ae005d29a4ef4db17f56b06f"},
+      {"id":"radio-club","originalPngBytes":1604159,"pngBytes":1291055,"pngSha256":"8c029890b2a6c1358175da3d26904fa0a6b72d44d409f8bca2a82fde8f7fea33","alphaSha256":"7bb066ee8e00e707b8ccb64a2ef54d54a5488e9713bb52711d42459221c40bce"},
+      {"id":"internet-oddities","originalPngBytes":1511455,"pngBytes":1210740,"pngSha256":"f2222c124098217d2feba69fe7762abb571a08c7c3212f92d7ea6b08a4bc9d64","alphaSha256":"f6dfd2eef38f356d26bdae5d6f9dc1b35d86c34f420f6e2591e6942866171e2d"},
+      {"id":"retro-chat","originalPngBytes":1469255,"pngBytes":1152652,"pngSha256":"f461c400c6bc7a0a4a62bf73bf375b895956f6bef5e8d67f9b9895aa88031f36","alphaSha256":"2c1da3ee36e15c9f328a1ab0ad375f79af0e2cc7da35e7cb01ebcb1986505bd3"},
+      {"id":"memes","originalPngBytes":1473736,"pngBytes":1193392,"pngSha256":"64106ff390aae7d85222d4e0ad29051a7dd8259ca54196328937238eda558fa1","alphaSha256":"621b181952fa4c75cdcdf18458ea9246cbad829cf8f3d074f461b657027709be"},
+      {"id":"linux","originalPngBytes":1592680,"pngBytes":1243916,"pngSha256":"f0461d6a0b3aec83af9b5721998769e8b7ed300ddba0ea9e9434af0faabb960e","alphaSha256":"d8ce022c61c9078279a65297d01d437fad92e800cff6c1f822386be89963b95e"}
+    ]
+  },
   "themes": [
     {
       "id": "motd",
@@ -75,7 +94,8 @@
       {
         "id": "linux",
         "status": "generated-wallpaper",
-        "finalExport": {"asset":"app/src/main/assets/chat-wallpapers/linux.png","size":"2048x2048","tool":"tools/wallpapers/generate-wallpapers.mjs","detailsAtlas":"atlases/details.png","seed":"periodic-v4:linux","uniqueMotifs":16,"majorPlacements":137,"tinyPlacements":144,"inkCoveragePercent":16.3,"qa":{"independent3x3PixelMatch":true,"pngAlphaPreserved":true,"whiteDarkAndOffsetProofsReviewed":true,"deterministicByteCheck":true}},
+        "historicalPngExport": {"asset":"app/src/main/assets/chat-wallpapers/linux.png","size":"2048x2048","tool":"tools/wallpapers/generate-wallpapers.mjs","detailsAtlas":"atlases/details.png","seed":"periodic-v4:linux","uniqueMotifs":16,"majorPlacements":137,"tinyPlacements":144,"inkCoveragePercent":16.3,"qa":{"independent3x3PixelMatch":true,"pngAlphaPreserved":true,"whiteDarkAndOffsetProofsReviewed":true,"deterministicByteCheck":true}},
+        "finalExport": {"asset":"app/src/main/assets/chat-wallpapers/linux.png","size":"2048x2048","tool":"tools/wallpapers/generate-wallpapers.mjs","format":"lossless 8-bit indexed PNG","encodingOnlyChange":true,"bytes":1243916,"pngSha256":"f0461d6a0b3aec83af9b5721998769e8b7ed300ddba0ea9e9434af0faabb960e","alphaSha256":"d8ce022c61c9078279a65297d01d437fad92e800cff6c1f822386be89963b95e","qa":{"decodedAlphaMatchesOriginalPng":true}},
         "qa": { "occupiedCells": 16, "verifiedMinimumCellMarginPercent": 15, "blackInkOnly": true, "transparentInteriors": true },
         "normalization": { "tool": "tools/wallpapers/normalize-atlases.mjs", "alpha": "Original alpha multiplied by inverse maximum RGB; clear alpha at or below 12/255 while retaining antialiasing.", "layout": "Uniformly scale each complete motif to at most 60% of its cell dimensions, then center it. Preserve native atlas dimensions." },
         "label": "Linux",
