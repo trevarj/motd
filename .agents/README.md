@@ -101,6 +101,10 @@ it implements clients/servers, not Kotlin code intelligence; no app dependency i
 ## Task guides
 
 - [`testing.md`](testing.md) — targeted local checks and hosted verification gates.
+- [`skills/motd-chat-wallpapers/SKILL.md`](skills/motd-chat-wallpapers/SKILL.md) —
+  repo-local chat wallpaper generation, review, and integration guidance; load
+  explicitly (automatic client discovery is unverified). Manual evaluation:
+  [`evals.md`](skills/motd-chat-wallpapers/evals.md).
 - [`releases.md`](releases.md) — signed tags, release artifacts, and failure
   recovery.
 - [`../test/e2e/README.md`](../test/e2e/README.md) — local stack, physical
