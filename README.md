@@ -65,14 +65,22 @@ them in motion on the [landing page](https://trevs.site/motd/).
 ## Install
 
 [<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png" alt="Get it on F-Droid" height="80">](https://f-droid.org/packages/io.github.trevarj.motd)
+[<img src="docs/assets/badges/obtainium.png" alt="Add motd with Obtainium" height="80">](https://trevs.site/motd/installation.html#obtainium)
+[<img src="docs/assets/badges/openapk.png" alt="Get motd on OpenAPK" height="80">](https://www.openapk.net/motd/io.github.trevarj.motd/)
 
 - **F-Droid**: [io.github.trevarj.motd](https://f-droid.org/packages/io.github.trevarj.motd)
 - **GitHub**: APKs on the [releases page](https://github.com/trevarj/motd/releases/latest)
+- **Obtainium**: [import the official GitHub release source](https://trevs.site/motd/installation.html#obtainium) for direct updates; no catalogue listing is required.
+- **OpenAPK**: [existing third-party catalogue](https://www.openapk.net/motd/io.github.trevarj.motd/); its 0.20.3 download was verified against the original upstream APK on 2026-10-11.
 
-Both share the same signing key, so either install updates from the other.
+F-Droid and GitHub share the same signing key, so either install updates from
+the other. Obtainium downloads the original GitHub APK; the verified OpenAPK
+download is byte-for-byte identical and preserves that update compatibility.
 Requires Android 8.0+ on a 64-bit ARM device (the embedded obfuscation
 transport is arm64-v8a-only). Push delivery is UnifiedPush — see the
 [ntfy setup guide](docs/ntfy-push.md).
+See the [Android distribution runbook](docs/android-distribution.md) for
+channel provenance, publication status, and the maintainer checklist.
 
 ## Connecting
 

@@ -29,6 +29,8 @@ required=(
   "$ROOT/docs/assets/brand/motd-lockup-light.png"
   "$ROOT/docs/assets/brand/motd-lockup-dark.png"
   "$ROOT/docs/assets/brand/motd-wordmark.png"
+  "$ROOT/docs/assets/badges/obtainium.png"
+  "$ROOT/docs/assets/badges/openapk.png"
 )
 for file in "${required[@]}"; do
   [ -s "$file" ] || {
@@ -38,9 +40,10 @@ for file in "${required[@]}"; do
 done
 
 rm -rf -- "$OUT"
-mkdir -p "$OUT/assets/brand" "$OUT/screenshots"
+mkdir -p "$OUT/assets/brand" "$OUT/assets/badges" "$OUT/screenshots"
 cp "${pages[@]/#/$SITE_DIR/}" "$SITE_DIR/styles.css" "$OUT/"
 cp "$ROOT/docs/assets/brand/"motd-{favicon,lockup-light,lockup-dark,wordmark}.png "$OUT/assets/brand/"
+cp "$ROOT/docs/assets/badges/"*.png "$OUT/assets/badges/"
 cp "$ROOT/screenshots/"{chat-list,chat,file-uploader}.png "$OUT/screenshots/"
 
 printf 'built documentation site: %s\n' "$OUT"

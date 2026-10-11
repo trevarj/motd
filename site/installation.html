@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#1b1b1f">
-    <meta name="description" content="Install motd on Android 8.0 or newer with a 64-bit ARM device, using F-Droid or the latest GitHub release.">
+    <meta name="description" content="Install motd on Android 8.0 or newer with a 64-bit ARM device, using F-Droid, GitHub, direct GitHub updates with Obtainium, or the verified OpenAPK catalogue.">
     <title>Installation — motd</title>
     <link rel="icon" href="assets/brand/motd-favicon.png" type="image/png">
     <link rel="stylesheet" href="styles.css">
@@ -74,12 +74,14 @@
           <li><a href="#requirements">Requirements</a></li>
           <li><a href="#f-droid">F-Droid</a></li>
           <li><a href="#github">GitHub</a></li>
+          <li><a href="#obtainium">Obtainium</a></li>
+          <li><a href="#openapk">OpenAPK</a></li>
           <li><a href="#next-steps">Next steps</a></li>
         </ul>
       </nav>
       <main class="doc-content" id="top" tabindex="-1">
         <h1>Installation</h1>
-        <p class="intro">Install motd from F-Droid or GitHub, then connect to an IRC network or your bouncer.</p>
+        <p class="intro">Install motd from F-Droid or GitHub, directly or with Obtainium, or use the verified third-party OpenAPK catalogue, then connect to an IRC network or your bouncer.</p>
 
         <h2 id="requirements">Requirements</h2>
         <ul>
@@ -92,11 +94,23 @@
         <h2 id="f-droid">F-Droid</h2>
         <p>Open <a href="https://f-droid.org/packages/io.github.trevarj.motd">motd on F-Droid</a> and install the app with package name <code>io.github.trevarj.motd</code>.</p>
         <p>F-Droid and GitHub releases share the same signing key. An installation from either channel can receive updates from the other.</p>
-        <p>The <a href="https://github.com/trevarj/motd/blob/main/README.md#install">README installation section</a> lists both supported channels.</p>
+        <p>The <a href="https://github.com/trevarj/motd/blob/main/docs/android-distribution.md">Android distribution runbook</a> records channel provenance and publication status.</p>
 
         <h2 id="github">GitHub</h2>
         <p>Download the APK from the <a href="https://github.com/trevarj/motd/releases/latest">latest GitHub release</a> and install it on your Android device. This is the same Google-free app, with the same signing key used by F-Droid.</p>
         <p>See the <a href="https://github.com/trevarj/motd/blob/main/README.md#install">README installation section</a> for the canonical release link and requirements.</p>
+
+        <h2 id="obtainium">Obtainium</h2>
+        <p>Obtainium tracks the official GitHub releases and downloads the original Google-free APK with the same signing key. This is a direct source import, not acceptance into the optional Obtainium catalogue.</p>
+        <p><a href="obtainium://app/%7B%22id%22%3A%22io.github.trevarj.motd%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Ftrevarj%2Fmotd%22%2C%22author%22%3A%22trevarj%22%2C%22name%22%3A%22motd%22%7D"><img src="assets/badges/obtainium.png" alt="Add motd with Obtainium" width="207" height="80"></a></p>
+        <p>With Obtainium installed, tap the badge to open its native import dialog, review the source, and confirm. It tracks stable releases by default; do not enable prereleases.</p>
+        <p>If Obtainium is not installed, <a href="https://github.com/ImranR98/Obtainium/releases/latest">get Obtainium from its official GitHub releases</a>. If your browser cannot open the import link, open Obtainium, add an app, and paste <code>https://github.com/trevarj/motd</code> as the source URL.</p>
+        <p>You can always use the ordinary <a href="#github">GitHub APK</a> or <a href="#f-droid">F-Droid listing</a> instead. motd still requires Android 8.0+ and an <code>arm64-v8a</code> device.</p>
+
+        <h2 id="openapk">OpenAPK</h2>
+        <p><a href="https://www.openapk.net/motd/io.github.trevarj.motd/"><img src="assets/badges/openapk.png" alt="Get motd on OpenAPK" width="207" height="80"></a></p>
+        <p>OpenAPK has an existing third-party catalogue listing, not a new maintainer upload. On October 11, 2026, its actual 0.20.3 (20003) download was verified byte-for-byte against the original GitHub APK, with the same package and release signing certificate. It preserves update compatibility with GitHub and F-Droid installations.</p>
+        <p>Open the badge to visit the package page and download the APK. motd remains Android 8.0+ and <code>arm64-v8a</code> only, regardless of generic 32-bit/x86 claims on the catalogue download page. See the <a href="https://github.com/trevarj/motd/blob/main/docs/android-distribution.md#openapk-verified-third-party-catalogue">distribution runbook</a> for verification evidence and provenance.</p>
 
         <h2 id="next-steps">Next steps</h2>
         <p>Follow <a href="getting-started.html">Getting started</a> to set up a direct IRC or soju connection. For background delivery through a compatible soju bouncer, follow the <a href="guides.html#push-notifications">push notification guide</a>.</p>

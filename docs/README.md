@@ -11,6 +11,8 @@ exact `nix develop` commands for one activity.
   the workflow that publishes it.
 - [`human-fdroid-update.md`](human-fdroid-update.md) — how a release reaches
   F-Droid, and when the fdroiddata recipe needs a hand-written change.
+- [`android-distribution.md`](android-distribution.md) — Google-free Android
+  channels, verified release inputs, and the native Appteka publication checklist.
 
 ## Packaging reference
 
