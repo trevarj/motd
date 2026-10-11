@@ -3,7 +3,11 @@ package io.github.trevarj.motd.ui.components
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.compose.foundation.IndicationNodeFactory
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
@@ -16,8 +20,12 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.node.DelegatableNode
+import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
@@ -33,6 +41,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
@@ -51,6 +60,7 @@ import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.TimestampConfig
 import io.github.trevarj.motd.ui.theme.contrastRatio
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -314,6 +324,80 @@ class MessageBubbleFooterUiTest {
         assertTrue("reaction shadow needs room at the bottom of its animated row", chip.bottom < row.bottom)
         assertTrue("reaction shadow needs room at the left edge of its animated row", row.left < chip.left)
         assertTrue("reaction shadow needs room at the right edge of its animated row", chip.right < row.right)
+    }
+
+    @Test
+    fun pressedRectangleIndicationIsClippedToZeroElevationReactionCorners() {
+        compose.setContent {
+            MotdTheme(dynamicColor = false, themePreset = ColorThemePreset.LIGHT) {
+                CompositionLocalProvider(LocalIndication provides PressedRectangleIndication) {
+                    Surface(Modifier.width(120.dp)) {
+                        ReactionRow(
+                            reactions = listOf(ReactionChip("♥", 1, mine = false)),
+                            onReact = {},
+                            chipElevation = 0.dp,
+                            modifier = Modifier.padding(16.dp),
+                        )
+                    }
+                }
+            }
+        }
+        val chip = compose.onNodeWithTag("chat_reaction_chip_♥", useUnmergedTree = true).assertIsDisplayed()
+        val idle = chip.captureToImage().toPixelMap()
+        chip.performTouchInput { down(center) }
+        try {
+            // A real press paints a rectangle; only the production chip clip rounds its corners.
+            compose.waitForIdle()
+            val pressed = chip.captureToImage().toPixelMap()
+            assertEquals(idle.width, pressed.width)
+            assertEquals(idle.height, pressed.height)
+            assertTrue(
+                "the held press must visibly paint the rectangle inside the chip",
+                (idle.width / 4 until idle.width * 3 / 4).any { x ->
+                    (1 until idle.height / 4).any { y -> idle[x, y] != pressed[x, y] }
+                },
+            )
+            // These small patches are wholly outside the capsule, not on its antialiased edge.
+            for (dx in 0 until idle.height / 8) {
+                for (dy in 0 until idle.height / 8) {
+                    for (x in listOf(dx, idle.width - 1 - dx)) {
+                        for (y in listOf(dy, idle.height - 1 - dy)) {
+                            assertEquals("pressed indication must not square off corner $x,$y", idle[x, y], pressed[x, y])
+                        }
+                    }
+                }
+            }
+        } finally {
+            chip.performTouchInput { cancel() }
+        }
+    }
+
+    private object PressedRectangleIndication : IndicationNodeFactory {
+        override fun create(interactionSource: InteractionSource): DelegatableNode =
+            object : Modifier.Node(), DrawModifierNode {
+                private var pressCount = 0
+
+                override fun onAttach() {
+                    coroutineScope.launch {
+                        interactionSource.interactions.collect { interaction ->
+                            when (interaction) {
+                                is PressInteraction.Press -> pressCount++
+                                is PressInteraction.Release, is PressInteraction.Cancel -> pressCount--
+                            }
+                            invalidateDraw()
+                        }
+                    }
+                }
+
+                override fun ContentDrawScope.draw() {
+                    drawContent()
+                    if (pressCount > 0) drawRect(Color.Magenta)
+                }
+            }
+
+        override fun hashCode(): Int = 0
+
+        override fun equals(other: Any?): Boolean = other === this
     }
 
     @Test

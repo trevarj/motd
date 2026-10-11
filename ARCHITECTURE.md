@@ -167,6 +167,8 @@ flowchart TD
   over an established landing ID; without a known row it stays pending rather than
   claiming a historical same-text confirmation. Echo/failure updates change the airborne
   glyph without shortening the morph or taking ownership from the accessible real row.
+- Inline reaction chips clip their press indication to the same capsule shape as
+  their fill and border, independently of chat-shadow elevation.
 - Timeline paging subscribes to native `messages` invalidation before reading a Room page.
   A confirmation committed after the first SQL read but before its caller resumes discards that
   generation; the replacement page keeps the canonical event ID and viewport/read anchors.
