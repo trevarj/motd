@@ -13,6 +13,7 @@ import { handleSoundRoute } from "../../chat-sounds/gallery/server-routes.mjs";
 const galleryDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultRoot = path.resolve(galleryDir, "../../..");
 const previewDirParts = ["build", "wallpaper-previews"];
+const atlasDirParts = ["tools", "wallpapers", "atlases"];
 const finalDirParts = ["app", "src", "main", "assets", "chat-wallpapers"];
 const validId = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const validFile = /^[a-z0-9][a-z0-9._-]{0,127}\.png$/;
@@ -25,6 +26,7 @@ export const themes = [
   { id: "internet-oddities", label: "Internet Oddities", description: "Cable snakes, cursor critters, tiny robots, and computer cats." },
   { id: "retro-chat", label: "Retro Chat", description: "Buddy lists, away messages, and the early messenger era." },
   { id: "memes", label: "Memes", description: "A dense archive of chaotic internet reaction faces." },
+  { id: "linux", label: "Linux", description: "Free-software mascots, terminals, and late-night command lines." },
 ];
 
 const mimeTypes = {
@@ -126,6 +128,22 @@ export function buildGallery(root = defaultRoot) {
     }
   }
 
+  for (const theme of themes) {
+    const registered = registeredFile(root, atlasDirParts, `${theme.id}.png`);
+    const id = `${theme.id}-atlas`;
+    if (registered && !seenIds.has(id)) {
+      assets.push({
+        id,
+        theme: theme.id,
+        label: `${theme.label} · Motif atlas`,
+        status: "Atlas",
+        source: "atlas",
+        file: registered.file,
+        version: versionFor(registered.file, registered.stat),
+      });
+    }
+  }
+
   const publicAssets = assets.map(({ file, ...asset }) => ({
     ...asset,
     url: `/api/artwork/${encodeURIComponent(asset.id)}?v=${encodeURIComponent(asset.version)}`,
@@ -150,6 +168,11 @@ export function resolveArtwork(root, id) {
   for (const theme of themes) {
     if (id !== `${theme.id}-final`) continue;
     const registered = registeredFile(root, finalDirParts, `${theme.id}.png`);
+    return registered ? { file: registered.file, version: versionFor(registered.file, registered.stat) } : null;
+  }
+  for (const theme of themes) {
+    if (id !== `${theme.id}-atlas`) continue;
+    const registered = registeredFile(root, atlasDirParts, `${theme.id}.png`);
     return registered ? { file: registered.file, version: versionFor(registered.file, registered.stat) } : null;
   }
   return null;

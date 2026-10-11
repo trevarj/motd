@@ -4,6 +4,8 @@ const elements = {
   selection: document.querySelector("#selection-detail"),
   inspectorHeading: document.querySelector("#inspector-heading"),
   imageMetadata: document.querySelector("#image-metadata"),
+  atlasNote: document.querySelector("#atlas-note"),
+  originalTab: document.querySelector("#tab-original"),
   original: document.querySelector("#original-art"),
   originalStage: document.querySelector("#original-stage"),
   originalEmpty: document.querySelector("#original-empty"),
@@ -40,6 +42,14 @@ function chooseAsset(theme) {
   return theme?.assets.find(asset => asset.status === "Final") ?? theme?.assets[0] ?? null;
 }
 
+function isAtlas(asset) {
+  return asset?.source === "atlas";
+}
+
+function availableTabs() {
+  return isAtlas(state.asset) ? ["original"] : ["original", "repeat", "chat"];
+}
+
 function renderGrid() {
   const orderedThemes = [...state.gallery.themes].sort((left, right) => Number(Boolean(chooseAsset(right))) - Number(Boolean(chooseAsset(left))));
   elements.grid.replaceChildren(...orderedThemes.map(theme => {
@@ -52,7 +62,13 @@ function renderGrid() {
     card.querySelector(".card-name").textContent = theme.label;
     card.querySelector(".card-description").textContent = theme.description;
     card.querySelector(".status").textContent = asset ? asset.status : "Awaiting artwork";
-    if (asset) setMask(card.querySelector(".card-art"), asset.url);
+    if (asset) {
+      const art = card.querySelector(".card-art");
+      if (isAtlas(asset)) {
+        art.classList.add("atlas");
+        art.style.setProperty("--atlas-url", `url("${asset.url}")`);
+      } else setMask(art, asset.url);
+    }
     card.addEventListener("click", () => { state.themeId = theme.id; state.asset = chooseAsset(theme); render(); });
     return card;
   }));
@@ -74,6 +90,7 @@ async function renderArtwork() {
   const asset = state.asset ?? chooseAsset(theme);
   state.asset = asset;
   const hasAsset = Boolean(asset);
+  const atlas = isAtlas(asset);
   elements.variant.replaceChildren(...(theme?.assets.length ? theme.assets : [{ id: "", label: "No artwork available" }]).map(candidate => {
     const option = document.createElement("option");
     option.value = candidate.id;
@@ -84,6 +101,8 @@ async function renderArtwork() {
   elements.variant.disabled = !hasAsset;
   elements.inspectorHeading.textContent = theme.label;
   elements.selection.textContent = hasAsset ? asset.label : "Awaiting artwork";
+  elements.originalTab.textContent = atlas ? "Atlas" : "Original";
+  elements.atlasNote.hidden = !atlas;
   elements.imageMetadata.hidden = true;
   elements.original.hidden = !hasAsset;
   elements.originalEmpty.hidden = hasAsset;
@@ -96,11 +115,11 @@ async function renderArtwork() {
     elements.original.alt = "";
   }
   for (const element of [elements.repeat, elements.chat]) {
-    element.hidden = !hasAsset;
-    setMask(element, asset?.url);
+    element.hidden = !hasAsset || atlas;
+    setMask(element, atlas ? null : asset?.url);
   }
-  elements.repeatStage.classList.toggle("has-art", hasAsset);
-  elements.repeatEmpty.hidden = hasAsset;
+  elements.repeatStage.classList.toggle("has-art", hasAsset && !atlas);
+  elements.repeatEmpty.hidden = hasAsset && !atlas;
   if (!asset) return;
   const currentUrl = asset.url;
   const dimensions = await imageDimensions(currentUrl);
@@ -122,14 +141,21 @@ async function renderArtwork() {
   elements.originalStage.style.setProperty("--art-width", `${dimensions.width}px`);
   elements.originalStage.style.setProperty("--art-height", `${dimensions.height}px`);
   elements.imageMetadata.hidden = false;
-  elements.imageMetadata.textContent = `Original raster: ${dimensions.width} × ${dimensions.height} px`;
+  elements.imageMetadata.textContent = atlas
+    ? `Source motif atlas: ${dimensions.width} × ${dimensions.height} px · 4 × 4 cells`
+    : `Original raster: ${dimensions.width} × ${dimensions.height} px`;
 }
 
 function render() {
   renderGrid();
   renderArtwork();
+  const enabledTabs = availableTabs();
+  if (!enabledTabs.includes(state.tab)) state.tab = "original";
   document.querySelectorAll("[data-tab]").forEach(button => {
     const selected = button.dataset.tab === state.tab;
+    const enabled = enabledTabs.includes(button.dataset.tab);
+    button.disabled = !enabled;
+    button.setAttribute("aria-disabled", String(!enabled));
     button.setAttribute("aria-selected", String(selected));
     button.tabIndex = selected ? 0 : -1;
     document.querySelector(`#panel-${button.dataset.tab}`).hidden = !selected;
@@ -157,18 +183,25 @@ document.querySelector("#refresh").addEventListener("click", () => refresh().cat
 }));
 const tabs = [...document.querySelectorAll("[data-tab]")];
 tabs.forEach((button, index) => {
-  button.addEventListener("click", () => { state.tab = button.dataset.tab; render(); });
+  button.addEventListener("click", () => {
+    if (!availableTabs().includes(button.dataset.tab)) return;
+    state.tab = button.dataset.tab;
+    render();
+  });
   button.addEventListener("keydown", event => {
+    const enabledTabs = tabs.filter(candidate => availableTabs().includes(candidate.dataset.tab));
+    const enabledIndex = enabledTabs.indexOf(button);
+    if (enabledIndex === -1) return;
     let nextIndex;
-    if (event.key === "ArrowRight") nextIndex = (index + 1) % tabs.length;
-    else if (event.key === "ArrowLeft") nextIndex = (index - 1 + tabs.length) % tabs.length;
+    if (event.key === "ArrowRight") nextIndex = (enabledIndex + 1) % enabledTabs.length;
+    else if (event.key === "ArrowLeft") nextIndex = (enabledIndex - 1 + enabledTabs.length) % enabledTabs.length;
     else if (event.key === "Home") nextIndex = 0;
-    else if (event.key === "End") nextIndex = tabs.length - 1;
+    else if (event.key === "End") nextIndex = enabledTabs.length - 1;
     else return;
     event.preventDefault();
-    state.tab = tabs[nextIndex].dataset.tab;
+    state.tab = enabledTabs[nextIndex].dataset.tab;
     render();
-    tabs[nextIndex].focus();
+    enabledTabs[nextIndex].focus();
   });
 });
 document.querySelectorAll(".zoom").forEach(button => button.addEventListener("click", () => { state.zoom = button.dataset.zoom; render(); }));

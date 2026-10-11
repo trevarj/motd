@@ -1916,6 +1916,8 @@
     <string name="settings_wallpaper_retro_chat_desc">Buddy lists, away messages, and IRC nostalgia.</string>
     <string name="settings_wallpaper_memes">Memes</string>
     <string name="settings_wallpaper_memes_desc">Chaotic classics from the early internet.</string>
+    <string name="settings_wallpaper_linux">Linux</string>
+    <string name="settings_wallpaper_linux_desc">Free-software mascots, terminals, and late-night tinkering.</string>
     <string name="settings_wallpaper_intensity">Wallpaper intensity</string>
     <string name="settings_wallpaper_preview_incoming">The background stays quiet.</string>
     <string name="settings_wallpaper_preview_outgoing">And still feels like IRC.</string>

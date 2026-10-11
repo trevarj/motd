@@ -25,19 +25,40 @@ test("gallery remains usable when the preview manifest is absent or malformed", 
   assert.equal(buildGallery(root).themes.flatMap(theme => theme.assets).length, 0);
 });
 
-test("all seven shipped PNGs are available without a draft manifest", () => {
+test("all registered shipped PNGs are available without a draft manifest", () => {
   const root = testRoot();
   const directory = path.join(root, "app/src/main/assets/chat-wallpapers");
   fs.mkdirSync(directory, { recursive: true });
   for (const theme of themes) fs.writeFileSync(path.join(directory, `${theme.id}.png`), "png");
   const gallery = buildGallery(root);
-  assert.equal(gallery.themes.length, 7);
+  assert.equal(gallery.themes.length, themes.length);
   assert.ok(gallery.themes.some(theme => theme.id === "motd"));
   for (const theme of gallery.themes) {
     assert.equal(theme.assets.length, 1);
     assert.equal(theme.assets[0].status, "Final");
     assert.equal(resolveArtwork(root, theme.assets[0].id).file, path.join(directory, `${theme.id}.png`));
   }
+});
+
+test("registered source atlases are exposed separately and cannot escape their directory", () => {
+  const root = testRoot();
+  const directory = path.join(root, "tools/wallpapers/atlases");
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, "linux.png"), "atlas");
+  const gallery = buildGallery(root);
+  const linux = gallery.themes.find(theme => theme.id === "linux");
+  assert.deepEqual(linux.assets.map(asset => ({ id: asset.id, status: asset.status, source: asset.source })), [{
+    id: "linux-atlas",
+    status: "Atlas",
+    source: "atlas",
+  }]);
+  assert.equal(resolveArtwork(root, "linux-atlas")?.file, path.join(directory, "linux.png"));
+
+  const outside = path.join(root, "outside.png");
+  fs.writeFileSync(outside, "private");
+  fs.symlinkSync(outside, path.join(directory, "deep-space.png"));
+  assert.equal(resolveArtwork(root, "deep-space-atlas"), null);
+  assert.equal(buildGallery(root).themes.find(theme => theme.id === "deep-space").assets.length, 0);
 });
 
 test("only registered png studies can become artwork routes", () => {

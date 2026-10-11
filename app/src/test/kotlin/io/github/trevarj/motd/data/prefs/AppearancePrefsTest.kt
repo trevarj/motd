@@ -213,6 +213,7 @@ class AppearancePrefsTest {
                 "PIXELS" to ChatWallpaperPreset.RETRO_GAMING,
                 "NONE" to ChatWallpaperPreset.NONE,
                 "MEMES" to ChatWallpaperPreset.MEMES,
+                "LINUX" to ChatWallpaperPreset.LINUX,
             )
         expected.forEach { (stored, preset) -> assertEquals(stored, preset, chatWallpaperPresetFromStored(stored)) }
         assertEquals(ChatWallpaperPreset.MOTD, chatWallpaperPresetFromStored(null))
@@ -227,6 +228,14 @@ class AppearancePrefsTest {
         assertEquals(
             """{"preset":"RETRO_CHAT","intensity":73}""",
             jsonWithDefaults.encodeToString(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, "private-wallpaper.image")),
+        )
+        assertEquals(
+            WallpaperSelection(ChatWallpaperPreset.LINUX, 73),
+            Json.decodeFromString<WallpaperSelection>("""{"preset":"LINUX","intensity":73}"""),
+        )
+        assertEquals(
+            """{"preset":"LINUX","intensity":73}""",
+            jsonWithDefaults.encodeToString(WallpaperSelection(ChatWallpaperPreset.LINUX, 73)),
         )
     }
 

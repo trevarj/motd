@@ -1,7 +1,7 @@
 // With the gallery running: nix develop .#sprite-studies -c node tools/wallpapers/gallery/browser-check.mjs
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -12,8 +12,14 @@ const browser = spawn('chromium', ['--headless', '--disable-gpu', '--disable-dev
 let stderr = '';
 browser.stderr.on('data', data => { stderr += data; });
 let socket;
-const timeout = setTimeout(() => { console.error(stderr.slice(-1500)); browser.kill(); process.exit(1); }, 60000);
-try {
+let rejectDeadline;
+const deadline = new Promise((_, reject) => { rejectDeadline = reject; });
+const timeout = setTimeout(() => {
+  const error = new Error(`Browser check timed out after 180 seconds:\n${stderr.slice(-1500)}`);
+  rejectDeadline(error);
+  browser.kill();
+}, 180000);
+const run = async () => {
   for (let i = 0; i < 100 && !stderr.includes('DevTools listening'); i++) await delay(100);
   const port = /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(stderr)?.[1];
   assert.ok(port, stderr.slice(-2000));
@@ -51,12 +57,43 @@ try {
   await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
   await call('Page.navigate', { url: 'http://127.0.0.1:4173' });
   for (let i = 0; i < 100; i++) {
-    if (await evaluate(`document.querySelectorAll('.theme-card').length === 7 && document.querySelector('#inspector-heading').textContent === 'MOTD'`)) break;
+    if (await evaluate(`document.querySelectorAll('.theme-card').length === 8 && document.querySelector('#inspector-heading').textContent === 'MOTD'`)) break;
     await delay(100);
   }
-  assert.equal(await evaluate(`document.querySelectorAll('.theme-card').length`), 7);
+  assert.equal(await evaluate(`document.querySelectorAll('.theme-card').length`), 8);
   assert.equal(await evaluate(`document.querySelector('#inspector-heading').textContent`), 'MOTD');
-  assert.equal(await evaluate(`document.querySelectorAll('.theme-card.has-art').length`), 7);
+  assert.ok(await evaluate(`document.querySelectorAll('.theme-card.has-art').length`) >= 7);
+  // Completed builtins default to their 2048 px final tiles. Their source atlases
+  // remain separately inspectable and must never be presented as tiled wallpapers.
+  for (const [id, label] of [['linux', 'Linux']]) {
+    await evaluate(`[...document.querySelectorAll('.theme-card')].find(el => el.querySelector('.card-name').textContent === ${JSON.stringify(label)}).click()`);
+    assert.equal(await evaluate(`document.querySelector('#variant').value`), `${id}-final`);
+    await evaluate(`document.querySelector('#original-art').decode()`);
+    assert.equal(await evaluate(`document.querySelector('#original-art').naturalWidth`), 2048);
+    assert.equal(await evaluate(`document.querySelector('#tab-repeat').disabled`), false);
+    assert.equal(await evaluate(`document.querySelector('#tab-chat').disabled`), false);
+    await click('#tab-repeat');
+    assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('#repeat-art')).display`), 'none');
+    await evaluate(`document.querySelector('#panel-repeat').scrollIntoView({block: 'center'})`);
+    await capture(`${id}-final-repeat`);
+    await click('#tab-chat');
+    assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('#chat-wallpaper')).display`), 'none');
+    await evaluate(`document.querySelector('#panel-chat').scrollIntoView({block: 'center'})`);
+    await capture(`${id}-final-chat`);
+    await evaluate(`document.querySelector('#variant').value=${JSON.stringify(`${id}-atlas`)}; document.querySelector('#variant').dispatchEvent(new Event('change', {bubbles:true}))`);
+    assert.equal(await evaluate(`document.querySelector('#tab-original').textContent`), 'Atlas');
+    assert.equal(await evaluate(`document.querySelector('#tab-repeat').disabled`), true);
+    assert.equal(await evaluate(`document.querySelector('#tab-chat').disabled`), true);
+    assert.equal(await evaluate(`document.querySelector('#atlas-note').hidden`), false);
+    await evaluate(`document.querySelector('#original-art').decode()`);
+    assert.ok(await evaluate(`document.querySelector('#original-art').naturalWidth > 0`));
+    await evaluate(`document.querySelector('#variant').value=${JSON.stringify(`${id}-final`)}; document.querySelector('#variant').dispatchEvent(new Event('change', {bubbles:true}))`);
+    assert.equal(await evaluate(`document.querySelector('#variant').value`), `${id}-final`);
+    assert.equal(await evaluate(`document.querySelector('#tab-repeat').disabled`), false);
+    assert.equal(await evaluate(`document.querySelector('#tab-chat').disabled`), false);
+  }
+  await evaluate(`[...document.querySelectorAll('.theme-card')].find(el => el.querySelector('.card-name').textContent === 'MOTD').click()`);
+  await evaluate('window.scrollTo(0, 0)');
   await capture('desktop-original');
   await evaluate(`[...document.querySelectorAll('.theme-card')].find(el => el.querySelector('.card-name').textContent === 'Retro Chat').click()`);
   await click('#tab-repeat');
@@ -133,9 +170,16 @@ try {
   await evaluate(`document.querySelector('#panel-chat').scrollIntoView()`);
   await capture('mobile-chat');
   assert.deepEqual(exceptions, []);
-  console.log('PASS: seven artworks, tabs, seam guides, three appearance modes, pure-black AMOLED, linear intensity, refresh, zoom, mobile layout, and no browser exceptions.');
+  console.log('PASS: gallery artworks, atlas previews, tabs, seam guides, three appearance modes, pure-black AMOLED, linear intensity, refresh, zoom, mobile layout, and no browser exceptions.');
+};
+try {
+  await Promise.race([run(), deadline]);
 } finally {
   clearTimeout(timeout);
   socket?.close();
-  browser.kill();
+  if (browser.exitCode === null) {
+    // Wait for Chromium to stop writing before removing its disposable profile.
+    await new Promise(resolve => { browser.once('exit', resolve); browser.kill(); });
+  }
+  await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
