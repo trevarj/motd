@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -45,7 +46,7 @@ import io.github.trevarj.motd.ui.theme.MotdLightScheme
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
-import io.github.trevarj.motd.ui.theme.neutralReadingInk
+import io.github.trevarj.motd.ui.theme.readingInk
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -242,17 +243,21 @@ class SettingsHomeAndPrimitivesUiTest {
     }
 
     @Test
-    @Config(qualifiers = "w411dp-h891dp")
-    fun ordinaryTextAndSettingsMetadataUseNeutralInkWithoutOverridingSemanticControls() {
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp")
+    fun ordinaryTextAndSettingsMetadataUseSelectedInkWithoutOverridingSemanticControls() {
         var preset by mutableStateOf(ColorThemePreset.AYU_LIGHT)
         var trueBlack by mutableStateOf(false)
+        var useThemeTextColors by mutableStateOf(false)
         var scheme: ColorScheme = MotdLightScheme
+        var disabledButtonInk = Color.Unspecified
         compose.setContent {
-            MotdTheme(dynamicColor = false, themePreset = preset, trueBlack = trueBlack) {
+            MotdTheme(dynamicColor = true, themePreset = preset, trueBlack = trueBlack, useThemeTextColors = useThemeTextColors) {
                 scheme = MaterialTheme.colorScheme
+                disabledButtonInk = ButtonDefaults.buttonColors().disabledContentColor
                 Surface {
                     Column {
                         Text("Ordinary body")
+                        Text("Background text", color = scheme.onBackground)
                         SettingsGroup(title = "Settings heading") {
                             SettingsValueRow("Ordinary title", "Current value", summary = "Supporting description")
                             SettingsActionRow("Ordinary action", onClick = {})
@@ -287,35 +292,59 @@ class SettingsHomeAndPrimitivesUiTest {
                 .single()
                 .layoutInput.style.color
         }
-        for ((theme, black) in listOf(ColorThemePreset.AYU_LIGHT to false, ColorThemePreset.AYU_DARK to false, ColorThemePreset.AYU_DARK to true)) {
-            compose.runOnIdle {
-                preset = theme
-                trueBlack = black
-            }
-            val surfaces =
+        for ((theme, black) in listOf(ColorThemePreset.AYU_LIGHT to false, ColorThemePreset.AYU_DARK to false, ColorThemePreset.AYU_DARK to true, ColorThemePreset.SYSTEM to false)) {
+            var staticBody = Color.Unspecified
+            for (themed in listOf(false, true)) {
+                compose.runOnIdle {
+                    preset = theme
+                    trueBlack = black
+                    useThemeTextColors = themed
+                }
+                compose.waitForIdle()
+                val surfaces =
+                    listOf(
+                        scheme.background,
+                        scheme.surface,
+                        scheme.surfaceContainerLowest,
+                        scheme.surfaceContainerLow,
+                        scheme.surfaceContainer,
+                        scheme.surfaceContainerHigh,
+                        scheme.surfaceContainerHighest,
+                        scheme.surfaceVariant,
+                    )
+                val neutral = ensureContrast(readingInk(scheme, useThemeTextColors = false), surfaces)
+                if (themed) {
+                    assertNotEquals("$theme trueBlack=$black ordinary text changes", staticBody, inkOf("Ordinary body"))
+                } else {
+                    staticBody = inkOf("Ordinary body")
+                    assertEquals("$theme static ink", neutral, staticBody)
+                    assertEquals(neutral, scheme.onBackground)
+                    assertEquals(neutral, scheme.onSurfaceVariant)
+                }
                 listOf(
-                    scheme.background,
-                    scheme.surface,
-                    scheme.surfaceContainerLowest,
-                    scheme.surfaceContainerLow,
-                    scheme.surfaceContainer,
-                    scheme.surfaceContainerHigh,
-                    scheme.surfaceContainerHighest,
-                    scheme.surfaceVariant,
-                )
-            val neutral = ensureContrast(neutralReadingInk(scheme), surfaces)
-            for (text in listOf("Ordinary body", "Settings heading", "Ordinary title", "Current value", "Supporting description", "Ordinary action", "Input text", "Input metadata", "Input placeholder")) {
-                assertEquals("$theme trueBlack=$black $text", neutral, inkOf(text))
+                    "Ordinary body" to scheme.onSurface,
+                    "Background text" to scheme.onBackground,
+                    "Settings heading" to scheme.onSurface,
+                    "Ordinary title" to scheme.onSurface,
+                    "Current value" to scheme.onSurfaceVariant,
+                    "Supporting description" to scheme.onSurfaceVariant,
+                    "Ordinary action" to scheme.onSurface,
+                    "Input text" to scheme.onSurface,
+                    "Input metadata" to scheme.onSurfaceVariant,
+                    "Input placeholder" to scheme.onSurfaceVariant,
+                ).forEach { (text, expected) ->
+                    assertEquals("$theme trueBlack=$black themed=$themed $text", expected, inkOf(text))
+                }
+                assertEquals("$theme destructive", scheme.error, inkOf("Destructive action"))
+                assertNotEquals("$theme error stays colored", neutral, inkOf("Destructive action"))
+                assertEquals("$theme filled action", scheme.onPrimary, inkOf("Filled action"))
+                assertTrue("$theme filled contrast", contrastRatio(inkOf("Filled action"), scheme.primary) >= 4.5)
+                assertEquals("$theme inverse content", scheme.inverseOnSurface, inkOf("Inverse content"))
+                assertTrue("$theme inverse contrast", contrastRatio(inkOf("Inverse content"), scheme.inverseSurface) >= 4.5)
+                assertEquals("$theme framework disabled action", disabledButtonInk, inkOf("Disabled action"))
+                assertEquals("$theme disabled choice", scheme.onSurface.copy(alpha = 0.38f), inkOf("Disabled choice"))
+                assertEquals("$theme disabled switch", scheme.onSurface.copy(alpha = 0.38f), inkOf("Disabled switch"))
             }
-            assertEquals("$theme destructive", scheme.error, inkOf("Destructive action"))
-            assertNotEquals("$theme error stays colored", neutral, inkOf("Destructive action"))
-            assertEquals("$theme filled action", scheme.onPrimary, inkOf("Filled action"))
-            assertTrue("$theme filled contrast", contrastRatio(inkOf("Filled action"), scheme.primary) >= 4.5)
-            assertEquals("$theme inverse content", scheme.inverseOnSurface, inkOf("Inverse content"))
-            assertTrue("$theme inverse contrast", contrastRatio(inkOf("Inverse content"), scheme.inverseSurface) >= 4.5)
-            assertEquals("$theme disabled action", scheme.onSurface.copy(alpha = 0.38f), inkOf("Disabled action"))
-            assertEquals("$theme disabled choice", scheme.onSurface.copy(alpha = 0.38f), inkOf("Disabled choice"))
-            assertEquals("$theme disabled switch", scheme.onSurface.copy(alpha = 0.38f), inkOf("Disabled switch"))
         }
     }
 

@@ -97,7 +97,7 @@ import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
-import io.github.trevarj.motd.ui.theme.neutralReadingInk
+import io.github.trevarj.motd.ui.theme.readingInk
 import kotlinx.coroutines.launch
 
 /** Stateful entry: wires the ViewModel and drives navigation/leave. */
@@ -888,7 +888,7 @@ private fun ChannelHeader(
                 if (topic != null) {
                     val scheme = MaterialTheme.colorScheme
                     val topicFill = scheme.background
-                    val readingInk = ensureContrast(neutralReadingInk(scheme), listOf(topicFill), MESSAGE_TEXT_CONTRAST)
+                    val readingInk = ensureContrast(readingInk(scheme), listOf(topicFill), MESSAGE_TEXT_CONTRAST)
                     Text(
                         text =
                             io.github.trevarj.motd.ui.components.linkifiedBody(

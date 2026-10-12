@@ -42,7 +42,7 @@ import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
-import io.github.trevarj.motd.ui.theme.neutralReadingInk
+import io.github.trevarj.motd.ui.theme.readingInk
 
 /** Alpha for the per-nick row background wash in COMPACT density: strong enough to band messages
  *  by speaker, faint enough to stay readable in light and dark themes. */
@@ -103,7 +103,7 @@ internal fun CompactMessageRow(
     // Self text stays on the default body color; others too (IRC is uniform). The nick carries color.
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
-    val codeColor = neutralReadingInk(MaterialTheme.colorScheme)
+    val codeColor = readingInk(MaterialTheme.colorScheme)
     val nickFontSize = MaterialTheme.typography.bodyMedium.fontSize
     // Friend highlight: a low-alpha primary background behind the nick, layered under the nick color.
     val friendTint = if (senderIsFriend) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Unspecified

@@ -178,7 +178,7 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
-import io.github.trevarj.motd.ui.theme.neutralReadingInk
+import io.github.trevarj.motd.ui.theme.readingInk
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -2214,7 +2214,7 @@ private fun ReplyBar(
 ) {
     val accent = LocalNickColors.current.nick(reply.sender, MaterialTheme.colorScheme.primary)
     val fill = MaterialTheme.colorScheme.surfaceContainerHigh
-    val bodyInk = neutralReadingInk(MaterialTheme.colorScheme)
+    val bodyInk = readingInk(MaterialTheme.colorScheme)
     val bodyColor = remember(bodyInk, fill) { ensureContrast(bodyInk, listOf(fill), MESSAGE_TEXT_CONTRAST) }
     Surface(
         modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 68.dp, top = 8.dp),

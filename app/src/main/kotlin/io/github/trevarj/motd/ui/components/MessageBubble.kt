@@ -107,7 +107,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.lottieStrokeColor
-import io.github.trevarj.motd.ui.theme.neutralReadingInk
+import io.github.trevarj.motd.ui.theme.readingInk
 import kotlin.math.roundToInt
 import java.text.DateFormat as JavaDateFormat
 
@@ -497,7 +497,7 @@ fun MessageBubble(
 
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
-    val codeColor = neutralReadingInk(MaterialTheme.colorScheme)
+    val codeColor = readingInk(MaterialTheme.colorScheme)
 
     val scheme = MaterialTheme.colorScheme
     val semantic = LocalMotdSemanticColors.current
@@ -519,7 +519,7 @@ fun MessageBubble(
         ) { messageBubbleRoleColors(scheme, isSelf, mentionHighlighted, kind, semantic) }
     val bubbleColor = bubbleRoles.container
     val textColor = bubbleRoles.content
-    val bodyInk = neutralReadingInk(scheme)
+    val bodyInk = readingInk(scheme)
     val bodyColor = remember(bodyInk, bubbleColor) { ensureContrast(bodyInk, listOf(bubbleColor), MESSAGE_TEXT_CONTRAST) }
     // Tighten the inner grouped edge while retaining the shared outer silhouette.
     val groupedCorner = spacing.bubbleGroupedCorner
@@ -826,7 +826,7 @@ private fun ComfortableActionBubble(
             messageBubbleRoleColors(scheme, isSelf, hasMention, MessageKind.ACTION, semanticColors)
         }
     val rowColor = roles.container
-    val bodyInk = neutralReadingInk(scheme)
+    val bodyInk = readingInk(scheme)
     val bodyColor = remember(bodyInk, rowColor) { ensureContrast(bodyInk, listOf(rowColor), MESSAGE_TEXT_CONTRAST) }
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
     val linkColor = roles.content
@@ -1076,7 +1076,7 @@ private fun ActionMessageRow(
             MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = ACTION_ROW_TINT_ALPHA)
         }
     val paintedRow = rowColor.compositeOver(MaterialTheme.colorScheme.background)
-    val bodyInk = neutralReadingInk(MaterialTheme.colorScheme)
+    val bodyInk = readingInk(MaterialTheme.colorScheme)
     val bodyColor = remember(bodyInk, paintedRow) { ensureContrast(bodyInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
     val linkColor = MaterialTheme.colorScheme.primary
@@ -1400,7 +1400,7 @@ private fun TwoLineMessageRow(
     val hideAvatar = avatarsHidden()
     val nameInk = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
-    val codeColor = neutralReadingInk(MaterialTheme.colorScheme)
+    val codeColor = readingInk(MaterialTheme.colorScheme)
     // Per-nick row wash (same treatment as COMPACT): a faint tint of the sender's own nick color
     // behind the whole row so runs of a nick's messages are trackable by speaker.
     val rowTint =
@@ -2182,7 +2182,7 @@ internal fun ReplyMiniBubble(
         MaterialTheme.colorScheme.surfaceContainerHighest
             .copy(alpha = 0.6f)
             .compositeOver(parentColor)
-    val bodyInk = neutralReadingInk(MaterialTheme.colorScheme)
+    val bodyInk = readingInk(MaterialTheme.colorScheme)
     val bodyColor = remember(bodyInk, previewColor) { ensureContrast(bodyInk, listOf(previewColor), MESSAGE_TEXT_CONTRAST) }
     val nameInk = nickColors.nick(reply.sender, MaterialTheme.colorScheme.onSurfaceVariant)
     val accent = remember(nameInk, previewColor) { ensureContrast(nameInk, listOf(previewColor), MESSAGE_TEXT_CONTRAST) }

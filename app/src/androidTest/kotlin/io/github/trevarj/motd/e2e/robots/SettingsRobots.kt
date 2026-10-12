@@ -2,10 +2,12 @@ package io.github.trevarj.motd.e2e.robots
 
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 
 internal class SettingsRobot(
@@ -30,6 +32,17 @@ internal class SettingsRobot(
     }
 
     fun appearance() = scrollToAndClick("settings_category_appearance")
+
+    fun selectThemeTextColors() {
+        awaitTag("settings_switch_theme_text_colors_row")
+        compose.onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true).performScrollTo()
+        turnOnPrefix("settings_switch_theme_text_colors_row")
+    }
+
+    fun assertThemeTextColorsEnabled() {
+        awaitTag("settings_switch_theme_text_colors_row")
+        compose.onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true).performScrollTo().assertIsOn()
+    }
 
     fun selectIrcSprites() {
         scrollToAndClick("settings_avatar_style_picker")

@@ -59,7 +59,7 @@ import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
-import io.github.trevarj.motd.ui.theme.neutralReadingInk
+import io.github.trevarj.motd.ui.theme.readingInk
 
 /**
  * Channel browser. LIST/ELIST-backed, scoped to [networkId].
@@ -310,7 +310,7 @@ private fun ChannelList(
 ) {
     val scheme = MaterialTheme.colorScheme
     val topicFill = ListItemDefaults.colors().containerColor.compositeOver(scheme.background)
-    val readingInk = ensureContrast(neutralReadingInk(scheme), listOf(topicFill), MESSAGE_TEXT_CONTRAST)
+    val readingInk = ensureContrast(readingInk(scheme), listOf(topicFill), MESSAGE_TEXT_CONTRAST)
     LazyColumn(Modifier.fillMaxSize()) {
         // Keyed by channel name for stable recomposition over large lists (cap 2000).
         items(listings, key = { it.name }) { listing ->

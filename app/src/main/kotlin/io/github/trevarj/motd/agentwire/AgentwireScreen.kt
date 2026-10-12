@@ -142,7 +142,7 @@ import io.github.trevarj.motd.ui.components.mircFormattedText
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.ensureContrast
-import io.github.trevarj.motd.ui.theme.neutralReadingInk
+import io.github.trevarj.motd.ui.theme.readingInk
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
@@ -1558,7 +1558,7 @@ internal fun AgentwireTimelineCard(
             if (!collapsible || expanded) {
                 item.body?.let { body ->
                     val assistant = item.kind.startsWith("assistant.")
-                    val bodyInk = if (assistant || item.kind == "user.prompt") neutralReadingInk(MaterialTheme.colorScheme) else Color.Unspecified
+                    val bodyInk = if (assistant || item.kind == "user.prompt") readingInk(MaterialTheme.colorScheme) else Color.Unspecified
                     val bodyColor =
                         remember(bodyInk, cardColor) {
                             if (bodyInk == Color.Unspecified) bodyInk else ensureContrast(bodyInk, listOf(cardColor), MESSAGE_TEXT_CONTRAST)

@@ -43,20 +43,23 @@ class LinkPreviewCardUiTest {
 
     @get:Rule val compose = createComposeRule()
 
-    @Test fun titlesDescriptionsAndTextExcerptsUseNeutralInkWhileSiteAndFailureStaySemantic() {
+    @Test fun titlesDescriptionsAndTextExcerptsFollowTextColorChoiceWhileSiteAndFailureStaySemantic() {
         val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
         val kind = mutableStateOf(LinkPreviewKind.TEXT)
         val contrastingFill = mutableStateOf(false)
         val urlTitle = mutableStateOf(false)
         val failed = mutableStateOf(false)
+        val useThemeTextColors = mutableStateOf(false)
         val url = "https://example.test/note"
         var fill = Color.Unspecified
         var siteInk = Color.Unspecified
         var errorInk = Color.Unspecified
+        var paletteReadingInk = Color.Unspecified
         var failedLabel = ""
         compose.setContent {
-            MotdTheme(dynamicColor = false, themePreset = preset.value) {
+            MotdTheme(dynamicColor = false, themePreset = preset.value, useThemeTextColors = useThemeTextColors.value) {
                 val scheme = MaterialTheme.colorScheme
+                paletteReadingInk = scheme.onBackground
                 val cardColor =
                     if (contrastingFill.value) {
                         if (preset.value == ColorThemePreset.AYU_LIGHT) Color(0xFF182836) else Color(0xFFF4E3D1)
@@ -91,29 +94,38 @@ class LinkPreviewCardUiTest {
             return layouts.single()
         }
         for (theme in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
-            val seed = if (theme == ColorThemePreset.AYU_LIGHT) Color(0xFF171717) else Color(0xFFF5F5F5)
-            for (previewKind in LinkPreviewKind.entries) {
-                for (contrasting in listOf(false, true)) {
-                    compose.runOnIdle {
-                        preset.value = theme
-                        kind.value = previewKind
-                        contrastingFill.value = contrasting
-                        urlTitle.value = previewKind == LinkPreviewKind.FILE
-                        failed.value = false
+            for (themed in listOf(false, true)) {
+                for (previewKind in LinkPreviewKind.entries) {
+                    for (contrasting in listOf(false, true)) {
+                        compose.runOnIdle {
+                            preset.value = theme
+                            useThemeTextColors.value = themed
+                            kind.value = previewKind
+                            contrastingFill.value = contrasting
+                            urlTitle.value = previewKind == LinkPreviewKind.FILE
+                            failed.value = false
+                        }
+                        compose.waitForIdle()
+                        val seed =
+                            when {
+                                themed -> paletteReadingInk
+                                theme == ColorThemePreset.AYU_LIGHT -> Color(0xFF171717)
+                                else -> Color(0xFFF5F5F5)
+                            }
+                        val title = layoutOf(if (previewKind == LinkPreviewKind.FILE) url else "Reading title")
+                        val description = layoutOf("Reading description\nsecond line")
+                        val label = "$theme themed=$themed $previewKind contrastingFill=$contrasting"
+                        val readingInk = ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST)
+                        assertEquals("$label title", readingInk, title.layoutInput.style.color)
+                        assertEquals("$label description", readingInk, description.layoutInput.style.color)
+                        assertEquals("$label site metadata", siteInk, layoutOf("example.test").layoutInput.style.color)
+                        assertEquals("$label text excerpt font", if (previewKind == LinkPreviewKind.TEXT) FontFamily.Monospace else FontFamily.Default, description.layoutInput.style.fontFamily)
+                        if (previewKind == LinkPreviewKind.TEXT) compose.onNodeWithTag("link_preview_text_body", useUnmergedTree = true).assertIsDisplayed()
                     }
-                    val title = layoutOf(if (previewKind == LinkPreviewKind.FILE) url else "Reading title")
-                    val description = layoutOf("Reading description\nsecond line")
-                    val label = "$theme $previewKind contrastingFill=$contrasting"
-                    val readingInk = ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST)
-                    assertEquals("$label title", readingInk, title.layoutInput.style.color)
-                    assertEquals("$label description", readingInk, description.layoutInput.style.color)
-                    assertEquals("$label site metadata", siteInk, layoutOf("example.test").layoutInput.style.color)
-                    assertEquals("$label text excerpt font", if (previewKind == LinkPreviewKind.TEXT) FontFamily.Monospace else FontFamily.Default, description.layoutInput.style.fontFamily)
-                    if (previewKind == LinkPreviewKind.TEXT) compose.onNodeWithTag("link_preview_text_body", useUnmergedTree = true).assertIsDisplayed()
                 }
+                compose.runOnIdle { failed.value = true }
+                assertEquals("$theme themed=$themed failure status", errorInk, layoutOf(failedLabel).layoutInput.style.color)
             }
-            compose.runOnIdle { failed.value = true }
-            assertEquals("$theme failure status", errorInk, layoutOf(failedLabel).layoutInput.style.color)
         }
     }
 

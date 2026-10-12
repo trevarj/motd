@@ -151,6 +151,7 @@ fun AppearanceSettingsScreen(
         onTrueBlack = viewModel::setTrueBlack,
         onFollowSystem = viewModel::setFollowSystem,
         onDynamicColor = viewModel::setDynamicColor,
+        onUseThemeTextColors = viewModel::setUseThemeTextColors,
         onLayoutDensity = viewModel::setLayoutDensity,
         onComposerStyle = viewModel::setComposerStyle,
         onFolderDisplayMode = viewModel::setFolderDisplayMode,
@@ -188,6 +189,7 @@ fun AppearanceSettingsContent(
     onTrueBlack: (Boolean) -> Unit,
     onFollowSystem: (Boolean) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
+    onUseThemeTextColors: (Boolean) -> Unit,
     onLayoutDensity: (LayoutDensity) -> Unit,
     onComposerStyle: (ComposerStyle) -> Unit,
     onFolderDisplayMode: (FolderDisplayMode) -> Unit,
@@ -327,6 +329,20 @@ fun AppearanceSettingsContent(
                     },
                     switchTag = "settings_switch_dynamic_color",
                     enabled = dynamicColorAvailable,
+                    modifier = targetModifier,
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.THEME_TEXT_COLORS.name) { targetModifier ->
+                SwitchRow(
+                    title = stringResource(R.string.settings_theme_text_colors),
+                    subtitle = stringResource(R.string.settings_theme_text_colors_desc),
+                    checked = appearance.useThemeTextColors,
+                    onCheckedChange = {
+                        previewAppearance = previewAppearance.copy(useThemeTextColors = it)
+                        onUseThemeTextColors(it)
+                    },
+                    switchTag = "settings_switch_theme_text_colors",
                     modifier = targetModifier,
                 )
             }
@@ -575,6 +591,7 @@ fun AppearanceSettingsContent(
             current = previewAppearance.theme,
             trueBlack = previewAppearance.trueBlack,
             dynamicColor = previewSettings.dynamicColor,
+            useThemeTextColors = previewAppearance.useThemeTextColors,
             onSelect = {
                 previewAppearance = previewAppearance.copy(theme = it)
                 onThemePreset(it)
@@ -661,6 +678,7 @@ private fun ChatLayoutPreview(
         trueBlack = appearance.trueBlack,
         dynamicColor = settings.dynamicColor,
         followSystem = appearance.followSystem,
+        useThemeTextColors = appearance.useThemeTextColors,
         layoutDensity = density,
         nickColorsEnabled = settings.nickColorsEnabled,
         nickColorPalette = settings.nickColorPalette,
@@ -763,6 +781,7 @@ private fun ComposerStylePreview(
         trueBlack = appearance.trueBlack,
         dynamicColor = settings.dynamicColor,
         followSystem = appearance.followSystem,
+        useThemeTextColors = appearance.useThemeTextColors,
         layoutDensity = settings.layoutDensity,
         nickColorsEnabled = settings.nickColorsEnabled,
         nickColorPalette = settings.nickColorPalette,
@@ -1166,6 +1185,7 @@ private fun ThemePickerSheet(
     current: ColorThemePreset,
     trueBlack: Boolean,
     dynamicColor: Boolean,
+    useThemeTextColors: Boolean,
     onSelect: (ColorThemePreset) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -1212,6 +1232,7 @@ private fun ThemePickerSheet(
                             current == mode,
                             trueBlack,
                             dynamicColor,
+                            useThemeTextColors,
                             onSelect,
                         )
                     }
@@ -1230,6 +1251,7 @@ private fun ThemeRadioRow(
     selected: Boolean,
     trueBlack: Boolean,
     dynamicColor: Boolean,
+    useThemeTextColors: Boolean,
     onSelect: (ColorThemePreset) -> Unit,
 ) {
     RadioRow(
@@ -1239,7 +1261,7 @@ private fun ThemeRadioRow(
         onClick = { onSelect(mode) },
         modifier = Modifier.testTag("settings_theme_${mode.name.lowercase()}"),
         trailing = {
-            MotdTheme(themePreset = mode, trueBlack = trueBlack, dynamicColor = dynamicColor) {
+            MotdTheme(themePreset = mode, trueBlack = trueBlack, dynamicColor = dynamicColor, useThemeTextColors = useThemeTextColors) {
                 val scheme = MaterialTheme.colorScheme
                 Surface(
                     color = scheme.background,
@@ -1509,6 +1531,7 @@ private fun AppearanceSettingsPreview() {
             onTrueBlack = {},
             onFollowSystem = {},
             onDynamicColor = {},
+            onUseThemeTextColors = {},
             onLayoutDensity = {},
             onComposerStyle = {},
             onFolderDisplayMode = {},
@@ -1544,6 +1567,7 @@ private fun AppearanceSettingsMinTextPreview() {
             onTrueBlack = {},
             onFollowSystem = {},
             onDynamicColor = {},
+            onUseThemeTextColors = {},
             onLayoutDensity = {},
             onComposerStyle = {},
             onFolderDisplayMode = {},
@@ -1579,6 +1603,7 @@ private fun AppearanceSettingsMaxTextPreview() {
             onTrueBlack = {},
             onFollowSystem = {},
             onDynamicColor = {},
+            onUseThemeTextColors = {},
             onLayoutDensity = {},
             onComposerStyle = {},
             onFolderDisplayMode = {},

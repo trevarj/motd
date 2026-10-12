@@ -16,6 +16,7 @@ internal val Context.appearanceDataStore by preferencesDataStore("appearance")
 private val THEME = stringPreferencesKey("theme_preset_v1")
 private val TRUE_BLACK = booleanPreferencesKey("true_black_v1")
 private val FOLLOW_SYSTEM = booleanPreferencesKey("follow_system_v1")
+private val USE_THEME_TEXT_COLORS = booleanPreferencesKey("use_theme_text_colors_v1")
 private val WALLPAPER = stringPreferencesKey("wallpaper_preset_v1")
 private val WALLPAPER_INTENSITY = intPreferencesKey("wallpaper_intensity_v1")
 private val WALLPAPER_IMAGE = stringPreferencesKey("wallpaper_local_image_v1")
@@ -81,6 +82,7 @@ class AppearancePrefsImpl
                         ),
                     trueBlack = storedTheme.trueBlack,
                     followSystem = prefs[FOLLOW_SYSTEM] ?: false,
+                    useThemeTextColors = prefs[USE_THEME_TEXT_COLORS] ?: false,
                     fontChoice =
                         prefs[FONT_CHOICE]?.let { runCatching { FontChoice.valueOf(it) }.getOrNull() }
                             ?: FontChoice.SYSTEM,
@@ -126,6 +128,10 @@ class AppearancePrefsImpl
 
         override suspend fun setFollowSystem(enabled: Boolean) {
             store.edit { it[FOLLOW_SYSTEM] = enabled }
+        }
+
+        override suspend fun setUseThemeTextColors(enabled: Boolean) {
+            store.edit { it[USE_THEME_TEXT_COLORS] = enabled }
         }
 
         override suspend fun setWallpaper(selection: WallpaperSelection) {

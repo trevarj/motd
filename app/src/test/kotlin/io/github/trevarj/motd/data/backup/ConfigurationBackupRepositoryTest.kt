@@ -407,6 +407,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setComposerStyle(ComposerStyle.COMPACT)
             appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.SQUARE)
             appearancePrefs.setChatShadowsEnabled(false)
+            appearancePrefs.setUseThemeTextColors(true)
             appearancePrefs.setLauncherIcon(LauncherIcon.GRUVBOX)
             appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, "12345678-1234-1234-1234-123456789abc.image"))
             // Only the display name travels; the font binary itself is not part of the backup payload.
@@ -427,6 +428,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setComposerStyle(ComposerStyle.COMFORTABLE)
             appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.ROUNDED)
             appearancePrefs.setChatShadowsEnabled(true)
+            appearancePrefs.setUseThemeTextColors(false)
             appearancePrefs.setLauncherIcon(LauncherIcon.DEFAULT)
             appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.MEMES, 20))
             appearancePrefs.setCustomFontName("")
@@ -442,6 +444,7 @@ class ConfigurationBackupRepositoryTest {
             assertEquals(ComposerStyle.COMPACT, config.composerStyle)
             assertEquals(BubbleCornerStyle.SQUARE, config.bubbleCornerStyle)
             assertEquals(false, config.chatShadowsEnabled)
+            assertEquals(true, config.useThemeTextColors)
             assertEquals(LauncherIcon.GRUVBOX, config.launcherIcon)
             assertEquals("Iosevka Term.ttf", config.customFontName)
             assertEquals(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73), config.wallpaper)
@@ -453,7 +456,7 @@ class ConfigurationBackupRepositoryTest {
         }
 
     @Test
-    fun olderAppearanceBackupDefaultsComposerStyleToComfortable() =
+    fun olderAppearanceBackupDefaultsComposerStyleAndTextColors() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()
             val appearancePrefs = AppearancePrefsImpl(context)
@@ -461,12 +464,18 @@ class ConfigurationBackupRepositoryTest {
             try {
                 val backup = repository(db)
                 appearancePrefs.setComposerStyle(ComposerStyle.COMPACT)
+                appearancePrefs.setUseThemeTextColors(true)
                 val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
-                val oldRaw = raw.replace(Regex(""",\s*"composerStyle"\s*:\s*"COMPACT""""), "")
+                val oldRaw =
+                    raw
+                        .replace(Regex(""",\s*"composerStyle"\s*:\s*"COMPACT""""), "")
+                        .replace(Regex(""",\s*"useThemeTextColors"\s*:\s*true"""), "")
                 assertFalse(oldRaw.contains("composerStyle"))
+                assertFalse(oldRaw.contains("useThemeTextColors"))
 
                 backup.import(oldRaw, importMode = BackupImportMode.MERGE)
                 assertEquals(ComposerStyle.COMFORTABLE, appearancePrefs.config.first().composerStyle)
+                assertEquals(false, appearancePrefs.config.first().useThemeTextColors)
 
                 val withoutAppearance =
                     raw.replace(
@@ -475,10 +484,13 @@ class ConfigurationBackupRepositoryTest {
                     )
                 assertFalse(withoutAppearance.contains("\"appearance\""))
                 appearancePrefs.setComposerStyle(ComposerStyle.LARGE)
+                appearancePrefs.setUseThemeTextColors(true)
                 backup.import(withoutAppearance, importMode = BackupImportMode.MERGE)
                 assertEquals(ComposerStyle.LARGE, appearancePrefs.config.first().composerStyle)
+                assertEquals(true, appearancePrefs.config.first().useThemeTextColors)
             } finally {
                 appearancePrefs.setComposerStyle(ComposerStyle.COMFORTABLE)
+                appearancePrefs.setUseThemeTextColors(false)
                 db.close()
             }
         }

@@ -67,6 +67,7 @@ enum class SettingsTarget {
     FOLLOW_SYSTEM,
     TRUE_BLACK,
     DYNAMIC_COLOR,
+    THEME_TEXT_COLORS,
     NICK_COLORS,
     NICK_PALETTE,
     NICK_OVERRIDES,

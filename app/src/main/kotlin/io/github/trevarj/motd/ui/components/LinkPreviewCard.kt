@@ -53,7 +53,7 @@ import io.github.trevarj.motd.data.repo.LinkPreviewKind
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
-import io.github.trevarj.motd.ui.theme.neutralReadingInk
+import io.github.trevarj.motd.ui.theme.readingInk
 
 internal val LocalLinkPreviewAwaiting = staticCompositionLocalOf { false }
 internal val LocalLinkPreviewFailed = staticCompositionLocalOf { false }
@@ -165,7 +165,7 @@ private fun LinkPreviewContent(
     onClick: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val readingInk = ensureContrast(neutralReadingInk(scheme), listOf(scheme.surfaceContainerHighest.compositeOver(scheme.background)), MESSAGE_TEXT_CONTRAST)
+    val readingInk = ensureContrast(readingInk(scheme), listOf(scheme.surfaceContainerHighest.compositeOver(scheme.background)), MESSAGE_TEXT_CONTRAST)
     Row(
         modifier =
             Modifier

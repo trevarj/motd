@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.theme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -11,6 +12,7 @@ import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.isDark
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -35,9 +37,22 @@ private val MotdDarkRaw =
 
 internal val MotdLightScheme: ColorScheme = accessibleColorScheme(MotdLightRaw, dark = false)
 internal val MotdDarkScheme: ColorScheme = accessibleColorScheme(MotdDarkRaw, dark = true)
+internal val MotdLightThemeTextScheme: ColorScheme = accessibleColorScheme(MotdLightRaw, dark = false, useThemeTextColors = true)
+internal val MotdDarkThemeTextScheme: ColorScheme = accessibleColorScheme(MotdDarkRaw, dark = true, useThemeTextColors = true)
 
-/** Neutral app ink follows the applied theme; reading renderers still fit it to their actual fill. */
-internal fun neutralReadingInk(scheme: ColorScheme): Color = if (scheme.background.luminance() < 0.5f) Color(0xFFF5F5F5) else Color(0xFF171717)
+internal val LocalUseThemeTextColors = staticCompositionLocalOf { false }
+
+/** Static ink follows the applied light/dark canvas, independently of its palette's text hues. */
+private fun staticTextInk(scheme: ColorScheme): Color = if (scheme.background.luminance() < 0.5f) Color(0xFFF5F5F5) else Color(0xFF171717)
+
+/** Reading renderers fit the selected ink to their actual fill, not just the theme canvas. */
+internal fun readingInk(
+    scheme: ColorScheme,
+    useThemeTextColors: Boolean,
+): Color = if (useThemeTextColors) scheme.onBackground else staticTextInk(scheme)
+
+@Composable
+internal fun readingInk(scheme: ColorScheme): Color = readingInk(scheme, LocalUseThemeTextColors.current)
 
 internal fun contrastRatio(
     a: Color,
@@ -121,6 +136,7 @@ private fun ensureContainerContrast(
 internal fun accessibleColorScheme(
     raw: ColorScheme,
     dark: Boolean,
+    useThemeTextColors: Boolean = false,
 ): ColorScheme {
     val surfaceContainerLow =
         ensureContainerContrast(
@@ -168,7 +184,7 @@ internal fun accessibleColorScheme(
             surfaceContainerHighest,
             surfaceVariant,
         )
-    val onSurface = ensureContrast(neutralReadingInk(raw), neutralSurfaces)
+    val onSurface = ensureContrast(staticTextInk(raw), neutralSurfaces)
     val primary = ensureContrast(raw.primary, neutralSurfaces)
     val secondary = ensureContrast(raw.secondary, neutralSurfaces)
     val tertiary = ensureContrast(raw.tertiary, neutralSurfaces)
@@ -207,11 +223,11 @@ internal fun accessibleColorScheme(
         tertiaryContainer = tertiaryContainer,
         onTertiaryContainer = ensureContrast(onSurface, listOf(tertiaryContainer)),
         background = raw.background,
-        onBackground = onSurface,
+        onBackground = if (useThemeTextColors) ensureContrast(raw.onBackground, neutralSurfaces) else onSurface,
         surface = raw.surface,
-        onSurface = onSurface,
+        onSurface = if (useThemeTextColors) ensureContrast(raw.onSurface, neutralSurfaces) else onSurface,
         surfaceVariant = surfaceVariant,
-        onSurfaceVariant = onSurface,
+        onSurfaceVariant = if (useThemeTextColors) ensureContrast(raw.onSurfaceVariant, neutralSurfaces) else onSurface,
         surfaceContainerLow = surfaceContainerLow,
         surfaceContainer = surfaceContainer,
         surfaceContainerHigh = surfaceContainerHigh,
@@ -232,44 +248,54 @@ internal fun accessibleColorScheme(
     )
 }
 
-private val FixedSchemes: Map<ColorThemePreset, ColorScheme> by lazy {
+private val RawFixedSchemes: Map<ColorThemePreset, ColorScheme> by lazy {
     mapOf(
-        ColorThemePreset.AYU_DARK to accessibleColorScheme(AyuDarkScheme, true),
-        ColorThemePreset.AYU_LIGHT to accessibleColorScheme(AyuLightScheme, false),
-        ColorThemePreset.AYU_MIRAGE to accessibleColorScheme(AyuMirageScheme, true),
-        ColorThemePreset.CATPPUCCIN_LATTE to accessibleColorScheme(CatppuccinLatteScheme, false),
-        ColorThemePreset.CATPPUCCIN_MOCHA to accessibleColorScheme(CatppuccinMochaScheme, true),
-        ColorThemePreset.DRACULA to accessibleColorScheme(DraculaScheme, true),
-        ColorThemePreset.EVERFOREST_DARK to accessibleColorScheme(EverforestDarkScheme, true),
-        ColorThemePreset.EVERFOREST_LIGHT to accessibleColorScheme(EverforestLightScheme, false),
-        ColorThemePreset.GRUVBOX_DARK to accessibleColorScheme(GruvboxDarkScheme, true),
-        ColorThemePreset.GRUVBOX_LIGHT to accessibleColorScheme(GruvboxLightScheme, false),
-        ColorThemePreset.KANAGAWA_DRAGON to accessibleColorScheme(KanagawaDragonScheme, true),
-        ColorThemePreset.KANAGAWA_LOTUS to accessibleColorScheme(KanagawaLotusScheme, false),
-        ColorThemePreset.KANAGAWA_WAVE to accessibleColorScheme(KanagawaWaveScheme, true),
-        ColorThemePreset.MODUS_OPERANDI to accessibleColorScheme(ModusOperandiScheme, false),
-        ColorThemePreset.MODUS_VIVENDI to accessibleColorScheme(ModusVivendiScheme, true),
-        ColorThemePreset.MODUS_OPERANDI_TINTED to accessibleColorScheme(ModusOperandiTintedScheme, false),
-        ColorThemePreset.MODUS_VIVENDI_TINTED to accessibleColorScheme(ModusVivendiTintedScheme, true),
-        ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA to accessibleColorScheme(ModusOperandiDeuteranopiaScheme, false),
-        ColorThemePreset.MODUS_VIVENDI_DEUTERANOPIA to accessibleColorScheme(ModusVivendiDeuteranopiaScheme, true),
-        ColorThemePreset.MODUS_OPERANDI_TRITANOPIA to accessibleColorScheme(ModusOperandiTritanopiaScheme, false),
-        ColorThemePreset.MODUS_VIVENDI_TRITANOPIA to accessibleColorScheme(ModusVivendiTritanopiaScheme, true),
-        ColorThemePreset.MONOKAI to accessibleColorScheme(MonokaiScheme, true),
-        ColorThemePreset.NORD to accessibleColorScheme(NordScheme, true),
-        ColorThemePreset.NORD_LIGHT to accessibleColorScheme(NordLightScheme, false),
-        ColorThemePreset.ONE_DARK to accessibleColorScheme(OneDarkScheme, true),
-        ColorThemePreset.ROSE_PINE to accessibleColorScheme(RosePineScheme, true),
-        ColorThemePreset.ROSE_PINE_DAWN to accessibleColorScheme(RosePineDawnScheme, false),
-        ColorThemePreset.ROSE_PINE_MOON to accessibleColorScheme(RosePineMoonScheme, true),
-        ColorThemePreset.SOLARIZED_DARK to accessibleColorScheme(SolarizedDarkScheme, true),
-        ColorThemePreset.SOLARIZED_LIGHT to accessibleColorScheme(SolarizedLightScheme, false),
-        ColorThemePreset.TOKYO_NIGHT to accessibleColorScheme(TokyoNightScheme, true),
-        ColorThemePreset.ZENBURN to accessibleColorScheme(ZenburnScheme, true),
+        ColorThemePreset.AYU_DARK to AyuDarkScheme,
+        ColorThemePreset.AYU_LIGHT to AyuLightScheme,
+        ColorThemePreset.AYU_MIRAGE to AyuMirageScheme,
+        ColorThemePreset.CATPPUCCIN_LATTE to CatppuccinLatteScheme,
+        ColorThemePreset.CATPPUCCIN_MOCHA to CatppuccinMochaScheme,
+        ColorThemePreset.DRACULA to DraculaScheme,
+        ColorThemePreset.EVERFOREST_DARK to EverforestDarkScheme,
+        ColorThemePreset.EVERFOREST_LIGHT to EverforestLightScheme,
+        ColorThemePreset.GRUVBOX_DARK to GruvboxDarkScheme,
+        ColorThemePreset.GRUVBOX_LIGHT to GruvboxLightScheme,
+        ColorThemePreset.KANAGAWA_DRAGON to KanagawaDragonScheme,
+        ColorThemePreset.KANAGAWA_LOTUS to KanagawaLotusScheme,
+        ColorThemePreset.KANAGAWA_WAVE to KanagawaWaveScheme,
+        ColorThemePreset.MODUS_OPERANDI to ModusOperandiScheme,
+        ColorThemePreset.MODUS_VIVENDI to ModusVivendiScheme,
+        ColorThemePreset.MODUS_OPERANDI_TINTED to ModusOperandiTintedScheme,
+        ColorThemePreset.MODUS_VIVENDI_TINTED to ModusVivendiTintedScheme,
+        ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA to ModusOperandiDeuteranopiaScheme,
+        ColorThemePreset.MODUS_VIVENDI_DEUTERANOPIA to ModusVivendiDeuteranopiaScheme,
+        ColorThemePreset.MODUS_OPERANDI_TRITANOPIA to ModusOperandiTritanopiaScheme,
+        ColorThemePreset.MODUS_VIVENDI_TRITANOPIA to ModusVivendiTritanopiaScheme,
+        ColorThemePreset.MONOKAI to MonokaiScheme,
+        ColorThemePreset.NORD to NordScheme,
+        ColorThemePreset.NORD_LIGHT to NordLightScheme,
+        ColorThemePreset.ONE_DARK to OneDarkScheme,
+        ColorThemePreset.ROSE_PINE to RosePineScheme,
+        ColorThemePreset.ROSE_PINE_DAWN to RosePineDawnScheme,
+        ColorThemePreset.ROSE_PINE_MOON to RosePineMoonScheme,
+        ColorThemePreset.SOLARIZED_DARK to SolarizedDarkScheme,
+        ColorThemePreset.SOLARIZED_LIGHT to SolarizedLightScheme,
+        ColorThemePreset.TOKYO_NIGHT to TokyoNightScheme,
+        ColorThemePreset.ZENBURN to ZenburnScheme,
     )
 }
 
-internal fun fixedThemeScheme(theme: ColorThemePreset): ColorScheme? = FixedSchemes[theme]
+private val FixedSchemes by lazy {
+    RawFixedSchemes.mapValues { (preset, raw) -> accessibleColorScheme(raw, preset.isDark) }
+}
+private val ThemeTextFixedSchemes by lazy {
+    RawFixedSchemes.mapValues { (preset, raw) -> accessibleColorScheme(raw, preset.isDark, useThemeTextColors = true) }
+}
+
+internal fun fixedThemeScheme(
+    theme: ColorThemePreset,
+    useThemeTextColors: Boolean = false,
+): ColorScheme? = if (useThemeTextColors) ThemeTextFixedSchemes[theme] else FixedSchemes[theme]
 
 private data class Hsl(
     val hue: Float,
@@ -375,15 +401,17 @@ internal fun semanticColors(
     }
     val (success, successContainer) = family(if (dark) Color(0xFF6DD58C) else Color(0xFF147D3F))
     val (warning, warningContainer) = family(if (dark) Color(0xFFFFB95C) else Color(0xFF8A4F00))
+    // The inverse fill retains the normalized neutral ink, even when ordinary text uses palette hues.
+    val containerInk = scheme.inverseSurface
     return MotdSemanticColors(
         success = success,
         onSuccess = bestOnColor(success),
         successContainer = successContainer,
-        onSuccessContainer = ensureContrast(scheme.onSurface, listOf(successContainer)),
+        onSuccessContainer = ensureContrast(containerInk, listOf(successContainer)),
         warning = warning,
         onWarning = bestOnColor(warning),
         warningContainer = warningContainer,
-        onWarningContainer = ensureContrast(scheme.onSurface, listOf(warningContainer)),
+        onWarningContainer = ensureContrast(containerInk, listOf(warningContainer)),
     )
 }
 

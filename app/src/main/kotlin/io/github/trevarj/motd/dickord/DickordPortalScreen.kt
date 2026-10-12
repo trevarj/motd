@@ -101,7 +101,7 @@ import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.ensureContrast
-import io.github.trevarj.motd.ui.theme.neutralReadingInk
+import io.github.trevarj.motd.ui.theme.readingInk
 
 private val noRemoteAvatars = RemoteAvatarState()
 
@@ -704,7 +704,7 @@ private fun DickordChannelRow(
     val badges = chatListBadgeState(row)
     val scheme = MaterialTheme.colorScheme
     val rowColor = if (selected) scheme.secondaryContainer else Color.Transparent
-    val readingInk = ensureContrast(neutralReadingInk(scheme), listOf(rowColor.compositeOver(scheme.surface)), MESSAGE_TEXT_CONTRAST)
+    val readingInk = ensureContrast(readingInk(scheme), listOf(rowColor.compositeOver(scheme.surface)), MESSAGE_TEXT_CONTRAST)
     Row(
         modifier =
             Modifier

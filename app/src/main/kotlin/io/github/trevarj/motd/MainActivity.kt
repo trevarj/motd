@@ -186,6 +186,7 @@ class MainActivity :
                 trueBlack = appearance.trueBlack,
                 dynamicColor = settings.dynamicColor,
                 followSystem = appearance.followSystem,
+                useThemeTextColors = appearance.useThemeTextColors,
                 layoutDensity = settings.layoutDensity,
                 nickColorsEnabled = settings.nickColorsEnabled,
                 nickColorPalette = settings.nickColorPalette,

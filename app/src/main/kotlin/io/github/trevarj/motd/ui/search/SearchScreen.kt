@@ -101,7 +101,7 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
-import io.github.trevarj.motd.ui.theme.neutralReadingInk
+import io.github.trevarj.motd.ui.theme.readingInk
 
 internal fun SearchUiState.serverTranslationBody(key: String): String? {
     val results = server as? ServerSearchState.Results ?: return null
@@ -649,9 +649,9 @@ private fun SearchRow(
     val displaySender = dickordNickLabel(sender, LocalDickordLabsEnabled.current)
     val scheme = MaterialTheme.colorScheme
     val rowFill = scheme.surfaceContainerLow.compositeOver(scheme.background)
-    val readingInk = ensureContrast(neutralReadingInk(scheme), listOf(rowFill), MESSAGE_TEXT_CONTRAST)
+    val readingInk = ensureContrast(readingInk(scheme), listOf(rowFill), MESSAGE_TEXT_CONTRAST)
     val highlightColor = LocalMotdSemanticColors.current.warningContainer
-    val highlightInk = ensureContrast(neutralReadingInk(scheme), listOf(highlightColor.compositeOver(rowFill)), MESSAGE_TEXT_CONTRAST)
+    val highlightInk = ensureContrast(readingInk(scheme), listOf(highlightColor.compositeOver(rowFill)), MESSAGE_TEXT_CONTRAST)
     Row(
         modifier =
             Modifier

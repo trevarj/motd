@@ -542,6 +542,7 @@ class ConfigurationBackupRepositoryImpl
                 appearancePrefs.setTheme(it.theme)
                 appearancePrefs.setTrueBlack(it.trueBlack)
                 appearancePrefs.setFollowSystem(it.followSystem)
+                appearancePrefs.setUseThemeTextColors(it.useThemeTextColors)
                 appearancePrefs.setWallpaper(it.wallpaper)
                 appearancePrefs.setUiFontScale(it.uiFontScalePercent)
                 appearancePrefs.setConversationFontScale(it.conversationFontScalePercent)

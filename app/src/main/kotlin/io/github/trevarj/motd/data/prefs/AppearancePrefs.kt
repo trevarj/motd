@@ -218,6 +218,7 @@ data class AppearanceConfig(
     // binary itself lives in CustomFontStore, not DataStore or backups.
     val customFontName: String = "",
     val composerStyle: ComposerStyle = ComposerStyle.COMFORTABLE,
+    val useThemeTextColors: Boolean = false,
 )
 
 interface AppearancePrefs {
@@ -228,6 +229,8 @@ interface AppearancePrefs {
     suspend fun setTrueBlack(enabled: Boolean)
 
     suspend fun setFollowSystem(enabled: Boolean)
+
+    suspend fun setUseThemeTextColors(enabled: Boolean)
 
     suspend fun setWallpaper(selection: WallpaperSelection)
 

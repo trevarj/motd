@@ -78,6 +78,8 @@ class AppearanceSettingsViewModel
 
         fun setFollowSystem(value: Boolean) = launch { appearancePrefs.setFollowSystem(value) }
 
+        fun setUseThemeTextColors(value: Boolean) = launch { appearancePrefs.setUseThemeTextColors(value) }
+
         fun setDynamicColor(value: Boolean) = launch { settingsRepository.setDynamicColor(value) }
 
         fun setLayoutDensity(value: LayoutDensity) = launch { settingsRepository.setLayoutDensity(value) }

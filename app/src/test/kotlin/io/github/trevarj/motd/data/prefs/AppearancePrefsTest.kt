@@ -38,6 +38,7 @@ class AppearancePrefsTest {
         assertEquals(MessageSpacing.DEFAULT, AppearanceConfig().messageSpacing)
         assertEquals(BubbleCornerStyle.ROUNDED, AppearanceConfig().bubbleCornerStyle)
         assertEquals(false, AppearanceConfig().chatShadowsEnabled)
+        assertEquals(false, AppearanceConfig().useThemeTextColors)
         assertEquals(LauncherIcon.DEFAULT, AppearanceConfig().launcherIcon)
         assertEquals("", AppearanceConfig().customFontName)
     }
@@ -112,6 +113,26 @@ class AppearancePrefsTest {
         assertEquals(false, Json.decodeFromString<AppearanceConfig>("""{}""").chatShadowsEnabled)
         assertEquals(true, Json.decodeFromString<AppearanceConfig>("""{"chatShadowsEnabled":true}""").chatShadowsEnabled)
     }
+
+    @Test fun themeTextColorsDefaultsToStaticAndPersistsAfterReload() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val key = booleanPreferencesKey("use_theme_text_colors_v1")
+            context.appearanceDataStore.edit { it.remove(key) }
+            try {
+                assertEquals(false, prefs.config.first().useThemeTextColors)
+                assertEquals(false, Json.decodeFromString<AppearanceConfig>("""{}""").useThemeTextColors)
+                prefs.setUseThemeTextColors(true)
+                assertEquals(true, AppearancePrefsImpl(context).config.first().useThemeTextColors)
+                assertEquals(true, context.appearanceDataStore.data.first()[key])
+                val saved = jsonWithDefaults.encodeToString(prefs.config.first())
+                assertEquals(true, Json.decodeFromString<AppearanceConfig>(saved).useThemeTextColors)
+                prefs.setUseThemeTextColors(false)
+                assertEquals(false, AppearancePrefsImpl(context).config.first().useThemeTextColors)
+            } finally {
+                context.appearanceDataStore.edit { it.remove(key) }
+            }
+        }
 
     @Test fun garbageStoredEnumStrings_decodeToDefaults() =
         runTest {

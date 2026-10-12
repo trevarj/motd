@@ -86,7 +86,7 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
-import io.github.trevarj.motd.ui.theme.neutralReadingInk
+import io.github.trevarj.motd.ui.theme.readingInk
 
 internal data class ChatListBadgeState(
     val mutedActivity: Int? = null,
@@ -248,7 +248,7 @@ fun ChatListRowItem(
         label = "chatlist_row_container",
     )
     val paintedRow = rowContainer.compositeOver(MaterialTheme.colorScheme.surface)
-    val readingInk = neutralReadingInk(MaterialTheme.colorScheme)
+    val readingInk = readingInk(MaterialTheme.colorScheme)
     val readingColor = remember(readingInk, paintedRow) { ensureContrast(readingInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
     val activeIndicator = MaterialTheme.colorScheme.primary
     val hideAvatar = avatarsHidden()

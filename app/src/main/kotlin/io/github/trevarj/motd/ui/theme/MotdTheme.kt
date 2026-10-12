@@ -179,6 +179,7 @@ fun MotdTheme(
     trueBlack: Boolean = false,
     dynamicColor: Boolean = true,
     followSystem: Boolean = false,
+    useThemeTextColors: Boolean = false,
     // Round 4; all defaulted so existing call sites (incl. previews) stay unchanged.
     layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
     nickColorsEnabled: Boolean = true,
@@ -206,22 +207,23 @@ fun MotdTheme(
     val dark = if (resolvedPreset == ColorThemePreset.SYSTEM) systemDark else resolvedPreset.isDark
     val effectivePreset = if (resolvedPreset == ColorThemePreset.AMOLED) ColorThemePreset.DARK else resolvedPreset
     val resolvedScheme =
-        fixedThemeScheme(effectivePreset) ?: when {
+        fixedThemeScheme(effectivePreset, useThemeTextColors) ?: when {
             // Material You dynamic color, API 31+.
             resolvedPreset == ColorThemePreset.SYSTEM &&
                 dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
                 accessibleColorScheme(
                     if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context),
                     dark,
+                    useThemeTextColors,
                 )
             }
 
             dark -> {
-                MotdDarkScheme
+                if (useThemeTextColors) MotdDarkThemeTextScheme else MotdDarkScheme
             }
 
             else -> {
-                MotdLightScheme
+                if (useThemeTextColors) MotdLightThemeTextScheme else MotdLightScheme
             }
         }
     val useTrueBlack = dark && (trueBlack || themePreset == ColorThemePreset.AMOLED)
@@ -280,6 +282,7 @@ fun MotdTheme(
         typography = typography,
     ) {
         CompositionLocalProvider(
+            LocalUseThemeTextColors provides useThemeTextColors,
             LocalSpacing provides spacingFor(layoutDensity, messageSpacing, bubbleCornerStyle),
             LocalChatShadowsEnabled provides chatShadowsEnabled,
             LocalNickColors provides

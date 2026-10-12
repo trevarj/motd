@@ -9,12 +9,14 @@ import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.ui.theme.MotdDarkScheme
+import io.github.trevarj.motd.ui.theme.MotdDarkThemeTextScheme
 import io.github.trevarj.motd.ui.theme.MotdLightScheme
+import io.github.trevarj.motd.ui.theme.MotdLightThemeTextScheme
 import io.github.trevarj.motd.ui.theme.accessibleColorScheme
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.fixedThemeScheme
-import io.github.trevarj.motd.ui.theme.neutralReadingInk
+import io.github.trevarj.motd.ui.theme.readingInk
 import io.github.trevarj.motd.ui.theme.semanticColors
 import io.github.trevarj.motd.ui.theme.withTrueBlackSurfaces
 import org.junit.Assert.assertEquals
@@ -58,16 +60,24 @@ class MessageBubbleLayoutTest {
         }
     }
 
-    @Test fun readingInk_usesAppliedThemeAndFitsActualFills() {
-        messageContrastSchemes().forEach { (name, scheme, dark) ->
-            val seed = neutralReadingInk(scheme)
-            assertEquals(name, if (dark) Color(0xFFF5F5F5) else Color(0xFF171717), seed)
-            val semantic = semanticColors(scheme, dark)
-            for (kind in listOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)) {
-                for (self in listOf(false, true)) {
-                    for (mention in listOf(false, true)) {
-                        val fill = messageBubbleRoleColors(scheme, self, mention, kind, semantic).container
-                        assertReadingContrast("$name neutral $kind self=$self mention=$mention", ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST), fill)
+    @Test fun readingInk_usesSelectedTextPolicyAndFitsActualFills() {
+        for (useThemeTextColors in listOf(false, true)) {
+            messageContrastSchemes(useThemeTextColors).forEach { (name, scheme, dark) ->
+                val seed = readingInk(scheme, useThemeTextColors)
+                val expected =
+                    when {
+                        useThemeTextColors -> scheme.onBackground
+                        dark -> Color(0xFFF5F5F5)
+                        else -> Color(0xFF171717)
+                    }
+                assertEquals(name, expected, seed)
+                val semantic = semanticColors(scheme, dark)
+                for (kind in listOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)) {
+                    for (self in listOf(false, true)) {
+                        for (mention in listOf(false, true)) {
+                            val fill = messageBubbleRoleColors(scheme, self, mention, kind, semantic).container
+                            assertReadingContrast("$name themed=$useThemeTextColors $kind self=$self mention=$mention", ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST), fill)
+                        }
                     }
                 }
             }
@@ -81,15 +91,18 @@ class MessageBubbleLayoutTest {
         assertEquals(fill, role.container)
         assertTrue(contrastRatio(Color.Black, fill) < 7.0 && contrastRatio(Color.White, fill) < 7.0)
         assertTrue(contrastRatio(role.content, fill) >= 4.5)
-        assertEquals(Color.Black, ensureContrast(neutralReadingInk(scheme), listOf(fill), MESSAGE_TEXT_CONTRAST))
+        assertEquals(Color.Black, ensureContrast(readingInk(scheme, useThemeTextColors = false), listOf(fill), MESSAGE_TEXT_CONTRAST))
     }
 }
 
-internal fun messageContrastSchemes(): List<Triple<String, ColorScheme, Boolean>> {
+internal fun messageContrastSchemes(useThemeTextColors: Boolean = false): List<Triple<String, ColorScheme, Boolean>> {
     val fixed =
-        listOf(Triple("Light", MotdLightScheme, false), Triple("Dark", MotdDarkScheme, true)) +
+        listOf(
+            Triple("Light", if (useThemeTextColors) MotdLightThemeTextScheme else MotdLightScheme, false),
+            Triple("Dark", if (useThemeTextColors) MotdDarkThemeTextScheme else MotdDarkScheme, true),
+        ) +
             ColorThemePreset.entries.mapNotNull { preset ->
-                fixedThemeScheme(preset)?.let { Triple(preset.name, it, preset.isDark) }
+                fixedThemeScheme(preset, useThemeTextColors)?.let { Triple(preset.name, it, preset.isDark) }
             }
     // Representative Material You roles, normalized at the same boundary as Android dynamic colors.
     val dynamic =
@@ -101,6 +114,7 @@ internal fun messageContrastSchemes(): List<Triple<String, ColorScheme, Boolean>
                         primary = Color(0xFF4D662B),
                         primaryContainer = Color(0xFFCDEDA3),
                         background = Color(0xFFF7FAEF),
+                        onBackground = Color(0xFF1B1C17),
                         surface = Color(0xFFF7FAEF),
                         surfaceVariant = Color(0xFFE1E4D5),
                         surfaceContainerHigh = Color(0xFFE6E9DF),
@@ -108,6 +122,7 @@ internal fun messageContrastSchemes(): List<Triple<String, ColorScheme, Boolean>
                         onSurfaceVariant = Color(0xFF44483C),
                     ),
                     dark = false,
+                    useThemeTextColors = useThemeTextColors,
                 ),
                 false,
             ),
@@ -119,12 +134,14 @@ internal fun messageContrastSchemes(): List<Triple<String, ColorScheme, Boolean>
                         primaryContainer = Color(0xFF4F378A),
                         background = Color(0xFF14121B),
                         surface = Color(0xFF14121B),
+                        onBackground = Color(0xFFE6E0E9),
                         surfaceVariant = Color(0xFF49454F),
                         surfaceContainerHigh = Color(0xFF2B2930),
                         onSurface = Color(0xFFE6E0E9),
                         onSurfaceVariant = Color(0xFFCAC4D0),
                     ),
                     dark = true,
+                    useThemeTextColors = useThemeTextColors,
                 ),
                 true,
             ),

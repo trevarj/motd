@@ -180,6 +180,72 @@ class ThemeCatalogTest {
         }
     }
 
+    @Test fun themeTextRoles_restoreRawPaletteHuesBeforeContrastAdaptation() {
+        for ((preset, raw) in listOf(ColorThemePreset.GRUVBOX_LIGHT to GruvboxLightScheme, ColorThemePreset.GRUVBOX_DARK to GruvboxDarkScheme)) {
+            val themed = requireNotNull(fixedThemeScheme(preset, useThemeTextColors = true))
+            val static = requireNotNull(fixedThemeScheme(preset))
+            val surfaces = neutralSurfaces(themed)
+            assertEquals("$preset background", ensureContrast(raw.onBackground, surfaces), themed.onBackground)
+            assertEquals("$preset surface", ensureContrast(raw.onSurface, surfaces), themed.onSurface)
+            assertEquals("$preset supporting", ensureContrast(raw.onSurfaceVariant, surfaces), themed.onSurfaceVariant)
+            assertNotEquals("$preset ordinary text changes", static.onSurface, themed.onSurface)
+            assertNotEquals("$preset reading text changes", readingInk(static, false), readingInk(themed, true))
+        }
+    }
+
+    @Test fun bothTextModes_keepContrastAndLeaveFillsInverseAndSemanticColorsUnchanged() {
+        val static = messageContrastSchemes()
+        val themed = messageContrastSchemes(useThemeTextColors = true)
+        assertEquals(static.map { it.first }, themed.map { it.first })
+        static.zip(themed).forEach { (source, selected) ->
+            val (name, scheme, dark) = source
+            val themedScheme = selected.second
+            neutralSurfaces(themedScheme).forEachIndexed { index, fill ->
+                for (ink in listOf(themedScheme.onBackground, themedScheme.onSurface, themedScheme.onSurfaceVariant)) {
+                    assertTrue("$name themed ordinary ink on $index", contrastRatio(ink, fill) >= 4.5)
+                }
+            }
+            if (name.startsWith("Dynamic")) {
+                val body = if (dark) Color(0xFFE6E0E9) else Color(0xFF1B1C17)
+                val supporting = if (dark) Color(0xFFCAC4D0) else Color(0xFF44483C)
+                val surfaces = neutralSurfaces(themedScheme)
+                assertEquals("$name palette background", ensureContrast(body, surfaces), themedScheme.onBackground)
+                assertEquals("$name palette surface", ensureContrast(body, surfaces), themedScheme.onSurface)
+                assertEquals("$name palette supporting", ensureContrast(supporting, surfaces), themedScheme.onSurfaceVariant)
+                assertNotEquals("$name switches ordinary ink", scheme.onSurface, themedScheme.onSurface)
+                assertNotEquals("$name switches reading ink", readingInk(scheme, false), readingInk(themedScheme, true))
+            }
+            assertEquals("$name neutral surfaces", neutralSurfaces(scheme), neutralSurfaces(themedScheme))
+            listOf(
+                scheme.primary to themedScheme.primary,
+                scheme.onPrimary to themedScheme.onPrimary,
+                scheme.primaryContainer to themedScheme.primaryContainer,
+                scheme.onPrimaryContainer to themedScheme.onPrimaryContainer,
+                scheme.secondary to themedScheme.secondary,
+                scheme.onSecondary to themedScheme.onSecondary,
+                scheme.secondaryContainer to themedScheme.secondaryContainer,
+                scheme.onSecondaryContainer to themedScheme.onSecondaryContainer,
+                scheme.tertiary to themedScheme.tertiary,
+                scheme.onTertiary to themedScheme.onTertiary,
+                scheme.tertiaryContainer to themedScheme.tertiaryContainer,
+                scheme.onTertiaryContainer to themedScheme.onTertiaryContainer,
+                scheme.error to themedScheme.error,
+                scheme.onError to themedScheme.onError,
+                scheme.errorContainer to themedScheme.errorContainer,
+                scheme.onErrorContainer to themedScheme.onErrorContainer,
+                scheme.inverseSurface to themedScheme.inverseSurface,
+                scheme.inverseOnSurface to themedScheme.inverseOnSurface,
+                scheme.inversePrimary to themedScheme.inversePrimary,
+                scheme.outline to themedScheme.outline,
+                scheme.outlineVariant to themedScheme.outlineVariant,
+                scheme.surfaceTint to themedScheme.surfaceTint,
+            ).forEachIndexed { index, (expected, actual) ->
+                assertEquals("$name unchanged non-ordinary role $index", expected, actual)
+            }
+            assertEquals("$name semantic colors", semanticColors(scheme, dark), semanticColors(themedScheme, dark))
+        }
+    }
+
     @Test fun trueBlack_preservesPaletteIdentityAndContrastForEveryDarkPalette() {
         staticSchemes().filter { it.first.isDark }.forEach { (preset, source) ->
             val scheme = source.withTrueBlackSurfaces()

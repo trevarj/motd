@@ -405,25 +405,29 @@ class MessageBubbleFooterUiTest {
     }
 
     @Test
-    fun messageReadingInkAndTimestampsAreNeutralAcrossDensities() {
+    fun messageReadingInkAndTimestampsFollowSelectedTextColorsAcrossDensities() {
         val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
         val density = mutableStateOf(LayoutDensity.COMFORTABLE)
         val role = mutableStateOf(Triple(MessageKind.PRIVMSG, false, false))
+        val useThemeTextColors = mutableStateOf(false)
         var fill = Color.Unspecified
         var codeFill = Color.Unspecified
         var replyFill = Color.Unspecified
         var timestampColor = Color.Unspecified
         var linkColor = Color.Unspecified
         var mentionColor = Color.Unspecified
+        var paletteReadingInk = Color.Unspecified
         compose.setContent {
             MotdTheme(
                 dynamicColor = false,
                 themePreset = preset.value,
                 layoutDensity = density.value,
                 avatarStyle = AvatarStyle.NONE,
+                useThemeTextColors = useThemeTextColors.value,
                 timestampConfig = TimestampConfig(show = true),
             ) {
                 val scheme = MaterialTheme.colorScheme
+                paletteReadingInk = scheme.onBackground
                 val semantic = LocalMotdSemanticColors.current
                 val nicks = LocalNickColors.current
                 val (kind, self, mention) = role.value
@@ -478,32 +482,43 @@ class MessageBubbleFooterUiTest {
                 Triple(MessageKind.ACTION, true, true),
             )
         for (theme in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
-            val seed = if (theme == ColorThemePreset.AYU_LIGHT) Color(0xFF171717) else Color(0xFFF5F5F5)
-            for (layout in listOf(LayoutDensity.COMFORTABLE, LayoutDensity.COMPACT, LayoutDensity.TWO_LINE)) {
-                for (messageRole in roles) {
-                    compose.runOnIdle {
-                        preset.value = theme
-                        density.value = layout
-                        role.value = messageRole
+            for (themed in listOf(false, true)) {
+                for (layout in listOf(LayoutDensity.COMFORTABLE, LayoutDensity.COMPACT, LayoutDensity.TWO_LINE)) {
+                    for (messageRole in roles) {
+                        compose.runOnIdle {
+                            preset.value = theme
+                            useThemeTextColors.value = themed
+                            density.value = layout
+                            role.value = messageRole
+                        }
+                        compose.waitForIdle()
+                        val seed =
+                            when {
+                                themed -> paletteReadingInk
+                                theme == ColorThemePreset.AYU_LIGHT -> Color(0xFF171717)
+                                else -> Color(0xFFF5F5F5)
+                            }
+                        val label = "$theme themed=$themed $layout $messageRole"
+                        val body = compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true).textLayout()
+                        assertEquals("$label prose", ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST), body.inkAt("Reading"))
+                        assertEquals("$label code", ensureContrast(seed, listOf(codeFill), MESSAGE_TEXT_CONTRAST), body.inkAt("code"))
+                        assertEquals("$label link", linkColor, body.inkAt("https://"))
+                        assertEquals("$label mention", mentionColor, body.inkAt("@bob"))
+                        if (!themed) {
+                            assertEquals("$label neutral timestamp red/green", timestampColor.red, timestampColor.green, 0.00001f)
+                            assertEquals("$label neutral timestamp green/blue", timestampColor.green, timestampColor.blue, 0.00001f)
+                        }
+                        assertEquals(
+                            "$label timestamp",
+                            timestampColor,
+                            compose
+                                .onNodeWithText(TIME, useUnmergedTree = true)
+                                .textLayout()
+                                .layoutInput.style.color,
+                        )
+                        val quote = compose.onNodeWithText("Quoted reply", useUnmergedTree = true).textLayout()
+                        assertEquals("$label reply", ensureContrast(seed, listOf(replyFill), MESSAGE_TEXT_CONTRAST), quote.inkAt("Quoted"))
                     }
-                    val label = "$theme $layout $messageRole"
-                    val body = compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true).textLayout()
-                    assertEquals("$label prose", ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST), body.inkAt("Reading"))
-                    assertEquals("$label code", ensureContrast(seed, listOf(codeFill), MESSAGE_TEXT_CONTRAST), body.inkAt("code"))
-                    assertEquals("$label link", linkColor, body.inkAt("https://"))
-                    assertEquals("$label mention", mentionColor, body.inkAt("@bob"))
-                    assertEquals("$label neutral timestamp red/green", timestampColor.red, timestampColor.green, 0.00001f)
-                    assertEquals("$label neutral timestamp green/blue", timestampColor.green, timestampColor.blue, 0.00001f)
-                    assertEquals(
-                        "$label timestamp",
-                        timestampColor,
-                        compose
-                            .onNodeWithText(TIME, useUnmergedTree = true)
-                            .textLayout()
-                            .layoutInput.style.color,
-                    )
-                    val quote = compose.onNodeWithText("Quoted reply", useUnmergedTree = true).textLayout()
-                    assertEquals("$label reply", ensureContrast(seed, listOf(replyFill), MESSAGE_TEXT_CONTRAST), quote.inkAt("Quoted"))
                 }
             }
         }

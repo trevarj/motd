@@ -1,12 +1,15 @@
 package io.github.trevarj.motd.ui.settings
 
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasAnyAncestor
@@ -20,11 +23,13 @@ import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.text.TextLayoutResult
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.FontChoice
@@ -33,8 +38,12 @@ import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.fixedThemeScheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -103,6 +112,47 @@ class AppearanceFolderLayoutUiTest {
 
         assertEquals(true, enabled)
         compose.onNodeWithTag("settings_chat_preview_inline_shadows_true").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun themeTextColorSwitchUpdatesOrdinaryTextAndMessagePreviewLive() {
+        val appearance = mutableStateOf(AppearanceConfig(theme = ColorThemePreset.GRUVBOX_DARK))
+        var selected: Boolean? = null
+        setContent(
+            appearanceProvider = { appearance.value },
+            onUseThemeTextColors = {
+                selected = it
+                appearance.value = appearance.value.copy(useThemeTextColors = it)
+            },
+        )
+        val preview = compose.onNodeWithTag("settings_chat_preview_inline_comfortable_default_rounded")
+        val body = "See you in the channel!"
+        preview.performScrollTo().assertIsDisplayed()
+        val static = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK))
+        val staticBody = inkOf(body)
+        assertEquals(ensureContrast(Color(0xFFF5F5F5), listOf(static.surfaceContainerHigh), MESSAGE_TEXT_CONTRAST), staticBody)
+
+        compose
+            .onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true)
+            .performScrollTo()
+            .assertIsOff()
+            .performClick()
+        compose.onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true).assertIsOn()
+        assertEquals(true, selected)
+        val themed = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK, useThemeTextColors = true))
+        assertEquals(themed.onSurface, inkOf("Appearance"))
+        preview.performScrollTo().assertIsDisplayed()
+        assertEquals(ensureContrast(themed.onBackground, listOf(themed.surfaceContainerHigh), MESSAGE_TEXT_CONTRAST), inkOf(body))
+        assertNotEquals(staticBody, inkOf(body))
+
+        compose
+            .onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true)
+            .performScrollTo()
+            .performClick()
+            .assertIsOff()
+        assertEquals(false, selected)
+        preview.performScrollTo().assertIsDisplayed()
+        assertEquals(staticBody, inkOf(body))
     }
 
     @Test
@@ -360,6 +410,14 @@ class AppearanceFolderLayoutUiTest {
 
     private fun previewTimeText(): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(PREVIEW_MESSAGE_TIME_MILLIS))
 
+    private fun inkOf(text: String): Color {
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText(text, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        return layouts
+            .single()
+            .layoutInput.style.color
+    }
+
     private fun setContent(
         settings: Settings = Settings(),
         appearance: AppearanceConfig = AppearanceConfig(),
@@ -372,20 +430,28 @@ class AppearanceFolderLayoutUiTest {
         onMessageSpacing: (MessageSpacing) -> Unit = {},
         onBubbleCornerStyle: (BubbleCornerStyle) -> Unit = {},
         onChatShadowsEnabled: (Boolean) -> Unit = {},
+        onUseThemeTextColors: (Boolean) -> Unit = {},
         onWallpaper: (WallpaperSelection) -> Unit = {},
         importedWallpaperProvider: () -> WallpaperSelection? = { null },
     ) {
         compose.setContent {
-            MotdTheme(dynamicColor = false) {
+            val currentAppearance = appearanceProvider()
+            MotdTheme(
+                dynamicColor = false,
+                themePreset = currentAppearance.theme,
+                trueBlack = currentAppearance.trueBlack,
+                useThemeTextColors = currentAppearance.useThemeTextColors,
+            ) {
                 AppearanceSettingsContent(
                     settings = settings,
-                    appearance = appearanceProvider(),
+                    appearance = currentAppearance,
                     onBack = {},
                     onOpenNickColors = {},
                     onThemePreset = {},
                     onTrueBlack = {},
                     onFollowSystem = {},
                     onDynamicColor = {},
+                    onUseThemeTextColors = onUseThemeTextColors,
                     onLayoutDensity = onLayoutDensity,
                     onComposerStyle = onComposerStyle,
                     onFolderDisplayMode = onFolderDisplayMode,

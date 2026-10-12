@@ -18,7 +18,7 @@ import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
-import io.github.trevarj.motd.ui.theme.neutralReadingInk
+import io.github.trevarj.motd.ui.theme.readingInk
 import io.github.trevarj.motd.ui.theme.semanticColors
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -231,7 +231,7 @@ class MessageBubbleTextTest {
                 "$IRC_HEX_COLOR" + "FF0000,0000FF${IRC_REVERSE}reverse\u000f"
         messageContrastSchemes().forEach { (name, scheme, dark) ->
             val semantic = semanticColors(scheme, dark)
-            val readingInk = neutralReadingInk(scheme)
+            val readingInk = readingInk(scheme, useThemeTextColors = false)
             val surfaces =
                 listOf(
                     "incoming" to messageBubbleRoleColors(scheme, false, false, MessageKind.PRIVMSG, semantic),

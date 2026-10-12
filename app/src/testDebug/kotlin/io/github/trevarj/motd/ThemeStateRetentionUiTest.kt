@@ -54,10 +54,13 @@ class ThemeStateRetentionUiTest {
     fun switchingFromDynamicToFixedPalette_preservesStatefulContent() {
         assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
         lateinit var selectTheme: (ColorThemePreset) -> Unit
+        lateinit var selectTextColors: (Boolean) -> Unit
         compose.setContent {
-            var theme by remember { mutableStateOf(ColorThemePreset.DARK) }
+            var theme by remember { mutableStateOf(ColorThemePreset.SYSTEM) }
+            var useThemeTextColors by remember { mutableStateOf(false) }
             selectTheme = { theme = it }
-            MotdTheme(themePreset = theme, dynamicColor = true) {
+            selectTextColors = { useThemeTextColors = it }
+            MotdTheme(themePreset = theme, dynamicColor = true, useThemeTextColors = useThemeTextColors) {
                 var marker by remember { mutableStateOf("initial") }
                 Button(
                     onClick = { marker = "retained" },
@@ -73,6 +76,11 @@ class ThemeStateRetentionUiTest {
         compose.waitForIdle()
 
         compose.onNodeWithTag("theme_state_marker").assertTextEquals("retained")
+        for (useThemeTextColors in listOf(true, false)) {
+            compose.runOnUiThread { selectTextColors(useThemeTextColors) }
+            compose.waitForIdle()
+            compose.onNodeWithTag("theme_state_marker").assertTextEquals("retained")
+        }
     }
 
     @Test
