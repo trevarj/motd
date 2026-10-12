@@ -129,7 +129,7 @@ jobs:
         run: nix shell --inputs-from . nixpkgs#imagemagick -c ./test/e2e/showcase-composite.sh screenshots
 
       - name: Upload refreshed screenshots
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: showcase-screenshots
           path: screenshots/*.png
@@ -139,7 +139,7 @@ jobs:
       # outage apart from a genuine UI regression without a second run.
       - name: Upload capture diagnostics
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: showcase-diagnostics
           path: |

@@ -46,7 +46,7 @@ jobs:
           ./test/e2e/local-stack.sh obfs-xray-negative
       - name: Upload proxy diagnostics
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: proxy-diagnostics
           path: ${{ runner.temp }}/motd-vless-reality/**/*.log
@@ -77,7 +77,7 @@ jobs:
           ./test/e2e/znc-stack.sh probe
       - name: Upload ZNC diagnostics
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: znc-playback-diagnostics
           path: |
@@ -162,7 +162,7 @@ jobs:
         run: ./test/e2e/hermetic-stack.sh capture test/e2e/artifacts
       - name: Upload e2e artifacts
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-artifacts
           path: test/e2e/artifacts/**
