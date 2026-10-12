@@ -29,6 +29,24 @@ The debug APK lands under `app/build/outputs/apk/debug/`. Install it with
 `adb install`. The debug build carries the `.debug` application-id suffix, so
 it can coexist with a release install.
 
+For a local arm64 device install loop, build both AI engines only for arm64:
+
+```sh
+./gradlew :app:installDebug -PmotdAiAbis=arm64-v8a
+```
+
+This opt-in changes only the native AI modules' ABI filters; AI features and
+source builds stay enabled. Without the property, both modules still build
+`arm64-v8a` and `x86_64`. The property accepts a comma-separated subset of those
+ABIs; empty or unsupported entries fail configuration. Append `--dry-run` to
+inspect the task graph without building or installing: the override should
+remove only the AI `x86_64` CMake tasks, retaining their arm64 tasks and app
+packaging/install tasks.
+
+Keep this override command-local. Do not use it for CI, E2E builds, or
+`:app:verifyAiNativeArtifacts`: E2E needs `x86_64`, and the verifier requires
+both ABIs in each AI AAR.
+
 The embedded VLESS transport (TCP + REALITY or WebSocket + TLS) uses bundled libbox, which is
 arm64-v8a-only. APKs built from this source tree must not be installed on
 32-bit ARM or x86 devices. Other ABI support needs a separately pinned and

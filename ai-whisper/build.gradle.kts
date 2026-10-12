@@ -11,6 +11,16 @@ fun aiSourcePin(name: String): String =
         ?.takeIf(String::isNotBlank)
         ?: error("third_party/ai/source.lock must pin $name")
 
+val supportedAiAbis = listOf("arm64-v8a", "x86_64")
+val aiAbis =
+    providers
+        .gradleProperty("motdAiAbis")
+        .map { value -> value.split(',').map(String::trim) }
+        .getOrElse(supportedAiAbis)
+require(aiAbis.all { it in supportedAiAbis }) {
+    "motdAiAbis must be a non-empty comma-separated list of arm64-v8a and/or x86_64"
+}
+
 android {
     namespace = "io.github.trevarj.motd.ai.whisper"
     compileSdk = 37
@@ -18,7 +28,7 @@ android {
 
     defaultConfig {
         minSdk = 26
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        ndk { abiFilters += aiAbis }
         externalNativeBuild {
             cmake {
                 arguments +=

@@ -11,6 +11,16 @@ fun aiSourcePin(name: String): String =
         ?.takeIf(String::isNotBlank)
         ?: error("third_party/ai/source.lock must pin $name")
 
+val supportedAiAbis = listOf("arm64-v8a", "x86_64")
+val aiAbis =
+    providers
+        .gradleProperty("motdAiAbis")
+        .map { value -> value.split(',').map(String::trim) }
+        .getOrElse(supportedAiAbis)
+require(aiAbis.all { it in supportedAiAbis }) {
+    "motdAiAbis must be a non-empty comma-separated list of arm64-v8a and/or x86_64"
+}
+
 android {
     namespace = "io.github.trevarj.motd.ai.text"
     compileSdk = 37
@@ -18,7 +28,7 @@ android {
     buildFeatures { buildConfig = true }
     defaultConfig {
         minSdk = 26
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        ndk { abiFilters += aiAbis }
         for (name in listOf("LLAMA_REPOSITORY", "LLAMA_COMMIT", "LLAMA_LICENSE", "LLAMA_LICENSE_FILE", "TEXT_MODEL_REPOSITORY", "TEXT_MODEL_REVISION", "TEXT_MODEL_FILE", "TEXT_MODEL_SHA256", "TEXT_MODEL_LICENSE", "TEXT_TEMPLATE_ID")) {
             buildConfigField("String", name, "\"${aiSourcePin(name)}\"")
         }
