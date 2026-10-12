@@ -1,13 +1,22 @@
 package io.github.trevarj.motd.ui.settings
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Button
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -22,15 +31,23 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.ui.nav.NetworkSettingsTarget
 import io.github.trevarj.motd.ui.nav.SettingsTarget
+import io.github.trevarj.motd.ui.theme.MotdLightScheme
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.contrastRatio
+import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.neutralReadingInk
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -222,6 +239,84 @@ class SettingsHomeAndPrimitivesUiTest {
         val toggle = compose.onNodeWithTag("narrow_switch", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         assertTrue("Label should wrap at a narrow width", label.height > toggle.height)
         assertTrue("Label should have a 16 dp gap before the switch", toggle.left - label.right >= with(compose.density) { 16.dp.toPx() } - 1f)
+    }
+
+    @Test
+    @Config(qualifiers = "w411dp-h891dp")
+    fun ordinaryTextAndSettingsMetadataUseNeutralInkWithoutOverridingSemanticControls() {
+        var preset by mutableStateOf(ColorThemePreset.AYU_LIGHT)
+        var trueBlack by mutableStateOf(false)
+        var scheme: ColorScheme = MotdLightScheme
+        compose.setContent {
+            MotdTheme(dynamicColor = false, themePreset = preset, trueBlack = trueBlack) {
+                scheme = MaterialTheme.colorScheme
+                Surface {
+                    Column {
+                        Text("Ordinary body")
+                        SettingsGroup(title = "Settings heading") {
+                            SettingsValueRow("Ordinary title", "Current value", summary = "Supporting description")
+                            SettingsActionRow("Ordinary action", onClick = {})
+                            SettingsActionRow("Destructive action", destructive = true, onClick = {})
+                        }
+                        RadioRow("Disabled choice", selected = false, enabled = false, onClick = {})
+                        SwitchRow("Disabled switch", "Why unavailable", checked = false, onCheckedChange = {}, enabled = false)
+                        TextField(
+                            value = "Input text",
+                            onValueChange = {},
+                            supportingText = { Text("Input metadata") },
+                        )
+                        TextField(
+                            value = "",
+                            onValueChange = {},
+                            placeholder = { Text("Input placeholder") },
+                        )
+                        Button(onClick = {}) { Text("Filled action") }
+                        Button(onClick = {}, enabled = false) { Text("Disabled action") }
+                        Surface(color = scheme.inverseSurface, contentColor = scheme.inverseOnSurface) {
+                            Text("Inverse content")
+                        }
+                    }
+                }
+            }
+        }
+
+        fun inkOf(text: String): Color {
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithText(text, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            return layouts
+                .single()
+                .layoutInput.style.color
+        }
+        for ((theme, black) in listOf(ColorThemePreset.AYU_LIGHT to false, ColorThemePreset.AYU_DARK to false, ColorThemePreset.AYU_DARK to true)) {
+            compose.runOnIdle {
+                preset = theme
+                trueBlack = black
+            }
+            val surfaces =
+                listOf(
+                    scheme.background,
+                    scheme.surface,
+                    scheme.surfaceContainerLowest,
+                    scheme.surfaceContainerLow,
+                    scheme.surfaceContainer,
+                    scheme.surfaceContainerHigh,
+                    scheme.surfaceContainerHighest,
+                    scheme.surfaceVariant,
+                )
+            val neutral = ensureContrast(neutralReadingInk(scheme), surfaces)
+            for (text in listOf("Ordinary body", "Settings heading", "Ordinary title", "Current value", "Supporting description", "Ordinary action", "Input text", "Input metadata", "Input placeholder")) {
+                assertEquals("$theme trueBlack=$black $text", neutral, inkOf(text))
+            }
+            assertEquals("$theme destructive", scheme.error, inkOf("Destructive action"))
+            assertNotEquals("$theme error stays colored", neutral, inkOf("Destructive action"))
+            assertEquals("$theme filled action", scheme.onPrimary, inkOf("Filled action"))
+            assertTrue("$theme filled contrast", contrastRatio(inkOf("Filled action"), scheme.primary) >= 4.5)
+            assertEquals("$theme inverse content", scheme.inverseOnSurface, inkOf("Inverse content"))
+            assertTrue("$theme inverse contrast", contrastRatio(inkOf("Inverse content"), scheme.inverseSurface) >= 4.5)
+            assertEquals("$theme disabled action", scheme.onSurface.copy(alpha = 0.38f), inkOf("Disabled action"))
+            assertEquals("$theme disabled choice", scheme.onSurface.copy(alpha = 0.38f), inkOf("Disabled choice"))
+            assertEquals("$theme disabled switch", scheme.onSurface.copy(alpha = 0.38f), inkOf("Disabled switch"))
+        }
     }
 
     private fun network(

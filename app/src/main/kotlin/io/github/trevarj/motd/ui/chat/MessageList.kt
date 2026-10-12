@@ -884,7 +884,7 @@ internal fun ActiveDccTransferCard(
                 Text(
                     text = "$direction file",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
                 DccDownloadMenu(transfer, onSaveToDownloads)

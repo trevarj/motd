@@ -296,7 +296,7 @@ private fun GroupHeader(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.onSurface,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 2.dp),
     )
@@ -558,7 +558,7 @@ private fun CustomModeDialog(
                             }
                         }.joinToString("\n"),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.tertiary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.testTag("channelinfo_custom_mode_hint"),
             )
         }

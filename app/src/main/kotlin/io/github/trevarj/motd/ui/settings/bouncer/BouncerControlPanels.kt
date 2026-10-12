@@ -524,7 +524,7 @@ fun ConsolePanel(
                         Text(
                             entry.sender,
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(entry.text, fontFamily = FontFamily.Monospace)
                     }
@@ -593,7 +593,7 @@ private fun PanelCard(
         Text(
             title,
             style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.SemiBold,
         )
         Surface(
@@ -648,7 +648,7 @@ private fun ConfirmDialog(
             TextButton(onClick = onConfirm) {
                 Text(
                     stringResource(R.string.action_continue),
-                    color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                 )
             }
         },

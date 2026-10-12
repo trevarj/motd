@@ -757,7 +757,7 @@ private fun ObfuscationSection(
                         Text(
                             stringResource(R.string.network_settings_tap_configure),
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -907,7 +907,7 @@ private fun TransportSection(
                     Text(
                         stringResource(R.string.network_settings_tap_configure),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }

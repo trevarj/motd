@@ -1122,7 +1122,7 @@ private fun FontScaleSlider(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Text(percent, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            Text(percent, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Slider(
             value = pending,

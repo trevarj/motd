@@ -2704,7 +2704,7 @@ private fun FoolsSectionHeader(
         Text(
             text = stringResource(R.string.chatlist_fools, count).uppercase(),
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f),
         )
@@ -3102,7 +3102,7 @@ private fun SectionHeader(text: String) {
     Text(
         text = text.uppercase(),
         style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.onSurface,
         fontWeight = FontWeight.SemiBold,
         // Same container as the row wrappers so the list reads as one continuous surface.
         modifier =

@@ -597,7 +597,7 @@ fun ChannelInfoContent(
                         Text(
                             text = section.prefix?.let { "$it" } ?: stringResource(R.string.channelinfo_section_regular),
                             style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.SemiBold,
                             // Headers move with their rows but never fade: their identity is the
                             // section, not the membership.
@@ -819,7 +819,7 @@ private fun FoolsSectionHeader(
         Text(
             text = stringResource(R.string.channelinfo_fools_section, count),
             style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f),
         )

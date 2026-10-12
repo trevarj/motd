@@ -899,7 +899,7 @@ internal fun AgentwireSessionDrawer(
                             },
                             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.SemiBold,
                         )
                     }
@@ -989,7 +989,7 @@ private fun AgentwireDrawerRowItem(
                         Text(
                             "${row.activeSubagents} agent${if (row.activeSubagents == 1) "" else "s"}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.testTag("agentwire_drawer_subagents_${row.sid}"),
                         )
                     }

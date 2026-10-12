@@ -277,7 +277,7 @@ internal fun NumberedInstruction(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        Text("$number.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Text("$number.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
         Text(text, modifier = Modifier.weight(1f))
     }
 }

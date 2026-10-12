@@ -608,7 +608,7 @@ private fun DestructiveButton(
         enabled = enabled,
         modifier = Modifier.testTag(tag),
     ) {
-        Text(label, color = if (enabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(label, color = if (enabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
     }
 }
 

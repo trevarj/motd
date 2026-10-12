@@ -692,7 +692,7 @@ private fun SheetSubtitle(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
     )
 }

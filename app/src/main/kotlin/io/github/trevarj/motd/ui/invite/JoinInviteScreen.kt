@@ -129,7 +129,7 @@ fun JoinInviteContent(
             when (state.phase) {
                 JoinInvitePhase.REVIEW -> {
                     if (invite != null) {
-                        Text(stringResource(R.string.invite_step, 1, 2), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                        Text(stringResource(R.string.invite_step, 1, 2), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
                             stringResource(if (contactInvite != null) R.string.contact_invite_review_title else R.string.invite_review_title),
                             style = MaterialTheme.typography.titleMedium,
@@ -142,7 +142,7 @@ fun JoinInviteContent(
                         )
                         Text(stringResource(R.string.invite_on_network, invite.networkName), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (channelInvite?.channelKey != null) {
-                            Text(stringResource(R.string.invite_contains_key), color = MaterialTheme.colorScheme.tertiary)
+                            Text(stringResource(R.string.invite_contains_key), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (!invite.tls) {
                             Text(stringResource(R.string.invite_create_plaintext_warning), color = MaterialTheme.colorScheme.error)
@@ -181,7 +181,7 @@ fun JoinInviteContent(
                 }
 
                 JoinInvitePhase.IDENTITY -> {
-                    Text(stringResource(R.string.invite_step, 2, 2), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.invite_step, 2, 2), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(stringResource(R.string.invite_identity_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text(stringResource(R.string.invite_identity_help), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(

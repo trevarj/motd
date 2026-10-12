@@ -990,7 +990,7 @@ internal fun ConfirmationSheet(
                             },
                         )
                     },
-                    trailingContent = { Text(stringResource(R.string.upload_destination_change), color = MaterialTheme.colorScheme.primary) },
+                    trailingContent = { Text(stringResource(R.string.upload_destination_change), color = MaterialTheme.colorScheme.onSurfaceVariant) },
                     modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable(onClick = onChangeDestination),
                 )
                 Spacer(Modifier.height(12.dp))
@@ -1039,7 +1039,7 @@ private fun BackendPickerSheet(
                     supportingContent = { Text(backendRetention(destination.config)) },
                     trailingContent =
                         if (sameDestination(config, destination.config)) {
-                            { Text("Selected", color = MaterialTheme.colorScheme.primary) }
+                            { Text("Selected", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         } else {
                             null
                         },

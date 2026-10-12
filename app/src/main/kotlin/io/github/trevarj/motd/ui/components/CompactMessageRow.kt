@@ -118,13 +118,6 @@ internal fun CompactMessageRow(
     val paintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
     val bodyInk = codeColor
     val bodyColor = remember(bodyInk, paintedRow) { ensureContrast(bodyInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
-    val legacyBodyInk = MaterialTheme.colorScheme.onSurface
-    val legacyBodyColor =
-        if (mediaUrls.isNotEmpty()) {
-            remember(legacyBodyInk, paintedRow) { ensureContrast(legacyBodyInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
-        } else {
-            Color.Unspecified
-        }
 
     // The `nick: text` content is a single flowing AnnotatedString so it wraps as one paragraph
     // like a real IRC line, with the nick colored (+ friend tint) and URLs linkified.
@@ -230,7 +223,7 @@ internal fun CompactMessageRow(
                             .aspectRatio(4f / 3f)
                             .clip(RoundedCornerShape(8.dp)),
                 )
-                MediaOriginCaption(url, color = legacyBodyColor, modifier = Modifier.widthIn(max = 280.dp))
+                MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
             }
         }
 

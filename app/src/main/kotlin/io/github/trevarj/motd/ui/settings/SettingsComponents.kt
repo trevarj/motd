@@ -229,7 +229,7 @@ internal fun RadioRow(
     ) {
         RadioButton(selected, onClick = null, enabled = enabled)
         Column(Modifier.padding(start = 12.dp).weight(1f)) {
-            Text(label, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(label, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f))
             subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         trailing?.invoke()
@@ -261,7 +261,7 @@ internal fun SwitchRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(title, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(title, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f))
                 Text(
                     if (!enabled && disabledExplanation != null) disabledExplanation else subtitle,
                     style = MaterialTheme.typography.bodySmall,
@@ -290,7 +290,7 @@ internal fun SectionHeader(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.onSurface,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp).semantics { heading() },
     )

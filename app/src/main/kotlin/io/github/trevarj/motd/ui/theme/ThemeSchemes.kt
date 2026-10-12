@@ -36,7 +36,7 @@ private val MotdDarkRaw =
 internal val MotdLightScheme: ColorScheme = accessibleColorScheme(MotdLightRaw, dark = false)
 internal val MotdDarkScheme: ColorScheme = accessibleColorScheme(MotdDarkRaw, dark = true)
 
-/** Reading ink follows the applied theme; renderers still fit it to the actual message fill. */
+/** Neutral app ink follows the applied theme; reading renderers still fit it to their actual fill. */
 internal fun neutralReadingInk(scheme: ColorScheme): Color = if (scheme.background.luminance() < 0.5f) Color(0xFFF5F5F5) else Color(0xFF171717)
 
 internal fun contrastRatio(
@@ -168,8 +168,7 @@ internal fun accessibleColorScheme(
             surfaceContainerHighest,
             surfaceVariant,
         )
-    val onSurface = ensureContrast(raw.onSurface, neutralSurfaces)
-    val onSurfaceVariant = ensureContrast(raw.onSurfaceVariant, neutralSurfaces)
+    val onSurface = ensureContrast(neutralReadingInk(raw), neutralSurfaces)
     val primary = ensureContrast(raw.primary, neutralSurfaces)
     val secondary = ensureContrast(raw.secondary, neutralSurfaces)
     val tertiary = ensureContrast(raw.tertiary, neutralSurfaces)
@@ -208,11 +207,11 @@ internal fun accessibleColorScheme(
         tertiaryContainer = tertiaryContainer,
         onTertiaryContainer = ensureContrast(onSurface, listOf(tertiaryContainer)),
         background = raw.background,
-        onBackground = ensureContrast(raw.onBackground, neutralSurfaces),
+        onBackground = onSurface,
         surface = raw.surface,
         onSurface = onSurface,
         surfaceVariant = surfaceVariant,
-        onSurfaceVariant = onSurfaceVariant,
+        onSurfaceVariant = onSurface,
         surfaceContainerLow = surfaceContainerLow,
         surfaceContainer = surfaceContainer,
         surfaceContainerHigh = surfaceContainerHigh,

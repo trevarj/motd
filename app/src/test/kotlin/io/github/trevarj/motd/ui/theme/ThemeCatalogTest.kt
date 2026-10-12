@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.isFixedPalette
 import io.github.trevarj.motd.data.prefs.resolveAutoPalette
 import io.github.trevarj.motd.data.prefs.systemPartner
+import io.github.trevarj.motd.ui.components.messageContrastSchemes
 import io.github.trevarj.motd.ui.components.onColorFor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -139,6 +140,43 @@ class ThemeCatalogTest {
                 assertContrast(preset, "outline on neutral $index", scheme.outline, surface, 3.0)
                 assertContrast(preset, "outlineVariant on neutral $index", scheme.outlineVariant, surface, 3.0)
             }
+        }
+    }
+
+    @Test fun ordinaryText_isNeutralAcrossFixedDynamicAndTrueBlackThemesWhileSemanticFillsStayReadable() {
+        messageContrastSchemes().forEach { (name, scheme, dark) ->
+            val ink = scheme.onSurface
+            assertEquals("$name background ink", ink, scheme.onBackground)
+            assertEquals("$name supporting ink", ink, scheme.onSurfaceVariant)
+            assertEquals("$name neutral red/green", ink.red, ink.green, 0.00001f)
+            assertEquals("$name neutral green/blue", ink.green, ink.blue, 0.00001f)
+            assertTrue("$name applied mode", if (dark) ink.luminance() > 0.5f else ink.luminance() < 0.5f)
+            neutralSurfaces(scheme).forEachIndexed { index, fill ->
+                assertTrue("$name ordinary ink on surface $index", contrastRatio(ink, fill) >= 4.5)
+            }
+            val semantic = semanticColors(scheme, dark)
+            listOf(
+                scheme.onPrimary to scheme.primary,
+                scheme.onSecondary to scheme.secondary,
+                scheme.onTertiary to scheme.tertiary,
+                scheme.onError to scheme.error,
+                scheme.onPrimaryContainer to scheme.primaryContainer,
+                scheme.onSecondaryContainer to scheme.secondaryContainer,
+                scheme.onTertiaryContainer to scheme.tertiaryContainer,
+                scheme.onErrorContainer to scheme.errorContainer,
+                scheme.inverseOnSurface to scheme.inverseSurface,
+                scheme.inversePrimary to scheme.inverseSurface,
+                semantic.onSuccess to semantic.success,
+                semantic.onWarning to semantic.warning,
+                semantic.onSuccessContainer to semantic.successContainer,
+                semantic.onWarningContainer to semantic.warningContainer,
+            ).forEachIndexed { index, (foreground, fill) ->
+                assertTrue("$name semantic fill $index", contrastRatio(foreground, fill) >= 4.5)
+            }
+            assertNotEquals("$name primary remains accented", ink, scheme.primary)
+            assertNotEquals("$name error remains semantic", ink, scheme.error)
+            assertNotEquals("$name success remains semantic", ink, semantic.success)
+            assertNotEquals("$name warning remains semantic", ink, semantic.warning)
         }
     }
 

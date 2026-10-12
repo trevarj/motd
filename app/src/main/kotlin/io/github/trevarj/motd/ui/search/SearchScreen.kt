@@ -481,7 +481,7 @@ private fun SearchResults(
                 Text(
                     text = stringResource(R.string.search_section_buffers),
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
                 )
@@ -519,7 +519,7 @@ private fun SearchResults(
                     Text(
                         text = dickordChannelLabel(group.bufferDisplayName, dickordEnabled),
                         style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

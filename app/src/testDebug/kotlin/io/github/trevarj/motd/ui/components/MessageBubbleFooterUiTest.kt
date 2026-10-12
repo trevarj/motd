@@ -405,7 +405,7 @@ class MessageBubbleFooterUiTest {
     }
 
     @Test
-    fun messageReadingInkIsNeutralAcrossDensitiesWithoutChangingTimestamps() {
+    fun messageReadingInkAndTimestampsAreNeutralAcrossDensities() {
         val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
         val density = mutableStateOf(LayoutDensity.COMFORTABLE)
         val role = mutableStateOf(Triple(MessageKind.PRIVMSG, false, false))
@@ -438,8 +438,8 @@ class MessageBubbleFooterUiTest {
                         else -> nicks.nick("alice", scheme.onSurfaceVariant).copy(alpha = 0.10f)
                     }
                 fill = if (density.value == LayoutDensity.COMFORTABLE) bubble.container else flatTint.compositeOver(scheme.background)
-                val legacyInk = if (density.value == LayoutDensity.COMFORTABLE) bubble.content else scheme.onSurfaceVariant
-                timestampColor = ensureContrast(legacyInk, listOf(fill), MESSAGE_TEXT_CONTRAST)
+                val metadataInk = if (density.value == LayoutDensity.COMFORTABLE) bubble.content else scheme.onSurfaceVariant
+                timestampColor = ensureContrast(metadataInk, listOf(fill), MESSAGE_TEXT_CONTRAST)
                 val codeBackground = scheme.surfaceVariant.copy(alpha = if (density.value == LayoutDensity.COMPACT && kind != MessageKind.ACTION) 0.72f else 1f)
                 codeFill = codeBackground.compositeOver(fill)
                 replyFill = scheme.surfaceContainerHighest.copy(alpha = 0.6f).compositeOver(fill)
@@ -492,6 +492,8 @@ class MessageBubbleFooterUiTest {
                     assertEquals("$label code", ensureContrast(seed, listOf(codeFill), MESSAGE_TEXT_CONTRAST), body.inkAt("code"))
                     assertEquals("$label link", linkColor, body.inkAt("https://"))
                     assertEquals("$label mention", mentionColor, body.inkAt("@bob"))
+                    assertEquals("$label neutral timestamp red/green", timestampColor.red, timestampColor.green, 0.00001f)
+                    assertEquals("$label neutral timestamp green/blue", timestampColor.green, timestampColor.blue, 0.00001f)
                     assertEquals(
                         "$label timestamp",
                         timestampColor,

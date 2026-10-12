@@ -12,12 +12,17 @@ surfaces where they appear. Component boundaries, outlines, and other non-text i
 3:1. Success, warning, and error use stable semantic color families instead of borrowing an accent
 whose meaning changes between palettes.
 
-Message bodies (including global and mentions feeds), chat-list and Dickord portal channel titles,
-message previews, search-result snippets, channel topics/directory descriptions, and link-preview
-titles/descriptions/text excerpts use shared neutral reading ink: near-black `#171717` for light
-themes and near-white `#F5F5F5` for dark themes. Timestamps and other metadata retain their
-theme-specific colors. Reading ink can still adjust for contrast against each surface's actual fill,
+Ordinary app text—including headings, action labels, input text and placeholders, supporting text,
+timestamps, and other metadata—uses shared neutral ink: near-black `#171717` for light themes and
+near-white `#F5F5F5` for dark themes. The background, surface, and supporting-text roles fit that ink
+to the normalized theme surfaces at 4.5:1. Reading renderers also fit it to each actual painted fill,
 including selected rows and search-hit highlights; existing highlight backgrounds stay intact.
+
+Links, user-configured nickname colors, explicit IRC colors, and error/destructive/status text retain
+their meaningful hues. Native interactive accents (such as text buttons, selected tabs, and focused
+field labels) keep Material styling. Filled and inverse controls keep foregrounds matched to their
+actual backgrounds, and disabled controls keep their disabled styling; the neutral policy does not
+override component content colors globally.
 
 Reading text uses a stronger **7:1 reading target** against the actual painted bubble, row, card,
 topic, search highlight, reply, or inline-code fill. Links, nick mentions, and explicit IRC foreground
