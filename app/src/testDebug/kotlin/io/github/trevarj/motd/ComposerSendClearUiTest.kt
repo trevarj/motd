@@ -76,7 +76,7 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -228,6 +228,7 @@ class ComposerSendClearUiTest {
     @get:Rule(order = 1)
     val uiDispatcher = UiDispatcherResetRule()
 
+    // v2 queues composition on the UI thread; the legacy unconfined rule can resume on an IO worker.
     @get:Rule
     val compose = createComposeRule()
 
