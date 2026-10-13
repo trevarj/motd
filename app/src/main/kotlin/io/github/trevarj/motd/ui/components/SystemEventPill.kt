@@ -56,6 +56,7 @@ fun SystemEventPill(
     onLongPress: (() -> Unit)? = null,
     onLineLongPress: ((Int) -> Unit)? = null,
     lineKey: ((Int) -> Any)? = null,
+    lineTrailingContent: (@Composable (index: Int) -> Unit)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     SystemEventPill(
@@ -70,6 +71,7 @@ fun SystemEventPill(
         onLongPress = onLongPress,
         onLineLongPress = onLineLongPress,
         lineKey = lineKey,
+        lineTrailingContent = lineTrailingContent,
     )
 }
 
@@ -87,6 +89,7 @@ internal fun SystemEventPill(
     onLongPress: (() -> Unit)? = null,
     onLineLongPress: ((Int) -> Unit)? = null,
     lineKey: ((Int) -> Any)? = null,
+    lineTrailingContent: (@Composable (index: Int) -> Unit)? = null,
 ) {
     // Materializing every line of a large JOIN/PART burst while scrolling is expensive. Keep the
     // collapsed path to its bounded summary and build lines only if the user opens the pill.
@@ -166,6 +169,7 @@ internal fun SystemEventPill(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center,
                             )
+                            lineTrailingContent?.invoke(index)
                         }
                     }
                 }

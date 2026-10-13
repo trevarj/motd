@@ -397,6 +397,8 @@ fun MessageList(
     // Entry's exact target owns paging demand until it is positioned.
     pagingHintsEnabled: Boolean = true,
     onTranslateMessage: ((MessageEntity) -> Unit)? = null,
+    externalTranslations: Map<Long, InlineTranslation> = emptyMap(),
+    onDismissExternalTranslation: (Long) -> Unit = {},
     // Reserve the overlaid bottom host without truncating the scrollable/drawn viewport.
     bottomContentPadding: PaddingValues? = null,
 ) {
@@ -497,6 +499,7 @@ fun MessageList(
                 MessagePlaceholderRow(placeholderHeight)
                 return@items
             }
+            val translation = inlineTranslationFor(msg, externalTranslations)
             val translationHold = onTranslateMessage.takeUnless { outgoingFlight?.matches(msg) == true }
             val older = if (index + 1 < snapshot.size) snapshot[index + 1] else null
             val newer = if (index > 0) snapshot[index - 1] else null
@@ -515,12 +518,15 @@ fun MessageList(
                         flightProgress,
                         onFlightRowPositioned,
                     ) {
-                        InvitationCard(
-                            message = msg,
-                            onJoin = { onAcceptInvite(msg.id) },
-                            onDismiss = { onDismissInvite(msg.id) },
-                            onLongPress = translationHold?.let { { it(msg) } },
-                        )
+                        Column {
+                            InvitationCard(
+                                message = msg,
+                                onJoin = { onAcceptInvite(msg.id) },
+                                onDismiss = { onDismissInvite(msg.id) },
+                                onLongPress = translationHold?.let { { it(msg) } },
+                            )
+                            translation?.let { InlineMessageTranslation(it) { onDismissExternalTranslation(it.eventId) } }
+                        }
                     }
                 }
                 return@items
@@ -537,7 +543,10 @@ fun MessageList(
                         flightProgress,
                         onFlightRowPositioned,
                     ) {
-                        NetworkBatchPill(msg, translationHold?.let { { it(msg) } })
+                        Column {
+                            NetworkBatchPill(msg, translationHold?.let { { it(msg) } })
+                            translation?.let { InlineMessageTranslation(it) { onDismissExternalTranslation(it.eventId) } }
+                        }
                     }
                 }
                 return@items
@@ -556,15 +565,18 @@ fun MessageList(
                     ) {
                         val transferFlow = remember(msg.id) { dccTransfer(msg) }
                         val transfer by transferFlow.collectAsStateWithLifecycle()
-                        DccTransferCard(
-                            message = msg,
-                            transfer = transfer,
-                            onAccept = onAcceptDccTransfer,
-                            onReject = onRejectDccTransfer,
-                            onRemove = onRemoveDccTransfer,
-                            onSaveToDownloads = onSaveDccToDownloads,
-                            onLongPress = translationHold?.let { { it(msg) } },
-                        )
+                        Column {
+                            DccTransferCard(
+                                message = msg,
+                                transfer = transfer,
+                                onAccept = onAcceptDccTransfer,
+                                onReject = onRejectDccTransfer,
+                                onRemove = onRemoveDccTransfer,
+                                onSaveToDownloads = onSaveDccToDownloads,
+                                onLongPress = translationHold?.let { { it(msg) } },
+                            )
+                            translation?.let { InlineMessageTranslation(it) { onDismissExternalTranslation(it.eventId) } }
+                        }
                     }
                 }
                 return@items
@@ -599,6 +611,8 @@ fun MessageList(
                         onLoadGap = onLoadGap,
                         expandedEventIds = expandedSystemEventIds,
                         onTranslateMessage = translationHold,
+                        externalTranslations = externalTranslations,
+                        onDismissExternalTranslation = onDismissExternalTranslation,
                         onExpandedChange = { runIds, expanded ->
                             expandedSystemEventIds =
                                 updateExpandedSystemEvents(
@@ -736,6 +750,8 @@ fun MessageList(
                         onSenderClick = onSenderClick,
                         replyPreview = replyPreview,
                         onReplyPreviewClick = onReplyPreviewClick,
+                        translation = translation,
+                        onDismissTranslation = onDismissExternalTranslation,
                     )
                 }
             }
@@ -1398,6 +1414,8 @@ private fun SystemEventRun(
     expandedEventIds: Set<Long>,
     onExpandedChange: (Collection<Long>, Boolean) -> Unit,
     onTranslateMessage: ((MessageEntity) -> Unit)? = null,
+    externalTranslations: Map<Long, InlineTranslation> = emptyMap(),
+    onDismissExternalTranslation: (Long) -> Unit = {},
 ) {
     // Gather exactly one chunk: newest first (index), then older neighbors while still system events
     // and not themselves a boundary — a boundary row heads the next chunk, so stopping there is what
@@ -1469,7 +1487,23 @@ private fun SystemEventRun(
                     { index -> callback(run[run.lastIndex - index]) }
                 },
             lineKey = { index -> run[run.lastIndex - index].id },
+            lineTrailingContent =
+                if (externalTranslations.isEmpty()) {
+                    null
+                } else {
+                    { index ->
+                        val source = run[run.lastIndex - index]
+                        inlineTranslationFor(source, externalTranslations)?.let {
+                            InlineMessageTranslation(it) { onDismissExternalTranslation(it.eventId) }
+                        }
+                    }
+                },
         )
+        if (run.size == 1 && !commandResponse) {
+            inlineTranslationFor(newest, externalTranslations)?.let {
+                InlineMessageTranslation(it) { onDismissExternalTranslation(it.eventId) }
+            }
+        }
     }
 }
 
@@ -1603,6 +1637,8 @@ private fun MessageRow(
     onReplyPreviewClick: (ReplyTarget) -> Unit,
     // Non-null for an expanded fool row: renders a "hide" chip above the bubble that re-collapses it.
     onCollapseFool: (() -> Unit)? = null,
+    translation: InlineTranslation? = null,
+    onDismissTranslation: (Long) -> Unit = {},
 ) {
     // The lazy list reverses item order, not a row's children. Render the divider before the first
     // unread bubble so the boundary is visually above that message.
@@ -2003,6 +2039,7 @@ private fun MessageRow(
             )
         }
     }
+    translation?.let { InlineMessageTranslation(it) { onDismissTranslation(it.eventId) } }
     // The outer gate keeps the Transition holder off ordinary rows: only pending or failed rows
     // compose the AnimatedVisibility, and pending stays in the gate so the pending -> failed flip
     // (and a retry back to pending) animates instead of remounting. A historical failed row first

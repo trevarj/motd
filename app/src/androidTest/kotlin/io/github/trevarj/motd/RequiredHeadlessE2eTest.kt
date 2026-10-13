@@ -6,6 +6,9 @@ import android.app.NotificationManager
 import android.app.RemoteInput
 import android.content.Intent
 import android.os.Bundle
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -13,8 +16,10 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -191,6 +196,28 @@ class RequiredHeadlessE2eTest {
         compose.waitUntil("canonical row renders Sent without reopening", 20_000) {
             runCatching { compose.onNode(canonicalSent, useUnmergedTree = true).assertIsDisplayed() }.isSuccess
         }
+        val canonicalRow = compose.onNodeWithTag(canonical.tag(), useUnmergedTree = true)
+        val longPressSurface = SemanticsMatcher("canonical message long-press surface") { it.config.contains(SemanticsActions.OnLongClick) }
+        val bubble =
+            compose
+                .onNode(
+                    hasAnyAncestor(hasTestTag(canonical.tag())) and longPressSurface,
+                    useUnmergedTree = true,
+                ).assertIsDisplayed()
+        val rowBounds = canonicalRow.fetchSemanticsNode().boundsInRoot
+        val bubbleBounds = bubble.fetchSemanticsNode().boundsInRoot
+        // Hold the existing source surface, outside its independently interactive text child.
+        val pressPosition = Offset(bubbleBounds.center.x, bubbleBounds.bottom - 1f) - rowBounds.topLeft
+        canonicalRow.performTouchInput { longClick(pressPosition) }
+        ChatRobot(compose).apply {
+            click("message_action_translate")
+            assertDisplayed("message_translation_picker")
+            compose.onAllNodesWithTag("message_translation_local", useUnmergedTree = true).assertCountEquals(0)
+            click("message_translation_cancel")
+            awaitTagGone("message_translation_picker")
+        }
+        TimelineRobot(compose).assertMessageVisible(canonical.tag())
+        compose.onNode(canonicalSent, useUnmergedTree = true).assertIsDisplayed()
         runBlocking {
             bootstrap.seams.connections().disconnect(network.childId)
             bootstrap.seams.connections().connect(network.childId)

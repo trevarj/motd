@@ -117,7 +117,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
@@ -129,8 +131,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.consumeAsFlow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -141,6 +145,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -159,6 +164,64 @@ import org.robolectric.RobolectricTestRunner
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class ChatViewModelTest {
+    companion object {
+        /** Shared real translation owner; callers own the ViewModelStore, dependency scope and Room. */
+        @OptIn(androidx.paging.ExperimentalPagingApi::class)
+        internal fun externalTranslationFixture(
+            db: MotdDatabase,
+            buffer: BufferEntity,
+            scope: CoroutineScope,
+            savedStateHandle: SavedStateHandle = SavedStateHandle(mapOf("bufferId" to buffer.id)),
+        ): ChatViewModel {
+            val settings = FakeSettingsRepository()
+            val foreground = FakeForegroundBufferTracker()
+            val processor = EventProcessor(db, TypingTrackerImpl(), io.github.trevarj.motd.data.sync.MessageNotifier.Noop)
+            return ChatViewModel(
+                savedStateHandle = savedStateHandle,
+                messageRepository =
+                    MessageRepositoryImpl(
+                        bufferDao = db.bufferDao(),
+                        networkIdentityDao = db.networkIdentityDao(),
+                        db = db,
+                        reactionDao = db.reactionDao(),
+                        mediatorFactory = ChatHistoryMediatorFactory { _, _, _ -> error("fixture supplies its Paging rows") },
+                        historyGapDao = db.historyGapDao(),
+                    ),
+                bufferRepository = FakeBufferRepository(buffer),
+                networkDao = db.networkDao(),
+                networkIdentityDao = db.networkIdentityDao(),
+                dccTransferDao = db.dccTransferDao(),
+                dccTransferController = FakeDccTransferController(),
+                connectionManager = FakeConnectionManager(buffer.networkId),
+                typingTracker = FakeTypingTracker(),
+                foregroundBufferTracker = foreground,
+                linkPreviewRepository =
+                    object : LinkPreviewRepository {
+                        override suspend fun preview(
+                            url: String,
+                            networkId: Long?,
+                        ): LinkPreview? = null
+                    },
+                audioMetadataRepository = FakeAudioMetadataRepository(),
+                audioPlaybackController = FakeAudioPlaybackController(),
+                draftStore = ComposerDraftStore(db),
+                pendingShareStore = PendingShareStore(),
+                scrollPositionStore = ChatScrollPositionStore(),
+                historyPageLoader = HistoryPageLoader(processor),
+                settingsRepository = settings,
+                replyPrefs = FakeReplyPrefs(),
+                ebooksLabsPrefs = FakeEbooksLabsPrefs(),
+                agentwirePrefs = FakeAgentwirePrefs(),
+                visibilityReader = MessageVisibilityReader(db),
+                historyResyncCoordinator = HistoryResyncCoordinator(db = db, processor = processor, scope = scope, settingsRepository = settings),
+                userDao = db.userDao(),
+                contentPreviewPrefs = FakeContentPreviewPrefs(),
+                readAloudController =
+                    ReadAloudHarness(ApplicationProvider.getApplicationContext(), db, scope, foreground, settings).controller,
+            )
+        }
+    }
+
     private val dispatcher = StandardTestDispatcher()
     private lateinit var db: MotdDatabase
     private lateinit var network: NetworkEntity
@@ -214,6 +277,464 @@ class ChatViewModelTest {
         db.close()
         Dispatchers.resetMain()
     }
+
+    @Test
+    fun externalTranslationReturnsWithoutMutatingDraftReplyOrHistory() =
+        runTest {
+            val source = seedTranslationSource()
+            val manager = FakeConnectionManager(network.id)
+            val vm = viewModel(channel, manager, messages = seamRepository())
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.state.collect() }
+            vm.composerDraft.first { it.hydrated }
+            vm.setReply(source)
+            vm.saveDraft("Unsent draft")
+            advanceUntilIdle()
+            val draft = vm.composerDraft.value
+            val persistedDraft = db.composerDraftDao().byRoom(channel.id)
+            val request = requireNotNull(vm.beginExternalTranslation(source))
+            assertEquals(source.id, request.eventId)
+            assertEquals(source.bufferId, request.roomId)
+            assertEquals(source.text, request.originalText)
+            assertEquals("Bonjour 👋\nSalut", request.plainText)
+            assertTrue(vm.externalTranslationInFlight.value)
+
+            val output = "Hello 👋\n日本語\tالعربية"
+            vm.completeExternalTranslation(output)
+            runCurrent()
+
+            assertEquals(InlineTranslation(channel.id, source.id, source.text, output), vm.externalTranslations.value[source.id])
+            assertFalse(vm.externalTranslationInFlight.value)
+            assertEquals(source, db.messageDao().byCanonicalId(source.id))
+            assertEquals(draft, vm.composerDraft.value)
+            assertEquals(persistedDraft, db.composerDraftDao().byRoom(channel.id))
+            assertEquals(source, vm.state.value.replyTo)
+            assertTrue(manager.messages.isEmpty())
+            assertTrue(manager.messageAttempts.isEmpty())
+            assertTrue(manager.sentLines.isEmpty())
+            vm.dismissExternalTranslation(source.id)
+            runCurrent()
+            assertTrue(vm.externalTranslations.value.isEmpty())
+            assertEquals(draft, vm.composerDraft.value)
+            assertEquals(persistedDraft, db.composerDraftDao().byRoom(channel.id))
+            assertEquals(source, vm.state.value.replyTo)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun externalTranslationSurvivesPauseAndFreshViewModelIgnoresRestoredReturn() =
+        runTest {
+            val source = seedTranslationSource()
+            val savedState = SavedStateHandle()
+            val vm = viewModel(channel, FakeConnectionManager(network.id), messages = seamRepository(), savedStateHandle = savedState)
+            runCurrent()
+            requireNotNull(vm.beginExternalTranslation(source))
+            vm.onPause()
+            runCurrent()
+            assertTrue(vm.externalTranslationInFlight.value)
+            vm.completeExternalTranslation("Hello")
+            runCurrent()
+            vm.onResume()
+            runCurrent()
+            assertEquals("Hello", vm.externalTranslations.value[source.id]?.text)
+            vm.onPause()
+            vm.onResume()
+            runCurrent()
+            assertEquals("Hello", vm.externalTranslations.value[source.id]?.text)
+            requireNotNull(vm.beginExternalTranslation(source))
+
+            val fresh = viewModel(channel, FakeConnectionManager(network.id), messages = seamRepository(), savedStateHandle = savedState)
+            runCurrent()
+            assertTrue(fresh.externalTranslations.value.isEmpty())
+            assertFalse(fresh.externalTranslationInFlight.value)
+            fresh.completeExternalTranslation("Registry-restored output")
+            runCurrent()
+            assertTrue(fresh.externalTranslations.value.isEmpty())
+            assertFalse(fresh.externalTranslationInFlight.value)
+            assertNotNull(fresh.beginExternalTranslation(source))
+            fresh.abortExternalTranslationLaunch()
+            vm.viewModelScope.cancel()
+            fresh.viewModelScope.cancel()
+        }
+
+    @Test
+    fun externalTranslationRejectsMissingChangedWrongRoomAndIneligibleSelections() =
+        runTest {
+            val source = seedTranslationSource()
+            val vm = viewModel(channel, FakeConnectionManager(network.id), messages = seamRepository())
+            runCurrent()
+            assertNull(vm.beginExternalTranslation(source.copy(id = 999)))
+            assertNull(vm.beginExternalTranslation(source.copy(text = "stale selected text")))
+            val ineligibleSources =
+                listOf(
+                    source.copy(bufferId = query.id),
+                    source.copy(kind = MessageKind.REDACTED),
+                    source.copy(text = " \n\t"),
+                    source.copy(text = "[voice 0:12 audio/ogg] https://example.org/voice.ogg"),
+                )
+            for (changed in ineligibleSources) {
+                db.messageDao().update(changed)
+                assertNull(vm.beginExternalTranslation(changed))
+                assertFalse(vm.externalTranslationInFlight.value)
+            }
+            assertTrue(vm.externalTranslations.value.isEmpty())
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun externalTranslationRechecksSourceBeforeAcceptingReturn() =
+        runTest {
+            val source = seedTranslationSource()
+            val vm = viewModel(channel, FakeConnectionManager(network.id), messages = seamRepository())
+            runCurrent()
+            val changedSources =
+                listOf(
+                    source.copy(bufferId = query.id),
+                    source.copy(text = "Changed source"),
+                    source.copy(kind = MessageKind.REDACTED),
+                    source.copy(text = " \n\t"),
+                    source.copy(text = "[voice 0:12 audio/ogg] https://example.org/voice.ogg"),
+                )
+            for (changed in changedSources) {
+                db.messageDao().update(source)
+                requireNotNull(vm.beginExternalTranslation(source))
+                db.messageDao().update(changed)
+                vm.completeExternalTranslation("Hello")
+                runCurrent()
+                assertTrue(vm.externalTranslations.value.isEmpty())
+                assertFalse(vm.externalTranslationInFlight.value)
+            }
+            db.messageDao().update(source)
+            requireNotNull(vm.beginExternalTranslation(source))
+            db.messageDao().deleteById(source.id)
+            vm.completeExternalTranslation("Hello")
+            runCurrent()
+            assertTrue(vm.externalTranslations.value.isEmpty())
+            assertFalse(vm.externalTranslationInFlight.value)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun externalTranslationRejectsInvalidOutputAndCanceledReturnKeepsPreviousResult() =
+        runTest {
+            val source = seedTranslationSource()
+            val vm = viewModel(channel, FakeConnectionManager(network.id), messages = seamRepository())
+            runCurrent()
+            requireNotNull(vm.beginExternalTranslation(source))
+            vm.completeExternalTranslation("Hello")
+            runCurrent()
+            val originalResult = vm.externalTranslations.value
+            for (output in listOf(null, "", " \n\t", "\uD800", "\uDC00", "bad\u0000text", "bad\u0085text", "é".repeat(32_769))) {
+                requireNotNull(vm.beginExternalTranslation(source))
+                vm.completeExternalTranslation(output)
+                runCurrent()
+                assertEquals(originalResult, vm.externalTranslations.value)
+                assertFalse(vm.externalTranslationInFlight.value)
+            }
+            val maximum = "é".repeat(32_768)
+            requireNotNull(vm.beginExternalTranslation(source))
+            vm.completeExternalTranslation(maximum)
+            runCurrent()
+            assertEquals(maximum, vm.externalTranslations.value[source.id]?.text)
+            requireNotNull(vm.beginExternalTranslation(source))
+            vm.completeExternalTranslation("A new translation")
+            runCurrent()
+            assertEquals("A new translation", vm.externalTranslations.value[source.id]?.text)
+            assertEquals(setOf(source.id), vm.externalTranslations.value.keys)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun externalTranslationObservesOnlyAcceptedSourcesAndDropsChangedRedactedOrDeletedRows() =
+        runTest {
+            val first = seedTranslationSource()
+            val second = seedTranslationSource(id = 89)
+            val third = seedTranslationSource(id = 90)
+            seedTranslationSource(id = 91)
+            val messages = HeldTranslationRepository(seamRepository())
+            val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
+            runCurrent()
+            assertEquals(0, messages.activeObservers)
+            for (source in listOf(first, second, third)) {
+                requireNotNull(vm.beginExternalTranslation(source))
+                vm.completeExternalTranslation("Hello ${source.id}")
+                runCurrent()
+            }
+            assertEquals(listOf(first.id, second.id, third.id), messages.observedIds)
+            assertEquals(3, messages.activeObservers)
+            db.messageDao().update(first.copy(text = "Changed"))
+            db.messageDao().update(second.copy(kind = MessageKind.REDACTED))
+            db.messageDao().deleteById(third.id)
+            runCurrent()
+            assertTrue(vm.externalTranslations.value.isEmpty())
+            assertEquals(0, messages.activeObservers)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun externalTranslationCanonicalAliasMigratesOwnershipAndDismissStopsObserver() =
+        runTest {
+            val losing = seedTranslationSource()
+            val winning = seedTranslationSource(id = 99)
+            val messages = HeldTranslationRepository(seamRepository())
+            val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
+            runCurrent()
+            requireNotNull(vm.beginExternalTranslation(losing))
+            vm.completeExternalTranslation("Hello")
+            runCurrent()
+            assertEquals(setOf(losing.id), vm.externalTranslations.value.keys)
+
+            db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(losing.id, winning.id))
+            db.messageDao().deleteById(losing.id)
+            runCurrent()
+
+            assertEquals(mapOf(winning.id to InlineTranslation(channel.id, winning.id, losing.text, "Hello")), vm.externalTranslations.value)
+            assertEquals(1, messages.activeObservers)
+            vm.dismissExternalTranslation(winning.id)
+            runCurrent()
+            assertTrue(vm.externalTranslations.value.isEmpty())
+            assertEquals(0, messages.activeObservers)
+            val canonicalRequest = requireNotNull(vm.beginExternalTranslation(losing))
+            assertEquals(winning.id, canonicalRequest.eventId)
+            vm.completeExternalTranslation("Canonical return")
+            runCurrent()
+            assertEquals("Canonical return", vm.externalTranslations.value[winning.id]?.text)
+            vm.clearExternalTranslationSession()
+            runCurrent()
+            assertEquals(0, messages.activeObservers)
+            assertTrue(vm.externalTranslations.value.isEmpty())
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun externalTranslationAliasCollisionKeepsNewestAcceptedResultInBothAcceptanceOrders() =
+        runTest {
+            for (losingResultIsNewer in listOf(true, false)) {
+                val winning = seedTranslationSource(id = if (losingResultIsNewer) 88 else 100)
+                val losing = seedTranslationSource(id = if (losingResultIsNewer) 99 else 101)
+                val messages = HeldTranslationRepository(seamRepository())
+                val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
+                runCurrent()
+                val earlierSource = if (losingResultIsNewer) winning else losing
+                val laterSource = if (losingResultIsNewer) losing else winning
+                val earlierRequest = requireNotNull(vm.beginExternalTranslation(earlierSource))
+                vm.completeExternalTranslation("Earlier translation")
+                runCurrent()
+                val laterRequest = requireNotNull(vm.beginExternalTranslation(laterSource))
+                vm.completeExternalTranslation("Latest translation")
+                runCurrent()
+                assertTrue(laterRequest.requestId > earlierRequest.requestId)
+                assertEquals(2, messages.activeObservers)
+
+                // Canonical identity chooses the smaller row ID, independently of result age.
+                db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(losing.id, winning.id))
+                db.messageDao().deleteById(losing.id)
+                runCurrent()
+
+                assertEquals(
+                    mapOf(winning.id to InlineTranslation(channel.id, winning.id, winning.text, "Latest translation")),
+                    vm.externalTranslations.value,
+                )
+                assertEquals(1, messages.activeObservers)
+                db.messageDao().update(winning.copy(text = "Changed canonical source"))
+                runCurrent()
+                assertTrue(vm.externalTranslations.value.isEmpty())
+                assertEquals(0, messages.activeObservers)
+                vm.viewModelScope.cancel()
+            }
+        }
+
+    @Test
+    fun externalTranslationReturnFollowsAliasCreatedWhileNativeActivityIsOutstanding() =
+        runTest {
+            val losing = seedTranslationSource()
+            val winning = seedTranslationSource(id = 99)
+            val vm = viewModel(channel, FakeConnectionManager(network.id), messages = seamRepository())
+            runCurrent()
+            requireNotNull(vm.beginExternalTranslation(losing))
+            db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(losing.id, winning.id))
+            db.messageDao().deleteById(losing.id)
+            vm.completeExternalTranslation("Hello")
+            runCurrent()
+            assertEquals(mapOf(winning.id to InlineTranslation(channel.id, winning.id, losing.text, "Hello")), vm.externalTranslations.value)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun externalTranslationClearKeepsNativeBarrierUntilLateTerminalReturn() =
+        runTest {
+            val source = seedTranslationSource()
+            val vm = viewModel(channel, FakeConnectionManager(network.id), messages = seamRepository())
+            runCurrent()
+            val first = requireNotNull(vm.beginExternalTranslation(source))
+            assertNull(vm.beginExternalTranslation(source))
+            vm.clearExternalTranslationSession()
+            runCurrent()
+            assertTrue(vm.externalTranslations.value.isEmpty())
+            assertTrue(vm.externalTranslationInFlight.value)
+            assertNull(vm.beginExternalTranslation(source))
+            vm.completeExternalTranslation("Late departed translation")
+            runCurrent()
+            assertTrue(vm.externalTranslations.value.isEmpty())
+            assertFalse(vm.externalTranslationInFlight.value)
+
+            val second = requireNotNull(vm.beginExternalTranslation(source))
+            assertTrue(second.requestId > first.requestId)
+            assertTrue(second.sessionId > first.sessionId)
+            vm.completeExternalTranslation("New visit")
+            runCurrent()
+            assertEquals("New visit", vm.externalTranslations.value[source.id]?.text)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun externalTranslationAbortReleasesFailedLaunchAndPreservesPreviousTranslation() =
+        runTest {
+            val source = seedTranslationSource()
+            val vm = viewModel(channel, FakeConnectionManager(network.id), messages = seamRepository())
+            runCurrent()
+            requireNotNull(vm.beginExternalTranslation(source))
+            vm.completeExternalTranslation("Hello")
+            runCurrent()
+            val previous = vm.externalTranslations.value
+            requireNotNull(vm.beginExternalTranslation(source))
+            vm.abortExternalTranslationLaunch()
+            runCurrent()
+            assertFalse(vm.externalTranslationInFlight.value)
+            assertEquals(previous, vm.externalTranslations.value)
+            assertNotNull(vm.beginExternalTranslation(source))
+            vm.abortExternalTranslationLaunch()
+            runCurrent()
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun externalTranslationBeginRejectsSessionChangedDuringSourceRead() =
+        runTest {
+            val source = seedTranslationSource()
+            val messages = HeldTranslationRepository(seamRepository())
+            val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
+            runCurrent()
+            val held = messages.holdNextRead()
+            val selection = async { vm.beginExternalTranslation(source) }
+            held.started.await()
+            vm.clearExternalTranslationSession()
+            runCurrent()
+            held.release.complete(Unit)
+            assertNull(selection.await())
+            assertFalse(vm.externalTranslationInFlight.value)
+            assertNotNull(vm.beginExternalTranslation(source))
+            vm.abortExternalTranslationLaunch()
+            runCurrent()
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun externalTranslationConcurrentSelectionsReserveOnlyOneRequestAfterSuspendedRead() =
+        runTest {
+            val source = seedTranslationSource()
+            val messages = HeldTranslationRepository(seamRepository())
+            val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
+            runCurrent()
+            val held = messages.holdNextRead()
+            val olderSelection = async { vm.beginExternalTranslation(source) }
+            held.started.await()
+            val current = requireNotNull(vm.beginExternalTranslation(source))
+            held.release.complete(Unit)
+            assertNull(olderSelection.await())
+            assertTrue(vm.externalTranslationInFlight.value)
+            vm.completeExternalTranslation("Current request ${current.requestId}")
+            runCurrent()
+            assertEquals("Current request ${current.requestId}", vm.externalTranslations.value[source.id]?.text)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun externalTranslationValidationKeepsGateAndConsumesReturnOnce() =
+        runTest {
+            val source = seedTranslationSource()
+            val messages = HeldTranslationRepository(seamRepository())
+            val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
+            runCurrent()
+            requireNotNull(vm.beginExternalTranslation(source))
+            val held = messages.holdNextRead()
+            vm.completeExternalTranslation("First callback")
+            held.started.await()
+            assertTrue(vm.externalTranslationInFlight.value)
+            assertNull(vm.beginExternalTranslation(source))
+            vm.completeExternalTranslation("Duplicate callback")
+            runCurrent()
+            assertTrue(vm.externalTranslationInFlight.value)
+            assertTrue(vm.externalTranslations.value.isEmpty())
+            held.release.complete(Unit)
+            runCurrent()
+            assertEquals("First callback", vm.externalTranslations.value[source.id]?.text)
+            assertFalse(vm.externalTranslationInFlight.value)
+            vm.completeExternalTranslation("No owner")
+            runCurrent()
+            assertEquals("First callback", vm.externalTranslations.value[source.id]?.text)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun externalTranslationClearCancelsValidationWithoutReleasingNewerRequestGate() =
+        runTest {
+            val source = seedTranslationSource()
+            val messages = HeldTranslationRepository(seamRepository())
+            val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
+            runCurrent()
+            val first = requireNotNull(vm.beginExternalTranslation(source))
+            val oldRead = messages.holdNextRead(nonCancellable = true)
+            vm.completeExternalTranslation("Old result")
+            oldRead.started.await()
+            vm.clearExternalTranslationSession()
+            runCurrent()
+            assertFalse(vm.externalTranslationInFlight.value)
+            val second = requireNotNull(vm.beginExternalTranslation(source))
+            assertTrue(second.requestId > first.requestId)
+            val newRead = messages.holdNextRead()
+            vm.completeExternalTranslation("New result")
+            newRead.started.await()
+
+            oldRead.release.complete(Unit)
+            runCurrent()
+            assertTrue(vm.externalTranslationInFlight.value)
+            assertTrue(vm.externalTranslations.value.isEmpty())
+            assertNull(vm.beginExternalTranslation(source))
+            newRead.release.complete(Unit)
+            runCurrent()
+            assertFalse(vm.externalTranslationInFlight.value)
+            assertEquals("New result", vm.externalTranslations.value[source.id]?.text)
+            vm.viewModelScope.cancel()
+        }
+
+    @Test
+    fun externalTranslationOperationalRoomChangeClearsResultsAndInvalidatesPendingActivity() =
+        runTest {
+            val source = seedTranslationSource()
+            val otherSource = seedTranslationSource(id = 99, roomId = query.id)
+            val buffers = FakeBufferRepository(channel)
+            val vm = viewModel(channel, FakeConnectionManager(network.id), messages = seamRepository(), buffers = buffers)
+            runCurrent()
+            requireNotNull(vm.beginExternalTranslation(source))
+            vm.completeExternalTranslation("Hello")
+            runCurrent()
+            requireNotNull(vm.beginExternalTranslation(source))
+            buffers.update(query)
+            runCurrent()
+            assertTrue(vm.externalTranslations.value.isEmpty())
+            assertTrue(vm.externalTranslationInFlight.value)
+            assertNull(vm.beginExternalTranslation(otherSource))
+            vm.completeExternalTranslation("Late old-room result")
+            runCurrent()
+            assertTrue(vm.externalTranslations.value.isEmpty())
+            assertFalse(vm.externalTranslationInFlight.value)
+            assertNull(vm.beginExternalTranslation(source))
+            requireNotNull(vm.beginExternalTranslation(otherSource))
+            vm.completeExternalTranslation("Other room")
+            runCurrent()
+            assertEquals(query.id, vm.externalTranslations.value[otherSource.id]?.roomId)
+            vm.viewModelScope.cancel()
+        }
 
     @Test
     fun composerNicknameUsesLiveThenPersistedThenConfiguredIdentity() =
@@ -4595,6 +5116,63 @@ class ChatViewModelTest {
             )
         val unread = unreadIds.map { checkNotNull(db.messageDao().byCanonicalId(it)) }
         return channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId) to unread
+    }
+
+    private suspend fun seedTranslationSource(
+        id: Long = 88,
+        roomId: Long = channel.id,
+    ): MessageEntity {
+        val source = message(roomId, "\u0002Bonjour\u0002 👋\nSalut", "translation-$id", "alice", id)
+        db.messageDao().insertAll(listOf(source))
+        return requireNotNull(db.messageDao().byCanonicalId(id))
+    }
+
+    /** Hold real canonical reads at the suspend boundary, including cancellation-resistant returns. */
+    private class HeldTranslationRepository(
+        private val delegate: MessageRepository,
+    ) : MessageRepository by delegate {
+        class HeldRead(
+            val nonCancellable: Boolean,
+            val started: CompletableDeferred<Unit> = CompletableDeferred(),
+            val release: CompletableDeferred<Unit> = CompletableDeferred(),
+        )
+
+        private var nextRead: HeldRead? = null
+        val observedIds = mutableListOf<Long?>()
+        var activeObservers = 0
+            private set
+
+        fun holdNextRead(nonCancellable: Boolean = false): HeldRead =
+            HeldRead(nonCancellable).also {
+                check(nextRead == null)
+                nextRead = it
+            }
+
+        override suspend fun byId(id: Long): MessageEntity? {
+            val held = nextRead
+            nextRead = null
+            val source = delegate.byId(id)
+            if (held != null) {
+                held.started.complete(Unit)
+                if (held.nonCancellable) withContext(NonCancellable) { held.release.await() } else held.release.await()
+            }
+            return source
+        }
+
+        override fun observeReplyTarget(
+            bufferId: Long,
+            eventId: Long?,
+            msgid: String?,
+        ): Flow<MessageEntity?> =
+            flow {
+                observedIds += eventId
+                ++activeObservers
+                try {
+                    emitAll(delegate.observeReplyTarget(bufferId, eventId, msgid))
+                } finally {
+                    --activeObservers
+                }
+            }
     }
 
     private fun viewModel(

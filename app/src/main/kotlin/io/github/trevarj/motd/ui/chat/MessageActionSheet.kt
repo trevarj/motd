@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -268,8 +269,8 @@ fun MessageActionSheet(
                 } // end !isServerBuffer (reactions + reply hidden for SERVER buffers)
                 onTranslate?.let {
                     ActionItem(
-                        Icons.Outlined.AutoAwesome,
-                        stringResource(R.string.ai_text_translate_message),
+                        Icons.Outlined.Translate,
+                        stringResource(R.string.chat_action_translate),
                         it,
                         modifier = Modifier.testTag("message_action_translate"),
                     )

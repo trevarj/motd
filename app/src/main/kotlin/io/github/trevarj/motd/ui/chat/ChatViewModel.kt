@@ -33,6 +33,7 @@ import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.TimelineAnchor
@@ -100,6 +101,7 @@ import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.PendingShareStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -889,6 +891,29 @@ class ChatViewModel
                 )
             }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ConversationHistorySyncState())
 
+        private val _externalTranslations = MutableStateFlow<Map<Long, InlineTranslation>>(emptyMap())
+        val externalTranslations: StateFlow<Map<Long, InlineTranslation>> = _externalTranslations.asStateFlow()
+        private val _externalTranslationInFlight = MutableStateFlow(false)
+        val externalTranslationInFlight: StateFlow<Boolean> = _externalTranslationInFlight.asStateFlow()
+        private var externalTranslationSession = 0L
+        private var nextExternalTranslationRequest = 0L
+
+        /** A null request retains only IDs while a departed visit's native Activity is outstanding. */
+        private class ExternalTranslationOwner(
+            val requestId: Long,
+            val sessionId: Long,
+            var request: ExternalTranslationRequest?,
+        )
+
+        private class ExternalTranslationObservation(
+            val requestId: Long,
+            val job: Job,
+        )
+
+        private var externalTranslationOwner: ExternalTranslationOwner? = null
+        private var externalTranslationValidation: Job? = null
+        private val externalTranslationObservers = mutableMapOf<Long, ExternalTranslationObservation>()
+
         /** The route id may be a durable redirect; all live screen behavior uses the winner id. */
         private val operationalBufferId: StateFlow<Long> =
             buffer
@@ -900,9 +925,150 @@ class ChatViewModel
             viewModelScope.launch {
                 operationalBufferId.drop(1).collect {
                     invalidateAiDraftTransform()
+                    clearExternalTranslationSessionNow()
                     viewportRefreshAnchor.value = null
                 }
             }
+        }
+
+        suspend fun beginExternalTranslation(message: MessageEntity): ExternalTranslationRequest? =
+            withContext(Dispatchers.Main.immediate) {
+                val session = externalTranslationSession
+                if (externalTranslationOwner != null) return@withContext null
+                val source = messageRepository.byId(message.id) ?: return@withContext null
+                val plainText = externalTranslationText(source) ?: return@withContext null
+                if (session != externalTranslationSession || externalTranslationOwner != null ||
+                    source.bufferId != operationalBufferId.value || source.text != message.text
+                ) {
+                    return@withContext null
+                }
+                ExternalTranslationRequest(
+                    requestId = ++nextExternalTranslationRequest,
+                    sessionId = session,
+                    roomId = source.bufferId,
+                    eventId = source.id,
+                    originalText = source.text,
+                    plainText = plainText,
+                ).also { request ->
+                    externalTranslationOwner = ExternalTranslationOwner(request.requestId, session, request)
+                    _externalTranslationInFlight.value = true
+                }
+            }
+
+        fun completeExternalTranslation(text: String?) {
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                val owner = externalTranslationOwner ?: return@launch
+                // Activity results are consumed once; duplicates cannot release a validation's gate.
+                if (externalTranslationValidation != null) return@launch
+                val request = owner.request
+                owner.request = null
+                if (request == null || text == null || text.isBlank() || !text.isValidAiText(65_536)) {
+                    releaseExternalTranslation(owner.requestId)
+                    return@launch
+                }
+                val validation =
+                    viewModelScope.launch(Dispatchers.Main.immediate, start = CoroutineStart.LAZY) validation@{
+                        try {
+                            val source = messageRepository.byId(request.eventId) ?: return@validation
+                            if (request.sessionId != externalTranslationSession ||
+                                externalTranslationOwner?.requestId != request.requestId ||
+                                source.bufferId != request.roomId || source.bufferId != operationalBufferId.value ||
+                                source.text != request.originalText || externalTranslationText(source) == null
+                            ) {
+                                return@validation
+                            }
+                            val translation = InlineTranslation(source.bufferId, source.id, request.originalText, text)
+                            externalTranslationObservers.remove(source.id)?.job?.cancel()
+                            _externalTranslations.value = _externalTranslations.value + (source.id to translation)
+                            observeExternalTranslation(source, translation, request.sessionId, request.requestId)
+                        } finally {
+                            releaseExternalTranslation(request.requestId)
+                        }
+                    }
+                externalTranslationValidation = validation
+                validation.start()
+            }
+        }
+
+        fun abortExternalTranslationLaunch() {
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                val owner = externalTranslationOwner ?: return@launch
+                externalTranslationValidation?.cancel()
+                releaseExternalTranslation(owner.requestId)
+            }
+        }
+
+        fun dismissExternalTranslation(eventId: Long) {
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                externalTranslationObservers.remove(eventId)?.job?.cancel()
+                _externalTranslations.value = _externalTranslations.value - eventId
+            }
+        }
+
+        fun clearExternalTranslationSession() {
+            viewModelScope.launch(Dispatchers.Main.immediate) { clearExternalTranslationSessionNow() }
+        }
+
+        private fun clearExternalTranslationSessionNow() {
+            ++externalTranslationSession
+            _externalTranslations.value = emptyMap()
+            externalTranslationObservers.values.forEach { it.job.cancel() }
+            externalTranslationObservers.clear()
+            val owner = externalTranslationOwner
+            if (externalTranslationValidation != null) {
+                externalTranslationValidation?.cancel()
+                owner?.let { releaseExternalTranslation(it.requestId) }
+            } else {
+                // Keep a native-return barrier, but never retain the departed source text.
+                owner?.request = null
+            }
+        }
+
+        private fun releaseExternalTranslation(requestId: Long) {
+            if (externalTranslationOwner?.requestId != requestId) return
+            externalTranslationOwner = null
+            externalTranslationValidation = null
+            _externalTranslationInFlight.value = false
+        }
+
+        private fun observeExternalTranslation(
+            source: MessageEntity,
+            translation: InlineTranslation,
+            sessionId: Long,
+            requestId: Long,
+        ) {
+            var eventId = source.id
+            var currentTranslation = translation
+            lateinit var observer: Job
+            observer =
+                viewModelScope.launch(Dispatchers.Main.immediate, start = CoroutineStart.LAZY) {
+                    messageRepository.observeReplyTarget(source.bufferId, source.id, source.msgid).collect { current ->
+                        val ownership = externalTranslationObservers[eventId] ?: return@collect
+                        if (sessionId != externalTranslationSession || ownership.job !== observer) return@collect
+                        if (current == null || current.bufferId != translation.roomId ||
+                            current.text != translation.originalText || current.kind == MessageKind.REDACTED
+                        ) {
+                            externalTranslationObservers.remove(eventId)
+                            _externalTranslations.value = _externalTranslations.value - eventId
+                            observer.cancel()
+                        } else if (current.id != eventId) {
+                            externalTranslationObservers.remove(eventId)
+                            _externalTranslations.value = _externalTranslations.value - eventId
+                            val canonicalOwner = externalTranslationObservers[current.id]
+                            if (canonicalOwner != null && canonicalOwner.requestId > ownership.requestId) {
+                                observer.cancel()
+                            } else {
+                                canonicalOwner?.job?.cancel()
+                                eventId = current.id
+                                currentTranslation = currentTranslation.copy(eventId = eventId)
+                                externalTranslationObservers[eventId] = ownership
+                                _externalTranslations.value = _externalTranslations.value + (eventId to currentTranslation)
+                            }
+                        }
+                    }
+                }
+            externalTranslationObservers[eventId] = ExternalTranslationObservation(requestId, observer)
+            observer.start()
         }
 
         val channelNotifications: StateFlow<ChannelNotificationPresentation> =

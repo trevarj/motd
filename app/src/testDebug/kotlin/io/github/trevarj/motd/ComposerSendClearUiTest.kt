@@ -1,9 +1,14 @@
 package io.github.trevarj.motd
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.net.Uri
+import android.text.SpannableString
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
@@ -28,6 +33,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,6 +69,7 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
@@ -77,6 +84,7 @@ import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -84,6 +92,8 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityOptionsCompat
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.viewModelScope
 import androidx.paging.LoadState
 import androidx.paging.LoadStates
 import androidx.paging.PagingData
@@ -133,9 +143,12 @@ import io.github.trevarj.motd.ui.chat.CHAT_TITLE_SYNC_SPINNER_TAG
 import io.github.trevarj.motd.ui.chat.ChatContent
 import io.github.trevarj.motd.ui.chat.ChatPositionTarget
 import io.github.trevarj.motd.ui.chat.ChatState
+import io.github.trevarj.motd.ui.chat.ChatViewModel
+import io.github.trevarj.motd.ui.chat.ChatViewModelTest
 import io.github.trevarj.motd.ui.chat.ComposerDraftState
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chat.EntryPositionState
+import io.github.trevarj.motd.ui.chat.ExternalTranslationRequest
 import io.github.trevarj.motd.ui.chat.MessageList
 import io.github.trevarj.motd.ui.chat.MessageUrlCache
 import io.github.trevarj.motd.ui.chat.OutgoingFlight
@@ -145,23 +158,32 @@ import io.github.trevarj.motd.ui.chat.SendFlightOverlay
 import io.github.trevarj.motd.ui.chat.UnreadEntrySnapshot
 import io.github.trevarj.motd.ui.chat.VoiceMessageUiState
 import io.github.trevarj.motd.ui.chat.VoiceRecordingUi
+import io.github.trevarj.motd.ui.chat.externalTranslationText
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
@@ -201,6 +223,8 @@ class ComposerSendClearUiTest {
     private val ebooksBuffer = buffer.copy(name = "#ebooks", displayName = "#ebooks")
 
     private var pickerRequestCode = -1
+    private val pickerLaunchedIntents = mutableListOf<Intent>()
+    private var pickerLaunchFailure: RuntimeException? = null
     private val pickerRegistry =
         object : ActivityResultRegistry() {
             override fun <I, O> onLaunch(
@@ -210,12 +234,118 @@ class ComposerSendClearUiTest {
                 options: ActivityOptionsCompat?,
             ) {
                 pickerRequestCode = requestCode
+                if (input is Intent) pickerLaunchedIntents += input
+                pickerLaunchFailure?.let { throw it }
             }
         }
     private val pickerOwner =
         object : ActivityResultRegistryOwner {
             override val activityResultRegistry = pickerRegistry
         }
+
+    private fun registerTranslationHandler(
+        packageName: String = "com.deepl.mobiletranslator",
+        action: String = Intent.ACTION_PROCESS_TEXT,
+        label: String = "Installed translator",
+        activityName: String = "TranslationActivity",
+    ): ComponentName {
+        val shadow = shadowOf(RuntimeEnvironment.getApplication().packageManager)
+        val component = ComponentName(packageName, "$packageName.$activityName")
+        shadow.addActivityIfNotPresent(component)
+        val appInfo =
+            shadow.getInternalMutablePackageInfo(packageName).applicationInfo!!.apply {
+                nonLocalizedLabel = label
+                enabled = true
+            }
+        shadow.addOrUpdateActivity(
+            ActivityInfo().apply {
+                this.packageName = packageName
+                name = component.className
+                applicationInfo = appInfo
+                enabled = true
+                exported = true
+            },
+        )
+        shadow.addIntentFilterForActivity(
+            component,
+            IntentFilter(action).apply {
+                addCategory(Intent.CATEGORY_DEFAULT)
+                addDataType("text/plain")
+            },
+        )
+        return component
+    }
+
+    private fun translationMessage() =
+        MessageEntity(
+            id = 88,
+            bufferId = buffer.id,
+            serverTime = 1,
+            sender = "alice",
+            kind = MessageKind.PRIVMSG,
+            text = "\u0002Bonjour\u0002 👋\nSalut",
+            ircFormattedText = "Protocol-only text is not exported",
+            dedupKey = "translation-parent",
+        )
+
+    /** Native dispatch fixture only; it neither echoes output nor simulates result acceptance. */
+    private fun translationRequest(source: MessageEntity) = ExternalTranslationRequest(1, 0, source.bufferId, source.id, source.text, requireNotNull(externalTranslationText(source)))
+
+    private fun openTranslationPicker() {
+        val tag = "chat_message_88"
+        val row = compose.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
+        val longPressSurface = SemanticsMatcher("message long-press surface") { it.config.contains(SemanticsActions.OnLongClick) }
+        val bubble = compose.onNode(hasAnyAncestor(hasTestTag(tag)) and longPressSurface, useUnmergedTree = true).assertIsDisplayed()
+        val rowBounds = row.fetchSemanticsNode().boundsInRoot
+        val bubbleBounds = bubble.fetchSemanticsNode().boundsInRoot
+        // Hold the source surface's bottom padding, not its independently interactive text child.
+        val pressPosition = Offset(bubbleBounds.center.x, bubbleBounds.bottom - 1f) - rowBounds.topLeft
+        row.performTouchInput { longClick(pressPosition) }
+        compose.onNodeWithTag("message_action_translate").performClick()
+        compose.onNodeWithTag("message_translation_picker").assertIsDisplayed()
+    }
+
+    private fun withTranslationOwner(
+        replyToParent: Boolean = true,
+        block: (MotdDatabase, ChatViewModel, MessageEntity) -> Unit,
+    ) {
+        val db =
+            Room
+                .inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), MotdDatabase::class.java)
+                .allowMainThreadQueries()
+                .setQueryExecutor { it.run() }
+                .setTransactionExecutor { it.run() }
+                .build()
+        val parent = translationMessage().copy(text = "Bonjour", ircFormattedText = null)
+        runBlocking {
+            db.networkDao().insert(NetworkEntity(id = buffer.networkId, name = "test", role = NetworkRole.DIRECT, host = "irc.example", port = 6697, nick = "me", username = "me", realname = "Me"))
+            db.bufferDao().insert(buffer)
+            db.messageDao().insertAll(listOf(parent))
+            ComposerDraftStore(db).saveDraft(buffer.id, "Unsent draft", parent.id.takeIf { replyToParent })
+        }
+        val store = ViewModelStore()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        lateinit var owner: ChatViewModel
+        compose.runOnIdle {
+            owner = ChatViewModelTest.externalTranslationFixture(db, buffer, scope)
+            store.put("chat", owner)
+        }
+        val ownerJob = owner.viewModelScope.coroutineContext[Job]
+        try {
+            block(db, owner, parent)
+        } finally {
+            compose.runOnIdle {
+                store.clear()
+                scope.cancel()
+            }
+            compose.waitForIdle()
+            runBlocking {
+                ownerJob?.join()
+                scope.coroutineContext[Job]?.join()
+            }
+            db.close()
+        }
+    }
 
     private fun selectedZip(vararg lines: String): File =
         File.createTempFile("ebook-results-", ".zip", RuntimeEnvironment.getApplication().cacheDir).also { file ->
@@ -288,6 +418,7 @@ class ComposerSendClearUiTest {
         parted: Boolean = false,
         onInviteUser: () -> Unit = {},
         replyTo: () -> MessageEntity? = { null },
+        onSetReply: (MessageEntity?) -> Unit = {},
         ebooksHelperRoomId: () -> Long? = { null },
         ebooksDccOffers: () -> List<DccTransferEntity> = { emptyList() },
         onAcceptDccTransfer: (Long, Uri, Boolean) -> Unit = { _, _, _ -> },
@@ -313,16 +444,25 @@ class ComposerSendClearUiTest {
         showImages: Boolean = true,
         showLinkPreviews: Boolean = true,
         onTranslateMessage: ((MessageEntity) -> Unit)? = null,
+        onBeginExternalTranslation: (suspend (MessageEntity) -> ExternalTranslationRequest?)? = null,
+        onCompleteExternalTranslation: ((String?) -> Unit)? = null,
+        onAbortExternalTranslationLaunch: (() -> Unit)? = null,
+        externalTranslationInFlight: () -> Boolean = { false },
         composerStyle: () -> ComposerStyle = { ComposerStyle.COMFORTABLE },
         memberNicks: List<String> = emptyList(),
         contentHeight: () -> Dp? = { null },
         voiceState: () -> VoiceMessageUiState = { VoiceMessageUiState() },
         onViewportRefreshAnchor: (ViewportRefreshAnchor?) -> Unit = {},
+        chatViewModel: ChatViewModel? = null,
         onSubmit: (String) -> Unit,
     ) {
         compose.setContent {
             backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
             val items = pages.collectAsLazyPagingItems()
+            val ownerState = chatViewModel?.state?.collectAsState()?.value
+            val ownerDraft = chatViewModel?.composerDraft?.collectAsState()?.value
+            val ownerTranslations = chatViewModel?.externalTranslations?.collectAsState()?.value
+            val ownerInFlight = chatViewModel?.externalTranslationInFlight?.collectAsState()?.value
             CompositionLocalProvider(
                 LocalActivityResultRegistryOwner provides (activityResults ?: checkNotNull(LocalActivityResultRegistryOwner.current)),
                 LocalDensity provides (fontScale?.let { Density(LocalDensity.current.density, it) } ?: LocalDensity.current),
@@ -336,7 +476,7 @@ class ComposerSendClearUiTest {
                     ) {
                         ChatContent(
                             state =
-                                ChatState(
+                                ownerState ?: ChatState(
                                     buffer = chatBuffer(),
                                     connState = liveConnection?.invoke() ?: connectionState,
                                     memberCount = memberCount,
@@ -362,16 +502,25 @@ class ComposerSendClearUiTest {
                             nickNormalizer = { it.lowercase() },
                             onSubmit = onSubmit,
                             onTyping = {},
-                            onSetReply = {},
+                            onSetReply = {
+                                onSetReply(it)
+                                chatViewModel?.setReply(it)
+                            },
                             onReact = { _, _ -> },
                             onRetry = {},
                             loadPreview = { _, _ -> null },
                             onAudioToggle = onAudioToggle,
-                            composerDraft = draft(),
+                            composerDraft = ownerDraft ?: draft(),
                             aiTextEnabled = aiEnabled(),
                             aiTextState = aiState(),
                             onAiComposer = onAi,
                             onTranslateMessage = onTranslateMessage,
+                            onBeginExternalTranslation = chatViewModel?.let { it::beginExternalTranslation } ?: onBeginExternalTranslation,
+                            onCompleteExternalTranslation = chatViewModel?.let { it::completeExternalTranslation } ?: onCompleteExternalTranslation,
+                            onAbortExternalTranslationLaunch = chatViewModel?.let { it::abortExternalTranslationLaunch } ?: onAbortExternalTranslationLaunch,
+                            externalTranslationInFlight = ownerInFlight ?: externalTranslationInFlight(),
+                            externalTranslations = ownerTranslations ?: emptyMap(),
+                            onDismissExternalTranslation = { chatViewModel?.dismissExternalTranslation(it) },
                             outgoingFlight = outgoingFlight(),
                             onDraftChanged = onDraftChanged,
                             onFlightSettled = onFlightSettled,
@@ -583,6 +732,524 @@ class ComposerSendClearUiTest {
     }
 
     @Test
+    fun externalTranslationReturnsInlineWithoutMutatingDraftReplyOrHistory() {
+        registerTranslationHandler()
+        withTranslationOwner { db, owner, parent ->
+            var submits = 0
+            var draftChanges = 0
+            var replies = 0
+            setContent(
+                draft = { owner.composerDraft.value },
+                chatViewModel = owner,
+                pages = flowOf(PagingData.from(listOf(parent))),
+                activityResults = pickerOwner,
+                onSetReply = { ++replies },
+                onDraftChanged = {
+                    ++draftChanges
+                    owner.saveDraft(it)
+                },
+                onSubmit = { ++submits },
+            )
+            compose.waitUntil(5_000) {
+                owner.composerDraft.value.hydrated &&
+                    owner.state.value.replyTo
+                        ?.id == parent.id
+            }
+            val originalDraft = owner.composerDraft.value
+            val originalPersistedDraft = runBlocking { db.composerDraftDao().byRoom(buffer.id) }
+            openTranslationPicker()
+            compose.onNodeWithTag("message_translation_local").assertDoesNotExist()
+            compose.runOnIdle { assertTrue(pickerLaunchedIntents.isEmpty()) }
+            compose.onNodeWithTag("message_translation_app_com.deepl.mobiletranslator").performClick()
+            compose.waitUntil(5_000) { pickerLaunchedIntents.isNotEmpty() }
+            compose.runOnIdle {
+                assertEquals("Bonjour", pickerLaunchedIntents.single().getStringExtra(Intent.EXTRA_PROCESS_TEXT))
+                assertTrue(owner.externalTranslationInFlight.value)
+                pickerRegistry.dispatchResult(pickerRequestCode, Activity.RESULT_OK, Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, "Hello"))
+            }
+            compose.waitUntil(5_000) { compose.onAllNodesWithTag("message_translation_88").fetchSemanticsNodes().isNotEmpty() }
+            val original = compose.onNodeWithTag("chat_message_88", useUnmergedTree = true)
+            val translated = compose.onNodeWithTag("message_translation_88", useUnmergedTree = true)
+            original.assertIsDisplayed()
+            translated.assertIsDisplayed()
+            compose.onNode(hasText("Bonjour") and hasAnyAncestor(hasTestTag("chat_message_88")), useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithText("Hello", useUnmergedTree = true).assertIsDisplayed()
+            assertTrue(original.fetchSemanticsNode().boundsInRoot.bottom <= translated.fetchSemanticsNode().boundsInRoot.top)
+            val returnedText = compose.onNodeWithText("Hello", useUnmergedTree = true)
+            assertFalse(returnedText.fetchSemanticsNode().config.contains(androidx.compose.ui.semantics.SemanticsActions.CustomActions))
+            returnedText.performTouchInput {
+                swipe(Offset(width * 0.15f, centerY), Offset(width * 0.85f, centerY), durationMillis = 400)
+            }
+            compose.runOnIdle {
+                assertEquals(0, replies)
+                assertEquals(0, submits)
+                assertEquals(0, draftChanges)
+                assertEquals(originalDraft, owner.composerDraft.value)
+                assertEquals(
+                    parent.id,
+                    owner.state.value.replyTo
+                        ?.id,
+                )
+                assertEquals(parent, runBlocking { db.messageDao().byCanonicalId(parent.id) })
+                assertEquals(originalPersistedDraft, runBlocking { db.composerDraftDao().byRoom(buffer.id) })
+            }
+            compose.onNodeWithTag("message_translation_dismiss_88").performClick()
+            compose.onNodeWithTag("message_translation_88").assertDoesNotExist()
+            compose.runOnIdle {
+                assertTrue(owner.externalTranslations.value.isEmpty())
+                assertEquals(originalDraft, owner.composerDraft.value)
+                assertEquals(
+                    parent.id,
+                    owner.state.value.replyTo
+                        ?.id,
+                )
+                assertEquals(originalPersistedDraft, runBlocking { db.composerDraftDao().byRoom(buffer.id) })
+            }
+        }
+    }
+
+    @Test
+    fun externalTranslationOriginalSourceSwipeStillSetsReplyInFreshOwner() {
+        withTranslationOwner(replyToParent = false) { _, owner, parent ->
+            var replies = 0
+            setContent(
+                draft = { owner.composerDraft.value },
+                chatViewModel = owner,
+                pages = flowOf(PagingData.from(listOf(parent))),
+                onSetReply = { ++replies },
+                onDraftChanged = owner::saveDraft,
+                onSubmit = { error("reply swipe sent") },
+            )
+            compose.waitUntil(5_000) { owner.composerDraft.value.hydrated && owner.state.value.buffer != null }
+            compose.runOnIdle { assertNull(owner.state.value.replyTo) }
+            compose.onNodeWithTag("chat_message_88", useUnmergedTree = true).performTouchInput {
+                swipe(Offset(width * 0.15f, centerY), Offset(width * 0.85f, centerY), durationMillis = 400)
+            }
+            compose.waitUntil(5_000) {
+                owner.state.value.replyTo
+                    ?.id == parent.id
+            }
+            compose.runOnIdle { assertEquals(1, replies) }
+        }
+    }
+
+    @Test
+    fun externalTranslationCanceledOrMissingOutputPreservesRealOwnersPreviousInlineResult() {
+        registerTranslationHandler()
+        withTranslationOwner { db, owner, parent ->
+            setContent(
+                draft = { owner.composerDraft.value },
+                chatViewModel = owner,
+                pages = flowOf(PagingData.from(listOf(parent))),
+                activityResults = pickerOwner,
+                onDraftChanged = { error("external result changed draft") },
+                onSubmit = { error("external result sent") },
+            )
+            compose.waitUntil(5_000) {
+                owner.composerDraft.value.hydrated &&
+                    owner.state.value.replyTo
+                        ?.id == parent.id
+            }
+            val draft = owner.composerDraft.value
+            val persistedDraft = runBlocking { db.composerDraftDao().byRoom(buffer.id) }
+            openTranslationPicker()
+            compose.onNodeWithTag("message_translation_app_com.deepl.mobiletranslator").performClick()
+            compose.waitUntil(5_000) { pickerLaunchedIntents.size == 1 }
+            compose.runOnIdle {
+                pickerRegistry.dispatchResult(pickerRequestCode, Activity.RESULT_OK, Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, "Hello"))
+            }
+            compose.onNodeWithTag("message_translation_88").assertIsDisplayed()
+            val canceledResults =
+                listOf(
+                    Activity.RESULT_CANCELED to Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, "Ignored"),
+                    Activity.RESULT_OK to Intent(),
+                    Activity.RESULT_OK to Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, " \n"),
+                )
+            for ((index, result) in canceledResults.withIndex()) {
+                openTranslationPicker()
+                compose.onNodeWithTag("message_translation_app_com.deepl.mobiletranslator").performClick()
+                compose.waitUntil(5_000) { pickerLaunchedIntents.size == index + 2 }
+                compose.runOnIdle { pickerRegistry.dispatchResult(pickerRequestCode, result.first, result.second) }
+                compose.waitUntil(5_000) { !owner.externalTranslationInFlight.value }
+                compose.onNodeWithText("Hello", useUnmergedTree = true).assertIsDisplayed()
+                compose.runOnIdle {
+                    assertEquals("Hello", owner.externalTranslations.value[parent.id]?.text)
+                    assertEquals(draft, owner.composerDraft.value)
+                    assertEquals(
+                        parent.id,
+                        owner.state.value.replyTo
+                            ?.id,
+                    )
+                    assertEquals(parent, runBlocking { db.messageDao().byCanonicalId(parent.id) })
+                    assertEquals(persistedDraft, runBlocking { db.composerDraftDao().byRoom(buffer.id) })
+                }
+            }
+        }
+    }
+
+    @Test
+    fun externalTranslationSendOnlyRealOwnerCreatesNoInlinePlaceholder() {
+        registerTranslationHandler(packageName = "ru.yandex.translate", action = Intent.ACTION_SEND)
+        withTranslationOwner { db, owner, parent ->
+            setContent(
+                draft = { owner.composerDraft.value },
+                chatViewModel = owner,
+                pages = flowOf(PagingData.from(listOf(parent))),
+                activityResults = pickerOwner,
+                onDraftChanged = { error("external handoff changed draft") },
+                onSubmit = { error("external handoff sent") },
+            )
+            compose.waitUntil(5_000) {
+                owner.composerDraft.value.hydrated &&
+                    owner.state.value.replyTo
+                        ?.id == parent.id
+            }
+            val draft = owner.composerDraft.value
+            val persistedDraft = runBlocking { db.composerDraftDao().byRoom(buffer.id) }
+            compose.runOnIdle { shadowOf(RuntimeEnvironment.getApplication()).clearNextStartedActivities() }
+            openTranslationPicker()
+            compose.onNodeWithText("Opens externally").assertIsDisplayed()
+            compose.onNodeWithTag("message_translation_app_ru.yandex.translate").performClick()
+            compose.waitUntil(5_000) { shadowOf(RuntimeEnvironment.getApplication()).peekNextStartedActivity() != null }
+            compose.onNodeWithTag("message_translation_88").assertDoesNotExist()
+            compose.runOnIdle {
+                assertFalse(owner.externalTranslationInFlight.value)
+                assertTrue(owner.externalTranslations.value.isEmpty())
+                assertTrue(pickerLaunchedIntents.isEmpty())
+                assertEquals(draft, owner.composerDraft.value)
+                assertEquals(
+                    parent.id,
+                    owner.state.value.replyTo
+                        ?.id,
+                )
+                assertEquals(parent, runBlocking { db.messageDao().byCanonicalId(parent.id) })
+                assertEquals(persistedDraft, runBlocking { db.composerDraftDao().byRoom(buffer.id) })
+            }
+        }
+    }
+
+    @Test
+    fun externalTranslationNativePickerReturnsPlainTextWithoutMutatingDraft() {
+        registerTranslationHandler()
+        val parent = translationMessage()
+        val draft = ComposerDraftState("Unsent draft", hydrated = true, revision = 17)
+        val returned = mutableListOf<String?>()
+        val selected = mutableListOf<Long>()
+        val db =
+            Room
+                .inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), MotdDatabase::class.java)
+                .allowMainThreadQueries()
+                .setQueryExecutor { it.run() }
+                .setTransactionExecutor { it.run() }
+                .build()
+        val store = ComposerDraftStore(db)
+        runBlocking {
+            db.networkDao().insert(NetworkEntity(id = buffer.networkId, name = "test", role = NetworkRole.DIRECT, host = "irc.example", port = 6697, nick = "me", username = "me", realname = "Me"))
+            db.bufferDao().insert(buffer)
+            db.messageDao().insertAll(listOf(parent))
+            store.saveDraft(buffer.id, draft.text, parent.id)
+        }
+        try {
+            setContent(
+                draft = { draft },
+                replyTo = { parent },
+                pages = flowOf(PagingData.from(listOf(parent))),
+                activityResults = pickerOwner,
+                onBeginExternalTranslation = { source ->
+                    selected += source.id
+                    val canonical = requireNotNull(db.messageDao().byCanonicalId(source.id))
+                    assertEquals(source.text, canonical.text)
+                    translationRequest(canonical)
+                },
+                onCompleteExternalTranslation = { returned += it },
+                onAbortExternalTranslationLaunch = { error("unexpected launch abort") },
+                onDraftChanged = { error("translation changed draft") },
+                onSubmit = { error("translation sent") },
+            )
+            openTranslationPicker()
+            compose.onNodeWithTag("message_translation_local").assertDoesNotExist()
+            compose.onNodeWithTag("message_translation_app_com.deepl.mobiletranslator").assertHeightIsAtLeast(48.dp)
+            compose.runOnIdle {
+                assertTrue(pickerLaunchedIntents.isEmpty())
+                assertTrue(selected.isEmpty())
+            }
+            compose.onNodeWithTag("message_translation_app_com.deepl.mobiletranslator").performClick()
+            compose.waitUntil(5_000) { pickerLaunchedIntents.isNotEmpty() }
+            compose.runOnIdle {
+                val intent = pickerLaunchedIntents.single()
+                assertEquals(Intent.ACTION_PROCESS_TEXT, intent.action)
+                assertEquals("com.deepl.mobiletranslator", intent.`package`)
+                assertEquals("text/plain", intent.type)
+                assertEquals("Bonjour 👋\nSalut", intent.getStringExtra(Intent.EXTRA_PROCESS_TEXT))
+                assertFalse(intent.getBooleanExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, true))
+                assertEquals(setOf(Intent.EXTRA_PROCESS_TEXT, Intent.EXTRA_PROCESS_TEXT_READONLY), intent.extras!!.keySet())
+                assertNull(intent.component)
+                assertEquals(0, intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK)
+                pickerRegistry.dispatchResult(
+                    pickerRequestCode,
+                    Activity.RESULT_OK,
+                    Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, SpannableString("Hello 👋\nWorld") as CharSequence),
+                )
+            }
+            compose.runOnIdle {
+                assertEquals(listOf(88L), selected)
+                assertEquals(listOf("Hello 👋\nWorld"), returned)
+                assertEquals("Unsent draft", draft.text)
+                assertEquals(17L, draft.revision)
+                assertEquals(parent.text, runBlocking { db.messageDao().byCanonicalId(parent.id) }?.text)
+                val stored = runBlocking { store.loadDraft(buffer.id) }
+                assertEquals(draft.text, stored?.text)
+                assertEquals(parent.id, stored?.replyToEventId)
+            }
+            compose.onNodeWithTag("message_translation_picker").assertDoesNotExist()
+            compose.onNodeWithTag("chat_message_88", useUnmergedTree = true).assertIsDisplayed()
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun externalTranslationOtherUsesProcessChooserAndCanceledMissingBlankOrMalformedReturnsAreQuiet() {
+        registerTranslationHandler(packageName = "example.textprocessor")
+        val parent = translationMessage()
+        val returned = mutableListOf<String?>()
+        setContent(
+            draft = { ComposerDraftState("Unsent draft", hydrated = true, revision = 17) },
+            pages = flowOf(PagingData.from(listOf(parent))),
+            activityResults = pickerOwner,
+            onBeginExternalTranslation = { translationRequest(it) },
+            onCompleteExternalTranslation = { returned += it },
+            onAbortExternalTranslationLaunch = { error("unexpected launch abort") },
+            onDraftChanged = { error("translation changed draft") },
+            onSubmit = { error("translation sent") },
+        )
+        val results =
+            listOf(
+                Activity.RESULT_CANCELED to Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, "Ignored"),
+                Activity.RESULT_OK to Intent(),
+                Activity.RESULT_OK to Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, " \n"),
+                Activity.RESULT_OK to Intent().putExtra(Intent.EXTRA_PROCESS_TEXT, 42),
+            )
+        for ((index, result) in results.withIndex()) {
+            openTranslationPicker()
+            compose.onNodeWithText("No supported translation apps installed.").assertIsDisplayed()
+            compose.onNodeWithTag("message_translation_app_example.textprocessor").assertDoesNotExist()
+            compose
+                .onNodeWithTag("message_translation_other")
+                .assertIsEnabled()
+                .performClick()
+            compose.waitUntil(5_000) { pickerLaunchedIntents.size == index + 1 }
+            compose.runOnIdle {
+                val chooser = pickerLaunchedIntents.last()
+                assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+                assertEquals("Translate message", chooser.getCharSequenceExtra(Intent.EXTRA_TITLE))
+                val process = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)!!
+                assertEquals(Intent.ACTION_PROCESS_TEXT, process.action)
+                assertNull(process.`package`)
+                assertEquals("text/plain", process.type)
+                assertEquals("Bonjour 👋\nSalut", process.getStringExtra(Intent.EXTRA_PROCESS_TEXT))
+                assertFalse(process.getBooleanExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, true))
+                pickerRegistry.dispatchResult(pickerRequestCode, result.first, result.second)
+            }
+        }
+        compose.runOnIdle { assertEquals(listOf(null, null, null, null), returned) }
+        compose.onNodeWithTag("chat_message_88", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun externalTranslationSendOnlyOpensDedicatedAppAndReleasesReservationWithoutReturnLauncher() {
+        registerTranslationHandler(packageName = "ru.yandex.translate", action = Intent.ACTION_SEND)
+        val parent = translationMessage()
+        var reservationsReleased = 0
+        setContent(
+            draft = { ComposerDraftState("Unsent draft", hydrated = true, revision = 17) },
+            pages = flowOf(PagingData.from(listOf(parent))),
+            activityResults = pickerOwner,
+            onBeginExternalTranslation = { translationRequest(it) },
+            onCompleteExternalTranslation = { error("SEND promised a returned result") },
+            onAbortExternalTranslationLaunch = { ++reservationsReleased },
+            onDraftChanged = { error("translation changed draft") },
+            onSubmit = { error("translation sent") },
+        )
+        compose.runOnIdle { shadowOf(RuntimeEnvironment.getApplication()).clearNextStartedActivities() }
+        openTranslationPicker()
+        compose.onNodeWithText("Opens externally").assertIsDisplayed()
+        compose.onNodeWithTag("message_translation_other").assertIsNotEnabled()
+        compose.onNodeWithText("No text-processing apps installed.").assertIsDisplayed()
+        compose.onNodeWithTag("message_translation_app_ru.yandex.translate").performClick()
+        compose.waitUntil(5_000) { shadowOf(RuntimeEnvironment.getApplication()).peekNextStartedActivity() != null }
+        compose.runOnIdle {
+            val intent = requireNotNull(shadowOf(RuntimeEnvironment.getApplication()).nextStartedActivity)
+            assertEquals(Intent.ACTION_SEND, intent.action)
+            assertEquals("ru.yandex.translate", intent.`package`)
+            assertEquals("text/plain", intent.type)
+            assertEquals("Bonjour 👋\nSalut", intent.getStringExtra(Intent.EXTRA_TEXT))
+            assertEquals(setOf(Intent.EXTRA_TEXT), intent.extras!!.keySet())
+            assertEquals(1, reservationsReleased)
+            assertTrue(pickerLaunchedIntents.isEmpty())
+        }
+        compose.onNodeWithTag("message_translation_88").assertDoesNotExist()
+        compose.onNodeWithTag("chat_message_88", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun externalTranslationOpeningAndCancelingPickerSharesNothingAndRequeriesInstalledApps() {
+        val parent = translationMessage()
+        setContent(
+            draft = { ComposerDraftState("Unsent draft", hydrated = true, revision = 17) },
+            pages = flowOf(PagingData.from(listOf(parent))),
+            activityResults = pickerOwner,
+            onBeginExternalTranslation = { error("canceling picker reserved a request") },
+            onCompleteExternalTranslation = { error("canceling picker completed a request") },
+            onAbortExternalTranslationLaunch = { error("canceling picker aborted a request") },
+            onDraftChanged = { error("translation changed draft") },
+            onSubmit = { error("translation sent") },
+        )
+        compose.runOnIdle { shadowOf(RuntimeEnvironment.getApplication()).clearNextStartedActivities() }
+        openTranslationPicker()
+        compose.onNodeWithText("No supported translation apps installed.").assertIsDisplayed()
+        compose.onNodeWithTag("message_translation_other").assertIsNotEnabled()
+        compose.onNodeWithTag("message_translation_cancel").performClick()
+        compose.onNodeWithTag("message_translation_picker").assertDoesNotExist()
+        compose.runOnIdle { registerTranslationHandler(label = "Newly installed translator") }
+        openTranslationPicker()
+        compose.onNodeWithText("Newly installed translator").assertIsDisplayed()
+        compose.onNodeWithTag("message_translation_other").assertIsEnabled()
+        compose.runOnIdle {
+            assertTrue(pickerLaunchedIntents.isEmpty())
+            assertNull(shadowOf(RuntimeEnvironment.getApplication()).peekNextStartedActivity())
+        }
+        compose.onNodeWithTag("message_translation_cancel").performClick()
+    }
+
+    @Test
+    fun externalTranslationServerMessageOffersPickerWithLabsOffAndNoLocalEntry() {
+        val parent = translationMessage()
+        setContent(
+            draft = { ComposerDraftState("", hydrated = true, revision = 1) },
+            pages = flowOf(PagingData.from(listOf(parent))),
+            chatBuffer = { buffer.copy(type = BufferType.SERVER) },
+            activityResults = pickerOwner,
+            onSubmit = { error("translation sent") },
+        )
+        openTranslationPicker()
+        compose.onNodeWithTag("message_translation_local").assertDoesNotExist()
+        compose.onNodeWithTag("message_translation_other").assertIsDisplayed()
+        compose.onNodeWithTag("message_translation_cancel").performClick()
+        compose.runOnIdle { assertTrue(pickerLaunchedIntents.isEmpty()) }
+    }
+
+    @Test
+    fun externalTranslationSingleSystemHoldOpensPickerDirectlyWithLabsOff() {
+        val parent = translationMessage().copy(kind = MessageKind.JOIN, text = "alice joined")
+        setContent(
+            draft = { ComposerDraftState("", hydrated = true, revision = 1) },
+            pages = flowOf(PagingData.from(listOf(parent))),
+            activityResults = pickerOwner,
+            onSubmit = { error("translation sent") },
+        )
+        compose.onNodeWithTag("chat_system_pill").performTouchInput { longClick() }
+        compose.onNodeWithTag("message_translation_picker").assertIsDisplayed()
+        compose.onNodeWithTag("message_action_translate").assertDoesNotExist()
+        compose.onNodeWithTag("message_translation_cancel").performClick()
+        compose.runOnIdle { assertTrue(pickerLaunchedIntents.isEmpty()) }
+    }
+
+    @Test
+    fun externalTranslationUnavailableSourceShowsSourceSnackbar() = assertExternalTranslationRefusal(busy = false)
+
+    @Test
+    fun externalTranslationBusyRequestShowsBusySnackbar() = assertExternalTranslationRefusal(busy = true)
+
+    private fun assertExternalTranslationRefusal(busy: Boolean) {
+        registerTranslationHandler()
+        val parent = translationMessage()
+        setContent(
+            draft = { ComposerDraftState("Unsent draft", hydrated = true, revision = 17) },
+            pages = flowOf(PagingData.from(listOf(parent))),
+            activityResults = pickerOwner,
+            onBeginExternalTranslation = { null },
+            onCompleteExternalTranslation = {},
+            onAbortExternalTranslationLaunch = { error("unreserved request aborted") },
+            externalTranslationInFlight = { busy },
+            onDraftChanged = { error("translation changed draft") },
+            onSubmit = { error("translation sent") },
+        )
+        openTranslationPicker()
+        compose.onNodeWithTag("message_translation_app_com.deepl.mobiletranslator").performClick()
+        compose
+            .onNodeWithText(
+                if (busy) "Finish the current translation first." else "This message is no longer available for translation.",
+            ).assertIsDisplayed()
+        compose.runOnIdle { assertTrue(pickerLaunchedIntents.isEmpty()) }
+    }
+
+    @Test
+    fun externalTranslationMissingCallbacksCannotLaunchFromStatelessPreview() {
+        registerTranslationHandler()
+        setContent(
+            draft = { ComposerDraftState("", hydrated = true, revision = 1) },
+            pages = flowOf(PagingData.from(listOf(translationMessage()))),
+            activityResults = pickerOwner,
+            onSubmit = { error("translation sent") },
+        )
+        openTranslationPicker()
+        compose.onNodeWithTag("message_translation_app_com.deepl.mobiletranslator").performClick()
+        compose.onNodeWithText("This message is no longer available for translation.").assertIsDisplayed()
+        compose.runOnIdle { assertTrue(pickerLaunchedIntents.isEmpty()) }
+    }
+
+    @Test
+    fun externalTranslationUnavailableProcessHandlerNeverFallsBackToSend() {
+        val process = registerTranslationHandler(activityName = "Process")
+        registerTranslationHandler(action = Intent.ACTION_SEND, activityName = "Share")
+        setContent(
+            draft = { ComposerDraftState("Unsent draft", hydrated = true, revision = 17) },
+            pages = flowOf(PagingData.from(listOf(translationMessage()))),
+            activityResults = pickerOwner,
+            onBeginExternalTranslation = { error("unavailable handler reserved a request") },
+            onCompleteExternalTranslation = {},
+            onAbortExternalTranslationLaunch = { error("unavailable handler aborted a request") },
+            onDraftChanged = { error("translation changed draft") },
+            onSubmit = { error("translation sent") },
+        )
+        compose.runOnIdle { shadowOf(RuntimeEnvironment.getApplication()).clearNextStartedActivities() }
+        openTranslationPicker()
+        compose.runOnIdle { shadowOf(RuntimeEnvironment.getApplication().packageManager).removeActivity(process) }
+        compose.onNodeWithTag("message_translation_app_com.deepl.mobiletranslator").performClick()
+        compose.onNodeWithText("Couldn’t open the translation app.").assertIsDisplayed()
+        compose.runOnIdle {
+            assertTrue(pickerLaunchedIntents.isEmpty())
+            assertNull(shadowOf(RuntimeEnvironment.getApplication()).peekNextStartedActivity())
+        }
+        compose.onNodeWithTag("chat_message_88", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun externalTranslationNativeLaunchExceptionsReleaseReservationsWithoutChangingSource() {
+        registerTranslationHandler()
+        var aborted = 0
+        setContent(
+            draft = { ComposerDraftState("Unsent draft", hydrated = true, revision = 17) },
+            pages = flowOf(PagingData.from(listOf(translationMessage()))),
+            activityResults = pickerOwner,
+            onBeginExternalTranslation = { translationRequest(it) },
+            onCompleteExternalTranslation = { error("failed launch returned a result") },
+            onAbortExternalTranslationLaunch = { ++aborted },
+            onDraftChanged = { error("translation changed draft") },
+            onSubmit = { error("translation sent") },
+        )
+        for ((index, failure) in listOf(ActivityNotFoundException("Removed after query"), SecurityException("Permission changed")).withIndex()) {
+            compose.runOnIdle { pickerLaunchFailure = failure }
+            openTranslationPicker()
+            compose.onNodeWithTag("message_translation_app_com.deepl.mobiletranslator").performClick()
+            compose.onNodeWithText("Couldn’t open the translation app.").assertIsDisplayed()
+            compose.runOnIdle { assertEquals(index + 1, aborted) }
+        }
+        compose.onNodeWithTag("chat_message_88", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
     fun messageTranslationNeverMutatesDraftReplyOrHistory() {
         val draft = ComposerDraftState("Unsent draft", hydrated = true, revision = 17)
         val parent = MessageEntity(id = 88, bufferId = buffer.id, serverTime = 1, sender = "alice", kind = MessageKind.PRIVMSG, text = "The report is ready.", dedupKey = "parent")
@@ -620,6 +1287,8 @@ class ComposerSendClearUiTest {
                 .onNodeWithTag("chat_message_88", useUnmergedTree = true)
                 .performTouchInput { longClick() }
             compose.onNodeWithTag("message_action_translate").performClick()
+            compose.onNodeWithTag("message_translation_picker").assertIsDisplayed()
+            compose.onNodeWithTag("message_translation_local").performClick()
             compose.onNodeWithTag("ai_text_source").assertIsDisplayed()
             compose.onNodeWithTag("ai_text_translate").performClick()
             compose.onNodeWithText("Le rapport est prêt.").assertIsDisplayed()

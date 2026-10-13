@@ -15,6 +15,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -24,6 +25,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavController
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -40,6 +42,7 @@ import io.github.trevarj.motd.ui.channelinfo.ChannelInfoScreen
 import io.github.trevarj.motd.ui.channellist.ChannelListScreen
 import io.github.trevarj.motd.ui.chat.ChatForegroundLifecycleGate
 import io.github.trevarj.motd.ui.chat.ChatScreen
+import io.github.trevarj.motd.ui.chat.ChatViewModel
 import io.github.trevarj.motd.ui.chatlist.AutoGroupScreen
 import io.github.trevarj.motd.ui.chatlist.ChatListScreen
 import io.github.trevarj.motd.ui.chatlist.ChatListViewModel
@@ -290,9 +293,12 @@ fun MotdNavGraph(
                             showComposerFormattingTools = showComposerFormattingTools,
                             onOpenAiSetup = { navController.navigate(AiLabsRoute(SettingsTarget.AI_TEXT_TOOLS)) },
                         ) {
+                            val chatViewModel: ChatViewModel = hiltViewModel(entry)
+                            ChatTranslationSessionEffect(navController, entry, chatViewModel::clearExternalTranslationSession)
                             ChatScreen(
                                 bufferId = route.bufferId,
                                 appearance = appearance,
+                                viewModel = chatViewModel,
                                 onBack = { navController.popBackStack() },
                                 showBack = showBack,
                                 onOpenConversationList =
@@ -672,6 +678,23 @@ fun MotdNavGraph(
                 onBack = { navController.popBackStack() },
             )
         }
+    }
+}
+
+@Composable
+internal fun ChatTranslationSessionEffect(
+    navController: NavHostController,
+    entry: NavBackStackEntry,
+    onDeparture: () -> Unit,
+) {
+    val latestOnDeparture by rememberUpdatedState(onDeparture)
+    DisposableEffect(navController, entry) {
+        val listener =
+            NavController.OnDestinationChangedListener { controller, _, _ ->
+                if (controller.currentBackStackEntry != entry) latestOnDeparture()
+            }
+        navController.addOnDestinationChangedListener(listener)
+        onDispose { navController.removeOnDestinationChangedListener(listener) }
     }
 }
 

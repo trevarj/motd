@@ -31,6 +31,15 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+        <package android:name="com.google.android.apps.translate" />
+        <package android:name="com.deepl.mobiletranslator" />
+        <package android:name="com.microsoft.translator" />
+        <package android:name="com.bnyro.translate" />
+        <package android:name="ru.yandex.translate" />
     </queries>
 
     <application

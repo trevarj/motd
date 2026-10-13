@@ -1,10 +1,13 @@
 package io.github.trevarj.motd.ui.chat
 
 import android.Manifest
+import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.BadParcelableException
 import android.os.Trace
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -408,6 +411,8 @@ fun ChatScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val ebooksHelperRoomId by viewModel.ebooksHelperRoomId.collectAsStateWithLifecycle()
     val ebooksDccOffers by viewModel.ebooksDccOffers.collectAsStateWithLifecycle()
+    val externalTranslations by viewModel.externalTranslations.collectAsStateWithLifecycle()
+    val externalTranslationInFlight by viewModel.externalTranslationInFlight.collectAsStateWithLifecycle()
     // Collect paging off the frame-aligned AndroidUiDispatcher. Bounded-window paging swaps the
     // whole Pager when a persisted older page recedes the gap edge, which emits two PagingData
     // back-to-back (the old Pager's invalidation generation plus the new Pager's first). cachedIn
@@ -693,6 +698,12 @@ fun ChatScreen(
             } else {
                 null
             },
+        externalTranslations = externalTranslations,
+        externalTranslationInFlight = externalTranslationInFlight,
+        onBeginExternalTranslation = viewModel::beginExternalTranslation,
+        onCompleteExternalTranslation = viewModel::completeExternalTranslation,
+        onAbortExternalTranslationLaunch = viewModel::abortExternalTranslationLaunch,
+        onDismissExternalTranslation = viewModel::dismissExternalTranslation,
         onAiComposer = {
             val snapshot = viewModel.beginAiDraftTransform()
             if (snapshot != null) aiTextViewModel.openComposer(snapshot) else aiTextViewModel.showUnavailable()
@@ -1077,7 +1088,14 @@ fun ChatContent(
     aiTextState: AiTextUiState = AiTextUiState.Closed,
     aiTextEnabled: Boolean = false,
     onAiComposer: () -> Unit = {},
+    // Exclusively the picker's existing On-device AI selection, gated by its caller.
     onTranslateMessage: ((MessageEntity) -> Unit)? = null,
+    externalTranslations: Map<Long, InlineTranslation> = emptyMap(),
+    externalTranslationInFlight: Boolean = false,
+    onBeginExternalTranslation: (suspend (MessageEntity) -> ExternalTranslationRequest?)? = null,
+    onCompleteExternalTranslation: ((String?) -> Unit)? = null,
+    onAbortExternalTranslationLaunch: (() -> Unit)? = null,
+    onDismissExternalTranslation: (Long) -> Unit = {},
     onDraftChanged: (String) -> Unit = {},
     // The send currently travelling from the composer into the timeline, if any.
     outgoingFlight: OutgoingFlight? = null,
@@ -1271,6 +1289,26 @@ fun ChatContent(
     val ebooksCache = remember(ctx) { EbooksResultCache(ctx) }
     val resources = LocalResources.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val latestExternalTranslationInFlight by rememberUpdatedState(externalTranslationInFlight)
+    val translationLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val returnedText =
+                if (result.resultCode == Activity.RESULT_OK) {
+                    try {
+                        result.data
+                            ?.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)
+                            ?.toString()
+                            ?.takeUnless(String::isBlank)
+                    } catch (_: BadParcelableException) {
+                        null
+                    } catch (_: ClassCastException) {
+                        null
+                    }
+                } else {
+                    null
+                }
+            onCompleteExternalTranslation?.invoke(returnedText)
+        }
     val eligibleEbooksRoomId =
         state.buffer?.let { room ->
             ebooksHelperRoomId?.takeIf {
@@ -2347,6 +2385,59 @@ fun ChatContent(
     var sheetTarget by remember { mutableStateOf<MessageEntity?>(null) }
     var redactionTarget by remember { mutableStateOf<MessageEntity?>(null) }
     val sheetState = rememberModalBottomSheetState()
+    var translationTarget by remember { mutableStateOf<MessageEntity?>(null) }
+    var translationTargets by remember { mutableStateOf(emptyList<ExternalTranslationTarget>()) }
+    var otherTranslationAvailable by remember { mutableStateOf(false) }
+
+    fun openTranslationPicker(message: MessageEntity) {
+        if (externalTranslationText(message) == null) return
+        translationTargets = externalTranslationTargets(ctx.packageManager)
+        otherTranslationAvailable = externalTranslationAvailable(ctx.packageManager, null)
+        translationTarget = message
+    }
+
+    fun launchTranslation(
+        message: MessageEntity,
+        target: ExternalTranslationTarget?,
+    ) {
+        scope.launch {
+            if (!externalTranslationAvailable(ctx.packageManager, target)) {
+                snackbarHostState.showSnackbar(resources.getString(R.string.chat_translation_open_failed))
+                return@launch
+            }
+            val begin = onBeginExternalTranslation
+            val abort = onAbortExternalTranslationLaunch
+            if (begin == null || onCompleteExternalTranslation == null || abort == null) {
+                snackbarHostState.showSnackbar(resources.getString(R.string.chat_translation_source_unavailable))
+                return@launch
+            }
+            val request = begin(message)
+            if (request == null) {
+                snackbarHostState.showSnackbar(
+                    resources.getString(
+                        if (latestExternalTranslationInFlight) R.string.chat_translation_busy else R.string.chat_translation_source_unavailable,
+                    ),
+                )
+                return@launch
+            }
+            val intent = externalTranslationIntent(request.plainText, target, resources.getString(R.string.chat_translation_picker_title))
+            try {
+                if (target?.action == Intent.ACTION_SEND) {
+                    // SEND is an external-only handoff; release the native-result reservation first.
+                    abort()
+                    ctx.startActivity(intent)
+                } else {
+                    translationLauncher.launch(intent)
+                }
+            } catch (_: ActivityNotFoundException) {
+                abort()
+                snackbarHostState.showSnackbar(resources.getString(R.string.chat_translation_open_failed))
+            } catch (_: SecurityException) {
+                abort()
+                snackbarHostState.showSnackbar(resources.getString(R.string.chat_translation_open_failed))
+            }
+        }
+    }
 
     ReportMessageViewport(
         items = items,
@@ -3454,7 +3545,9 @@ fun ChatContent(
                                             listState = listState,
                                             pagingHintsEnabled = initialPositionSettled,
                                             bottomContentPadding = innerPadding,
-                                            onTranslateMessage = onTranslateMessage,
+                                            onTranslateMessage = ::openTranslationPicker,
+                                            externalTranslations = externalTranslations,
+                                            onDismissExternalTranslation = onDismissExternalTranslation,
                                             liveEntryIds = liveEntryIds,
                                             onLiveEntryConsumed = onLiveEntryConsumed,
                                             outgoingFlight = outgoingFlight,
@@ -3968,7 +4061,12 @@ fun ChatContent(
             sheetState = sheetState,
             isServerBuffer = isServerBuffer,
             onDismiss = { sheetTarget = null },
-            onTranslate = onTranslateMessage?.let { callback -> { hideThen { callback(target) } } },
+            onTranslate =
+                if (externalTranslationText(target) != null) {
+                    { hideThen { openTranslationPicker(target) } }
+                } else {
+                    null
+                },
             onReply = {
                 hideThen {
                     onSetReply(target)
@@ -4021,6 +4119,18 @@ fun ChatContent(
             onRedact = { hideThen { redactionTarget = target } },
             // Outbound share: the raw message text, no formatting or attribution.
             onShare = { hideThen { shareMessageText(ctx, target.text) } },
+        )
+    }
+
+    translationTarget?.let { target ->
+        MessageTranslationPicker(
+            targets = translationTargets,
+            localAvailable = onTranslateMessage != null,
+            otherAvailable = otherTranslationAvailable,
+            onLocal = { onTranslateMessage?.invoke(target) },
+            onTarget = { launchTranslation(target, it) },
+            onOther = { launchTranslation(target, null) },
+            onDismiss = { translationTarget = null },
         )
     }
 

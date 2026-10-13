@@ -237,6 +237,18 @@ flowchart TD
   caches and never enter IRC history. Legacy transcription and installed Android
   voice settings survive migration; retired model files/directories remain unused
   in private storage rather than being automatically deleted.
+- Chat translation uses one explicit picker: optional on-device AI, compatible
+  installed translators, and Android's text-processing chooser. External apps
+  receive only the selected message's plain text and may use online services;
+  SEND-only handlers open externally and do not promise an inline result.
+  Returned text is validated and held in the chat entry's ViewModel, bound to its
+  canonical source ID, room and unchanged text. Selectable, dismissible results
+  never modify history, drafts or reply targets; source deletion/redaction/change
+  removes them. External translation requires neither AI Labs nor a model.
+  The session survives pause, rotation and translator round trips, but committed
+  navigation to any other MOTD entry clears it even when the chat remains in the
+  back stack; canceled predictive back and effect disposal do not clear it.
+  Nothing is persisted across a new process.
 - Chat routing waits on Agentwire classification with a blank full-size gate, not
   a progress bar or ordinary chat. Agentwire sync, history and running-tool
   progress indicators remain visible after classification.
