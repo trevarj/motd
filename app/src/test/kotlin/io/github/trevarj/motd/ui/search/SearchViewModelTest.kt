@@ -777,27 +777,6 @@ class SearchViewModelTest {
         }
 
     @Test
-    fun blank_state_discloses_coverage_before_the_first_keystroke() =
-        runTest {
-            val repo =
-                FakeSearchRepository(
-                    emptyList(),
-                    coverage = SearchCoverage.BufferPartial(openGaps = 2, historyComplete = false),
-                )
-            val vm = viewModel(repo)
-
-            vm.state.test {
-                vm.init(bufferId = 7L)
-                runCurrent()
-                val blank = awaitStateWhere { it.hasBufferScope }
-                assertEquals(SearchCoverage.BufferPartial(2, false), blank.coverage)
-                assertTrue("no query ran", blank.groups.isEmpty())
-                assertEquals("the disclosure must not require a DB search", 0, repo.calls.get())
-                cancelAndIgnoreRemainingEvents()
-            }
-        }
-
-    @Test
     fun results_carry_coverage_and_the_raw_page_truncation_flag() =
         runTest {
             val repo =

@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.search
 
+import android.content.Context
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -9,6 +10,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
@@ -21,8 +25,11 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
+import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.ai.text.TextTermination
 import io.github.trevarj.motd.ai.text.TextTransformResult
@@ -33,6 +40,7 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.repo.SearchCoverage
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.irc.ext.SearchResultKind
 import io.github.trevarj.motd.ui.ai.AiTextSheet
@@ -63,6 +71,51 @@ class SearchScreenUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun blankCoverageNoticeRemainsHonestWhileCoverageLoads() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val initial = SearchUiState(hasBufferScope = true, scope = SearchScope.CURRENT)
+        var state by mutableStateOf(initial)
+        var queryChanges = 0
+        var searchSubmissions = 0
+        compose.setContent {
+            MotdTheme {
+                SearchContent(
+                    state,
+                    onQueryChange = { queryChanges++ },
+                    onScopeChange = {},
+                    onBack = {},
+                    onOpenHit = {},
+                    onServerSearchSubmit = { searchSubmissions++ },
+                )
+            }
+        }
+
+        val transitions =
+            listOf(
+                initial to R.string.search_coverage_partial,
+                initial.copy(coverage = SearchCoverage.BufferPartial(2, false)) to R.string.search_coverage_partial,
+                initial.copy(coverage = SearchCoverage.BufferComplete) to null,
+                initial.copy(scope = SearchScope.ALL, coverage = SearchCoverage.BufferComplete) to R.string.search_coverage_all,
+                initial.copy(scope = SearchScope.ALL, coverage = SearchCoverage.DeviceOnly) to R.string.search_coverage_all,
+            )
+        for ((next, notice) in transitions) {
+            compose.runOnIdle { state = next }
+            if (notice == null) {
+                compose.onNodeWithTag("search_coverage_notice").assertDoesNotExist()
+            } else {
+                compose.onNodeWithTag("search_coverage_notice").assertIsDisplayed().assertTextEquals(context.getString(notice))
+            }
+            compose.onNodeWithTag("search_field").assert(
+                SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")),
+            )
+            compose.runOnIdle {
+                assertEquals(0, queryChanges)
+                assertEquals(0, searchSubmissions)
+            }
+        }
+    }
 
     @Test
     fun snippetsUseNeutralInkOnRowAndHighlightWithoutChangingSenderOrTimestamp() {
