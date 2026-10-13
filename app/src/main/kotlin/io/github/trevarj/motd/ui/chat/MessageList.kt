@@ -528,7 +528,7 @@ fun MessageList(
                             onDismiss = { onDismissInvite(msg.id) },
                             onLongPress = translationHold?.let { { it(msg) } },
                             trailingContent = translationContent,
-                            containerModifier = translationHostModifier,
+                            modifier = translationHostModifier,
                         )
                     }
                 }
@@ -547,10 +547,10 @@ fun MessageList(
                         onFlightRowPositioned,
                     ) {
                         NetworkBatchPill(
-                            msg,
-                            translationHold?.let { { it(msg) } },
+                            message = msg,
+                            onLongPress = translationHold?.let { { it(msg) } },
                             trailingContent = translationContent,
-                            containerModifier = translationHostModifier,
+                            modifier = translationHostModifier,
                         )
                     }
                 }
@@ -579,7 +579,7 @@ fun MessageList(
                             onSaveToDownloads = onSaveDccToDownloads,
                             onLongPress = translationHold?.let { { it(msg) } },
                             trailingContent = translationContent,
-                            containerModifier = translationHostModifier,
+                            modifier = translationHostModifier,
                         )
                     }
                 }
@@ -818,9 +818,9 @@ private fun DccTransferCard(
     onReject: (Long) -> Unit,
     onRemove: (Long) -> Unit,
     onSaveToDownloads: (suspend (Long) -> Unit)?,
+    modifier: Modifier = Modifier,
     onLongPress: (() -> Unit)? = null,
     trailingContent: (@Composable (Color) -> Unit)? = null,
-    containerModifier: Modifier = Modifier,
 ) {
     // Latch the outgoing entity: by the time the card collapses into the compact pill the entity
     // is already gone, and the exiting frames must keep rendering the last real content.
@@ -841,7 +841,7 @@ private fun DccTransferCard(
                 modifier = Modifier.testTag("chat_dcc_transfer_compact_${message.id}"),
                 onLongPress = onLongPress,
                 trailingContent = trailingContent.takeIf { transfer == null },
-                containerModifier = containerModifier,
+                containerModifier = modifier,
             )
         } else {
             // An exiting card keeps composing through the card->pill collapse; its actions must
@@ -855,7 +855,7 @@ private fun DccTransferCard(
                 onSaveToDownloads = onSaveToDownloads.takeIf { current },
                 onLongPress = onLongPress,
                 trailingContent = trailingContent.takeIf { current },
-                containerModifier = containerModifier,
+                modifier = modifier,
             )
         }
     }
@@ -867,12 +867,12 @@ internal fun ActiveDccTransferCard(
     onAccept: (Long, String, Boolean) -> Unit,
     onReject: (Long) -> Unit,
     onRemove: (Long) -> Unit,
+    modifier: Modifier = Modifier,
     onSaveToDownloads: (suspend (Long) -> Unit)? = null,
     onReceiveResultsPrivately: ((DccTransferEntity, Boolean) -> Unit)? = null,
     onViewResults: ((DccTransferEntity) -> Unit)? = null,
     onLongPress: (() -> Unit)? = null,
     trailingContent: (@Composable (Color) -> Unit)? = null,
-    containerModifier: Modifier = Modifier,
 ) {
     val privateRisk =
         remember(transfer.address, transfer.addressKind) {
@@ -906,7 +906,8 @@ internal fun ActiveDccTransferCard(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 6.dp)
-                .then(if (trailingContent == null) sourceModifier else containerModifier),
+                .then(modifier)
+                .then(if (trailingContent == null) sourceModifier else Modifier),
     ) {
         MessagePaintedContent(
             modifier = Modifier,
@@ -1265,9 +1266,9 @@ private fun LiveMessageEntry(
 @Composable
 private fun NetworkBatchPill(
     message: MessageEntity,
+    modifier: Modifier = Modifier,
     onLongPress: (() -> Unit)? = null,
     trailingContent: (@Composable (Color) -> Unit)? = null,
-    containerModifier: Modifier = Modifier,
 ) {
     val payload = remember(message.eventPayload) { NetworkBatchPayloadV1.decode(message.eventPayload) }
     if (payload == null) {
@@ -1279,7 +1280,7 @@ private fun NetworkBatchPill(
             modifier = Modifier.testTag("chat_network_batch_${message.id}"),
             onLongPress = onLongPress,
             trailingContent = trailingContent,
-            containerModifier = containerModifier,
+            containerModifier = modifier,
         )
         return
     }
@@ -1295,7 +1296,7 @@ private fun NetworkBatchPill(
         modifier = Modifier.testTag("chat_network_batch_${message.kind.name.lowercase()}_${message.id}"),
         onLongPress = onLongPress,
         trailingContent = trailingContent,
-        containerModifier = containerModifier,
+        containerModifier = modifier,
     )
 }
 
@@ -1328,9 +1329,9 @@ private fun InvitationCard(
     message: MessageEntity,
     onJoin: () -> Unit,
     onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
     onLongPress: (() -> Unit)? = null,
     trailingContent: (@Composable (Color) -> Unit)? = null,
-    containerModifier: Modifier = Modifier,
 ) {
     val payload = remember(message.eventPayload) { InvitePayloadV1.decode(message.eventPayload) }
     val state = message.inviteState
@@ -1372,7 +1373,7 @@ private fun InvitationCard(
                     modifier = Modifier.testTag(target.testTag),
                     onLongPress = onLongPress,
                     trailingContent = trailingContent.takeIf { target == render },
-                    containerModifier = containerModifier,
+                    containerModifier = modifier,
                 )
             }
 
@@ -1393,7 +1394,8 @@ private fun InvitationCard(
                         Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 6.dp)
-                            .then(if (currentTrailing == null) sourceModifier else containerModifier),
+                            .then(modifier)
+                            .then(if (currentTrailing == null) sourceModifier else Modifier),
                 ) {
                     MessagePaintedContent(
                         modifier = Modifier,

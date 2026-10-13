@@ -252,6 +252,7 @@ flowchart TD
   wrap returned text. Dismissible results never modify history, drafts or reply
   targets; source deletion/redaction/change removes them. External translation
   requires neither AI Labs nor a model.
+  Root layout modifiers remain separate from source-region gesture modifiers.
   The session survives pause, rotation and translator round trips, but committed
   navigation to any other MOTD entry clears it even when the chat remains in the
   back stack; canceled predictive back and effect disposal do not clear it.
