@@ -250,6 +250,11 @@ fun ChatListRowItem(
     val paintedRow = rowContainer.compositeOver(MaterialTheme.colorScheme.surface)
     val readingInk = readingInk(MaterialTheme.colorScheme)
     val readingColor = remember(readingInk, paintedRow) { ensureContrast(readingInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
+    // Read previews stay subdued without sacrificing readable contrast on the painted row.
+    val previewColor =
+        remember(isUnread, readingColor, paintedRow) {
+            if (isUnread) readingColor else ensureContrast(readingColor.copy(alpha = 0.65f).compositeOver(paintedRow), listOf(paintedRow))
+        }
     val activeIndicator = MaterialTheme.colorScheme.primary
     val hideAvatar = avatarsHidden()
     val presenceDescription =
@@ -441,7 +446,7 @@ fun ChatListRowItem(
                         },
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = if (isUnread) FontWeight.Medium else FontWeight.Normal,
-                    color = readingColor,
+                    color = previewColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),

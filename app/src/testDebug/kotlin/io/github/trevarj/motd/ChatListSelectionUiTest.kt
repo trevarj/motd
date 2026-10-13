@@ -62,7 +62,9 @@ import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.TimestampConfig
+import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.readingInk
 import io.github.trevarj.motd.ui.theme.spacingFor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -97,22 +99,27 @@ class ChatListSelectionUiTest {
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
     }
 
-    @Test fun title_and_preview_use_neutral_ink_without_changing_timestamp_sender_or_unread_weight() {
+    @Test fun read_previews_are_subdued_and_readable_without_changing_title_timestamp_sender_or_unread_weight() {
         val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
+        val paletteText = mutableStateOf(false)
         val state = mutableStateOf(Triple(false, false, 0))
+        val muted = mutableStateOf(false)
         val voice = mutableStateOf(false)
         var fill = Color.Unspecified
+        var titleInk = Color.Unspecified
         var timestampInk = Color.Unspecified
         var senderInk = Color.Unspecified
         compose.setContent {
             MotdTheme(
                 dynamicColor = false,
                 themePreset = preset.value,
+                useThemeTextColors = paletteText.value,
                 timestampConfig = TimestampConfig(format = TimeFormat.CUSTOM, customPattern = "'Preview time'"),
             ) {
                 val scheme = MaterialTheme.colorScheme
                 val (selected, active, unread) = state.value
-                fill = chatListRowContainer(chatListRowVisualState(selected, active, unread > 0), scheme).compositeOver(scheme.surface)
+                fill = chatListRowContainer(chatListRowVisualState(selected, active, !muted.value && unread > 0), scheme).compositeOver(scheme.surface)
+                titleInk = ensureContrast(readingInk(scheme), listOf(fill), MESSAGE_TEXT_CONTRAST)
                 timestampInk = scheme.onSurfaceVariant
                 senderInk = LocalNickColors.current.nick("alice", scheme.onSurfaceVariant)
                 Surface(color = scheme.surface) {
@@ -121,6 +128,7 @@ class ChatListSelectionUiTest {
                             type = BufferType.CHANNEL,
                             displayName = "#reading",
                             unreadCount = unread,
+                            muted = muted.value,
                             lastMessageText = if (voice.value) "[voice 0:14 audio/ogg] https://files.example/voice.ogg" else "Reading preview",
                         ),
                         false,
@@ -139,35 +147,60 @@ class ChatListSelectionUiTest {
             compose.onNodeWithText(text, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
             return layouts.single()
         }
-        val states =
-            listOf(
-                Triple(false, false, 0),
-                Triple(false, false, 1),
-                Triple(false, true, 0),
-                Triple(false, true, 1),
-                Triple(true, false, 0),
-                Triple(true, false, 1),
-            )
         val voiceLabel = RuntimeEnvironment.getApplication().getString(R.string.chatlist_voice_message) + " · 0:14"
         for (theme in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
-            val seed = if (theme == ColorThemePreset.AYU_LIGHT) Color(0xFF171717) else Color(0xFFF5F5F5)
-            for (rowState in states) {
-                for (audio in listOf(false, true)) {
-                    compose.runOnIdle {
-                        preset.value = theme
-                        state.value = rowState
-                        voice.value = audio
+            for (usePalette in listOf(false, true)) {
+                for ((selected, active) in listOf(false to false, false to true, true to false)) {
+                    for (audio in listOf(false, true)) {
+                        var readInk = Color.Unspecified
+                        var readContrast = 0.0
+                        var readRenderedContrast = 0.0
+                        // Clear unread on the same row, then verify a muted count also stays subdued.
+                        for ((step, activity) in listOf(false to 0, false to 1, false to 0, true to 1).withIndex()) {
+                            val (isMuted, unread) = activity
+                            compose.runOnIdle {
+                                preset.value = theme
+                                paletteText.value = usePalette
+                                state.value = Triple(selected, active, unread)
+                                muted.value = isMuted
+                                voice.value = audio
+                            }
+                            val isUnread = !isMuted && unread > 0
+                            val previewText = if (audio) voiceLabel else "Reading preview"
+                            val title = layoutOf("#reading").layoutInput.style
+                            val preview = layoutOf(previewText).layoutInput.style
+                            val label = "$theme palette=$usePalette selected=$selected active=$active voice=$audio muted=$isMuted unread=$unread"
+                            val rowPixels = compose.onNodeWithTag("chatlist_row_1").captureToImage().asAndroidBitmap()
+                            val paintedFill = Color(rowPixels.getPixel(rowPixels.width / 2, rowPixels.height - 2))
+                            assertEquals("$label painted row", fill.toArgb(), paintedFill.toArgb())
+                            val previewContrast = contrastRatio(preview.color, fill)
+                            val previewPixels = compose.onNodeWithText(previewText, useUnmergedTree = true).captureToImage().asAndroidBitmap()
+                            val pixels = IntArray(previewPixels.width * previewPixels.height)
+                            previewPixels.getPixels(pixels, 0, previewPixels.width, 0, 0, previewPixels.width, previewPixels.height)
+                            val renderedContrast = pixels.maxOf { contrastRatio(Color(it), paintedFill) }
+                            assertTrue("$label readable preview: $previewContrast", previewContrast >= 4.5)
+                            // Native glyph pixels quantize the Compose colors to 8-bit channels.
+                            assertEquals("$label native glyph ink", previewContrast, renderedContrast, 0.1)
+                            assertEquals("$label title remains reading ink", titleInk, title.color)
+                            assertEquals("$label title unread weight", if (isUnread) FontWeight.Bold else FontWeight.Medium, title.fontWeight)
+                            assertEquals("$label preview unread weight", if (isUnread) FontWeight.Medium else FontWeight.Normal, preview.fontWeight)
+                            assertEquals("$label timestamp", timestampInk, layoutOf("Preview time").layoutInput.style.color)
+                            assertEquals("$label sender", senderInk, layoutOf("alice").layoutInput.style.color)
+                            if (step == 0) {
+                                readInk = preview.color
+                                readContrast = previewContrast
+                                readRenderedContrast = renderedContrast
+                                assertTrue("$label preview is dimmer than title", previewContrast < contrastRatio(title.color, paintedFill))
+                            } else if (isUnread) {
+                                assertEquals("$label unread stays bright", title.color, preview.color)
+                                assertTrue("$label unread contrast is stronger", previewContrast > readContrast)
+                                assertTrue("$label native unread ink is stronger", renderedContrast > readRenderedContrast)
+                            } else {
+                                assertEquals("$label clearing unread or muting restores subdued ink", readInk, preview.color)
+                                assertEquals("$label subdued native ink", readRenderedContrast, renderedContrast, 0.1)
+                            }
+                        }
                     }
-                    val title = layoutOf("#reading").layoutInput.style
-                    val preview = layoutOf(if (audio) voiceLabel else "Reading preview").layoutInput.style
-                    val label = "$theme $rowState voice=$audio"
-                    val readingInk = ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST)
-                    assertEquals("$label title", readingInk, title.color)
-                    assertEquals("$label preview", readingInk, preview.color)
-                    assertEquals("$label title unread weight", if (rowState.third > 0) FontWeight.Bold else FontWeight.Medium, title.fontWeight)
-                    assertEquals("$label preview unread weight", if (rowState.third > 0) FontWeight.Medium else FontWeight.Normal, preview.fontWeight)
-                    assertEquals("$label timestamp", timestampInk, layoutOf("Preview time").layoutInput.style.color)
-                    assertEquals("$label sender", senderInk, layoutOf("alice").layoutInput.style.color)
                 }
             }
         }

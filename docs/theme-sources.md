@@ -34,6 +34,9 @@ formatting stay intact.
 Some mid-luminance fills cannot reach 7:1 with any ink, so these retain their palette color and use
 the most readable black or white ink, with at least 4.5:1 contrast.
 
+Read chat-list message previews are subdued while retaining at least 4.5:1 contrast.
+Unread previews keep the stronger reading ink in both text-color modes.
+
 Compact, two-line, and full-width ACTION rows paint their existing nick/attention tint composited
 onto the theme canvas as an **opaque text backdrop**. Wallpaper remains visible outside those rows;
 its selected intensity controls builtin ink or full-color image opacity directly, including 100%.
