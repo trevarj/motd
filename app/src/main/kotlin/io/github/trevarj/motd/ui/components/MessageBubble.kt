@@ -15,6 +15,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -252,6 +253,29 @@ private fun Modifier.mentionHighlight(accent: Color): Modifier =
         )
     }
 
+/** Keep the existing source layout unchanged unless a separate, noninteractive inset is present. */
+@Composable
+internal fun MessagePaintedContent(
+    modifier: Modifier,
+    sourceModifier: Modifier,
+    contentModifier: Modifier,
+    parentColor: Color,
+    sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? = null,
+    trailingContent: (@Composable (Color) -> Unit)? = null,
+    verticalArrangement: Arrangement.Vertical = Arrangement.Top,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    if (trailingContent == null) {
+        Column(modifier.then(sourceModifier).then(contentModifier), verticalArrangement = verticalArrangement, content = content)
+    } else {
+        Column(modifier.then(contentModifier)) {
+            val source: @Composable () -> Unit = { Column(sourceModifier, verticalArrangement = verticalArrangement, content = content) }
+            if (sourceWrapper != null) sourceWrapper(source) else source()
+            trailingContent(parentColor)
+        }
+    }
+}
+
 /**
  * One chat bubble. Handles the four rendered kinds (PRIVMSG bubble, NOTICE labelled bubble, ACTION
  * italic no-bubble, plus reply/image/reactions decorations). System-event kinds are rendered by
@@ -314,6 +338,10 @@ fun MessageBubble(
     sendMorphProgress: (() -> Float)? = null,
     bubbleModifier: Modifier = Modifier,
     bodyModifier: Modifier = Modifier,
+    // Translated rows separate the painted host from source gestures; ghosts/default callers do not.
+    containerModifier: Modifier = Modifier,
+    sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? = null,
+    trailingContent: (@Composable (Color) -> Unit)? = null,
 ) {
     // Production timelines pass a string from one list-scoped formatter. The fallback keeps
     // previews/direct callers source-compatible without making every real row query system time
@@ -369,6 +397,9 @@ fun MessageBubble(
                 onImageClick = onImageClick,
                 onLinkPreviewClick = onLinkPreviewClick,
                 onSenderClick = onSenderClick,
+                containerModifier = containerModifier,
+                sourceWrapper = sourceWrapper,
+                trailingContent = trailingContent,
             )
         } else {
             ComfortableActionBubble(
@@ -406,6 +437,9 @@ fun MessageBubble(
                 onImageClick = onImageClick,
                 onLinkPreviewClick = onLinkPreviewClick,
                 onSenderClick = onSenderClick,
+                containerModifier = containerModifier,
+                sourceWrapper = sourceWrapper,
+                trailingContent = trailingContent,
             )
         }
         return
@@ -448,6 +482,9 @@ fun MessageBubble(
             onImageClick = onImageClick,
             onLinkPreviewClick = onLinkPreviewClick,
             onSenderClick = onSenderClick,
+            containerModifier = containerModifier,
+            sourceWrapper = sourceWrapper,
+            trailingContent = trailingContent,
         )
         return
     }
@@ -491,6 +528,9 @@ fun MessageBubble(
             onImageClick = onImageClick,
             onLinkPreviewClick = onLinkPreviewClick,
             onSenderClick = onSenderClick,
+            containerModifier = containerModifier,
+            sourceWrapper = sourceWrapper,
+            trailingContent = trailingContent,
         )
         return
     }
@@ -586,17 +626,23 @@ fun MessageBubble(
             }
         }
 
-        Column(
+        MessagePaintedContent(
             modifier =
                 bubbleModifier
                     .chatBubbleWidth()
                     .then(surfaceModifier)
-                    .messageRowClicks(
-                        onClick = onClick,
-                        onClickLabel = onClickLabel,
-                        onLongPress = onLongPress,
-                        onLongPressLabel = onLongPressLabel ?: actionsLabel,
-                    ).padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
+                    .then(containerModifier),
+            sourceModifier =
+                Modifier.messageRowClicks(
+                    onClick = onClick,
+                    onClickLabel = onClickLabel,
+                    onLongPress = onLongPress,
+                    onLongPressLabel = onLongPressLabel ?: actionsLabel,
+                ),
+            contentModifier = Modifier.padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
+            parentColor = bubbleColor,
+            sourceWrapper = sourceWrapper,
+            trailingContent = trailingContent,
         ) {
             if (showSender && !isSelf) {
                 val nameInk = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
@@ -815,6 +861,9 @@ private fun ComfortableActionBubble(
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
+    containerModifier: Modifier = Modifier,
+    sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? = null,
+    trailingContent: (@Composable (Color) -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val actionDescription = stringResource(R.string.chat_action_message)
@@ -910,13 +959,16 @@ private fun ComfortableActionBubble(
             ),
         horizontalArrangement = if (isSelf) Arrangement.End else Arrangement.Start,
     ) {
-        Column(
+        MessagePaintedContent(
             modifier =
                 Modifier
                     .chatBubbleWidth()
                     .shadow(comfortableElevation(COMFORTABLE_BUBBLE_ELEVATION), shape)
                     .clip(shape)
                     .background(rowColor)
+                    .then(containerModifier),
+            sourceModifier =
+                Modifier
                     .testTag("chat_action_row")
                     .semantics {
                         contentDescription = actionLabel
@@ -926,7 +978,11 @@ private fun ComfortableActionBubble(
                         onClickLabel = onClickLabel,
                         onLongPress = onLongPress,
                         onLongPressLabel = onLongPressLabel ?: actionsLabel,
-                    ).padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
+                    ),
+            contentModifier = Modifier.padding(horizontal = spacing.bubbleInnerHPad, vertical = spacing.bubbleInnerVPad),
+            parentColor = rowColor,
+            sourceWrapper = sourceWrapper,
+            trailingContent = trailingContent,
         ) {
             reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, rowColor) }
 
@@ -1057,6 +1113,9 @@ private fun ActionMessageRow(
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
+    containerModifier: Modifier = Modifier,
+    sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? = null,
+    trailingContent: (@Composable (Color) -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val actionDescription = stringResource(R.string.chat_action_message)
@@ -1138,25 +1197,29 @@ private fun ActionMessageRow(
     // The caller's modifier carries the stable per-message semantics. Keep the ACTION-specific
     // identity on a nested layout node so its test tag does not compete with that message tag.
     Box(modifier = modifier.fillMaxWidth()) {
-        Column(
+        MessagePaintedContent(
             modifier =
                 Modifier
                     .fillMaxWidth()
+                    .background(paintedRow)
+                    .actionAccentRail(accent)
+                    .then(containerModifier),
+            sourceModifier =
+                Modifier
                     .testTag("chat_action_row")
                     .semantics {
                         contentDescription = actionLabel
                         stateDescription = actionDescription
-                    }.background(paintedRow)
-                    .actionAccentRail(accent)
-                    .messageRowClicks(
+                    }.messageRowClicks(
                         onClick = onClick,
                         onClickLabel = onClickLabel,
                         onLongPress = onLongPress,
                         onLongPressLabel = onLongPressLabel ?: actionsLabel,
-                    ).padding(
-                        horizontal = spacing.messageOuterHPad,
-                        vertical = spacing.actionVPad,
                     ),
+            contentModifier = Modifier.padding(horizontal = spacing.messageOuterHPad, vertical = spacing.actionVPad),
+            parentColor = paintedRow,
+            sourceWrapper = sourceWrapper,
+            trailingContent = trailingContent,
         ) {
             reply?.let {
                 ReplyMiniBubble(it, nickColors, onReplyClick, paintedRow)
@@ -1395,6 +1458,9 @@ private fun TwoLineMessageRow(
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
+    containerModifier: Modifier = Modifier,
+    sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? = null,
+    trailingContent: (@Composable (Color) -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val hideAvatar = avatarsHidden()
@@ -1422,20 +1488,31 @@ private fun TwoLineMessageRow(
         }
     val nameColor = remember(nameInk, nameBackground) { ensureContrast(nameInk, listOf(nameBackground), MESSAGE_TEXT_CONTRAST) }
 
-    Column(
+    MessagePaintedContent(
         modifier =
             modifier
                 .fillMaxWidth()
-                // Tint fills the full row width (behind the horizontal padding) so the speaker band is
-                // unbroken edge to edge, matching COMPACT.
-                // Flatten the wash onto the canvas so wallpaper never becomes the text backdrop.
+                // Flatten the speaker wash onto the canvas before the source and its inset.
                 .background(paintedRow)
-                .messageRowClicks(
-                    onClick = onClick,
-                    onClickLabel = onClickLabel,
-                    onLongPress = onLongPress,
-                    onLongPressLabel = onLongPressLabel ?: actionsLabel,
-                ).padding(horizontal = spacing.messageOuterHPad, vertical = spacing.bubbleRowVPad),
+                .then(containerModifier),
+        sourceModifier =
+            Modifier.messageRowClicks(
+                onClick = onClick,
+                onClickLabel = onClickLabel,
+                onLongPress = onLongPress,
+                onLongPressLabel = onLongPressLabel ?: actionsLabel,
+            ),
+        contentModifier = Modifier.padding(horizontal = spacing.messageOuterHPad, vertical = spacing.bubbleRowVPad),
+        parentColor = paintedRow,
+        sourceWrapper = sourceWrapper,
+        trailingContent =
+            trailingContent?.let { trailing ->
+                { color ->
+                    Column(Modifier.padding(start = twoLineBodyIndent(spacing, hideAvatar))) {
+                        trailing(color)
+                    }
+                }
+            },
     ) {
         // Line 1 (header): avatar + nick + (own) sent check + timestamp — only on a group's first
         // message. Continuations (showSender == false) omit the header and indent the body under it.

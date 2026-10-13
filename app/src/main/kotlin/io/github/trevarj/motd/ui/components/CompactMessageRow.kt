@@ -96,6 +96,9 @@ internal fun CompactMessageRow(
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
+    containerModifier: Modifier = Modifier,
+    sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? = null,
+    trailingContent: (@Composable (Color) -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val spacing = LocalSpacing.current
@@ -162,20 +165,24 @@ internal fun CompactMessageRow(
             ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
         }
 
-    Column(
+    MessagePaintedContent(
         modifier =
             modifier
                 .fillMaxWidth()
-                // Tint fills the full row width (behind the horizontal padding) so the speaker band is
-                // unbroken edge to edge.
-                // Paint the flattened wash opaquely so wallpaper ink cannot intrude under text.
+                // Paint the flattened speaker band opaquely beneath source and inset.
                 .background(paintedRow)
-                .messageRowClicks(
-                    onClick = onClick,
-                    onClickLabel = onClickLabel,
-                    onLongPress = onLongPress,
-                    onLongPressLabel = onLongPressLabel ?: actionsLabel,
-                ).padding(horizontal = spacing.messageOuterHPad, vertical = spacing.compactRowVPad),
+                .then(containerModifier),
+        sourceModifier =
+            Modifier.messageRowClicks(
+                onClick = onClick,
+                onClickLabel = onClickLabel,
+                onLongPress = onLongPress,
+                onLongPressLabel = onLongPressLabel ?: actionsLabel,
+            ),
+        contentModifier = Modifier.padding(horizontal = spacing.messageOuterHPad, vertical = spacing.compactRowVPad),
+        parentColor = paintedRow,
+        sourceWrapper = sourceWrapper,
+        trailingContent = trailingContent,
     ) {
         reply?.let {
             ReplyMiniBubble(it, nickColors, onReplyClick, paintedRow)

@@ -61,6 +61,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -117,6 +118,8 @@ fun AudioAttachmentPlayers(
     transcriptionReady: Boolean = false,
     onTranscribe: (AudioPlaybackRequest, Boolean) -> Unit = { _, _ -> },
     onCancelTranscription: (String) -> Unit = {},
+    sourceWrapper: (@Composable (index: Int, content: @Composable () -> Unit) -> Unit)? = null,
+    trailingContent: (@Composable (Color) -> Unit)? = null,
 ) {
     var expanded by remember(attachments) { mutableStateOf(false) }
     val visible = if (expanded) attachments else attachments.take(MAX_COLLAPSED_AUDIO_PLAYERS)
@@ -136,7 +139,7 @@ fun AudioAttachmentPlayers(
                 horizontalAlignment = if (isSelf) Alignment.End else Alignment.Start,
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                visible.forEach { attachment ->
+                visible.forEachIndexed { index, attachment ->
                     AudioAttachmentPlayer(
                         attachment = attachment,
                         playbackState = playbackState,
@@ -158,6 +161,8 @@ fun AudioAttachmentPlayers(
                         onLongPress = onLongPress,
                         onClick = onClick,
                         onClickLabel = onClickLabel,
+                        sourceWrapper = sourceWrapper?.let { wrapper -> { content -> wrapper(index, content) } },
+                        trailingContent = trailingContent.takeIf { index == 0 },
                         modifier =
                             Modifier
                                 .fillMaxWidth(0.82f)
@@ -205,6 +210,8 @@ private fun AudioAttachmentPlayer(
     transcriptionReady: Boolean,
     onTranscribe: (AudioPlaybackRequest, Boolean) -> Unit,
     onCancelTranscription: (String) -> Unit,
+    sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)?,
+    trailingContent: (@Composable (Color) -> Unit)?,
 ) {
     val context = LocalContext.current
     val active = playbackState.activeId == attachment.playbackId
@@ -236,15 +243,16 @@ private fun AudioAttachmentPlayer(
         onInspectCache(attachment)
     }
 
-    Surface(
-        modifier =
-            modifier.combinedClickable(
+    AudioPlayerSurface(
+        modifier = modifier,
+        sourceModifier =
+            Modifier.combinedClickable(
                 onClick = onClick ?: {},
                 onClickLabel = onClickLabel,
                 onLongClick = onLongPress ?: { showDetails = true },
             ),
-        shape = MotdShapes.card,
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        sourceWrapper = sourceWrapper,
+        trailingContent = trailingContent,
     ) {
         Row(
             Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -453,6 +461,38 @@ private fun AudioAttachmentPlayer(
                 },
                 onCancelTranscription = { onCancelTranscription(attachment.playbackId) },
             )
+        }
+    }
+}
+
+/** Keep the ordinary Surface path intact; only a returned result needs a source-only subtree. */
+@Composable
+private fun AudioPlayerSurface(
+    modifier: Modifier,
+    sourceModifier: Modifier,
+    sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)?,
+    trailingContent: (@Composable (Color) -> Unit)?,
+    content: @Composable () -> Unit,
+) {
+    val color = MaterialTheme.colorScheme.surfaceContainer
+    if (trailingContent == null) {
+        if (sourceWrapper == null) {
+            Surface(modifier = modifier.then(sourceModifier), shape = MotdShapes.card, color = color, content = content)
+        } else {
+            // Constrain and align the player before the full-width source gesture wrapper.
+            Box(modifier = modifier, propagateMinConstraints = true) {
+                sourceWrapper {
+                    Surface(modifier = Modifier.fillMaxWidth().then(sourceModifier), shape = MotdShapes.card, color = color, content = content)
+                }
+            }
+        }
+    } else {
+        Surface(modifier = modifier, shape = MotdShapes.card, color = color) {
+            Column {
+                val source: @Composable () -> Unit = { Box(sourceModifier) { content() } }
+                if (sourceWrapper != null) sourceWrapper(source) else source()
+                Box(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) { trailingContent(color) }
+            }
         }
     }
 }

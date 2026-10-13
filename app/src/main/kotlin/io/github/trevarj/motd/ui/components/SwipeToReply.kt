@@ -27,9 +27,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.node.Ref
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
@@ -107,6 +111,8 @@ internal fun SwipeToReplyContainer(
     val haptics = LocalHapticFeedback.current
     val currentOnReply by rememberUpdatedState(onReply)
     var offsetPx by remember { mutableFloatStateOf(0f) }
+    val sourceCoordinates = remember { Ref<LayoutCoordinates>() }
+    val view = LocalView.current
     val thresholdPx = with(density) { SWIPE_REPLY_THRESHOLD_DP.dp.toPx() }
     val maxOffsetPx = with(density) { SWIPE_REPLY_MAX_OFFSET_DP.dp.toPx() }
     val systemGestures = WindowInsets.systemGestures
@@ -118,6 +124,7 @@ internal fun SwipeToReplyContainer(
         modifier =
             Modifier
                 .fillMaxWidth()
+                .onGloballyPositioned { sourceCoordinates.value = it }
                 .pointerInput(
                     enabled,
                     layoutDirection,
@@ -132,9 +139,13 @@ internal fun SwipeToReplyContainer(
                         var snapBackJob: Job? = null
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
+                            val coordinates = sourceCoordinates.value ?: return@awaitEachGesture
+                            if (!coordinates.isAttached) return@awaitEachGesture
+                            // Insets describe physical window edges, not an embedded bubble's edges.
+                            val windowDownX = coordinates.localToWindow(down.position).x
                             if (isReplySystemEdge(
-                                    down.position.x,
-                                    size.width.toFloat(),
+                                    windowDownX,
+                                    view.rootView.width.toFloat(),
                                     layoutDirection,
                                     leftGestureInset,
                                     rightGestureInset,

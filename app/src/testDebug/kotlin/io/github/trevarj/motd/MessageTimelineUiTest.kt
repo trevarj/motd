@@ -1,12 +1,21 @@
 package io.github.trevarj.motd
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.systemGestures
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
@@ -30,8 +39,15 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.ai.text.TextTermination
@@ -46,8 +62,11 @@ import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.sync.COMMAND_RESPONSE_PAYLOAD_PREFIX
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
@@ -67,6 +86,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -600,6 +620,7 @@ class MessageTimelineUiTest {
             scrollTo("message_translation_1")
             compose.onNodeWithTag("message_translation_2").assertDoesNotExist()
             assertTrue(bounds(messageTag(1)).bottom <= bounds("message_translation_1").top)
+            assertTranslationContained(1)
             assertTrue(bounds("message_translation_1").bottom <= bounds(messageTag(2)).top)
         }
         compose.runOnIdle {
@@ -613,6 +634,7 @@ class MessageTimelineUiTest {
         scrollTo("message_translation_1")
         compose.onNodeWithTag("message_translation_2").assertDoesNotExist()
         assertTrue(bounds(messageTag(1)).bottom <= bounds("message_translation_1").top)
+        assertTranslationContained(1)
         compose.onNodeWithText("日本語 translation\nالعربية", useUnmergedTree = true).assertTextEquals("日本語 translation\nالعربية")
     }
 
@@ -655,25 +677,32 @@ class MessageTimelineUiTest {
     }
 
     @Test
+    @Config(sdk = [26], qualifiers = "w411dp-h891dp")
     fun externalTranslationGroupedSystemAppearsOnlyBelowExpandedExactLineAcrossPaging() {
         val newer = message(1002, 300, MessageKind.JOIN, "duplicate")
         val source = message(1001, 200, MessageKind.PART, "duplicate")
         val older = message((900L until source.id).last { !isSystemRunChunkBoundary(it) }, 100, MessageKind.QUIT, "older")
         val pages = MutableStateFlow(PagingData.from(listOf(newer, source)))
         val translations = mapOf(source.id to InlineTranslation(1, source.id, source.text, "Exact older line translation"))
-        render(pages, externalTranslations = { translations })
+        render(pages, externalTranslations = { translations }, translation = true)
         scrollTo("chat_system_pill")
         compose.onNodeWithTag("message_translation_1001").assertDoesNotExist()
         compose.onNodeWithTag("chat_system_pill", useUnmergedTree = true).performClick()
         compose.onNodeWithTag("message_translation_1001", useUnmergedTree = true).assertIsDisplayed()
         assertTrue(bounds("chat_system_event_1001").bottom <= bounds("message_translation_1001").top)
         assertTrue(bounds("message_translation_1001").bottom <= bounds("chat_system_event_1002").top)
+        assertTranslationContained(1001, hostId = 1002)
+        val resultText = compose.onNodeWithText("Exact older line translation", useUnmergedTree = true)
+        assertNoSourceActions(resultText.fetchSemanticsNode())
+        resultText.performTouchInput { longClick() }
+        compose.runOnIdle { assertEquals(null, translatedEventId) }
+        compose.onNodeWithTag("ai_text_sheet").assertDoesNotExist()
         compose.onNodeWithTag("message_translation_1002").assertDoesNotExist()
         compose.runOnIdle { pages.value = PagingData.from(listOf(newer, source, older)) }
         compose.onNodeWithTag("chat_system_event_${older.id}", useUnmergedTree = true).assertIsDisplayed()
         assertTrue(bounds("chat_system_event_1001").bottom <= bounds("message_translation_1001").top)
         assertTrue(bounds("message_translation_1001").bottom <= bounds("chat_system_event_1002").top)
-        compose.onNodeWithTag("chat_system_pill", useUnmergedTree = true).performClick()
+        compose.onNodeWithTag("chat_system_event_1002", useUnmergedTree = true).performClick()
         compose.onNodeWithTag("message_translation_1001").assertDoesNotExist()
         compose.onNodeWithTag("chat_system_pill", useUnmergedTree = true).performClick()
         scrollTo("message_translation_1001")
@@ -694,38 +723,85 @@ class MessageTimelineUiTest {
         scrollTo("message_translation_1")
         val singleBounds = compose.onNodeWithText("alice joined", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         assertTrue(singleBounds.bottom <= bounds("message_translation_1").top)
+        assertTranslationContained(1)
         compose.onNodeWithTag("message_translation_3").assertDoesNotExist()
         compose.onNodeWithTag("chat_timeline", useUnmergedTree = true).performScrollToNode(hasText("/motd · 1 reply"))
         compose.onNode(hasTestTag("chat_system_pill") and hasAnyDescendant(hasText("/motd · 1 reply")), useUnmergedTree = true).performClick()
         compose.onNodeWithTag("message_translation_3", useUnmergedTree = true).assertIsDisplayed()
         assertTrue(bounds("chat_system_event_3").bottom <= bounds("message_translation_3").top)
+        assertTranslationContained(3)
     }
 
     @Test
-    fun externalTranslationSpecialCardsRetainControlsAndRenderDirectlyBelowTheirSources() {
+    fun externalTranslationSpecialCardsRetainControlsInsideTheirPaintedHosts() {
+        val transfer =
+            DccTransferEntity(
+                id = 8,
+                networkId = 1,
+                timelineEventId = 8,
+                offerKey = "offer-8",
+                direction = DccDirection.INCOMING,
+                protocol = DccTransferProtocol.SEND,
+                peerNick = "alice",
+                normalizedPeer = "alice",
+                filename = "report.txt",
+                displayFilename = "report.txt",
+                address = "8.8.8.8",
+                addressKind = DccAddressKind.IPV4_DOTTED,
+                port = 9000,
+                sizeBytes = 100,
+                token = null,
+                state = DccTransferState.OFFERED,
+                bytesTransferred = 0,
+                destinationUri = null,
+                createdAt = 1,
+                expiresAt = null,
+                updatedAt = 1,
+            )
+        val transferState = MutableStateFlow<DccTransferEntity?>(transfer)
         val rows =
             listOf(
+                message(8, 800, MessageKind.DCC_TRANSFER, "active file offer"),
+                message(7, 700, MessageKind.INVITE, "resolved invite", payload = InvitePayloadV1("alice", "me", "#resolved").encode(), inviteState = InviteState.JOINED),
+                message(6, 600, MessageKind.INVITE, "historical invite", inviteState = InviteState.HISTORICAL),
+                message(5, 500, MessageKind.NETSPLIT, "network fallback"),
                 message(4, 400, MessageKind.DCC_TRANSFER, "file offer"),
-                message(3, 300, MessageKind.NETJOIN, "network healed", payload = NetworkBatchPayloadV1("a.example", "b.example", listOf("alice")).encode()),
+                message(3, 300, MessageKind.NETJOIN, "network healed", payload = NetworkBatchPayloadV1("a.example", "b.example", listOf("alice", "bob")).encode()),
                 message(2, 200, MessageKind.NETSPLIT, "network split", payload = NetworkBatchPayloadV1("a.example", "b.example", listOf("alice")).encode()),
                 message(1, 100, MessageKind.INVITE, "alice invited you", payload = InvitePayloadV1("alice", "me", "#room").encode(), inviteState = InviteState.PENDING),
             )
         var translations by mutableStateOf(rows.associate { it.id to InlineTranslation(1, it.id, it.text, "Translation ${it.id}") })
         var joined = 0L
         var dismissed = 0L
+        var rejected = 0L
         render(
             flowOf(PagingData.from(rows)),
             externalTranslations = { translations },
             onDismissExternalTranslation = { translations = translations - it },
             onAcceptInvite = { joined = it },
             onDismissInvite = { dismissed = it },
+            dccTransfer = { if (it.id == 8L) transferState else MutableStateFlow(null) },
+            onRejectDccTransfer = {
+                rejected = it
+                transferState.value = null
+            },
         )
-        val sourceTags =
-            mapOf(1L to "chat_invite_card_1", 2L to "chat_network_batch_netsplit_2", 3L to "chat_network_batch_netjoin_3", 4L to "chat_dcc_transfer_compact_4")
-        for ((id, sourceTag) in sourceTags) {
-            scrollTo("message_translation_$id")
-            assertTrue(bounds(sourceTag).bottom <= bounds("message_translation_$id").top)
+        for (source in rows) {
+            scrollTo("message_translation_${source.id}")
+            assertTranslationContained(source.id)
         }
+        scrollTo("chat_network_batch_netjoin_3")
+        compose.onNodeWithText("2 users rejoined (a.example ↔ b.example)", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("bob", useUnmergedTree = true).assertIsDisplayed()
+        compose.onAllNodesWithTag("message_translation_3", useUnmergedTree = true).assertCountEquals(1)
+        assertTranslationContained(3)
+        scrollTo("chat_dcc_transfer_8")
+        compose.onNodeWithTag("chat_dcc_reject_8").performClick()
+        compose.runOnIdle { assertEquals(8L, rejected) }
+        compose.waitForIdle()
+        scrollTo("message_translation_8")
+        compose.onAllNodesWithTag("message_translation_8", useUnmergedTree = true).assertCountEquals(1)
+        assertTranslationContained(8)
         scrollTo("chat_invite_card_1")
         compose.onNodeWithTag("chat_invite_join_1").performClick()
         compose.onNodeWithTag("chat_invite_dismiss_1").performClick()
@@ -778,20 +854,230 @@ class MessageTimelineUiTest {
         val source = message(1, 100, MessageKind.PRIVMSG, "source")
         val output = "**Hello** https://invalid.example/a"
         val translations = mapOf(source.id to InlineTranslation(1, source.id, source.text, output))
-        render(flowOf(PagingData.from(listOf(source))), externalTranslations = { translations })
+        var replies = 0
+        render(
+            flowOf(PagingData.from(listOf(source))),
+            externalTranslations = { translations },
+            translation = true,
+            onReply = { replies++ },
+        )
         scrollTo("message_translation_1")
         val text = compose.onNodeWithText(output, useUnmergedTree = true)
         text.assertTextEquals(output).assertHasNoClickAction()
+        assertTranslationContained(1)
+        assertNoSourceActions(text.fetchSemanticsNode())
+        text.performTouchInput { swipe(Offset(width * 0.15f, centerY), Offset(width * 0.85f, centerY), durationMillis = 400) }
+        compose.runOnIdle { assertEquals(0, replies) }
         // Native SelectionContainer exposes real selection handles under this semantics key.
         val selectionHandle = SemanticsMatcher("native text selection handle") { node -> node.config.any { it.key.name == "SelectionHandleInfo" } }
         compose.onAllNodes(selectionHandle, useUnmergedTree = true).assertCountEquals(0)
         text.performTouchInput { longClick() }
         compose.waitUntil(5_000) { compose.onAllNodes(selectionHandle, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("ai_text_sheet").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(null, translatedEventId) }
+        val sourceDrag = with(compose.density) { 160.dp.toPx() }
+        compose.onNodeWithTag(messageTag(1), useUnmergedTree = true).performTouchInput {
+            // Source content can be narrower than the armed drag distance; capture inside it.
+            swipe(Offset(centerX, centerY), Offset(centerX + sourceDrag, centerY), durationMillis = 400)
+        }
+        compose.runOnIdle { assertEquals(1, replies) }
         compose.onNodeWithTag("message_translation_dismiss_1").assertHeightIsAtLeast(48.dp)
     }
 
+    @Test
+    fun externalTranslationFullTextStaysContainedAcrossRendererRolesAtAccessibleScale() {
+        val output = "日本語の翻訳です。 Bonjour à toutes et à tous.\nالعربية محفوظة هنا.\nПривет, мир — Ελληνικά.\nLast visible line: END-TRANSLATION"
+        val samples =
+            LayoutDensity.entries.flatMap { density ->
+                listOf(
+                    Triple(density, MessageKind.PRIVMSG, true),
+                    Triple(density, MessageKind.ACTION, density != LayoutDensity.COMPACT),
+                    Triple(density, MessageKind.NOTICE, false),
+                    Triple(density, MessageKind.NOTICE, true),
+                )
+            } + Triple(LayoutDensity.COMFORTABLE, MessageKind.ACTION, false)
+        var sample by mutableStateOf(samples.first())
+
+        fun rows() =
+            listOf(
+                message(2, 200, sample.second, "source", self = sample.third),
+                message(1, 100, sample.second, "previous source", self = sample.third),
+            )
+        val pages = MutableStateFlow(PagingData.from(rows()))
+        render(
+            pages,
+            externalTranslations = { mapOf(2L to InlineTranslation(1, 2, "source", output)) },
+            layoutDensity = { sample.first },
+            avatarStyle = { if (sample.second == MessageKind.NOTICE || sample.second == MessageKind.ACTION && !sample.third) AvatarStyle.NONE else AvatarStyle.IRC_SPRITE },
+            bubbleCornerStyle = {
+                when (sample.second) {
+                    MessageKind.PRIVMSG -> BubbleCornerStyle.SQUARE
+                    MessageKind.ACTION -> BubbleCornerStyle.SUBTLE
+                    else -> BubbleCornerStyle.ROUNDED
+                }
+            },
+            messageSpacing = { if (sample.third) MessageSpacing.RELAXED else MessageSpacing.COMPACT },
+            fontScale = 1.5f,
+            paneWidth = 320.dp,
+        )
+        for (variant in samples) {
+            compose.runOnIdle {
+                sample = variant
+                pages.value = PagingData.from(rows())
+            }
+            scrollTo("message_translation_2")
+            assertTranslationContained(2)
+            assertTrue(bounds(messageTag(2)).bottom <= bounds("message_translation_2").top)
+            assertFullTranslationText(output)
+            if (variant.first == LayoutDensity.TWO_LINE && variant.second != MessageKind.ACTION) {
+                val body =
+                    compose
+                        .onNode(
+                            hasTestTag("message_two_line_body") and hasAnyAncestor(hasTestTag(messageTag(2))),
+                            useUnmergedTree = true,
+                        ).fetchSemanticsNode()
+                        .boundsInRoot
+                assertTrue("two-line result must follow the actual body indent", abs(body.left - bounds("message_translation_2").left) <= 1f)
+            }
+        }
+    }
+
+    @Test
+    fun externalTranslationStandaloneAudioStaysInsideFirstPlayerWithoutChangingPlaybackOwnership() {
+        val url = "https://files.example/clip.mp3"
+        val source = message(1, 100, MessageKind.PRIVMSG, "<$url>")
+        var played: AudioPlaybackRequest? = null
+        render(
+            flowOf(PagingData.from(listOf(source))),
+            externalTranslations = { mapOf(1L to InlineTranslation(1, 1, source.text, "Translated visible audio URL")) },
+            dickordEnabled = true,
+            conversationName = "Alice Smith",
+            hideInlineAudioLinks = true,
+            richContentReady = true,
+            onAudioToggle = { played = it },
+        )
+        scrollTo("message_translation_1")
+        compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).assertCountEquals(1)
+        assertTranslationContained(1, paintedHostTag = "audio_player")
+        assertTrue(bounds(messageTag(1)).bottom <= bounds("message_translation_1").top)
+        compose.onNodeWithTag("audio_player_toggle", useUnmergedTree = true).performClick()
+        compose.runOnIdle {
+            assertEquals(1L, played?.origin?.eventId)
+            assertEquals(url, played?.attachment?.url)
+        }
+    }
+
+    @Test
+    fun externalTranslationOwnAudioPlayersKeepAlignmentAndControlsAcrossSourceHosts() {
+        val urls = listOf("https://files.example/first.mp3", "https://files.example/second.mp3")
+        var source by mutableStateOf(message(1, 100, MessageKind.PRIVMSG, "listen ${urls.joinToString(" ") { "<$it>" }}", self = true))
+        var translated by mutableStateOf(false)
+        val pages = MutableStateFlow(PagingData.from(listOf(source)))
+        val played = mutableListOf<AudioPlaybackRequest>()
+        render(
+            pages,
+            externalTranslations = { if (translated) mapOf(1L to InlineTranslation(1, 1, source.text, "Returned audio-source text")) else emptyMap() },
+            dickordEnabled = true,
+            conversationName = "Alice Smith",
+            hideInlineAudioLinks = true,
+            richContentReady = true,
+            onAudioToggle = { played += it },
+        )
+
+        fun audioBounds(): List<Rect> {
+            scrollTo(messageTag(1))
+            compose.waitUntil(5_000) { compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).fetchSemanticsNodes().size == 2 }
+            return compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).fetchSemanticsNodes().map { it.boundsInRoot }
+        }
+        for (standalone in listOf(false, true)) {
+            if (standalone) {
+                compose.runOnIdle {
+                    translated = false
+                    source = source.copy(text = urls.joinToString("\n") { "<$it>" })
+                    pages.value = PagingData.from(listOf(source))
+                }
+            }
+            val before = audioBounds()
+            compose.runOnIdle { translated = true }
+            scrollTo("message_translation_1")
+            val after = audioBounds()
+            before.zip(after).forEachIndexed { index, (original, returned) ->
+                assertEquals("own player $index must keep its left anchor", original.left, returned.left, 1f)
+                assertEquals("own player $index must keep its right anchor", original.right, returned.right, 1f)
+            }
+            assertEquals(after.first().right, after.last().right, 1f)
+            compose.onAllNodesWithTag("message_translation_1", useUnmergedTree = true).assertCountEquals(1)
+            assertTranslationContained(1, paintedHostTag = if (standalone) "audio_player" else "message_translation_host_1")
+            for (index in urls.indices) {
+                compose.onAllNodesWithTag("audio_player_toggle", useUnmergedTree = true)[index].performClick()
+                compose.runOnIdle {
+                    assertEquals(urls[index], played.last().attachment.url)
+                    assertEquals(1L, played.last().origin?.eventId)
+                    assertEquals(true, played.last().origin?.isSelf)
+                }
+            }
+        }
+        compose.runOnIdle { assertEquals(4, played.size) }
+    }
+
+    @Test
+    @Config(sdk = [30], qualifiers = "w411dp-h891dp")
+    fun externalTranslationSourceSwipeUsesWindowEdgesInBothDirections() {
+        val source = message(1, 100, MessageKind.PRIVMSG, "offset source")
+        var direction by mutableStateOf(LayoutDirection.Ltr)
+        var translated by mutableStateOf(true)
+        var density by mutableStateOf(LayoutDensity.COMFORTABLE)
+        var replies = 0
+        val insetPx = with(compose.density) { 24.dp.roundToPx() }
+        render(
+            flowOf(PagingData.from(listOf(source))),
+            externalTranslations = { if (translated) mapOf(1L to InlineTranslation(1, 1, source.text, "Returned text")) else emptyMap() },
+            layoutDensity = { density },
+            layoutDirection = { direction },
+            systemGestureInsetPx = insetPx,
+            onReply = { replies++ },
+        )
+        compose.waitUntil(5_000) { observedSystemGestureInsets == (insetPx to insetPx) }
+        val sourceDrag = with(compose.density) { 160.dp.toPx() }
+        for (value in listOf(LayoutDirection.Ltr, LayoutDirection.Rtl)) {
+            compose.runOnIdle {
+                direction = value
+                translated = true
+                density = LayoutDensity.COMFORTABLE
+            }
+            scrollTo(messageTag(1))
+            val content = bounds(messageTag(1))
+            val timeline = bounds("chat_timeline")
+            if (value == LayoutDirection.Ltr) {
+                assertTrue("translated source starts beyond the physical back edge", content.left > timeline.left + insetPx)
+            } else {
+                assertTrue("translated source ends before the physical back edge", content.right < timeline.right - insetPx)
+            }
+            compose.onNodeWithTag(messageTag(1), useUnmergedTree = true).performTouchInput {
+                val start = if (value == LayoutDirection.Ltr) 1f else width - 1f
+                val end = start + if (value == LayoutDirection.Ltr) sourceDrag else -sourceDrag
+                swipe(Offset(start, centerY), Offset(end, centerY), durationMillis = 400)
+            }
+            compose.runOnIdle { assertEquals(if (value == LayoutDirection.Ltr) 1 else 2, replies) }
+            compose.runOnIdle {
+                translated = false
+                density = LayoutDensity.COMPACT
+            }
+            scrollTo(messageTag(1))
+            val edgeSource = bounds(messageTag(1))
+            assertEquals(timeline.left, edgeSource.left, 1f)
+            assertEquals(timeline.right, edgeSource.right, 1f)
+            compose.onNodeWithTag(messageTag(1), useUnmergedTree = true).performTouchInput {
+                val start = if (value == LayoutDirection.Ltr) 1f else width - 1f
+                val end = start + if (value == LayoutDirection.Ltr) sourceDrag else -sourceDrag
+                swipe(Offset(start, centerY), Offset(end, centerY), durationMillis = 400)
+            }
+            compose.runOnIdle { assertEquals(if (value == LayoutDirection.Ltr) 1 else 2, replies) }
+        }
+    }
+
     private var translatedEventId: Long? = null
+    private var observedSystemGestureInsets: Pair<Int, Int>? = null
 
     private fun render(
         pages: Flow<PagingData<MessageEntity>>,
@@ -817,15 +1103,46 @@ class MessageTimelineUiTest {
         onDismissExternalTranslation: (Long) -> Unit = {},
         layoutDensity: () -> LayoutDensity = { LayoutDensity.COMFORTABLE },
         fontScale: Float? = null,
+        avatarStyle: () -> AvatarStyle = { AvatarStyle.IRC_SPRITE },
+        bubbleCornerStyle: () -> BubbleCornerStyle = { BubbleCornerStyle.ROUNDED },
+        messageSpacing: () -> MessageSpacing = { MessageSpacing.DEFAULT },
+        paneWidth: Dp? = null,
+        onReply: (MessageEntity) -> Unit = {},
+        layoutDirection: () -> LayoutDirection = { LayoutDirection.Ltr },
+        systemGestureInsetPx: Int? = null,
     ) {
         compose.setContent {
             var ai by androidx.compose.runtime.remember { mutableStateOf<AiTextUiState>(AiTextUiState.Closed) }
             CompositionLocalProvider(
                 LocalDickordLabsEnabled provides dickordEnabled,
                 LocalDensity provides (fontScale?.let { Density(LocalDensity.current.density, it) } ?: LocalDensity.current),
+                LocalLayoutDirection provides layoutDirection(),
             ) {
-                MotdTheme(dynamicColor = false, layoutDensity = layoutDensity()) {
+                if (systemGestureInsetPx != null) {
+                    val view = LocalView.current
+                    LaunchedEffect(view, systemGestureInsetPx) {
+                        ViewCompat.dispatchApplyWindowInsets(
+                            view,
+                            WindowInsetsCompat
+                                .Builder()
+                                .setInsets(WindowInsetsCompat.Type.systemGestures(), Insets.of(systemGestureInsetPx, 0, systemGestureInsetPx, 0))
+                                .build(),
+                        )
+                    }
+                    val insets = WindowInsets.systemGestures
+                    val left = insets.getLeft(LocalDensity.current, LocalLayoutDirection.current)
+                    val right = insets.getRight(LocalDensity.current, LocalLayoutDirection.current)
+                    SideEffect { observedSystemGestureInsets = left to right }
+                }
+                MotdTheme(
+                    dynamicColor = false,
+                    layoutDensity = layoutDensity(),
+                    avatarStyle = avatarStyle(),
+                    bubbleCornerStyle = bubbleCornerStyle(),
+                    messageSpacing = messageSpacing(),
+                ) {
                     MessageList(
+                        modifier = paneWidth?.let { Modifier.width(it) } ?: Modifier,
                         items = pages.collectAsLazyPagingItems(context = Dispatchers.Unconfined),
                         listState = rememberLazyListState(),
                         networkId = 1,
@@ -853,7 +1170,7 @@ class MessageTimelineUiTest {
                             },
                         externalTranslations = externalTranslations(),
                         onDismissExternalTranslation = onDismissExternalTranslation,
-                        onReply = {},
+                        onReply = onReply,
                         onReact = { _, _ -> },
                         onImageClick = {},
                         onRetry = {},
@@ -904,6 +1221,48 @@ class MessageTimelineUiTest {
     }
 
     private fun bounds(tag: String): Rect = compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+
+    private fun assertTranslationContained(
+        eventId: Long,
+        hostId: Long = eventId,
+        paintedHostTag: String = "message_translation_host_$hostId",
+    ) {
+        val resultTag = "message_translation_$eventId"
+        val result = compose.onNodeWithTag(resultTag, useUnmergedTree = true)
+        val paintedHost = hasTestTag(paintedHostTag) and hasAnyDescendant(hasTestTag(resultTag))
+        compose.onAllNodes(paintedHost, useUnmergedTree = true).assertCountEquals(1)
+        compose
+            .onNode(
+                hasTestTag(resultTag) and hasAnyAncestor(paintedHost),
+                useUnmergedTree = true,
+            ).assertIsDisplayed()
+        val host = compose.onNode(paintedHost, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val inset = result.fetchSemanticsNode().boundsInRoot
+        assertTrue("result must stay horizontally inside its painted source host", inset.left >= host.left && inset.right <= host.right)
+        assertTrue("result must stay vertically inside its painted source host", inset.top >= host.top && inset.bottom <= host.bottom)
+    }
+
+    private fun assertFullTranslationText(output: String) {
+        val text = compose.onNodeWithText(output, useUnmergedTree = true).assertTextEquals(output)
+        val layouts = mutableListOf<TextLayoutResult>()
+        text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { action -> assertTrue(action(layouts)) }
+        val layout = layouts.single()
+        assertTrue("regression text must exercise more than ReplyMiniBubble's two lines", layout.lineCount > 2)
+        assertFalse("returned text must not visually overflow", layout.hasVisualOverflow)
+        for (line in 0 until layout.lineCount) assertFalse("line $line must not be ellipsized", layout.isLineEllipsized(line))
+        val lastLine = layout.lineCount - 1
+        assertEquals(output.length, layout.getLineEnd(lastLine))
+        assertTrue(layout.getLineBottom(lastLine) <= layout.size.height)
+        assertTrue(layout.getBoundingBox(output.lastIndex).bottom <= layout.size.height)
+        assertTrue("the last rendered line must lie inside measured text bounds", layout.size.height <= text.fetchSemanticsNode().boundsInRoot.height + 1f)
+    }
+
+    private fun assertNoSourceActions(text: androidx.compose.ui.semantics.SemanticsNode) {
+        generateSequence(text) { it.parent }.forEach { node ->
+            assertFalse("source Reply must not wrap returned text", node.config.contains(SemanticsActions.CustomActions))
+            assertFalse("source hold must not wrap returned text", node.config.contains(SemanticsActions.OnLongClick))
+        }
+    }
 
     private fun messageTag(id: Long) = "chat_message_m$id"
 

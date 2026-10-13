@@ -106,18 +106,34 @@ be applied or copied. Results are plain text and lose IRC formatting. Experiment
 model output can change meaning or facts: review it before applying or sending.
 Android memory, speed, battery use and hardware quality remain unmeasured.
 
-Long-hold an actual message to translate it locally in chat, feed, mentions,
-local/server search, or an Agentwire user/assistant body. Chat's action sheet offers
-Translate even in SERVER buffers. Concealed fool/quiet rows and grouped system runs
-must first be expanded; expanded system lines select their exact stored event.
-Invitation and file-transfer buttons retain their existing behavior: translation
-does not accept an invitation or transfer, read a file, or fetch media.
+Long-hold an actual message to translate it. In chat, Translate opens one picker
+with compatible installed translation apps, Android's text-processing chooser,
+and On-device AI when the existing local text-tools feature is available.
+External translation requires neither AI Labs nor a model, including in SERVER
+buffers. Selected apps receive only that message's plain text and may send it to
+an online service. Apps labeled **Opens externally** do not return an inline result;
+other apps produce one only if they return text.
 
-Message translation is read-only: Source and selectable Result offer Copy and Close,
+Returned chat text appears in a solid reply-like inset inside its original bubble,
+dense row, card or pill in every layout. It wraps naturally without a two-line
+limit, remains selectable, and has its own dismiss button. The original message's
+click, hold, swipe and Reply actions do not apply to the returned text.
+Concealed fool/quiet rows and grouped system runs must first be expanded;
+grouped translations appear only under their exact expanded source line.
+Invitation, file-transfer and audio controls retain their existing behavior:
+translation does not accept an invitation or transfer, read a file, or fetch media.
+External results never modify drafts, replies or history. They survive pause,
+rotation and translator round trips, but source deletion/redaction/change removes
+them and committed navigation away from the chat clears the visit. Nothing is
+stored across a new process.
+
+On-device AI in the chat picker retains its separate read-only result sheet.
+Feed, mentions, local/server search and Agentwire user/assistant bodies retain
+their local translation action. Source and selectable Result offer Copy and Close,
 never Apply, Quote, Send, draft insertion, or history replacement. Redaction, source
 changes, search replacement, Agentwire stream/session changes, leaving the screen,
-or disabling the feature clear the preview. No translation result cache is stored.
-Language coverage and factual preservation are experimental, not guarantees.
+or disabling the feature clear this local preview. No translation result cache is
+stored. Language coverage and factual preservation are experimental, not guarantees.
 The active video view forwards its owning-message hold while retaining playback
 controls; physical-device video gesture behavior remains unmeasured.
 

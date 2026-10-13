@@ -242,9 +242,14 @@ flowchart TD
   receive only the selected message's plain text and may use online services;
   SEND-only handlers open externally and do not promise an inline result.
   Returned text is validated and held in the chat entry's ViewModel, bound to its
-  canonical source ID, room and unchanged text. Selectable, dismissible results
-  never modify history, drafts or reply targets; source deletion/redaction/change
-  removes them. External translation requires neither AI Labs nor a model.
+  canonical source ID, room and unchanged text. Full returned text is natively
+  selectable inside a solid reply-like inset in the source's painted bubble,
+  dense band, card or pill, including standalone audio players. Grouped system
+  results belong only to their exact expanded line. The painted host is
+  noninteractive: source click, hold, swipe and Reply accessibility actions never
+  wrap returned text. Dismissible results never modify history, drafts or reply
+  targets; source deletion/redaction/change removes them. External translation
+  requires neither AI Labs nor a model.
   The session survives pause, rotation and translator round trips, but committed
   navigation to any other MOTD entry clears it even when the chat remains in the
   back stack; canceled predictive back and effect disposal do not clear it.

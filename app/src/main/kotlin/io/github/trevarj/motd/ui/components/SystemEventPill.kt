@@ -17,6 +17,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -56,7 +57,9 @@ fun SystemEventPill(
     onLongPress: (() -> Unit)? = null,
     onLineLongPress: ((Int) -> Unit)? = null,
     lineKey: ((Int) -> Any)? = null,
-    lineTrailingContent: (@Composable (index: Int) -> Unit)? = null,
+    lineTrailingContent: (@Composable (index: Int, parentColor: Color) -> Unit)? = null,
+    trailingContent: (@Composable (Color) -> Unit)? = null,
+    containerModifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
     SystemEventPill(
@@ -72,6 +75,8 @@ fun SystemEventPill(
         onLineLongPress = onLineLongPress,
         lineKey = lineKey,
         lineTrailingContent = lineTrailingContent,
+        trailingContent = trailingContent,
+        containerModifier = containerModifier,
     )
 }
 
@@ -89,7 +94,9 @@ internal fun SystemEventPill(
     onLongPress: (() -> Unit)? = null,
     onLineLongPress: ((Int) -> Unit)? = null,
     lineKey: ((Int) -> Any)? = null,
-    lineTrailingContent: (@Composable (index: Int) -> Unit)? = null,
+    lineTrailingContent: (@Composable (index: Int, parentColor: Color) -> Unit)? = null,
+    trailingContent: (@Composable (Color) -> Unit)? = null,
+    containerModifier: Modifier = Modifier,
 ) {
     // Materializing every line of a large JOIN/PART burst while scrolling is expensive. Keep the
     // collapsed path to its bounded summary and build lines only if the user opens the pill.
@@ -106,7 +113,32 @@ internal fun SystemEventPill(
     // Capsule for the short collapsed pill; once expanded the percent radius would be 50% of the
     // smaller dimension and overrun the 14 dp text padding, pushing top/bottom lines outside the
     // background. Cap it to a Dp radius that stays within the padding when expanded.
-    val pillShape = if (showLines) RoundedCornerShape(14.dp) else RoundedCornerShape(50)
+    val separateSource = trailingContent != null || lineTrailingContent != null
+    val pillShape = if (showLines || trailingContent != null) RoundedCornerShape(14.dp) else RoundedCornerShape(50)
+    val parentColor = MaterialTheme.colorScheme.surfaceContainerHigh
+    val sourceActions =
+        Modifier
+            .then(
+                if (collapsible) {
+                    Modifier.semantics {
+                        role = Role.Button
+                        contentDescription = summary
+                        stateDescription = expansionState
+                    }
+                } else {
+                    Modifier
+                },
+            ).then(
+                if (collapsible || onLongPress != null) {
+                    Modifier.combinedClickable(
+                        onClick = { if (collapsible) onExpandedChange(!showLines) },
+                        onLongClickLabel = stringResource(R.string.ai_text_translate),
+                        onLongClick = onLongPress,
+                    )
+                } else {
+                    Modifier
+                },
+            )
     Row(
         modifier =
             modifier.fillMaxWidth().padding(
@@ -118,30 +150,10 @@ internal fun SystemEventPill(
         Column(
             modifier =
                 Modifier
-                    .background(
-                        MaterialTheme.colorScheme.surfaceContainerHigh,
-                        pillShape,
-                    ).then(
-                        if (collapsible) {
-                            Modifier.semantics {
-                                role = Role.Button
-                                contentDescription = summary
-                                stateDescription = expansionState
-                            }
-                        } else {
-                            Modifier
-                        },
-                    ).then(
-                        if (collapsible || onLongPress != null) {
-                            Modifier.combinedClickable(
-                                onClick = { if (collapsible) onExpandedChange(!showLines) },
-                                onLongClickLabel = stringResource(R.string.ai_text_translate),
-                                onLongClick = onLongPress,
-                            )
-                        } else {
-                            Modifier
-                        },
-                    ).padding(horizontal = 14.dp, vertical = 6.dp),
+                    .background(parentColor, pillShape)
+                    .then(containerModifier)
+                    .then(if (separateSource) Modifier else sourceActions)
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
             horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
         ) {
             // Keep exactly one content tree mounted. AnimatedContent briefly layered the collapsed
@@ -157,30 +169,34 @@ internal fun SystemEventPill(
                                     Modifier
                                         .then(lineKey?.let { Modifier.testTag("chat_system_event_${it(index)}") } ?: Modifier)
                                         .then(
-                                            onLineLongPress?.let { callback ->
+                                            if (separateSource || onLineLongPress != null) {
                                                 Modifier.combinedClickable(
-                                                    onClick = {},
+                                                    onClick = { if (separateSource) onExpandedChange(false) },
                                                     onLongClickLabel = stringResource(R.string.ai_text_translate),
-                                                    onLongClick = { callback(index) },
+                                                    onLongClick = onLineLongPress?.let { callback -> { callback(index) } } ?: onLongPress,
                                                 )
-                                            } ?: Modifier,
+                                            } else {
+                                                Modifier
+                                            },
                                         ),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center,
                             )
-                            lineTrailingContent?.invoke(index)
+                            lineTrailingContent?.invoke(index, parentColor)
                         }
                     }
                 }
             } else {
                 Text(
                     text = summary,
+                    modifier = if (separateSource) sourceActions else Modifier,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
             }
+            trailingContent?.invoke(parentColor)
         }
     }
 }

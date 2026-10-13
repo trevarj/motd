@@ -123,6 +123,7 @@ import io.github.trevarj.motd.ui.components.LocalLinkMediaConsent
 import io.github.trevarj.motd.ui.components.LocalLinkPreviewAwaiting
 import io.github.trevarj.motd.ui.components.LocalLinkPreviewFailed
 import io.github.trevarj.motd.ui.components.MessageBubble
+import io.github.trevarj.motd.ui.components.MessagePaintedContent
 import io.github.trevarj.motd.ui.components.NewMessagesDivider
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.RemoteMediaConsent
@@ -500,6 +501,9 @@ fun MessageList(
                 return@items
             }
             val translation = inlineTranslationFor(msg, externalTranslations)
+            val translationContent: (@Composable (Color) -> Unit)? =
+                translation?.let { result -> { color -> InlineMessageTranslation(result, color) { onDismissExternalTranslation(result.eventId) } } }
+            val translationHostModifier = if (translation != null) Modifier.testTag("message_translation_host_${msg.id}") else Modifier
             val translationHold = onTranslateMessage.takeUnless { outgoingFlight?.matches(msg) == true }
             val older = if (index + 1 < snapshot.size) snapshot[index + 1] else null
             val newer = if (index > 0) snapshot[index - 1] else null
@@ -518,15 +522,14 @@ fun MessageList(
                         flightProgress,
                         onFlightRowPositioned,
                     ) {
-                        Column {
-                            InvitationCard(
-                                message = msg,
-                                onJoin = { onAcceptInvite(msg.id) },
-                                onDismiss = { onDismissInvite(msg.id) },
-                                onLongPress = translationHold?.let { { it(msg) } },
-                            )
-                            translation?.let { InlineMessageTranslation(it) { onDismissExternalTranslation(it.eventId) } }
-                        }
+                        InvitationCard(
+                            message = msg,
+                            onJoin = { onAcceptInvite(msg.id) },
+                            onDismiss = { onDismissInvite(msg.id) },
+                            onLongPress = translationHold?.let { { it(msg) } },
+                            trailingContent = translationContent,
+                            containerModifier = translationHostModifier,
+                        )
                     }
                 }
                 return@items
@@ -543,10 +546,12 @@ fun MessageList(
                         flightProgress,
                         onFlightRowPositioned,
                     ) {
-                        Column {
-                            NetworkBatchPill(msg, translationHold?.let { { it(msg) } })
-                            translation?.let { InlineMessageTranslation(it) { onDismissExternalTranslation(it.eventId) } }
-                        }
+                        NetworkBatchPill(
+                            msg,
+                            translationHold?.let { { it(msg) } },
+                            trailingContent = translationContent,
+                            containerModifier = translationHostModifier,
+                        )
                     }
                 }
                 return@items
@@ -565,18 +570,17 @@ fun MessageList(
                     ) {
                         val transferFlow = remember(msg.id) { dccTransfer(msg) }
                         val transfer by transferFlow.collectAsStateWithLifecycle()
-                        Column {
-                            DccTransferCard(
-                                message = msg,
-                                transfer = transfer,
-                                onAccept = onAcceptDccTransfer,
-                                onReject = onRejectDccTransfer,
-                                onRemove = onRemoveDccTransfer,
-                                onSaveToDownloads = onSaveDccToDownloads,
-                                onLongPress = translationHold?.let { { it(msg) } },
-                            )
-                            translation?.let { InlineMessageTranslation(it) { onDismissExternalTranslation(it.eventId) } }
-                        }
+                        DccTransferCard(
+                            message = msg,
+                            transfer = transfer,
+                            onAccept = onAcceptDccTransfer,
+                            onReject = onRejectDccTransfer,
+                            onRemove = onRemoveDccTransfer,
+                            onSaveToDownloads = onSaveDccToDownloads,
+                            onLongPress = translationHold?.let { { it(msg) } },
+                            trailingContent = translationContent,
+                            containerModifier = translationHostModifier,
+                        )
                     }
                 }
                 return@items
@@ -815,6 +819,8 @@ private fun DccTransferCard(
     onRemove: (Long) -> Unit,
     onSaveToDownloads: (suspend (Long) -> Unit)?,
     onLongPress: (() -> Unit)? = null,
+    trailingContent: (@Composable (Color) -> Unit)? = null,
+    containerModifier: Modifier = Modifier,
 ) {
     // Latch the outgoing entity: by the time the card collapses into the compact pill the entity
     // is already gone, and the exiting frames must keep rendering the last real content.
@@ -834,6 +840,8 @@ private fun DccTransferCard(
                 contentKey = message.id,
                 modifier = Modifier.testTag("chat_dcc_transfer_compact_${message.id}"),
                 onLongPress = onLongPress,
+                trailingContent = trailingContent.takeIf { transfer == null },
+                containerModifier = containerModifier,
             )
         } else {
             // An exiting card keeps composing through the card->pill collapse; its actions must
@@ -846,6 +854,8 @@ private fun DccTransferCard(
                 onRemove = { id -> if (current) onRemove(id) },
                 onSaveToDownloads = onSaveToDownloads.takeIf { current },
                 onLongPress = onLongPress,
+                trailingContent = trailingContent.takeIf { current },
+                containerModifier = containerModifier,
             )
         }
     }
@@ -861,6 +871,8 @@ internal fun ActiveDccTransferCard(
     onReceiveResultsPrivately: ((DccTransferEntity, Boolean) -> Unit)? = null,
     onViewResults: ((DccTransferEntity) -> Unit)? = null,
     onLongPress: (() -> Unit)? = null,
+    trailingContent: (@Composable (Color) -> Unit)? = null,
+    containerModifier: Modifier = Modifier,
 ) {
     val privateRisk =
         remember(transfer.address, transfer.addressKind) {
@@ -879,23 +891,31 @@ internal fun ActiveDccTransferCard(
             DccTransferProtocol.SSEND -> "Secure DCC SSEND · identity unverified"
         }
     val status = dccStatusText(transfer)
+    val sourceModifier =
+        Modifier.testTag("chat_dcc_transfer_${transfer.id}").then(
+            onLongPress?.let {
+                Modifier.combinedClickable(
+                    onClick = {},
+                    onLongClick = it,
+                    onLongClickLabel = stringResource(R.string.ai_text_translate_message),
+                )
+            } ?: Modifier,
+        )
     Card(
         modifier =
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 6.dp)
-                .testTag("chat_dcc_transfer_${transfer.id}")
-                .then(
-                    onLongPress?.let {
-                        Modifier.combinedClickable(
-                            onClick = {},
-                            onLongClick = it,
-                            onLongClickLabel = stringResource(R.string.ai_text_translate_message),
-                        )
-                    } ?: Modifier,
-                ),
+                .then(if (trailingContent == null) sourceModifier else containerModifier),
     ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        MessagePaintedContent(
+            modifier = Modifier,
+            sourceModifier = if (trailingContent != null) sourceModifier else Modifier,
+            contentModifier = Modifier.padding(16.dp),
+            parentColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            trailingContent = trailingContent,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "$direction file",
@@ -1246,6 +1266,8 @@ private fun LiveMessageEntry(
 private fun NetworkBatchPill(
     message: MessageEntity,
     onLongPress: (() -> Unit)? = null,
+    trailingContent: (@Composable (Color) -> Unit)? = null,
+    containerModifier: Modifier = Modifier,
 ) {
     val payload = remember(message.eventPayload) { NetworkBatchPayloadV1.decode(message.eventPayload) }
     if (payload == null) {
@@ -1256,6 +1278,8 @@ private fun NetworkBatchPill(
             contentKey = message.id,
             modifier = Modifier.testTag("chat_network_batch_${message.id}"),
             onLongPress = onLongPress,
+            trailingContent = trailingContent,
+            containerModifier = containerModifier,
         )
         return
     }
@@ -1270,6 +1294,8 @@ private fun NetworkBatchPill(
         contentKey = message.id,
         modifier = Modifier.testTag("chat_network_batch_${message.kind.name.lowercase()}_${message.id}"),
         onLongPress = onLongPress,
+        trailingContent = trailingContent,
+        containerModifier = containerModifier,
     )
 }
 
@@ -1303,6 +1329,8 @@ private fun InvitationCard(
     onJoin: () -> Unit,
     onDismiss: () -> Unit,
     onLongPress: (() -> Unit)? = null,
+    trailingContent: (@Composable (Color) -> Unit)? = null,
+    containerModifier: Modifier = Modifier,
 ) {
     val payload = remember(message.eventPayload) { InvitePayloadV1.decode(message.eventPayload) }
     val state = message.inviteState
@@ -1343,27 +1371,37 @@ private fun InvitationCard(
                     contentKey = message.id,
                     modifier = Modifier.testTag(target.testTag),
                     onLongPress = onLongPress,
+                    trailingContent = trailingContent.takeIf { target == render },
+                    containerModifier = containerModifier,
                 )
             }
 
             is InviteRender.ActiveCard -> {
+                val sourceModifier =
+                    Modifier.testTag("chat_invite_card_${message.id}").then(
+                        onLongPress?.let {
+                            Modifier.combinedClickable(
+                                onClick = {},
+                                onLongClick = it,
+                                onLongClickLabel = stringResource(R.string.ai_text_translate_message),
+                            )
+                        } ?: Modifier,
+                    )
+                val currentTrailing = trailingContent.takeIf { target == render }
                 Card(
                     modifier =
                         Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 6.dp)
-                            .testTag("chat_invite_card_${message.id}")
-                            .then(
-                                onLongPress?.let {
-                                    Modifier.combinedClickable(
-                                        onClick = {},
-                                        onLongClick = it,
-                                        onLongClickLabel = stringResource(R.string.ai_text_translate_message),
-                                    )
-                                } ?: Modifier,
-                            ),
+                            .then(if (currentTrailing == null) sourceModifier else containerModifier),
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    MessagePaintedContent(
+                        modifier = Modifier,
+                        sourceModifier = if (currentTrailing != null) sourceModifier else Modifier,
+                        contentModifier = Modifier.padding(16.dp),
+                        parentColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        trailingContent = currentTrailing,
+                    ) {
                         Text("Invitation to ${target.channel}", style = MaterialTheme.typography.titleMedium)
                         Text(message.text, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
                         if (target.state == InviteState.FAILED) {
@@ -1488,22 +1526,27 @@ private fun SystemEventRun(
                 },
             lineKey = { index -> run[run.lastIndex - index].id },
             lineTrailingContent =
-                if (externalTranslations.isEmpty()) {
+                if (externalTranslations.isEmpty() || run.none { inlineTranslationFor(it, externalTranslations) != null }) {
                     null
                 } else {
-                    { index ->
+                    { index, color ->
                         val source = run[run.lastIndex - index]
                         inlineTranslationFor(source, externalTranslations)?.let {
-                            InlineMessageTranslation(it) { onDismissExternalTranslation(it.eventId) }
+                            InlineMessageTranslation(it, color) { onDismissExternalTranslation(it.eventId) }
                         }
                     }
                 },
+            trailingContent =
+                if (run.size == 1 && !commandResponse) {
+                    inlineTranslationFor(newest, externalTranslations)?.let { result ->
+                        { color -> InlineMessageTranslation(result, color) { onDismissExternalTranslation(result.eventId) } }
+                    }
+                } else {
+                    null
+                },
+            containerModifier =
+                if (externalTranslations.isEmpty()) Modifier else Modifier.testTag("message_translation_host_${newest.id}"),
         )
-        if (run.size == 1 && !commandResponse) {
-            inlineTranslationFor(newest, externalTranslations)?.let {
-                InlineMessageTranslation(it) { onDismissExternalTranslation(it.eventId) }
-            }
-        }
     }
 }
 
@@ -1884,17 +1927,26 @@ private fun MessageRow(
         )
     }
 
-    SwipeToReplyContainer(
-        // Keep the stable automation id and mention state on one semantics node. SwipeToReply adds
-        // its custom action downstream without changing this message-level accessibility state.
-        modifier =
-            Modifier.semantics {
-                semanticsTestTag = messageTag(msg)
-                mentionDescription?.let { stateDescription = it }
-            },
-        onReply = { onReply(msg) },
-        enabled = swipeToReplyEnabled,
-    ) { rowModifier ->
+    // Keep the stable ID/Reply semantics on original content, never on the painted translation host.
+    val sourceModifier =
+        Modifier.semantics {
+            semanticsTestTag = messageTag(msg)
+            mentionDescription?.let { stateDescription = it }
+        }
+    val translatedSourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? =
+        if (translation != null) {
+            { content ->
+                SwipeToReplyContainer(modifier = sourceModifier, onReply = { onReply(msg) }, enabled = swipeToReplyEnabled) { rowModifier ->
+                    Column(rowModifier) { content() }
+                }
+            }
+        } else {
+            null
+        }
+    val translationContent: (@Composable (Color) -> Unit)? =
+        translation?.let { result -> { color -> InlineMessageTranslation(result, color) { onDismissTranslation(result.eventId) } } }
+    val translationHostModifier = if (translation != null) Modifier.testTag("message_translation_host_${msg.id}") else Modifier
+    val source: @Composable (Modifier) -> Unit = { rowModifier ->
         Column(modifier = rowModifier.fillMaxWidth()) {
             val messageBubble: @Composable () -> Unit = {
                 CompositionLocalProvider(
@@ -1965,6 +2017,9 @@ private fun MessageRow(
                         },
                         // Only non-self senders open the nick sheet.
                         onSenderClick = if (msg.isSelf) null else ({ onSenderClick(msg.sender) }),
+                        sourceWrapper = translatedSourceWrapper,
+                        trailingContent = translationContent.takeUnless { standaloneAudio },
+                        containerModifier = if (standaloneAudio) Modifier else translationHostModifier,
                     )
                 }
             }
@@ -2036,10 +2091,29 @@ private fun MessageRow(
                 onClickLabel = if (standaloneAudio && readMessage != null) stringResource(R.string.read_aloud_message) else null,
                 reactions = if (standaloneAudio) reactions else emptyList(),
                 onReact = { emoji -> onReact(msg, emoji) },
+                trailingContent = translationContent.takeIf { standaloneAudio },
+                sourceWrapper =
+                    if (translation != null) {
+                        { index, content ->
+                            if (standaloneAudio && index == 0) {
+                                translatedSourceWrapper?.invoke(content)
+                            } else {
+                                SwipeToReplyContainer(onReply = { onReply(msg) }, enabled = swipeToReplyEnabled) { audioModifier ->
+                                    Column(audioModifier) { content() }
+                                }
+                            }
+                        }
+                    } else {
+                        null
+                    },
             )
         }
     }
-    translation?.let { InlineMessageTranslation(it) { onDismissTranslation(it.eventId) } }
+    if (translation == null) {
+        SwipeToReplyContainer(modifier = sourceModifier, onReply = { onReply(msg) }, enabled = swipeToReplyEnabled, content = source)
+    } else {
+        source(Modifier)
+    }
     // The outer gate keeps the Transition holder off ordinary rows: only pending or failed rows
     // compose the AnimatedVisibility, and pending stays in the gate so the pending -> failed flip
     // (and a retry back to pending) animates instead of remounting. A historical failed row first
