@@ -20,6 +20,7 @@ import io.github.trevarj.motd.data.history.GapEdgeAnchor
 import io.github.trevarj.motd.data.history.ResolvedGap
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -27,7 +28,7 @@ import java.io.File
 /** Newest-first rows read straight from `messages`, enough to see who owns the newest positions. */
 private const val RAW_ROW_LIMIT = 24
 
-/** Source-query rows walked to locate the target; the newest end is all that is ever in question. */
+/** Source-query rows walked to locate the requested row's newest-first rank. */
 private const val SOURCE_SCAN_LIMIT = 512
 
 /** Composed timeline rows recorded; the viewport holds well under this many. */
@@ -36,7 +37,7 @@ private const val COMPOSED_ROW_LIMIT = 60
 /**
  * Failure-time snapshot explaining why one timeline row is not presented.
  *
- * The required gate's newest-row wait can only report "the row never appeared", which is true of
+ * A required timeline wait can only report "the row never appeared", which is true of
  * every competing explanation at once. This captures the four independent states that disagree in
  * different ways per hypothesis — what Paging presents, what the Paging key map resolves, what Room
  * holds, and where the room's history gaps resolve to — so the next red run names the cause instead
@@ -53,7 +54,7 @@ private const val COMPOSED_ROW_LIMIT = 60
  *    to the same file, so no write, no invalidation, and no `PagingSource` regeneration is
  *    possible — the observer-perturbs-observed failure this journey already suffered once.
  *
- * Privacy: ids, msgids, counts, indices, timestamps, test tags, and boolean flags only. Message
+ * Privacy: ids, hashed msgids/tags, counts, indices, timestamps, and boolean flags only. Message
  * bodies, senders, room names, and credentials are never read out of the row, and the SQL below
  * selects those columns by name so a schema change cannot silently widen the dump.
  */
@@ -85,7 +86,7 @@ internal class TimelineDiagnostics(
     ) {
         val root = JSONObject()
         runCatching {
-            root.put("schema", "timeline-newest-row/1")
+            root.put("schema", "timeline-row/2")
             root.put("label", label)
             root.put("outcome", outcome)
             root.put("budgetMs", budgetMs)
@@ -93,17 +94,18 @@ internal class TimelineDiagnostics(
             root.put(
                 "target",
                 JSONObject().apply {
-                    put("tag", targetTag)
+                    putNullable("tagHash", DiagnosticLogger.Noop.fingerprint(targetTag))
                     put("pagingKey", targetKey)
                     put("probedEventId", probedEventId)
-                    putNullable("probedMsgid", probedMsgid)
+                    putNullable("probedMsgidHash", DiagnosticLogger.Noop.fingerprint(probedMsgid))
                     put("bufferId", bufferId)
                 },
             )
+            root.put("divider", guarded { dividerSnapshot() })
             // Room first: it resolves the newest event ids that the Paging key probes ask for.
             root.put("room", guarded { roomSnapshot(targetKey) })
             root.put("paging", guarded { pagingSnapshot(containerTag, targetTag, targetKey) })
-        }
+        }.onFailure { root.put("captureError", it::class.java.name) }
         val delivered = E2eArtifactSink.write("$artifactPrefix/$label/$outcome/timeline.json", root.toString())
         milestones.record(
             "timeline_diagnostics",
@@ -132,6 +134,8 @@ internal class TimelineDiagnostics(
         out.put("containerTag", containerTag)
         out.put("containerCount", containers.size)
         val container = containers.firstOrNull() ?: return out
+        out.put("containerTop", container.boundsInRoot.top.toInt())
+        out.put("containerBottom", container.boundsInRoot.bottom.toInt())
         out.put("presentedCount", container.config.getOrNull(SemanticsProperties.CollectionInfo)?.rowCount ?: -1)
         container.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)?.let { range ->
             // Under reverseLayout the value is measured from the newest end, so a value near 0
@@ -159,7 +163,7 @@ internal class TimelineDiagnostics(
                 JSONObject().apply {
                     put("rank", rank)
                     put("eventId", row.first)
-                    putNullable("msgid", row.second)
+                    putNullable("msgidHash", DiagnosticLogger.Noop.fingerprint(row.second))
                     put("index", index)
                 },
             )
@@ -186,7 +190,7 @@ internal class TimelineDiagnostics(
             .forEach { node ->
                 composed.put(
                     JSONObject().apply {
-                        put("tag", node.config.getOrElse(SemanticsProperties.TestTag) { "" })
+                        putNullable("tagHash", DiagnosticLogger.Noop.fingerprint(node.config.getOrElse(SemanticsProperties.TestTag) { "" }))
                         put("top", node.boundsInRoot.top.toInt())
                         put("bottom", node.boundsInRoot.bottom.toInt())
                     },
@@ -201,6 +205,27 @@ internal class TimelineDiagnostics(
         out.put("historyFooterComposed", footerTagged)
         out.put("unreadDividerComposed", compose.onAllNodesWithTag(UNREAD_DIVIDER_TAG, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
         return out
+    }
+
+    private fun dividerSnapshot(): JSONObject {
+        val nodes = compose.onAllNodesWithTag(UNREAD_DIVIDER_TAG, useUnmergedTree = true).fetchSemanticsNodes()
+        return JSONObject().apply {
+            put("composed", nodes.isNotEmpty())
+            put("count", nodes.size)
+            put(
+                "bounds",
+                JSONArray().apply {
+                    nodes.forEach { node ->
+                        put(
+                            JSONObject().apply {
+                                put("top", node.boundsInRoot.top.toInt())
+                                put("bottom", node.boundsInRoot.bottom.toInt())
+                            },
+                        )
+                    }
+                },
+            )
+        }
     }
 
     // ------------------------------------------------------------------------- Room / DB truth
@@ -364,11 +389,11 @@ internal class TimelineDiagnostics(
                     put("id", resolved.gap.id)
                     put("roomId", resolved.gap.roomId)
                     put("recoverable", resolved.gap.recoverable)
-                    putNullable("olderMsgid", resolved.gap.olderMsgid)
+                    putNullable("olderMsgidHash", DiagnosticLogger.Noop.fingerprint(resolved.gap.olderMsgid))
                     put("olderServerTime", resolved.gap.olderServerTime)
                     putNullable("olderEventId", resolved.gap.olderEventId)
                     putNullable("olderTimelineOrder", resolved.gap.olderTimelineOrder)
-                    putNullable("newerMsgid", resolved.gap.newerMsgid)
+                    putNullable("newerMsgidHash", DiagnosticLogger.Noop.fingerprint(resolved.gap.newerMsgid))
                     put("newerServerTime", resolved.gap.newerServerTime)
                     putNullable("newerEventId", resolved.gap.newerEventId)
                     putNullable("newerTimelineOrder", resolved.gap.newerTimelineOrder)
@@ -497,7 +522,9 @@ internal class TimelineDiagnostics(
         JSONObject().apply {
             put("eventId", long("id"))
             put("bufferId", long("bufferId"))
-            putNullable("msgid", stringOrNull("msgid"))
+            val msgid = stringOrNull("msgid")
+            putNullable("msgidHash", DiagnosticLogger.Noop.fingerprint(msgid))
+            putNullable("tagHash", DiagnosticLogger.Noop.fingerprint("$TIMELINE_ROW_TAG_PREFIX${msgid ?: long("id")}"))
             put("serverTime", long("serverTime"))
             put("timelineOrder", long("timelineOrder"))
             put("kind", string("kind"))

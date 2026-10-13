@@ -253,6 +253,11 @@ Newest-row waits seek the loaded Room key, then wait for composition and align
 the target node. Do not sweep the timeline to find that row: a miss can park the
 viewport at the oldest history boundary instead of observing the newest row.
 
+Unread-entry failures capture the real target rank, composed divider and row
+bounds before Compose teardown. `diagnostics.log` records entry page/header
+gates and placement stages; exported message IDs and row tags are fingerprints,
+not raw identities or message text.
+
 ## Public screenshot showcase
 
 The showcase command attempts to provision a separate local fixture with

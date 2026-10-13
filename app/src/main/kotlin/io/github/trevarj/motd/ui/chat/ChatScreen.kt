@@ -1579,6 +1579,7 @@ internal fun ChatContent(
     // nothing that happens within a visit -- a republished post-catch-up repair, a re-resolve -- can
     // re-engage it. A restored visit that already knows where it landed starts lifted.
     val latestEntryState by rememberUpdatedState(entryState)
+    val latestUnreadEntrySnapshot by rememberUpdatedState(unreadEntrySnapshot)
     var entryVeilLifted by remember {
         mutableStateOf(
             shouldLiftEntryVeil(
@@ -1660,6 +1661,76 @@ internal fun ChatContent(
             animationSpec = if (placingTopEntry) snap() else MotdMotion.fadeIn,
             label = "chat_header_expansion",
         )
+
+    // Capture only entry-stage boundaries, through the already opt-in structural journal.
+    fun recordEntryStage(
+        event: String,
+        target: ChatPositionTarget?,
+        outcome: String? = null,
+    ) {
+        diagnostics.record("chat_entry", event) {
+            val frozen = latestUnreadEntrySnapshot
+            val load = items.loadState
+            val snapshot = items.itemSnapshotList
+            val layout = listState.layoutInfo
+            val targetEventId =
+                target?.expectedEventId ?: target?.expectedMsgid?.let { msgid ->
+                    snapshot.items.firstOrNull { it.msgid == msgid }?.id
+                }
+            val measured = targetEventId?.let { key -> layout.visibleItemsInfo.firstOrNull { it.key == key } }
+            mapOf(
+                "room_id" to traceBufferId,
+                "session_id" to traceSessionId,
+                "outcome" to outcome,
+                "entry_state" to latestEntryState.journalName,
+                "position_settled" to initialPositionSettled,
+                "target_present" to (target != null),
+                "target_index" to target?.index,
+                "target_offset" to target?.offset,
+                "target_event_id" to target?.expectedEventId,
+                "target_msgid_hash" to diagnostics.fingerprint(target?.expectedMsgid),
+                "target_place_at_top" to target?.placeAtTop,
+                "target_saved" to target?.fromSavedPosition,
+                "frozen_present" to (frozen != null),
+                "frozen_marker_time" to frozen?.marker?.serverTime,
+                "frozen_marker_event_id" to frozen?.marker?.eventId,
+                "frozen_marker_order" to frozen?.marker?.timelineOrder,
+                "frozen_loaded_count" to frozen?.loadedCount,
+                "frozen_lower_bound" to frozen?.lowerBound,
+                "refresh" to loadStateName(load.refresh),
+                "prepend" to loadStateName(load.prepend),
+                "append" to loadStateName(load.append),
+                "source_refresh" to loadStateName(load.source.refresh),
+                "source_prepend" to loadStateName(load.source.prepend),
+                "source_append" to loadStateName(load.source.append),
+                "mediator_present" to (load.mediator != null),
+                "mediator_refresh" to load.mediator?.refresh?.let(::loadStateName),
+                "mediator_prepend" to load.mediator?.prepend?.let(::loadStateName),
+                "mediator_append" to load.mediator?.append?.let(::loadStateName),
+                "page" to initialPagingPage(items.itemCount, load.append).name,
+                "item_count" to items.itemCount,
+                "loaded_count" to snapshot.items.size,
+                "loaded_start" to snapshot.placeholdersBefore,
+                "placing_top_entry" to placingTopEntry,
+                "clamped_at_bottom" to topEntryClampedAtBottom,
+                "header_expansion" to headerExpansion.value,
+                "laid_out_header_expansion" to laidOutEntryHeaderExpansion,
+                "viewport_index" to listState.firstVisibleItemIndex,
+                "viewport_offset" to listState.firstVisibleItemScrollOffset,
+                "viewport_start" to layout.viewportStartOffset,
+                "viewport_end" to layout.viewportEndOffset,
+                "target_loaded_index" to
+                    targetEventId?.let {
+                        materializedTargetSnapshotIndex(snapshot.placeholdersBefore, snapshot.items, it)
+                    },
+                "target_measured" to (measured != null),
+                "target_measured_key" to (measured?.key as? Long),
+                "target_measured_index" to measured?.index,
+                "target_measured_offset" to measured?.offset,
+                "target_measured_size" to measured?.size,
+            )
+        }
+    }
 
     var prefillConsumed by remember(traceBufferId) { mutableStateOf(false) }
 
@@ -1993,6 +2064,7 @@ internal fun ChatContent(
     // Normal entry shares the deep-link paging mechanics but has no highlight. It is separate so
     // a deep link always wins and so a completed normal entry cannot be replayed on recomposition.
     LaunchedEffect(initialTarget) {
+        recordEntryStage("initial_position_start", initialTarget, if (initialTarget == null) "no_target" else "waiting")
         val target = initialTarget ?: return@LaunchedEffect
         AutoFollowTrace.record("initial_position_start", traceBufferId, traceSessionId) {
             "target_index=${target.index} target_offset=${target.offset} " +
@@ -2011,9 +2083,19 @@ internal fun ChatContent(
                 "target_index=${target.index} refresh=${items.loadState.refresh} " +
                     "append=${items.loadState.append} item_count=${items.itemCount}"
             }
+            recordEntryStage(
+                "initial_position_page_not_ready",
+                target,
+                when {
+                    items.loadState.refresh !is LoadState.NotLoading -> "refresh_not_ready"
+                    initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.Pending -> "page_pending"
+                    else -> "header_layout_pending"
+                },
+            )
             onInitialPositionUnresolved()
             return@LaunchedEffect
         }
+        recordEntryStage("initial_position_page_ready", target)
         val currentlyAtBottom =
             listState.firstVisibleItemIndex == 0 &&
                 listState.firstVisibleItemScrollOffset <= AUTOSCROLL_BOTTOM_TOLERANCE_PX
@@ -2021,6 +2103,7 @@ internal fun ChatContent(
             target.index == 0 && target.expectedEventId == null &&
                 target.expectedMsgid == null &&
                 initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.TerminalEmpty
+        if (!terminalEmpty) recordEntryStage("initial_position_materializing", target)
         val targetRow =
             if (terminalEmpty) {
                 null
@@ -2039,6 +2122,7 @@ internal fun ChatContent(
                     }
                 if (materialized != null) {
                     val row = materialized.row
+                    recordEntryStage("initial_position_materialized", target)
                     // The materialization scroll places the target at the reversed viewport start
                     // (visually the bottom). Align that measured row directly instead of estimating a
                     // second index from placeholder row counts: cold Paging swaps those placeholders
@@ -2056,6 +2140,7 @@ internal fun ChatContent(
                             }.first { it != null }
                         }
                     if (item != null) {
+                        recordEntryStage("initial_position_align", target)
                         // A single fire-and-forget correction can race a Paging generation swap (the
                         // reopen backfill deletes the history gap milliseconds after materialization,
                         // regenerating the Pager): the lazy layout clamps the scroll mid-presentation
@@ -2112,13 +2197,16 @@ internal fun ChatContent(
                             // A short unread run clamps at newest. Restore its expanded viewport
                             // under the veil, and wait for that layout before consuming the target.
                             topEntryClampedAtBottom = true
+                            recordEntryStage("initial_position_waiting_expanded_header", target)
                             snapshotFlow { laidOutEntryHeaderExpansion }.first { it == 1f }
+                            recordEntryStage("initial_position_expanded_header_ready", target)
                         }
                         row
                     } else {
                         AutoFollowTrace.record("initial_position_align_missing", traceBufferId, traceSessionId) {
                             "target_index=${target.index} item_count=${items.itemCount}"
                         }
+                        recordEntryStage("initial_position_align_missing", target, "target_not_measured")
                         null
                     }
                 } else {
@@ -2139,6 +2227,7 @@ internal fun ChatContent(
         if (terminalEmpty) {
             initialPositionSettled = true
             suppressNextAutoFollow = true
+            recordEntryStage("initial_position_settled", target, "terminal_empty")
             onInitialPositionHandled()
         } else if (targetRow != null && positionTargetMatches(target, targetRow)) {
             AutoFollowTrace.record("initial_position_settled", traceBufferId, traceSessionId) {
@@ -2148,22 +2237,26 @@ internal fun ChatContent(
             }
             initialPositionSettled = true
             suppressNextAutoFollow = true
+            recordEntryStage("initial_position_settled", target, "identity_matched")
             onInitialPositionHandled()
         } else if (targetRow != null) {
             AutoFollowTrace.record("initial_position_reresolve", traceBufferId, traceSessionId) {
                 "target_index=${target.index} reason=identity_mismatch item_count=${items.itemCount}"
             }
+            recordEntryStage("initial_position_reresolve", target, "identity_mismatch")
             onReresolveInitial(target)
         } else if (target.expectedEventId != null || target.expectedMsgid != null) {
             AutoFollowTrace.record("initial_position_reresolve", traceBufferId, traceSessionId) {
                 "target_index=${target.index} reason=target_missing item_count=${items.itemCount}"
             }
+            recordEntryStage("initial_position_reresolve", target, "target_missing")
             onReresolveInitial(target)
         } else {
             AutoFollowTrace.record("initial_position_unresolved", traceBufferId, traceSessionId) {
                 "target_index=${target.index} item_count=${items.itemCount} " +
                     "append=${loadStateName(items.loadState.append)}"
             }
+            recordEntryStage("initial_position_unresolved", target, "target_missing")
             onInitialPositionUnresolved()
         }
     }

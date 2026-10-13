@@ -155,59 +155,86 @@ internal class TimelineRobot(
     fun assertUnreadEntry(
         firstTag: String,
         secondTag: String,
+        firstKey: Long,
+        diagnostics: TimelineDiagnostics,
         expectedLabel: String? = null,
         timeoutMs: Long = 30_000,
     ) {
-        rule.waitForIdle()
-        awaitEntryVeilLifted(timeoutMs)
-        // Atomic history publication can leave Paging materializing the bounded entry window for
-        // longer than the generic component timeout on a cold hosted emulator.
-        awaitTag("chat_read_marker_divider", timeoutMs)
-        awaitTag(firstTag, timeoutMs)
-        awaitTag(secondTag, timeoutMs)
-        val timeline = rule.onNodeWithTag("chat_timeline", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        expectedLabel?.let {
-            rule
-                .onNode(
-                    hasText(it) and hasAnyAncestor(hasTestTag("chat_read_marker_divider")),
-                    useUnmergedTree = true,
-                ).assertIsDisplayed()
+        try {
+            rule.waitForIdle()
+            awaitEntryVeilLifted(timeoutMs)
+            // Atomic history publication can leave Paging materializing the bounded entry window for
+            // longer than the generic component timeout on a cold hosted emulator.
+            awaitTag("chat_read_marker_divider", timeoutMs)
+            awaitTag(firstTag, timeoutMs)
+            awaitTag(secondTag, timeoutMs)
+            val timeline = rule.onNodeWithTag("chat_timeline", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            expectedLabel?.let {
+                rule
+                    .onNode(
+                        hasText(it) and hasAnyAncestor(hasTestTag("chat_read_marker_divider")),
+                        useUnmergedTree = true,
+                    ).assertIsDisplayed()
+            }
+            val divider =
+                rule
+                    .onNodeWithTag("chat_read_marker_divider", useUnmergedTree = true)
+                    .assertIsDisplayed()
+                    .fetchSemanticsNode()
+                    .boundsInRoot
+            val first =
+                rule
+                    .onNodeWithTag(firstTag, useUnmergedTree = true)
+                    .assertIsDisplayed()
+                    .fetchSemanticsNode()
+                    .boundsInRoot
+            val second =
+                rule
+                    .onNodeWithTag(secondTag, useUnmergedTree = true)
+                    .assertIsDisplayed()
+                    .fetchSemanticsNode()
+                    .boundsInRoot
+            val density =
+                InstrumentationRegistry
+                    .getInstrumentation()
+                    .targetContext.resources.displayMetrics.density
+            assertTrue("first unread was above the timeline viewport", first.top >= timeline.top - density)
+            assertTrue(
+                "first unread was not anchored near the viewport top: timeline=${timeline.top}, row=${first.top}",
+                first.top <= timeline.top + 96f * density,
+            )
+            assertTrue("second unread did not follow the first", second.top > first.top)
+            assertTrue("unread divider was not attached to the first unread row", divider.bottom <= first.top)
+            assertTrue(
+                "unread divider was attached to a different row: divider=${divider.bottom}, row=${first.top}",
+                first.top - divider.bottom <= 24f * density,
+            )
+            rule.onAllNodesWithTag(firstTag, useUnmergedTree = true).assertCountEquals(1)
+            rule.onAllNodesWithTag(secondTag, useUnmergedTree = true).assertCountEquals(1)
+        } catch (failure: Throwable) {
+            // The outer failure rule runs after Compose teardown; capture the live tree here.
+            runCatching {
+                diagnostics.capture(
+                    label = "unread_entry_$firstKey",
+                    outcome = "failure",
+                    containerTag = "chat_timeline",
+                    targetTag = firstTag,
+                    targetKey = firstKey,
+                    budgetMs = timeoutMs,
+                )
+            }
+            throw failure
         }
-        val divider =
-            rule
-                .onNodeWithTag("chat_read_marker_divider", useUnmergedTree = true)
-                .assertIsDisplayed()
-                .fetchSemanticsNode()
-                .boundsInRoot
-        val first =
-            rule
-                .onNodeWithTag(firstTag, useUnmergedTree = true)
-                .assertIsDisplayed()
-                .fetchSemanticsNode()
-                .boundsInRoot
-        val second =
-            rule
-                .onNodeWithTag(secondTag, useUnmergedTree = true)
-                .assertIsDisplayed()
-                .fetchSemanticsNode()
-                .boundsInRoot
-        val density =
-            InstrumentationRegistry
-                .getInstrumentation()
-                .targetContext.resources.displayMetrics.density
-        assertTrue("first unread was above the timeline viewport", first.top >= timeline.top - density)
-        assertTrue(
-            "first unread was not anchored near the viewport top: timeline=${timeline.top}, row=${first.top}",
-            first.top <= timeline.top + 96f * density,
-        )
-        assertTrue("second unread did not follow the first", second.top > first.top)
-        assertTrue("unread divider was not attached to the first unread row", divider.bottom <= first.top)
-        assertTrue(
-            "unread divider was attached to a different row: divider=${divider.bottom}, row=${first.top}",
-            first.top - divider.bottom <= 24f * density,
-        )
-        rule.onAllNodesWithTag(firstTag, useUnmergedTree = true).assertCountEquals(1)
-        rule.onAllNodesWithTag(secondTag, useUnmergedTree = true).assertCountEquals(1)
+        runCatching {
+            diagnostics.capture(
+                label = "unread_entry_$firstKey",
+                outcome = "pass",
+                containerTag = "chat_timeline",
+                targetTag = firstTag,
+                targetKey = firstKey,
+                budgetMs = timeoutMs,
+            )
+        }
     }
 
     /**

@@ -508,6 +508,17 @@ class RequiredHeadlessE2eTest {
         timeline.assertUnreadEntry(
             oldestLoaded.tag(),
             secondLoaded.tag(),
+            firstKey = oldestLoaded.id,
+            diagnostics =
+                TimelineDiagnostics(
+                    compose = compose,
+                    targetContext = InstrumentationRegistry.getInstrumentation().targetContext,
+                    artifactPrefix = artifacts.artifactPrefix(),
+                    milestones = milestones,
+                    bufferId = bufferId,
+                    probedEventId = oldestLoaded.id,
+                    probedMsgid = oldestLoaded.msgid,
+                ),
             expectedLabel = "49+ new messages",
         )
         compose.waitForIdle()
@@ -594,6 +605,17 @@ class RequiredHeadlessE2eTest {
         timeline.assertUnreadEntry(
             reopenOldest.tag(),
             reopenSecond.tag(),
+            firstKey = reopenOldest.id,
+            diagnostics =
+                TimelineDiagnostics(
+                    compose = compose,
+                    targetContext = InstrumentationRegistry.getInstrumentation().targetContext,
+                    artifactPrefix = artifacts.artifactPrefix(),
+                    milestones = milestones,
+                    bufferId = bufferId,
+                    probedEventId = reopenOldest.id,
+                    probedMsgid = reopenOldest.msgid,
+                ),
         )
         assertMarkerAtLeast(bootstrap, bufferId, marker)
         // No search pin after the reopen: its entry lands ON the window's oldest unread row (the
