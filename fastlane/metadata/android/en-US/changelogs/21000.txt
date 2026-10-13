@@ -1,0 +1,5 @@
+- Compact message actions, full emoji reactions, and forwarding with optional sender attribution.
+- Translate messages with Android apps and view returned translations inline in every layout.
+- Improved text contrast with optional theme-based colors.
+- New Linux-themed chat wallpaper.
+- Smaller APK and smoother emoji-picker scrolling.
