@@ -141,7 +141,7 @@ jobs:
           MOTD_LINT_LOG: app/build/reports/android-lint.log
         run: ./tools/android-lint.sh
       - name: Upload lint diagnostics
-        if: steps.lint.outcome == 'failure'
+        if: failure() && steps.lint.outcome == 'failure'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: app-lint-failure-${{ github.run_id }}
