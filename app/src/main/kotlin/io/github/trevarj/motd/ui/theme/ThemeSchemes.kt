@@ -285,17 +285,23 @@ private val RawFixedSchemes: Map<ColorThemePreset, ColorScheme> by lazy {
     )
 }
 
-private val FixedSchemes by lazy {
-    RawFixedSchemes.mapValues { (preset, raw) -> accessibleColorScheme(raw, preset.isDark) }
-}
-private val ThemeTextFixedSchemes by lazy {
-    RawFixedSchemes.mapValues { (preset, raw) -> accessibleColorScheme(raw, preset.isDark, useThemeTextColors = true) }
-}
+// Normalize only the requested palette/text mode; eager catalog normalization delays first paint.
+private val FixedSchemes = java.util.concurrent.ConcurrentHashMap<ColorThemePreset, ColorScheme>()
+private val ThemeTextFixedSchemes = java.util.concurrent.ConcurrentHashMap<ColorThemePreset, ColorScheme>()
 
 internal fun fixedThemeScheme(
     theme: ColorThemePreset,
     useThemeTextColors: Boolean = false,
-): ColorScheme? = if (useThemeTextColors) ThemeTextFixedSchemes[theme] else FixedSchemes[theme]
+): ColorScheme? {
+    when (theme) {
+        ColorThemePreset.SYSTEM, ColorThemePreset.LIGHT, ColorThemePreset.DARK, ColorThemePreset.AMOLED -> return null
+        else -> Unit
+    }
+    val cache = if (useThemeTextColors) ThemeTextFixedSchemes else FixedSchemes
+    return cache[theme] ?: cache.computeIfAbsent(theme) { preset ->
+        accessibleColorScheme(RawFixedSchemes.getValue(preset), preset.isDark, useThemeTextColors)
+    }
+}
 
 private data class Hsl(
     val hue: Float,
