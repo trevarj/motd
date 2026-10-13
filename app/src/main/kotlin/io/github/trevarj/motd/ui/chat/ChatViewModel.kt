@@ -25,6 +25,7 @@ import io.github.trevarj.motd.avatar.NoopAvatarController
 import io.github.trevarj.motd.bouncer.isBouncerConsole
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.ComposerDraftEntity
 import io.github.trevarj.motd.data.db.DccDirection
 import io.github.trevarj.motd.data.db.DccTransferDao
@@ -83,6 +84,7 @@ import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistorySyncStatus
+import io.github.trevarj.motd.service.ImmediateWireAcceptance
 import io.github.trevarj.motd.service.NotificationMode
 import io.github.trevarj.motd.service.NotificationSettings
 import io.github.trevarj.motd.service.PresenceKey
@@ -99,6 +101,7 @@ import io.github.trevarj.motd.ui.components.deriveChannelNotificationPresentatio
 import io.github.trevarj.motd.ui.nav.ChatRoute
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.PendingShareStore
+import io.github.trevarj.motd.ui.share.filterShareTargets
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
@@ -920,6 +923,164 @@ class ChatViewModel
                 .map { it?.id ?: bufferId }
                 .distinctUntilChanged()
                 .stateIn(viewModelScope, SharingStarted.Eagerly, bufferId)
+
+        private val _forwardState = MutableStateFlow<MessageForwardState?>(null)
+        internal val forwardState: StateFlow<MessageForwardState?> = _forwardState.asStateFlow()
+        internal val forwardTargets: StateFlow<List<ChatListRow>> =
+            combine(
+                bufferRepository.observeChatList(),
+                connectionManager.connectionStates,
+                operationalBufferId,
+            ) { rows, connections, sourceRoomId ->
+                filterShareTargets(rows, "").filter { row ->
+                    row.bufferId != sourceRoomId &&
+                        (row.type == BufferType.CHANNEL || row.type == BufferType.QUERY) &&
+                        connections[row.networkId] is IrcClientState.Ready
+                }
+            }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+        internal fun openForward(message: MessageEntity) {
+            if (_forwardState.value != null) return
+            if (canForwardMessage(message, buffer.value?.type)) {
+                _forwardState.compareAndSet(null, MessageForwardState(source = message))
+            }
+        }
+
+        private fun editableForwardState(): MessageForwardState? =
+            _forwardState.value?.takeUnless {
+                it.sending || it.acceptance != null ||
+                    it.error == MessageForwardError.SOURCE_UNAVAILABLE || it.error == MessageForwardError.SEND_FAILED
+            }
+
+        internal fun selectForwardDestination(row: ChatListRow) {
+            val current = editableForwardState() ?: return
+            _forwardState.compareAndSet(current, current.copy(destination = row, error = null))
+        }
+
+        internal fun changeForwardDestination() {
+            val current = editableForwardState() ?: return
+            _forwardState.compareAndSet(current, current.copy(destination = null, error = null))
+        }
+
+        internal fun setForwardIncludeSender(include: Boolean) {
+            val current = editableForwardState() ?: return
+            if (current.includeSender == include) return
+            _forwardState.compareAndSet(current, current.copy(includeSender = include))
+        }
+
+        internal fun dismissForward() {
+            val current = _forwardState.value ?: return
+            if (!current.sending) _forwardState.compareAndSet(current, null)
+        }
+
+        /** Completion belongs to this exact admitted preview, never to a later reopened request. */
+        private fun finishForward(
+            request: MessageForwardState,
+            result: MessageForwardState?,
+        ) {
+            if (_forwardState.value === request) _forwardState.compareAndSet(request, result)
+        }
+
+        internal fun confirmForward() {
+            val preview = editableForwardState() ?: return
+            val destination = preview.destination ?: return
+            val request = preview.copy(sending = true, error = null)
+            if (!_forwardState.compareAndSet(preview, request)) return
+            val text = forwardMessageText(request.source, request.includeSender)
+            viewModelScope.launch {
+                try {
+                    val source = messageRepository.byId(request.source.id)
+                    val sourceRoomId = source?.let { messageRepository.canonicalRoomId(it.bufferId) }
+                    val previewRoomId = messageRepository.canonicalRoomId(request.source.bufferId)
+                    val currentRoomId = bufferRepository.canonicalBufferId(operationalBufferId.value)
+                    val sourceRoom = sourceRoomId?.let { bufferRepository.observeBuffer(it).first() }
+                    if (source == null || sourceRoomId != previewRoomId || sourceRoomId != currentRoomId ||
+                        !canForwardMessage(source, sourceRoom?.type) ||
+                        source.kind != request.source.kind || source.sender != request.source.sender ||
+                        source.text != request.source.text
+                    ) {
+                        finishForward(request, request.copy(sending = false, error = MessageForwardError.SOURCE_UNAVAILABLE))
+                        return@launch
+                    }
+
+                    val destinationId = bufferRepository.canonicalBufferId(destination.bufferId)
+                    val room = destinationId?.let { bufferRepository.observeBuffer(it).first() }
+                    val row =
+                        filterShareTargets(bufferRepository.observeChatList().first(), "")
+                            .firstOrNull { it.bufferId == destinationId }
+                    if (destinationId == null || destinationId != destination.bufferId || room == null || row == null ||
+                        room.id != destinationId || room.networkId != destination.networkId ||
+                        room.type != destination.type || room.displayName != destination.displayName ||
+                        row.networkId != destination.networkId || row.type != destination.type ||
+                        row.displayName != destination.displayName || row.networkName != destination.networkName
+                    ) {
+                        finishForward(
+                            request,
+                            request.copy(destination = null, sending = false, error = MessageForwardError.TARGET_UNAVAILABLE),
+                        )
+                        return@launch
+                    }
+                    if ((room.type != BufferType.CHANNEL && room.type != BufferType.QUERY) ||
+                        room.archived || room.dismissed || room.redirectToRoomId != null ||
+                        room.pendingCloseAt != null || room.id == sourceRoomId ||
+                        (room.type == BufferType.CHANNEL && !room.joined)
+                    ) {
+                        finishForward(request, request.copy(sending = false, error = MessageForwardError.TARGET_UNAVAILABLE))
+                        return@launch
+                    }
+                    // Target reads can suspend while the screen's operational room changes.
+                    if (bufferRepository.canonicalBufferId(operationalBufferId.value) != sourceRoomId) {
+                        finishForward(request, request.copy(sending = false, error = MessageForwardError.SOURCE_UNAVAILABLE))
+                        return@launch
+                    }
+                    if (_forwardState.value !== request) return@launch
+                    if (connectionManager.connectionStates.value[room.networkId] !is IrcClientState.Ready) {
+                        finishForward(request, request.copy(sending = false, error = MessageForwardError.TARGET_UNAVAILABLE))
+                        return@launch
+                    }
+                    when (
+                        val acceptance =
+                            connectionManager.sendMessage(
+                                destinationId,
+                                text,
+                                replyToEventId = null,
+                                channelContext = null,
+                            )
+                    ) {
+                        is SendAcceptance.Rejected -> {
+                            finishForward(
+                                request,
+                                request.copy(
+                                    sending = false,
+                                    error =
+                                        if (acceptance.reason == SendRejectionReason.NOT_IN_CHANNEL) {
+                                            MessageForwardError.TARGET_UNAVAILABLE
+                                        } else {
+                                            MessageForwardError.SEND_REJECTED
+                                        },
+                                ),
+                            )
+                        }
+
+                        is SendAcceptance.Accepted -> {
+                            finishForward(
+                                request,
+                                if (acceptance.immediateWireAcceptance == ImmediateWireAcceptance.ACCEPTED) {
+                                    null
+                                } else {
+                                    request.copy(sending = false, acceptance = acceptance)
+                                },
+                            )
+                        }
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // A send may already have persisted rows: this request must never resend.
+                    finishForward(request, request.copy(sending = false, error = MessageForwardError.SEND_FAILED))
+                }
+            }
+        }
 
         init {
             viewModelScope.launch {

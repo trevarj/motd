@@ -2177,14 +2177,15 @@ private fun EmojiAutocompletePanel(
 }
 
 @Composable
-private fun EmojiPickerPanel(
+internal fun EmojiPickerPanel(
     onPick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    tagPrefix: String = "chat_composer",
 ) {
     Surface(
         modifier =
             modifier
-                .testTag("chat_composer_emoji_picker")
+                .testTag("${tagPrefix}_emoji_picker")
                 .padding(start = 8.dp, end = 8.dp, top = 8.dp)
                 .fillMaxSize(),
         shape = MotdShapes.bubble,
@@ -2202,7 +2203,7 @@ private fun EmojiPickerPanel(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .testTag("chat_composer_emoji_grid"),
+                    .testTag("${tagPrefix}_emoji_grid"),
         )
     }
 }

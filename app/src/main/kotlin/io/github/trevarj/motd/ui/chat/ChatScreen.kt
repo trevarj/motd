@@ -198,6 +198,7 @@ import io.github.trevarj.motd.audio.VoiceSendProgress
 import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.avatar.ConversationAvatarOutcome
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.DccDirection
 import io.github.trevarj.motd.data.db.DccTransferEntity
 import io.github.trevarj.motd.data.db.DccTransferState
@@ -413,6 +414,8 @@ fun ChatScreen(
     val ebooksDccOffers by viewModel.ebooksDccOffers.collectAsStateWithLifecycle()
     val externalTranslations by viewModel.externalTranslations.collectAsStateWithLifecycle()
     val externalTranslationInFlight by viewModel.externalTranslationInFlight.collectAsStateWithLifecycle()
+    val forwardState by viewModel.forwardState.collectAsStateWithLifecycle()
+    val forwardTargets by viewModel.forwardTargets.collectAsStateWithLifecycle()
     // Collect paging off the frame-aligned AndroidUiDispatcher. Bounded-window paging swaps the
     // whole Pager when a persisted older page recedes the gap edge, which emits two PagingData
     // back-to-back (the old Pager's invalidation generation plus the new Pager's first). cachedIn
@@ -704,6 +707,14 @@ fun ChatScreen(
         onCompleteExternalTranslation = viewModel::completeExternalTranslation,
         onAbortExternalTranslationLaunch = viewModel::abortExternalTranslationLaunch,
         onDismissExternalTranslation = viewModel::dismissExternalTranslation,
+        forwardState = forwardState,
+        forwardTargets = forwardTargets,
+        onOpenForward = viewModel::openForward,
+        onSelectForwardDestination = viewModel::selectForwardDestination,
+        onChangeForwardDestination = viewModel::changeForwardDestination,
+        onForwardIncludeSenderChanged = viewModel::setForwardIncludeSender,
+        onConfirmForward = viewModel::confirmForward,
+        onDismissForward = viewModel::dismissForward,
         onAiComposer = {
             val snapshot = viewModel.beginAiDraftTransform()
             if (snapshot != null) aiTextViewModel.openComposer(snapshot) else aiTextViewModel.showUnavailable()
@@ -979,7 +990,7 @@ fun ChatScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatContent(
+internal fun ChatContent(
     state: ChatState,
     items: LazyPagingItems<MessageEntity>,
     composerEnabled: Boolean,
@@ -1096,6 +1107,14 @@ fun ChatContent(
     onCompleteExternalTranslation: ((String?) -> Unit)? = null,
     onAbortExternalTranslationLaunch: (() -> Unit)? = null,
     onDismissExternalTranslation: (Long) -> Unit = {},
+    forwardState: MessageForwardState? = null,
+    forwardTargets: List<ChatListRow> = emptyList(),
+    onOpenForward: ((MessageEntity) -> Unit)? = null,
+    onSelectForwardDestination: (ChatListRow) -> Unit = {},
+    onChangeForwardDestination: () -> Unit = {},
+    onForwardIncludeSenderChanged: (Boolean) -> Unit = {},
+    onConfirmForward: () -> Unit = {},
+    onDismissForward: () -> Unit = {},
     onDraftChanged: (String) -> Unit = {},
     // The send currently travelling from the composer into the timeline, if any.
     outgoingFlight: OutgoingFlight? = null,
@@ -2384,7 +2403,9 @@ fun ChatContent(
     // Long-press action sheet target.
     var sheetTarget by remember { mutableStateOf<MessageEntity?>(null) }
     var redactionTarget by remember { mutableStateOf<MessageEntity?>(null) }
-    val sheetState = rememberModalBottomSheetState()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var reactionPickerTarget by remember { mutableStateOf<MessageEntity?>(null) }
+    val reactionPickerState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var translationTarget by remember { mutableStateOf<MessageEntity?>(null) }
     var translationTargets by remember { mutableStateOf(emptyList<ExternalTranslationTarget>()) }
     var otherTranslationAvailable by remember { mutableStateOf(false) }
@@ -2437,6 +2458,18 @@ fun ChatContent(
                 snackbarHostState.showSnackbar(resources.getString(R.string.chat_translation_open_failed))
             }
         }
+    }
+
+    fun reactionEnabled(
+        target: MessageEntity,
+        emoji: String,
+    ): Boolean {
+        val ready = state.connState as? IrcClientState.Ready
+        val mine =
+            target.msgid?.let { msgid ->
+                reactionChips(msgid).firstOrNull { it.emoji == emoji }?.mine
+            } == true
+        return ready != null && canSendReactionTags(ready.caps, ready.isupport, remove = mine)
     }
 
     ReportMessageViewport(
@@ -4067,6 +4100,12 @@ fun ChatContent(
                 } else {
                     null
                 },
+            onForward =
+                if (onOpenForward != null && canForwardMessage(target, state.buffer?.type)) {
+                    { hideThen { onOpenForward(target) } }
+                } else {
+                    null
+                },
             onReply = {
                 hideThen {
                     onSetReply(target)
@@ -4083,15 +4122,9 @@ fun ChatContent(
             // Pass the whole target: the VM queues the react when target.msgid is still null (own
             // pending message) instead of silently dropping it.
             onReact = { emoji -> hideThen { onReact(target, emoji) } },
+            onMoreReactions = { hideThen { reactionPickerTarget = target } },
             reactions = target.msgid?.let(reactionChips).orEmpty(),
-            reactionEnabled = { emoji ->
-                val ready = state.connState as? IrcClientState.Ready
-                val mine =
-                    target.msgid?.let { msgid ->
-                        reactionChips(msgid).firstOrNull { it.emoji == emoji }?.mine
-                    } == true
-                ready != null && canSendReactionTags(ready.caps, ready.isupport, remove = mine)
-            },
+            reactionEnabled = { emoji -> reactionEnabled(target, emoji) },
             canPrepareThreadContext =
                 !contextPreparing &&
                     canPrepareThreadContext(
@@ -4119,6 +4152,29 @@ fun ChatContent(
             onRedact = { hideThen { redactionTarget = target } },
             // Outbound share: the raw message text, no formatting or attribution.
             onShare = { hideThen { shareMessageText(ctx, target.text) } },
+        )
+    }
+
+    if (sheetTarget == null) {
+        forwardState?.let { request ->
+            MessageForwardSheet(
+                state = request,
+                targets = forwardTargets,
+                onSelectDestination = onSelectForwardDestination,
+                onChangeDestination = onChangeForwardDestination,
+                onIncludeSenderChanged = onForwardIncludeSenderChanged,
+                onConfirm = onConfirmForward,
+                onDismiss = onDismissForward,
+            )
+        }
+    }
+
+    reactionPickerTarget?.let { target ->
+        MessageReactionPicker(
+            sheetState = reactionPickerState,
+            onDismiss = { reactionPickerTarget = null },
+            onReact = { emoji -> onReact(target, emoji) },
+            reactionEnabled = { emoji -> reactionEnabled(target, emoji) },
         )
     }
 

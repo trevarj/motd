@@ -2,6 +2,7 @@ package io.github.trevarj.motd
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.IntentFilter
@@ -46,10 +47,12 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
@@ -59,6 +62,8 @@ import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.assertTouchHeightIsEqualTo
 import androidx.compose.ui.test.assertTouchWidthIsEqualTo
@@ -81,12 +86,15 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
@@ -132,6 +140,8 @@ import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.HistorySyncStatus
+import io.github.trevarj.motd.service.ImmediateWireAcceptance
+import io.github.trevarj.motd.service.SendRejectionReason
 import io.github.trevarj.motd.ui.ai.AiComposerDraftSnapshot
 import io.github.trevarj.motd.ui.ai.AiTextAction
 import io.github.trevarj.motd.ui.ai.AiTextSheet
@@ -149,6 +159,7 @@ import io.github.trevarj.motd.ui.chat.ComposerDraftState
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chat.EntryPositionState
 import io.github.trevarj.motd.ui.chat.ExternalTranslationRequest
+import io.github.trevarj.motd.ui.chat.MessageForwardError
 import io.github.trevarj.motd.ui.chat.MessageList
 import io.github.trevarj.motd.ui.chat.MessageUrlCache
 import io.github.trevarj.motd.ui.chat.OutgoingFlight
@@ -158,12 +169,19 @@ import io.github.trevarj.motd.ui.chat.SendFlightOverlay
 import io.github.trevarj.motd.ui.chat.UnreadEntrySnapshot
 import io.github.trevarj.motd.ui.chat.VoiceMessageUiState
 import io.github.trevarj.motd.ui.chat.VoiceRecordingUi
+import io.github.trevarj.motd.ui.chat.clickNativeEmoji
 import io.github.trevarj.motd.ui.chat.externalTranslationText
+import io.github.trevarj.motd.ui.chat.pickNativeEmojiVariant
+import io.github.trevarj.motd.ui.chat.timelineMessageTag
 import io.github.trevarj.motd.ui.components.MessageBubble
+import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
+import io.github.trevarj.motd.ui.share.PendingShare
+import io.github.trevarj.motd.ui.share.PendingShareStore
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -291,8 +309,11 @@ class ComposerSendClearUiTest {
     /** Native dispatch fixture only; it neither echoes output nor simulates result acceptance. */
     private fun translationRequest(source: MessageEntity) = ExternalTranslationRequest(1, 0, source.bufferId, source.id, source.text, requireNotNull(externalTranslationText(source)))
 
-    private fun openTranslationPicker() {
-        val tag = "chat_message_88"
+    private fun holdMessageBubble(message: MessageEntity) {
+        val tag = timelineMessageTag(message.msgid, message.id)
+        compose.waitForIdle()
+        compose.onNodeWithTag("chat_timeline", useUnmergedTree = true).performScrollToNode(hasTestTag(tag))
+        compose.waitForIdle()
         val row = compose.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
         val longPressSurface = SemanticsMatcher("message long-press surface") { it.config.contains(SemanticsActions.OnLongClick) }
         val bubble = compose.onNode(hasAnyAncestor(hasTestTag(tag)) and longPressSurface, useUnmergedTree = true).assertIsDisplayed()
@@ -301,12 +322,21 @@ class ComposerSendClearUiTest {
         // Hold the source surface's bottom padding, not its independently interactive text child.
         val pressPosition = Offset(bubbleBounds.center.x, bubbleBounds.bottom - 1f) - rowBounds.topLeft
         row.performTouchInput { longClick(pressPosition) }
+    }
+
+    private fun openTranslationPicker() {
+        holdMessageBubble(translationMessage())
         compose.onNodeWithTag("message_action_translate").performClick()
         compose.onNodeWithTag("message_translation_picker").assertIsDisplayed()
     }
 
     private fun withTranslationOwner(
         replyToParent: Boolean = true,
+        sourceText: String = "Bonjour",
+        prepare: suspend (MotdDatabase, MessageEntity) -> Unit = { _, _ -> },
+        createOwner: (MotdDatabase, CoroutineScope) -> ChatViewModel = { db, scope ->
+            ChatViewModelTest.externalTranslationFixture(db, buffer, scope)
+        },
         block: (MotdDatabase, ChatViewModel, MessageEntity) -> Unit,
     ) {
         val db =
@@ -316,18 +346,19 @@ class ComposerSendClearUiTest {
                 .setQueryExecutor { it.run() }
                 .setTransactionExecutor { it.run() }
                 .build()
-        val parent = translationMessage().copy(text = "Bonjour", ircFormattedText = null)
+        val parent = translationMessage().copy(text = sourceText, ircFormattedText = null)
         runBlocking {
             db.networkDao().insert(NetworkEntity(id = buffer.networkId, name = "test", role = NetworkRole.DIRECT, host = "irc.example", port = 6697, nick = "me", username = "me", realname = "Me"))
             db.bufferDao().insert(buffer)
             db.messageDao().insertAll(listOf(parent))
             ComposerDraftStore(db).saveDraft(buffer.id, "Unsent draft", parent.id.takeIf { replyToParent })
+            prepare(db, parent)
         }
         val store = ViewModelStore()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         lateinit var owner: ChatViewModel
         compose.runOnIdle {
-            owner = ChatViewModelTest.externalTranslationFixture(db, buffer, scope)
+            owner = createOwner(db, scope)
             store.put("chat", owner)
         }
         val ownerJob = owner.viewModelScope.coroutineContext[Job]
@@ -344,6 +375,21 @@ class ComposerSendClearUiTest {
                 scope.coroutineContext[Job]?.join()
             }
             db.close()
+        }
+    }
+
+    private fun waitForForward(
+        owner: ChatViewModel,
+        condition: () -> Boolean,
+    ) {
+        try {
+            compose.waitUntil(5_000) {
+                // Fresh Room/settings collectors in confirmForward need the paused main looper.
+                compose.waitForIdle()
+                condition()
+            }
+        } catch (timeout: ComposeTimeoutException) {
+            throw AssertionError("Forward state=${owner.forwardState.value}; targets=${owner.forwardTargets.value}", timeout)
         }
     }
 
@@ -419,6 +465,8 @@ class ComposerSendClearUiTest {
         onInviteUser: () -> Unit = {},
         replyTo: () -> MessageEntity? = { null },
         onSetReply: (MessageEntity?) -> Unit = {},
+        onReact: (MessageEntity, String) -> Unit = { _, _ -> },
+        reactionChips: (String) -> List<ReactionChip> = { emptyList() },
         ebooksHelperRoomId: () -> Long? = { null },
         ebooksDccOffers: () -> List<DccTransferEntity> = { emptyList() },
         onAcceptDccTransfer: (Long, Uri, Boolean) -> Unit = { _, _, _ -> },
@@ -454,6 +502,7 @@ class ComposerSendClearUiTest {
         voiceState: () -> VoiceMessageUiState = { VoiceMessageUiState() },
         onViewportRefreshAnchor: (ViewportRefreshAnchor?) -> Unit = {},
         chatViewModel: ChatViewModel? = null,
+        forwardEnabled: Boolean = false,
         onSubmit: (String) -> Unit,
     ) {
         compose.setContent {
@@ -463,6 +512,9 @@ class ComposerSendClearUiTest {
             val ownerDraft = chatViewModel?.composerDraft?.collectAsState()?.value
             val ownerTranslations = chatViewModel?.externalTranslations?.collectAsState()?.value
             val ownerInFlight = chatViewModel?.externalTranslationInFlight?.collectAsState()?.value
+            val forwardingOwner = chatViewModel.takeIf { forwardEnabled }
+            val ownerForward = forwardingOwner?.forwardState?.collectAsState()?.value
+            val ownerForwardTargets = forwardingOwner?.forwardTargets?.collectAsState()?.value
             CompositionLocalProvider(
                 LocalActivityResultRegistryOwner provides (activityResults ?: checkNotNull(LocalActivityResultRegistryOwner.current)),
                 LocalDensity provides (fontScale?.let { Density(LocalDensity.current.density, it) } ?: LocalDensity.current),
@@ -506,7 +558,8 @@ class ComposerSendClearUiTest {
                                 onSetReply(it)
                                 chatViewModel?.setReply(it)
                             },
-                            onReact = { _, _ -> },
+                            onReact = onReact,
+                            reactionChips = reactionChips,
                             onRetry = {},
                             loadPreview = { _, _ -> null },
                             onAudioToggle = onAudioToggle,
@@ -521,6 +574,14 @@ class ComposerSendClearUiTest {
                             externalTranslationInFlight = ownerInFlight ?: externalTranslationInFlight(),
                             externalTranslations = ownerTranslations ?: emptyMap(),
                             onDismissExternalTranslation = { chatViewModel?.dismissExternalTranslation(it) },
+                            forwardState = ownerForward,
+                            forwardTargets = ownerForwardTargets ?: emptyList(),
+                            onOpenForward = forwardingOwner?.let { it::openForward },
+                            onSelectForwardDestination = { forwardingOwner?.selectForwardDestination(it) },
+                            onChangeForwardDestination = { forwardingOwner?.changeForwardDestination() },
+                            onForwardIncludeSenderChanged = { forwardingOwner?.setForwardIncludeSender(it) },
+                            onConfirmForward = { forwardingOwner?.confirmForward() },
+                            onDismissForward = { forwardingOwner?.dismissForward() },
                             outgoingFlight = outgoingFlight(),
                             onDraftChanged = onDraftChanged,
                             onFlightSettled = onFlightSettled,
@@ -729,6 +790,607 @@ class ComposerSendClearUiTest {
             assertEquals(0, positionsHandled)
             assertEquals(0, marksRead)
         }
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "en-w320dp-h360dp", fontScale = 2f)
+    fun compactMessageActionsFitActualDialogViewportWithoutMutatingComposer() {
+        // This geometry fixture leaves the short timeline visible; reply preservation has separate coverage.
+        withTranslationOwner(replyToParent = false) { db, owner, source ->
+            val draftChanges = mutableListOf<String>()
+            val persistedDraft = runBlocking { db.composerDraftDao().byRoom(buffer.id) }
+            val actions =
+                listOf(
+                    "message_action_reply" to R.string.chat_action_reply,
+                    "message_action_translate" to R.string.chat_action_translate,
+                    "message_action_copy" to R.string.chat_action_copy,
+                    "message_action_share" to R.string.chat_action_share,
+                    "message_action_quote" to R.string.chat_action_quote,
+                )
+            setContent(
+                draft = { owner.composerDraft.value },
+                chatViewModel = owner,
+                pages = flowOf(PagingData.from(listOf(source))),
+                onTranslateMessage = { error("Holding or canceling must not translate") },
+                onDraftChanged = {
+                    draftChanges += it
+                    owner.saveDraft(it)
+                },
+                onSetReply = { error("Holding or canceling must not change the reply") },
+                onSubmit = { error("Holding or canceling must not submit the composer") },
+            )
+            waitForForward(owner) {
+                owner.composerDraft.value.hydrated && owner.state.value.buffer
+                    ?.id == buffer.id &&
+                    owner.state.value.replyTo == null
+            }
+            compose.onNodeWithTag("chat_composer_field").assertTextEquals("Unsent draft")
+            val draft = owner.composerDraft.value
+            // Hydration may report the initial cursor; only the following popup interaction is under test.
+            val startupChanges = draftChanges.toList()
+            compose.runOnIdle {
+                assertEquals(persistedDraft, runBlocking { db.composerDraftDao().byRoom(buffer.id) })
+                assertNull(owner.state.value.replyTo)
+            }
+            holdMessageBubble(source)
+            compose.onNodeWithTag("message_action_sheet").assertIsDisplayed()
+            val configuration = RuntimeEnvironment.getApplication().resources.configuration
+            assertEquals("Use the real narrow native window", 320, configuration.screenWidthDp)
+            assertEquals("Use the real short native window", 360, configuration.screenHeightDp)
+            assertEquals("Use native 2x fonts, not a fixture-only density override", 2f, configuration.fontScale, 0f)
+            val bounds = actions.map { (tag, _) -> compose.onNodeWithTag(tag).getUnclippedBoundsInRoot() }
+            bounds.forEachIndexed { index, first ->
+                bounds.drop(index + 1).forEach { second ->
+                    assertTrue(
+                        "Action touch targets must not overlap",
+                        first.right <= second.left || second.right <= first.left ||
+                            first.bottom <= second.top || second.bottom <= first.top,
+                    )
+                }
+            }
+            actions.forEach { (tag, resource) ->
+                assertMessageActionFitsNativeViewport(tag, RuntimeEnvironment.getApplication().getString(resource))
+            }
+            compose
+                .onNode(
+                    SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss),
+                    useUnmergedTree = true,
+                ).performSemanticsAction(SemanticsActions.Dismiss) { it() }
+            compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+            compose.onNodeWithTag("chat_composer_field").assertTextEquals(draft.text)
+            compose.onNodeWithText("Replying to alice").assertDoesNotExist()
+            compose.runOnIdle {
+                assertEquals("The popup must not emit another draft callback", startupChanges, draftChanges)
+                assertEquals(draft, owner.composerDraft.value)
+                assertNull(owner.state.value.replyTo)
+                assertEquals(source, runBlocking { db.messageDao().byCanonicalId(source.id) })
+                assertEquals(persistedDraft, runBlocking { db.composerDraftDao().byRoom(buffer.id) })
+            }
+        }
+    }
+
+    private fun assertMessageActionFitsNativeViewport(
+        tag: String,
+        label: String,
+    ) {
+        val action = compose.onNodeWithTag(tag).performScrollTo().assertIsDisplayed()
+        val text = compose.onNode(hasText(label) and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)
+        val layouts = mutableListOf<TextLayoutResult>()
+        text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val layout = layouts.single()
+        assertEquals(
+            "The dialog label inherits the native font scale",
+            RuntimeEnvironment
+                .getApplication()
+                .resources.configuration.fontScale,
+            layout.layoutInput.density.fontScale,
+            0f,
+        )
+        assertEquals("The entire localized label is laid out", label, layout.layoutInput.text.text)
+        val lineBounds =
+            (0 until layout.lineCount).map { line ->
+                Rect(layout.getLineLeft(line), layout.getLineTop(line), layout.getLineRight(line), layout.getLineBottom(line))
+            }
+        val diagnostic =
+            "$label: didOverflowWidth=${layout.didOverflowWidth}, didOverflowHeight=${layout.didOverflowHeight}, " +
+                "size=${layout.size}, paragraph=${layout.multiParagraph.width}x${layout.multiParagraph.height}, " +
+                "lineCount=${layout.lineCount}, lineBounds=$lineBounds"
+        if (layout.hasVisualOverflow) println("Native popup text layout: $diagnostic")
+        // Line bounds are paragraph-local, even when centered text has a smaller wrap-content layout size.
+        // Check complete lines in that coordinate frame; native label/touch containment is checked below.
+        assertFalse("The $label layout must not omit lines: $diagnostic", layout.multiParagraph.didExceedMaxLines)
+        assertTrue("The $label label must not ellipsize: $diagnostic", (0 until layout.lineCount).none { layout.isLineEllipsized(it) })
+        assertEquals("The $label layout includes its final visible character: $diagnostic", label.trimEnd().length, layout.getLineEnd(layout.lineCount - 1, visibleEnd = true))
+        lineBounds.forEach { bounds ->
+            assertTrue(
+                "The complete line must fit the paragraph's painted area: $diagnostic",
+                bounds.left >= -1f && bounds.top >= -1f &&
+                    bounds.right <= layout.multiParagraph.width + 1f && bounds.bottom <= layout.multiParagraph.height + 1f,
+            )
+        }
+        val node = action.fetchSemanticsNode()
+        val touch = action.getUnclippedBoundsInRoot()
+        val density = layout.layoutInput.density.density
+        val origin = node.positionOnScreen - node.positionInRoot
+        val touchOnScreen =
+            Rect(
+                origin.x + touch.left.value * density,
+                origin.y + touch.top.value * density,
+                origin.x + touch.right.value * density,
+                origin.y + touch.bottom.value * density,
+            )
+        val textNode = text.fetchSemanticsNode()
+        val labelOnScreen =
+            Rect(
+                textNode.positionOnScreen.x,
+                textNode.positionOnScreen.y,
+                textNode.positionOnScreen.x + textNode.size.width,
+                textNode.positionOnScreen.y + textNode.size.height,
+            )
+        assertTrue("The $label touch target is at least 48dp wide", touchOnScreen.width + 1f >= 48f * density)
+        assertTrue("The $label touch target is at least 48dp tall", touchOnScreen.height + 1f >= 48f * density)
+        compose.runOnIdle {
+            val view = (checkNotNull(node.root) as ViewRootForTest).view
+            val visible = android.graphics.Rect()
+            val screen = android.graphics.Rect()
+            assertTrue("Use the actual attached dialog viewport", view.isAttachedToWindow && view.getLocalVisibleRect(visible))
+            val position = IntArray(2)
+            view.getLocationOnScreen(position)
+            visible.offset(position[0], position[1])
+            view.getWindowVisibleDisplayFrame(screen)
+            assertTrue("The dialog intersects the visible native screen", visible.intersect(screen))
+            listOf("touch target" to touchOnScreen, "complete label" to labelOnScreen).forEach { (part, bounds) ->
+                assertTrue(
+                    "The $label $part $bounds must fit entirely inside the native viewport $visible",
+                    bounds.left >= visible.left - 1f && bounds.top >= visible.top - 1f &&
+                        bounds.right <= visible.right + 1f && bounds.bottom <= visible.bottom + 1f,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun forwardPreviewToggleCancelAndConfirmPreserveComposer() {
+        val destination = buffer.copy(id = 2, networkId = 2, name = "alice", displayName = "alice", type = BufferType.QUERY)
+        val sameNamed = destination.copy(id = 3, networkId = buffer.networkId)
+        val shares = PendingShareStore()
+        val pending = PendingShare.AgentContext(sameNamed.id, "Unrelated", "Untouched payload", "partial")
+        shares.set(pending)
+        val sends = mutableListOf<List<Any?>>()
+        withTranslationOwner(
+            sourceText = "Hello\nworld",
+            prepare = { db, parent ->
+                db.networkDao().insert(NetworkEntity(id = 2, name = "Other network", role = NetworkRole.DIRECT, host = "irc.other", port = 6697, nick = "otherMe", username = "me", realname = "Me"))
+                db.networkDao().insert(NetworkEntity(id = 3, name = "Offline network", role = NetworkRole.DIRECT, host = "irc.offline", port = 6697, nick = "offlineMe", username = "me", realname = "Me"))
+                db.bufferDao().insert(destination)
+                db.bufferDao().insert(sameNamed)
+                db.bufferDao().insert(destination.copy(id = 4, networkId = 3))
+                db.bufferDao().insert(destination.copy(id = 5, name = "archived", displayName = "archived", archived = true))
+                val destinationReply = parent.copy(id = 99, bufferId = destination.id, text = "Destination reply", dedupKey = "destination-reply")
+                db.messageDao().insertAll(listOf(destinationReply))
+                ComposerDraftStore(db).saveDraft(destination.id, "Destination draft\nstill unsent", destinationReply.id)
+            },
+            createOwner = { db, scope ->
+                ChatViewModelTest.externalTranslationFixture(
+                    db,
+                    buffer,
+                    scope,
+                    buffers = ChatViewModelTest.roomBuffers(db),
+                    connectionStates =
+                        mapOf(
+                            buffer.networkId to IrcClientState.Ready("me", emptySet(), emptyMap()),
+                            2L to IrcClientState.Ready("otherMe", emptySet(), emptyMap()),
+                        ),
+                    pendingShares = shares,
+                    onSendMessage = { id, text, reply, context -> sends += listOf(id, text, reply, context) },
+                )
+            },
+        ) { db, owner, parent ->
+            var draftChanges = 0
+            var submits = 0
+            var replies = 0
+            setContent(
+                draft = { owner.composerDraft.value },
+                chatViewModel = owner,
+                forwardEnabled = true,
+                pages = flowOf(PagingData.from(listOf(parent))),
+                onDraftChanged = {
+                    ++draftChanges
+                    owner.saveDraft(it)
+                },
+                onSetReply = { ++replies },
+                onSubmit = { ++submits },
+            )
+            waitForForward(owner) {
+                owner.composerDraft.value.hydrated && owner.state.value.replyTo
+                    ?.id == parent.id &&
+                    owner.forwardTargets.value.size == 2
+            }
+            val originalDraft = owner.composerDraft.value
+            val sourceDraft = runBlocking { db.composerDraftDao().byRoom(buffer.id) }
+            val destinationDraft = runBlocking { db.composerDraftDao().byRoom(destination.id) }
+
+            holdMessageBubble(parent)
+            compose.onNodeWithTag("message_action_forward").assertIsDisplayed().performClick()
+            compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+            compose.onNodeWithTag("message_forward_sheet").assertIsDisplayed()
+            compose.onNodeWithTag("message_forward_target_${buffer.id}").assertDoesNotExist()
+            compose.onNodeWithTag("message_forward_target_4").assertDoesNotExist()
+            compose.onNodeWithTag("message_forward_target_5").assertDoesNotExist()
+            compose.onNode(hasText("Other network") and hasAnyAncestor(hasTestTag("message_forward_target_${destination.id}")), useUnmergedTree = true).assertIsDisplayed()
+            compose.onNode(hasText("test") and hasAnyAncestor(hasTestTag("message_forward_target_${sameNamed.id}")), useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithTag("message_forward_search").performTextReplacement("missing")
+            compose.onNodeWithText("No available chats").assertIsDisplayed()
+            compose.onNodeWithTag("message_forward_target_${destination.id}").assertDoesNotExist()
+            compose.onNodeWithTag("message_forward_search").performTextReplacement("ALIce")
+            compose.onNodeWithTag("message_forward_target_${sameNamed.id}").assertIsDisplayed()
+            compose.onNodeWithTag("message_forward_target_${destination.id}").assertIsDisplayed().performClick()
+            compose.onNodeWithText("Other network").assertIsDisplayed()
+            compose.onNodeWithTag("message_forward_preview").assertTextEquals("> alice: Hello\n> alice: world")
+            val toggle = compose.onNodeWithTag("message_forward_include_sender")
+            toggle.assertIsOn().assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, androidx.compose.ui.semantics.Role.Checkbox))
+            compose.onAllNodes(hasClickAction() and hasAnyAncestor(hasTestTag("message_forward_include_sender")), useUnmergedTree = true).assertCountEquals(0)
+            toggle.performClick().assertIsOff()
+            compose.onNodeWithTag("message_forward_preview").assertTextEquals("> Hello\n> world")
+            compose.runOnIdle {
+                assertEquals(
+                    destination.id,
+                    owner.forwardState.value
+                        ?.destination
+                        ?.bufferId,
+                )
+                assertTrue(sends.isEmpty())
+            }
+            compose.onNodeWithTag("message_forward_change_destination").performClick()
+            compose.onNodeWithTag("message_forward_preview").assertDoesNotExist()
+            compose.onNodeWithTag("message_forward_target_${destination.id}").performClick()
+            compose.onNodeWithTag("message_forward_include_sender").assertIsOff()
+            compose.onNodeWithTag("message_forward_preview").assertTextEquals("> Hello\n> world")
+            compose.onNodeWithTag("message_forward_cancel").performClick()
+            compose.onNodeWithTag("message_forward_sheet").assertDoesNotExist()
+            compose.onNodeWithTag("chat_composer_field").assertTextEquals(originalDraft.text)
+            compose.onNodeWithText("Replying to alice").assertIsDisplayed()
+            compose.runOnIdle {
+                assertTrue(sends.isEmpty())
+                assertNull(owner.forwardState.value)
+                assertEquals(originalDraft, owner.composerDraft.value)
+                assertEquals(parent, owner.state.value.replyTo)
+                assertEquals(sourceDraft, runBlocking { db.composerDraftDao().byRoom(buffer.id) })
+                assertEquals(destinationDraft, runBlocking { db.composerDraftDao().byRoom(destination.id) })
+                assertEquals(pending, shares.peek())
+                assertEquals(0, draftChanges)
+                assertEquals(0, submits)
+                assertEquals(0, replies)
+            }
+
+            holdMessageBubble(parent)
+            compose.onNodeWithTag("message_action_forward").performClick()
+            compose.onNodeWithTag("message_forward_search").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
+            compose.onNodeWithTag("message_forward_target_${destination.id}").performClick()
+            compose.onNodeWithTag("message_forward_include_sender").assertIsOn()
+            compose.onNodeWithTag("message_forward_preview").assertTextEquals("> alice: Hello\n> alice: world")
+            compose.onNodeWithTag("message_forward_include_sender").performClick()
+            compose.onNodeWithTag("message_forward_preview").assertTextEquals("> Hello\n> world")
+            compose.onNodeWithTag("message_forward_confirm").assertIsEnabled().performClick()
+            waitForForward(owner) { owner.forwardState.value == null && sends.size == 1 }
+            compose.onNodeWithTag("message_forward_sheet").assertDoesNotExist()
+            compose.onNodeWithTag("chat_composer_field").assertTextEquals(originalDraft.text)
+            compose.onNodeWithText("Replying to alice").assertIsDisplayed()
+            compose.runOnIdle {
+                assertEquals(listOf(listOf(destination.id, "> Hello\n> world", null, null)), sends)
+                assertEquals(originalDraft, owner.composerDraft.value)
+                assertEquals(parent, owner.state.value.replyTo)
+                assertEquals(parent, runBlocking { db.messageDao().byCanonicalId(parent.id) })
+                assertEquals(sourceDraft, runBlocking { db.composerDraftDao().byRoom(buffer.id) })
+                assertEquals(destinationDraft, runBlocking { db.composerDraftDao().byRoom(destination.id) })
+                assertEquals(pending, shares.peek())
+                assertEquals(0, draftChanges)
+                assertEquals(0, submits)
+                assertEquals(0, replies)
+            }
+        }
+    }
+
+    @Test
+    fun forwardSendingLocksSheetAndDurableUnsentAcceptanceOffersOnlyClose() {
+        val destination = buffer.copy(id = 2, name = "alice", displayName = "alice", type = BufferType.QUERY)
+        val gate = CompletableDeferred<Unit>()
+        val sends = mutableListOf<String>()
+        withTranslationOwner(
+            prepare = { db, _ -> db.bufferDao().insert(destination) },
+            createOwner = { db, scope ->
+                ChatViewModelTest.externalTranslationFixture(
+                    db,
+                    buffer,
+                    scope,
+                    buffers = ChatViewModelTest.roomBuffers(db),
+                    sendGate = gate,
+                    immediateWireAcceptance = ImmediateWireAcceptance.DISCONNECTED,
+                    onSendMessage = { _, text, _, _ -> sends += text },
+                )
+            },
+        ) { _, owner, parent ->
+            setContent(
+                draft = { owner.composerDraft.value },
+                chatViewModel = owner,
+                forwardEnabled = true,
+                pages = flowOf(PagingData.from(listOf(parent))),
+                onDraftChanged = { error("forward changed draft") },
+                onSubmit = { error("forward submitted composer") },
+            )
+            waitForForward(owner) { owner.composerDraft.value.hydrated && owner.forwardTargets.value.size == 1 }
+            holdMessageBubble(parent)
+            compose.onNodeWithTag("message_action_forward").performClick()
+            compose.onNodeWithTag("message_forward_target_${destination.id}").performClick()
+            compose.onNodeWithTag("message_forward_confirm").performClick()
+            waitForForward(owner) { owner.forwardState.value?.sending == true && sends.size == 1 }
+            compose.onNodeWithTag("message_forward_include_sender").assertIsNotEnabled().assertIsOn()
+            compose.onNodeWithTag("message_forward_change_destination").assertIsNotEnabled()
+            compose.onNodeWithTag("message_forward_confirm").assertIsNotEnabled()
+            compose.onNodeWithTag("message_forward_cancel").assertIsNotEnabled()
+            compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo), useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithTag("message_forward_sheet").performTouchInput {
+                swipe(Offset(centerX, height * 0.15f), Offset(centerX, height * 0.95f), durationMillis = 400)
+            }
+            compose.waitForIdle()
+            compose.onNodeWithTag("message_forward_sheet").assertIsDisplayed()
+            compose.runOnIdle {
+                assertTrue(requireNotNull(owner.forwardState.value).sending)
+                assertEquals(1, sends.size)
+                gate.complete(Unit)
+            }
+            waitForForward(owner) { owner.forwardState.value?.acceptance != null && owner.forwardState.value?.sending == false }
+            compose.onNodeWithTag("message_forward_error").assertTextEquals("Message saved in the destination but not fully sent. Open that chat to review delivery.")
+            compose.onNodeWithTag("message_forward_preview").assertTextEquals("> alice: Bonjour")
+            compose.onNodeWithTag("message_forward_include_sender").assertDoesNotExist()
+            compose.onNodeWithTag("message_forward_change_destination").assertDoesNotExist()
+            compose.onNodeWithTag("message_forward_confirm").assertDoesNotExist()
+            compose.onNodeWithTag("message_forward_cancel").assertIsEnabled().assertTextEquals("Close")
+            compose.runOnIdle {
+                assertEquals(
+                    ImmediateWireAcceptance.DISCONNECTED,
+                    owner.forwardState.value
+                        ?.acceptance
+                        ?.immediateWireAcceptance,
+                )
+                assertEquals(listOf("> alice: Bonjour"), sends)
+                owner.confirmForward()
+                assertEquals(1, sends.size)
+            }
+            compose.onNodeWithTag("message_forward_cancel").performClick()
+            compose.onNodeWithTag("message_forward_sheet").assertDoesNotExist()
+            compose.onNodeWithTag("chat_composer_field").assertTextEquals("Unsent draft")
+            compose.onNodeWithText("Replying to alice").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun forwardChangedSourceDisablesPreviewEditsAndConfirmationWithoutSending() {
+        val destination = buffer.copy(id = 2, name = "alice", displayName = "alice", type = BufferType.QUERY)
+        withTranslationOwner(
+            prepare = { db, _ -> db.bufferDao().insert(destination) },
+            createOwner = { db, scope ->
+                ChatViewModelTest.externalTranslationFixture(
+                    db,
+                    buffer,
+                    scope,
+                    buffers = ChatViewModelTest.roomBuffers(db),
+                    onSendMessage = { _, _, _, _ -> error("changed source was sent") },
+                )
+            },
+        ) { db, owner, parent ->
+            setContent(
+                draft = { owner.composerDraft.value },
+                chatViewModel = owner,
+                forwardEnabled = true,
+                pages = flowOf(PagingData.from(listOf(parent))),
+                onDraftChanged = { error("forward changed draft") },
+                onSubmit = { error("forward submitted composer") },
+            )
+            waitForForward(owner) { owner.composerDraft.value.hydrated && owner.forwardTargets.value.size == 1 }
+            holdMessageBubble(parent)
+            compose.onNodeWithTag("message_action_forward").performClick()
+            compose.onNodeWithTag("message_forward_target_${destination.id}").performClick()
+            compose.runOnIdle { runBlocking { db.messageDao().update(parent.copy(text = "Changed")) } }
+            compose.onNodeWithTag("message_forward_confirm").performClick()
+            waitForForward(owner) { owner.forwardState.value?.error == MessageForwardError.SOURCE_UNAVAILABLE }
+            compose.onNodeWithTag("message_forward_error").assertTextEquals("This message changed or is no longer available. Reopen Forward.")
+            compose.onNodeWithTag("message_forward_preview").assertTextEquals("> alice: Bonjour")
+            compose.onNodeWithTag("message_forward_include_sender").assertIsNotEnabled()
+            compose.onNodeWithTag("message_forward_change_destination").assertIsNotEnabled()
+            compose.onNodeWithTag("message_forward_confirm").assertIsNotEnabled()
+            compose
+                .onNodeWithTag("message_forward_cancel")
+                .assertIsEnabled()
+                .assertTextEquals("Close")
+                .performClick()
+            compose.onNodeWithTag("message_forward_sheet").assertDoesNotExist()
+            compose.onNodeWithTag("chat_composer_field").assertTextEquals("Unsent draft")
+        }
+    }
+
+    @Test
+    fun forwardChangedDestinationReturnsToPickerForExplicitReview() {
+        val destination = buffer.copy(id = 2, name = "alice", displayName = "alice", type = BufferType.QUERY)
+        val sends = mutableListOf<String>()
+        withTranslationOwner(
+            prepare = { db, _ -> db.bufferDao().insert(destination) },
+            createOwner = { db, scope ->
+                ChatViewModelTest.externalTranslationFixture(
+                    db,
+                    buffer,
+                    scope,
+                    buffers = ChatViewModelTest.roomBuffers(db),
+                    onSendMessage = { _, text, _, _ -> sends += text },
+                )
+            },
+        ) { db, owner, parent ->
+            setContent(
+                draft = { owner.composerDraft.value },
+                chatViewModel = owner,
+                forwardEnabled = true,
+                pages = flowOf(PagingData.from(listOf(parent))),
+                onDraftChanged = { error("forward changed draft") },
+                onSubmit = { error("forward submitted composer") },
+            )
+            waitForForward(owner) { owner.composerDraft.value.hydrated && owner.forwardTargets.value.size == 1 }
+            holdMessageBubble(parent)
+            compose.onNodeWithTag("message_action_forward").performClick()
+            compose.onNodeWithTag("message_forward_target_${destination.id}").performClick()
+            compose.runOnIdle {
+                runBlocking {
+                    db.networkDao().update(requireNotNull(db.networkDao().byId(buffer.networkId)).copy(name = "Renamed network"))
+                }
+            }
+            compose.onNodeWithTag("message_forward_confirm").performClick()
+            waitForForward(owner) {
+                owner.forwardState.value?.error == MessageForwardError.TARGET_UNAVAILABLE &&
+                    owner.forwardState.value?.destination == null
+            }
+            compose.onNodeWithTag("message_forward_error").assertTextEquals("This chat is no longer available for forwarding. Choose another chat.")
+            compose.onNodeWithTag("message_forward_preview").assertDoesNotExist()
+            compose.onNodeWithTag("message_forward_confirm").assertDoesNotExist()
+            compose.runOnIdle {
+                assertNull(owner.forwardState.value?.destination)
+                assertTrue(sends.isEmpty())
+            }
+            waitForForward(owner) {
+                owner.forwardTargets.value
+                    .singleOrNull()
+                    ?.networkName == "Renamed network"
+            }
+            compose.onNodeWithTag("message_forward_target_${destination.id}").performClick()
+            compose.onNodeWithText("Renamed network").assertIsDisplayed()
+            compose.onNodeWithTag("message_forward_error").assertDoesNotExist()
+            compose.onNodeWithTag("message_forward_preview").assertTextEquals("> alice: Bonjour")
+            compose.onNodeWithTag("message_forward_confirm").assertIsEnabled()
+            compose.runOnIdle { assertTrue(sends.isEmpty()) }
+            compose.onNodeWithTag("message_forward_confirm").performClick()
+            waitForForward(owner) { owner.forwardState.value == null && sends.size == 1 }
+            compose.runOnIdle { assertEquals(listOf("> alice: Bonjour"), sends) }
+            compose.onNodeWithTag("chat_composer_field").assertTextEquals("Unsent draft")
+        }
+    }
+
+    @Test
+    fun forwardRejectedSendRetainsReviewAndRetriesOnlyAfterExplicitConfirmation() {
+        val destination = buffer.copy(id = 2, name = "alice", displayName = "alice", type = BufferType.QUERY)
+        val attempts = mutableListOf<String>()
+        withTranslationOwner(
+            prepare = { db, _ -> db.bufferDao().insert(destination) },
+            createOwner = { db, scope ->
+                ChatViewModelTest.externalTranslationFixture(
+                    db,
+                    buffer,
+                    scope,
+                    buffers = ChatViewModelTest.roomBuffers(db),
+                    sendRejection = SendRejectionReason.PERSISTENCE_FAILED,
+                    onSendMessage = { _, text, _, _ -> attempts += text },
+                )
+            },
+        ) { _, owner, parent ->
+            setContent(
+                draft = { owner.composerDraft.value },
+                chatViewModel = owner,
+                forwardEnabled = true,
+                pages = flowOf(PagingData.from(listOf(parent))),
+                onDraftChanged = { error("forward changed draft") },
+                onSubmit = { error("forward submitted composer") },
+            )
+            waitForForward(owner) { owner.composerDraft.value.hydrated && owner.forwardTargets.value.size == 1 }
+            holdMessageBubble(parent)
+            compose.onNodeWithTag("message_action_forward").performClick()
+            compose.onNodeWithTag("message_forward_target_${destination.id}").performClick()
+            compose.onNodeWithTag("message_forward_confirm").performClick()
+            waitForForward(owner) { owner.forwardState.value?.error == MessageForwardError.SEND_REJECTED && attempts.size == 1 }
+            compose.onNodeWithTag("message_forward_error").assertTextEquals("Couldn't save this message")
+            compose.onNodeWithTag("message_forward_preview").assertTextEquals("> alice: Bonjour")
+            compose.onNodeWithTag("message_forward_include_sender").assertIsEnabled().performClick()
+            compose.onNodeWithTag("message_forward_preview").assertTextEquals("> Bonjour")
+            compose.onNodeWithTag("message_forward_change_destination").assertIsEnabled().performClick()
+            compose.onNodeWithTag("message_forward_error").assertDoesNotExist()
+            compose.onNodeWithTag("message_forward_target_${destination.id}").performClick()
+            compose.onNodeWithTag("message_forward_confirm").assertIsEnabled()
+            compose.runOnIdle { assertEquals(listOf("> alice: Bonjour"), attempts) }
+            compose.onNodeWithTag("message_forward_confirm").performClick()
+            waitForForward(owner) { owner.forwardState.value?.error == MessageForwardError.SEND_REJECTED && attempts.size == 2 }
+            compose.runOnIdle {
+                assertNull(owner.forwardState.value?.acceptance)
+                assertEquals(listOf("> alice: Bonjour", "> Bonjour"), attempts)
+            }
+            compose
+                .onNodeWithTag("message_forward_cancel")
+                .assertIsEnabled()
+                .assertTextEquals("Cancel")
+                .performClick()
+            compose.onNodeWithTag("message_forward_sheet").assertDoesNotExist()
+            compose.onNodeWithTag("chat_composer_field").assertTextEquals("Unsent draft")
+        }
+    }
+
+    @Test
+    fun forwardUncertainSendFailureDisablesFurtherSendingFromTheRequest() {
+        val destination = buffer.copy(id = 2, name = "alice", displayName = "alice", type = BufferType.QUERY)
+        var attempts = 0
+        withTranslationOwner(
+            prepare = { db, _ -> db.bufferDao().insert(destination) },
+            createOwner = { db, scope ->
+                ChatViewModelTest.externalTranslationFixture(
+                    db,
+                    buffer,
+                    scope,
+                    buffers = ChatViewModelTest.roomBuffers(db),
+                    onSendMessage = { _, _, _, _ ->
+                        ++attempts
+                        error("uncertain send")
+                    },
+                )
+            },
+        ) { _, owner, parent ->
+            setContent(
+                draft = { owner.composerDraft.value },
+                chatViewModel = owner,
+                forwardEnabled = true,
+                pages = flowOf(PagingData.from(listOf(parent))),
+                onDraftChanged = { error("forward changed draft") },
+                onSubmit = { error("forward submitted composer") },
+            )
+            waitForForward(owner) { owner.composerDraft.value.hydrated && owner.forwardTargets.value.size == 1 }
+            holdMessageBubble(parent)
+            compose.onNodeWithTag("message_action_forward").performClick()
+            compose.onNodeWithTag("message_forward_target_${destination.id}").performClick()
+            compose.onNodeWithTag("message_forward_confirm").performClick()
+            waitForForward(owner) { owner.forwardState.value?.error == MessageForwardError.SEND_FAILED && attempts == 1 }
+            compose.onNodeWithTag("message_forward_error").assertTextEquals("Forwarding could not be confirmed. Check the destination before trying again.")
+            compose.onNodeWithTag("message_forward_preview").assertTextEquals("> alice: Bonjour")
+            compose.onNodeWithTag("message_forward_include_sender").assertIsNotEnabled()
+            compose.onNodeWithTag("message_forward_change_destination").assertIsNotEnabled()
+            compose.onNodeWithTag("message_forward_confirm").assertIsNotEnabled()
+            compose.runOnIdle {
+                owner.confirmForward()
+                assertEquals(1, attempts)
+            }
+            compose
+                .onNodeWithTag("message_forward_cancel")
+                .assertIsEnabled()
+                .assertTextEquals("Close")
+                .performClick()
+            compose.onNodeWithTag("message_forward_sheet").assertDoesNotExist()
+            compose.onNodeWithTag("chat_composer_field").assertTextEquals("Unsent draft")
+        }
+    }
+
+    @Test
+    fun forwardWithoutWiredOwnerStaysHiddenInExistingFixtures() {
+        val parent = translationMessage()
+        setContent(
+            draft = { ComposerDraftState("Unsent draft", hydrated = true, revision = 17) },
+            pages = flowOf(PagingData.from(listOf(parent))),
+            onSubmit = { error("forward submitted composer") },
+        )
+        holdMessageBubble(parent)
+        compose.onNodeWithTag("message_action_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("message_action_forward").assertDoesNotExist()
     }
 
     @Test
@@ -1305,6 +1967,207 @@ class ComposerSendClearUiTest {
             }
         } finally {
             db.close()
+        }
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "en-w411dp-h891dp")
+    fun messageBubbleMoreUsesNativePickerForPendingMessageWithoutChangingComposer() {
+        val draft = ComposerDraftState("Unsent draft", hydrated = true, revision = 17)
+        val parent = translationMessage().copy(sender = "me", text = "Pending message", pendingLabel = "pending", msgid = null)
+        val picked = mutableListOf<Pair<MessageEntity, String>>()
+        setContent(
+            draft = { draft },
+            replyTo = { parent },
+            pages = flowOf(PagingData.from(listOf(parent))),
+            connectionState = IrcClientState.Ready("me", setOf("message-tags"), emptyMap()),
+            onReact = { source, emoji -> picked += source to emoji },
+            onSetReply = { error("reaction changed reply") },
+            onDraftChanged = { error("reaction changed draft") },
+            onSubmit = { error("reaction submitted the composer") },
+        )
+        holdMessageBubble(parent)
+        compose.onNodeWithTag("message_more_reactions").performClick()
+        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+        compose.onNodeWithTag("message_reaction_picker").assertIsDisplayed()
+        compose.clickNativeEmoji("ANIMALS AND NATURE", "🦑")
+        compose.onNodeWithTag("message_reaction_picker").assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_field").assertTextEquals(draft.text)
+        compose.onNodeWithText("Replying to me").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(listOf(parent to "🦑"), picked)
+            assertNull(picked.single().first.msgid)
+        }
+
+        holdMessageBubble(parent)
+        compose.onNodeWithTag("message_more_reactions").performClick()
+        compose
+            .onNode(
+                androidx.compose.ui.test.SemanticsMatcher
+                    .keyIsDefined(androidx.compose.ui.semantics.SemanticsActions.Dismiss),
+                useUnmergedTree = true,
+            ).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.Dismiss) { it() }
+        compose.onNodeWithTag("message_reaction_picker").assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_field").assertTextEquals(draft.text)
+        compose.onNodeWithText("Replying to me").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(1, picked.size)
+            assertEquals(17L, draft.revision)
+        }
+    }
+
+    @Test
+    fun messageQuickReactionsUseExactOwnershipAndAddRemovePolicy() {
+        val parent = translationMessage().copy(text = "React to this", msgid = "source-message")
+        var connection by mutableStateOf<IrcClientState>(
+            IrcClientState.Ready("me", setOf("message-tags"), mapOf("CLIENTTAGDENY" to "draft/react")),
+        )
+        val picked = mutableListOf<Pair<MessageEntity, String>>()
+        setContent(
+            draft = { ComposerDraftState("Unsent draft", hydrated = true) },
+            pages = flowOf(PagingData.from(listOf(parent))),
+            liveConnection = { connection },
+            reactionChips = {
+                listOf(
+                    ReactionChip("👍🏽", 1, mine = true, reactorDisplayNames = listOf("me")),
+                    ReactionChip("❤️", 1, mine = true, reactorDisplayNames = listOf("me")),
+                )
+            },
+            onReact = { source, emoji -> picked += source to emoji },
+            onDraftChanged = { error("reaction changed draft") },
+            onSubmit = { error("reaction submitted the composer") },
+        )
+        holdMessageBubble(parent)
+        val thumb = compose.onNode(hasText("👍") and hasAnyAncestor(hasTestTag("message_action_sheet")))
+        val heart = compose.onNode(hasText("❤️") and hasAnyAncestor(hasTestTag("message_action_sheet")))
+        thumb.assertIsNotEnabled()
+        heart.assertIsEnabled()
+        compose.runOnIdle {
+            connection = IrcClientState.Ready("me", setOf("message-tags"), mapOf("CLIENTTAGDENY" to "draft/unreact"))
+        }
+        thumb.assertIsEnabled()
+        heart.assertIsNotEnabled()
+        compose.runOnIdle { connection = IrcClientState.Disconnected }
+        thumb.assertIsNotEnabled()
+        heart.assertIsNotEnabled()
+        compose.runOnIdle {
+            assertTrue(picked.isEmpty())
+            connection = IrcClientState.Ready("me", setOf("message-tags"), mapOf("CLIENTTAGDENY" to "draft/react"))
+        }
+        heart.assertIsEnabled().performClick()
+        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(listOf(parent to "❤️"), picked) }
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "en-w411dp-h891dp")
+    fun messageReactionPickerDeniesAddButAllowsOwnedRemoval() {
+        val parent = translationMessage().copy(text = "React to this", msgid = "source-message")
+        val picked = mutableListOf<Pair<MessageEntity, String>>()
+        setContent(
+            draft = { ComposerDraftState("Unsent draft", hydrated = true) },
+            pages = flowOf(PagingData.from(listOf(parent))),
+            connectionState = IrcClientState.Ready("me", setOf("message-tags"), mapOf("CLIENTTAGDENY" to "draft/react")),
+            reactionChips = {
+                listOf(
+                    ReactionChip("👍🏽", 1, mine = true, reactorDisplayNames = listOf("me")),
+                    ReactionChip("❤️", 1, mine = true, reactorDisplayNames = listOf("me")),
+                )
+            },
+            onReact = { source, emoji -> picked += source to emoji },
+            onDraftChanged = { error("reaction changed draft") },
+            onSubmit = { error("reaction submitted the composer") },
+        )
+        holdMessageBubble(parent)
+        compose.onNode(hasText("👍") and hasAnyAncestor(hasTestTag("message_action_sheet"))).assertIsNotEnabled()
+        compose.onNode(hasText("❤️") and hasAnyAncestor(hasTestTag("message_action_sheet"))).assertIsEnabled()
+        compose.onNodeWithTag("message_more_reactions").performClick()
+        compose.clickNativeEmoji("ANIMALS AND NATURE", "🦑")
+        compose.onNodeWithTag("message_reaction_picker").assertIsDisplayed()
+        compose.onNodeWithTag("message_reaction_unavailable").assertIsDisplayed()
+        compose.runOnIdle { assertTrue(picked.isEmpty()) }
+        compose.pickNativeEmojiVariant("SMILEYS AND EMOTIONS", "👍", "👍🏽")
+        compose.onNodeWithTag("message_reaction_picker").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(listOf(parent to "👍🏽"), picked) }
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "en-w411dp-h891dp")
+    fun messageReactionPickerDeniesRemoveAndUsesCurrentConnectionPolicy() {
+        val parent = translationMessage().copy(text = "React to this", msgid = "source-message")
+        var connection by mutableStateOf<IrcClientState>(
+            IrcClientState.Ready("me", setOf("message-tags"), mapOf("CLIENTTAGDENY" to "draft/unreact")),
+        )
+        val picked = mutableListOf<Pair<MessageEntity, String>>()
+        setContent(
+            draft = { ComposerDraftState("Unsent draft", hydrated = true) },
+            pages = flowOf(PagingData.from(listOf(parent))),
+            liveConnection = { connection },
+            reactionChips = { listOf(ReactionChip("🦑", 1, mine = true, reactorDisplayNames = listOf("me"))) },
+            onReact = { source, emoji -> picked += source to emoji },
+            onDraftChanged = { error("reaction changed draft") },
+            onSubmit = { error("reaction submitted the composer") },
+        )
+        holdMessageBubble(parent)
+        compose.onNodeWithTag("message_more_reactions").performClick()
+        compose.clickNativeEmoji("ANIMALS AND NATURE", "🦑")
+        compose.onNodeWithTag("message_reaction_picker").assertIsDisplayed()
+        compose.onNodeWithTag("message_reaction_unavailable").assertIsDisplayed()
+        compose.runOnIdle {
+            assertTrue(picked.isEmpty())
+            connection = IrcClientState.Disconnected
+        }
+        compose.clickNativeEmoji("ANIMALS AND NATURE", "🦑")
+        compose.onNodeWithTag("message_reaction_picker").assertIsDisplayed()
+        compose.runOnIdle {
+            assertTrue(picked.isEmpty())
+            connection = IrcClientState.Ready("me", setOf("message-tags"), mapOf("CLIENTTAGDENY" to "draft/react"))
+        }
+        compose.clickNativeEmoji("ANIMALS AND NATURE", "🦑")
+        compose.onNodeWithTag("message_reaction_picker").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(listOf(parent to "🦑"), picked) }
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "en-w411dp-h891dp")
+    fun composerAndReactionPickersShareNativeRecentAndStickyChoices() {
+        val parent = translationMessage().copy(text = "React to this", msgid = "source-message")
+        var draft by mutableStateOf(ComposerDraftState("", hydrated = true, revision = 1))
+        val picked = mutableListOf<String>()
+        setContent(
+            draft = { draft },
+            pages = flowOf(PagingData.from(listOf(parent))),
+            connectionState = IrcClientState.Ready("me", setOf("message-tags"), emptyMap()),
+            onReact = { source, emoji ->
+                assertEquals(parent, source)
+                picked += emoji
+            },
+            onDraftChanged = { draft = draft.copy(text = it, revision = draft.revision + 1) },
+            onSubmit = { error("picking emoji submitted the composer") },
+        )
+        holdMessageBubble(parent)
+        compose.onNodeWithTag("message_more_reactions").performClick()
+        compose.pickNativeEmojiVariant("SMILEYS AND EMOTIONS", "👍", "👍🏽")
+        compose.runOnIdle {
+            assertEquals(listOf("👍🏽"), picked)
+            assertEquals("", draft.text)
+        }
+
+        // This composer picker is newly opened, so AndroidX loads its own persisted selections.
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_emoji").performClick()
+        compose.onNodeWithTag("chat_composer_emoji_picker").assertIsDisplayed()
+        compose.clickNativeEmoji("RECENTLY USED", "👍🏽")
+        compose.clickNativeEmoji("SMILEYS AND EMOTIONS", "👍🏽")
+        compose.onNodeWithTag("chat_composer_field").assertTextEquals("👍🏽👍🏽")
+        compose.onNodeWithTag("chat_composer_field").performTouchInput { click(center) }
+
+        holdMessageBubble(parent)
+        compose.onNodeWithTag("message_more_reactions").performClick()
+        compose.clickNativeEmoji("RECENTLY USED", "👍🏽")
+        compose.runOnIdle {
+            assertEquals(listOf("👍🏽", "👍🏽"), picked)
+            assertEquals("👍🏽👍🏽", draft.text)
         }
     }
 
@@ -3054,8 +3917,20 @@ class ComposerSendClearUiTest {
         compose.onNodeWithText("@Search   City of Brass", substring = true).assertExists()
         compose.onNodeWithTag("chat_message_103", useUnmergedTree = true).performClick()
         compose.onNodeWithText("File   request:", substring = true).assertExists()
-        compose.onNodeWithText("@Search   City of Brass", substring = true).performTouchInput { longClick() }
-        compose.onNodeWithText("Copy").assertIsDisplayed()
+        holdMessageBubble(posts.single { it.id == 102L })
+        compose.onNodeWithTag("message_action_copy").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+        compose.runOnIdle {
+            val clipboard = RuntimeEnvironment.getApplication().getSystemService(ClipboardManager::class.java)
+            assertEquals(
+                "@Search   City of Brass",
+                clipboard.primaryClip
+                    ?.getItemAt(0)
+                    ?.text
+                    ?.toString(),
+            )
+        }
     }
 
     @Test

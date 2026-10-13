@@ -97,6 +97,7 @@ import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistoryResyncCoordinator
 import io.github.trevarj.motd.service.HistoryResyncState
 import io.github.trevarj.motd.service.HistorySyncStatus
+import io.github.trevarj.motd.service.ImmediateWireAcceptance
 import io.github.trevarj.motd.service.NotificationMode
 import io.github.trevarj.motd.service.NotificationScope
 import io.github.trevarj.motd.service.NotificationSettings
@@ -104,6 +105,7 @@ import io.github.trevarj.motd.service.NotificationSettingsImpl
 import io.github.trevarj.motd.service.PresenceKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.RosterLoadState
+import io.github.trevarj.motd.service.SendRejectionReason
 import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.testing.NoopConnectionManager
 import io.github.trevarj.motd.testing.ReadAloudHarness
@@ -172,6 +174,13 @@ class ChatViewModelTest {
             buffer: BufferEntity,
             scope: CoroutineScope,
             savedStateHandle: SavedStateHandle = SavedStateHandle(mapOf("bufferId" to buffer.id)),
+            buffers: BufferRepository = FakeBufferRepository(buffer),
+            connectionStates: Map<Long, IrcClientState>? = null,
+            onSendMessage: ((Long, String, Long?, String?) -> Unit)? = null,
+            pendingShares: PendingShareStore = PendingShareStore(),
+            sendGate: CompletableDeferred<Unit>? = null,
+            immediateWireAcceptance: ImmediateWireAcceptance = ImmediateWireAcceptance.ACCEPTED,
+            sendRejection: SendRejectionReason? = null,
         ): ChatViewModel {
             val settings = FakeSettingsRepository()
             val foreground = FakeForegroundBufferTracker()
@@ -187,12 +196,24 @@ class ChatViewModelTest {
                         mediatorFactory = ChatHistoryMediatorFactory { _, _, _ -> error("fixture supplies its Paging rows") },
                         historyGapDao = db.historyGapDao(),
                     ),
-                bufferRepository = FakeBufferRepository(buffer),
+                bufferRepository = buffers,
                 networkDao = db.networkDao(),
                 networkIdentityDao = db.networkIdentityDao(),
                 dccTransferDao = db.dccTransferDao(),
                 dccTransferController = FakeDccTransferController(),
-                connectionManager = FakeConnectionManager(buffer.networkId),
+                connectionManager =
+                    FakeConnectionManager(
+                        buffer.networkId,
+                        onSendMessage = onSendMessage,
+                        sendGate = sendGate,
+                        immediateWireAcceptance = immediateWireAcceptance,
+                        sendRejection = sendRejection,
+                    ).apply {
+                        connectionStates?.let {
+                            this.connectionStates.value = it
+                            this.connectionActivity.value = this.connectionActivity.value.copy(states = it)
+                        }
+                    },
                 typingTracker = FakeTypingTracker(),
                 foregroundBufferTracker = foreground,
                 linkPreviewRepository =
@@ -205,7 +226,7 @@ class ChatViewModelTest {
                 audioMetadataRepository = FakeAudioMetadataRepository(),
                 audioPlaybackController = FakeAudioPlaybackController(),
                 draftStore = ComposerDraftStore(db),
-                pendingShareStore = PendingShareStore(),
+                pendingShareStore = pendingShares,
                 scrollPositionStore = ChatScrollPositionStore(),
                 historyPageLoader = HistoryPageLoader(processor),
                 settingsRepository = settings,
@@ -220,6 +241,16 @@ class ChatViewModelTest {
                     ReadAloudHarness(ApplicationProvider.getApplicationContext(), db, scope, foreground, settings).controller,
             )
         }
+
+        internal fun roomBuffers(db: MotdDatabase) =
+            BufferRepositoryImpl(
+                bufferDao = db.bufferDao(),
+                memberDao = db.memberDao(),
+                messageDao = db.messageDao(),
+                settings = FakeSettingsRepository(),
+                visibilityReader = MessageVisibilityReader(db),
+                localAvatarStore = LocalAvatarStore(ApplicationProvider.getApplicationContext()),
+            )
     }
 
     private val dispatcher = StandardTestDispatcher()
@@ -277,6 +308,661 @@ class ChatViewModelTest {
         db.close()
         Dispatchers.resetMain()
     }
+
+    @Test
+    fun forwardPayloadQuotesEveryPhysicalLineWithOptionalSender() {
+        val source = message(channel.id, "Hello\nworld", "historical", "alice")
+        assertEquals("> alice: Hello\n> alice: world", forwardMessageText(source, includeSender = true))
+        assertEquals("> Hello\n> world", forwardMessageText(source, includeSender = false))
+
+        val blankLines = source.copy(text = "\n Hello \n\nalice: world\n")
+        assertEquals(
+            "> alice: \n> alice:  Hello \n> alice: \n> alice: alice: world\n> alice: ",
+            forwardMessageText(blankLines, includeSender = true),
+        )
+        assertEquals(
+            "> \n>  Hello \n> \n> alice: world\n> ",
+            forwardMessageText(blankLines, includeSender = false),
+        )
+    }
+
+    @Test
+    fun forwardPayloadCleansControlsAndKeepsPlainUnicodeContent() {
+        val source =
+            message(
+                channel.id,
+                "\u0000\u0002Hello\u0002\t\u000304red\u000f\u0007\u001b\u007f\r\n" +
+                    "/me waves\r/join #other\n/raw PRIVMSG #other :hello\n" +
+                    "\u0001ACTION 🦑 👍🏽 👩🏽‍💻 e\u0301\u0001\n`alice` **literal**",
+                null,
+                "\u0002al\u0002\r\nice\t\u0000\u007f",
+            ).copy(ircFormattedText = "\u0002Different rendering payload\u0002")
+        val expected = "Hello red\n/me waves\n/join #other\n/raw PRIVMSG #other :hello\nACTION 🦑 👍🏽 👩🏽‍💻 e\u0301\n`alice` **literal**"
+        assertEquals("> " + expected.replace("\n", "\n> "), forwardMessageText(source, includeSender = false))
+        assertEquals("> al ice : " + expected.replace("\n", "\n> al ice : "), forwardMessageText(source, includeSender = true))
+        assertTrue(canForwardMessage(source, BufferType.CHANNEL))
+
+        val otherControls = (0..31).filterNot { it == 9 || it == 10 || it == 13 }.joinToString("") { it.toChar().toString() } + "\u007f"
+        assertEquals("> ab", forwardMessageText(source.copy(text = "a${otherControls}b"), includeSender = false))
+        assertEquals("> a\n> \n> b", forwardMessageText(source.copy(text = "a\r\r\nb"), includeSender = false))
+        assertEquals("> al ice: Hello", forwardMessageText(source.copy(text = "Hello", sender = "al\rice"), includeSender = true))
+
+        val attachment = source.copy(kind = MessageKind.ACTION, text = "[voice 0:12 audio/ogg] https://example.org/voice.ogg", sender = "alice")
+        assertEquals("> alice: [voice 0:12 audio/ogg] https://example.org/voice.ogg", forwardMessageText(attachment, includeSender = true))
+    }
+
+    @Test
+    fun forwardEligibilityRequiresConversationKindAndCleanVisibleContent() {
+        val source = message(channel.id, "Saved conversation", "historical", "alice", id = 42)
+        val conversationKinds = listOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)
+        val availableSources =
+            listOf(
+                source,
+                source.copy(msgid = null),
+                source.copy(msgid = null, isSelf = true, pendingLabel = "pending"),
+                source.copy(msgid = null, isSelf = true, failed = true),
+                source.copy(text = "[voice 0:12 audio/ogg] https://example.org/voice.ogg"),
+            )
+        for (bufferType in listOf(BufferType.CHANNEL, BufferType.QUERY)) {
+            for (kind in conversationKinds) {
+                for (available in availableSources) {
+                    assertTrue("$bufferType $kind $available", canForwardMessage(available.copy(kind = kind), bufferType))
+                }
+            }
+        }
+        for (kind in MessageKind.entries.filterNot { it in conversationKinds }) {
+            assertFalse(kind.name, canForwardMessage(source.copy(kind = kind), BufferType.CHANNEL))
+        }
+        assertFalse(canForwardMessage(source, BufferType.SERVER))
+        assertFalse(canForwardMessage(source, null))
+
+        val controls = (0..31).joinToString("") { it.toChar().toString() } + "\u007f"
+        for (blank in listOf("", " \t\r\n", "\u000304\u0002\u000f", controls)) {
+            assertFalse("blank body: $blank", canForwardMessage(source.copy(text = blank), BufferType.CHANNEL))
+            assertFalse("blank sender: $blank", canForwardMessage(source.copy(sender = blank), BufferType.CHANNEL))
+        }
+        assertFalse(canForwardMessage(source.copy(text = "", ircFormattedText = "Nonblank rendering payload"), BufferType.CHANNEL))
+    }
+
+    @Test
+    fun forwardPreviewUsesOptionalSenderAndNeverTouchesDrafts() =
+        runTest {
+            val source = seedTranslationSource().copy(text = "Hello\nworld")
+            db.messageDao().update(source)
+            val targetReply = seedTranslationSource(id = 89, roomId = query.id)
+            val drafts = ComposerDraftStore(db)
+            drafts.saveDraft(channel.id, "Unsent source\nwith reply", source.id)
+            drafts.saveDraft(query.id, "Unsent destination\nwith reply", targetReply.id)
+            val shares = PendingShareStore()
+            val pending = PendingShare.AgentContext(query.id, "Unrelated", "Untouched payload", "partial")
+            shares.set(pending)
+            val manager = FakeConnectionManager(network.id)
+            val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers(), drafts = drafts, shares = shares)
+            try {
+                backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.state.collect() }
+                vm.composerDraft.first { it.hydrated }
+                vm.state.first { it.replyTo?.id == source.id }
+                val target = vm.forwardTargets.first { it.any { row -> row.bufferId == query.id } }.single { it.bufferId == query.id }
+                val composer = vm.composerDraft.value
+                val sourceDraft = drafts.loadDraft(channel.id)
+                val destinationDraft = drafts.loadDraft(query.id)
+
+                vm.openForward(source)
+                assertTrue(requireNotNull(vm.forwardState.value).includeSender)
+                vm.openForward(targetReply)
+                assertEquals(source, vm.forwardState.value?.source)
+                vm.selectForwardDestination(target)
+                vm.setForwardIncludeSender(false)
+                assertEquals("> Hello\n> world", forwardMessageText(source, requireNotNull(vm.forwardState.value).includeSender))
+                vm.changeForwardDestination()
+                assertNull(vm.forwardState.value?.destination)
+                vm.selectForwardDestination(target)
+                vm.dismissForward()
+                assertNull(vm.forwardState.value)
+                assertTrue(manager.messageAttempts.isEmpty())
+
+                for ((include, expected) in listOf(true to "> alice: Hello\n> alice: world", false to "> Hello\n> world")) {
+                    vm.openForward(source)
+                    assertTrue(requireNotNull(vm.forwardState.value).includeSender)
+                    vm.selectForwardDestination(target)
+                    vm.setForwardIncludeSender(include)
+                    assertEquals(expected, forwardMessageText(source, requireNotNull(vm.forwardState.value).includeSender))
+                    vm.confirmForward()
+                    assertTrue(requireNotNull(vm.forwardState.value).sending)
+                    runCurrent()
+                    assertNull(vm.forwardState.value)
+                    assertEquals(SentMessage(query.id, expected, null, null), manager.messages.last())
+                    assertEquals(composer, vm.composerDraft.value)
+                    assertEquals(source, vm.state.value.replyTo)
+                    assertEquals(sourceDraft, drafts.loadDraft(channel.id))
+                    assertEquals(destinationDraft, drafts.loadDraft(query.id))
+                    assertEquals(pending, shares.peek())
+                    assertNull(shares.agentContext(query.id).value)
+                    assertEquals(source, db.messageDao().byCanonicalId(source.id))
+                    assertEquals(targetReply, db.messageDao().byCanonicalId(targetReply.id))
+                }
+                assertEquals(2, manager.messageAttempts.size)
+                assertTrue(manager.sentLines.isEmpty())
+                assertTrue(manager.commandOrigins.isEmpty())
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
+
+    @Test
+    fun forwardTargetsKeepChatOrderAndSendSameNamedCrossNetworkChatsById() =
+        runTest {
+            val otherNetwork = network.copy(id = 0, name = "other").let { it.copy(id = db.networkDao().insert(it)) }
+            val otherQuery = query.copy(id = 0, networkId = otherNetwork.id).let { it.copy(id = db.bufferDao().insert(it)) }
+            val agent =
+                channel
+                    .copy(
+                        id = 0,
+                        networkId = otherNetwork.id,
+                        name = "#agent",
+                        displayName = "#agent",
+                        joined = true,
+                        topic = "agentwire:v1;account=controller;agent=host;backend=claude",
+                    ).let { it.copy(id = db.bufferDao().insert(it)) }
+            for (excluded in listOf(
+                channel.copy(id = 0, name = "*", displayName = "server", type = BufferType.SERVER),
+                channel.copy(id = 0, name = "#archived", displayName = "#archived", archived = true),
+                channel.copy(id = 0, name = "#closing", displayName = "#closing", pendingCloseAt = 1),
+                query.copy(id = 0, name = "dismissed", displayName = "dismissed", dismissed = true),
+                query.copy(id = 0, name = "redirect", displayName = "redirect", redirectToRoomId = query.id),
+            )) {
+                db.bufferDao().insert(excluded)
+            }
+            val source = seedTranslationSource()
+            val buffers = roomBuffers()
+            val shares = PendingShareStore()
+            val pending = PendingShare.AgentContext(channel.id, "#room", "Unrelated context", "partial")
+            shares.set(pending)
+            val manager = FakeConnectionManager(network.id)
+            val ready = IrcClientState.Ready("destinationNick", emptySet(), emptyMap())
+            manager.connectionStates.value = mapOf(network.id to ready, otherNetwork.id to ready)
+            val vm = viewModel(channel, manager, messages = seamRepository(), buffers = buffers, shares = shares)
+            try {
+                vm.state.first { it.buffer != null }
+                val targets = vm.forwardTargets.first { it.size == 3 }
+                val expectedIds =
+                    buffers
+                        .observeChatList()
+                        .first()
+                        .filter { it.bufferId in setOf(query.id, otherQuery.id, agent.id) }
+                        .map { it.bufferId }
+                assertEquals(expectedIds, targets.map { it.bufferId })
+                assertEquals(2, targets.count { it.displayName == "alice" })
+                assertEquals(listOf(network.name, otherNetwork.name).toSet(), targets.filter { it.displayName == "alice" }.map { it.networkName }.toSet())
+
+                // An offline source is still readable; only the destination's connection admits send.
+                manager.connectionStates.value = mapOf(network.id to IrcClientState.Disconnected, otherNetwork.id to ready)
+                vm.forwardTargets.first { it.size == 2 }
+                vm.openForward(source)
+                vm.selectForwardDestination(targets.single { it.bufferId == otherQuery.id })
+                vm.confirmForward()
+                runCurrent()
+                assertNull(vm.forwardState.value)
+                manager.connectionStates.value = mapOf(network.id to ready, otherNetwork.id to ready)
+                vm.forwardTargets.first { it.size == 3 }
+                for (id in listOf(query.id, agent.id)) {
+                    vm.openForward(source)
+                    vm.selectForwardDestination(targets.single { it.bufferId == id })
+                    vm.confirmForward()
+                    runCurrent()
+                    assertNull(vm.forwardState.value)
+                }
+                assertEquals(listOf(otherQuery.id, query.id, agent.id), manager.messages.map { it.bufferId })
+                assertTrue(manager.messages.all { it.text == forwardMessageText(source, true) && it.replyTo == null && it.channelContext == null })
+                assertEquals(pending, shares.peek())
+                assertNull(shares.agentContext(agent.id).value)
+                assertTrue(manager.joins.isEmpty())
+                assertTrue(manager.commandOrigins.isEmpty())
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
+
+    @Test
+    fun forwardChangedDeletedRedactedOrWrongRoomSourceRequiresReopening() =
+        runTest {
+            val source = seedTranslationSource()
+            val manager = FakeConnectionManager(network.id)
+            val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
+            try {
+                vm.state.first { it.buffer != null }
+                val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
+                for (changed in listOf(
+                    source.copy(text = "Changed text"),
+                    source.copy(sender = "mallory"),
+                    source.copy(kind = MessageKind.NOTICE),
+                    source.copy(kind = MessageKind.REDACTED),
+                    source.copy(text = ""),
+                    source.copy(bufferId = query.id),
+                    null,
+                )) {
+                    vm.openForward(source)
+                    vm.selectForwardDestination(target)
+                    if (changed == null) db.messageDao().deleteById(source.id) else db.messageDao().update(changed)
+                    vm.confirmForward()
+                    runCurrent()
+                    val invalid = requireNotNull(vm.forwardState.value)
+                    assertEquals(MessageForwardError.SOURCE_UNAVAILABLE, invalid.error)
+                    assertEquals(source, invalid.source)
+                    assertFalse(invalid.sending)
+                    assertNull(invalid.acceptance)
+                    vm.confirmForward()
+                    vm.changeForwardDestination()
+                    vm.selectForwardDestination(target)
+                    vm.setForwardIncludeSender(false)
+                    vm.openForward(source.copy(text = "A new request"))
+                    assertTrue(vm.forwardState.value === invalid)
+                    assertTrue(manager.messageAttempts.isEmpty())
+                    vm.dismissForward()
+                    db.messageDao().deleteById(source.id)
+                    db.messageDao().insertAll(listOf(source))
+                }
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
+
+    @Test
+    fun forwardCanonicalEventAndRoomMergeWithUnchangedContentKeepsReviewedPayload() =
+        runTest {
+            val source = seedTranslationSource()
+            val winnerRoom = channel.copy(id = 0, name = "#winner", displayName = "#winner").let { it.copy(id = db.bufferDao().insert(it)) }
+            val winner = source.copy(id = 89, bufferId = winnerRoom.id, dedupKey = "winner", msgid = "winner")
+            db.messageDao().insertAll(listOf(winner))
+            val manager = FakeConnectionManager(network.id)
+            val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
+            try {
+                vm.state.first { it.buffer?.id == channel.id }
+                val target = vm.forwardTargets.first { it.any { row -> row.bufferId == query.id } }.single { it.bufferId == query.id }
+                vm.openForward(source)
+                vm.selectForwardDestination(target)
+                db.bufferDao().update(channel.copy(redirectToRoomId = winnerRoom.id))
+                db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(source.id, winner.id))
+                db.messageDao().deleteById(source.id)
+                vm.state.first { it.buffer?.id == winnerRoom.id }
+                vm.forwardTargets.first { it.none { row -> row.bufferId == winnerRoom.id } }
+                vm.confirmForward()
+                runCurrent()
+                assertNull(vm.forwardState.value)
+                assertEquals(listOf(SentMessage(query.id, forwardMessageText(source, true), null, null)), manager.messages)
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
+
+    @Test
+    fun forwardRevalidatesDestinationMembershipAndConnectionBeforeEveryAttempt() =
+        runTest {
+            val destination =
+                channel
+                    .copy(id = 0, name = "#destination", displayName = "#destination")
+                    .let { it.copy(id = db.bufferDao().insert(it)) }
+            val source = seedTranslationSource()
+            val manager = FakeConnectionManager(network.id)
+            val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
+            try {
+                vm.state.first { it.buffer != null }
+                val target = vm.forwardTargets.first { it.any { row -> row.bufferId == destination.id } }.single { it.bufferId == destination.id }
+                vm.openForward(source)
+                vm.selectForwardDestination(target)
+                vm.confirmForward()
+                runCurrent()
+                assertEquals(MessageForwardError.TARGET_UNAVAILABLE, vm.forwardState.value?.error)
+                assertEquals(target, vm.forwardState.value?.destination)
+                assertTrue(manager.messageAttempts.isEmpty())
+                db.bufferDao().update(destination.copy(joined = true))
+                manager.publishState(network.id, IrcClientState.Disconnected)
+                vm.confirmForward()
+                runCurrent()
+                assertEquals(MessageForwardError.TARGET_UNAVAILABLE, vm.forwardState.value?.error)
+                assertTrue(manager.messageAttempts.isEmpty())
+                manager.publishState(network.id, IrcClientState.Ready("me", emptySet(), emptyMap()))
+                vm.confirmForward()
+                runCurrent()
+                assertNull(vm.forwardState.value)
+                assertEquals(listOf(SentMessage(destination.id, forwardMessageText(source, true), null, null)), manager.messages)
+                assertTrue(manager.joins.isEmpty())
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
+
+    @Test
+    fun forwardDestinationLifecycleOrReviewedIdentityChangeInvalidatesSelection() =
+        runTest {
+            val source = seedTranslationSource()
+            val otherNetwork = network.copy(id = 0, name = "other").let { it.copy(id = db.networkDao().insert(it)) }
+            val manager = FakeConnectionManager(network.id)
+            manager.connectionStates.value = mapOf(network.id to IrcClientState.Ready("me", emptySet(), emptyMap()), otherNetwork.id to IrcClientState.Ready("me", emptySet(), emptyMap()))
+            val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
+            try {
+                vm.state.first { it.buffer != null }
+                for (changed in listOf(
+                    query.copy(archived = true),
+                    query.copy(dismissed = true),
+                    query.copy(pendingCloseAt = 1),
+                    query.copy(type = BufferType.SERVER),
+                    query.copy(networkId = otherNetwork.id),
+                    query.copy(displayName = "Renamed chat"),
+                    query.copy(redirectToRoomId = channel.id),
+                )) {
+                    val target = vm.forwardTargets.first { it.any { row -> row.bufferId == query.id } }.single { it.bufferId == query.id }
+                    vm.openForward(source)
+                    vm.selectForwardDestination(target)
+                    db.bufferDao().update(changed)
+                    vm.confirmForward()
+                    runCurrent()
+                    assertEquals(MessageForwardError.TARGET_UNAVAILABLE, vm.forwardState.value?.error)
+                    assertNull(vm.forwardState.value?.destination)
+                    assertFalse(requireNotNull(vm.forwardState.value).sending)
+                    assertTrue(manager.messageAttempts.isEmpty())
+                    vm.dismissForward()
+                    db.bufferDao().update(query)
+                }
+                val target = vm.forwardTargets.first { it.any { row -> row.bufferId == query.id } }.single { it.bufferId == query.id }
+                vm.openForward(source)
+                vm.selectForwardDestination(target)
+                db.networkDao().update(network.copy(name = "Renamed network"))
+                vm.confirmForward()
+                runCurrent()
+                assertEquals(MessageForwardError.TARGET_UNAVAILABLE, vm.forwardState.value?.error)
+                assertNull(vm.forwardState.value?.destination)
+                assertTrue(manager.messageAttempts.isEmpty())
+                vm.dismissForward()
+                db.networkDao().update(network)
+                val restoredTarget =
+                    vm.forwardTargets
+                        .first { rows -> rows.any { it.bufferId == query.id && it.networkName == network.name } }
+                        .single { it.bufferId == query.id }
+                vm.openForward(source)
+                vm.selectForwardDestination(restoredTarget)
+                db.bufferDao().deleteBufferRow(query.id)
+                vm.confirmForward()
+                runCurrent()
+                assertEquals(MessageForwardError.TARGET_UNAVAILABLE, vm.forwardState.value?.error)
+                assertNull(vm.forwardState.value?.destination)
+                assertTrue(manager.messageAttempts.isEmpty())
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
+
+    @Test
+    fun forwardSourceRoomIsNeverADestination() =
+        runTest {
+            val source = seedTranslationSource()
+            val manager = FakeConnectionManager(network.id)
+            val buffers = roomBuffers()
+            val vm = viewModel(channel, manager, messages = seamRepository(), buffers = buffers)
+            try {
+                vm.state.first { it.buffer != null }
+                val sourceRow = buffers.observeChatList().first().single { it.bufferId == channel.id }
+                vm.openForward(source)
+                vm.selectForwardDestination(sourceRow)
+                vm.confirmForward()
+                runCurrent()
+                assertEquals(MessageForwardError.TARGET_UNAVAILABLE, vm.forwardState.value?.error)
+                assertTrue(manager.messageAttempts.isEmpty())
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
+
+    @Test
+    fun forwardHeldSendAdmitsOneConfirmationAndIgnoresEveryMutationAndDismissal() =
+        runTest {
+            val source = seedTranslationSource()
+            val gate = CompletableDeferred<Unit>()
+            val manager = FakeConnectionManager(network.id, sendGate = gate)
+            val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
+            try {
+                vm.state.first { it.buffer != null }
+                val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
+                vm.openForward(source)
+                vm.selectForwardDestination(target)
+                vm.confirmForward()
+                val admitted = requireNotNull(vm.forwardState.value)
+                assertTrue(admitted.sending)
+                vm.confirmForward()
+                vm.dismissForward()
+                vm.changeForwardDestination()
+                vm.selectForwardDestination(target.copy(displayName = "Changed"))
+                vm.setForwardIncludeSender(false)
+                vm.openForward(source.copy(text = "Different request"))
+                assertTrue(vm.forwardState.value === admitted)
+                manager.messageStarted.await()
+                vm.confirmForward()
+                vm.dismissForward()
+                assertEquals(listOf(SentMessage(query.id, forwardMessageText(source, true), null, null)), manager.messageAttempts)
+                assertTrue(manager.messages.isEmpty())
+                assertTrue(vm.forwardState.value === admitted)
+                gate.complete(Unit)
+                runCurrent()
+                assertNull(vm.forwardState.value)
+                assertEquals(manager.messageAttempts, manager.messages)
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
+
+    @Test
+    fun forwardRejectedSendRetainsPreviewAndDeliberateRetryRunsFreshValidation() =
+        runTest {
+            val source = seedTranslationSource()
+            for (reason in listOf(SendRejectionReason.PERSISTENCE_FAILED, SendRejectionReason.NOT_IN_CHANNEL)) {
+                val manager = FakeConnectionManager(network.id, sendRejection = reason)
+                val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
+                try {
+                    vm.state.first { it.buffer != null }
+                    val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
+                    vm.openForward(source)
+                    vm.selectForwardDestination(target)
+                    vm.setForwardIncludeSender(false)
+                    vm.confirmForward()
+                    runCurrent()
+                    val rejected = requireNotNull(vm.forwardState.value)
+                    assertEquals(
+                        if (reason == SendRejectionReason.NOT_IN_CHANNEL) MessageForwardError.TARGET_UNAVAILABLE else MessageForwardError.SEND_REJECTED,
+                        rejected.error,
+                    )
+                    assertEquals(target, rejected.destination)
+                    assertFalse(rejected.includeSender)
+                    assertFalse(rejected.sending)
+                    assertNull(rejected.acceptance)
+                    assertTrue(manager.messages.isEmpty())
+                    assertEquals(1, manager.messageAttempts.size)
+                    manager.sendRejection = null
+                    db.messageDao().update(source.copy(text = "Changed before retry"))
+                    vm.confirmForward()
+                    runCurrent()
+                    assertEquals(MessageForwardError.SOURCE_UNAVAILABLE, vm.forwardState.value?.error)
+                    assertEquals(1, manager.messageAttempts.size)
+                    vm.dismissForward()
+                    db.messageDao().update(source)
+                    vm.openForward(source)
+                    vm.selectForwardDestination(target)
+                    vm.confirmForward()
+                    runCurrent()
+                    assertNull(vm.forwardState.value)
+                    assertEquals(2, manager.messageAttempts.size)
+                    assertEquals(listOf(SentMessage(query.id, forwardMessageText(source, true), null, null)), manager.messages)
+                } finally {
+                    vm.viewModelScope.cancel()
+                }
+            }
+        }
+
+    @Test
+    fun forwardRejectedRequestAllowsExplicitRetryAndDestinationReview() =
+        runTest {
+            val source = seedTranslationSource()
+            for (reason in listOf(SendRejectionReason.PERSISTENCE_FAILED, SendRejectionReason.NOT_IN_CHANNEL)) {
+                val manager = FakeConnectionManager(network.id, sendRejection = reason)
+                val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
+                try {
+                    vm.state.first { it.buffer != null }
+                    val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
+                    vm.openForward(source)
+                    vm.selectForwardDestination(target)
+                    vm.confirmForward()
+                    runCurrent()
+                    assertNotNull(vm.forwardState.value?.error)
+                    vm.setForwardIncludeSender(false)
+                    assertNotNull(vm.forwardState.value?.error)
+                    manager.sendRejection = null
+                    vm.confirmForward()
+                    runCurrent()
+                    assertNull(vm.forwardState.value)
+                    assertEquals(2, manager.messageAttempts.size)
+                    assertEquals(listOf(SentMessage(query.id, forwardMessageText(source, false), null, null)), manager.messages)
+
+                    manager.sendRejection = reason
+                    vm.openForward(source)
+                    vm.selectForwardDestination(target)
+                    vm.confirmForward()
+                    runCurrent()
+                    vm.changeForwardDestination()
+                    assertNull(vm.forwardState.value?.destination)
+                    assertNull(vm.forwardState.value?.error)
+                    vm.selectForwardDestination(target)
+                    assertEquals(target, vm.forwardState.value?.destination)
+                    assertNull(vm.forwardState.value?.error)
+                    vm.dismissForward()
+                    assertNull(vm.forwardState.value)
+                    assertEquals(3, manager.messageAttempts.size)
+                } finally {
+                    vm.viewModelScope.cancel()
+                }
+            }
+        }
+
+    @Test
+    fun forwardDurableUnsentAcceptanceRetainsEventIdsAndAllowsOnlyClose() =
+        runTest {
+            val source = seedTranslationSource()
+            for (wire in listOf(ImmediateWireAcceptance.DISCONNECTED, ImmediateWireAcceptance.FAILED)) {
+                val manager = FakeConnectionManager(network.id, immediateWireAcceptance = wire, storedTexts = { it.split('\n') })
+                val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
+                try {
+                    vm.state.first { it.buffer != null }
+                    val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
+                    vm.openForward(source)
+                    vm.selectForwardDestination(target)
+                    vm.confirmForward()
+                    runCurrent()
+                    val terminal = requireNotNull(vm.forwardState.value)
+                    val acceptance = requireNotNull(terminal.acceptance)
+                    assertEquals(wire, acceptance.immediateWireAcceptance)
+                    assertEquals(listOf(1L, 2L), acceptance.eventIds)
+                    assertEquals(forwardMessageText(source, true).split('\n'), acceptance.storedTexts)
+                    assertFalse(terminal.sending)
+                    assertNull(terminal.error)
+                    vm.confirmForward()
+                    vm.selectForwardDestination(target.copy(displayName = "Different"))
+                    vm.changeForwardDestination()
+                    vm.setForwardIncludeSender(false)
+                    vm.openForward(source.copy(text = "Different"))
+                    assertTrue(vm.forwardState.value === terminal)
+                    assertEquals(1, manager.messageAttempts.size)
+                    assertEquals(1, manager.messages.size)
+                    vm.dismissForward()
+                    assertNull(vm.forwardState.value)
+                } finally {
+                    vm.viewModelScope.cancel()
+                }
+            }
+        }
+
+    @Test
+    fun forwardUnexpectedExceptionIsTerminalAndCancellationNeverEnablesRetry() =
+        runTest {
+            val source = seedTranslationSource()
+            for (failure in listOf(IllegalStateException("Uncertain persistence"), CancellationException("Canceled durable send"))) {
+                val manager = FakeConnectionManager(network.id, sendException = failure)
+                val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
+                try {
+                    vm.state.first { it.buffer != null }
+                    val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
+                    vm.openForward(source)
+                    vm.selectForwardDestination(target)
+                    vm.confirmForward()
+                    runCurrent()
+                    val terminal = requireNotNull(vm.forwardState.value)
+                    assertEquals(source, terminal.source)
+                    assertNull(terminal.acceptance)
+                    if (failure is CancellationException) {
+                        assertTrue(terminal.sending)
+                        assertNull(terminal.error)
+                        vm.dismissForward()
+                        assertTrue(vm.forwardState.value === terminal)
+                    } else {
+                        assertFalse(terminal.sending)
+                        assertEquals(MessageForwardError.SEND_FAILED, terminal.error)
+                    }
+                    vm.confirmForward()
+                    vm.changeForwardDestination()
+                    vm.selectForwardDestination(target)
+                    vm.setForwardIncludeSender(false)
+                    vm.openForward(source)
+                    assertTrue(vm.forwardState.value === terminal)
+                    assertEquals(1, manager.messageAttempts.size)
+                    assertTrue(manager.messages.isEmpty())
+                    if (failure !is CancellationException) {
+                        vm.dismissForward()
+                        assertNull(vm.forwardState.value)
+                    }
+                } finally {
+                    vm.viewModelScope.cancel()
+                }
+            }
+        }
+
+    @Test
+    fun forwardCommandsControlsActionsAndUnicodeSendTheExactLiteralQuotation() =
+        runTest {
+            val original = seedTranslationSource()
+            val manager = FakeConnectionManager(network.id)
+            val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
+            try {
+                vm.state.first { it.buffer != null }
+                val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
+                for ((body, cleaned) in listOf(
+                    "/me waves" to "/me waves",
+                    "/raw PRIVMSG #elsewhere :not a command" to "/raw PRIVMSG #elsewhere :not a command",
+                    "/join #elsewhere" to "/join #elsewhere",
+                    "\u0001ACTION waves\u0001\r\n\t👍🏽 👩‍👩‍👧‍👦\u0000\u007f\n" to "ACTION waves\n 👍🏽 👩‍👩‍👧‍👦\n",
+                )) {
+                    for (include in listOf(true, false)) {
+                        val source = original.copy(text = body, sender = "a\r\nb\t\u0000", kind = MessageKind.ACTION, ircFormattedText = "Must not forward rendering")
+                        db.messageDao().update(source)
+                        vm.openForward(source)
+                        vm.selectForwardDestination(target)
+                        vm.setForwardIncludeSender(include)
+                        val prefix = if (include) "> a b : " else "> "
+                        val expected = cleaned.split('\n').joinToString("\n") { prefix + it }
+                        assertEquals(expected, forwardMessageText(source, include))
+                        vm.confirmForward()
+                        runCurrent()
+                        assertNull(vm.forwardState.value)
+                        assertEquals(SentMessage(query.id, expected, null, null), manager.messages.last())
+                    }
+                }
+                assertEquals(8, manager.messageAttempts.size)
+                assertTrue(manager.commandOrigins.isEmpty())
+                assertTrue(manager.joins.isEmpty())
+                for (invalid in listOf(original.copy(text = ""), original.copy(kind = MessageKind.REDACTED), original.copy(sender = "\u0000"))) {
+                    vm.openForward(invalid)
+                    assertNull(vm.forwardState.value)
+                }
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
 
     @Test
     fun externalTranslationReturnsWithoutMutatingDraftReplyOrHistory() =
@@ -4592,6 +5278,8 @@ class ChatViewModelTest {
             historyGapDao = db.historyGapDao(),
         )
 
+    private fun roomBuffers() = roomBuffers(db)
+
     /** A live network whose CHATHISTORY negotiation finished: the gate's `historyReady` input. */
     private fun readyHistoryManager() =
         FakeConnectionManager(
@@ -5333,9 +6021,12 @@ class ChatViewModelTest {
         private val reactionError: Boolean = false,
         private val redactionAccepted: Boolean = false,
         private val storedTexts: ((String) -> List<String>)? = null,
-        private val sendRejection: io.github.trevarj.motd.service.SendRejectionReason? = null,
+        var sendRejection: io.github.trevarj.motd.service.SendRejectionReason? = null,
         private val retryRejection: io.github.trevarj.motd.service.SendRejectionReason? = null,
         private val inviteAccepted: Boolean = false,
+        private val immediateWireAcceptance: ImmediateWireAcceptance = ImmediateWireAcceptance.ACCEPTED,
+        private val sendException: Exception? = null,
+        private val onSendMessage: ((Long, String, Long?, String?) -> Unit)? = null,
         historyPending: Set<Long> = emptySet(),
         /**
          * What a negotiated CHATHISTORY wire would report. Defaults to the pre-registration answer
@@ -5411,8 +6102,10 @@ class ChatViewModelTest {
             channelContext: String?,
         ): io.github.trevarj.motd.service.SendAcceptance {
             messageAttempts += SentMessage(bufferId, text, replyToEventId, channelContext)
+            onSendMessage?.invoke(bufferId, text, replyToEventId, channelContext)
             messageStarted.complete(Unit)
             sendGate?.await()
+            sendException?.let { throw it }
             sendRejection?.let {
                 return io.github.trevarj.motd.service.SendAcceptance
                     .Rejected(it)
@@ -5428,6 +6121,7 @@ class ChatViewModelTest {
             val stored = storedTexts?.invoke(text) ?: listOf(text)
             return io.github.trevarj.motd.service.SendAcceptance.Accepted(
                 eventIds = List(stored.size) { it + 1L },
+                immediateWireAcceptance = immediateWireAcceptance,
                 storedTexts = stored,
             )
         }

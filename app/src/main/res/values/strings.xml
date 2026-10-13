@@ -868,6 +868,15 @@
     <string name="chat_reply_open">Go to replied message</string>
     <string name="chat_action_copy">Copy</string>
     <string name="chat_action_quote">Quote</string>
+    <string name="chat_action_forward">Forward</string>
+    <string name="chat_forward_title">Forward message</string>
+    <string name="chat_forward_include_sender">Include sender</string>
+    <string name="chat_forward_change_destination">Change destination</string>
+    <string name="chat_forward_empty">No available chats</string>
+    <string name="chat_forward_source_unavailable">This message changed or is no longer available. Reopen Forward.</string>
+    <string name="chat_forward_target_unavailable">This chat is no longer available for forwarding. Choose another chat.</string>
+    <string name="chat_forward_send_failed">Forwarding could not be confirmed. Check the destination before trying again.</string>
+    <string name="chat_forward_saved_not_sent">Message saved in the destination but not fully sent. Open that chat to review delivery.</string>
     <string name="chat_action_share">Share</string>
     <string name="chat_action_share_chooser">Share message</string>
     <string name="chat_action_translate">Translate</string>
@@ -887,6 +896,7 @@
     <string name="chat_action_tab_actions">Actions</string>
     <string name="chat_action_tab_reactions">Reactions</string>
     <string name="chat_reaction_reactors_description">%1$s reacted: %2$s</string>
+    <string name="chat_reaction_unavailable">This reaction cannot be sent on the current connection.</string>
     <string name="chat_action_delete_message">Delete message</string>
     <string name="chat_redaction_confirm_title">Delete this message?</string>
     <string name="chat_redaction_confirm_body">This asks the server to delete it for everyone. The server may refuse, and other clients may retain copies.</string>
