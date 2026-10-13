@@ -1,6 +1,10 @@
 package io.github.trevarj.motd.ui.components
 
+import android.content.Context
 import android.net.Uri
+import android.view.ContextThemeWrapper
+import android.view.MotionEvent
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -94,6 +98,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -2182,6 +2187,14 @@ internal fun EmojiPickerPanel(
     modifier: Modifier = Modifier,
     tagPrefix: String = "chat_composer",
 ) {
+    val surface = MaterialTheme.colorScheme.surfaceContainerHigh
+    // Compose's applied palette can oppose the platform's resource night mode.
+    val nativeTheme =
+        if (surface.luminance() > 0.5f) {
+            android.R.style.Theme_Material_Light_NoActionBar
+        } else {
+            android.R.style.Theme_Material_NoActionBar
+        }
     Surface(
         modifier =
             modifier
@@ -2189,22 +2202,45 @@ internal fun EmojiPickerPanel(
                 .padding(start = 8.dp, end = 8.dp, top = 8.dp)
                 .fillMaxSize(),
         shape = MotdShapes.bubble,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = surface,
     ) {
-        AndroidView(
-            factory = { context ->
-                EmojiPickerView(context).apply {
-                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                }
-            },
-            update = { picker ->
-                picker.setOnEmojiPickedListener { item -> onPick(item.emoji) }
-            },
-            modifier =
-                Modifier
-                    .fillMaxSize()
-                    .testTag("${tagPrefix}_emoji_grid"),
-        )
+        // Refresh native theme attributes only when the applied light/dark identity changes;
+        // ordinary composer close/reopen keeps the populated picker and its scroll position.
+        key(nativeTheme) {
+            AndroidView(
+                factory = { context -> NativeEmojiPickerHost(ContextThemeWrapper(context, nativeTheme)) },
+                update = { host ->
+                    host.picker.setOnEmojiPickedListener { item -> onPick(item.emoji) }
+                },
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .testTag("${tagPrefix}_emoji_grid"),
+            )
+        }
+    }
+}
+
+private class NativeEmojiPickerHost(
+    context: Context,
+) : FrameLayout(context) {
+    val picker = EmojiPickerView(context).apply { setBackgroundColor(android.graphics.Color.TRANSPARENT) }
+
+    init {
+        // AndroidView's nested-scroll bridge checks its hosted root, not the inner RecyclerView.
+        isNestedScrollingEnabled = true
+        addView(picker, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        // Claim before a clickable emoji child handles DOWN: waiting for RecyclerView touch slop
+        // lets the enclosing Compose sheet's draggable cancel the native gesture first.
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) parent?.requestDisallowInterceptTouchEvent(true)
+        val handled = super.dispatchTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            parent?.requestDisallowInterceptTouchEvent(false)
+        }
+        return handled
     }
 }
 

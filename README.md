@@ -56,7 +56,7 @@ them in motion on the [landing page](https://trevs.site/motd/).
 - **Multi-network** — several networks over one bouncer connection (`soju.im/bouncer-networks`)
 - **Push or persistent socket** — UnifiedPush + `soju.im/webpush` with on-device decryption, or a foreground service
 - **Modern composer** — nick autocomplete, replies, typing indicators, and editable slash-command chips with described suggestions
-- **Message actions** — compact labeled icon grid, quick reactions, and the native full emoji picker with categories, recents, and long-press variants; Share still opens Android system sharing
+- **Message actions** — compact labeled icon grid, quick reactions, and the native full emoji picker with touch scrolling, light/dark-aware categories, recents, and long-press variants; Share still opens Android system sharing
 - **Forward messages** — choose an existing chat on a Ready network and review the exact plain-text quotation before sending. “Include sender” is checked by default and optional; visible `> ` markers keep commands literal. Source and destination drafts stay untouched; saved-but-unsent messages are retried from destination history, not resent by the popup.
 - **Read incoming chats aloud** — opt-in Android TTS with installed voice choices, speed, pitch, and message gap in Settings → Chat → Voice and audio → TTS Reader; previous, pause/resume, skip, latest, and stop controls; previews never enable chat reading
 - **CTCP VERSION** — identifies motd and the running app version when a request reaches the client

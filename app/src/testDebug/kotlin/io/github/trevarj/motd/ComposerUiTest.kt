@@ -47,6 +47,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.core.content.FileProvider
+import androidx.emoji2.emojipicker.EmojiPickerView
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ComposerStyle
@@ -54,6 +55,13 @@ import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.IrcTextStyle
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
+import io.github.trevarj.motd.ui.chat.assertNativeEmojiCategoryVisible
+import io.github.trevarj.motd.ui.chat.findNativeEmoji
+import io.github.trevarj.motd.ui.chat.nativeEmojiPicker
+import io.github.trevarj.motd.ui.chat.pickNativeEmojiVariant
+import io.github.trevarj.motd.ui.chat.swipeNativeEmojiBody
+import io.github.trevarj.motd.ui.chat.tapNativeEmojiCategory
+import io.github.trevarj.motd.ui.chat.touchNativeEmojiView
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
@@ -62,6 +70,8 @@ import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -152,36 +162,71 @@ class ComposerUiTest {
     }
 
     @Test
+    @Config(sdk = [35], qualifiers = "en-w411dp-h891dp")
     fun emojiPicker_reopensWithTheRetainedPicker() {
+        val draft = mutableStateOf(TextFieldValue("draft", TextRange(5)))
+        val reply = ComposerReply("alice", "parent")
+        var sends = 0
         compose.setContent {
             MotdTheme {
                 Composer(
-                    value = TextFieldValue("draft"),
-                    onValueChange = {},
-                    onSend = {},
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = { sends++ },
                     enabled = true,
+                    reply = reply,
                 )
             }
         }
 
         compose.onNodeWithTag("chat_composer_tools").performClick()
         compose.onNodeWithTag("chat_composer_emoji").performClick()
-        compose.waitForIdle()
-        compose.onNodeWithTag("chat_composer_emoji_grid").assertExists()
+        val picker = compose.nativeEmojiPicker()
+        val height =
+            compose
+                .onNodeWithTag("chat_composer_emoji_panel")
+                .fetchSemanticsNode()
+                .size.height
+        compose.tapNativeEmojiCategory("FOOD AND DRINK")
+        compose.swipeNativeEmojiBody(upward = true, tagPrefix = "chat_composer")
+        compose.swipeNativeEmojiBody(upward = false, tagPrefix = "chat_composer")
+        compose.runOnIdle {
+            assertEquals(TextFieldValue("draft", TextRange(5)), draft.value)
+            assertEquals(0, sends)
+        }
 
         compose.onNodeWithTag("chat_composer_tools").performClick()
-        compose.waitForIdle()
-        // Retained across the close: reopening reveals the same view instead of re-inflating it and
-        // re-running the async category load that made the picker flash blank.
-        compose.onNodeWithTag("chat_composer_emoji_grid").assertExists()
-
+        compose.onNodeWithTag("chat_composer_emoji_picker").assertIsNotDisplayed()
+        assertEquals(
+            0,
+            compose
+                .onNodeWithTag("chat_composer_emoji_panel")
+                .fetchSemanticsNode()
+                .size.height,
+        )
+        compose.runOnIdle { assertTrue("Closing clips rather than discards the real native picker", picker.isAttachedToWindow) }
         compose.onNodeWithTag("chat_composer_emoji").performClick()
-        compose.waitForIdle()
-        compose.onNodeWithTag("chat_composer_emoji_picker").assertIsDisplayed()
-        compose.onNodeWithTag("chat_composer_emoji_grid").assertExists()
+        val reopenedPicker = compose.nativeEmojiPicker()
+        compose.runOnIdle { assertSame(picker, reopenedPicker) }
+        assertEquals(
+            height,
+            compose
+                .onNodeWithTag("chat_composer_emoji_panel")
+                .fetchSemanticsNode()
+                .size.height,
+        )
+        compose.swipeNativeEmojiBody(upward = true, tagPrefix = "chat_composer")
+        compose.swipeNativeEmojiBody(upward = false, tagPrefix = "chat_composer")
+        compose.onNodeWithText("Replying to alice").assertIsDisplayed()
+
+        compose.touchNativeEmojiView(compose.findNativeEmoji("ANIMALS AND NATURE", "🦑"))
+        compose.pickNativeEmojiVariant("SMILEYS AND EMOTIONS", "👍", "👍🏽", touch = true)
+        compose.onNodeWithTag("chat_composer_field").assertTextEquals("draft🦑👍🏽")
+        compose.runOnIdle { assertEquals("Real native selections insert but never send", 0, sends) }
     }
 
     @Test
+    @Config(sdk = [35], qualifiers = "en-w411dp-h891dp")
     fun emojiPicker_panelHeightComplementsTheImeThroughoutTheAnimation() {
         val imeHeightPx = mutableStateOf(200)
         compose.setContent {
@@ -204,7 +249,8 @@ class ComposerUiTest {
         // Simulated keyboard fall and rise. The panel is measured from the same inset value the
         // ancestor imePadding() consumes, so their sum — the space below the input row — never moves.
         var expectedSumPx = -1
-        listOf(200, 150, 100, 40, 0, 80, 160, 200).forEach { currentImeHeightPx ->
+        var retainedPicker: EmojiPickerView? = null
+        listOf(200, 150, 100, 40, 0, 80, 160, 200, 0).forEach { currentImeHeightPx ->
             compose.runOnIdle { imeHeightPx.value = currentImeHeightPx }
             compose.waitForIdle()
             val panelHeightPx =
@@ -215,7 +261,48 @@ class ComposerUiTest {
                     .height
             val sumPx = panelHeightPx + currentImeHeightPx
             if (expectedSumPx < 0) expectedSumPx = sumPx else assertEquals(expectedSumPx, sumPx)
+            if (currentImeHeightPx == 0) {
+                val picker = compose.nativeEmojiPicker()
+                if (retainedPicker == null) retainedPicker = picker else assertSame(retainedPicker, picker)
+            }
         }
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "en-w411dp-h891dp-night")
+    fun emojiPicker_appliedThemeSwitchRefreshesNativeColorsButOrdinaryReopenRetainsTheView() {
+        val theme = mutableStateOf(ColorThemePreset.LIGHT)
+        var surface = Color.Unspecified
+        compose.setContent {
+            MotdTheme(themePreset = theme.value) {
+                surface = MaterialTheme.colorScheme.surfaceContainerHigh
+                Composer(
+                    value = TextFieldValue("draft"),
+                    onValueChange = { error("Theme/toggle changed the draft") },
+                    onSend = { error("Theme/toggle sent the draft") },
+                    enabled = true,
+                    reply = ComposerReply("alice", "parent"),
+                )
+            }
+        }
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_emoji").performClick()
+        val lightPicker = compose.nativeEmojiPicker()
+        compose.assertNativeEmojiCategoryVisible("FOOD AND DRINK", surface, tagPrefix = "chat_composer")
+
+        compose.runOnIdle { theme.value = ColorThemePreset.DARK }
+        val darkPicker = compose.nativeEmojiPicker()
+        compose.runOnIdle {
+            assertNotSame("Applied light/dark switch recreates native theme-bound views", lightPicker, darkPicker)
+            assertTrue("The obsolete native theme view is removed", !lightPicker.isAttachedToWindow)
+        }
+        compose.assertNativeEmojiCategoryVisible("FOOD AND DRINK", surface, tagPrefix = "chat_composer")
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_emoji").performClick()
+        val reopened = compose.nativeEmojiPicker()
+        compose.runOnIdle { assertSame("Same-theme toggles retain the new native view", darkPicker, reopened) }
+        compose.onNodeWithTag("chat_composer_field").assertTextEquals("draft")
+        compose.onNodeWithText("Replying to alice").assertIsDisplayed()
     }
 
     @Test

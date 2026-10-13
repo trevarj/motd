@@ -171,8 +171,12 @@ import io.github.trevarj.motd.ui.chat.VoiceMessageUiState
 import io.github.trevarj.motd.ui.chat.VoiceRecordingUi
 import io.github.trevarj.motd.ui.chat.clickNativeEmoji
 import io.github.trevarj.motd.ui.chat.externalTranslationText
+import io.github.trevarj.motd.ui.chat.findNativeEmoji
 import io.github.trevarj.motd.ui.chat.pickNativeEmojiVariant
+import io.github.trevarj.motd.ui.chat.swipeNativeEmojiBody
+import io.github.trevarj.motd.ui.chat.tapNativeEmojiCategory
 import io.github.trevarj.motd.ui.chat.timelineMessageTag
+import io.github.trevarj.motd.ui.chat.touchNativeEmojiView
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
@@ -1990,7 +1994,13 @@ class ComposerSendClearUiTest {
         compose.onNodeWithTag("message_more_reactions").performClick()
         compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
         compose.onNodeWithTag("message_reaction_picker").assertIsDisplayed()
-        compose.clickNativeEmoji("ANIMALS AND NATURE", "🦑")
+        compose.tapNativeEmojiCategory("FOOD AND DRINK")
+        compose.swipeNativeEmojiBody(upward = true)
+        compose.swipeNativeEmojiBody(upward = false)
+        compose.onNodeWithTag("message_reaction_picker").assertIsDisplayed()
+        compose.runOnIdle { assertTrue("Bubble → More cell swipes never send/pick a reaction", picked.isEmpty()) }
+        compose.onNodeWithTag("chat_composer_field").assertTextEquals(draft.text)
+        compose.touchNativeEmojiView(compose.findNativeEmoji("ANIMALS AND NATURE", "🦑"))
         compose.onNodeWithTag("message_reaction_picker").assertDoesNotExist()
         compose.onNodeWithTag("chat_composer_field").assertTextEquals(draft.text)
         compose.onNodeWithText("Replying to me").assertIsDisplayed()
