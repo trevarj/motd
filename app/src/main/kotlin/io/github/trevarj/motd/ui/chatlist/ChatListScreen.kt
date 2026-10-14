@@ -10,6 +10,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -36,6 +37,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -45,6 +47,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -80,6 +83,7 @@ import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Unarchive
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -113,6 +117,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -152,7 +157,9 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -189,7 +196,6 @@ import io.github.trevarj.motd.ui.components.AudioPlaybackViewModel
 import io.github.trevarj.motd.ui.components.EmptyState
 import io.github.trevarj.motd.ui.components.FolderIcon
 import io.github.trevarj.motd.ui.components.HistoryIncompleteBadge
-import io.github.trevarj.motd.ui.components.HistorySyncSpinner
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.SenderLabel
@@ -243,9 +249,6 @@ fun ChatListScreen(
     val recoveringActivityIds by viewModel.recoveringActivityIds.collectAsStateWithLifecycle()
     val networkActivity by viewModel.networkActivity.collectAsStateWithLifecycle()
     val hasUnseenNetworkActivity by viewModel.hasUnseenNetworkActivity.collectAsStateWithLifecycle()
-    val networkActivityBannerHidden by viewModel.networkActivityBannerHidden.collectAsStateWithLifecycle()
-    val connectionNoticeVisible by viewModel.connectionNoticeVisible.collectAsStateWithLifecycle()
-    val connectionOnlyNoticeVisible by viewModel.connectionOnlyNoticeVisible.collectAsStateWithLifecycle()
     val nickSuggestions by viewModel.nickSuggestions.collectAsStateWithLifecycle()
 
     // Fresh installs enter onboarding once state is loaded; a durable skip keeps the empty main UI.
@@ -272,12 +275,8 @@ fun ChatListScreen(
         recoveringActivityIds = recoveringActivityIds,
         networkActivity = networkActivity,
         hasUnseenNetworkActivity = hasUnseenNetworkActivity,
-        networkActivityBannerHidden = networkActivityBannerHidden,
-        onHideNetworkActivityBanner = viewModel::hideNetworkActivityBanner,
         onNetworkActivitySeen = viewModel::markNetworkActivitySeen,
         onClearNetworkActivityHistory = viewModel::clearNetworkActivityHistory,
-        connectionNoticeVisible = connectionNoticeVisible,
-        connectionOnlyNoticeVisible = connectionOnlyNoticeVisible,
         onActivityAction = { issue, action -> viewModel.networkActivityAction(issue, action, onOpenBuffer, onOpenNetworkSettings) },
         onActivityNetworkAction = { id, action -> viewModel.networkActivityNetworkAction(id, action, onOpenBuffer, onOpenNetworkSettings) },
         titleConnecting = titleConnecting,
@@ -420,12 +419,8 @@ fun ChatListContent(
     onNickSuggestionQuery: (Long?, String) -> Unit = { _, _ -> },
     networkActivity: NetworkActivityState = NetworkActivityState(),
     hasUnseenNetworkActivity: Boolean = false,
-    networkActivityBannerHidden: Boolean = false,
-    onHideNetworkActivityBanner: () -> Unit = {},
     onNetworkActivitySeen: () -> Unit = {},
     onClearNetworkActivityHistory: () -> Unit = {},
-    connectionNoticeVisible: Boolean = false,
-    connectionOnlyNoticeVisible: Boolean = connectionNoticeVisible,
     onActivityAction: (NetworkActivityIssue, NetworkActivityAction) -> Unit = { _, _ -> },
     onActivityNetworkAction: (Long, NetworkActivityAction) -> Unit = { _, _ -> },
 ) {
@@ -438,7 +433,7 @@ fun ChatListContent(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showActivitySheet by remember { mutableStateOf(false) }
     val activitySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val showNewNetworkActivity = networkActivityBannerHidden && hasUnseenNetworkActivity && networkActivity.unacknowledgedCount > 0
+    val showNewNetworkActivity = hasUnseenNetworkActivity && networkActivity.unacknowledgedCount > 0
     val newNetworkActivityDescription = stringResource(R.string.network_activity_new)
     val networkActivityMenuTitle = stringResource(if (showNewNetworkActivity) R.string.network_activity_title_new else R.string.network_activity_title)
 
@@ -495,6 +490,14 @@ fun ChatListContent(
             archiveMode = archiveMode,
             scoped = state.selectedNetworkName != null,
         )
+    val titleSyncing = (syncChrome as? ChatListSyncChrome.Syncing)?.takeUnless { archiveMode || invitationMode }
+    val titleIssueCount =
+        networkActivity.active.count {
+            !it.acknowledged && (!(archiveMode || invitationMode) || it.kind == NetworkActivityKind.CONNECTION)
+        }
+    val showTitleStatus = titleIssueCount > 0 || titleConnecting || titleSyncing != null
+    val titleActivityVisibility = remember { MutableTransitionState(showTitleStatus) }
+    val compactDefaultTitle = showTitleStatus || titleActivityVisibility.currentState || !titleActivityVisibility.isIdle
     // Exit latches: the selection empties and the scope name nulls on the same frame their mode
     // leaves, so the outgoing top-bar/chip content holds the last real value while it fades.
     var lastSelectedRows by remember { mutableStateOf(listOf<ChatListRow>()) }
@@ -624,50 +627,67 @@ fun ChatListContent(
                 ChatListTopBar(
                     modifier = Modifier.testTag(if (selectionActive) "chatlist_selection_top_app_bar" else "chatlist_top_app_bar"),
                     title = {
-                        AnimatedContent(
-                            targetState = topBarMode,
-                            transitionSpec = {
-                                // Cross-fade only; using(null) drops the default SizeTransform so
-                                // the bar never pumps when the title width changes.
-                                (fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)).using(null)
-                            },
-                            label = "chatlist_top_bar_title",
-                        ) { mode ->
-                            when (mode) {
-                                ChatListTopBarMode.SELECTION -> {
-                                    // Never wrap: a growing action row must shrink this font instead
-                                    // of pushing the count to multiple lines and blowing out the bar's
-                                    // height. Ellipsis is only the last-resort floor once even the
-                                    // smallest step can't fit (e.g. a huge selected count on a tiny
-                                    // screen).
-                                    Text(
-                                        pluralStringResource(R.plurals.chatlist_selected_count, lastSelectedRows.size, lastSelectedRows.size),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        autoSize = TextAutoSize.StepBased(minFontSize = 14.sp, maxFontSize = 22.sp),
-                                    )
-                                }
+                        Box(Modifier.fillMaxWidth().testTag("chatlist_header")) {
+                            Column {
+                                AnimatedContent(
+                                    targetState = topBarMode,
+                                    transitionSpec = {
+                                        // Only contextual mode changes cross-fade; title hosts retain their geometry.
+                                        (fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)).using(null)
+                                    },
+                                    label = "chatlist_top_bar_title",
+                                ) { mode ->
+                                    when (mode) {
+                                        ChatListTopBarMode.SELECTION -> {
+                                            // Keep the count on one line even when the action row grows.
+                                            Text(
+                                                pluralStringResource(R.plurals.chatlist_selected_count, lastSelectedRows.size, lastSelectedRows.size),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                autoSize = TextAutoSize.StepBased(minFontSize = 14.sp, maxFontSize = 22.sp),
+                                                modifier = Modifier.testTag("chatlist_selection_title"),
+                                            )
+                                        }
 
-                                ChatListTopBarMode.INVITATIONS -> {
-                                    Text(text = stringResource(R.string.chatlist_invitations), fontWeight = FontWeight.Bold)
-                                }
+                                        ChatListTopBarMode.INVITATIONS -> {
+                                            Text(text = stringResource(R.string.chatlist_invitations), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
 
-                                ChatListTopBarMode.ARCHIVE -> {
-                                    Text(text = stringResource(R.string.chatlist_archived_chats), fontWeight = FontWeight.Bold)
-                                }
+                                        ChatListTopBarMode.ARCHIVE -> {
+                                            Text(text = stringResource(R.string.chatlist_archived_chats), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
 
-                                // Scoped: show the network name so the active filter is legible.
-                                ChatListTopBarMode.SCOPED -> {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(text = lastScopeName, fontWeight = FontWeight.Bold)
-                                        ChatListTitleConnectingSpinner(visible = titleConnecting)
+                                        ChatListTopBarMode.SCOPED -> {
+                                            Text(text = lastScopeName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("chatlist_title"))
+                                        }
+
+                                        ChatListTopBarMode.DEFAULT -> {
+                                            // ponytail: measure the full title even while its visible glyphs move/compact.
+                                            Text(
+                                                text = stringResource(R.string.app_name),
+                                                style = MaterialTheme.typography.titleLarge,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.alpha(0f).clearAndSetSemantics {},
+                                            )
+                                        }
                                     }
                                 }
-
-                                // Use the platform typography instead of the stylized brand asset here.
-                                ChatListTopBarMode.DEFAULT -> {
-                                    ChatListDefaultTitle(titleConnecting)
-                                }
+                                ChatListTitleActivityStatus(
+                                    connecting = titleConnecting,
+                                    syncing = titleSyncing,
+                                    issueCount = titleIssueCount,
+                                    compact = selectionActive,
+                                    visibilityState = titleActivityVisibility,
+                                )
+                            }
+                            if (topBarMode == ChatListTopBarMode.DEFAULT) {
+                                // Keep the compact title above outgoing status until its native fade has finished.
+                                ChatListDefaultTitle(
+                                    showStatus = compactDefaultTitle,
+                                    modifier = Modifier.align(if (compactDefaultTitle) Alignment.TopStart else Alignment.CenterStart),
+                                )
                             }
                         }
                     },
@@ -934,17 +954,6 @@ fun ChatListContent(
         ) { padding ->
             Box(modifier = Modifier.fillMaxSize().padding(padding)) {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    if (!networkActivityBannerHidden) {
-                        NetworkActivityBanner(
-                            activity = networkActivity,
-                            chrome = syncChrome,
-                            connectionNoticeVisible = if (archiveMode || invitationMode) connectionOnlyNoticeVisible else connectionNoticeVisible,
-                            includeHistory = !archiveMode && !invitationMode,
-                            onInspect = ::inspectNetworkActivity,
-                            onHide = onHideNetworkActivityBanner,
-                        )
-                    }
-
                     // Active-scope chip: keeps the filter discoverable/escapable without the drawer.
                     AnimatedVisibility(
                         visible = state.selectedNetworkId != null,
@@ -1112,6 +1121,7 @@ fun ChatListContent(
         }
         NetworkActivitySheet(
             activity = networkActivity,
+            syncChrome = syncChrome,
             sheetState = activitySheetState,
             onDismiss = { showActivitySheet = false },
             onIssueAction = { issue, action ->
@@ -2833,49 +2843,152 @@ internal fun SelectableChatListRow(
     }
 }
 
-const val CHAT_LIST_TITLE_CONNECTING_TAG = "chatlist_title_connecting"
+const val CHAT_LIST_TITLE_ACTIVITY_TAG = "chatlist_title_activity"
+const val CHAT_LIST_TITLE_PROGRESS_TAG = "chatlist_title_progress"
+const val CHAT_LIST_TITLE_STATUS_TEXT_TAG = "chatlist_title_status_text"
+const val CHAT_LIST_TITLE_ATTENTION_TAG = "chatlist_title_attention"
 
 @Composable
-internal fun ChatListDefaultTitle(titleConnecting: Boolean) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = stringResource(R.string.app_name),
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.testTag("chatlist_title"),
-        )
-        ChatListTitleConnectingSpinner(visible = titleConnecting)
-    }
-}
-
-/**
- * The title's socket-establishment cue, in the chat title's `ChatTitleSyncSpinner` shape: a trailing 12 dp
- * ring that fades beside the title text, never over the list. The text keeps its position — the
- * cue only occupies trailing space, so appearing and settling shift no layout the reader is using.
- *
- * [visible] is the presenter-resolved value from [TitleConnectingPresenter], so this composable
- * carries no timing of its own — a sub-grace reconnect never reaches it. No liveRegion, matching
- * the chat title's spinner: reconnects recur, and announcing each would spam TalkBack; the
- * NetworkActivityBanner remains the announcing surface for connection trouble.
- */
-@Composable
-internal fun ChatListTitleConnectingSpinner(
-    visible: Boolean,
+internal fun ChatListDefaultTitle(
+    showStatus: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    AnimatedVisibility(
-        visible = visible,
-        modifier = modifier,
-        enter = fadeIn(MotdMotion.microFadeIn),
-        exit = fadeOut(MotdMotion.microFadeOut),
-    ) {
-        HistorySyncSpinner(
-            contentDescription = stringResource(R.string.chatlist_title_connecting),
-            // Padding inside the visibility scope so a settled connection leaves no gap.
-            modifier =
-                Modifier
-                    .padding(start = 8.dp)
-                    .testTag(CHAT_LIST_TITLE_CONNECTING_TAG),
+    Text(
+        text = stringResource(R.string.app_name),
+        style = if (showStatus) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier.testTag("chatlist_title"),
+    )
+}
+
+/** A permanently measured subtitle keeps title/action/list geometry independent of activity. */
+@Composable
+internal fun ChatListTitleActivityStatus(
+    connecting: Boolean,
+    syncing: ChatListSyncChrome.Syncing?,
+    issueCount: Int = 0,
+    compact: Boolean = false,
+    visibilityState: MutableTransitionState<Boolean> = remember { MutableTransitionState(false) },
+) {
+    val hasIssues = issueCount > 0
+    val knownSync = syncing?.takeIf { it.total > 0 }
+    val attention = hasIssues && knownSync == null
+    val issueLabel = pluralStringResource(R.plurals.network_activity_issue_count, issueCount, issueCount)
+    val issueHeadline = stringResource(R.string.network_activity_issues)
+    val connectingLabel = stringResource(R.string.network_activity_connecting)
+    val syncingLabel = stringResource(R.string.network_activity_syncing)
+    val label =
+        when {
+            knownSync != null -> syncingLabel
+            hasIssues -> issueHeadline
+            connecting -> connectingLabel
+            syncing != null -> syncingLabel
+            else -> null
+        }
+    val progress = knownSync?.let { (it.done.toFloat() / it.total).coerceIn(0f, 1f) }
+    // Use integer counts, not the rounded ring fraction: near-complete work must not say 100%.
+    val percentage = knownSync?.let { (it.done.toLong().coerceIn(0L, it.total.toLong()) * 100L / it.total).toInt() }
+    val text =
+        when {
+            percentage != null -> stringResource(R.string.chatlist_sync_progress, percentage)
+            hasIssues -> issueLabel
+            else -> label
+        }
+    val warningOnly = hasIssues && !connecting && syncing == null
+    var lastText by remember { mutableStateOf("") }
+    var lastProgress by remember { mutableStateOf<Float?>(null) }
+    var lastWarningOnly by remember { mutableStateOf(false) }
+    var lastAttention by remember { mutableStateOf(false) }
+    SideEffect {
+        if (text != null) {
+            lastText = text
+            lastProgress = progress
+            lastWarningOnly = warningOnly
+            lastAttention = attention
+        }
+    }
+    val displayedText = text ?: lastText
+    val displayedProgress = if (label != null) progress else lastProgress
+    val displayedWarningOnly = if (label != null) warningOnly else lastWarningOnly
+    val displayedAttention = if (label != null) attention else lastAttention
+    val textStyle = MaterialTheme.typography.bodySmall
+    val cueTopInset = maxOf(0.dp, (with(LocalDensity.current) { textStyle.lineHeight.toDp() } - 12.dp) / 2f)
+    val placeholderModifier = Modifier.alpha(0f).clearAndSetSemantics {}
+    Box(Modifier.fillMaxWidth()) {
+        // ponytail: native maximum-headline measurement, not activity, owns subtitle height.
+        Spacer(Modifier.size(12.dp).clearAndSetSemantics {})
+        if (compact) {
+            // Selection keeps all four actions and a readable native cue, not squeezed text.
+            Text(" ", style = textStyle, maxLines = 1, modifier = placeholderModifier)
+        } else {
+            Box(Modifier.fillMaxWidth().padding(start = 16.dp)) {
+                // Wrapping is intentional at accessible font scales; never cap/shrink the font/count.
+                // Reserve the native count envelope, not the currently displayed digit count.
+                Text(pluralStringResource(R.plurals.network_activity_issue_count, 1, 1), style = textStyle, modifier = placeholderModifier)
+                Text(pluralStringResource(R.plurals.network_activity_issue_count, Int.MAX_VALUE, Int.MAX_VALUE), style = textStyle, modifier = placeholderModifier)
+                Text(connectingLabel, style = textStyle, modifier = placeholderModifier)
+                Text(stringResource(R.string.chatlist_sync_progress, 100), style = textStyle, modifier = placeholderModifier)
+            }
+        }
+        // Only this stable sibling announces the headline; percentage/range/count changes aren't live.
+        Box(
+            Modifier
+                .matchParentSize()
+                .testTag(CHAT_LIST_TITLE_ACTIVITY_TAG)
+                .clearAndSetSemantics {
+                    if (label != null) {
+                        contentDescription = label
+                        liveRegion = LiveRegionMode.Polite
+                    }
+                },
         )
+        visibilityState.targetState = label != null
+        AnimatedVisibility(
+            visibleState = visibilityState,
+            modifier = Modifier.matchParentSize(),
+            enter = fadeIn(MotdMotion.microFadeIn),
+            exit = fadeOut(MotdMotion.microFadeOut),
+        ) {
+            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.Top) {
+                // Keep the cue beside the first text line, even when the reserved subtitle wraps.
+                val cueModifier = Modifier.padding(top = cueTopInset).size(12.dp)
+                val cueColor = if (displayedAttention) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                if (displayedWarningOnly) {
+                    Icon(
+                        Icons.Outlined.Warning,
+                        contentDescription = if (label != null) issueLabel else null,
+                        tint = cueColor,
+                        modifier = cueModifier.testTag(CHAT_LIST_TITLE_ATTENTION_TAG).then(if (label == null) Modifier.clearAndSetSemantics {} else Modifier),
+                    )
+                } else {
+                    val ringModifier =
+                        cueModifier
+                            .testTag(CHAT_LIST_TITLE_PROGRESS_TAG)
+                            .then(if (attention) Modifier.semantics { contentDescription = issueLabel } else Modifier)
+                            .then(if (label == null) Modifier.clearAndSetSemantics {} else Modifier)
+                    if (displayedProgress == null) {
+                        CircularProgressIndicator(color = cueColor, strokeWidth = 2.dp, modifier = ringModifier)
+                    } else {
+                        CircularProgressIndicator(progress = { displayedProgress }, color = cueColor, strokeWidth = 2.dp, modifier = ringModifier)
+                    }
+                }
+                if (!compact) {
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = displayedText,
+                        style = textStyle,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier =
+                            Modifier.weight(1f).fillMaxHeight().testTag(CHAT_LIST_TITLE_STATUS_TEXT_TAG).then(
+                                // The stable headline/counted cue/native range speak this without duplicate text.
+                                if (label == null) Modifier.clearAndSetSemantics {} else Modifier.semantics { hideFromAccessibility() },
+                            ),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -2892,11 +3005,20 @@ private fun ChatListTopBar(
             containerColor = MaterialTheme.colorScheme.surface,
             scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         )
+    var titleHeightPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    val expandedHeight = maxOf(TopAppBarDefaults.TopAppBarExpandedHeight, with(density) { titleHeightPx.toDp() } + 16.dp)
     TopAppBar(
         modifier = modifier,
-        title = title,
+        title = {
+            // Measure natural font/wrapping height independently of the app bar's current height.
+            Box(Modifier.wrapContentHeight(unbounded = true).onSizeChanged { titleHeightPx = it.height }) {
+                title()
+            }
+        },
         navigationIcon = navigationIcon,
         actions = actions,
+        expandedHeight = expandedHeight,
         colors = colors,
     )
 }

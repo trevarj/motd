@@ -240,7 +240,6 @@ class ChatListReadFreshnessTest {
         networks: NetworkRepository = FakeNetworkRepository(),
         buffers: BufferRepository = FakeBufferRepository(rows, invitations),
         resync: HistoryResyncController? = null,
-        bannerSession: NetworkActivityBannerSession = NetworkActivityBannerSession(),
     ) = ChatListViewModel(
         bufferRepository = buffers,
         networkRepository = networks,
@@ -290,7 +289,6 @@ class ChatListReadFreshnessTest {
         dickordLabsPrefs = fakeDickordLabsPrefs(dickordEnabled),
         savedStateHandle = SavedStateHandle(),
         appVisibility = visibility,
-        networkActivityBannerSession = bannerSession,
     )
 
     private fun unreadRow(count: Int) =
@@ -455,7 +453,7 @@ class ChatListReadFreshnessTest {
         }
 
     @Test
-    fun bannerHideSharesProcessOwnerWhileQueuesAndSeenStayEntryLocal() =
+    fun queuesAndSeenWatermarksStayNavigationEntryLocal() =
         runTest {
             val network = NetworkEntity(id = 1, name = "Libera", role = NetworkRole.DIRECT, host = "irc.test", port = 6697, nick = "me", username = "me", realname = "Me")
             val networks =
@@ -465,19 +463,16 @@ class ChatListReadFreshnessTest {
             val connections = FakeConnectionManager()
             connections.connectionStates.value = mapOf(1L to IrcClientState.Failed("first cause", false))
             val visibility = FakeAppVisibility(true)
-            val session = NetworkActivityBannerSession()
             val models = mutableListOf<ChatListViewModel>()
 
-            fun entry(owner: NetworkActivityBannerSession): ChatListViewModel = vm(flowOf(emptyList()), visibility, connections = connections, networks = networks, bannerSession = owner).also(models::add)
+            fun entry(): ChatListViewModel = vm(flowOf(emptyList()), visibility, connections = connections, networks = networks).also(models::add)
             try {
-                val first = entry(session)
-                val second = entry(session)
+                val first = entry()
+                val second = entry()
                 runCurrent()
-                assertEquals(false, first.networkActivityBannerHidden.value)
                 assertEquals(true, first.hasUnseenNetworkActivity.value)
-                first.hideNetworkActivityBanner()
+                first.markNetworkActivitySeen()
                 runCurrent()
-                assertEquals(true, second.networkActivityBannerHidden.value)
                 assertEquals(false, first.hasUnseenNetworkActivity.value)
                 assertEquals(true, second.hasUnseenNetworkActivity.value)
                 assertEquals(1, first.networkActivity.value.unacknowledgedCount)
@@ -488,16 +483,11 @@ class ChatListReadFreshnessTest {
                 runCurrent()
                 visibility.set(true)
                 connections.connectionStates.value = mapOf(1L to IrcClientState.Failed("later cause", true))
-                val recreated = entry(session)
-                val freshProcess = entry(NetworkActivityBannerSession())
+                val recreated = entry()
                 runCurrent()
-                assertEquals(true, recreated.networkActivityBannerHidden.value)
                 assertEquals(emptyList<NetworkActivityIssue>(), recreated.networkActivity.value.recent)
                 assertEquals(1L, recreated.networkActivity.value.latestAttentionSequence)
                 assertEquals(true, recreated.hasUnseenNetworkActivity.value)
-                assertEquals(false, freshProcess.networkActivityBannerHidden.value)
-                assertEquals(true, freshProcess.connectionNoticeVisible.value)
-                assertEquals(true, freshProcess.hasUnseenNetworkActivity.value)
                 assertEquals(1, second.networkActivity.value.recent.size)
             } finally {
                 models.forEach { it.viewModelScope.cancel() }

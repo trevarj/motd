@@ -212,7 +212,6 @@ class ChatListViewModel
         private val savedStateHandle: SavedStateHandle,
         private val appVisibility: AppVisibility,
         bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
-        private val networkActivityBannerSession: NetworkActivityBannerSession = NetworkActivityBannerSession(),
     ) : ViewModel() {
         init {
             // The coordinator is process-scoped and observes persisted pending closes, so creating a
@@ -230,7 +229,6 @@ class ChatListViewModel
         private val networkActivityLedger = NetworkActivityLedger()
         private val _networkActivity = MutableStateFlow(NetworkActivityState())
         val networkActivity: StateFlow<NetworkActivityState> = _networkActivity.asStateFlow()
-        val networkActivityBannerHidden: StateFlow<Boolean> = networkActivityBannerSession.hidden
         private val seenNetworkActivitySequence = MutableStateFlow(0L)
         val hasUnseenNetworkActivity: StateFlow<Boolean> =
             combine(networkActivity, seenNetworkActivitySequence) { activity, seen ->
@@ -239,11 +237,6 @@ class ChatListViewModel
 
         fun markNetworkActivitySeen() {
             seenNetworkActivitySequence.value = networkActivityLedger.latestAttentionSequence
-        }
-
-        fun hideNetworkActivityBanner() {
-            markNetworkActivitySeen()
-            networkActivityBannerSession.hide()
         }
 
         fun clearNetworkActivityHistory() {
@@ -261,7 +254,7 @@ class ChatListViewModel
                 }
             }
 
-        // Aggregate header chrome, debounced so a fast pass never flashes. Engine-owned counts; the
+        // Aggregate activity, debounced so a fast pass never flashes. Engine-owned counts; the
         // driver's clock is elapsed real time, which keeps the windows honest across Doze.
         val syncChrome: StateFlow<ChatListSyncChrome> =
             combine(
@@ -274,8 +267,8 @@ class ChatListViewModel
 
         // Deliberately kept out of the [state] combine: the enum map already defeats a retried
         // Failed's reason-string churn, but folding it into ChatListState would still recompose every
-        // row on any one buffer's sync transition instead of just its own row. Gated by the same
-        // chrome flow as the header so queued rings and the explaining line appear together.
+        // row on any one buffer's sync transition instead of just its own row. The existing
+        // aggregate presenter also gates queued rings without changing per-row waiting cues.
         val syncIndicators: StateFlow<Map<Long, ChatListSyncIndicator>> =
             combine(
                 historyResync.syncStatuses,
@@ -286,17 +279,6 @@ class ChatListViewModel
                 chatListSyncIndicators(statuses, visible).filterNot { (id, indicator) -> id in acknowledgedBuffers && indicator == ChatListSyncIndicator.ERROR }
             }.distinctUntilChanged()
                 .stateIn(viewModelScope, WhileSubscribed(5_000), emptyMap())
-
-        val connectionNoticeVisible: StateFlow<Boolean> =
-            combine(networkActivity, syncChrome, ::Pair)
-                .presentNetworkActivity(SystemClock::elapsedRealtime)
-                .stateIn(viewModelScope, SharingStarted.Eagerly, false)
-
-        val connectionOnlyNoticeVisible: StateFlow<Boolean> =
-            networkActivity
-                .map { it to ChatListSyncChrome.Hidden }
-                .presentNetworkActivity(SystemClock::elapsedRealtime)
-                .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
         init {
             // ponytail: snapshots capture observed failures, not an exhaustive protocol log.

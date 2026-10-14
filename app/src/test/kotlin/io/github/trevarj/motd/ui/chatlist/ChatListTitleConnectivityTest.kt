@@ -30,7 +30,7 @@ class ChatListTitleConnectivityTest {
         assertFalse(titleConnectingSnapshot(emptyMap()))
         assertFalse(titleConnectingSnapshot(mapOf(1L to ready)))
         assertFalse(titleConnectingSnapshot(mapOf(1L to IrcClientState.Disconnected)))
-        // Terminal failures (fatal or the cert-trust park) are the banner's chrome, not progress.
+        // Terminal failures (fatal or the cert-trust park) belong in the inspector, not progress.
         assertFalse(titleConnectingSnapshot(mapOf(1L to IrcClientState.Failed("SASL", fatal = true))))
         assertFalse(titleConnectingSnapshot(mapOf(1L to IrcClientState.Failed("certificate not trusted", fatal = false))))
     }

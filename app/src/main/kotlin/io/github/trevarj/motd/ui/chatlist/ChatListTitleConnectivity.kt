@@ -15,14 +15,10 @@ import kotlinx.coroutines.flow.transformLatest
  *
  * One state on purpose. Connecting, registering, and the backoff wait between retries (the actor
  * republishes Connecting there — see ConnectionActor) all mean the same actionable thing from the
- * list: "sockets are coming up". Everything else is deliberately someone else's chrome:
- *  - a terminal [IrcClientState.Failed] (fatal or awaiting cert trust) is not progress, and
- *    painting a spinner over it would misreport it — the network-activity banner and drawer carry the
- *    reason;
- *  - a plain [IrcClientState.Disconnected] is quiescent (a manually disconnected network), not an
- *    episode;
- *  - history sync already has the unified activity banner and per-row badges; repeating it in the title
- *    would be a second spinner for the same fact.
+ * list: "sockets are coming up". Terminal failures are not progress: the inspector and drawer
+ * carry their reasons, while the overflow attention cue makes unseen issues discoverable.
+ * A plain [IrcClientState.Disconnected] is quiescent, not an episode. History sync is presented
+ * independently by syncChrome; Connecting takes precedence in the shared title activity slot.
  *
  * The predicate is the one the status notification's `statusNotificationShape` already uses for
  * its "reconnecting" wording, minus that shape's connected==0 collapse: the notification hides
@@ -44,7 +40,7 @@ internal fun titleConnectingSnapshot(
 
 /**
  * Anti-flash windows for the title cue, in exactly [SyncChromePresenter]'s shape and on its
- * constants, so the title and the sync header one row below share one timing vocabulary:
+ * constants, so connection and history activity share one timing vocabulary:
  *
  * - The cue may not appear until it has been wanted for [SYNC_CHROME_APPEARANCE_DELAY_MS]
  *   continuously — a reconnect that resolves inside the window (the healthy-socket common case,
@@ -53,10 +49,6 @@ internal fun titleConnectingSnapshot(
  *   immediately after, so a flapping connection reads as one steady episode instead of a strobe.
  * - A re-connect that begins during the minimum-visible hold continues the same episode: the cue
  *   simply stays up, with no fresh appearance moment.
- *
- * Not the activity banner's 3 s grace on purpose: the banner interrupts with a full-width line and
- * earns a long fuse, while this is a 12 dp glyph after the title — cheap enough to tell the truth
- * early, which is the point during a multi-second bouncer bring-up.
  */
 internal class TitleConnectingPresenter {
     private var candidate = false

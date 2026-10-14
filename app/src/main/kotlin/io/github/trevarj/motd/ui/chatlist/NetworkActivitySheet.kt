@@ -1,6 +1,5 @@
 package io.github.trevarj.motd.ui.chatlist
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,16 +10,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.outlined.History
-import androidx.compose.material.icons.outlined.Lan
-import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,11 +24,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
-import androidx.compose.material3.Surface
-import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,172 +38,23 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.dismiss
 import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.HistorySyncStatus
-import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import java.text.DateFormat
 import java.util.Date
-
-/** Inspectable banner with independent visibility control; errors never replace engine progress. */
-@Composable
-fun NetworkActivityBanner(
-    activity: NetworkActivityState,
-    chrome: ChatListSyncChrome,
-    connectionNoticeVisible: Boolean,
-    includeHistory: Boolean,
-    onInspect: () -> Unit,
-    onHide: () -> Unit,
-) {
-    val issues = activity.active.filter { !it.acknowledged && (includeHistory || it.bufferId == null) }
-    val headlineIssue = issues.filter { it.bufferId != null || connectionNoticeVisible || it.fatal }.minWithOrNull(compareByDescending<NetworkActivityIssue> { it.severity }.thenBy { it.episodeId })
-    val connecting = activity.networks.firstOrNull { it.connection == IrcClientState.Connecting || it.connection == IrcClientState.Registering }?.takeIf { connectionNoticeVisible }
-    val sync = chrome.takeIf { includeHistory } ?: ChatListSyncChrome.Hidden
-    val headline =
-        when {
-            headlineIssue != null -> R.string.network_activity_attention
-            connecting != null -> R.string.network_activity_connecting
-            sync is ChatListSyncChrome.Syncing -> R.string.network_activity_syncing
-            else -> return
-        }
-    val inspect = stringResource(R.string.network_activity_open)
-    val dismissState = rememberSwipeToDismissBoxState()
-    var hideRequested by rememberSaveable { mutableStateOf(false) }
-    val hide = {
-        if (!hideRequested) {
-            hideRequested = true
-            onHide()
-        }
-    }
-    val hideLabel = stringResource(R.string.network_activity_hide_banner)
-    SwipeToDismissBox(
-        state = dismissState,
-        backgroundContent = {},
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-        onDismiss = { hide() },
-    ) {
-        Surface(
-            shape = MotdShapes.card,
-            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp)
-                    .testTag("chatlist_status_banner")
-                    .clickable(role = Role.Button, onClickLabel = inspect, onClick = onInspect)
-                    .semantics {
-                        contentDescription = inspect
-                        dismiss(hideLabel) {
-                            hide()
-                            true
-                        }
-                    },
-        ) {
-            Row(
-                Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(
-                    when (headline) {
-                        R.string.network_activity_attention -> Icons.Outlined.Warning
-                        R.string.network_activity_connecting -> Icons.Outlined.Lan
-                        else -> Icons.Outlined.History
-                    },
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp).testTag("chatlist_status_glyph"),
-                    tint = if (headlineIssue != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        stringResource(R.string.network_activity_title),
-                        modifier = Modifier.testTag("chatlist_status_title"),
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    // Keep changing status separate from the static title, badge and progress.
-                    Text(
-                        stringResource(headline),
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .testTag("chatlist_status_label")
-                                .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (sync is ChatListSyncChrome.Syncing) {
-                    val progressLabel = stringResource(R.string.network_activity_history_sync_progress)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Icon(
-                            Icons.Outlined.History,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp).testTag("chatlist_status_progress_history"),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        LinearProgressIndicator(
-                            // Preserve the engine contract: a pass with no known total starts at zero.
-                            progress = { if (sync.total > 0) (sync.done.toFloat() / sync.total).coerceIn(0f, 1f) else 0f },
-                            modifier =
-                                Modifier
-                                    .width(28.dp)
-                                    .height(2.dp)
-                                    .testTag("chatlist_status_progress")
-                                    .semantics { contentDescription = progressLabel },
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f),
-                            strokeCap = StrokeCap.Round,
-                            gapSize = 0.dp,
-                            drawStopIndicator = {},
-                        )
-                    }
-                }
-                if (issues.isNotEmpty()) {
-                    val issueCount = pluralStringResource(R.plurals.network_activity_issue_count, issues.size, issues.size)
-                    Surface(
-                        shape = MotdShapes.pill,
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        modifier =
-                            Modifier
-                                .testTag("chatlist_status_issue_count")
-                                .clearAndSetSemantics { contentDescription = issueCount },
-                    ) {
-                        Text(
-                            issues.size.toString(),
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NetworkActivitySheet(
     activity: NetworkActivityState,
+    syncChrome: ChatListSyncChrome,
     sheetState: SheetState,
     onDismiss: () -> Unit,
     onIssueAction: (NetworkActivityIssue, NetworkActivityAction) -> Unit,
@@ -223,13 +65,14 @@ fun NetworkActivitySheet(
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, modifier = Modifier.testTag("network_activity_sheet")) {
         SheetSystemBars()
-        NetworkActivitySheetContent(activity, onDismiss, onIssueAction, onConnect, onSettings, onServerMessages, onClearRecent)
+        NetworkActivitySheetContent(activity, syncChrome, onDismiss, onIssueAction, onConnect, onSettings, onServerMessages, onClearRecent)
     }
 }
 
 @Composable
 internal fun NetworkActivitySheetContent(
     activity: NetworkActivityState,
+    syncChrome: ChatListSyncChrome,
     onDismiss: () -> Unit,
     onIssueAction: (NetworkActivityIssue, NetworkActivityAction) -> Unit,
     onConnect: (Long) -> Unit,
@@ -256,6 +99,27 @@ internal fun NetworkActivitySheetContent(
             }
         }
         item { ActivityHeading(stringResource(R.string.network_activity_current)) }
+        if (syncChrome is ChatListSyncChrome.Syncing) {
+            item {
+                val progressLabel = stringResource(R.string.network_activity_history_sync_progress)
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(progressLabel, style = MaterialTheme.typography.bodySmall)
+                    LinearProgressIndicator(
+                        // Unknown engine totals retain zero rather than inventing a percentage.
+                        progress = { if (syncChrome.total > 0) (syncChrome.done.toFloat() / syncChrome.total).coerceIn(0f, 1f) else 0f },
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .testTag("network_activity_history_progress")
+                                .semantics { contentDescription = progressLabel },
+                        strokeCap = StrokeCap.Round,
+                        gapSize = 0.dp,
+                        drawStopIndicator = {},
+                    )
+                }
+            }
+        }
         items(activity.networks, key = { "network_${it.id}" }) { network ->
             ActivityNetwork(network, onConnect, onSettings, onServerMessages)
         }

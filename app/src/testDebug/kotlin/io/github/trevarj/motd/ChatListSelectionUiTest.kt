@@ -52,7 +52,6 @@ import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.ui.chatlist.ArchiveAccessibilityAnnouncement
 import io.github.trevarj.motd.ui.chatlist.ArchiveFolderPull
 import io.github.trevarj.motd.ui.chatlist.ChatListContent
-import io.github.trevarj.motd.ui.chatlist.ChatListDefaultTitle
 import io.github.trevarj.motd.ui.chatlist.ChatListInvitation
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
 import io.github.trevarj.motd.ui.chatlist.ChatListState
@@ -301,22 +300,6 @@ class ChatListSelectionUiTest {
         compose.onNodeWithText("FOOLS (1)").performClick()
         assertEquals(0, compose.onAllNodesWithTag("chatlist_row_1").fetchSemanticsNodes().size)
         assertEquals(0, compose.onAllNodesWithTag("chatlist_selection_top_app_bar").fetchSemanticsNodes().size)
-    }
-
-    @Test fun unscoped_title_uses_lowercase_text() {
-        compose.setContent {
-            MotdTheme(dynamicColor = false) { ChatListDefaultTitle(titleConnecting = false) }
-        }
-
-        val title =
-            compose
-                .onNodeWithTag("chatlist_title", useUnmergedTree = true)
-                .fetchSemanticsNode()
-                .config[SemanticsProperties.Text]
-                .single()
-                .text
-        assertTrue(title.startsWith("motd"))
-        assertEquals(0, compose.onAllNodesWithText("/motd").fetchSemanticsNodes().size)
     }
 
     @Test fun archive_pull_reveals_while_held_after_early_release_and_cancel_settle_back() {

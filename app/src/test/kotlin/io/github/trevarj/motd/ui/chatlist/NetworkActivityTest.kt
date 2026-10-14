@@ -33,16 +33,6 @@ class NetworkActivityTest {
 
     private fun ready() = IrcClientState.Ready("me", emptySet(), emptyMap())
 
-    @Test fun bannerHideIsOneWayAndFreshProcessOwnerStartsUnhidden() {
-        val session = NetworkActivityBannerSession()
-        assertFalse(session.hidden.value)
-        session.hide()
-        assertTrue(session.hidden.value)
-        session.hide()
-        assertTrue(session.hidden.value)
-        assertFalse(NetworkActivityBannerSession().hidden.value)
-    }
-
     @Test fun attentionSequenceTracksOnlyNewCausesEpisodesAndSeverityRises() {
         assertEquals(0L, observe().latestAttentionSequence)
 
@@ -352,20 +342,6 @@ class NetworkActivityTest {
         assertEquals(2, observed.active.single { it.bufferId == 10L }.occurrences)
         assertEquals(cleared.latestAttentionSequence, observed.latestAttentionSequence)
         assertTrue(observed.recent.isEmpty())
-    }
-
-    @Test fun connectionGraceSurvivesRepresentationsAndWaitingOpensCombinedEpisode() {
-        val presenter = NetworkActivityPresenter()
-        val connecting = NetworkActivityState(networks = listOf(NetworkActivityNetwork(1, "Libera", IrcClientState.Connecting)))
-        assertFalse(presenter.resolve(connecting, ChatListSyncChrome.Hidden, 0))
-        assertEquals(3_000L, presenter.nextDeadline(0))
-        val registering = connecting.copy(networks = listOf(NetworkActivityNetwork(1, "Libera", IrcClientState.Registering)))
-        assertFalse(presenter.resolve(registering, ChatListSyncChrome.Hidden, 2_999))
-        assertTrue(presenter.resolve(registering, ChatListSyncChrome.Hidden, 3_000))
-        assertTrue(presenter.resolve(registering, ChatListSyncChrome.Waiting(2), 3_100))
-        assertTrue(presenter.resolve(connecting, ChatListSyncChrome.Hidden, 3_200))
-        assertFalse(presenter.resolve(NetworkActivityState(), ChatListSyncChrome.Hidden, 3_300))
-        assertFalse(presenter.resolve(connecting, ChatListSyncChrome.Hidden, 3_400))
     }
 
     private fun network(id: Long) = NetworkEntity(id = id, name = "Network $id", role = NetworkRole.DIRECT, host = "irc.test", port = 6697, nick = "me", username = "me", realname = "Me")

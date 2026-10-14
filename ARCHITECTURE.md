@@ -50,7 +50,7 @@ flowchart TD
   go through `ConnectionManager` instead of constructing IRC clients in screens.
 - Fixed theme contrast normalization is cached on demand per preset and text-color
   mode. `SYSTEM`, `LIGHT`, `DARK`, and `AMOLED` never warm the fixed palette catalog.
-- The chat-list Scaffold canvas and chat rows use theme `surface`, matching the top bar's original unscrolled `surface`; its scrolled `surfaceContainerLow` remains unchanged. After any network-activity banner and active-scope chip, folder tabs overlay the scrolling chat viewport on an unpainted, transparent strip; the measured tab-and-pinned-mentions header is reserved only for the list's initial position, so rows can scroll beneath it. A separate `surfaceContainerHigh` capsule carries the tabs, and the selected pill uses the stronger `primary`/`onPrimary` colors.
+- The chat-list Scaffold canvas and chat rows use theme `surface`, matching the top bar's original unscrolled `surface`; its scrolled `surfaceContainerLow` remains unchanged. After the active-scope chip, folder tabs overlay the scrolling chat viewport on an unpainted, transparent strip; the measured tab-and-pinned-mentions header is reserved only for the list's initial position, so rows can scroll beneath it. A separate `surfaceContainerHigh` capsule carries the tabs, and the selected pill uses the stronger `primary`/`onPrimary` colors.
   Selected history-coverage glyphs and advertised-activity dots also use `onPrimary`;
   unselected indicators retain `onSurfaceVariant` and `primary`, respectively.
 - Archive pull hints, the revealed folder and the archive-only route share the chat-card
@@ -71,44 +71,63 @@ flowchart TD
   stays 1:1 through one row, then uses 0.2x resistance with a row-scaled 16dp cap. Settling reuses
   `MotdMotion`'s distance-scaled 200–300ms quintic ease-out. Eligibility loss or pointer-lifecycle
   cancellation resets an unfinished pull; card remeasurement does not.
-- The chat list has one compact, inspectable network-activity banner matching the folder
-  capsule's 8dp horizontal/4dp vertical outer margins and 48dp resting height at normal font
-  scale, independently of compact/comfortable chat-row density. It keeps the shared 16dp
-  card shape, 12dp inner horizontal padding and a compact 24dp glyph without an avatar host.
-  The static localized `Network activity` title uses `bodyMedium` typography (14sp/20sp);
-  one Connecting/Syncing/Needs attention status underneath uses `labelMedium` (12sp/16sp).
-  A 2dp line gap gives 38dp of content with balanced 5dp top/bottom insets in 48dp; minimum rather than fixed
-  height lets larger accessible fonts grow the card. Unacknowledged issues retain a numeric,
-  plural-labeled badge beside the title.
-  The highest-severity, oldest eligible issue wins before visible connection activity and syncing.
-  Waiting alone does not make the card eligible; pending work remains visible as per-network
-  waiting/queued summaries in the global inspector, without changing per-row waiting cues.
-  The card stays on neutral `surfaceContainerHighest`, with only the warning glyph error-tinted.
-  Engine progress remains visible independently of failures: a centered 48dp cue pairs a muted
-  decorative 16dp history glyph, a 4dp gap and a rounded 28dp-wide, 2dp native track.
-  Its localized `History sync progress` label retains native range semantics, without fractions,
-  an end-stop marker, a third text row, or text overlap.
-  Progress is clamped to 0–1; a pass with no known total retains zero progress.
-  No network names, totals, failure reasons or supporting text appear on the banner;
-  detailed network/chat statuses and exact reasons remain in the inspector.
-  Only the changing current-status line announces politely, independently of the static title,
-  issue count and progress. Healthy idle hides; archive/invitations promote
-  connection activity only, while the Material inspector remains global and preserves list modes.
-  Swiping the card in either direction or its labeled accessibility dismiss action latches the
-  process-local `NetworkActivityBannerSession` hidden; tapping still opens the inspector.
-  New issues, navigation entries, progress, rotation and warm Activity relaunch never restore it;
-  a genuinely new process starts unhidden and uses the normal startup/sync eligibility gates.
-  Neither overflow menu offers restoration; the inspector is always available.
-  Hiding acknowledges nothing or changes source state.
-  While hidden, both overflow buttons show a static theme-accent dot for unseen active issues;
-  both inspector menu entries pair a decorative network icon with `Network activity · New`.
-  Hide and every inspector entry baseline a navigation-entry VM-owned attention watermark,
-  without acknowledging or resolving issues. All-active-clear removes the cue even with recent records.
-  Connection-only notices retain their three-second grace; presented history waiting bypasses it.
-  The existing history anti-flash/minimum-visible presenter also gates per-row queued cues.
+- Network/history status lives directly under the contextual title inside the existing chat-list
+  TopAppBar, never in a card, extra full-width stripe or the list's flow. The actual `motd`
+  wordmark uses original `titleLarge`, vertically centered on the native navigation/actions
+  at idle while retaining its start alignment, and `titleMedium` above active status.
+  A native full-size measuring sibling reserves title geometry inside a stable header Box;
+  only the single accessible wordmark's size/placement changes, never subtitle/actions/viewport.
+  Native subtitle visibility keeps the title compact until outgoing status has finished fading,
+  so the restored centered wordmark cannot overlap it. Scoped/context titles and selection
+  actions retain their existing typography.
+  A permanently reserved `bodySmall` subtitle measures the native maximum of localized
+  singular/plural issue labels through `Int.MAX_VALUE` (the representable count bound),
+  Connecting and Syncing History · 100%. Visible text uses identical native wrapping parameters,
+  never count caps, ellipsis, font shrinking or a line cap. At normal font scales the native
+  measurement uses only the necessary extent; accessible fonts/narrow panes may wrap.
+  Natural title-column measurement drives the native app bar's expanded height, with its
+  existing minimum and a small vertical inset, independently of the app bar's current height.
+  Font, width and contextual-mode changes may enlarge the resting header; activity, issue-count
+  digits and percentage changes cannot move actions, header or chat rows. Only default wordmark
+  glyph/layout size and placement change with status; its full-size host and subtitle origin remain fixed.
+  Selection retains all four actions and reserves one actual typography line for a compact
+  native ring/warning cue instead of illegibly squeezed text; its non-live accessible cue
+  exposes the counted issue label when issues own the headline, with details in the inspector.
+  Determinate history (`total > 0`) always wins over issues and Connecting: localized
+  `Syncing History · n%` uses a primary-colored native done/total ring, a clamped fraction and
+  overflow-safe integer-floor percentage, without labeling that ring as an issue.
+  Counts are settled history targets, not bytes/messages. Errors remain untouched in raw state,
+  overflow attention and the inspector; displaying history progress never acknowledges them.
+  Without a positive total, `Network issue (1)` / `Network issues (n)` wins for relevant active
+  unacknowledged episodes, never summed occurrences, distinct networks, recent records or
+  acknowledged tombstones. Then Connecting wins, then indeterminate `Syncing History` if
+  history work exists. An unknown total alone is not an issue and never invents a cause.
+  This policy remains global in default/scoped/selection, independent of the seen watermark;
+  archive/invitations count connection episodes only and omit header history work.
+  Issue-owned cues use theme error; without any live work a small warning replaces the ring,
+  including selection. Selection keeps the same category precedence without adding text/actions.
+  Existing Connecting and aggregate history anti-flash/minimum-visible timing remain;
+  the latter also gates per-row queued cues. Exit retains the last label/ring/warning while
+  contents fade, never changing reserved height. A separate localized polite announcement
+  speaks only the stable category (Network issues/Connecting/Syncing History), never count/percentage
+  ticks. Counted labels stay readable from the non-live native ring/warning cue; changing range
+  remains non-live and visual text is excluded from duplicate accessibility speech.
+  Idle measuring text has no semantics, and headline/text/range clear immediately on idle,
+  with no idle/completion announcement, completion message, snackbar, separate numeric badge
+  or resurrected swipe-hide latch. After exit fades, healthy idle has no text/ring/warning.
+  Details, recovery actions and independently updating aggregate history progress remain
+  in the existing global Material inspector, available in every mode without replacing it.
+  The localized `History sync progress` track keeps native range semantics, clamps engine
+  progress to 0–1 and retains zero for unknown totals; no invented total text is shown.
+  Waiting/queued work remains in per-network summaries without changing per-row waiting cues.
+  Both overflow buttons show a static theme-accent dot for unseen active unacknowledged issues,
+  and their inspector entries pair a decorative network icon with `Network activity · New`.
+  Archive/invitations keep the same always-available inspector action. Every inspector entry
+  baselines the navigation-entry VM-owned seen watermark, without acknowledging or resolving
+  issues. All-active-clear removes attention even with recent records. There is no hide latch.
 - `ChatListViewModel` eagerly captures observed connection/history failures even without screen
-  subscribers. Its issue queue and seen watermark belong to the retained chat-list navigation entry,
-  not the process-wide banner hide latch. A new entry gets a fresh queue/watermark but shares the latch.
+  subscribers. Its issue queue and seen watermark belong to the retained chat-list navigation entry.
+  A new entry gets a fresh queue/watermark; no process-wide presentation state is shared.
   A small in-memory ledger retains one episode per network connection or history source status-map key.
   A different exact cause replaces the prior episode, honestly marked Replaced in newest-first recent
   activity (capped at 20); acknowledged episodes are discarded on replacement or finish.

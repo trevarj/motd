@@ -4,30 +4,6 @@ import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.HistorySyncStatus
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.transformLatest
-import javax.inject.Inject
-import javax.inject.Singleton
-
-/** Manual hide lasts for this process, independently of navigation entries and saved state. */
-@Singleton
-class NetworkActivityBannerSession
-    @Inject
-    constructor() {
-        private val _hidden = MutableStateFlow(false)
-        val hidden = _hidden.asStateFlow()
-
-        fun hide() {
-            _hidden.value = true
-        }
-    }
 
 /** Observed failures only, retained by the chat-list entry's ViewModel, never persisted. */
 enum class NetworkActivityKind { CONNECTION, HISTORY_FAILED, HISTORY_PARTIAL }
@@ -248,43 +224,3 @@ internal class NetworkActivityLedger {
 
     private fun connectionSignature(state: IrcClientState): Any = if (state is IrcClientState.Ready) "ready" else state
 }
-
-internal const val NETWORK_ACTIVITY_CONNECTION_GRACE_MS = 3_000L
-
-/** Keeps connection grace across connecting/registering/retries; presented waiting opens the gate. */
-internal class NetworkActivityPresenter {
-    private var activeSince: Long? = null
-    private var waitingPresented = false
-
-    fun resolve(
-        state: NetworkActivityState,
-        chrome: ChatListSyncChrome,
-        now: Long,
-    ): Boolean {
-        val connectionActive = state.active.any { it.bufferId == null && !it.acknowledged } || state.networks.any { it.connection == IrcClientState.Connecting || it.connection == IrcClientState.Registering }
-        if (!connectionActive && chrome == ChatListSyncChrome.Hidden) {
-            activeSince = null
-            waitingPresented = false
-        }
-        if (connectionActive && activeSince == null) activeSince = now
-        if (chrome is ChatListSyncChrome.Waiting) waitingPresented = true
-        return waitingPresented || state.active.any { it.bufferId == null && !it.acknowledged && it.fatal } || activeSince?.let { now - it >= NETWORK_ACTIVITY_CONNECTION_GRACE_MS } == true
-    }
-
-    fun nextDeadline(now: Long): Long? = activeSince?.plus(NETWORK_ACTIVITY_CONNECTION_GRACE_MS)?.takeIf { !waitingPresented && it > now }
-}
-
-@OptIn(ExperimentalCoroutinesApi::class)
-internal fun Flow<Pair<NetworkActivityState, ChatListSyncChrome>>.presentNetworkActivity(now: () -> Long): Flow<Boolean> =
-    flow {
-        val presenter = NetworkActivityPresenter()
-        emitAll(
-            transformLatest { (state, chrome) ->
-                while (true) {
-                    emit(presenter.resolve(state, chrome, now()))
-                    val deadline = presenter.nextDeadline(now()) ?: break
-                    delay((deadline - now()).coerceAtLeast(0))
-                }
-            }.distinctUntilChanged(),
-        )
-    }

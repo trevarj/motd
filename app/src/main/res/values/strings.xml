@@ -21,8 +21,6 @@
     <string name="network_activity_title">Network activity</string>
     <string name="network_activity_title_new">Network activity · New</string>
     <string name="network_activity_new">New network activity</string>
-    <string name="network_activity_open">Open network activity</string>
-    <string name="network_activity_hide_banner">Hide network activity banner</string>
     <string name="network_activity_history_sync_progress">History sync progress</string>
     <string name="network_activity_close">Close</string>
     <string name="network_activity_current">Networks</string>
@@ -46,15 +44,16 @@
         <item quantity="other">%1$d acknowledged issues still active</item>
     </plurals>
     <plurals name="network_activity_issue_count">
-        <item quantity="one">%1$d issue</item>
-        <item quantity="other">%1$d issues</item>
+        <item quantity="one">Network issue (%1$d)</item>
+        <item quantity="other">Network issues (%1$d)</item>
     </plurals>
+    <string name="network_activity_issues">Network issues</string>
     <string name="network_activity_connecting">Connecting</string>
-    <string name="network_activity_attention">Needs attention</string>
     <string name="network_activity_registering">Registering</string>
     <string name="network_activity_connected">Connected</string>
     <string name="network_activity_offline">Offline</string>
-    <string name="network_activity_syncing">Syncing</string>
+    <string name="network_activity_syncing">Syncing History</string>
+    <string name="chatlist_sync_progress">Syncing History · %1$d%%</string>
     <string name="network_activity_unavailable">History unavailable</string>
     <string name="network_activity_certificate_pending">Certificate decision pending in the security dialog</string>
     <string name="network_activity_connection_issue">Connection failed</string>
@@ -80,7 +79,6 @@
     <string name="network_activity_retry_target">Retry history for %1$s</string>
     <string name="network_activity_acknowledge">Acknowledge</string>
     <string name="network_activity_acknowledge_target">Acknowledge issue for %1$s</string>
-    <string name="chatlist_title_connecting">Connecting</string>
     <string name="chatlist_empty_title">No conversations yet</string>
     <string name="chatlist_empty_message">Connect to a network to start chatting.</string>
     <string name="chatlist_no_networks_title">No networks configured</string>
