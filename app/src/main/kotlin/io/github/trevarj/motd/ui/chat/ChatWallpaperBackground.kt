@@ -112,7 +112,7 @@ fun ChatWallpaperBackground(
             gradientColors(renderedPreset, base, scheme.primary, scheme.secondary, scheme.tertiary, foregrounds)
         }
     // The source PNG carries the anti-alias alpha; intensity controls the ink opacity directly.
-    val pattern = wallpaperInkColor(scheme.onSurfaceVariant, wallpaper.intensity)
+    val pattern = wallpaperInkColor(wallpaper.outlineColor?.let(::Color) ?: scheme.onSurfaceVariant, wallpaper.intensity)
     var gradientCoverage by remember { mutableStateOf(IntSize.Zero) }
 
     Box(

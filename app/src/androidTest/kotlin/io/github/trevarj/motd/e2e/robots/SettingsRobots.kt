@@ -1,7 +1,9 @@
 package io.github.trevarj.motd.e2e.robots
 
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
@@ -9,6 +11,7 @@ import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.AnnotatedString
 
 internal class SettingsRobot(
     compose: ComposeTestRule,
@@ -58,10 +61,25 @@ internal class SettingsRobot(
         click("settings_wallpaper_preset_deep_space")
         scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_intensity")
         compose.onNodeWithTag("settings_wallpaper_intensity").performSemanticsAction(SemanticsActions.SetProgress) { it(80f) }
+        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_outline_color")
+        click("settings_wallpaper_outline_color")
+        compose.onNodeWithTag("settings_wallpaper_color_hex").performScrollTo()
+        replace("settings_wallpaper_color_hex", "#FFFFFF")
+        click("settings_wallpaper_color_apply")
+        awaitTagGone("settings_wallpaper_color_dialog")
         scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_done")
         click("settings_wallpaper_done")
         awaitTagGone("settings_wallpaper_sheet")
         assertDisplayed("settings_wallpaper_picker")
+        // Reopening reads the saved color, not a dialog-local draft.
+        scrollToAndClick("settings_wallpaper_picker")
+        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_outline_color")
+        click("settings_wallpaper_outline_color")
+        compose.onNodeWithTag("settings_wallpaper_color_hex").performScrollTo().assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#FFFFFF")))
+        click("settings_wallpaper_color_cancel")
+        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_done")
+        click("settings_wallpaper_done")
+        awaitTagGone("settings_wallpaper_sheet")
     }
 
     fun returnToRoot() {

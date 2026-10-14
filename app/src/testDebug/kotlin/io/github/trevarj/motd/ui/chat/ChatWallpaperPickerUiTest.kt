@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.chat
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.view.MotionEvent
 import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.ActivityResultRegistryOwner
@@ -17,22 +18,30 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityOptionsCompat
@@ -68,6 +77,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowDialog
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
@@ -113,6 +123,278 @@ class ChatWallpaperPickerUiTest {
     }
 
     @Test
+    fun outlineColorDraftValidatesRestoresAppliesAndCancelsWithoutPrematureWrites() {
+        var current by mutableStateOf(WallpaperSelection())
+        val changes = mutableListOf<WallpaperSelection>()
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatWallpaperPicker(current, onChange = {
+                    current = it
+                    changes += it
+                })
+            }
+        }
+        compose.onNodeWithTag("settings_wallpaper_picker").performClick()
+        reveal("settings_wallpaper_outline_color")
+        val editorScroll =
+            compose
+                .onNodeWithTag("settings_wallpaper_list")
+                .fetchSemanticsNode()
+                .config[SemanticsProperties.VerticalScrollAxisRange]
+                .value()
+        openColor()
+        compose.onNodeWithTag("settings_wallpaper_color_hex").performScrollTo().performTextReplacement("#12GG34")
+        compose.onNodeWithTag("settings_wallpaper_color_apply").assertIsNotEnabled()
+        assertTrue(changes.isEmpty())
+        compose.onNodeWithTag("settings_wallpaper_color_default").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_wallpaper_color_apply").assertIsEnabled()
+        compose.onNodeWithTag("settings_wallpaper_color_cancel").performClick()
+        assertTrue(changes.isEmpty())
+        compose.onNodeWithTag("settings_wallpaper_sheet").assertIsDisplayed()
+        assertEquals(
+            editorScroll,
+            compose
+                .onNodeWithTag("settings_wallpaper_list")
+                .fetchSemanticsNode()
+                .config[SemanticsProperties.VerticalScrollAxisRange]
+                .value(),
+            0.01f,
+        )
+
+        openColor()
+        val defaultPreview =
+            compose
+                .onNodeWithTag("settings_wallpaper_color_preview")
+                .performScrollTo()
+                .captureToImage()
+                .asAndroidBitmap()
+        compose.onNodeWithTag("settings_wallpaper_color_hex").performScrollTo().performTextReplacement("#FF0000")
+        compose.waitUntil(10_000) {
+            !defaultPreview.sameAs(
+                compose
+                    .onNodeWithTag("settings_wallpaper_color_preview")
+                    .performScrollTo()
+                    .captureToImage()
+                    .asAndroidBitmap(),
+            )
+        }
+        val redPreview = compose.onNodeWithTag("settings_wallpaper_color_preview").captureToImage().asAndroidBitmap()
+        compose.onNodeWithTag("settings_wallpaper_color_hex").performScrollTo().performTextReplacement("#0000FF")
+        compose.waitUntil(10_000) {
+            !redPreview.sameAs(
+                compose
+                    .onNodeWithTag("settings_wallpaper_color_preview")
+                    .performScrollTo()
+                    .captureToImage()
+                    .asAndroidBitmap(),
+            )
+        }
+        val bluePreview = compose.onNodeWithTag("settings_wallpaper_color_preview").captureToImage().asAndroidBitmap()
+        var changedPixels = 0
+        var sampleRed = 0
+        var sampleBlue = 0
+        for (x in 0 until redPreview.width) {
+            for (y in 0 until redPreview.height) {
+                val red = redPreview.getPixel(x, y)
+                val blue = bluePreview.getPixel(x, y)
+                if (red != blue) {
+                    assertEquals(red ushr 24, blue ushr 24)
+                    assertEquals(red ushr 8 and 255, blue ushr 8 and 255)
+                    assertTrue((red ushr 16 and 255) >= (blue ushr 16 and 255))
+                    assertTrue((red and 255) <= (blue and 255))
+                    changedPixels++
+                    sampleRed = red
+                    sampleBlue = blue
+                }
+            }
+        }
+        assertTrue("Only real outline pixels should change between red and blue drafts", changedPixels in 1 until redPreview.width * redPreview.height / 2)
+        println("Outline tint pixels: red=%08X blue=%08X changed=%d".format(sampleRed, sampleBlue, changedPixels))
+        compose.onNodeWithTag("settings_wallpaper_color_hex").performScrollTo().performTextReplacement("#123ABC")
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("settings_wallpaper_color_dialog").assertExists()
+        compose.onNodeWithTag("settings_wallpaper_color_hex").performScrollTo().assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#123ABC")))
+        assertTrue(changes.isEmpty())
+        compose.onNodeWithTag("settings_wallpaper_color_apply").performClick()
+        assertEquals(WallpaperSelection(outlineColor = 0xff123abc.toInt()), changes.single())
+        compose.onNodeWithTag("settings_wallpaper_sheet").assertIsDisplayed()
+        reveal("settings_wallpaper_preset_motd")
+        val tintedThumbnail = compose.onNodeWithTag("settings_wallpaper_preset_motd").captureToImage().asAndroidBitmap()
+
+        openColor()
+        compose.onNodeWithTag("settings_wallpaper_color_default").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_wallpaper_color_cancel").performClick()
+        assertEquals(0xff123abc.toInt(), current.outlineColor)
+        openColor()
+        compose.onNodeWithTag("settings_wallpaper_color_hex").performScrollTo().assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#123ABC")))
+        compose.onNodeWithTag("settings_wallpaper_color_default").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_wallpaper_color_apply").performClick()
+        assertNull(current.outlineColor)
+        assertEquals(2, changes.size)
+        reveal("settings_wallpaper_preset_motd")
+        compose.waitUntil(10_000) {
+            !tintedThumbnail.sameAs(compose.onNodeWithTag("settings_wallpaper_preset_motd").captureToImage().asAndroidBitmap())
+        }
+
+        openColor()
+        compose.onNodeWithTag("settings_wallpaper_color_hex").performScrollTo().performTextReplacement("#FFFFFF")
+        setColorComponent("hue", 120f)
+        setColorComponent("saturation", 1f)
+        compose.onNodeWithTag("settings_wallpaper_color_hex").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#00FF00")))
+        setColorComponent("saturation", 0f)
+        compose.onNodeWithTag("settings_wallpaper_color_hex").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#FFFFFF")))
+        setColorComponent("brightness", 0f)
+        compose.onNodeWithTag("settings_wallpaper_color_hex").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#000000")))
+        setColorComponent("saturation", 1f)
+        setColorComponent("brightness", 1f)
+        compose.onNodeWithTag("settings_wallpaper_color_hex").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#00FF00")))
+        compose.onNodeWithTag("settings_wallpaper_color_wheel").performScrollTo().performTouchInput {
+            down(center)
+            moveTo(Offset(width + 80f, center.y))
+            up()
+        }
+        compose.onNodeWithTag("settings_wallpaper_color_hex").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#FF0000")))
+        assertEquals(
+            1f,
+            compose
+                .onNodeWithTag("settings_wallpaper_color_saturation")
+                .fetchSemanticsNode()
+                .config[SemanticsProperties.ProgressBarRangeInfo]
+                .current,
+        )
+        compose.onNodeWithTag("settings_wallpaper_color_cancel").performClick()
+        assertEquals(2, changes.size)
+
+        openColor()
+        compose.onNodeWithTag("settings_wallpaper_color_hex").performScrollTo().performTextReplacement("#0000FF")
+        compose.runOnIdle { ShadowDialog.getLatestDialog().onBackPressed() }
+        compose.onNodeWithTag("settings_wallpaper_color_dialog").assertDoesNotExist()
+        compose.onNodeWithTag("settings_wallpaper_sheet").assertIsDisplayed()
+        assertEquals(
+            editorScroll,
+            compose
+                .onNodeWithTag("settings_wallpaper_list")
+                .fetchSemanticsNode()
+                .config[SemanticsProperties.VerticalScrollAxisRange]
+                .value(),
+            0.01f,
+        )
+        openColor()
+        compose.runOnIdle {
+            val outside = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, -100f, -100f, 0)
+            try {
+                val dialog = ShadowDialog.getLatestDialog()
+                dialog.onTouchEvent(outside)
+                outside.action = MotionEvent.ACTION_UP
+                dialog.onTouchEvent(outside)
+            } finally {
+                outside.recycle()
+            }
+        }
+        compose.onNodeWithTag("settings_wallpaper_color_dialog").assertDoesNotExist()
+        compose.onNodeWithTag("settings_wallpaper_sheet").assertIsDisplayed()
+        assertEquals(
+            editorScroll,
+            compose
+                .onNodeWithTag("settings_wallpaper_list")
+                .fetchSemanticsNode()
+                .config[SemanticsProperties.VerticalScrollAxisRange]
+                .value(),
+            0.01f,
+        )
+        assertEquals(2, changes.size)
+        assertNull(current.outlineColor)
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h480dp")
+    fun compactLargeFontColorEditorKeepsAccessibleControlsAndActionsReachable() {
+        var current by mutableStateOf(WallpaperSelection())
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 2f)) {
+                MotdTheme(dynamicColor = false) {
+                    ChatWallpaperPicker(current, onChange = { current = it })
+                }
+            }
+        }
+        compose.onNodeWithTag("settings_wallpaper_picker").performClick()
+        openColor()
+        for ((component, value) in listOf("hue" to 240f, "saturation" to 1f, "brightness" to 1f)) {
+            val node = compose.onNodeWithTag("settings_wallpaper_color_$component").performScrollTo().assertIsDisplayed()
+            val semantics = node.fetchSemanticsNode().config
+            assertTrue(semantics[SemanticsProperties.ContentDescription].single().isNotBlank())
+            assertTrue(semantics[SemanticsProperties.StateDescription].isNotBlank())
+            node.performSemanticsAction(SemanticsActions.SetProgress) { it(value) }
+        }
+        compose
+            .onNodeWithTag("settings_wallpaper_color_hex")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#0000FF")))
+        compose.onNodeWithTag("settings_wallpaper_color_default").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("settings_wallpaper_color_cancel").assertIsDisplayed()
+        compose.onNodeWithTag("settings_wallpaper_color_apply").assertIsDisplayed().performClick()
+        assertEquals(0xff0000ff.toInt(), current.outlineColor)
+        reveal("settings_wallpaper_preset_deep_space")
+        compose.onNodeWithTag("settings_wallpaper_preset_deep_space").performClick()
+        assertEquals(0xff0000ff.toInt(), current.outlineColor)
+        reveal("settings_wallpaper_preset_none")
+        compose.onNodeWithTag("settings_wallpaper_preset_none").performClick()
+        assertEquals(0xff0000ff.toInt(), current.outlineColor)
+        reveal("settings_wallpaper_outline_color")
+        compose.onNodeWithTag("settings_wallpaper_outline_color").assertIsNotEnabled()
+        reveal("settings_wallpaper_done")
+        compose.onNodeWithTag("settings_wallpaper_done").performClick()
+    }
+
+    @Test
+    fun builtinTintChangesOnlyInkPixelsAndPreservesGradientAndDirectAlpha() {
+        compose.setContent {
+            MotdTheme(dynamicColor = false, themePreset = ColorThemePreset.LIGHT) {
+                Column {
+                    for ((tag, color, intensity) in listOf(Triple("red", 0xffff0000.toInt(), 100), Triple("blue", 0xff0000ff.toInt(), 100), Triple("half", 0xffff0000.toInt(), 50), Triple("gradient", 0xffff0000.toInt(), 0))) {
+                        Box(Modifier.size(200.dp, 90.dp).testTag(tag)) {
+                            ChatWallpaperBackground(WallpaperSelection(outlineColor = color, intensity = intensity), Modifier.matchParentSize())
+                        }
+                    }
+                }
+            }
+        }
+
+        fun image(tag: String) = compose.onNodeWithTag(tag).captureToImage().asAndroidBitmap()
+        compose.waitUntil(10_000) { !image("red").sameAs(image("gradient")) && !image("blue").sameAs(image("gradient")) }
+        val red = image("red")
+        val blue = image("blue")
+        val half = image("half")
+        val gradient = image("gradient")
+        var ink = 0
+        var untouched = 0
+        for (x in 0 until red.width) {
+            for (y in 0 until red.height) {
+                val r = red.getPixel(x, y)
+                val b = blue.getPixel(x, y)
+                val base = gradient.getPixel(x, y)
+                if (r == b) {
+                    assertEquals(base, r)
+                    assertEquals(base, half.getPixel(x, y))
+                    untouched++
+                } else {
+                    assertEquals(r ushr 8 and 255, b ushr 8 and 255)
+                    for (shift in listOf(0, 8, 16)) {
+                        val expected = ((r ushr shift and 255) + (base ushr shift and 255)) / 2f
+                        assertEquals(expected, (half.getPixel(x, y) ushr shift and 255).toFloat(), 2f)
+                    }
+                    ink++
+                }
+            }
+        }
+        assertTrue("Tint must change real mask coverage", ink > 0)
+        assertTrue("Transparent mask pixels must keep the gradient", untouched > ink)
+    }
+
+    @Test
     @Config(qualifiers = "w411dp-h480dp")
     fun compactEditorKeepsSheetAndScrollPositionStableWhileAllControlsRemainReachable() {
         var current by mutableStateOf(WallpaperSelection())
@@ -153,7 +435,7 @@ class ChatWallpaperPickerUiTest {
         val store = CustomWallpaperStore(context)
         val directory = File(context.filesDir, CustomWallpaperStore.DIRECTORY)
         directory.deleteRecursively()
-        runBlocking { prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.NONE, 100)) }
+        runBlocking { prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.NONE, 100, outlineColor = 0xffff0000.toInt())) }
         val vm = AppearanceSettingsViewModel(DataStoreSettingsRepository(context), prefs, CustomFontStore(context), store)
         val originalLoader = Coil.imageLoader(context)
         val loaded = CopyOnWriteArrayList<File>()
@@ -192,7 +474,7 @@ class ChatWallpaperPickerUiTest {
         var failures = 0
         try {
             compose.setContent {
-                val config by prefs.config.collectAsState(initial = AppearanceConfig(wallpaper = WallpaperSelection(ChatWallpaperPreset.NONE, 100)))
+                val config by prefs.config.collectAsState(initial = AppearanceConfig(wallpaper = WallpaperSelection(ChatWallpaperPreset.NONE, 100, outlineColor = 0xffff0000.toInt())))
                 val importing by vm.wallpaperImporting.collectAsState()
                 LaunchedEffect(vm) { vm.importedWallpaper.collect { imported = it } }
                 LaunchedEffect(vm) { vm.wallpaperFailures.collect { failures++ } }
@@ -213,6 +495,9 @@ class ChatWallpaperPickerUiTest {
             pick(Uri.fromFile(source))
             compose.waitUntil(10_000) { compose.runOnIdle { imported != null && loaded.any { it.name == imported?.localImageName } } }
             val first = requireNotNull(imported)
+            assertEquals(0xffff0000.toInt(), first.outlineColor)
+            reveal("settings_wallpaper_outline_color")
+            compose.onNodeWithTag("settings_wallpaper_outline_color").assertIsNotEnabled()
             val firstBytes = requireNotNull(CustomWallpaperStore.resolve(context, first.localImageName)).readBytes()
             reveal("settings_wallpaper_preview")
             assertPreviewColor(0xff28c864.toInt())
@@ -236,19 +521,20 @@ class ChatWallpaperPickerUiTest {
             pick(Uri.fromFile(changed))
             compose.waitUntil(10_000) { compose.runOnIdle { imported?.localImageName != first.localImageName && loaded.any { it.name == imported?.localImageName } } }
             assertEquals(50, imported?.intensity)
+            assertEquals(0xffff0000.toInt(), imported?.outlineColor)
             assertNull(CustomWallpaperStore.resolve(context, first.localImageName))
             reveal("settings_wallpaper_preview")
             assertPreviewColor(0xff64194d.toInt(), tolerance = 2)
             reveal("settings_wallpaper_preset_deep_space")
             compose.onNodeWithTag("settings_wallpaper_preset_deep_space").assertIsEnabled().performClick()
             compose.waitUntil(10_000) { compose.runOnIdle { directory.listFiles().orEmpty().isEmpty() } }
-            assertEquals(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 50), runBlocking { prefs.config.first().wallpaper })
+            assertEquals(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 50, outlineColor = 0xffff0000.toInt()), runBlocking { prefs.config.first().wallpaper })
             pick(Uri.fromFile(source))
             compose.waitUntil(10_000) { compose.runOnIdle { imported?.preset == ChatWallpaperPreset.DEEP_SPACE && directory.listFiles().orEmpty().size == 1 } }
             reveal("settings_wallpaper_remove")
             compose.onNodeWithTag("settings_wallpaper_remove").assertIsEnabled().performClick()
             compose.waitUntil(10_000) { compose.runOnIdle { directory.listFiles().orEmpty().isEmpty() } }
-            assertEquals(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 50), runBlocking { prefs.config.first().wallpaper })
+            assertEquals(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 50, outlineColor = 0xffff0000.toInt()), runBlocking { prefs.config.first().wallpaper })
             compose.onNodeWithTag("settings_wallpaper_remove").assertIsNotEnabled()
             reveal("settings_wallpaper_done")
             compose.onNodeWithTag("settings_wallpaper_done").performClick()
@@ -268,7 +554,7 @@ class ChatWallpaperPickerUiTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val directory = File(context.filesDir, CustomWallpaperStore.DIRECTORY).apply { mkdirs() }
         val corrupt = File(directory, "${UUID.randomUUID()}.image").apply { writeText("not an image") }
-        var selection by mutableStateOf(WallpaperSelection(ChatWallpaperPreset.MOTD, 100, "${UUID.randomUUID()}.image"))
+        var selection by mutableStateOf(WallpaperSelection(ChatWallpaperPreset.MOTD, 100, "${UUID.randomUUID()}.image", 0xffff0000.toInt()))
         val errors = CopyOnWriteArrayList<File>()
         val requested = CopyOnWriteArrayList<Any>()
         val originalLoader = Coil.imageLoader(context)
@@ -332,6 +618,19 @@ class ChatWallpaperPickerUiTest {
 
     private fun reveal(tag: String) {
         compose.onNodeWithTag("settings_wallpaper_list").performScrollToNode(hasTestTag(tag))
+    }
+
+    private fun openColor() {
+        reveal("settings_wallpaper_outline_color")
+        compose.onNodeWithTag("settings_wallpaper_outline_color").performClick()
+        compose.onNodeWithTag("settings_wallpaper_color_dialog").assertExists()
+    }
+
+    private fun setColorComponent(
+        component: String,
+        value: Float,
+    ) {
+        compose.onNodeWithTag("settings_wallpaper_color_$component").performScrollTo().performSemanticsAction(SemanticsActions.SetProgress) { it(value) }
     }
 
     private fun assertPreviewColor(

@@ -4,6 +4,14 @@ The canonical wallpaper masks live in `app/src/main/assets/chat-wallpapers/` and
 `tools/wallpapers/generate-wallpapers.mjs`. They are transparent, monochrome, seamless 2048×2048
 lossless indexed PNG tiles (`<preset-id>.png`), with black RGB and the approved 8-bit alpha unchanged.
 The app combines each mask with a theme-derived gradient and user-controlled ink opacity.
+Appearance → Wallpaper → Outline color changes only the builtin drawing ink, including chat,
+live previews and thumbnails. Default retains the theme's `onSurfaceVariant` color; existing
+preferences and backups without a color keep that behavior. The color wheel selects hue and
+saturation, with equivalent accessible sliders, a brightness slider (including white/black),
+and a validated six-digit sRGB hex field. The real wallpaper previews the draft immediately;
+only Apply saves it. Cancel, back and outside dismissal discard it, and Default resets only
+the draft until Apply. Draft state survives configuration recreation. No opacity setting is
+duplicated: wallpaper intensity still multiplies the unchanged mask alpha directly.
 
 Regenerate and verify from the pinned Nix development shell:
 
@@ -29,3 +37,6 @@ intensity controls opacity over the theme canvas in chat and both settings previ
 returns to the retained builtin fallback, while None selects the plain canvas. Cancelling or a
 failed import preserves the current image. Custom image bytes and filenames are local-only and
 are excluded from configuration backups.
+Outline color is portable in configuration backups and retained when switching presets,
+choosing None, importing or removing an image. It never recolors the theme gradient, messages,
+or a successfully loaded photo; a missing photo uses the retained builtin and its outline color.

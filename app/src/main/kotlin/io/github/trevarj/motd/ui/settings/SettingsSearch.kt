@@ -163,7 +163,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_time_format, R.string.settings_time_format_custom_help, "12 24 clock", SettingsSearchPage.APPEARANCE, SettingsTarget.TIME_FORMAT),
         spec(R.string.settings_message_spacing, R.string.settings_appearance_messages_section, "compact relaxed", SettingsSearchPage.APPEARANCE, SettingsTarget.MESSAGE_SPACING),
         spec(R.string.settings_bubble_corners, R.string.settings_bubble_corners_desc, "rounded square", SettingsSearchPage.APPEARANCE, SettingsTarget.BUBBLE_CORNERS),
-        spec(R.string.settings_wallpaper, R.string.settings_appearance_summary, "background image", SettingsSearchPage.APPEARANCE, SettingsTarget.WALLPAPER),
+        spec(R.string.settings_wallpaper, R.string.settings_appearance_summary, "background image drawing outline tint color wheel", SettingsSearchPage.APPEARANCE, SettingsTarget.WALLPAPER),
         spec(R.string.settings_app_icon_section, R.string.settings_appearance_summary, "launcher", SettingsSearchPage.APPEARANCE, SettingsTarget.LAUNCHER_ICON),
         spec(R.string.settings_presence_title, R.string.settings_presence_smart_desc, "join part quit away", SettingsSearchPage.CHAT, SettingsTarget.PRESENCE),
         spec(R.string.settings_show_redacted_messages, R.string.settings_show_redacted_messages_desc, "deleted accountability", SettingsSearchPage.CHAT, SettingsTarget.DELETED_MESSAGES),

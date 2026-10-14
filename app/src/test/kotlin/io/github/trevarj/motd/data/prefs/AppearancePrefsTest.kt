@@ -3,6 +3,7 @@ package io.github.trevarj.motd.data.prefs
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.flow.first
@@ -165,6 +166,26 @@ class AppearancePrefsTest {
             assertEquals(WallpaperSelection(ChatWallpaperPreset.INTERNET_ODDITIES, 73), prefs.config.first().wallpaper)
         }
 
+    @Test fun wallpaperOutlineColorPersistsNormalizesAndResetsWithoutChangingTheSelection() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val selection = WallpaperSelection(ChatWallpaperPreset.LINUX, 73, outlineColor = 0x0012ab34)
+            prefs.setWallpaper(selection)
+            assertEquals(selection.copy(outlineColor = 0xff12ab34.toInt()), AppearancePrefsImpl(context).config.first().wallpaper)
+            prefs.setWallpaper(selection.copy(outlineColor = null))
+            assertEquals(selection.copy(outlineColor = null), AppearancePrefsImpl(context).config.first().wallpaper)
+            assertEquals(null, context.appearanceDataStore.data.first()[intPreferencesKey("wallpaper_outline_color_v1")])
+            // A pre-feature store has no color key, just like resetting to Default.
+            context.appearanceDataStore.edit { it.remove(intPreferencesKey("wallpaper_outline_color_v1")) }
+            assertEquals(
+                null,
+                AppearancePrefsImpl(context)
+                    .config
+                    .first()
+                    .wallpaper.outlineColor,
+            )
+        }
+
     @Test fun followSystem_defaultsFalseAndRoundTrips() =
         runTest {
             assertEquals(false, prefs.config.first().followSystem)
@@ -247,7 +268,7 @@ class AppearancePrefsTest {
             Json.decodeFromString<WallpaperSelection>("""{"preset":"CHATTER","intensity":73}"""),
         )
         assertEquals(
-            """{"preset":"RETRO_CHAT","intensity":73}""",
+            """{"preset":"RETRO_CHAT","intensity":73,"outlineColor":null}""",
             jsonWithDefaults.encodeToString(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, "private-wallpaper.image")),
         )
         assertEquals(
@@ -255,9 +276,13 @@ class AppearancePrefsTest {
             Json.decodeFromString<WallpaperSelection>("""{"preset":"LINUX","intensity":73}"""),
         )
         assertEquals(
-            """{"preset":"LINUX","intensity":73}""",
+            """{"preset":"LINUX","intensity":73,"outlineColor":null}""",
             jsonWithDefaults.encodeToString(WallpaperSelection(ChatWallpaperPreset.LINUX, 73)),
         )
+        for (color in listOf(0xffffffff.toInt(), 0xff000000.toInt(), 0xff12ab34.toInt())) {
+            val selection = WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, outlineColor = color)
+            assertEquals(selection, Json.decodeFromString<WallpaperSelection>(jsonWithDefaults.encodeToString(selection)))
+        }
     }
 
     @Test fun fontScales_areIndependentRoundedAndClamped() =

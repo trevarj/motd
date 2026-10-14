@@ -409,7 +409,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setChatShadowsEnabled(false)
             appearancePrefs.setUseThemeTextColors(true)
             appearancePrefs.setLauncherIcon(LauncherIcon.GRUVBOX)
-            appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, "12345678-1234-1234-1234-123456789abc.image"))
+            appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, "12345678-1234-1234-1234-123456789abc.image", 0xff12ab34.toInt()))
             // Only the display name travels; the font binary itself is not part of the backup payload.
             appearancePrefs.setCustomFontName("Iosevka Term.ttf")
 
@@ -447,7 +447,7 @@ class ConfigurationBackupRepositoryTest {
             assertEquals(true, config.useThemeTextColors)
             assertEquals(LauncherIcon.GRUVBOX, config.launcherIcon)
             assertEquals("Iosevka Term.ttf", config.customFontName)
-            assertEquals(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73), config.wallpaper)
+            assertEquals(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, outlineColor = 0xff12ab34.toInt()), config.wallpaper)
             assertTrue(
                 source
                     .exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 2_000L)
@@ -465,17 +465,21 @@ class ConfigurationBackupRepositoryTest {
                 val backup = repository(db)
                 appearancePrefs.setComposerStyle(ComposerStyle.COMPACT)
                 appearancePrefs.setUseThemeTextColors(true)
+                appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80, outlineColor = 0xffffffff.toInt()))
                 val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
                 val oldRaw =
                     raw
                         .replace(Regex(""",\s*"composerStyle"\s*:\s*"COMPACT""""), "")
                         .replace(Regex(""",\s*"useThemeTextColors"\s*:\s*true"""), "")
+                        .replace(Regex(""",\s*"outlineColor"\s*:\s*-?\d+"""), "")
                 assertFalse(oldRaw.contains("composerStyle"))
                 assertFalse(oldRaw.contains("useThemeTextColors"))
+                assertFalse(oldRaw.contains("outlineColor"))
 
                 backup.import(oldRaw, importMode = BackupImportMode.MERGE)
                 assertEquals(ComposerStyle.COMFORTABLE, appearancePrefs.config.first().composerStyle)
                 assertEquals(false, appearancePrefs.config.first().useThemeTextColors)
+                assertEquals(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80), appearancePrefs.config.first().wallpaper)
 
                 val withoutAppearance =
                     raw.replace(
@@ -491,6 +495,7 @@ class ConfigurationBackupRepositoryTest {
             } finally {
                 appearancePrefs.setComposerStyle(ComposerStyle.COMFORTABLE)
                 appearancePrefs.setUseThemeTextColors(false)
+                appearancePrefs.setWallpaper(WallpaperSelection())
                 db.close()
             }
         }

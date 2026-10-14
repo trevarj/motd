@@ -20,6 +20,7 @@ private val USE_THEME_TEXT_COLORS = booleanPreferencesKey("use_theme_text_colors
 private val WALLPAPER = stringPreferencesKey("wallpaper_preset_v1")
 private val WALLPAPER_INTENSITY = intPreferencesKey("wallpaper_intensity_v1")
 private val WALLPAPER_IMAGE = stringPreferencesKey("wallpaper_local_image_v1")
+private val WALLPAPER_OUTLINE_COLOR = intPreferencesKey("wallpaper_outline_color_v1")
 private val UI_FONT_SCALE = intPreferencesKey("ui_font_scale_percent_v1")
 private val CONVERSATION_FONT_SCALE = intPreferencesKey("conversation_font_scale_percent_v1")
 private val FONT_CHOICE = stringPreferencesKey("font_choice_v1")
@@ -71,6 +72,7 @@ class AppearancePrefsImpl
                                 chatWallpaperPresetFromStored(prefs[WALLPAPER]),
                             intensity = (prefs[WALLPAPER_INTENSITY] ?: DEFAULT_WALLPAPER_INTENSITY).coerceIn(0, 100),
                             localImageName = prefs[WALLPAPER_IMAGE],
+                            outlineColor = prefs[WALLPAPER_OUTLINE_COLOR]?.or(0xff000000.toInt()),
                         ),
                     uiFontScalePercent =
                         normalizeFontScalePercent(
@@ -141,6 +143,8 @@ class AppearancePrefsImpl
                 it[WALLPAPER_INTENSITY] = normalized.intensity
                 normalized.localImageName?.let { name -> it[WALLPAPER_IMAGE] = name }
                     ?: it.remove(WALLPAPER_IMAGE)
+                normalized.outlineColor?.let { color -> it[WALLPAPER_OUTLINE_COLOR] = color }
+                    ?: it.remove(WALLPAPER_OUTLINE_COLOR)
             }
         }
 

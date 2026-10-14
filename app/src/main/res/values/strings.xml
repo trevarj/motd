@@ -1951,6 +1951,20 @@
     <string name="settings_wallpaper_remove">Remove image</string>
     <string name="settings_wallpaper_importing">Importing image…</string>
     <string name="settings_wallpaper_invalid">Could not save wallpaper. Choose a valid image up to 20 MiB.</string>
+    <string name="settings_wallpaper_outline_color">Outline color</string>
+    <string name="settings_wallpaper_color_default">Default (theme color)</string>
+    <string name="settings_wallpaper_color_builtin_only">Outline color applies to builtin drawings only. Your color is retained for the fallback; photos keep their original colors.</string>
+    <string name="settings_wallpaper_color_none">Choose a builtin wallpaper to change its outline color.</string>
+    <string name="settings_wallpaper_color_wheel">Color wheel: hue and saturation. The sliders below also adjust these values.</string>
+    <string name="settings_wallpaper_color_hue">Hue</string>
+    <string name="settings_wallpaper_color_saturation">Saturation</string>
+    <string name="settings_wallpaper_color_brightness">Brightness</string>
+    <string name="settings_wallpaper_color_degrees">%1$d degrees</string>
+    <string name="settings_wallpaper_color_percent">%1$d percent</string>
+    <string name="settings_wallpaper_color_hex">Hex color (#RRGGBB)</string>
+    <string name="settings_wallpaper_color_invalid">Enter six hexadecimal digits, for example #FFFFFF.</string>
+    <string name="settings_wallpaper_color_preview">Wallpaper preview</string>
+    <string name="settings_wallpaper_color_apply">Apply</string>
 
     <string name="settings_app_icon_section">App icon</string>
     <string name="settings_app_icon_default">Default</string>

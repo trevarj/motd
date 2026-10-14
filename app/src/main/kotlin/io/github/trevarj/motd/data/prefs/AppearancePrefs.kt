@@ -193,8 +193,10 @@ data class WallpaperSelection(
     val intensity: Int = DEFAULT_WALLPAPER_INTENSITY,
     // Local-only; portable backups retain the builtin fallback instead of a private file reference.
     @Transient val localImageName: String? = null,
+    // Opaque sRGB ARGB; null keeps the theme-adaptive ink used by existing selections.
+    val outlineColor: Int? = null,
 ) {
-    fun normalized() = copy(intensity = intensity.coerceIn(0, 100))
+    fun normalized() = copy(intensity = intensity.coerceIn(0, 100), outlineColor = outlineColor?.or(0xff000000.toInt()))
 }
 
 @Serializable

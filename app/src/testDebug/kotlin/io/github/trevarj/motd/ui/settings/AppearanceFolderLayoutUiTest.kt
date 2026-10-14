@@ -366,12 +366,14 @@ class AppearanceFolderLayoutUiTest {
     fun wallpaperPreviewKeepsImmediateEditsAcrossStaleEmissionsAndExplicitImport() {
         val appearance = mutableStateOf(AppearanceConfig())
         val imported = mutableStateOf<WallpaperSelection?>(null)
+        var applied: WallpaperSelection? = null
         var changes = 0
         setContent(
             appearanceProvider = { appearance.value },
             importedWallpaperProvider = { imported.value },
             onWallpaper = {
                 changes++
+                applied = it
                 appearance.value =
                     AppearanceConfig(
                         wallpaper = WallpaperSelection(ChatWallpaperPreset.NONE, 30),
@@ -385,8 +387,13 @@ class AppearanceFolderLayoutUiTest {
         compose.onNodeWithTag("settings_wallpaper_preset_deep_space").performClick()
         list.performScrollToNode(hasTestTag("settings_wallpaper_intensity"))
         compose.onNodeWithTag("settings_wallpaper_intensity").performSemanticsAction(SemanticsActions.SetProgress) { it(80f) }
+        list.performScrollToNode(hasTestTag("settings_wallpaper_outline_color"))
+        compose.onNodeWithTag("settings_wallpaper_outline_color").performClick()
+        compose.onNodeWithTag("settings_wallpaper_color_hex").performScrollTo().performTextReplacement("#12AB34")
+        compose.onNodeWithTag("settings_wallpaper_color_apply").performClick()
+        assertEquals(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80, outlineColor = 0xff12ab34.toInt()), applied)
         compose.runOnIdle {
-            imported.value = WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80, "12345678-1234-1234-1234-123456789abc.image")
+            imported.value = WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80, "12345678-1234-1234-1234-123456789abc.image", 0xff12ab34.toInt())
         }
         list.performScrollToNode(hasTestTag("settings_wallpaper_remove"))
         compose.onNodeWithTag("settings_wallpaper_remove").assertIsEnabled()
@@ -396,6 +403,7 @@ class AppearanceFolderLayoutUiTest {
         compose.onNodeWithTag("settings_wallpaper_picker").performScrollTo().performClick()
         list.performScrollToNode(hasTestTag("settings_wallpaper_remove"))
         compose.onNodeWithTag("settings_wallpaper_remove").performClick()
+        assertEquals(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80, outlineColor = 0xff12ab34.toInt()), applied)
         list.performScrollToNode(hasTestTag("settings_wallpaper_done"))
         compose.onNodeWithTag("settings_wallpaper_done").performClick()
         compose.onNodeWithTag("settings_chat_preview_inline_wallpaper_deep_space_80").performScrollTo().assertIsDisplayed()
