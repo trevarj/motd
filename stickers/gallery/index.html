@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>motd IRC stickers</title>
+    <link rel="stylesheet" href="gallery.css">
+  </head>
+  <body>
+    <header class="masthead">
+      <p class="eyebrow">motd / IRC sticker set</p>
+      <h1>STICK TO IRC.</h1>
+      <p>Minimal die-cut proofs for the people who keep the channel moving.</p>
+      <div class="masthead-actions">
+        <a class="button" href="https://github.com/trevarj/motd/releases">GET MOTD ↗</a>
+        <button class="button" id="print-sheet" type="button">PRINT A4 SHEET</button>
+      </div>
+      <nav class="edition-switch" aria-label="Sticker editions">
+        <a class="edition-link" data-edition="v3" href="?edition=v3">LATEST COLOR</a>
+        <a class="edition-link" data-edition="v2" href="?edition=v2">ORIGINAL MINIMALIST</a>
+      </nav>
+    </header>
+    <main>
+      <p class="notice" id="notice" aria-live="polite">Loading sticker proofs…</p>
+      <section class="sticker-grid" id="sticker-grid" aria-label="motd IRC sticker proofs"></section>
+    </main>
+    <footer>IRC ONLY · DIE-CUT ART · REAL QR CODES</footer>
+    <dialog id="lightbox">
+      <button class="close" id="close" aria-label="Close full-size sticker">×</button>
+      <div class="lightbox-stage"><img id="lightbox-image" alt=""></div>
+      <div class="dialog-copy"><p id="lightbox-title"></p><div id="lightbox-actions"></div></div>
+    </dialog>
+    <script type="module" src="gallery.js"></script>
+  </body>
+</html>

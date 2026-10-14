@@ -1,0 +1,126 @@
+{
+  "edition": "v1",
+  "target": "https://github.com/trevarj/motd/releases",
+  "assets": [
+    {
+      "slug": "01-good-time",
+      "title": "NEED A GOOD TIME?",
+      "available": true,
+      "source": "artwork/01-good-time.png",
+      "svg": "exports/01-good-time.svg",
+      "png": "exports/01-good-time.png",
+      "width": 1254,
+      "height": 1254,
+      "channels": "srgb",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.8,
+        "y": 0.8,
+        "size": 0.17,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    },
+    {
+      "slug": "02-noise",
+      "title": "MAKE SOME NOISE.",
+      "available": true,
+      "source": "artwork/02-noise.png",
+      "svg": "exports/02-noise.svg",
+      "png": "exports/02-noise.png",
+      "width": 1254,
+      "height": 1254,
+      "channels": "srgb",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.8,
+        "y": 0.8,
+        "size": 0.17,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    },
+    {
+      "slug": "03-underground",
+      "title": "STAY UNDERGROUND.",
+      "available": true,
+      "source": "artwork/03-underground.png",
+      "svg": "exports/03-underground.svg",
+      "png": "exports/03-underground.png",
+      "width": 1254,
+      "height": 1254,
+      "channels": "srgb",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.8,
+        "y": 0.8,
+        "size": 0.17,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    },
+    {
+      "slug": "04-together",
+      "title": "BETTER TOGETHER.",
+      "available": true,
+      "source": "artwork/04-together.png",
+      "svg": "exports/04-together.svg",
+      "png": "exports/04-together.png",
+      "width": 1254,
+      "height": 1254,
+      "channels": "srgb",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.8,
+        "y": 0.8,
+        "size": 0.17,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    },
+    {
+      "slug": "05-signal",
+      "title": "JOIN THE SIGNAL.",
+      "available": true,
+      "source": "artwork/05-signal.png",
+      "svg": "exports/05-signal.svg",
+      "png": "exports/05-signal.png",
+      "width": 1254,
+      "height": 1254,
+      "channels": "srgb",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.8,
+        "y": 0.8,
+        "size": 0.17,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    },
+    {
+      "slug": "06-after-show",
+      "title": "SEE YOU AFTER THE SHOW.",
+      "available": true,
+      "source": "artwork/06-after-show.png",
+      "svg": "exports/06-after-show.svg",
+      "png": "exports/06-after-show.png",
+      "width": 1254,
+      "height": 1254,
+      "channels": "srgb",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.8,
+        "y": 0.8,
+        "size": 0.17,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    }
+  ]
+}

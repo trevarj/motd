@@ -1,0 +1,132 @@
+{
+  "edition": "v2",
+  "target": "https://github.com/trevarj/motd/releases",
+  "assets": [
+    {
+      "slug": "01-slash-v2",
+      "title": "motd / IRC",
+      "shape": "circle",
+      "available": true,
+      "source": "artwork/01-slash-v2.png",
+      "svg": "exports-v2/01-slash-v2.svg",
+      "png": "exports-v2/01-slash-v2.png",
+      "width": 1254,
+      "height": 1254,
+      "channels": "srgba",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.42,
+        "y": 0.75,
+        "size": 0.16,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    },
+    {
+      "slug": "02-join-v2",
+      "title": "/join #motd",
+      "shape": "rectangle",
+      "available": true,
+      "source": "artwork/02-join-v2.png",
+      "svg": "exports-v2/02-join-v2.svg",
+      "png": "exports-v2/02-join-v2.png",
+      "width": 1774,
+      "height": 887,
+      "channels": "srgba",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.75,
+        "y": 0.35,
+        "size": 0.16,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    },
+    {
+      "slug": "03-irc-v2",
+      "title": "IRC IS ALIVE.",
+      "shape": "circle",
+      "available": true,
+      "source": "artwork/03-irc-v2.png",
+      "svg": "exports-v2/03-irc-v2.svg",
+      "png": "exports-v2/03-irc-v2.png",
+      "width": 1254,
+      "height": 1254,
+      "channels": "srgba",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.4,
+        "y": 0.72,
+        "size": 0.18,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    },
+    {
+      "slug": "04-good-time-v2",
+      "title": "NEED A GOOD TIME?",
+      "shape": "rectangle",
+      "available": true,
+      "source": "artwork/04-good-time-v2.png",
+      "svg": "exports-v2/04-good-time-v2.svg",
+      "png": "exports-v2/04-good-time-v2.png",
+      "width": 1774,
+      "height": 887,
+      "channels": "srgba",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.78,
+        "y": 0.36,
+        "size": 0.14,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    },
+    {
+      "slug": "05-talking-v2",
+      "title": "KEEP TALKING.",
+      "shape": "rounded-rectangle",
+      "available": true,
+      "source": "artwork/05-talking-v2.png",
+      "svg": "exports-v2/05-talking-v2.svg",
+      "png": "exports-v2/05-talking-v2.png",
+      "width": 1774,
+      "height": 887,
+      "channels": "srgba",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.76,
+        "y": 0.35,
+        "size": 0.16,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    },
+    {
+      "slug": "06-people-v2",
+      "title": "FIND YOUR PEOPLE.",
+      "shape": "circle",
+      "available": true,
+      "source": "artwork/06-people-v2.png",
+      "svg": "exports-v2/06-people-v2.svg",
+      "png": "exports-v2/06-people-v2.png",
+      "width": 1254,
+      "height": 1254,
+      "channels": "srgba",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.42,
+        "y": 0.75,
+        "size": 0.16,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    }
+  ]
+}

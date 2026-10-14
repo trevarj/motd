@@ -1,0 +1,93 @@
+[
+  {
+    "id": 1,
+    "slug": "01-slash-v2",
+    "title": "motd / IRC",
+    "shape": "circle",
+    "qr": {
+      "x": 0.42,
+      "y": 0.75,
+      "size": 0.16
+    },
+    "artwork": "artwork/01-slash-v2.png",
+    "prompt": "Use case: ads-marketing\nAsset type: minimalist die-cut sticker artwork for motd, an Android IRC client. Flat 2D finished sticker only on a genuinely TRANSPARENT background.\nCreative direction: punk / underground hardcore graphic DESIGN LANGUAGE only: stark two-ink silkscreen, strong condensed sans type, tiny amount of worn ink. Early constructivist influence solely through asymmetric typography and one simple diagonal accent. Contemporary IRC logo sticker, highly restrained and immediately readable at small size.\nSubject constraints: only IRC chat symbols (slash commands, #channel symbol, chat bubbles, terminal cursor) and motd brand lettering. Zero people, crowds, fists, musicians, microphones, instruments, radios, antennas, cassettes, flags, political symbols, stars, propaganda scenes, scenic illustrations, bursts, collage layers or explanatory prose.\nComposition: huge negative space; one main logo-like symbol, one short phrase at most plus small motd wordmark. Large clean solid ink shapes, minimal detail. No dense illustration, no busy background, no repeated tiny motifs. Brand spelled m-o-t-d lowercase. Exact requested text only.\nMaterials: matte ivory sticker stock with black/red inks, very subtle silkscreen imperfections confined to printed shapes. Smooth clean die-cut boundary, a thin ivory border. Transparent outside sticker shape, no square background, no cast shadow, no photograph, no mockup, no hands. No extra sticker, watermark, caption, website or signature.\nQR layout: a real machine-generated QR will be added afterward. Leave specified quiet area plain solid ivory, without any drawn fake QR, outlined placeholder, caption or decoration.\nShape: one perfectly circular ivory sticker centered on square transparent canvas, diameter exactly90% of canvas, bounds x5%-95%,y5%-95%.\nDesign: a single substantial black chat-bubble silhouette containing an ivory forward slash \"/\" centered in the upper half; one tiny red diagonal accent adjacent to bubble. Small bold lowercase \"motd\" wordmark centered below at about60% height. No other slogan or text. Minimal emblem, the black slash chat logo is the entire focal point.\nColor palette: ivory, black, single vermilion accent.\nText(verbatim): \"motd\".\nQR quiet area: centered near the bottom, rectangle x40%-58%,y72%-90%, completely plain ivory. Keep symbol and text entirely above68%height.",
+    "mode": "built-in",
+    "qrTarget": "https://github.com/trevarj/motd/releases"
+  },
+  {
+    "id": 2,
+    "slug": "02-join-v2",
+    "title": "/join #motd",
+    "shape": "rectangle",
+    "qr": {
+      "x": 0.75,
+      "y": 0.35,
+      "size": 0.16
+    },
+    "artwork": "artwork/02-join-v2.png",
+    "prompt": "Use case: ads-marketing\nAsset type: minimalist die-cut sticker artwork for motd, an Android IRC client. Flat 2D finished sticker only on a genuinely TRANSPARENT background.\nCreative direction: punk / underground hardcore graphic DESIGN LANGUAGE only: stark two-ink silkscreen, strong condensed sans type, tiny amount of worn ink. Early constructivist influence solely through asymmetric typography and one simple diagonal accent. Contemporary IRC logo sticker, highly restrained and immediately readable at small size.\nSubject constraints: only IRC chat symbols (slash commands, #channel symbol, chat bubbles, terminal cursor) and motd brand lettering. Zero people, crowds, fists, musicians, microphones, instruments, radios, antennas, cassettes, flags, political symbols, stars, propaganda scenes, scenic illustrations, bursts, collage layers or explanatory prose.\nComposition: huge negative space; one main logo-like symbol, one short phrase at most plus small motd wordmark. Large clean solid ink shapes, minimal detail. No dense illustration, no busy background, no repeated tiny motifs. Brand spelled m-o-t-d lowercase. Exact requested text only.\nMaterials: matte ivory sticker stock with black/red inks, very subtle silkscreen imperfections confined to printed shapes. Smooth clean die-cut boundary, a thin ivory border. Transparent outside sticker shape, no square background, no cast shadow, no photograph, no mockup, no hands. No extra sticker, watermark, caption, website or signature.\nQR layout: a real machine-generated QR will be added afterward. Leave specified quiet area plain solid ivory, without any drawn fake QR, outlined placeholder, caption or decoration.\nShape: one horizontal rectangular ivory sticker with subtly rounded 2%corners centered on transparent square canvas, bounds x5%-95%,y25%-75%; clean thin black outer keyline.\nDesign: enormous \"/join\" in bold condensed black typography on left, smaller \"#motd\" below it in red monospaced IRC command lettering. One small terminal underscore cursor. Simple typographic logo-like graphic, no other illustration. Rightmost quarter of sticker plain ivory for QR.\nColor palette: ivory, black, red.\nText(verbatim): \"/join\" and \"#motd\". No other text.\nQR quiet area: x77%-95%,y40%-58%, plain ivory. All main typography remains left of70%width.",
+    "mode": "built-in",
+    "qrTarget": "https://github.com/trevarj/motd/releases"
+  },
+  {
+    "id": 3,
+    "slug": "03-irc-v2",
+    "title": "IRC IS ALIVE.",
+    "editPrompt": "Use case: precise-object-edit\nInput image: edit target, the supplied round ivory IRC sticker on transparent background.\nChange only the layout spacing inside this sticker to make room for a real QR code. Keep the circular ivory silhouette, exact palette, minimal black/red silkscreen aesthetic, subtle texture, transparent exterior, red # channel symbol and exact lettering unchanged in design.\nMake the red # symbol about 25% smaller and shift it upward. Move \"IRC IS ALIVE.\" and lowercase \"motd\" upward, with both lines fully above 65% of full canvas height. Maintain ample separation between symbol and phrase. The bottom center rectangle x40%-60%, y72%-92% of the canvas must be completely blank plain ivory, with no text or marks; a real QR will be overlaid later. DO NOT draw a fake QR or any placeholder.\nPreserve exact text \"IRC IS ALIVE.\" and \"motd\". No new objects, no extra text, no border changes, no political imagery. Keep genuine transparency outside the circular die-cut. Return only one flat finished sticker.",
+    "shape": "circle",
+    "qr": {
+      "x": 0.4,
+      "y": 0.72,
+      "size": 0.18
+    },
+    "artwork": "artwork/03-irc-v2.png",
+    "prompt": "Use case: ads-marketing\nAsset type: minimalist die-cut sticker artwork for motd, an Android IRC client. Flat 2D finished sticker only on a genuinely TRANSPARENT background.\nCreative direction: punk / underground hardcore graphic DESIGN LANGUAGE only: stark two-ink silkscreen, strong condensed sans type, tiny amount of worn ink. Early constructivist influence solely through asymmetric typography and one simple diagonal accent. Contemporary IRC logo sticker, highly restrained and immediately readable at small size.\nSubject constraints: only IRC chat symbols (slash commands, #channel symbol, chat bubbles, terminal cursor) and motd brand lettering. Zero people, crowds, fists, musicians, microphones, instruments, radios, antennas, cassettes, flags, political symbols, stars, propaganda scenes, scenic illustrations, bursts, collage layers or explanatory prose.\nComposition: huge negative space; one main logo-like symbol, one short phrase at most plus small motd wordmark. Large clean solid ink shapes, minimal detail. No dense illustration, no busy background, no repeated tiny motifs. Brand spelled m-o-t-d lowercase. Exact requested text only.\nMaterials: matte ivory sticker stock with black/red inks, very subtle silkscreen imperfections confined to printed shapes. Smooth clean die-cut boundary, a thin ivory border. Transparent outside sticker shape, no square background, no cast shadow, no photograph, no mockup, no hands. No extra sticker, watermark, caption, website or signature.\nQR layout: a real machine-generated QR will be added afterward. Leave specified quiet area plain solid ivory, without any drawn fake QR, outlined placeholder, caption or decoration.\nShape: one perfectly circular black-ink-on-ivory sticker centered on square transparent canvas, diameter exactly90%of canvas,bounds x5%-95%,y5%-95%.\nDesign: one large red \"#\" channel glyph as a geometric logo-like symbol in the uppercenter. Text \"IRC IS ALIVE.\" in bold black sans lettering across middle, small lowercase \"motd\" beneath. No ray burst. Plenty of plain ivory negative space around the symbol and words. A restrained hardcore merch badge, no politics.\nColor palette: ivory, black, red.\nText(verbatim): \"IRC IS ALIVE.\" and \"motd\".\nQR quiet area: x40%-58%,y72%-90%, plain ivory, main symbol and all text above68%height.",
+    "mode": "built-in",
+    "qrTarget": "https://github.com/trevarj/motd/releases"
+  },
+  {
+    "id": 4,
+    "slug": "04-good-time-v2",
+    "title": "NEED A GOOD TIME?",
+    "shape": "rectangle",
+    "qr": {
+      "x": 0.78,
+      "y": 0.36,
+      "size": 0.14
+    },
+    "artwork": "artwork/04-good-time-v2.png",
+    "prompt": "Use case: ads-marketing\nAsset type: minimalist die-cut sticker artwork for motd, an Android IRC client. Flat 2D finished sticker only on a genuinely TRANSPARENT background.\nCreative direction: punk / underground hardcore graphic DESIGN LANGUAGE only: stark two-ink silkscreen, strong condensed sans type, tiny amount of worn ink. Early constructivist influence solely through asymmetric typography and one simple diagonal accent. Contemporary IRC logo sticker, highly restrained and immediately readable at small size.\nSubject constraints: only IRC chat symbols (slash commands, #channel symbol, chat bubbles, terminal cursor) and motd brand lettering. Zero people, crowds, fists, musicians, microphones, instruments, radios, antennas, cassettes, flags, political symbols, stars, propaganda scenes, scenic illustrations, bursts, collage layers or explanatory prose.\nComposition: huge negative space; one main logo-like symbol, one short phrase at most plus small motd wordmark. Large clean solid ink shapes, minimal detail. No dense illustration, no busy background, no repeated tiny motifs. Brand spelled m-o-t-d lowercase. Exact requested text only.\nMaterials: matte ivory sticker stock with black/red inks, very subtle silkscreen imperfections confined to printed shapes. Smooth clean die-cut boundary, a thin ivory border. Transparent outside sticker shape, no square background, no cast shadow, no photograph, no mockup, no hands. No extra sticker, watermark, caption, website or signature.\nQR layout: a real machine-generated QR will be added afterward. Leave specified quiet area plain solid ivory, without any drawn fake QR, outlined placeholder, caption or decoration.\nShape: one horizontal rectangular ivory sticker centered on transparent square canvas,bounds x5%-95%,y25%-75%, sharp corners and thin black edge.\nDesign: \"NEED A GOOD TIME?\" in two short lines of chunky black condensed punk type across left two-thirds. Small red chat bubble containing an ivory \"/\" next to a compact lowercase black \"motd\" wordmark below. One simple red diagonal underline. Make this striking but extremely sparse, text and one simple chat logo only.\nColor palette: ivory, black, red.\nText(verbatim): \"NEED A GOOD TIME?\" and \"motd\".\nQR quiet area: x77%-95%,y40%-58%, plain ivory. Type and logo left of70%width.",
+    "mode": "built-in",
+    "qrTarget": "https://github.com/trevarj/motd/releases"
+  },
+  {
+    "id": 5,
+    "slug": "05-talking-v2",
+    "title": "KEEP TALKING.",
+    "shape": "rounded-rectangle",
+    "qr": {
+      "x": 0.76,
+      "y": 0.35,
+      "size": 0.16
+    },
+    "artwork": "artwork/05-talking-v2.png",
+    "prompt": "Use case: ads-marketing\nAsset type: minimalist die-cut sticker artwork for motd, an Android IRC client. Flat 2D finished sticker only on a genuinely TRANSPARENT background.\nCreative direction: punk / underground hardcore graphic DESIGN LANGUAGE only: stark two-ink silkscreen, strong condensed sans type, tiny amount of worn ink. Early constructivist influence solely through asymmetric typography and one simple diagonal accent. Contemporary IRC logo sticker, highly restrained and immediately readable at small size.\nSubject constraints: only IRC chat symbols (slash commands, #channel symbol, chat bubbles, terminal cursor) and motd brand lettering. Zero people, crowds, fists, musicians, microphones, instruments, radios, antennas, cassettes, flags, political symbols, stars, propaganda scenes, scenic illustrations, bursts, collage layers or explanatory prose.\nComposition: huge negative space; one main logo-like symbol, one short phrase at most plus small motd wordmark. Large clean solid ink shapes, minimal detail. No dense illustration, no busy background, no repeated tiny motifs. Brand spelled m-o-t-d lowercase. Exact requested text only.\nMaterials: matte ivory sticker stock with black/red inks, very subtle silkscreen imperfections confined to printed shapes. Smooth clean die-cut boundary, a thin ivory border. Transparent outside sticker shape, no square background, no cast shadow, no photograph, no mockup, no hands. No extra sticker, watermark, caption, website or signature.\nQR layout: a real machine-generated QR will be added afterward. Leave specified quiet area plain solid ivory, without any drawn fake QR, outlined placeholder, caption or decoration.\nShape: one horizontal rounded rectangular sticker centered on transparent squarecanvas,bounds x5%-95%,y25%-75%, corner radius5%ofcanvas.\nDesign: a small clean black terminal-like frame at left containing a red \"/\". To its right, chunky black \"KEEP TALKING.\" headline in two lines, with small lowercase \"motd\" below. Maximal negative space. One minimalist icon plus words, no extra decoration. Pared back DIY computing / hardcore label vibe.\nColor palette: ivory, black, small vermilion accent.\nText(verbatim): \"KEEP TALKING.\" and \"motd\". The icon may contain \"/\" but no other terminal command.\nQR quiet area: x77%-95%,y40%-58%, completely plain ivory. Everything else stays left of70%width.",
+    "mode": "built-in",
+    "qrTarget": "https://github.com/trevarj/motd/releases"
+  },
+  {
+    "id": 6,
+    "slug": "06-people-v2",
+    "title": "FIND YOUR PEOPLE.",
+    "shape": "circle",
+    "qr": {
+      "x": 0.42,
+      "y": 0.75,
+      "size": 0.16
+    },
+    "artwork": "artwork/06-people-v2.png",
+    "prompt": "Use case: ads-marketing\nAsset type: minimalist die-cut sticker artwork for motd, an Android IRC client. Flat 2D finished sticker only on a genuinely TRANSPARENT background.\nCreative direction: punk / underground hardcore graphic DESIGN LANGUAGE only: stark two-ink silkscreen, strong condensed sans type, tiny amount of worn ink. Early constructivist influence solely through asymmetric typography and one simple diagonal accent. Contemporary IRC logo sticker, highly restrained and immediately readable at small size.\nSubject constraints: only IRC chat symbols (slash commands, #channel symbol, chat bubbles, terminal cursor) and motd brand lettering. Zero people, crowds, fists, musicians, microphones, instruments, radios, antennas, cassettes, flags, political symbols, stars, propaganda scenes, scenic illustrations, bursts, collage layers or explanatory prose.\nComposition: huge negative space; one main logo-like symbol, one short phrase at most plus small motd wordmark. Large clean solid ink shapes, minimal detail. No dense illustration, no busy background, no repeated tiny motifs. Brand spelled m-o-t-d lowercase. Exact requested text only.\nMaterials: matte ivory sticker stock with black/red inks, very subtle silkscreen imperfections confined to printed shapes. Smooth clean die-cut boundary, a thin ivory border. Transparent outside sticker shape, no square background, no cast shadow, no photograph, no mockup, no hands. No extra sticker, watermark, caption, website or signature.\nQR layout: a real machine-generated QR will be added afterward. Leave specified quiet area plain solid ivory, without any drawn fake QR, outlined placeholder, caption or decoration.\nShape: one perfectly circular ivory sticker centered on transparent squarecanvas, diameter exactly90%ofcanvas,bounds x5%-95%,y5%-95%.\nDesign: two small interlocking geometric speech bubbles in the top half, oneblack containing ivory \"/\", onered containing ivory \"#\". Under them \"FIND YOUR PEOPLE.\" in two tight boldblack sans lines and tiny lowercase \"motd\". Very clean little brandbadge with abundant blank ivory around it; subtle ink wear only. No people depicted.\nColor palette: ivory, black, red.\nText(verbatim): \"FIND YOUR PEOPLE.\" and \"motd\", symbols \"/\"and\"#\" inside bubbles.\nQR quiet area: x40%-58%,y72%-90%, plain ivory; all logos and words strictlyabove68%height.",
+    "mode": "built-in",
+    "qrTarget": "https://github.com/trevarj/motd/releases"
+  }
+]

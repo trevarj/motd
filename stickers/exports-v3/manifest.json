@@ -1,0 +1,168 @@
+{
+  "edition": "v3",
+  "target": "https://github.com/trevarj/motd/releases",
+  "assets": [
+    {
+      "slug": "01-slash-v3",
+      "title": "motd / IRC",
+      "shape": "circle",
+      "paletteName": "Midnight / cyan",
+      "palette": [
+        "#E6F9FF",
+        "#14213D",
+        "#00D7E8"
+      ],
+      "available": true,
+      "source": "artwork/01-slash-v3.png",
+      "svg": "exports-v3/01-slash-v3.svg",
+      "png": "exports-v3/01-slash-v3.png",
+      "width": 1254,
+      "height": 1254,
+      "channels": "srgba",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.42,
+        "y": 0.75,
+        "size": 0.16,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    },
+    {
+      "slug": "02-join-v3",
+      "title": "/join #motd",
+      "shape": "rectangle",
+      "paletteName": "Acid lime / violet",
+      "palette": [
+        "#D6FF32",
+        "#171417",
+        "#7735CB"
+      ],
+      "available": true,
+      "source": "artwork/02-join-v3.png",
+      "svg": "exports-v3/02-join-v3.svg",
+      "png": "exports-v3/02-join-v3.png",
+      "width": 1774,
+      "height": 887,
+      "channels": "srgba",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.75,
+        "y": 0.35,
+        "size": 0.16,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    },
+    {
+      "slug": "03-irc-v3",
+      "title": "IRC IS ALIVE.",
+      "shape": "circle",
+      "paletteName": "Lavender / pink",
+      "palette": [
+        "#D8C6FF",
+        "#3B174C",
+        "#E946A3"
+      ],
+      "available": true,
+      "source": "artwork/03-irc-v3.png",
+      "svg": "exports-v3/03-irc-v3.svg",
+      "png": "exports-v3/03-irc-v3.png",
+      "width": 1254,
+      "height": 1254,
+      "channels": "srgba",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.4,
+        "y": 0.72,
+        "size": 0.18,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    },
+    {
+      "slug": "04-good-time-v3",
+      "title": "NEED A GOOD TIME?",
+      "shape": "rectangle",
+      "paletteName": "Peach / burgundy",
+      "palette": [
+        "#FFE2C5",
+        "#4A1230",
+        "#FF9B45"
+      ],
+      "available": true,
+      "source": "artwork/04-good-time-v3.png",
+      "svg": "exports-v3/04-good-time-v3.svg",
+      "png": "exports-v3/04-good-time-v3.png",
+      "width": 1774,
+      "height": 887,
+      "channels": "srgba",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.78,
+        "y": 0.36,
+        "size": 0.14,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    },
+    {
+      "slug": "05-talking-v3",
+      "title": "KEEP TALKING.",
+      "shape": "rounded-rectangle",
+      "paletteName": "Mint / teal / lemon",
+      "palette": [
+        "#D9F3E5",
+        "#0A665C",
+        "#FFE66A"
+      ],
+      "available": true,
+      "source": "artwork/05-talking-v3.png",
+      "svg": "exports-v3/05-talking-v3.svg",
+      "png": "exports-v3/05-talking-v3.png",
+      "width": 1774,
+      "height": 887,
+      "channels": "srgba",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.76,
+        "y": 0.35,
+        "size": 0.16,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    },
+    {
+      "slug": "06-people-v3",
+      "title": "FIND YOUR PEOPLE.",
+      "shape": "circle",
+      "paletteName": "Cobalt / coral",
+      "palette": [
+        "#FFF4DE",
+        "#2451D6",
+        "#FF6C62"
+      ],
+      "available": true,
+      "source": "artwork/06-people-v3.png",
+      "svg": "exports-v3/06-people-v3.svg",
+      "png": "exports-v3/06-people-v3.png",
+      "width": 1254,
+      "height": 1254,
+      "channels": "srgba",
+      "qr": {
+        "target": "https://github.com/trevarj/motd/releases",
+        "x": 0.42,
+        "y": 0.75,
+        "size": 0.16,
+        "errorCorrection": "M",
+        "quietZoneModules": 4,
+        "dataModules": 29
+      }
+    }
+  ]
+}

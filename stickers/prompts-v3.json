@@ -1,0 +1,134 @@
+[
+  {
+    "id": 1,
+    "slug": "01-slash-v3",
+    "title": "motd / IRC",
+    "shape": "circle",
+    "qr": {
+      "x": 0.42,
+      "y": 0.75,
+      "size": 0.16
+    },
+    "artwork": "artwork/01-slash-v3.png",
+    "reference": "artwork/01-slash-v2.png",
+    "paletteName": "Midnight / cyan",
+    "palette": [
+      "#E6F9FF",
+      "#14213D",
+      "#00D7E8"
+    ],
+    "mode": "built-in edit",
+    "qrTarget": "https://github.com/trevarj/motd/releases",
+    "prompt": "Use case: precise-object-edit\nInput image: EDIT TARGET, the supplied minimalist motd IRC sticker raster.\nPrimary request: recolor ONLY this exact sticker to the specified palette.\nPalette mapping: Sticker stock: very pale ice blue #E6F9FF. Former black chat bubble and motd wordmark: rich midnight navy #14213D. Former red diagonal accent: vivid electric cyan #00D7E8. Ivory slash inside bubble: pale ice blue.\nPreserve invariants: same circular or rectangular sticker silhouette, exact original canvas aspect ratio and image dimensions if possible, same artwork placement and scale, same chat/IRC symbols and typography, exact existing lettering and punctuation \"motd / IRC\" and all other existing \"motd\" letters, same substantial negative space and restrained silkscreen texture. Do not redraw the composition or add details.\nKeep genuine transparency outside the sticker silhouette. Return a flat transparent-background sticker asset only, no scenery, mockup, shadow, square backing or added border. Keep the sticker's current simple die-cut edge and tiny existing print imperfections.\nColor flat fills and ink only. No gradients or new illustrations. No additional text, URLs, logos, icons, slogans, political imagery or decoration. Do not add a QR code, QR placeholder, checkerboard pattern or watermark. Preserve the existing blank QR integration area clear of lettering/symbols; a real black-on-light QR will be added afterward. The light QR panel is allowed to contrast with colored stock.\nThis remains a punk/underground hardcore inspired minimalist IRC brand sticker, with constructivist typography influence only. These influences come through existing type, geometric marks and ink texture, never political subject matter."
+  },
+  {
+    "id": 2,
+    "slug": "02-join-v3",
+    "title": "/join #motd",
+    "shape": "rectangle",
+    "qr": {
+      "x": 0.75,
+      "y": 0.35,
+      "size": 0.16
+    },
+    "artwork": "artwork/02-join-v3.png",
+    "reference": "artwork/02-join-v2.png",
+    "paletteName": "Acid lime / violet",
+    "palette": [
+      "#D6FF32",
+      "#171417",
+      "#7735CB"
+    ],
+    "mode": "built-in edit",
+    "qrTarget": "https://github.com/trevarj/motd/releases",
+    "prompt": "Use case: precise-object-edit\nInput image: EDIT TARGET, the supplied minimalist motd IRC sticker raster.\nPrimary request: recolor ONLY this exact sticker to the specified palette.\nPalette mapping: Sticker stock: bold acid lime #D6FF32, clearly saturated lime yellow-green. /join main lettering and outer thin keyline: nearly black #171417. #motd secondary lettering and underscore: strong violet #7735CB. Keep this a high-contrast DIY terminal label.\nPreserve invariants: same circular or rectangular sticker silhouette, exact original canvas aspect ratio and image dimensions if possible, same artwork placement and scale, same chat/IRC symbols and typography, exact existing lettering and punctuation \"/join #motd\" and all other existing \"motd\" letters, same substantial negative space and restrained silkscreen texture. Do not redraw the composition or add details.\nKeep genuine transparency outside the sticker silhouette. Return a flat transparent-background sticker asset only, no scenery, mockup, shadow, square backing or added border. Keep the sticker's current simple die-cut edge and tiny existing print imperfections.\nColor flat fills and ink only. No gradients or new illustrations. No additional text, URLs, logos, icons, slogans, political imagery or decoration. Do not add a QR code, QR placeholder, checkerboard pattern or watermark. Preserve the existing blank QR integration area clear of lettering/symbols; a real black-on-light QR will be added afterward. The light QR panel is allowed to contrast with colored stock.\nThis remains a punk/underground hardcore inspired minimalist IRC brand sticker, with constructivist typography influence only. These influences come through existing type, geometric marks and ink texture, never political subject matter."
+  },
+  {
+    "id": 3,
+    "slug": "03-irc-v3",
+    "title": "IRC IS ALIVE.",
+    "shape": "circle",
+    "qr": {
+      "x": 0.4,
+      "y": 0.72,
+      "size": 0.18
+    },
+    "artwork": "artwork/03-irc-v3.png",
+    "reference": "artwork/03-irc-v2.png",
+    "paletteName": "Lavender / pink",
+    "palette": [
+      "#D8C6FF",
+      "#3B174C",
+      "#E946A3"
+    ],
+    "mode": "built-in edit",
+    "qrTarget": "https://github.com/trevarj/motd/releases",
+    "prompt": "Use case: precise-object-edit\nInput image: EDIT TARGET, the supplied minimalist motd IRC sticker raster.\nPrimary request: recolor ONLY this exact sticker to the specified palette.\nPalette mapping: Sticker stock: light lavender #D8C6FF. IRC IS ALIVE. and motd lettering: deep plum #3B174C. Large # symbol: hot pink #E946A3. A vivid purple/pink limited-ink badge.\nPreserve invariants: same circular or rectangular sticker silhouette, exact original canvas aspect ratio and image dimensions if possible, same artwork placement and scale, same chat/IRC symbols and typography, exact existing lettering and punctuation \"IRC IS ALIVE.\" and all other existing \"motd\" letters, same substantial negative space and restrained silkscreen texture. Do not redraw the composition or add details.\nKeep genuine transparency outside the sticker silhouette. Return a flat transparent-background sticker asset only, no scenery, mockup, shadow, square backing or added border. Keep the sticker's current simple die-cut edge and tiny existing print imperfections.\nColor flat fills and ink only. No gradients or new illustrations. No additional text, URLs, logos, icons, slogans, political imagery or decoration. Do not add a QR code, QR placeholder, checkerboard pattern or watermark. Preserve the existing blank QR integration area clear of lettering/symbols; a real black-on-light QR will be added afterward. The light QR panel is allowed to contrast with colored stock.\nThis remains a punk/underground hardcore inspired minimalist IRC brand sticker, with constructivist typography influence only. These influences come through existing type, geometric marks and ink texture, never political subject matter."
+  },
+  {
+    "id": 4,
+    "slug": "04-good-time-v3",
+    "title": "NEED A GOOD TIME?",
+    "shape": "rectangle",
+    "qr": {
+      "x": 0.78,
+      "y": 0.36,
+      "size": 0.14
+    },
+    "artwork": "artwork/04-good-time-v3.png",
+    "reference": "artwork/04-good-time-v2.png",
+    "paletteName": "Peach / burgundy",
+    "palette": [
+      "#FFE2C5",
+      "#4A1230",
+      "#FF9B45"
+    ],
+    "mode": "built-in edit",
+    "qrTarget": "https://github.com/trevarj/motd/releases",
+    "prompt": "Use case: precise-object-edit\nInput image: EDIT TARGET, the supplied minimalist motd IRC sticker raster.\nPrimary request: recolor ONLY this exact sticker to the specified palette.\nPalette mapping: Sticker stock: light peach #FFE2C5. Main slogan and motd wordmark plus outline: deep burgundy #4A1230. Chat bubble and diagonal underline: vibrant tangerine #FF9B45. Slash inside chat bubble: light peach.\nPreserve invariants: same circular or rectangular sticker silhouette, exact original canvas aspect ratio and image dimensions if possible, same artwork placement and scale, same chat/IRC symbols and typography, exact existing lettering and punctuation \"NEED A GOOD TIME?\" and all other existing \"motd\" letters, same substantial negative space and restrained silkscreen texture. Do not redraw the composition or add details.\nKeep genuine transparency outside the sticker silhouette. Return a flat transparent-background sticker asset only, no scenery, mockup, shadow, square backing or added border. Keep the sticker's current simple die-cut edge and tiny existing print imperfections.\nColor flat fills and ink only. No gradients or new illustrations. No additional text, URLs, logos, icons, slogans, political imagery or decoration. Do not add a QR code, QR placeholder, checkerboard pattern or watermark. Preserve the existing blank QR integration area clear of lettering/symbols; a real black-on-light QR will be added afterward. The light QR panel is allowed to contrast with colored stock.\nThis remains a punk/underground hardcore inspired minimalist IRC brand sticker, with constructivist typography influence only. These influences come through existing type, geometric marks and ink texture, never political subject matter."
+  },
+  {
+    "id": 5,
+    "slug": "05-talking-v3",
+    "title": "KEEP TALKING.",
+    "shape": "rounded-rectangle",
+    "qr": {
+      "x": 0.76,
+      "y": 0.35,
+      "size": 0.16
+    },
+    "artwork": "artwork/05-talking-v3.png",
+    "reference": "artwork/05-talking-v2.png",
+    "paletteName": "Mint / teal / lemon",
+    "palette": [
+      "#D9F3E5",
+      "#0A665C",
+      "#FFE66A"
+    ],
+    "mode": "built-in edit",
+    "qrTarget": "https://github.com/trevarj/motd/releases",
+    "prompt": "Use case: precise-object-edit\nInput image: EDIT TARGET, the supplied minimalist motd IRC sticker raster.\nPrimary request: recolor ONLY this exact sticker to the specified palette.\nPalette mapping: Sticker stock: pale mint #D9F3E5. Terminal icon, its dark frame, KEEP TALKING. and motd lettering: deep teal #0A665C. Slash inside terminal: bright lemon yellow #FFE66A. Inner light terminal keyline: pale mint.\nPreserve invariants: same circular or rectangular sticker silhouette, exact original canvas aspect ratio and image dimensions if possible, same artwork placement and scale, same chat/IRC symbols and typography, exact existing lettering and punctuation \"KEEP TALKING.\" and all other existing \"motd\" letters, same substantial negative space and restrained silkscreen texture. Do not redraw the composition or add details.\nKeep genuine transparency outside the sticker silhouette. Return a flat transparent-background sticker asset only, no scenery, mockup, shadow, square backing or added border. Keep the sticker's current simple die-cut edge and tiny existing print imperfections.\nColor flat fills and ink only. No gradients or new illustrations. No additional text, URLs, logos, icons, slogans, political imagery or decoration. Do not add a QR code, QR placeholder, checkerboard pattern or watermark. Preserve the existing blank QR integration area clear of lettering/symbols; a real black-on-light QR will be added afterward. The light QR panel is allowed to contrast with colored stock.\nThis remains a punk/underground hardcore inspired minimalist IRC brand sticker, with constructivist typography influence only. These influences come through existing type, geometric marks and ink texture, never political subject matter."
+  },
+  {
+    "id": 6,
+    "slug": "06-people-v3",
+    "title": "FIND YOUR PEOPLE.",
+    "shape": "circle",
+    "qr": {
+      "x": 0.42,
+      "y": 0.75,
+      "size": 0.16
+    },
+    "artwork": "artwork/06-people-v3.png",
+    "reference": "artwork/06-people-v2.png",
+    "paletteName": "Cobalt / coral",
+    "palette": [
+      "#FFF4DE",
+      "#2451D6",
+      "#FF6C62"
+    ],
+    "mode": "built-in edit",
+    "qrTarget": "https://github.com/trevarj/motd/releases",
+    "prompt": "Use case: precise-object-edit\nInput image: EDIT TARGET, the supplied minimalist motd IRC sticker raster.\nPrimary request: recolor ONLY this exact sticker to the specified palette.\nPalette mapping: Sticker stock: light cream #FFF4DE. Former black slash chat bubble and FIND YOUR PEOPLE. plus motd lettering: cobalt blue #2451D6. Former red # chat bubble: bright coral #FF6C62. Slash and # inside bubbles: cream.\nPreserve invariants: same circular or rectangular sticker silhouette, exact original canvas aspect ratio and image dimensions if possible, same artwork placement and scale, same chat/IRC symbols and typography, exact existing lettering and punctuation \"FIND YOUR PEOPLE.\" and all other existing \"motd\" letters, same substantial negative space and restrained silkscreen texture. Do not redraw the composition or add details.\nKeep genuine transparency outside the sticker silhouette. Return a flat transparent-background sticker asset only, no scenery, mockup, shadow, square backing or added border. Keep the sticker's current simple die-cut edge and tiny existing print imperfections.\nColor flat fills and ink only. No gradients or new illustrations. No additional text, URLs, logos, icons, slogans, political imagery or decoration. Do not add a QR code, QR placeholder, checkerboard pattern or watermark. Preserve the existing blank QR integration area clear of lettering/symbols; a real black-on-light QR will be added afterward. The light QR panel is allowed to contrast with colored stock.\nThis remains a punk/underground hardcore inspired minimalist IRC brand sticker, with constructivist typography influence only. These influences come through existing type, geometric marks and ink texture, never political subject matter."
+  }
+]

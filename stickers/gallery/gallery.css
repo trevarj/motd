@@ -1,0 +1,33 @@
+:root { color: #efe9dd; background: #141311; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; background: #141311; }
+.masthead { max-width: 1160px; margin: 0 auto; padding: clamp(2rem, 6vw, 5rem) 1.25rem 2.5rem; border-bottom: 1px solid #655d52; }
+.eyebrow { margin: 0 0 .9rem; color: #f25442; font-size: .72rem; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+h1 { margin: 0; font: 900 clamp(2.4rem, 8vw, 5rem)/.88 Impact, Haettenschweiler, sans-serif; letter-spacing: -.04em; }
+.masthead > p:not(.eyebrow) { max-width: 44rem; margin: 1rem 0 1.35rem; color: #c7bcaa; line-height: 1.55; }
+.masthead-actions, .actions, #lightbox-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.edition-switch { display: flex; gap: 1rem; margin-top: 1.1rem; }.edition-link { color: #aba192; font-size: .66rem; font-weight: 700; letter-spacing: .08em; text-decoration: none; }.edition-link:hover, .edition-link:focus-visible, .edition-link[aria-current="page"] { color: #f25442; text-decoration: underline; text-underline-offset: .3rem; }
+.button, .download { display: inline-block; padding: .68rem .8rem; border: 1px solid #a89d8b; color: inherit; background: transparent; font: 700 .7rem ui-monospace, monospace; letter-spacing: .04em; text-decoration: none; cursor: pointer; }
+.button:hover, .button:focus-visible, .download:hover, .download:focus-visible { border-color: #f25442; color: #141311; background: #f25442; }
+main { max-width: 1160px; margin: 0 auto; padding: 1.5rem 1.25rem 3.5rem; }
+.notice { min-height: 1.6rem; margin: 0 0 1.1rem; color: #a99f90; font-size: .72rem; }
+.sticker-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: 1rem; }
+.card { display: flex; min-width: 0; flex-direction: column; border: 1px solid #4d483f; background: #1c1a17; }
+.art-button { display: grid; min-height: 255px; place-items: center; padding: 1rem; border: 0; background: #eae1d0; background-image: linear-gradient(45deg, #ded3be 25%, transparent 25%), linear-gradient(-45deg, #ded3be 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ded3be 75%), linear-gradient(-45deg, transparent 75%, #ded3be 75%); background-position: 0 0, 0 12px, 12px -12px, -12px 0; background-size: 24px 24px; cursor: zoom-in; }
+.art-button img { display: block; width: 100%; height: 100%; max-height: 340px; object-fit: contain; }
+.art-button:focus-visible, .button:focus-visible, .download:focus-visible, .close:focus-visible { outline: 3px solid #f25442; outline-offset: 3px; }
+.pending-art { display: grid; min-height: 255px; place-items: center; padding: 2rem; color: #171513; background: #eae1d0; font: 900 1.5rem/.9 Impact, sans-serif; text-align: center; }
+.card-copy { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: start; padding: .85rem; }
+.card h2 { margin: 0; font: 900 1.18rem/.95 Impact, sans-serif; letter-spacing: -.02em; }
+.status { margin: .4rem 0 0; color: #aba192; font-size: .66rem; }
+.palette { display: flex; align-items: center; gap: .35rem; margin: .42rem 0 0; color: #c7bcaa; font-size: .62rem; }.swatches { display: flex; gap: 2px; }.swatch { width: .62rem; height: .62rem; border: 1px solid #141311; outline: 1px solid #8e8373; }
+.download { padding: .5rem .56rem; font-size: .62rem; }
+.disabled { color: #978d80; font-size: .63rem; }
+footer { padding: 1.4rem; border-top: 1px solid #4d483f; color: #938979; font-size: .65rem; letter-spacing: .12em; text-align: center; }
+dialog { width: min(94vw, 900px); padding: 0; border: 1px solid #eae1d0; color: #efe9dd; background: #1c1a17; }
+dialog::backdrop { background: #000c; }.lightbox-stage { display: grid; min-height: min(70vh, 760px); place-items: center; padding: 1.2rem; background: #eae1d0; }.lightbox-stage img { max-width: 100%; max-height: min(66vh, 720px); object-fit: contain; }
+.dialog-copy { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .75rem; padding: .85rem; }.dialog-copy p { margin: 0; font-weight: 700; }
+.close { position: fixed; top: 1rem; right: 1rem; width: 2.5rem; height: 2.5rem; border: 1px solid #eae1d0; color: #eae1d0; background: #141311; font-size: 1.8rem; cursor: pointer; }
+@media (max-width: 540px) { .card-copy { grid-template-columns: 1fr; } }
+@page { size: A4 portrait; margin: 5mm; }
+@media print { body { background: #fff; } .masthead, footer, .notice, .actions, .close { display: none; } main { padding: 0; } .sticker-grid { grid-template-columns: repeat(2, 90mm); gap: 5mm; justify-content: center; } .card { width: 90mm; border: 0; break-inside: avoid; } .art-button { min-height: 90mm; padding: 0; background: #fff; } .card-copy { display: none; } }
