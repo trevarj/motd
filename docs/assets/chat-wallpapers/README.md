@@ -6,9 +6,11 @@ lossless indexed PNG tiles (`<preset-id>.png`), with black RGB and the approved 
 The app combines each mask with a theme-derived gradient and user-controlled ink opacity.
 Appearance → Wallpaper → Outline color changes only the builtin drawing ink, including chat,
 live previews and thumbnails. Default retains the theme's `onSurfaceVariant` color; existing
-preferences and backups without a color keep that behavior. The color wheel selects hue and
-saturation, with equivalent accessible sliders, a brightness slider (including white/black),
-and a validated six-digit sRGB hex field. The real wallpaper previews the draft immediately;
+preferences and backups without a color keep that behavior. The color wheel always displays
+the full-brightness hue/saturation spectrum, even when the selected color is black or near-black.
+Equivalent accessible sliders, a brightness slider (including white/black), and a validated
+six-digit sRGB hex field retain the actual selected brightness. Picking hue/saturation at black
+keeps the draft black until brightness is raised. The real wallpaper previews the draft immediately;
 only Apply saves it. Cancel, back and outside dismissal discard it, and Default resets only
 the draft until Apply. Draft state survives configuration recreation. No opacity setting is
 duplicated: wallpaper intensity still multiplies the unchanged mask alpha directly.

@@ -116,7 +116,7 @@ internal fun WallpaperOutlineColorDialog(
                         contentDescription = previewLabel
                     },
                 )
-                OutlineColorWheel(hue, saturation, brightness) { nextHue, nextSaturation ->
+                OutlineColorWheel(hue, saturation) { nextHue, nextSaturation ->
                     hue = nextHue
                     saturation = nextSaturation
                     updateHex()
@@ -226,7 +226,6 @@ private fun ColorComponentSlider(
 private fun OutlineColorWheel(
     hue: Float,
     saturation: Float,
-    brightness: Float,
     onChange: (Float, Float) -> Unit,
 ) {
     val change by rememberUpdatedState(onChange)
@@ -266,7 +265,6 @@ private fun OutlineColorWheel(
         val radius = size.minDimension / 2f
         drawCircle(rainbow, radius)
         drawCircle(saturationBrush, radius)
-        drawCircle(Color.Black.copy(alpha = 1f - brightness), radius)
         val angle = hue * PI.toFloat() / 180f
         val marker = center + Offset(cos(angle), sin(angle)) * (saturation * radius)
         drawCircle(Color.Black, 7.dp.toPx(), marker, style = Stroke(3.dp.toPx()))

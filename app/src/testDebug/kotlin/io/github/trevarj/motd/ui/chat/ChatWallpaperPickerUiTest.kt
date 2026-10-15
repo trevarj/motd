@@ -31,6 +31,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -305,6 +306,57 @@ class ChatWallpaperPickerUiTest {
         )
         assertEquals(2, changes.size)
         assertNull(current.outlineColor)
+    }
+
+    @Test
+    fun blackOutlineKeepsWheelSpectrumVisibleAndRecoversColorWithBrightness() {
+        var applied: Int? = null
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                WallpaperOutlineColorDialog(
+                    selection = WallpaperSelection(outlineColor = android.graphics.Color.BLACK),
+                    onApply = { applied = it },
+                    onDismiss = {},
+                )
+            }
+        }
+
+        val wheel = compose.onNodeWithTag("settings_wallpaper_color_wheel").performScrollTo()
+        val image = wheel.captureToImage().asAndroidBitmap()
+        val radius = minOf(image.width, image.height) / 2f
+        val samples =
+            listOf(
+                Triple(0.8f, 0f, 16),
+                Triple(-0.4f, 0.693f, 8),
+                Triple(-0.4f, -0.693f, 0),
+            )
+        for ((x, y, channel) in samples) {
+            val pixel = image.getPixel((image.width / 2f + x * radius).toInt(), (image.height / 2f + y * radius).toInt())
+            val dominant = pixel ushr channel and 255
+            assertTrue("Wheel channel $channel must remain bright at zero selected brightness", dominant > 220)
+            for (other in listOf(0, 8, 16).filter { it != channel }) {
+                assertTrue("Wheel must show distinct red, green and blue regions", dominant - (pixel ushr other and 255) > 100)
+            }
+        }
+        assertEquals(
+            0f,
+            compose
+                .onNodeWithTag("settings_wallpaper_color_brightness")
+                .fetchSemanticsNode()
+                .config[SemanticsProperties.ProgressBarRangeInfo]
+                .current,
+        )
+        wheel.performTouchInput { click(Offset(center.x + minOf(width, height) / 2f, center.y)) }
+        compose
+            .onNodeWithTag("settings_wallpaper_color_hex")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#000000")))
+        assertNull(applied)
+        setColorComponent("brightness", 1f)
+        compose
+            .onNodeWithTag("settings_wallpaper_color_hex")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#FF0000")))
+        compose.onNodeWithTag("settings_wallpaper_color_apply").performClick()
+        assertEquals(android.graphics.Color.RED, applied)
     }
 
     @Test
