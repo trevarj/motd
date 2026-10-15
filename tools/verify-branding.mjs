@@ -67,6 +67,13 @@ for (const [density, factor] of [["mdpi", 1], ["hdpi", 1.5], ["xhdpi", 2], ["xxh
   const splashSize = Math.round(200 * factor);
   const splash = inspect(splashFile, splashSize, splashSize, 76 * factor);
   assert.ok(splash.max - splash.min > 15, "Splash ceramic shading was flattened");
+  assert.ok(splash.min >= 128, "Splash ceramic mark must remain light on black");
+  const splashPixels = magick([splashFile, "-depth", "8", "rgba:-"]);
+  for (let i = 0; i < splashPixels.length; i += 4) {
+    if (splashPixels[i + 3] <= 127) continue;
+    assert.equal(splashPixels[i], splashPixels[i + 1], `${splashFile}: colored ceramic mark`);
+    assert.equal(splashPixels[i], splashPixels[i + 2], `${splashFile}: colored ceramic mark`);
+  }
   const unit = splashSize / 192;
   const width = Math.round(164 * unit * .66);
   const height = Math.round(158 * unit * .66);
@@ -114,6 +121,8 @@ for (const [name, inverse] of [["light", false], ["dark", true]]) {
     if (pixels[i + 3] <= 127) continue;
     min = Math.min(min, pixels[i]);
     max = Math.max(max, pixels[i]);
+    assert.equal(pixels[i], pixels[i + 1], `${file}: colored ceramic mark`);
+    assert.equal(pixels[i], pixels[i + 2], `${file}: colored ceramic mark`);
   }
   assert.ok(max - min > 15, `${file}: ceramic shading was flattened`);
   assert.ok(inverse ? min >= 128 : max < 128, `${file}: wrong light/dark contrast`);
@@ -127,4 +136,20 @@ for (const [name, inverse] of [["light", false], ["dark", true]]) {
   }
   assert.ok(lockup.equals(text), `${file}: existing lettering pixels changed`);
 }
-console.log(`${checked} Android density assets and 2 README lockups verified; transparency, smooth contours, contrast, shading, safe zones, unchanged lettering, and raster references passed.`);
+// Distribution icons are neutral ceramic white on black, not launcher artwork.
+const appIcon = readFileSync(path.join(brand, "motd-app-icon.png"));
+for (const relative of ["docs/assets/store/motd-play-icon-512.png", "fastlane/metadata/android/en-US/images/icon.png"]) {
+  assert.deepEqual(readFileSync(path.join(root, relative)), appIcon, `${relative}: stale store icon`);
+}
+const iconPixels = magick([path.join(brand, "motd-app-icon.png"), "-depth", "8", "rgba:-"]);
+assert.deepEqual([...iconPixels.subarray(0, 4)], [0, 0, 0, 255], "Default icon background must be black");
+const lightTones = new Set();
+for (let i = 0; i < iconPixels.length; i += 4) {
+  assert.equal(iconPixels[i + 3], 255, "Store icon must be opaque");
+  assert.equal(iconPixels[i], iconPixels[i + 1], "Store icon must be grayscale");
+  assert.equal(iconPixels[i], iconPixels[i + 2], "Store icon must be grayscale");
+  if (iconPixels[i] >= 128) lightTones.add(iconPixels[i]);
+}
+assert.ok(lightTones.size > 15, "Store ceramic shading was flattened");
+assert.ok(Math.max(...lightTones) > 200, "Store icon must contain a light ceramic mark");
+console.log(`${checked} Android density assets, 2 README lockups, and store icons verified; transparency, smooth contours, contrast, ceramic shading, neutrality, safe zones, preserved lettering, and raster references passed.`);

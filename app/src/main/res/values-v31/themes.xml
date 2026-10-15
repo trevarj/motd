@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Android 12+ platform SplashScreen: brand background + centered splash logo. Supersedes
-         the pre-31 windowBackground splash. -->
+    <!-- Android 12+ platform SplashScreen: white logo on black in both light and dark mode.
+         Supersedes the pre-31 windowBackground splash. -->
     <style name="Theme.Motd.Splash" parent="Theme.Motd">
-        <item name="android:windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <item name="android:windowSplashScreenBackground">@android:color/black</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
+        <item name="android:statusBarColor">@android:color/black</item>
+        <item name="android:navigationBarColor">@android:color/black</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
     </style>
 </resources>

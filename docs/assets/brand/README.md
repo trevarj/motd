@@ -23,23 +23,52 @@ then preserve the current 2048-unit em advances (`m` 1774, `o` 1156, `t` 693,
 
 ## Raster exports
 
-The README uses `motd-lockup-light.png` and `motd-lockup-dark.png`. Their speech
-bubble comes from the smoothed `motd-splash-master.png`, retaining its soft alpha
-contours and ceramic shading rather than reapplying the older symbol mask.
-The original `motd-lettering-master.png` is composited unchanged for light mode
-and RGB-inverted for dark mode; both retain the 1470×540 horizontal layout.
+In-app logos and launcher choices stay **theme-colored matte ceramic**. The
+`#motd` chat-list tile keeps its deterministic theme background and highlight;
+runtime marks use `ceramicLogoColorMatrix` with their existing theme targets.
+Launcher palette backgrounds and the terminal-green artwork are unchanged.
 
-Regenerate only these two lockups (without rewriting Android or other assets):
+Only splash and README branding use neutral black/white treatment: splash is a
+white ceramic mark on black in both OS modes (including status/navigation bars),
+and README lockups pair a dark ceramic mark with a light page or a white ceramic
+mark with a dark page. Black/white describes polarity, **not flat silhouettes**.
+
+The immutable RGB masters supply the matte ceramic shading as well as geometry.
+The smoothed `motd-splash-master.png` supplies splash and README contours with
+soft alpha intact; other exports retain `motd-ceramic-master.png` and
+`motd-symbol-mask.png`. Original README lettering is composited unchanged in
+light mode and RGB-inverted in dark mode at the same 1470×540 layout.
+
+The separately requested F-Droid/store icon is white ceramic on black; these
+distribution PNGs do not control Android launcher choices. The site logo,
+standalone symbols, favicon, and stacked lockup retain their existing treatment.
+
+Regenerate all branding, including the F-Droid/store icons:
 
 ```sh
-nix develop .#sprite-studies -c node tools/export-branding.mjs --readme-only
+nix develop .#sprite-studies -c node tools/export-branding.mjs
 ```
 
-Use `--splash-only` for the Android splash density assets, or omit the flag for
-all brand exports. Other marks continue to use `motd-ceramic-master.png` and
-`motd-symbol-mask.png`; the smoothing source is scoped to splash and README art.
-Verify dimensions, contours, transparency, shading, and preserved lettering with:
+Use `--splash-only` for just the Android splash density assets, `--readme-only`
+for the 1470×540 light/dark README lockups, or `--store-only` for the three
+distribution icons without touching in-app, launcher, or site artwork. The full
+exporter preserves the existing themed ceramic runtime/launcher pipeline.
+Verify exports with:
 
 ```sh
 nix develop .#sprite-studies -c node tools/verify-branding.mjs
+```
+
+F-Droid's `fastlane/metadata/android/en-US/images/phoneScreenshots/` uses the
+actual full-app light/dark showcase composites from `screenshots/` (chat list,
+conversation, attachment chooser), not fabricated UI or a splash replacement.
+They retain the existing 1080×2400 dimensions and encoded format. These are
+reused captures, not a claim of a fresh runtime capture of the current build.
+To capture a fresh set, follow `test/e2e/README.md` and run:
+
+```sh
+nix develop -c ./test/e2e/headless.sh showcase
+cp screenshots/chat-list.png fastlane/metadata/android/en-US/images/phoneScreenshots/01_chat-list.png
+cp screenshots/chat.png fastlane/metadata/android/en-US/images/phoneScreenshots/02_chat.png
+cp screenshots/file-uploader.png fastlane/metadata/android/en-US/images/phoneScreenshots/03_file-uploader.png
 ```

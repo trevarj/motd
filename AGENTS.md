@@ -21,6 +21,9 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
 
 ## Architecture and implementation rules
 
+- Splash, README, and export branding changes must not alter themed in-app or
+  launcher artwork unless explicitly requested. Preserve matte ceramic shading;
+  black/white treatment is not a flat silhouette.
 - Chat wallpaper artwork must tile seamlessly across both axes and corners.
   Wrap complete motifs and verify repeated proofs; transparent border padding
   or cropping alone does not satisfy this requirement. Preserve the approved

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 // Run with nix develop .#sprite-studies -c node tools/export-branding.mjs.
 // Add --splash-only to regenerate just the splash density assets.
 // Add --readme-only to regenerate just the light/dark README lockups.
+// Add --store-only to regenerate just the external distribution icons.
 // Raster-only sources retain the approved ceramic finish and original lettering.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const brand = path.join(root, "docs/assets/brand");
@@ -92,7 +93,8 @@ const padding = Math.max(2, Math.round(Math.max(splashWidth, splashHeight) / 512
 const splashBounds = `${visibleWidth + 2 * padding}x${visibleHeight + 2 * padding}+${visibleX - padding}+${visibleY - padding}`;
 const splashCrop = png(["png:-", "-crop", splashBounds, "+repage"], shade([255, 255, 255], splashMaster));
 const readmeOnly = process.argv.includes("--readme-only");
-if (!readmeOnly) {
+const storeOnly = process.argv.includes("--store-only");
+if (!readmeOnly && !storeOnly) {
   for (const [density, factor] of densities) {
     save(path.join(res, `drawable-${density}`, "ic_splash_logo.png"), aligned(splashCrop, Math.round(200 * factor), .66));
   }
@@ -103,11 +105,13 @@ if (process.argv.includes("--splash-only")) {
 }
 
 const lettering = readFileSync(path.join(brand, "motd-lettering-master.png"));
-for (const [name, inverse] of [["light", false], ["dark", true]]) {
-  const text = inverse ? png(["png:-", "-channel", "RGB", "-negate", "+channel"], lettering) : lettering;
-  const ink = inverse ? splashCrop : png(["png:-", "-crop", splashBounds, "+repage"], shade([0, 0, 0], splashMaster));
-  const mark = layer(aligned(ink, Math.round(192 * .92 * 3)), 1470, 540, Math.round(23.7 * 3), 3);
-  save(path.join(brand, `motd-lockup-${name}.png`), over(mark, resize(text, 1470, 540)));
+if (!storeOnly) {
+  for (const [name, inverse] of [["light", false], ["dark", true]]) {
+    const text = inverse ? png(["png:-", "-channel", "RGB", "-negate", "+channel"], lettering) : lettering;
+    const ink = inverse ? splashCrop : png(["png:-", "-crop", splashBounds, "+repage"], shade([0, 0, 0], splashMaster));
+    const mark = layer(aligned(ink, Math.round(192 * .92 * 3)), 1470, 540, Math.round(23.7 * 3), 3);
+    save(path.join(brand, `motd-lockup-${name}.png`), over(mark, resize(text, 1470, 540)));
+  }
 }
 if (readmeOnly) {
   console.log(`Exported ${outputs.length} README lockups from the smoothed raster master.`);
@@ -118,10 +122,19 @@ const black = shade([0, 0, 0]);
 const white = shade([255, 255, 255]);
 const terminal = shade([51, 255, 102]);
 
+// Distribution artwork is independent of the themed Android launcher.
+const appIcon = over(solid(512, 512, "black"), normalized(white, 512, .74));
+save(path.join(brand, "motd-app-icon.png"), appIcon);
+save(path.join(root, "docs/assets/store/motd-play-icon-512.png"), appIcon);
+save(path.join(root, "fastlane/metadata/android/en-US/images/icon.png"), appIcon);
+if (storeOnly) {
+  console.log(`Exported ${outputs.length} ceramic white-on-black store icons.`);
+  process.exit(0);
+}
+
 save(path.join(brand, "motd-symbol.png"), normalized(black, 512));
 save(path.join(brand, "motd-symbol-white.png"), normalized(white, 512));
 save(path.join(brand, "motd-favicon.png"), over(solid(64, 64, "white"), normalized(black, 64, .85)));
-save(path.join(brand, "motd-app-icon.png"), over(solid(512, 512, "#006C70"), normalized(white, 512, .74)));
 save(path.join(root, "docs/assets/logo.png"), over(solid(1024, 1024, "#006C70"), normalized(white, 1024, .74)));
 
 // Move the existing lettering as a single raster layer; never redraw the glyphs.

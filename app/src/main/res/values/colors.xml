@@ -2,8 +2,8 @@
 <resources>
     <color name="ic_launcher_background">#006C70</color>
 
-    <!-- Launcher icon variant backgrounds (Appearance > App icon). Do not repurpose
-         ic_launcher_background above: the splash screen keys off it directly. -->
+    <!-- Launcher icon variant backgrounds (Appearance > App icon).
+         Splash backgrounds are independently fixed to platform black. -->
     <color name="ic_launcher_background_mono">#0B0B0D</color>
     <color name="ic_launcher_background_terminal">#0A0F0A</color>
     <color name="ic_launcher_background_gruvbox">#282828</color>
