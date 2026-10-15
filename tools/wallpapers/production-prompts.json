@@ -109,6 +109,497 @@
         ],
         "selectedEdit": 2,
         "references": "Final edit used a temporary white inspection proof of the primary generated atlas. No historical style-reference image was supplied to imagegen."
+      },
+      {
+        "id": "systemcrafters",
+        "label": "System Crafters",
+        "status": "draft-wallpaper-study",
+        "study": "systemcrafters-study-03",
+        "nativeSize": "1254x1254",
+        "atlas": "atlases/systemcrafters.png",
+        "source": "sources/systemcrafters-study-02-original.png",
+        "tool": "imagegen (built-in)",
+        "prompt": "Use case: stylized-concept.\nAsset type: transparent motif atlas for a seamless MOTD Android chat wallpaper.\nEdit the existing System Crafters motif atlas into a SIMPLER new study with ONLY SEVEN subject types. Image1 is the old atlas for outline drawing STYLE and the logos only; replace every other old subject. Image2 is the authentic System Crafters logo; use ONLY its standalone half-gear and staggered horizontal-block emblem, no wordmark. Image3 is the authentic Emacs logo; use its recognizable flowing ribbon inside a thin circle. Image4 is the authentic Guix logo; use ONLY its paired curved horns meeting in a V, no Guix wordmark.\nCreate a precise FOUR BY FOUR atlas of exactly16 separate complete drawings, one per equally spaced cell. Variants below are repeated instances of the SAME subject, with only very slight natural hand-drawn contour variation; preserve authentic logos.\nExact reading order:\n01 standalone System Crafters half-gear and horizontal-block emblem;\n02 Emacs flowing ribbon emblem within a thin circle, ribbon as thin contour with transparent interior;\n03 plain standalone monospace text exactly \"#systemcrafters\";\n04 plain balanced parentheses \"()\";\n05 simple lambda symbol \"λ\";\n06 plain standalone monospace text exactly \"M-x\", NO keyboard, keycap, frame or bubble;\n07 standalone Guix paired horns/V emblem, thin outline and transparent interior;\n08 second faithful System Crafters emblem, same identity, slight hand-drawn variation;\n09 second faithful Emacs emblem in circle, same identity;\n10 second standalone monospace \"#systemcrafters\";\n11 second pair of parentheses \"()\";\n12 second lambda \"λ\";\n13 second standalone monospace \"M-x\", no objects;\n14 second Guix horns/V emblem, same geometry;\n15 third faithful System Crafters emblem;\n16 third faithful Emacs emblem in circle.\nThe final wallpaper will have LARGE System Crafters emblems, noticeably SMALLER Emacs emblems, and MUCH SMALLER fillers. The compositor controls that scale hierarchy: for this ATLAS, draw all cells large enough to inspect, with plenty of transparent margin.\nStyle: playful hand-drawn crisp thin rounded MONOCHROME BLACK OUTLINE doodles. Distinctive authentic emblem geometry, legible programmer monospace lettering with equal-width glyphs. Do not draw generic substitute gears, letter E or generic bull heads. No heavy solid filled masses. Emacs ribbon and Guix horns must be OUTLINED, not solid silhouettes.\nCenter each complete drawing in its cell. Each drawing occupies at most60percent of cell width and height, with at least20percent truly transparent margin on EVERY side. Preserve all contours and text completely.\nActual transparent RGBA background, gutters AND outlined interiors; BLACK INK ONLY. No white fills, opaque background, checkerboard pixels, paper, texture, shadows, shading, gradients, color, grid lines, cell borders, numbered labels, watermark, UI mockup, overlap, clipping or drawing touching cell boundaries.\nONLY the seven subject types listed. Remove ALL boats, Greek shore buildings, Marvin2 tags, broken USB, keyboards, terminals, files, cons diagrams, trees, Scheme expressions, stars, hearts and other accents.\nOutput only the isolated complete 4x4 transparent atlas, not a finished repeat.",
+        "editPrompts": [
+          "Use case: precise-object-edit.\nMake only a typography correction to the supplied 4x4 transparent System Crafters motif atlas.\nIn cell03 (row1,col3) and cell10 (row3,col2), replace ONLY the text with exact \"#systemcrafters\" in TRUE MONOSPACE programmer typewriter lettering, equal character advances. The letter i and narrow letters must occupy the same horizontal space as m and w. Keep one line, same overall width and cell position. Spell exactly hash followed by s y s t e m c r a f t e r s.\nIn cell06 (row2,col2) and cell13 (row4,col1), keep exactly \"M-x\" as plain monospace text with equal-width character spacing; no keyboard, keycap or frame.\nPreserve every other motif's exact subject, position, scale and contour detail. Keep all three System Crafters half-gear/horizontal-block emblems, all three OUTLINED Emacs ribbons in circles, both Guix horn emblems, parentheses and lambdas unchanged. Do not simplify the logos or fill the Emacs ribbon.\nPreserve actual transparent alpha background, all gutters, and transparent outlined interiors. BLACK INK ONLY, no white fills, shadows, color, background or checkerboard. Do not change spacing or shrink subjects; deterministic normalization handles margins later.\nOutput the full 4x4 transparent atlas with ONLY those lettering corrections.",
+          "Use case: precise-object-edit.\nMake ONLY TWO LOCAL text corrections to Image1, the original16-motif System Crafters Study02 atlas. Image2 is the SAME atlas on white so the exact fine details are visible; it is not the desired output background.\nPreserve the exact artwork in FOURTEEN of the sixteen cells, with pixel-faithful subject contours. Do not redraw or simplify those14 drawings. In particular, the THREE System Crafters emblems MUST retain their MANY SEPARATE STAGGERED RECTANGULAR BLOCKS, with visible gaps between blocks in each horizontal row. Do NOT replace blocks with long continuous horizontal stripes. Keep every original block gap and gear tooth. Preserve the detailed hollow flowing Emacs ribbons inside circles, Guix horns, lambdas, parentheses and M-x.\nCorrection1: cell03 row1col3: change only \"#systemcrafters\" to true programmer TYPEWRITER MONOSPACE text, equal horizontal advances, one line, same width and location. No box or decoration.\nCorrection2: cell10 row3col2: same monospace correction to exactly \"#systemcrafters\".\nEverything else remains identical to the reference drawings, including all3 block-built gear logos, all3 Emacs emblems, both Guix horns, both M-x texts, lambdas and parentheses. Do not change any other drawing, its scale or location. Do not smooth away gaps.\nActual RGBA transparency matching Image1 background and interiors. Thin rounded BLACK OUTLINES only, no opaque white or gray, no shadow, checkerboard or additional objects.\nOutput the complete4x4 transparent atlas with ONLY those TWO localized text corrections. Do not resize cells or motifs."
+        ],
+        "selectedEdit": 2,
+        "editSelection": "The first typography edit was rejected because it replaced the System Crafters emblem's staggered blocks with continuous stripes. The selected edit starts from the original generated atlas plus its white visibility proof.",
+        "editSources": {
+          "original": "sources/systemcrafters-study-02-original.png",
+          "rejectedTypography": "sources/systemcrafters-study-02-lettering-edit.png",
+          "selectedRaw": "sources/systemcrafters-study-02-selected-edit.png"
+        },
+        "references": [
+          {
+            "path": "sources/systemcrafters-study-01-atlas.png",
+            "role": "previous atlas style reference"
+          },
+          {
+            "path": "references/systemcrafters/systemcrafters-sc_logo.png",
+            "role": "authentic standalone System Crafters emblem",
+            "source": "https://systemcrafters.net/img/sc_logo.png"
+          },
+          {
+            "path": "references/systemcrafters/emacs-official.png",
+            "role": "authentic Emacs emblem",
+            "source": "https://www.gnu.org/software/emacs/images/emacs.png"
+          },
+          {
+            "path": "references/systemcrafters/guix-official-horn-logo.png",
+            "role": "authentic Guix horns, no wordmark",
+            "source": "https://git.savannah.gnu.org/cgit/guix/guix-artwork.git/plain/logo/Guix.svg"
+          }
+        ],
+        "editReferences": [
+          "sources/systemcrafters-study-02-original.png",
+          "build/wallpaper-previews/systemcrafters-study-02-atlas-raw-white.png"
+        ],
+        "normalization": {
+          "tool": "tools/wallpapers/normalize-atlases.mjs",
+          "alpha": "Original alpha multiplied by inverse maximum RGB; clear alpha at or below 12/255 while retaining antialiasing.",
+          "layout": "Uniformly scale complete motifs to at most 60% of their cell dimensions and center them. Preserve native atlas dimensions."
+        },
+        "artDirection": {
+          "largest": "System Crafters emblem",
+          "secondary": "Emacs emblem",
+          "muchSmallerFillers": [
+            "monospace #systemcrafters",
+            "()",
+            "lambda",
+            "plain M-x",
+            "Guix horns"
+          ],
+          "subjectTypes": 7,
+          "atlasSlots": 16,
+          "variations": "Three System Crafters variants, three Emacs variants, and two variants of each of the five filler types.",
+          "details": "Only requested filler subjects from this atlas; no generic details atlas.",
+          "density": "Dense irregular packing with visible small fillers and reduced large empty patches; retain System Crafters largest and Emacs smaller."
+        },
+        "motifSlots": [
+          "System Crafters",
+          "Emacs",
+          "#systemcrafters",
+          "()",
+          "lambda",
+          "M-x",
+          "Guix horns",
+          "System Crafters",
+          "Emacs",
+          "#systemcrafters",
+          "()",
+          "lambda",
+          "M-x",
+          "Guix horns",
+          "System Crafters",
+          "Emacs"
+        ],
+        "integration": "Artwork study only; not an Android builtin preset.",
+        "qa": {
+          "occupiedCells": 16,
+          "verifiedMinimumCellMarginPercent": 15,
+          "blackInkOnly": true,
+          "transparentInteriors": true
+        },
+        "rawAlphaQa": {
+          "transparentPixels": 1399048,
+          "whitePixels": 0
+        },
+        "draftExport": {
+          "asset": "build/wallpaper-previews/systemcrafters-study-03.png",
+          "size": "2048x2048",
+          "tool": "tools/wallpapers/generate-wallpapers.mjs",
+          "generatorSnapshot": "build/wallpaper-previews/systemcrafters-study-03-generator.mjs",
+          "generatorSha256": "b4a7c1173726d7e8d1fb0ccd349662ba49f8c45ea1692a259e7329e3ea91cf3f",
+          "command": "nix develop .#sprite-studies -c env MAGICK_THREAD_LIMIT=1 WALLPAPER_THEME=systemcrafters WALLPAPER_OUTPUT_DIR=build/wallpaper-previews/systemcrafters-study-03 node tools/wallpapers/generate-wallpapers.mjs > build/wallpaper-previews/systemcrafters-study-03/export.log 2>&1",
+          "format": "lossless 8-bit indexed PNG",
+          "seed": "periodic-v4:systemcrafters",
+          "bytes": 1314836,
+          "pngSha256": "8e364a3f2675388bbec9ac6a40205b272929ae69023ef8628c0102f018eae5ed",
+          "alphaSha256": "fab88902fa7323b3df7b7180d30284f8c10335799cfad265ad6ea28bce66bc50",
+          "qa": {
+            "independent3x3PixelMatch": true,
+            "pngAlphaPreserved": true,
+            "whiteDarkAndOffsetProofsReviewed": true,
+            "deterministicByteCheck": true
+          },
+          "verificationCommands": [
+            "env WALLPAPER_THEME=systemcrafters WALLPAPER_OUTPUT_DIR=build/wallpaper-previews/systemcrafters-study-03 node tools/wallpapers/generate-wallpapers.mjs --check --preview",
+            "env WALLPAPER_THEME=systemcrafters WALLPAPER_OUTPUT_DIR=build/wallpaper-previews/systemcrafters-study-03 node tools/wallpapers/generate-wallpapers.mjs --check"
+          ],
+          "verificationEnvironment": "Retained nix develop .#sprite-studies shell with MAGICK_THREAD_LIMIT=1"
+        },
+        "previousStudies": [
+          {
+            "id": "systemcrafters",
+            "label": "System Crafters",
+            "status": "draft-wallpaper-study",
+            "atlas": "sources/systemcrafters-study-01-atlas.png",
+            "tool": "imagegen (built-in)",
+            "prompt": "Use case: stylized-concept.\nAsset type: transparent motif atlas for a seamless MOTD Android chat wallpaper.\nTransform the reference motif atlas into a new System Crafters IRC clubhouse theme, replacing ALL its subjects with the exact subjects below. Preserve the atlas's complete isolated drawings and generous transparent gutters; draw fresh coherent thin-line doodles.\nInput images: Image 1 is a STYLE AND ATLAS-SPACING reference only (existing Linux motif atlas), NOT a source of subjects. Image 2 is the authentic System Crafters logo: use ONLY the standalone left emblem, a half-gear above irregular horizontal blocks, no wordmark. Image 3 is the authentic Emacs emblem: preserve its recognizable flowing ribbon shape inside a circle, adapted to black outline. Image 4 is the authentic Guix logo: use ONLY its paired curved horns converging into a V, no \"Guix\" lettering.\nTheme: friendly IRC clubhouse for free-software tinkerers, Emacs and Guile Scheme users, with understated channel in-jokes and a quiet Greek coastal reference.\nCreate a precise 4 by 4 atlas of exactly 16 SEPARATE COMPLETE motifs, one intact recognizable motif per cell, in this exact reading order:\n01 System Crafters standalone half-gear / horizontal-block emblem faithfully matching Image 2, each block outlined and transparent inside; no surrounding circle or lettering;\n02 Emacs flowing ribbon emblem within a thin circle faithfully matching Image 3, ribbon contour outline with transparent interior;\n03 standalone legible plain MONOSPACE text exactly \"#systemcrafters\", one line, no bubble, box, window or decorations;\n04 small entire keyboard with several rows of blank keys and a single legible legend exactly \"M-x\";\n05 simple Scheme REPL terminal with the short expression exactly \"(+ 1 2)\" and a small cursor, no other letters;\n06 branching Lisp list tree: three or four simple round nodes connected by clear branching lines, small balanced-parenthesis symbols in nodes, no words;\n07 cons-cell diagram: two divided rectangular cells connected by a short arrow, simple outlined dots inside, no text;\n08 slightly curled file sheet with a folded corner and exactly \".scm\" on it;\n09 standalone Guix horn emblem from Image 4 faithfully matching the two curved horns and converging V; BLACK OUTLINE, transparent inside, no word below;\n10 simple small Greek wooden fishing boat beside a short stone quay and the hint of ONE whitewashed shore building, two short wave strokes; one compact complete shoreline doodle, very sparse detail, no large landscape, flag or lettering;\n11 small casual handwritten graffiti tag exactly \"Marvin2 wuz here\", \"Marvin2\" on the first line and \"wuz here\" on the second, no robot, speech bubble or decorations;\n12 simple standalone lambda symbol \"λ\" in graceful rounded black strokes;\n13 a playful pair of large balanced parentheses \"()\" with a short blank space between them, no face;\n14 standalone monospace code exactly \"(car xs)\", no frame;\n15 standalone monospace code exactly \"(cons a b)\", no frame;\n16 very simple broken USB cable doodle: recognizable small plug, a short curved cable ending in two fine loose wires, no face, bandage, sparks, lettering or attention marks.\nAll sixteen atlas drawings must be clear and complete even though the final compositor will make subjects 09-15 smaller and subject 16 TINY and rare. Do not add Guix parcel, other software logos, robot, olive sprigs, columns, random stars or unrequested motifs.\nStyle: playful hand-drawn crisp THIN rounded MONOCHROME BLACK OUTLINE doodles, legible at phone size, varied silhouettes, sparse internal detail, no heavy solid masses. Slight handmade warmth; crisp coherent strokes. Exact specified words only. The monochrome logo adaptations preserve authentic geometry, not invented logos or generic gears.\nEach motif centered in its evenly spaced cell with at least 20 percent genuinely transparent margin on EVERY side. Keep all contours complete and wholly inside the cell, including boat, quay, waves, branches, USB wires, and ALL text.\nActual transparent RGBA background, gutters, AND ALL outlined interiors; BLACK INK ONLY. No white fills, opaque background, checkerboard pixels, paper, texture, shadows, shading, gradients, color, grid lines, cell borders, numbered labels, watermark, UI mockup, overlap, clipping, or art touching cell boundaries. Text only where explicitly specified as a subject; spell it exactly.\nOutput only the isolated square motif atlas. Do not pack a dense wallpaper or attempt seamless edge wrapping; the deterministic compositor will do that.",
+            "editPrompts": [
+              "Use case: precise-object-edit.\nEdit the supplied System Crafters 4 by 4 motif atlas. Preserve all 16 exact subject identities, reading order, handmade outline style, and existing exact words.\nThis is an atlas-spacing correction, not a wallpaper layout. Keep exactly FOUR rows and FOUR columns. Reduce EVERY complete motif to approximately HALF its current width and height, then CENTER it in the SAME cell. Every motif must occupy AT MOST 58 percent of its quarter-width/quarter-height cell. Leave at least 21 percent ACTUAL FULLY TRANSPARENT margin on all FOUR sides of EVERY cell. All text, boat waves, horns and USB wires must remain complete. No grid lines.\nMake these targeted corrections:\nCell 01 row1 col1: preserve the recognizable System Crafters half-gear and lower horizontal-block arrangement, but draw EACH horizontal block as a thin outlined small rectangle with transparent interior, no solid black blocks. The gear remains a thin outline.\nCell 03 row1 col3: replace proportional lettering with true programmer MONOSPACE TYPEWRITER lettering, every character has equal horizontal advance. Exact text \"#systemcrafters\", one line, all lowercase after hash. No frame, bubble, window or decoration.\nCell 07 row2 col3: a recognizable cons diagram: TWO two-compartment rectangular boxes connected by a short arrow. Each box has a VERTICAL DIVIDER forming its two compartments; outlined little circles represent pointers. No letters. Do not draw undivided squares.\nCell 14 row4 col2: exact \"(car xs)\" in equal-width monospace.\nCell 15 row4 col3: exact \"(cons a b)\" in equal-width monospace.\nPreserve the other cells exactly in subject: Emacs emblem in circle; keyboard \"M-x\"; Scheme REPL \"(+ 1 2)\"; branching list tree; \".scm\" file; Guix V-shaped horns; tiny Greek fishing boat/quay/one shore building; handwritten \"Marvin2\" over \"wuz here\"; lambda; balanced parentheses; simple broken USB.\nActual RGBA transparency everywhere outside the black lines AND inside every outlined subject. BLACK INK ONLY. No white fills or opaque background, no checkerboard pixels, gray, shading, shadows, gradients, color, paper texture, labels, borders, extra decorations, overlap, clipped subjects or art near cell boundaries. No giant filled shapes.\nOutput only the complete widely spaced 4x4 transparent atlas.",
+              "Use case: precise-object-edit.\nMake ONLY TWO LOCAL corrections to Image 1, the original 16-motif System Crafters atlas. Image 2 is the SAME original atlas composited onto white purely as a visibility reference. It is NOT an opaque output background.\nPreserve the exact artwork, scale, position and all contour details in FOURTEEN of the sixteen cells. Do not simplify, shrink, replace, or redraw those fourteen motifs.\nCorrection 1: cell03, row1 column3. Change ONLY the lettering to true programmer MONOSPACE, equal-width typewriter glyphs, exactly \"#systemcrafters\". Same overall text width and location. No frame.\nCorrection 2: cell07, row2 column3. Add one vertical divider inside EACH of the two connected rectangular cons-cell boxes, turning each into TWO compartments. Keep their arrow and outlined pointer dots. No letters.\nEverything else unchanged: retain original detailed System Crafters half-gear with MANY horizontal rows of blocks; Emacs flowing ribbon with TRANSPARENT interior and its surrounding circle; ENTIRE keyboard with many keys and \"M-x\", NOT a lone keycap; REPL \"(+ 1 2)\"; Lisp tree with parentheses in nodes; \".scm\" file; Guix horns; original detailed wooden fishing boat/quay/building; original handwritten \"Marvin2 wuz here\"; lambda; parentheses; \"(car xs)\"; \"(cons a b)\"; original single broken USB cable with loose wires, NO sparks.\nThin rounded black outline art. Preserve true alpha transparency of Image1 and transparent outlined interiors, gutters and background. No white fills, gray/color, checkerboard, opaque canvas or extra elements.\nDo NOT change cell spacing, size, or gutters in this edit; a deterministic tool will normalize those afterwards. Do NOT fill the Emacs ribbon black. Output the complete 4x4 transparent atlas with only those TWO localized corrections."
+            ],
+            "selectedEdit": 2,
+            "source": "sources/systemcrafters-study-01-original.png",
+            "references": [
+              {
+                "path": "atlases/linux.png",
+                "role": "style and isolated atlas spacing only"
+              },
+              {
+                "path": "references/systemcrafters/systemcrafters-sc_logo.png",
+                "source": "https://systemcrafters.net/img/sc_logo.png",
+                "role": "standalone System Crafters emblem geometry"
+              },
+              {
+                "path": "references/systemcrafters/emacs-official.png",
+                "source": "https://www.gnu.org/software/emacs/images/emacs.png",
+                "role": "Emacs emblem geometry"
+              },
+              {
+                "path": "references/systemcrafters/guix-official-horn-logo.png",
+                "source": "https://git.savannah.gnu.org/cgit/guix/guix-artwork.git/plain/logo/Guix.svg",
+                "role": "Guix horns only, no wordmark"
+              },
+              {
+                "path": "/tmp/motd-systemcrafters-atlas-white.png",
+                "role": "temporary white visibility proof of original atlas, used only in selected targeted edit"
+              }
+            ],
+            "artDirection": {
+              "large": [
+                "System Crafters emblem",
+                "Emacs emblem",
+                "monospace #systemcrafters"
+              ],
+              "medium": [
+                "M-x keyboard",
+                "Scheme REPL",
+                "branching Lisp list",
+                "cons-cell diagram",
+                ".scm file"
+              ],
+              "small": [
+                "Guix horns",
+                "Greek fishing boat near shore",
+                "Marvin2 wuz here",
+                "lambda",
+                "balanced parentheses",
+                "(car xs)",
+                "(cons a b)"
+              ],
+              "tinyOccasional": [
+                "broken USB cable"
+              ]
+            },
+            "detailsAtlas": "atlases/details.png",
+            "integration": "Artwork draft only; not an Android builtin preset.",
+            "nativeSize": "1254x1254",
+            "editSelection": "The spacing edit was rejected after it simplified the keyboard and filled the Emacs ribbon. The selected targeted lettering/divider edit starts from the original atlas.",
+            "editSources": {
+              "original": "sources/systemcrafters-study-01-original.png",
+              "rejectedSpacing": "sources/systemcrafters-study-01-spacing-edit.png",
+              "selectedRaw": "sources/systemcrafters-study-01-lettering-edit.png"
+            },
+            "normalization": {
+              "tool": "tools/wallpapers/normalize-atlases.mjs",
+              "alpha": "Original alpha multiplied by inverse maximum RGB; clear alpha at or below 12/255 while retaining antialiasing.",
+              "layout": "Uniformly scale each complete motif to at most 60% of its cell dimensions, then center it. Preserve native atlas dimensions."
+            },
+            "qa": {
+              "occupiedCells": 16,
+              "verifiedMinimumCellMarginPercent": 15,
+              "blackInkOnly": true,
+              "transparentInteriors": true
+            },
+            "draftExport": {
+              "asset": "build/wallpaper-previews/systemcrafters-study-01.png",
+              "size": "2048x2048",
+              "tool": "tools/wallpapers/generate-wallpapers.mjs",
+              "command": "nix develop .#sprite-studies -c env MAGICK_THREAD_LIMIT=1 WALLPAPER_THEME=systemcrafters WALLPAPER_OUTPUT_DIR=build/wallpaper-previews/systemcrafters-study-01 node tools/wallpapers/generate-wallpapers.mjs --preview",
+              "format": "lossless 8-bit indexed PNG",
+              "seed": "periodic-v4:systemcrafters",
+              "uniqueMotifs": 16,
+              "majorPlacements": 191,
+              "tinyPlacements": 145,
+              "motifPlacements": [
+                14,
+                12,
+                10,
+                18,
+                16,
+                17,
+                18,
+                17,
+                10,
+                10,
+                10,
+                9,
+                9,
+                9,
+                9,
+                3
+              ],
+              "inkCoveragePercent": 13.6,
+              "bytes": 1094671,
+              "pngSha256": "e8540a4f5293eacba278d1b7ad5d9fd2270f97a4d56f2359f8727be94e89bb37",
+              "alphaSha256": "3fdfaca917603a13b13d9e749ffc24889e558d24993ea5e65bf076613368064a",
+              "qa": {
+                "independent3x3PixelMatch": true,
+                "pngAlphaPreserved": true,
+                "whiteDarkAndOffsetProofsReviewed": true,
+                "deterministicByteCheck": true
+              }
+            },
+            "study": "systemcrafters-study-01"
+          },
+          {
+            "id": "systemcrafters",
+            "label": "System Crafters",
+            "status": "draft-wallpaper-study",
+            "study": "systemcrafters-study-02",
+            "nativeSize": "1254x1254",
+            "atlas": "atlases/systemcrafters.png",
+            "source": "sources/systemcrafters-study-02-original.png",
+            "tool": "imagegen (built-in)",
+            "prompt": "Use case: stylized-concept.\nAsset type: transparent motif atlas for a seamless MOTD Android chat wallpaper.\nEdit the existing System Crafters motif atlas into a SIMPLER new study with ONLY SEVEN subject types. Image1 is the old atlas for outline drawing STYLE and the logos only; replace every other old subject. Image2 is the authentic System Crafters logo; use ONLY its standalone half-gear and staggered horizontal-block emblem, no wordmark. Image3 is the authentic Emacs logo; use its recognizable flowing ribbon inside a thin circle. Image4 is the authentic Guix logo; use ONLY its paired curved horns meeting in a V, no Guix wordmark.\nCreate a precise FOUR BY FOUR atlas of exactly16 separate complete drawings, one per equally spaced cell. Variants below are repeated instances of the SAME subject, with only very slight natural hand-drawn contour variation; preserve authentic logos.\nExact reading order:\n01 standalone System Crafters half-gear and horizontal-block emblem;\n02 Emacs flowing ribbon emblem within a thin circle, ribbon as thin contour with transparent interior;\n03 plain standalone monospace text exactly \"#systemcrafters\";\n04 plain balanced parentheses \"()\";\n05 simple lambda symbol \"λ\";\n06 plain standalone monospace text exactly \"M-x\", NO keyboard, keycap, frame or bubble;\n07 standalone Guix paired horns/V emblem, thin outline and transparent interior;\n08 second faithful System Crafters emblem, same identity, slight hand-drawn variation;\n09 second faithful Emacs emblem in circle, same identity;\n10 second standalone monospace \"#systemcrafters\";\n11 second pair of parentheses \"()\";\n12 second lambda \"λ\";\n13 second standalone monospace \"M-x\", no objects;\n14 second Guix horns/V emblem, same geometry;\n15 third faithful System Crafters emblem;\n16 third faithful Emacs emblem in circle.\nThe final wallpaper will have LARGE System Crafters emblems, noticeably SMALLER Emacs emblems, and MUCH SMALLER fillers. The compositor controls that scale hierarchy: for this ATLAS, draw all cells large enough to inspect, with plenty of transparent margin.\nStyle: playful hand-drawn crisp thin rounded MONOCHROME BLACK OUTLINE doodles. Distinctive authentic emblem geometry, legible programmer monospace lettering with equal-width glyphs. Do not draw generic substitute gears, letter E or generic bull heads. No heavy solid filled masses. Emacs ribbon and Guix horns must be OUTLINED, not solid silhouettes.\nCenter each complete drawing in its cell. Each drawing occupies at most60percent of cell width and height, with at least20percent truly transparent margin on EVERY side. Preserve all contours and text completely.\nActual transparent RGBA background, gutters AND outlined interiors; BLACK INK ONLY. No white fills, opaque background, checkerboard pixels, paper, texture, shadows, shading, gradients, color, grid lines, cell borders, numbered labels, watermark, UI mockup, overlap, clipping or drawing touching cell boundaries.\nONLY the seven subject types listed. Remove ALL boats, Greek shore buildings, Marvin2 tags, broken USB, keyboards, terminals, files, cons diagrams, trees, Scheme expressions, stars, hearts and other accents.\nOutput only the isolated complete 4x4 transparent atlas, not a finished repeat.",
+            "editPrompts": [
+              "Use case: precise-object-edit.\nMake only a typography correction to the supplied 4x4 transparent System Crafters motif atlas.\nIn cell03 (row1,col3) and cell10 (row3,col2), replace ONLY the text with exact \"#systemcrafters\" in TRUE MONOSPACE programmer typewriter lettering, equal character advances. The letter i and narrow letters must occupy the same horizontal space as m and w. Keep one line, same overall width and cell position. Spell exactly hash followed by s y s t e m c r a f t e r s.\nIn cell06 (row2,col2) and cell13 (row4,col1), keep exactly \"M-x\" as plain monospace text with equal-width character spacing; no keyboard, keycap or frame.\nPreserve every other motif's exact subject, position, scale and contour detail. Keep all three System Crafters half-gear/horizontal-block emblems, all three OUTLINED Emacs ribbons in circles, both Guix horn emblems, parentheses and lambdas unchanged. Do not simplify the logos or fill the Emacs ribbon.\nPreserve actual transparent alpha background, all gutters, and transparent outlined interiors. BLACK INK ONLY, no white fills, shadows, color, background or checkerboard. Do not change spacing or shrink subjects; deterministic normalization handles margins later.\nOutput the full 4x4 transparent atlas with ONLY those lettering corrections.",
+              "Use case: precise-object-edit.\nMake ONLY TWO LOCAL text corrections to Image1, the original16-motif System Crafters Study02 atlas. Image2 is the SAME atlas on white so the exact fine details are visible; it is not the desired output background.\nPreserve the exact artwork in FOURTEEN of the sixteen cells, with pixel-faithful subject contours. Do not redraw or simplify those14 drawings. In particular, the THREE System Crafters emblems MUST retain their MANY SEPARATE STAGGERED RECTANGULAR BLOCKS, with visible gaps between blocks in each horizontal row. Do NOT replace blocks with long continuous horizontal stripes. Keep every original block gap and gear tooth. Preserve the detailed hollow flowing Emacs ribbons inside circles, Guix horns, lambdas, parentheses and M-x.\nCorrection1: cell03 row1col3: change only \"#systemcrafters\" to true programmer TYPEWRITER MONOSPACE text, equal horizontal advances, one line, same width and location. No box or decoration.\nCorrection2: cell10 row3col2: same monospace correction to exactly \"#systemcrafters\".\nEverything else remains identical to the reference drawings, including all3 block-built gear logos, all3 Emacs emblems, both Guix horns, both M-x texts, lambdas and parentheses. Do not change any other drawing, its scale or location. Do not smooth away gaps.\nActual RGBA transparency matching Image1 background and interiors. Thin rounded BLACK OUTLINES only, no opaque white or gray, no shadow, checkerboard or additional objects.\nOutput the complete4x4 transparent atlas with ONLY those TWO localized text corrections. Do not resize cells or motifs."
+            ],
+            "selectedEdit": 2,
+            "editSelection": "The first typography edit was rejected because it replaced the System Crafters emblem's staggered blocks with continuous stripes. The selected edit starts from the original generated atlas plus its white visibility proof.",
+            "editSources": {
+              "original": "sources/systemcrafters-study-02-original.png",
+              "rejectedTypography": "sources/systemcrafters-study-02-lettering-edit.png",
+              "selectedRaw": "sources/systemcrafters-study-02-selected-edit.png"
+            },
+            "references": [
+              {
+                "path": "sources/systemcrafters-study-01-atlas.png",
+                "role": "previous atlas style reference"
+              },
+              {
+                "path": "references/systemcrafters/systemcrafters-sc_logo.png",
+                "role": "authentic standalone System Crafters emblem",
+                "source": "https://systemcrafters.net/img/sc_logo.png"
+              },
+              {
+                "path": "references/systemcrafters/emacs-official.png",
+                "role": "authentic Emacs emblem",
+                "source": "https://www.gnu.org/software/emacs/images/emacs.png"
+              },
+              {
+                "path": "references/systemcrafters/guix-official-horn-logo.png",
+                "role": "authentic Guix horns, no wordmark",
+                "source": "https://git.savannah.gnu.org/cgit/guix/guix-artwork.git/plain/logo/Guix.svg"
+              }
+            ],
+            "editReferences": [
+              "sources/systemcrafters-study-02-original.png",
+              "build/wallpaper-previews/systemcrafters-study-02-atlas-raw-white.png"
+            ],
+            "normalization": {
+              "tool": "tools/wallpapers/normalize-atlases.mjs",
+              "alpha": "Original alpha multiplied by inverse maximum RGB; clear alpha at or below 12/255 while retaining antialiasing.",
+              "layout": "Uniformly scale complete motifs to at most 60% of their cell dimensions and center them. Preserve native atlas dimensions."
+            },
+            "artDirection": {
+              "largest": "System Crafters emblem",
+              "secondary": "Emacs emblem",
+              "muchSmallerFillers": [
+                "monospace #systemcrafters",
+                "()",
+                "lambda",
+                "plain M-x",
+                "Guix horns"
+              ],
+              "subjectTypes": 7,
+              "atlasSlots": 16,
+              "variations": "Three System Crafters variants, three Emacs variants, and two variants of each of the five filler types.",
+              "details": "Only requested filler subjects from this atlas; no generic details atlas."
+            },
+            "motifSlots": [
+              "System Crafters",
+              "Emacs",
+              "#systemcrafters",
+              "()",
+              "lambda",
+              "M-x",
+              "Guix horns",
+              "System Crafters",
+              "Emacs",
+              "#systemcrafters",
+              "()",
+              "lambda",
+              "M-x",
+              "Guix horns",
+              "System Crafters",
+              "Emacs"
+            ],
+            "placementSizesPx": {
+              "systemCrafters": [
+                200,
+                220,
+                235,
+                250
+              ],
+              "emacs": [
+                100,
+                115,
+                128,
+                135
+              ],
+              "symbolFillers": [
+                24,
+                31,
+                38,
+                45
+              ],
+              "mX": [
+                35,
+                42,
+                50
+              ],
+              "channelTextWidth": [
+                90,
+                102,
+                115
+              ]
+            },
+            "integration": "Artwork study only; not an Android builtin preset.",
+            "compositionResults": {
+              "mainLayerPlacements": 139,
+              "tinyLayerPlacements": 145,
+              "systemCraftersLogos": 29,
+              "emacsLogos": 40,
+              "fillers": 215,
+              "inkCoveragePercent": 12.5,
+              "mainLayerMotifCounts": [
+                9,
+                14,
+                7,
+                7,
+                7,
+                7,
+                7,
+                10,
+                13,
+                7,
+                7,
+                7,
+                7,
+                7,
+                10,
+                13
+              ]
+            },
+            "qa": {
+              "occupiedCells": 16,
+              "verifiedMinimumCellMarginPercent": 15,
+              "blackInkOnly": true,
+              "transparentInteriors": true
+            },
+            "rawAlphaQa": {
+              "transparentPixels": 1399048,
+              "whitePixels": 0
+            },
+            "draftExport": {
+              "asset": "build/wallpaper-previews/systemcrafters-study-02.png",
+              "size": "2048x2048",
+              "tool": "tools/wallpapers/generate-wallpapers.mjs",
+              "command": "nix develop .#sprite-studies -c env MAGICK_THREAD_LIMIT=1 WALLPAPER_THEME=systemcrafters WALLPAPER_OUTPUT_DIR=build/wallpaper-previews/systemcrafters-study-02 node tools/wallpapers/generate-wallpapers.mjs --preview",
+              "format": "lossless 8-bit indexed PNG",
+              "seed": "periodic-v4:systemcrafters",
+              "bytes": 803167,
+              "pngSha256": "1371a7f4651c9476786a63b19fe0da0fbf88836dbb38d459112618c07a909bee",
+              "alphaSha256": "638371f86ca1b2dce71a9f60f9f1ecb26edca08b2705446d455df2ea30dfbbaf",
+              "qa": {
+                "independent3x3PixelMatch": true,
+                "pngAlphaPreserved": true,
+                "whiteDarkAndOffsetProofsReviewed": true,
+                "deterministicByteCheck": true
+              }
+            },
+            "generatorSnapshot": "build/wallpaper-previews/systemcrafters-study-02-generator.mjs"
+          }
+        ],
+        "compositionRevision": {
+          "request": "Regenerate at materially higher density with much less empty space; resize main logos and fillers as necessary.",
+          "atlasReused": true,
+          "newImagegenCall": false,
+          "previousStudy": "systemcrafters-study-02",
+          "layoutTool": "tools/wallpapers/generate-wallpapers.mjs"
+        },
+        "compositionResults": {
+          "majorPlacements": 412,
+          "tinyPlacements": 181,
+          "systemCraftersPlacements": 60,
+          "emacsPlacements": 90,
+          "fillerPlacements": 443,
+          "majorPlacementsByAtlasSlot": [
+            20,
+            30,
+            23,
+            27,
+            26,
+            28,
+            28,
+            20,
+            30,
+            20,
+            27,
+            27,
+            28,
+            28,
+            20,
+            30
+          ],
+          "inkCoveragePercentRounded": 19.1,
+          "maximumNearEmptySquarePx": 32,
+          "minimum192pxWindowInkPercentRounded": 17.4,
+          "gapMeasurement": "32px cells with alpha > 5; a near-empty cell contains at most two ink pixels. Minimum 192px-window coverage uses toroidal 6x6-cell windows.",
+          "previousStudy": {
+            "id": "systemcrafters-study-02",
+            "inkCoveragePercentRounded": 12.5,
+            "maximumNearEmptySquarePx": 128,
+            "minimum192pxWindowInkPercentRounded": 1.2
+          },
+          "placementSizesPx": {
+            "systemCrafters": [
+              170,
+              185,
+              198,
+              210
+            ],
+            "emacs": [
+              90,
+              100,
+              110,
+              120
+            ],
+            "channelText": [
+              100,
+              115,
+              128,
+              140
+            ],
+            "M-x": [
+              45,
+              55,
+              65
+            ],
+            "otherFillers": [
+              32,
+              40,
+              48,
+              55
+            ]
+          }
+        }
       }
     ]
   }

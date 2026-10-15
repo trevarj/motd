@@ -7,13 +7,32 @@ import { crc32, deflateSync } from "node:zlib";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const atlasDir = path.join(root, "tools/wallpapers/atlases");
-const outDir = path.join(root, "app/src/main/assets/chat-wallpapers");
+// Drafts can be exported outside app assets for gallery review. Keep the
+// default destination stable so existing builtins remain byte-for-byte stable.
+const outDir = process.env.WALLPAPER_OUTPUT_DIR
+  ? path.resolve(root, process.env.WALLPAPER_OUTPUT_DIR)
+  : path.join(root, "app/src/main/assets/chat-wallpapers");
 const previewDir = path.join(root, "build/wallpaper-previews/export-qa");
-const names = ["motd", "deep-space", "retro-gaming", "radio-club", "internet-oddities", "retro-chat", "memes", "linux"];
+const builtinNames = ["motd", "deep-space", "retro-gaming", "radio-club", "internet-oddities", "retro-chat", "memes", "linux"];
+// Draft themes require explicit selection until they become Android presets.
+const names = [...builtinNames, "systemcrafters"];
 const TILE = 2048;
+const systemCraftersQuotas = [20, 30, 28, 28, 28, 28, 28, 20, 30, 28, 28, 28, 28, 28, 20, 30];
+const systemCraftersFillers = [2, 3, 4, 5, 6, 9, 10, 11, 12, 13];
+function makeSystemCraftersSchedule() {
+  const schedule = Array.from({ length: 16 }, (_, motif) => motif);
+  const remaining = systemCraftersQuotas.map(count => count - 1);
+  for (const group of [[0, 7, 14], [1, 8, 15], systemCraftersFillers]) {
+    while (group.some(motif => remaining[motif] > 0)) {
+      for (const motif of group) if (remaining[motif]-- > 0) schedule.push(motif);
+    }
+  }
+  return schedule;
+}
+const systemCraftersSchedule = makeSystemCraftersSchedule();
 const flags = new Set(process.argv.slice(2));
 if ([...flags].some(flag => !["--check", "--preview"].includes(flag))) throw new Error("Usage: generate-wallpapers.mjs [--check] [--preview]");
-const selectedNames = process.env.WALLPAPER_THEME ? names.filter(name => name === process.env.WALLPAPER_THEME) : names;
+const selectedNames = process.env.WALLPAPER_THEME ? names.filter(name => name === process.env.WALLPAPER_THEME) : builtinNames;
 if (!selectedNames.length) throw new Error("Unknown WALLPAPER_THEME");
 
 function magick(args, input) {
@@ -122,42 +141,136 @@ function occupy(stamp, x, y, occupied) {
     occupied[targetY * TILE + targetX] = 1;
   }
 }
+function systemCraftersGapScore(x, y, occupied) {
+  let score = 0;
+  for (const radius of [48, 96, 160, 224]) for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, 1], [-1, -1], [1, -1]]) {
+    const sampleX = tileCoordinate(x + Math.round(radius * dx / (Math.abs(dx) + Math.abs(dy))));
+    const sampleY = tileCoordinate(y + Math.round(radius * dy / (Math.abs(dx) + Math.abs(dy))));
+    if (!occupied[sampleY * TILE + sampleX]) score += radius;
+  }
+  return score;
+}
+function systemCraftersPosition(stamp, next, occupied, candidates, trialBudget) {
+  let best = null;
+  let fitting = 0;
+  for (let attempt = 0; attempt < trialBudget; attempt++) {
+    const x = Math.floor(next() * TILE), y = Math.floor(next() * TILE);
+    if (!fits(stamp, x, y, occupied)) continue;
+    const score = systemCraftersGapScore(x, y, occupied);
+    if (!best || score > best.score) best = { x, y, score };
+    if (++fitting === candidates) break;
+  }
+  return best;
+}
+function motifSize(name, motif, index, next) {
+  if (name !== "systemcrafters") {
+    // Existing themes intentionally retain their original placement sizes.
+    return Math.round(index < 16 ? 145 + next() * 50 : 115 + next() * 85);
+  }
+  const source = (index * 7 + motif * 11) >>> 0;
+  return systemCraftersSizes(motif)[source % systemCraftersSizes(motif).length];
+}
+function systemCraftersSizes(motif) {
+  if ([0, 7, 14].includes(motif)) return [170, 185, 198, 210];
+  if ([1, 8, 15].includes(motif)) return [90, 100, 110, 120];
+  if ([2, 9].includes(motif)) return [100, 115, 128, 140];
+  if ([5, 12].includes(motif)) return [45, 55, 65];
+  return [32, 40, 48, 55];
+}
+function motifAngle(name, motif, next) {
+  if (name === "systemcrafters") {
+    const source = (motif * 13 + 7) >>> 0;
+    if ([2, 5, 9, 12].includes(motif)) return 0;
+    if ([0, 7, 14].includes(motif)) return [-12, -6, 0, 6, 12][source % 5];
+    if ([1, 8, 15].includes(motif)) return [-14, -7, 0, 7, 14][source % 5];
+    return [-18, -9, 0, 9, 18][source % 5];
+  }
+  return Math.round(next() * 36 - 18);
+}
 function arrange(name, motifs, details) {
-  const next = random(`periodic-v4:${name}`), major = [], tiny = [], occupied = new Uint8Array(TILE * TILE);
-  for (let index = 0; index < 180; index++) {
-    const motifIndex = index < 16 ? index : Math.floor(next() * motifs.length);
-    // First-cycle doodles retain the major visual vocabulary. Later repeats
-    // vary from 115px to 200px, while the separate detail layer supplies the
-    // genuinely small marks instead of shrinking every major motif.
-    const size = Math.round(index < 16 ? 145 + next() * 50 : 115 + next() * 85);
+  const next = random(`periodic-v4:${name}`), major = [], tiny = [], occupied = new Uint8Array(TILE * TILE), stampCache = new Map();
+  const majorAttempts = name === "systemcrafters" ? systemCraftersSchedule.length : 180;
+  for (let index = 0; index < majorAttempts; index++) {
+    const motifIndex = name === "systemcrafters"
+      ? systemCraftersSchedule[index]
+      : index < 16 ? index : Math.floor(next() * motifs.length);
     let inserted = false;
-    const angle = Math.round(next() * 36 - 18);
-    const stamp = transform(motifs[motifIndex], size, angle);
-    // Anchor complete motifs across a corner and each axis; subsequent packing is irregular.
-    const anchor = [[0, 0], [0, TILE / 2], [TILE / 2, 0]][index];
-    for (let attempt = 0; attempt < 900; attempt++) {
-      const [x, y] = anchor ?? [Math.floor(next() * TILE), Math.floor(next() * TILE)];
-      if (!fits(stamp, x, y, occupied)) { if (anchor) break; else continue; }
-      major.push({ ...stamp, x, y, motif: motifIndex, angle });
-      occupy(stamp, x, y, occupied);
-      inserted = true;
-      break;
+    if (name === "systemcrafters") {
+      const size = motifSize(name, motifIndex, index, next), angle = motifAngle(name, motifIndex, next);
+      const logo = [0, 1, 7, 8, 14, 15].includes(motifIndex);
+      const sizes = index < 16 || !logo
+        ? [size]
+        : [size, ...systemCraftersSizes(motifIndex).filter(candidate => candidate < size).sort((a, b) => b - a)];
+      for (const candidateSize of sizes) {
+        const stampKey = `${motifIndex}:${candidateSize}:${angle}`;
+        const stamp = stampCache.get(stampKey) ?? stampCache.set(stampKey, transform(motifs[motifIndex], candidateSize, angle)).get(stampKey);
+        const anchor = candidateSize === size ? [[0, 0], [0, TILE / 2], [TILE / 2, 0]][index] : null;
+        const position = anchor
+          ? fits(stamp, anchor[0], anchor[1], occupied) ? { x: anchor[0], y: anchor[1] } : null
+          : systemCraftersPosition(stamp, next, occupied, logo ? 24 : 12, logo ? 768 : 192);
+        if (!position) continue;
+        major.push({ ...stamp, x: position.x, y: position.y, motif: motifIndex, angle });
+        occupy(stamp, position.x, position.y, occupied);
+        inserted = true;
+        break;
+      }
+    } else {
+      // The existing random size, angle, and placement sequence stays exact.
+      const size = motifSize(name, motifIndex, index, next), angle = motifAngle(name, motifIndex, next);
+      const stamp = transform(motifs[motifIndex], size, angle);
+      const anchor = [[0, 0], [0, TILE / 2], [TILE / 2, 0]][index];
+      for (let attempt = 0; attempt < 900; attempt++) {
+        const [x, y] = anchor ?? [Math.floor(next() * TILE), Math.floor(next() * TILE)];
+        if (!fits(stamp, x, y, occupied)) { if (anchor) break; else continue; }
+        major.push({ ...stamp, x, y, motif: motifIndex, angle });
+        occupy(stamp, x, y, occupied);
+        inserted = true;
+        break;
+      }
     }
     if (!inserted && index < 16) throw new Error(`${name}: could not place every unique motif`);
   }
   if (major.length < 130) throw new Error(`${name}: insufficient major motif density (${major.length})`);
-  for (let index = 0; index < 145; index++) {
-    const size = 25 + Math.round(next() * 40), stamp = transform(details[Math.floor(next() * details.length)], size, Math.round(next() * 70 - 35));
-    for (let attempt = 0; attempt < 900; attempt++) {
-      const x = Math.floor(next() * TILE), y = Math.floor(next() * TILE);
-      if (!fits(stamp, x, y, occupied)) continue;
-      tiny.push({ ...stamp, x, y });
-      occupy(stamp, x, y, occupied);
-      break;
+  const tinyAttempts = name === "systemcrafters" ? 520 : 145;
+  for (let index = 0; index < tinyAttempts; index++) {
+    // Preserve the existing themes' size → detail → angle RNG sequence so
+    // their exports remain byte-for-byte stable.
+    let motifIndex, size, angle;
+    if (name === "systemcrafters") {
+      motifIndex = systemCraftersFillers[Math.floor(next() * systemCraftersFillers.length)];
+      size = motifSize(name, motifIndex, index, next);
+      angle = motifAngle(name, motifIndex, next);
+    } else {
+      size = 25 + Math.round(next() * 40);
+      motifIndex = Math.floor(next() * details.length);
+      angle = Math.round(next() * 70 - 35);
+    }
+    const stampKey = `${motifIndex}:${size}:${angle}`;
+    const motif = name === "systemcrafters" ? motifs[motifIndex] : details[motifIndex];
+    const stamp = name === "systemcrafters"
+      ? stampCache.get(stampKey) ?? stampCache.set(stampKey, transform(motif, size, angle)).get(stampKey)
+      : transform(motif, size, angle);
+    if (name === "systemcrafters") {
+      const position = systemCraftersPosition(stamp, next, occupied, 10, 160);
+      if (position) {
+        tiny.push({ ...stamp, x: position.x, y: position.y });
+        occupy(stamp, position.x, position.y, occupied);
+      }
+    } else {
+      for (let attempt = 0; attempt < 900; attempt++) {
+        const x = Math.floor(next() * TILE), y = Math.floor(next() * TILE);
+        if (!fits(stamp, x, y, occupied)) continue;
+        tiny.push({ ...stamp, x, y });
+        occupy(stamp, x, y, occupied);
+        break;
+      }
     }
   }
   if (tiny.length < 100) throw new Error(`${name}: insufficient tiny detail density (${tiny.length})`);
-  return { placed: [...major, ...tiny], major: major.length, tiny: tiny.length };
+  const counts = name === "systemcrafters"
+    ? Array.from({ length: motifs.length }, (_, motif) => major.filter(item => item.motif === motif).length)
+    : null;
+  return { placed: [...major, ...tiny], major: major.length, tiny: tiny.length, counts };
 }
 const blend = (destination, source) => source + Math.round(destination * (255 - source) / 255);
 function periodicTile(placed) {
@@ -201,8 +314,30 @@ function verifyPeriodicity(tile, scene, name) {
   if (ink < .025 || ink > .5) throw new Error(`${name}: unexpected ink coverage ${ink}`);
   return ink;
 }
-function encodeProofPng(pixels, size) {
-  return magick(["-size", `${size}x${size}`, "-depth", "8", "gray:-", "-alpha", "copy", "-channel", "RGB", "-evaluate", "set", "0", "+channel", "-depth", "8", "-strip", "-define", "png:color-type=4", "-define", "png:compression-level=9", "png:-"], pixels);
+function visibleGapMetric(pixels) {
+  const cell = 32, side = TILE / cell, cells = new Uint32Array(side * side);
+  for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {
+    if (pixels[y * TILE + x] > 5) cells[Math.floor(y / cell) * side + Math.floor(x / cell)]++;
+  }
+  let maxNearEmptySquare = 0;
+  const previous = new Uint16Array(side + 1), current = new Uint16Array(side + 1);
+  for (let y = 1; y <= side; y++) {
+    for (let x = 1; x <= side; x++) {
+      current[x] = cells[(y - 1) * side + x - 1] <= 2 ? Math.min(previous[x], current[x - 1], previous[x - 1]) + 1 : 0;
+      maxNearEmptySquare = Math.max(maxNearEmptySquare, current[x]);
+    }
+    previous.set(current); current.fill(0);
+  }
+  let minimumWindowInk = Infinity;
+  for (let y = 0; y < side; y++) for (let x = 0; x < side; x++) {
+    let ink = 0;
+    for (let row = 0; row < 6; row++) for (let column = 0; column < 6; column++) ink += cells[((y + row) % side) * side + (x + column) % side];
+    minimumWindowInk = Math.min(minimumWindowInk, ink / (36 * cell * cell));
+  }
+  return { maxNearEmptySquare: maxNearEmptySquare * cell, minimumWindowInk };
+}
+function encodeProofPng(pixels, size, compressionLevel = 9) {
+  return magick(["-size", `${size}x${size}`, "-depth", "8", "gray:-", "-alpha", "copy", "-channel", "RGB", "-evaluate", "set", "0", "+channel", "-depth", "8", "-strip", "-define", "png:color-type=4", "-define", `png:compression-level=${compressionLevel}`, "png:-"], pixels);
 }
 function pngChunk(type, data) {
   const chunk = Buffer.allocUnsafe(data.length + 12);
@@ -230,9 +365,10 @@ function encodeIndexedPng(pixels) {
 }
 const outputs = [];
 for (const name of selectedNames) {
-  const motifs = extractMotifs(name), details = extractMotifs("details", "details"), arrangement = arrange(name, motifs, details), placed = arrangement.placed;
+  const motifs = extractMotifs(name), details = name === "systemcrafters" ? null : extractMotifs("details", "details"), arrangement = arrange(name, motifs, details), placed = arrangement.placed;
   const pixels = periodicTile(placed), scene = independentScene(placed);
   const ink = verifyPeriodicity(pixels, scene, name);
+  const gaps = name === "systemcrafters" ? visibleGapMetric(pixels) : null;
   const png = encodeIndexedPng(pixels);
   const decoded = alphaImage(["png:-", "-alpha", "extract"], png);
   if (decoded.width !== TILE || decoded.height !== TILE || !decoded.pixels.equals(pixels)) throw new Error(`${name}: indexed PNG encoding changed the verified periodic alpha`);
@@ -241,12 +377,14 @@ for (const name of selectedNames) {
   outputs.push({ target, png });
   if (flags.has("--preview")) {
     fs.mkdirSync(previewDir, { recursive: true });
-    const scenePng = encodeProofPng(scene, TILE * 3);
+    const scenePng = encodeProofPng(scene, TILE * 3, name === "systemcrafters" ? 1 : 9);
     fs.writeFileSync(path.join(previewDir, `${name}-3x3-white.png`), magick(["png:-", "-background", "white", "-alpha", "remove", "-alpha", "off", "-resize", "1536x1536", "png:-"], scenePng));
     fs.writeFileSync(path.join(previewDir, `${name}-3x3-dark.png`), magick(["png:-", "-channel", "RGB", "-evaluate", "set", "85%", "+channel", "-background", "#10131a", "-alpha", "remove", "-alpha", "off", "-resize", "1536x1536", "png:-"], scenePng));
     fs.writeFileSync(path.join(previewDir, `${name}-offset.png`), magick(["png:-", "-crop", `${TILE}x${TILE}+${TILE / 2}+${TILE / 2}`, "+repage", "-background", "white", "-alpha", "remove", "-alpha", "off", "-resize", "1024x1024", "png:-"], scenePng));
   }
-  console.log(`${flags.has("--check") ? "verified" : "prepared"} ${name}: 16 complete motifs, ${arrangement.major} major + ${arrangement.tiny} tiny placements, ${(ink * 100).toFixed(1)}% ink; all 3x3 pixels match`);
+  const counts = arrangement.counts ? `; motif placements [${arrangement.counts.join(", ")}]` : "";
+  const gapReport = gaps ? `, ${gaps.maxNearEmptySquare}px max near-empty square, ${(gaps.minimumWindowInk * 100).toFixed(1)}% minimum 192px-window ink` : "";
+  console.log(`${flags.has("--check") ? "verified" : "prepared"} ${name}: 16 complete motifs, ${arrangement.major} major + ${arrangement.tiny} tiny placements, ${(ink * 100).toFixed(1)}% ink${gapReport}; all 3x3 pixels match${counts}`);
 }
 // Validate every requested theme before replacing any shipped asset.
 if (!flags.has("--check")) for (const { target, png } of outputs) {

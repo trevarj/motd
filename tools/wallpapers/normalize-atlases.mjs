@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const atlasDir = path.join(root, "tools/wallpapers/atlases");
-const knownThemes = ["linux"];
+const knownThemes = ["linux", "systemcrafters"];
 const threshold = 12;
 const flags = new Set(process.argv.slice(2).filter(argument => argument.startsWith("--")));
 const requestedThemes = process.argv.slice(2).filter(argument => !argument.startsWith("--"));
