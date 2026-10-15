@@ -33,6 +33,7 @@ import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.URL
 import java.net.URLDecoder
+import java.net.URLEncoder
 import java.nio.charset.Charset
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
@@ -65,10 +66,10 @@ internal class RetryableLinkPreviewException(
 ) : IOException(classification)
 
 // Declared web/text/media link preview. HttpURLConnection GET, 5s connect/read timeouts, HTML body
-// capped at 512 KB, text body capped at 16 KB, and Wikipedia summaries capped at 128 KB.
-// Definitive negative results live in a bounded process cache; retryable failures do not. Concurrent
-// callers for the same network+URL await one shared request. HTML scanning remains dependency-free; Wikipedia
-// summaries use the already-pinned kotlinx.serialization JSON parser.
+// capped at 512 KB, text body capped at 16 KB, YouTube oEmbed capped at 16 KB, and Wikipedia
+// summaries capped at 128 KB. Definitive negative results live in a bounded process cache; retryable
+// failures do not. Concurrent callers for the same network+URL await one shared request. HTML scanning
+// remains dependency-free; metadata endpoints use the already-pinned kotlinx.serialization JSON parser.
 //
 // Every request is opened through the owning network's media route (never authenticated), so a
 // preview for a proxied network traverses that network's proxy and fails closed — no direct
@@ -194,6 +195,13 @@ class LinkPreviewRepositoryImpl
                 val job =
                     applicationScope.launch(ioDispatcher) {
                         try {
+                            val youtubeUrl = youtubeOEmbedUrl(url)
+                            if (youtubeUrl != null) {
+                                // Watch HTML can redirect to supported_browsers; never cache that as a video.
+                                val result = fetchYoutubeOEmbed(url, youtubeUrl, route, connection)
+                                if (continuation.isActive) continuation.resume(result)
+                                return@launch
+                            }
                             // Wikimedia's summary response is purpose-built for link previews. Fall back to
                             // the ordinary HTML parser when a page or language edition does not expose it.
                             val summaryUrl = wikipediaSummaryUrl(url)
@@ -225,13 +233,27 @@ class LinkPreviewRepositoryImpl
                 }
             }
 
+        private fun fetchYoutubeOEmbed(
+            videoUrl: String,
+            oEmbedUrl: String,
+            route: NetworkMediaRoute,
+            connection: AtomicReference<HttpURLConnection?>,
+        ): LinkPreview? =
+            request(oEmbedUrl, JSON_ACCEPT, route, connection) { conn ->
+                val contentType = conn.getHeaderField("Content-Type")
+                if (mediaType(contentType) != "application/json" || !hasSupportedContentEncoding(conn)) {
+                    return@request null
+                }
+                parseYoutubeOEmbed(videoUrl, conn.readCappedBody(YOUTUBE_MAX_BYTES).toString(Charsets.UTF_8))
+            }
+
         private fun fetchWikipediaSummary(
             articleUrl: String,
             summaryUrl: String,
             route: NetworkMediaRoute,
             connection: AtomicReference<HttpURLConnection?>,
         ): LinkPreview? =
-            request(summaryUrl, WIKIPEDIA_ACCEPT, route, connection) { conn ->
+            request(summaryUrl, JSON_ACCEPT, route, connection) { conn ->
                 val contentType = conn.getHeaderField("Content-Type")
                 if (contentType?.substringBefore(';')?.trim()?.equals("application/json", ignoreCase = true) != true ||
                     !hasSupportedContentEncoding(conn)
@@ -389,16 +411,22 @@ class LinkPreviewRepositoryImpl
             private const val HTML_MAX_BYTES = 512 * 1024
             private const val TEXT_MAX_BYTES = 16 * 1024
             private const val WIKIPEDIA_MAX_BYTES = 128 * 1024
+            private const val YOUTUBE_MAX_BYTES = 16 * 1024
             private const val TEXT_MAX_CODE_POINTS = 2_048
 
             private const val HTML_SNIFF_MAX_BYTES = 4 * 1024
             private const val GENERIC_ACCEPT = "text/html, application/xhtml+xml, text/*, application/json, application/xml, image/*, video/*, application/*;q=0.1"
-            private const val WIKIPEDIA_ACCEPT = "application/json"
+            private const val JSON_ACCEPT = "application/json"
             private const val USER_AGENT = "motd-Android (https://github.com/trevarj/motd)"
             private const val WIKIPEDIA_SITE_NAME = "Wikipedia"
             private val JSON = Json { ignoreUnknownKeys = true }
             private val WIKIPEDIA_HOST = Regex("""(?:^|[.])wikipedia[.]org$""", RegexOption.IGNORE_CASE)
             private val WIKIPEDIA_WHITESPACE = Regex("""\s+""")
+            private val YOUTUBE_HOSTS = setOf("youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com")
+            private val YOUTUBE_EMBED_HOSTS = setOf("youtube-nocookie.com", "www.youtube-nocookie.com")
+            private val YOUTUBE_SHORT_HOSTS = setOf("youtu.be", "www.youtu.be")
+            private val YOUTUBE_VIDEO_ID = Regex("[A-Za-z0-9_-]{11}")
+            private val YOUTUBE_VIDEO_ROUTES = setOf("shorts", "embed", "live")
             internal val REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
             private val PERMANENT_HTTP_CODES = setOf(400, 401, 405, 406, 411, 413, 414, 415, 422)
             private val IPV4_LITERAL = Regex("""\d{1,3}(?:\.\d{1,3}){3}""")
@@ -754,6 +782,61 @@ class LinkPreviewRepositoryImpl
                     kind = kind,
                 )
 
+            internal fun youtubeOEmbedUrl(url: String): String? {
+                val parsed = runCatching { URL(url) }.getOrNull() ?: return null
+                if (parsed.protocol != "http" && parsed.protocol != "https") return null
+                if (parsed.userInfo != null || parsed.port != -1 && parsed.port != parsed.defaultPort) return null
+                val host = parsed.host.lowercase()
+                if (host !in YOUTUBE_HOSTS && host !in YOUTUBE_EMBED_HOSTS && host !in YOUTUBE_SHORT_HOSTS) return null
+                val segments = parsed.path.removeSuffix("/").split('/')
+                val id =
+                    when {
+                        host in YOUTUBE_SHORT_HOSTS && segments.size == 2 -> {
+                            segments[1]
+                        }
+
+                        host in YOUTUBE_HOSTS && parsed.path == "/watch" -> {
+                            parsed.query
+                                ?.split('&')
+                                ?.singleOrNull { it.startsWith("v=") }
+                                ?.removePrefix("v=")
+                        }
+
+                        segments.size == 3 &&
+                            (
+                                host in YOUTUBE_HOSTS && segments[1] in YOUTUBE_VIDEO_ROUTES ||
+                                    host in YOUTUBE_EMBED_HOSTS && segments[1] == "embed"
+                            ) -> {
+                            segments[2]
+                        }
+
+                        else -> {
+                            null
+                        }
+                    } ?: return null
+                if (!YOUTUBE_VIDEO_ID.matches(id)) return null
+                val target = URLEncoder.encode("https://www.youtube.com/watch?v=$id", "UTF-8")
+                return "https://www.youtube.com/oembed?url=$target&format=json"
+            }
+
+            internal fun parseYoutubeOEmbed(
+                url: String,
+                rawJson: String,
+            ): LinkPreview? =
+                runCatching {
+                    val root = JSON.parseToJsonElement(rawJson) as? JsonObject ?: return@runCatching null
+                    if (root.string("type") != "video") return@runCatching null
+                    val title = root.string("title")?.cleanJsonText() ?: return@runCatching null
+                    LinkPreview(
+                        url = url,
+                        title = title,
+                        description = root.string("author_name")?.cleanJsonText(),
+                        imageUrl = safeMetadataImageUrl(url, root.string("thumbnail_url")),
+                        siteName = URL(url).host,
+                        kind = LinkPreviewKind.VIDEO,
+                    )
+                }.getOrNull()
+
             internal fun wikipediaSummaryUrl(url: String): String? {
                 val parsed = runCatching { URL(url) }.getOrNull() ?: return null
                 if (parsed.protocol != "http" && parsed.protocol != "https") return null
@@ -788,10 +871,10 @@ class LinkPreviewRepositoryImpl
                     val root =
                         JSON.parseToJsonElement(rawJson) as? JsonObject
                             ?: return@runCatching null
-                    val title = root.string("title")?.cleanWikipediaText()
+                    val title = root.string("title")?.cleanJsonText()
                     val extract =
                         (root.string("extract") ?: root.string("description"))
-                            ?.cleanWikipediaText()
+                            ?.cleanJsonText()
                     val image =
                         (root["thumbnail"] as? JsonObject)
                             ?.string("source")
@@ -810,9 +893,9 @@ class LinkPreviewRepositoryImpl
                     }
                 }.getOrNull()
 
-            private fun JsonObject.string(name: String): String? = get(name)?.jsonPrimitive?.contentOrNull
+            private fun JsonObject.string(name: String): String? = get(name)?.jsonPrimitive?.takeIf { it.isString }?.contentOrNull
 
-            private fun String.cleanWikipediaText(): String? = sanitizeText(this)?.replace(WIKIPEDIA_WHITESPACE, " ")?.trim()?.takeIf(String::isNotEmpty)
+            private fun String.cleanJsonText(): String? = sanitizeText(this)?.replace(WIKIPEDIA_WHITESPACE, " ")?.trim()?.takeIf(String::isNotEmpty)
 
             private fun isHttpUrl(value: String): Boolean =
                 runCatching {

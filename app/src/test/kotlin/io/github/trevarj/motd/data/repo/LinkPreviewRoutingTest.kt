@@ -7,6 +7,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.diagnostics.RecordingDiagnostics
+import io.github.trevarj.motd.service.PinningTrustManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -18,6 +19,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -29,7 +31,11 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.net.InetSocketAddress
 import java.net.Proxy
+import java.security.KeyStore
+import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.KeyManagerFactory
+import javax.net.ssl.SSLContext
 
 /**
  * Finding-1/3 regressions: every preview fetch traverses the owning network's media route and
@@ -131,6 +137,150 @@ class LinkPreviewRoutingTest {
             assertEquals(1, server.requestCount)
             val line = server.takeRequest().requestLine
             assertTrue("expected absolute-form proxy request, was: $line", "preview-target.invalid" in line)
+        }
+
+    @Test
+    fun youtube_video_uses_proxied_oembed_instead_of_browser_block_html() =
+        runBlocking {
+            val pin = enableYoutubeTls()
+            server.toProxyAddress().let { proxy ->
+                val repository =
+                    LinkPreviewRepositoryImpl(
+                        prefs,
+                        { id -> route(id, proxy = proxy, authorizationHeader = "Basic secret", host = "www.youtube.com", pin = pin) },
+                        LinkPreviewFetchPolicy(),
+                        this,
+                        Dispatchers.IO,
+                    )
+                enqueueYoutubeResponse(youtubeResponse())
+                val url = "https://youtu.be/dQw4w9WgXcQ?si=private&t=30"
+                prefs.setShowLinkPreviews(false)
+                assertNull(repository.preview(url, NETWORK_ID))
+                assertEquals(0, server.requestCount)
+                prefs.setShowLinkPreviews(true)
+
+                val preview = repository.preview(url, NETWORK_ID)!!
+
+                assertEquals(url, preview.url)
+                assertEquals("A real video", preview.title)
+                assertEquals("Video author", preview.description)
+                assertEquals("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg", preview.imageUrl)
+                assertEquals(LinkPreviewKind.VIDEO, preview.kind)
+                assertEquals("youtu.be", preview.siteName)
+                assertEquals(preview, repository.preview(url, NETWORK_ID))
+                assertEquals(2, server.requestCount)
+                assertYoutubeTunnel()
+                val request = server.takeRequest()
+                assertEquals(
+                    "/oembed?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DdQw4w9WgXcQ&format=json",
+                    request.path,
+                )
+                assertEquals("www.youtube.com", request.getHeader("Host"))
+                assertEquals("application/json", request.getHeader("Accept"))
+                assertNull(request.getHeader("Authorization"))
+                assertNotNull(request.handshake)
+            }
+        }
+
+    @Test
+    fun youtube_missing_video_is_negative_cached_without_fetching_watch_html() =
+        runBlocking {
+            val pin = enableYoutubeTls()
+            server.toProxyAddress().let { proxy ->
+                val repository =
+                    LinkPreviewRepositoryImpl(
+                        prefs,
+                        { id -> route(id, proxy = proxy, host = "www.youtube.com", pin = pin) },
+                        LinkPreviewFetchPolicy(),
+                        this,
+                        Dispatchers.IO,
+                    )
+                enqueueYoutubeResponse(MockResponse().setResponseCode(404))
+                val url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+                assertNull(repository.preview(url, NETWORK_ID))
+                assertNotNull(repository.cachedPreview(url, NETWORK_ID))
+                assertNull(repository.preview(url, NETWORK_ID))
+                assertEquals(2, server.requestCount)
+                assertYoutubeTunnel()
+                assertTrue(server.takeRequest().path!!.startsWith("/oembed?"))
+            }
+        }
+
+    @Test
+    fun youtube_oembed_denial_and_outage_are_retryable_without_html_fallback() =
+        runBlocking {
+            val pin = enableYoutubeTls()
+            server.toProxyAddress().let { proxy ->
+                val repository =
+                    LinkPreviewRepositoryImpl(
+                        prefs,
+                        { id -> route(id, proxy = proxy, host = "www.youtube.com", pin = pin) },
+                        LinkPreviewFetchPolicy(),
+                        this,
+                        Dispatchers.IO,
+                    )
+                val url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                for (status in listOf(403, 429, 503)) {
+                    enqueueYoutubeResponse(MockResponse().setResponseCode(status))
+                    assertRetryable { repository.preview(url, NETWORK_ID) }
+                    assertNull(repository.cachedPreview(url, NETWORK_ID))
+                }
+                enqueueYoutubeResponse(youtubeResponse())
+                assertEquals("A real video", repository.preview(url, NETWORK_ID)?.title)
+                assertEquals(8, server.requestCount)
+                repeat(4) {
+                    assertYoutubeTunnel()
+                    val request = server.takeRequest()
+                    assertTrue(request.path!!.startsWith("/oembed?"))
+                    assertNull(request.getHeader("Authorization"))
+                }
+            }
+        }
+
+    @Test
+    fun youtube_oembed_redirects_cannot_enter_private_destinations() =
+        runBlocking {
+            val pin = enableYoutubeTls()
+            server.toProxyAddress().let { proxy ->
+                val repository =
+                    LinkPreviewRepositoryImpl(
+                        prefs,
+                        { id -> route(id, proxy = proxy, host = "www.youtube.com", pin = pin) },
+                        LinkPreviewFetchPolicy(),
+                        this,
+                        Dispatchers.IO,
+                    )
+                enqueueYoutubeResponse(MockResponse().setResponseCode(302).setHeader("Location", "https://127.0.0.1/private"))
+
+                assertNull(repository.preview("https://youtu.be/dQw4w9WgXcQ", NETWORK_ID))
+                assertEquals(2, server.requestCount)
+                assertYoutubeTunnel()
+            }
+        }
+
+    @Test
+    fun youtube_oembed_body_is_bounded_before_parsing() =
+        runBlocking {
+            val pin = enableYoutubeTls()
+            server.toProxyAddress().let { proxy ->
+                val repository =
+                    LinkPreviewRepositoryImpl(
+                        prefs,
+                        { id -> route(id, proxy = proxy, host = "www.youtube.com", pin = pin) },
+                        LinkPreviewFetchPolicy(),
+                        this,
+                        Dispatchers.IO,
+                    )
+                enqueueYoutubeResponse(
+                    MockResponse()
+                        .setHeader("Content-Type", "application/json")
+                        .setBody("{\"type\":\"video\",\"title\":\"" + "x".repeat(20 * 1024) + "\"}"),
+                )
+
+                assertNull(repository.preview("https://youtu.be/dQw4w9WgXcQ", NETWORK_ID))
+                assertEquals(2, server.requestCount)
+            }
         }
 
     @Test
@@ -253,6 +403,39 @@ class LinkPreviewRoutingTest {
         }
     }
 
+    private fun enqueueYoutubeResponse(response: MockResponse) {
+        // CONNECT carries the canonical host:443 to the proxy, followed by real TLS to the fixture.
+        // Script the cleartext tunnel response before each HTTPS metadata response.
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.UPGRADE_TO_SSL_AT_END))
+        server.enqueue(response)
+    }
+
+    private fun assertYoutubeTunnel() {
+        val connect = server.takeRequest()
+        assertEquals("CONNECT www.youtube.com:443 HTTP/1.1", connect.requestLine)
+        assertNull(connect.getHeader("Authorization"))
+        assertNull(connect.getHeader("Proxy-Authorization"))
+    }
+
+    private fun enableYoutubeTls(): String {
+        val password = "media-test".toCharArray()
+        val keyStore = KeyStore.getInstance("PKCS12")
+        javaClass.getResourceAsStream("/network-media.p12")!!.use { keyStore.load(it, password) }
+        val keys = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply { init(keyStore, password) }
+        server.useHttps(SSLContext.getInstance("TLS").apply { init(keys.keyManagers, null, null) }.socketFactory, false)
+        return PinningTrustManager.sha256Hex(keyStore.getCertificate("media") as X509Certificate)
+    }
+
+    private fun youtubeResponse(): MockResponse =
+        MockResponse()
+            .setHeader("Content-Type", "application/json")
+            .setBody(
+                """
+                {"type":"video","title":"A real video","author_name":"Video author",
+                 "thumbnail_url":"https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"}
+                """.trimIndent(),
+            )
+
     private fun htmlResponse(title: String): MockResponse =
         MockResponse()
             .setHeader("Content-Type", "text/html")
@@ -263,6 +446,8 @@ class LinkPreviewRoutingTest {
         proxy: Proxy? = null,
         proxyError: String? = null,
         authorizationHeader: String? = null,
+        host: String = "irc.example.test",
+        pin: String? = null,
     ) = NetworkMediaRoute(
         networkId = networkId,
         endpoint =
@@ -270,7 +455,7 @@ class LinkPreviewRoutingTest {
                 id = networkId,
                 name = "test",
                 role = NetworkRole.DIRECT,
-                host = "irc.example.test",
+                host = host,
                 port = 6697,
                 nick = "nick",
                 username = "user",
@@ -279,6 +464,7 @@ class LinkPreviewRoutingTest {
         proxy = proxy,
         proxyError = proxyError,
         authorizationHeader = authorizationHeader,
+        endpointPinnedSha256 = pin,
     )
 
     private class FakeContentPreviewPrefs : ContentPreviewPrefs {

@@ -227,6 +227,11 @@ flowchart TD
   Link metadata and extensionless-audio HEAD discovery use that same owning route;
   there is no direct-preview bypass. Global avatars require an unambiguous source
   network, while imported avatar files remain local.
+  YouTube video links use the public, bounded JSON oEmbed endpoint through that
+  same unauthenticated route, preserving the original clickable URL. Missing
+  videos are negative-cached; denied or transient endpoint failures remain
+  retryable. Watch-page HTML is never used as a fallback because YouTube can
+  redirect it to an empty browser-support page.
 - The app ships as a single Google-free build with no product flavors; push
   delivery is UnifiedPush only. The E2E build is x86_64-compatible and
   intentionally omits the arm64-only libbox JNI.

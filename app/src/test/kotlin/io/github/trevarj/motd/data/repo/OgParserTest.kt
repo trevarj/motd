@@ -112,6 +112,88 @@ class OgParserTest {
     }
 
     @Test
+    fun youtubeVideoUrls_useOnlyTheValidatedIdInCanonicalOEmbedTarget() {
+        val expected =
+            "https://www.youtube.com/oembed?url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DdQw4w9WgXcQ&format=json"
+        for (
+        videoUrl in
+        listOf(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=private&url=https://evil.test#t=30",
+            "https://youtube.com/watch?feature=share&v=dQw4w9WgXcQ",
+            "https://m.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://music.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtu.be/dQw4w9WgXcQ?si=tracking",
+            "https://www.youtu.be/dQw4w9WgXcQ",
+            "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+            "https://youtube.com/embed/dQw4w9WgXcQ/",
+            "https://www.youtube.com/live/dQw4w9WgXcQ",
+            "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
+            "https://youtube-nocookie.com/embed/dQw4w9WgXcQ",
+        )
+        ) {
+            assertEquals(videoUrl, expected, LinkPreviewRepositoryImpl.youtubeOEmbedUrl(videoUrl))
+        }
+    }
+
+    @Test
+    fun youtubeOEmbed_rejectsLookalikesNonVideosAndInvalidIds() {
+        for (
+        videoUrl in
+        listOf(
+            "https://youtube.com.evil.test/watch?v=dQw4w9WgXcQ",
+            "https://notyoutube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtu.be.evil.test/dQw4w9WgXcQ",
+            "https://youtube-nocookie.com.evil.test/embed/dQw4w9WgXcQ",
+            "https://www.youtube.com@evil.test/watch?v=dQw4w9WgXcQ",
+            "https://evil.test@www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://www.youtube.com:8443/watch?v=dQw4w9WgXcQ",
+            "ftp://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtube.com/channel/dQw4w9WgXcQ",
+            "https://youtube.com/@dQw4w9WgXcQ",
+            "https://youtube.com/playlist?list=dQw4w9WgXcQ",
+            "https://youtube.com/watch?list=dQw4w9WgXcQ",
+            "https://youtube-nocookie.com/watch?v=dQw4w9WgXcQ",
+            "https://youtube.com/watch?v=short",
+            "https://youtube.com/watch?v=dQw4w9WgXcQx",
+            "https://youtube.com/watch?v=dQw4w9WgXcQ&v=aaaaaaaaaaa",
+            "https://youtube.com/watch?v=dQw4w9WgXc%51",
+            "https://youtube.com/watch?v=dQw4w9WgXcQ%26url=evil",
+            "https://youtu.be/dQw4w9WgXcQ/extra",
+            "https://youtube.com/embed/dQw4w9WgXcQ/extra",
+        )
+        ) {
+            assertNull(videoUrl, LinkPreviewRepositoryImpl.youtubeOEmbedUrl(videoUrl))
+        }
+    }
+
+    @Test
+    fun youtubeOEmbed_sanitizesBoundedTextAndRejectsUnsafeThumbnailsAndInvalidJson() {
+        val videoUrl = "https://youtu.be/dQw4w9WgXcQ"
+        for (thumbnail in listOf("file:///etc/passwd", "http://127.0.0.1/private", "http://[::1]/private", "http://localhost/private")) {
+            val preview =
+                LinkPreviewRepositoryImpl.parseYoutubeOEmbed(
+                    videoUrl,
+                    """{"type":"video","title":" Safe\u202e\u0000\n title ","author_name":"${"a".repeat(3_000)}","thumbnail_url":"$thumbnail"}""",
+                )!!
+            assertEquals("Safe title", preview.title)
+            assertEquals(2_048, preview.description?.length)
+            assertNull(preview.imageUrl)
+        }
+        for (json in listOf("not json", "{}", """{"type":"video","title":123}""", """{"type":"photo","title":"Not a video"}""")) {
+            assertNull(LinkPreviewRepositoryImpl.parseYoutubeOEmbed(videoUrl, json))
+        }
+        // The old HTML path turns YouTube's empty browser-block page into this bogus cached title.
+        assertEquals(
+            "supported_browsers",
+            LinkPreviewRepositoryImpl
+                .parseOgTags(
+                    "https://m.youtube.com/supported_browsers?next_url=watch",
+                    "<html><head></head><body></body></html>",
+                )?.title,
+        )
+    }
+
+    @Test
     fun wikipediaArticleUrls_useLanguageEditionSummaryEndpoint() {
         assertEquals(
             "https://en.wikipedia.org/api/rest_v1/page/summary/Alan_Turing",
