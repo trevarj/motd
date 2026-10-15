@@ -1961,8 +1961,11 @@
     <string name="settings_wallpaper_color_hue">Hue</string>
     <string name="settings_wallpaper_color_saturation">Saturation</string>
     <string name="settings_wallpaper_color_brightness">Brightness</string>
-    <string name="settings_wallpaper_color_degrees">%1$d degrees</string>
-    <string name="settings_wallpaper_color_percent">%1$d percent</string>
+    <plurals name="settings_wallpaper_color_degrees">
+        <item quantity="one">%1$d degree</item>
+        <item quantity="other">%1$d degrees</item>
+    </plurals>
+    <string name="settings_wallpaper_color_percent">%1$d%%</string>
     <string name="settings_wallpaper_color_hex">Hex color (#RRGGBB)</string>
     <string name="settings_wallpaper_color_invalid">Enter six hexadecimal digits, for example #FFFFFF.</string>
     <string name="settings_wallpaper_color_preview">Wallpaper preview</string>

@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -125,7 +126,7 @@ internal fun WallpaperOutlineColorDialog(
                     label = stringResource(R.string.settings_wallpaper_color_hue),
                     value = hue,
                     range = 0f..360f,
-                    state = stringResource(R.string.settings_wallpaper_color_degrees, hue.roundToInt()),
+                    state = pluralStringResource(R.plurals.settings_wallpaper_color_degrees, hue.roundToInt(), hue.roundToInt()),
                     tag = "settings_wallpaper_color_hue",
                 ) {
                     hue = it
@@ -230,7 +231,7 @@ private fun OutlineColorWheel(
 ) {
     val change by rememberUpdatedState(onChange)
     val wheelLabel = stringResource(R.string.settings_wallpaper_color_wheel)
-    val hueState = stringResource(R.string.settings_wallpaper_color_degrees, hue.roundToInt())
+    val hueState = pluralStringResource(R.plurals.settings_wallpaper_color_degrees, hue.roundToInt(), hue.roundToInt())
     val saturationState = stringResource(R.string.settings_wallpaper_color_percent, (saturation * 100).roundToInt())
     val rainbow = remember { Brush.sweepGradient(listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red)) }
     val saturationBrush = remember { Brush.radialGradient(listOf(Color.White, Color.Transparent)) }

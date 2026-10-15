@@ -19,7 +19,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [30, 35])
+@Config(sdk = [26, 27, 30, 35])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class SplashBrandingTest {
     @Test
@@ -43,16 +43,22 @@ class SplashBrandingTest {
                     android.R.attr.statusBarColor,
                     android.R.attr.navigationBarColor,
                     android.R.attr.windowLightStatusBar,
-                    android.R.attr.windowLightNavigationBar,
                 ),
             )
         try {
             assertEquals(Color.BLACK, attributes.getColor(0, Color.WHITE))
             assertEquals(Color.BLACK, attributes.getColor(1, Color.WHITE))
             assertFalse(attributes.getBoolean(2, true))
-            assertFalse(attributes.getBoolean(3, true))
         } finally {
             attributes.recycle()
+        }
+        if (Build.VERSION.SDK_INT >= 27) {
+            val navigation = theme.obtainStyledAttributes(intArrayOf(android.R.attr.windowLightNavigationBar))
+            try {
+                assertFalse(navigation.getBoolean(0, true))
+            } finally {
+                navigation.recycle()
+            }
         }
         if (Build.VERSION.SDK_INT >= 31) {
             val splash = theme.obtainStyledAttributes(intArrayOf(android.R.attr.windowSplashScreenBackground))

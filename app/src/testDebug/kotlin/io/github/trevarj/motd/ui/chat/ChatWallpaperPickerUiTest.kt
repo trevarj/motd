@@ -373,13 +373,19 @@ class ChatWallpaperPickerUiTest {
         }
         compose.onNodeWithTag("settings_wallpaper_picker").performClick()
         openColor()
-        for ((component, value) in listOf("hue" to 240f, "saturation" to 1f, "brightness" to 1f)) {
+        setColorComponent("hue", 1f)
+        setColorComponent("saturation", 0.01f)
+        compose.onNodeWithTag("settings_wallpaper_color_hue").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "1 degree"))
+        compose.onNodeWithTag("settings_wallpaper_color_saturation").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "1%"))
+        compose.onNodeWithTag("settings_wallpaper_color_wheel").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "1 degree, 1%"))
+        for ((component, value, state) in listOf(Triple("hue", 240f, "240 degrees"), Triple("saturation", 1f, "100%"), Triple("brightness", 1f, "100%"))) {
             val node = compose.onNodeWithTag("settings_wallpaper_color_$component").performScrollTo().assertIsDisplayed()
             val semantics = node.fetchSemanticsNode().config
             assertTrue(semantics[SemanticsProperties.ContentDescription].single().isNotBlank())
-            assertTrue(semantics[SemanticsProperties.StateDescription].isNotBlank())
             node.performSemanticsAction(SemanticsActions.SetProgress) { it(value) }
+            node.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, state))
         }
+        compose.onNodeWithTag("settings_wallpaper_color_wheel").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "240 degrees, 100%"))
         compose
             .onNodeWithTag("settings_wallpaper_color_hex")
             .performScrollTo()
