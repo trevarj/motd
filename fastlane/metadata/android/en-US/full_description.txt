@@ -1,17 +1,20 @@
-motd is a native Android IRC client with a modern chat interface for direct IRC networks and soju bouncers.
-
-Connect directly to an IRC server or use a bouncer for persistent connections, multi-network access, synchronized history, read markers, and push delivery.
+motd is a native Android IRC client with a modern chat interface. Connect directly to IRC networks or use a soju or ZNC bouncer.
 
 Features:
 
-* IRCv3 capabilities, SASL PLAIN and EXTERNAL, TLS, and client certificates
-* soju bouncer networks and Web Push with UnifiedPush
-* Infinite scrollback with local search and full-text filtering
-* Replies, reactions, typing indicators, nick autocomplete, and slash commands
-* Inline images, link previews, file uploads, and configurable chat wallpapers
-* SOCKS5, Tor, and optional VLESS + REALITY routing through embedded sing-box
-* Material You themes, dark and AMOLED modes, custom text sizes, and message styles
+* Local message history and full-text search across chats or within one conversation, with jump-to-message
+* Bouncer history and synchronized read markers where supported; soju multi-network management and ZNC playback
+* Replies, reactions, typing indicators, nick autocomplete, and slash commands, depending on server capabilities
+* Inline images, link previews including YouTube videos, and file uploads, with remote-media controls
+* Chat folders, pinned chats, and an archive
+* Material You dynamic color, curated themes, light, dark and AMOLED modes, adjustable text sizes, and message styles
+* Builtin and custom-image wallpapers, including the System Crafters preset and selectable builtin outline colors
+* TLS, SASL PLAIN and EXTERNAL, and client certificates
 
-motd does not require a hosted account or a proprietary chat service. The FOSS build uses UnifiedPush for battery-friendly background delivery and contains no Google Firebase dependency.
+motd is Google-free and uses UnifiedPush for push delivery, not Firebase. Push requires a compatible server or bouncer and an installed UnifiedPush distributor. Persistent socket delivery is also available. Plain IRC networks retain local history; remote history, read-state sync and push depend on the server or bouncer.
 
-The embedded VLESS + REALITY transport is available on arm64-v8a devices. Android 8.0 (API 26) or newer is required.
+Optional per-network routing supports SOCKS5, Tor through Orbot, and embedded VLESS with TCP + REALITY or WebSocket + TLS. Embedded VLESS requires a compatible proxy server and is limited to arm64-v8a. Routing is not a guarantee of anonymity.
+
+An opt-in read-aloud feature uses installed Android offline voices. Third-party speech engines still receive the text they read.
+
+Requires Android 8.0 or newer and a 64-bit ARM device.

@@ -1,0 +1,4 @@
+- Stabilized chat-list connection and history status without shifting chat rows.
+- Added wallpaper outline tint controls and a System Crafters preset; the color wheel stays visible at low brightness.
+- Fixed YouTube link previews while keeping the original video links.
+- Refined the ceramic splash branding and refreshed the F-Droid icon and screenshots.
