@@ -113,7 +113,7 @@
       {
         "id": "systemcrafters",
         "label": "System Crafters",
-        "status": "draft-wallpaper-study",
+        "status": "builtin-wallpaper",
         "study": "systemcrafters-study-03",
         "nativeSize": "1254x1254",
         "atlas": "atlases/systemcrafters.png",
@@ -195,7 +195,7 @@
           "System Crafters",
           "Emacs"
         ],
-        "integration": "Artwork study only; not an Android builtin preset.",
+        "integration": "Builtin Android preset SYSTEMCRAFTERS using app/src/main/assets/chat-wallpapers/systemcrafters.png.",
         "qa": {
           "occupiedCells": 16,
           "verifiedMinimumCellMarginPercent": 15,
@@ -229,6 +229,26 @@
             "env WALLPAPER_THEME=systemcrafters WALLPAPER_OUTPUT_DIR=build/wallpaper-previews/systemcrafters-study-03 node tools/wallpapers/generate-wallpapers.mjs --check"
           ],
           "verificationEnvironment": "Retained nix develop .#sprite-studies shell with MAGICK_THREAD_LIMIT=1"
+        },
+        "shippedExport": {
+          "asset": "app/src/main/assets/chat-wallpapers/systemcrafters.png",
+          "copiedFrom": "build/wallpaper-previews/systemcrafters-study-03.png",
+          "size": "2048x2048",
+          "tool": "tools/wallpapers/generate-wallpapers.mjs",
+          "generatorSha256": "4dd093adf25e8c857ee558231962f815a9e9d9e2cc0abc7cc8d3fc9de1b597c0",
+          "command": "nix develop .#sprite-studies -c env MAGICK_THREAD_LIMIT=1 WALLPAPER_THEME=systemcrafters node tools/wallpapers/generate-wallpapers.mjs --check",
+          "format": "lossless 8-bit indexed PNG",
+          "seed": "periodic-v4:systemcrafters",
+          "bytes": 1314836,
+          "pngSha256": "8e364a3f2675388bbec9ac6a40205b272929ae69023ef8628c0102f018eae5ed",
+          "alphaSha256": "fab88902fa7323b3df7b7180d30284f8c10335799cfad265ad6ea28bce66bc50",
+          "qa": {
+            "identicalToApprovedStudy03": true,
+            "independent3x3PixelMatch": true,
+            "pngAlphaPreserved": true,
+            "whiteDarkAndOffsetProofsReviewed": true,
+            "deterministicByteCheck": true
+          }
         },
         "previousStudies": [
           {

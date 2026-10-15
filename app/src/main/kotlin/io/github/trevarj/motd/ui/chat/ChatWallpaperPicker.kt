@@ -352,6 +352,7 @@ private fun wallpaperLabel(preset: ChatWallpaperPreset): String =
             ChatWallpaperPreset.RETRO_CHAT -> R.string.settings_wallpaper_retro_chat
             ChatWallpaperPreset.MEMES -> R.string.settings_wallpaper_memes
             ChatWallpaperPreset.LINUX -> R.string.settings_wallpaper_linux
+            ChatWallpaperPreset.SYSTEMCRAFTERS -> R.string.settings_wallpaper_systemcrafters
         },
     )
 
@@ -367,4 +368,5 @@ private fun wallpaperDescription(preset: ChatWallpaperPreset): String? =
         ChatWallpaperPreset.RETRO_CHAT -> stringResource(R.string.settings_wallpaper_retro_chat_desc)
         ChatWallpaperPreset.MEMES -> stringResource(R.string.settings_wallpaper_memes_desc)
         ChatWallpaperPreset.LINUX -> stringResource(R.string.settings_wallpaper_linux_desc)
+        ChatWallpaperPreset.SYSTEMCRAFTERS -> stringResource(R.string.settings_wallpaper_systemcrafters_desc)
     }

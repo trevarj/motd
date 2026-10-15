@@ -142,6 +142,7 @@ enum class ChatWallpaperPreset {
     RETRO_CHAT,
     MEMES,
     LINUX,
+    SYSTEMCRAFTERS,
 }
 
 /** Decode current wallpaper names plus the seven retired SVG selections from preferences and backups. */
@@ -156,6 +157,7 @@ internal fun chatWallpaperPresetFromStored(saved: String?): ChatWallpaperPreset 
         "RETRO_CHAT", "CHATTER", "CHANNELS" -> ChatWallpaperPreset.RETRO_CHAT
         "MEMES" -> ChatWallpaperPreset.MEMES
         "LINUX" -> ChatWallpaperPreset.LINUX
+        "SYSTEMCRAFTERS" -> ChatWallpaperPreset.SYSTEMCRAFTERS
         null -> ChatWallpaperPreset.MOTD
         else -> ChatWallpaperPreset.MOTD
     }

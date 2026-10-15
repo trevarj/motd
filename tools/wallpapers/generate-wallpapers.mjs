@@ -13,9 +13,8 @@ const outDir = process.env.WALLPAPER_OUTPUT_DIR
   ? path.resolve(root, process.env.WALLPAPER_OUTPUT_DIR)
   : path.join(root, "app/src/main/assets/chat-wallpapers");
 const previewDir = path.join(root, "build/wallpaper-previews/export-qa");
-const builtinNames = ["motd", "deep-space", "retro-gaming", "radio-club", "internet-oddities", "retro-chat", "memes", "linux"];
-// Draft themes require explicit selection until they become Android presets.
-const names = [...builtinNames, "systemcrafters"];
+const builtinNames = ["motd", "deep-space", "retro-gaming", "radio-club", "internet-oddities", "retro-chat", "memes", "linux", "systemcrafters"];
+const names = builtinNames;
 const TILE = 2048;
 const systemCraftersQuotas = [20, 30, 28, 28, 28, 28, 28, 20, 30, 28, 28, 28, 28, 28, 20, 30];
 const systemCraftersFillers = [2, 3, 4, 5, 6, 9, 10, 11, 12, 13];

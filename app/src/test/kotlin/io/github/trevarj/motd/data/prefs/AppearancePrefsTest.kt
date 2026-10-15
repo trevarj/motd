@@ -256,6 +256,7 @@ class AppearancePrefsTest {
                 "NONE" to ChatWallpaperPreset.NONE,
                 "MEMES" to ChatWallpaperPreset.MEMES,
                 "LINUX" to ChatWallpaperPreset.LINUX,
+                "SYSTEMCRAFTERS" to ChatWallpaperPreset.SYSTEMCRAFTERS,
             )
         expected.forEach { (stored, preset) -> assertEquals(stored, preset, chatWallpaperPresetFromStored(stored)) }
         assertEquals(ChatWallpaperPreset.MOTD, chatWallpaperPresetFromStored(null))
@@ -278,6 +279,14 @@ class AppearancePrefsTest {
         assertEquals(
             """{"preset":"LINUX","intensity":73,"outlineColor":null}""",
             jsonWithDefaults.encodeToString(WallpaperSelection(ChatWallpaperPreset.LINUX, 73)),
+        )
+        assertEquals(
+            WallpaperSelection(ChatWallpaperPreset.SYSTEMCRAFTERS, 73),
+            Json.decodeFromString<WallpaperSelection>("""{"preset":"SYSTEMCRAFTERS","intensity":73}"""),
+        )
+        assertEquals(
+            """{"preset":"SYSTEMCRAFTERS","intensity":73,"outlineColor":null}""",
+            jsonWithDefaults.encodeToString(WallpaperSelection(ChatWallpaperPreset.SYSTEMCRAFTERS, 73)),
         )
         for (color in listOf(0xffffffff.toInt(), 0xff000000.toInt(), 0xff12ab34.toInt())) {
             val selection = WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, outlineColor = color)

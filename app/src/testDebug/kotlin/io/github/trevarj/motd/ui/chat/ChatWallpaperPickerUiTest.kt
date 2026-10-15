@@ -107,14 +107,14 @@ class ChatWallpaperPickerUiTest {
 
         compose.onNodeWithTag("settings_wallpaper_picker").performClick()
         compose.onNodeWithTag("settings_wallpaper_sheet").assertIsDisplayed()
-        reveal("settings_wallpaper_preset_deep_space")
-        compose.onNodeWithTag("settings_wallpaper_preset_deep_space").performClick()
-        assertEquals(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 50), changes.last())
+        reveal("settings_wallpaper_preset_systemcrafters")
+        compose.onNodeWithTag("settings_wallpaper_preset_systemcrafters").performClick()
+        assertEquals(WallpaperSelection(ChatWallpaperPreset.SYSTEMCRAFTERS, 50), changes.last())
         compose.onNodeWithTag("settings_wallpaper_sheet").assertIsDisplayed()
 
         reveal("settings_wallpaper_intensity")
         compose.onNodeWithTag("settings_wallpaper_intensity").performSemanticsAction(SemanticsActions.SetProgress) { it(80f) }
-        assertEquals(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80), changes.last())
+        assertEquals(WallpaperSelection(ChatWallpaperPreset.SYSTEMCRAFTERS, 80), changes.last())
         compose.onNodeWithTag("settings_wallpaper_sheet").assertIsDisplayed()
 
         reveal("settings_wallpaper_done")

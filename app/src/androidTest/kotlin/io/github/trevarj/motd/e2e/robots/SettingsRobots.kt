@@ -57,8 +57,8 @@ internal class SettingsRobot(
     fun selectWallpaperAndIntensity() {
         scrollToAndClick("settings_wallpaper_picker")
         assertDisplayed("settings_wallpaper_sheet")
-        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_preset_deep_space")
-        click("settings_wallpaper_preset_deep_space")
+        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_preset_systemcrafters")
+        click("settings_wallpaper_preset_systemcrafters")
         scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_intensity")
         compose.onNodeWithTag("settings_wallpaper_intensity").performSemanticsAction(SemanticsActions.SetProgress) { it(80f) }
         scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_outline_color")

@@ -186,6 +186,7 @@ internal fun gradientColors(
             ChatWallpaperPreset.RETRO_CHAT -> listOf(primary, tertiary, secondary)
             ChatWallpaperPreset.MEMES -> listOf(secondary, primary, tertiary)
             ChatWallpaperPreset.LINUX -> listOf(primary, secondary, tertiary)
+            ChatWallpaperPreset.SYSTEMCRAFTERS -> listOf(tertiary, secondary, primary)
             ChatWallpaperPreset.NONE -> listOf(base, base, base)
         }
     return listOf(.06f, .04f, .05f, .03f).mapIndexed { index, alpha ->
@@ -310,6 +311,7 @@ internal fun assetName(preset: ChatWallpaperPreset): String =
         ChatWallpaperPreset.RETRO_CHAT -> "retro-chat.png"
         ChatWallpaperPreset.MEMES -> "memes.png"
         ChatWallpaperPreset.LINUX -> "linux.png"
+        ChatWallpaperPreset.SYSTEMCRAFTERS -> "systemcrafters.png"
     }
 
 internal const val WALLPAPER_TILE_PERIOD_DP = 512f

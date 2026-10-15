@@ -189,6 +189,7 @@ class WallpaperAssetTest {
             ChatWallpaperPreset.RETRO_CHAT -> "2c1da3ee36e15c9f328a1ab0ad375f79af0e2cc7da35e7cb01ebcb1986505bd3"
             ChatWallpaperPreset.MEMES -> "621b181952fa4c75cdcdf18458ea9246cbad829cf8f3d074f461b657027709be"
             ChatWallpaperPreset.LINUX -> "d8ce022c61c9078279a65297d01d437fad92e800cff6c1f822386be89963b95e"
+            ChatWallpaperPreset.SYSTEMCRAFTERS -> "fab88902fa7323b3df7b7180d30284f8c10335799cfad265ad6ea28bce66bc50"
             ChatWallpaperPreset.NONE -> error("NONE has no approved wallpaper alpha")
         }
 

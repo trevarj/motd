@@ -27,7 +27,7 @@ export const themes = [
   { id: "retro-chat", label: "Retro Chat", description: "Buddy lists, away messages, and the early messenger era." },
   { id: "memes", label: "Memes", description: "A dense archive of chaotic internet reaction faces." },
   { id: "linux", label: "Linux", description: "Free-software mascots, terminals, and late-night command lines." },
-  { id: "systemcrafters", label: "System Crafters", description: "Emacs, Scheme, IRC folklore, and tiny coastal Greek details." },
+  { id: "systemcrafters", label: "System Crafters", description: "System Crafters, Emacs, Guix horns, and #systemcrafters." },
 ];
 
 const mimeTypes = {
