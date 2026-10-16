@@ -423,7 +423,7 @@ data class RoomAliasEntity(
         Index(value = ["bufferId", "msgid"]),
         Index(value = ["bufferId", "replyToMsgid", "replyToEventId"]),
         Index(value = ["bufferId", "pendingLabel"]),
-        // Bound smart-presence evidence by conversation kind before seeking either time window;
+        // Bound smart-presence evidence by conversation kind before seeking each time window;
         // presence churn must not be scanned as possible speech, especially over seven days.
         Index(value = ["bufferId", "normalizedActor", "kind", "serverTime"]),
         // The global feed orders every room's rows together. Every other index here is

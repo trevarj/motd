@@ -199,7 +199,9 @@ flowchart TD
 - Smart presence uses one shared SQL predicate for the timeline, positional counts,
   and anchors: a normalized actor must have sent a conversation message in the same
   room within the preceding five minutes, or at least five within the preceding
-  seven days. Both backward windows include their lower time bound. JOIN additionally
+  seven days with the last prior speech within one hour. All backward windows include
+  their lower time bound and are relative to the presence event, not the current clock:
+  historical presence does not expire merely as wall time passes. JOIN additionally
   becomes visible when that actor speaks after it within five minutes (inclusive).
   Same-time speech retains the existing timestamp-inclusive backward eligibility.
   Other presence kinds do not look forward. New speech invalidates Room paging,
@@ -207,7 +209,7 @@ flowchart TD
   Own presence and netsplit/netjoin aggregates remain visible; Hide all still removes
   every presence kind. Presence never becomes preview, activity, or unread content.
   Speech evidence uses the covering `(bufferId, normalizedActor, kind, serverTime)` index:
-  conversation-kind seeks exclude presence churn before either time window is scanned,
+  conversation-kind seeks exclude presence churn before the time windows are scanned,
   keeping exact entry counts and paging refreshes bounded by speech rather than join/part history.
 - Fool membership stays global; sparse preferences independently inherit or override
   Dimmed/Collapsed/Hidden visibility and opt into mention/reply or DM notifications.

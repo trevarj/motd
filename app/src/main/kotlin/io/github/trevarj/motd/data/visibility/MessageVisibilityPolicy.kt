@@ -7,6 +7,7 @@ import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_COMMON_GRACE_MS
 import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_COMMON_MIN_MESSAGES
 import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_COMMON_WINDOW_MS
 import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_WINDOW_MS
@@ -257,6 +258,8 @@ internal class MessageVisibilitySql(
      * Keep an actor-attributable presence row for a recent or common chatter in the same room:
      * one conversation message within [SMART_PRESENCE_WINDOW_MS], or at least
      * [SMART_PRESENCE_COMMON_MIN_MESSAGES] within [SMART_PRESENCE_COMMON_WINDOW_MS] before the event.
+     * Common chatters must also have spoken within [SMART_PRESENCE_COMMON_GRACE_MS] before the event.
+     * All backward bounds are inclusive and event-relative; wall time never expires historical rows.
      * JOIN also becomes visible when that actor speaks after it within [SMART_PRESENCE_WINDOW_MS].
      * Other presence kinds never use later speech; same-time speech retains backward eligibility.
      *
@@ -278,13 +281,19 @@ internal class MessageVisibilitySql(
             "AND spoke.kind IN ($CONVERSATION_KIND_SQL) " +
             "AND spoke.serverTime <= $serverTime " +
             "AND spoke.serverTime >= $serverTime - $SMART_PRESENCE_WINDOW_MS) " +
-            "OR EXISTS (SELECT 1 FROM messages spoke " +
+            "OR (EXISTS (SELECT 1 FROM messages spoke " +
+            "WHERE spoke.bufferId = ${column(alias, "bufferId")} " +
+            "AND spoke.normalizedActor = ${column(alias, "normalizedActor")} " +
+            "AND spoke.kind IN ($CONVERSATION_KIND_SQL) " +
+            "AND spoke.serverTime <= $serverTime " +
+            "AND spoke.serverTime >= $serverTime - $SMART_PRESENCE_COMMON_GRACE_MS) " +
+            "AND EXISTS (SELECT 1 FROM messages spoke " +
             "WHERE spoke.bufferId = ${column(alias, "bufferId")} " +
             "AND spoke.normalizedActor = ${column(alias, "normalizedActor")} " +
             "AND spoke.kind IN ($CONVERSATION_KIND_SQL) " +
             "AND spoke.serverTime <= $serverTime " +
             "AND spoke.serverTime >= $serverTime - $SMART_PRESENCE_COMMON_WINDOW_MS " +
-            "LIMIT 1 OFFSET ${SMART_PRESENCE_COMMON_MIN_MESSAGES - 1}) " +
+            "LIMIT 1 OFFSET ${SMART_PRESENCE_COMMON_MIN_MESSAGES - 1})) " +
             "OR ($kind = '${MessageKind.JOIN.name}' AND EXISTS (SELECT 1 FROM messages spoke " +
             "WHERE spoke.bufferId = ${column(alias, "bufferId")} " +
             "AND spoke.normalizedActor = ${column(alias, "normalizedActor")} " +

@@ -240,6 +240,38 @@ class SmartPresenceVisibilityTest {
         }
 
     @Test
+    fun `smart common chatter grace includes one hour but excludes one millisecond later`() =
+        runTest {
+            val hourMs = 60 * 60 * 1000L
+            repeat(5) {
+                insert(MessageKind.PRIVMSG, "Alice", -hourMs - it * 1_000L, normalizedActor = "alice")
+            }
+            insert(MessageKind.AWAY, "ALICE", 0, normalizedActor = "alice")
+            insert(MessageKind.BACK, "ALICE", 1, normalizedActor = "alice")
+
+            val rows = visibleRows(PresenceMode.SMART)
+            assertEquals(
+                listOf(MessageKind.AWAY) + List(5) { MessageKind.PRIVMSG },
+                rows.map { it.kind },
+            )
+            val reader = MessageVisibilityReader(db)
+            val spec = MessageVisibilitySpec(presenceMode = PresenceMode.SMART)
+            val lastSpeech = rows.first { it.kind == MessageKind.PRIVMSG }
+            assertEquals(1, reader.countTimelineNewer(bufferId, lastSpeech.serverTime, lastSpeech.id, spec))
+            assertEquals(rows.first().id, reader.latestEffectiveAnchor(bufferId, spec)?.id)
+
+            // Neither future speech nor another room/normalized actor can renew this event's grace.
+            insert(MessageKind.NOTICE, "Alice", 1_000, normalizedActor = "alice")
+            insert(MessageKind.ACTION, "Alice", -600_000, room = otherBufferId, normalizedActor = "alice")
+            insert(MessageKind.PRIVMSG, "ALICE", -600_000, normalizedActor = "bob")
+            insert(MessageKind.NICK, "ALICE", -1, normalizedActor = "alice")
+            assertEquals(
+                listOf(MessageKind.AWAY to "ALICE"),
+                visibleKinds(PresenceMode.SMART).filter { it.first == MessageKind.AWAY || it.first == MessageKind.BACK },
+            )
+        }
+
+    @Test
     fun `smart common chatter includes seven day boundary but excludes older speech`() =
         runTest {
             repeat(4) {
