@@ -4456,6 +4456,7 @@ class ChatViewModelTest {
                 .reresolveInitialOnce(
                     ChatPositionTarget(
                         index = 99,
+                        offset = 19,
                         expectedEventId = id,
                         expectedMsgid = "target",
                         serverTime = 200,
@@ -4467,6 +4468,97 @@ class ChatViewModelTest {
             val repaired = checkNotNull(vm.initialTarget.value)
             assertTrue(repaired.forceScrollOnEntry)
             assertTrue(repaired.placeAtTop)
+            assertEquals(19, repaired.offset)
+        }
+
+    @Test
+    fun `pending unread entry repairs to current visible unread without revealing hidden fools`() =
+        runTest {
+            val (entered, unread) = seedContextUnread()
+            val settings =
+                FakeSettingsRepository().apply {
+                    this.settings.value = Settings(fools = setOf("alice"), foolsMode = FoolsMode.DIMMED)
+                }
+            val messages = FakeMessageRepository(events = unread, counts = MessageVisibilityReader(db))
+            val vm = viewModel(entered, FakeConnectionManager(network.id), messages = messages, settings = settings)
+            val initial = checkNotNull(vm.initialTarget.first { it != null })
+            assertEquals(unread.first().id, initial.expectedEventId)
+            assertEquals(EntryPositionState.Pending, vm.entryState.value)
+
+            settings.settings.value = settings.settings.value.copy(foolsMode = FoolsMode.HIDE)
+            vm.reresolveInitialOnce(initial).join()
+
+            val repaired = checkNotNull(vm.initialTarget.value)
+            assertFalse(vm.hiddenFoolsRevealed.value)
+            assertEquals(unread.last().id, repaired.expectedEventId)
+            assertEquals(0, repaired.index)
+            assertTrue(repaired.forceScrollOnEntry)
+            assertTrue(repaired.placeAtTop)
+            assertFalse(repaired.fromSavedPosition)
+            assertEquals(0, repaired.offset)
+            val spec = checkNotNull(repaired.requiredVisibilitySpec)
+            assertFalse(spec.revealHiddenFools)
+            assertEquals(FoolsMode.HIDE, spec.foolsMode)
+            assertEquals(spec, messages.lastCountVisibility)
+            assertEquals(spec, vm.messageGeneration.first { it?.spec == spec }?.spec)
+            assertEquals(EntryPositionState.Pending, vm.entryState.value)
+        }
+
+    @Test
+    fun `pending saved entry repairs hidden anchor behind viewport and drops only its obsolete offset`() =
+        runTest {
+            val rows =
+                listOf(
+                    message(channel.id, "visible older", "older", "bob").copy(serverTime = 100, dedupKey = "older"),
+                    message(channel.id, "saved fool", "saved", "alice").copy(serverTime = 200, dedupKey = "saved"),
+                    message(channel.id, "visible newest", "newest", "bob").copy(serverTime = 300, dedupKey = "newest"),
+                )
+            val ids = db.messageDao().insertAll(rows)
+            val saved =
+                ChatScrollPosition(
+                    index = 1,
+                    offset = 37,
+                    msgid = "saved",
+                    serverTime = 200,
+                    rowId = ids[1],
+                )
+            val positions = ChatScrollPositionStore().apply { put(channel.id, saved) }
+            val settings =
+                FakeSettingsRepository().apply {
+                    this.settings.value = Settings(fools = setOf("alice"), foolsMode = FoolsMode.DIMMED)
+                }
+            val messages =
+                FakeMessageRepository(
+                    events = ids.map { checkNotNull(db.messageDao().byId(it)) },
+                    counts = MessageVisibilityReader(db),
+                )
+            val entered = channel.copy(localReadAnchorTime = 300, localReadAnchorEventId = ids.last())
+            val vm =
+                viewModel(
+                    entered,
+                    FakeConnectionManager(network.id),
+                    messages = messages,
+                    settings = settings,
+                    scrollPositions = positions,
+                )
+            val initial = checkNotNull(vm.initialTarget.first { it != null })
+            assertEquals(ids[1], initial.expectedEventId)
+            assertEquals(37, initial.offset)
+            assertTrue(initial.fromSavedPosition)
+
+            settings.settings.value = settings.settings.value.copy(foolsMode = FoolsMode.HIDE)
+            vm.reresolveInitialOnce(initial).join()
+
+            val repaired = checkNotNull(vm.initialTarget.value)
+            assertFalse(vm.hiddenFoolsRevealed.value)
+            assertEquals(ids.first(), repaired.expectedEventId)
+            assertEquals("older", repaired.expectedMsgid)
+            assertEquals(1, repaired.index)
+            assertEquals(0, repaired.offset)
+            assertTrue(repaired.fromSavedPosition)
+            assertFalse(repaired.placeAtTop)
+            assertFalse(checkNotNull(repaired.requiredVisibilitySpec).revealHiddenFools)
+            assertEquals(saved, positions.get(channel.id))
         }
 
     @Test

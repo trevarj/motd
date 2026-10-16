@@ -18,14 +18,19 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.edit
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModelStore
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
@@ -37,6 +42,7 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.network
@@ -355,6 +361,179 @@ class FoolCollapseUiTest {
             compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertDoesNotExist()
             compose.onNodeWithText("Pending entry alice").assertIsDisplayed()
             compose.onNodeWithText("Pending entry bot").assertIsDisplayed()
+            assertEquals(initialSettings, runBlocking { repo.settings.first() })
+        } finally {
+            compose.runOnIdle {
+                store.clear()
+                scope.cancel()
+            }
+            compose.waitForIdle()
+            db.close()
+        }
+    }
+
+    @OptIn(androidx.paging.ExperimentalPagingApi::class)
+    @Test
+    fun settled_reaction_window_follows_revealed_paging_generation_and_viewport() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repo = DataStoreSettingsRepository(context)
+        val db = inMemoryDb(directCommit = true)
+        val room =
+            runBlocking {
+                context.settingsDataStore.edit { it.clear() }
+                repo.setFool("bot", true)
+                repo.setFoolPreferences("bot", FoolPreferences(FoolsMode.HIDE))
+                val networkId = db.networkDao().insert(network())
+                val room = buffer(networkId, "#reactions").copy(joined = true)
+                room.copy(id = db.bufferDao().insert(room))
+            }
+        val rows =
+            (1L..60L).map { id ->
+                val nick = if (id == 1L) "bot" else "alice"
+                MessageEntity(
+                    id = id,
+                    bufferId = room.id,
+                    msgid = "reaction-$id",
+                    serverTime = id * 1_000,
+                    timelineOrder = id,
+                    sender = nick,
+                    normalizedActor = nick,
+                    kind = MessageKind.PRIVMSG,
+                    text = "Reaction body $id\nSecond line",
+                    dedupKey = "reaction-$id",
+                )
+            }
+        runBlocking {
+            db.messageDao().insertAll(rows)
+            db.reactionDao().upsert(
+                ReactionEntity(
+                    bufferId = room.id,
+                    targetMsgid = "reaction-1",
+                    actorKey = "nick:alice",
+                    sender = "alice",
+                    emoji = "\u2B50",
+                    serverTime = 61_000,
+                    targetEventId = 1,
+                ),
+            )
+        }
+        val initialSettings = runBlocking { repo.settings.first() }
+        val stored =
+            MessageRepositoryImpl(
+                db.bufferDao(),
+                db.networkIdentityDao(),
+                db,
+                db.reactionDao(),
+                ChatHistoryMediatorFactory { _, _, _ -> error("local paging only") },
+                db.historyGapDao(),
+            )
+        val messages =
+            object : MessageRepository by stored {
+                override fun messages(
+                    bufferId: Long,
+                    visibility: MessageVisibilitySpec,
+                    initialKey: Int?,
+                    viewport: StateFlow<ViewportRefreshAnchor?>,
+                ): Flow<PagingData<MessageEntity>> =
+                    Pager(PagingConfig(pageSize = 80, initialLoadSize = 80, enablePlaceholders = true)) {
+                        db.messageDao().pagingSource(messagePagingQuery(bufferId, visibility))
+                    }.flow
+            }
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val store = ViewModelStore()
+        lateinit var vm: ChatViewModel
+        var items: LazyPagingItems<MessageEntity>? = null
+        var visibleMsgids = emptyList<String>()
+        compose.runOnIdle {
+            vm =
+                ChatViewModelTest.externalTranslationFixture(
+                    db,
+                    room,
+                    scope,
+                    savedStateHandle = SavedStateHandle(mapOf("bufferId" to room.id, "entry_position_settled" to true)),
+                    settings = repo,
+                    messages = messages,
+                )
+            store.put("reaction-generation", vm)
+        }
+        try {
+            compose.waitUntil(10_000) {
+                compose.waitForIdle()
+                vm.messageGeneration.value != null
+            }
+            compose.setContent {
+                val generation by vm.messageGeneration.collectAsState()
+                val collected = key(generation) { checkNotNull(generation).pages.collectAsLazyPagingItems(Dispatchers.Main.immediate) }
+                val settings by vm.settings.collectAsState(initialSettings)
+                val state by vm.state.collectAsState()
+                val revealed by vm.hiddenFoolsRevealed.collectAsState()
+                val entryState by vm.entryState.collectAsState()
+                val chips by vm.reactionChips.collectAsState()
+                SideEffect { items = collected }
+                MotdTheme(dynamicColor = false) {
+                    ChatContent(
+                        state = state,
+                        items = collected,
+                        composerEnabled = false,
+                        onBack = {},
+                        onOpenChannelInfo = {},
+                        onOpenSearch = {},
+                        onOpenImage = {},
+                        nickNormalizer = { it.lowercase() },
+                        onSubmit = {},
+                        onTyping = {},
+                        onSetReply = {},
+                        onReact = { _, _ -> },
+                        onRetry = {},
+                        loadPreview = { _, _ -> null },
+                        showImages = false,
+                        showLinkPreviews = false,
+                        fools = settings.fools,
+                        foolsMode = settings.foolsMode,
+                        foolPreferences = settings.foolPreferences,
+                        hiddenFoolsRevealed = revealed,
+                        presentedVisibilitySpec = generation?.spec,
+                        onHiddenFoolsRevealedChange = vm::setHiddenFoolsRevealed,
+                        viewportReadEnabled = false,
+                        entryState = entryState,
+                        reactionChips = { chips[it].orEmpty() },
+                        onVisibleMsgidsChanged = {
+                            visibleMsgids = it
+                            vm.setVisibleMsgids(it)
+                        },
+                    )
+                }
+            }
+            compose.waitUntil(10_000) {
+                compose.waitForIdle()
+                items?.itemCount == 59 && visibleMsgids.isNotEmpty()
+            }
+            compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertDoesNotExist()
+            compose.onNodeWithTag("chat_message_reaction-1", useUnmergedTree = true).assertDoesNotExist()
+            assertFalse("reaction-1" in visibleMsgids)
+            val retiredItems = items
+            toggleAll()
+            compose.waitUntil(10_000) {
+                compose.waitForIdle()
+                items !== retiredItems && items?.itemCount == 60
+            }
+            compose.onNodeWithTag("chat_timeline").performScrollToIndex(59)
+            compose.waitUntil(10_000) {
+                compose.waitForIdle()
+                "reaction-1" in visibleMsgids && vm.reactionChips.value["reaction-1"]
+                    ?.singleOrNull()
+                    ?.count == 1
+            }
+            compose.onNodeWithText("Reaction body 1\nSecond line", useUnmergedTree = true).assertIsDisplayed()
+            compose
+                .onNode(hasText("\u2B50") and hasAnyAncestor(hasTestTag("chat_message_reaction-1")), useUnmergedTree = true)
+                .assertIsDisplayed()
+            compose.onNodeWithTag("chat_timeline").performScrollToIndex(0)
+            compose.waitUntil(10_000) {
+                compose.waitForIdle()
+                "reaction-1" !in visibleMsgids && "reaction-1" !in vm.reactionChips.value
+            }
+            compose.onNodeWithTag("chat_message_reaction-1", useUnmergedTree = true).assertDoesNotExist()
             assertEquals(initialSettings, runBlocking { repo.settings.first() })
         } finally {
             compose.runOnIdle {

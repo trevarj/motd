@@ -2381,13 +2381,13 @@ internal fun ChatContent(
     // The previous collector allocated and wrote to the position cache for nearly every pixel of a
     // fling. We only need the final anchor: persist when scrolling settles, plus once on disposal so
     // a back gesture during an active fling still retains the current location.
-    LaunchedEffect(initialPositionSettled, listState, visibilityPolicy) {
+    LaunchedEffect(initialPositionSettled, listState, visibilityPolicy, items) {
         if (!initialPositionSettled) return@LaunchedEffect
         snapshotFlow { listState.isScrollInProgress }
             .distinctUntilChanged()
             .collect { scrolling -> if (!scrolling) saveCurrentScrollPosition() }
     }
-    DisposableEffect(initialPositionSettled, listState, visibilityPolicy) {
+    DisposableEffect(initialPositionSettled, listState, visibilityPolicy, items) {
         onDispose { saveCurrentScrollPosition() }
     }
 
@@ -2423,17 +2423,17 @@ internal fun ChatContent(
             ) ?: return
         onFurthestDisplayedChanged(anchor)
     }
-    LaunchedEffect(initialPositionSettled, listState, visibilityPolicy) {
+    LaunchedEffect(initialPositionSettled, listState, visibilityPolicy, items) {
         if (!initialPositionSettled) return@LaunchedEffect
         snapshotFlow { listState.isScrollInProgress }
             .distinctUntilChanged()
             .collect { recordFurthestDisplayed() }
     }
-    DisposableEffect(initialPositionSettled, listState, visibilityPolicy) {
+    DisposableEffect(initialPositionSettled, listState, visibilityPolicy, items) {
         onDispose { recordFurthestDisplayed() }
     }
 
-    LaunchedEffect(initialPositionSettled, listState) {
+    LaunchedEffect(initialPositionSettled, listState, items) {
         snapshotFlow {
             // While scrolling, deliberately stop observing itemCount/index. snapshotFlow then
             // unregisters those hot reads until the idle edge, preventing a DB query restart for

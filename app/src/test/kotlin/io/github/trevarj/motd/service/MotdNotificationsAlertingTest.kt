@@ -7,8 +7,10 @@ import android.database.Cursor
 import android.os.CancellationSignal
 import androidx.core.app.NotificationCompat
 import androidx.room.Room
+import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
+import androidx.sqlite.db.SupportSQLiteProgram
 import androidx.sqlite.db.SupportSQLiteQuery
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
@@ -23,6 +25,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FoolPreferences
+import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.MessageNotifier
@@ -30,14 +33,23 @@ import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.di.ForegroundBufferTrackerImpl
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
+import io.github.trevarj.motd.dickord.DickordLabsPrefs
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -49,7 +61,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Pins the channel-governed alerting contract for message/mention notifications:
@@ -73,57 +88,71 @@ class MotdNotificationsAlertingTest {
 
     @Volatile private var beforeDatabaseQuery: (() -> Unit)? = null
 
+    @Volatile private var beforeBoundDatabaseQuery: ((SupportSQLiteQuery) -> Unit)? = null
+
     private val context: Context get() = ApplicationProvider.getApplicationContext()
 
     @Before
     fun setUp() =
         runTest {
-            db =
-                Room
-                    .inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
-                    .allowMainThreadQueries()
-                    .openHelperFactory(
-                        object : SupportSQLiteOpenHelper.Factory {
-                            override fun create(configuration: SupportSQLiteOpenHelper.Configuration): SupportSQLiteOpenHelper {
-                                val helper = FrameworkSQLiteOpenHelperFactory().create(configuration)
-                                return object : SupportSQLiteOpenHelper by helper {
-                                    override val writableDatabase: SupportSQLiteDatabase
-                                        get() = interceptQueries(helper.writableDatabase)
-                                    override val readableDatabase: SupportSQLiteDatabase
-                                        get() = interceptQueries(helper.readableDatabase)
-                                }
-                            }
-                        },
-                    ).setQueryCallback(
-                        { sql, args -> beforeQuery?.invoke(sql, args) },
-                        Executor(Runnable::run),
-                    ).build()
-            networkId =
-                db.networkDao().insert(
-                    NetworkEntity(
-                        name = "libera",
-                        role = NetworkRole.DIRECT,
-                        host = "irc.libera.chat",
-                        port = 6697,
-                        nick = "me",
-                        username = "me",
-                        realname = "Me",
-                    ),
-                )
-            dmBufferId =
-                db.bufferDao().insert(
-                    BufferEntity(
-                        networkId = networkId,
-                        name = "alert-peer",
-                        displayName = "alert-peer",
-                        type = BufferType.QUERY,
-                    ),
-                )
-            shadowOf(context as android.app.Application)
-                .grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
-            repo = DataStoreSettingsRepository(context)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            openDatabase()
         }
+
+    private suspend fun openDatabase(immediate: Boolean = false) {
+        db =
+            Room
+                .inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
+                .allowMainThreadQueries()
+                .apply {
+                    // Only the real-time race schedules need reads to finish before the caller resumes.
+                    // Inline transactions can otherwise block runTest's queued background initializers.
+                    if (immediate) {
+                        setQueryExecutor(Executor(Runnable::run))
+                        setTransactionExecutor(Executor(Runnable::run))
+                        setJournalMode(RoomDatabase.JournalMode.TRUNCATE)
+                    }
+                }.openHelperFactory(
+                    object : SupportSQLiteOpenHelper.Factory {
+                        override fun create(configuration: SupportSQLiteOpenHelper.Configuration): SupportSQLiteOpenHelper {
+                            val helper = FrameworkSQLiteOpenHelperFactory().create(configuration)
+                            return object : SupportSQLiteOpenHelper by helper {
+                                override val writableDatabase: SupportSQLiteDatabase
+                                    get() = interceptQueries(helper.writableDatabase)
+                                override val readableDatabase: SupportSQLiteDatabase
+                                    get() = interceptQueries(helper.readableDatabase)
+                            }
+                        }
+                    },
+                ).setQueryCallback(
+                    { sql, args -> beforeQuery?.invoke(sql, args) },
+                    Executor(Runnable::run),
+                ).build()
+        networkId =
+            db.networkDao().insert(
+                NetworkEntity(
+                    name = "libera",
+                    role = NetworkRole.DIRECT,
+                    host = "irc.libera.chat",
+                    port = 6697,
+                    nick = "me",
+                    username = "me",
+                    realname = "Me",
+                ),
+            )
+        dmBufferId =
+            db.bufferDao().insert(
+                BufferEntity(
+                    networkId = networkId,
+                    name = "alert-peer",
+                    displayName = "alert-peer",
+                    type = BufferType.QUERY,
+                ),
+            )
+        shadowOf(context as android.app.Application)
+            .grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+        repo = DataStoreSettingsRepository(context)
+        notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+    }
 
     @After
     fun tearDown() =
@@ -143,9 +172,76 @@ class MotdNotificationsAlertingTest {
                 cancellationSignal: CancellationSignal?,
             ): Cursor {
                 beforeDatabaseQuery?.invoke()
+                beforeBoundDatabaseQuery?.invoke(query)
                 return if (cancellationSignal == null) database.query(query) else database.query(query, cancellationSignal)
             }
         }
+
+    private suspend fun resetImmediateFixture() {
+        db.close()
+        openDatabase(immediate = true)
+        val snapshot = repo.settings.first()
+        notifications =
+            MotdNotifications(
+                context,
+                db,
+                ForegroundBufferTrackerImpl(),
+                object : SettingsRepository by repo {
+                    override val settings = flowOf(snapshot)
+                },
+                object : DickordLabsPrefs() {
+                    override val enabled = flowOf(false)
+                },
+            )
+    }
+
+    private fun pauseCanonicalRead(eventId: Long): Pair<CountDownLatch, CountDownLatch> {
+        val pauseOnce = AtomicBoolean(true)
+        val paused = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        beforeBoundDatabaseQuery = { query ->
+            if (query.sql.contains("SELECT * FROM messages WHERE id = COALESCE")) {
+                var readsEvent = false
+                query.bindTo(
+                    object : SupportSQLiteProgram {
+                        override fun bindNull(index: Int) = Unit
+
+                        override fun bindLong(
+                            index: Int,
+                            value: Long,
+                        ) {
+                            if (value == eventId) readsEvent = true
+                        }
+
+                        override fun bindDouble(
+                            index: Int,
+                            value: Double,
+                        ) = Unit
+
+                        override fun bindString(
+                            index: Int,
+                            value: String,
+                        ) = Unit
+
+                        override fun bindBlob(
+                            index: Int,
+                            value: ByteArray,
+                        ) = Unit
+
+                        override fun clearBindings() = Unit
+
+                        override fun close() = Unit
+                    },
+                )
+                if (readsEvent && pauseOnce.compareAndSet(true, false)) {
+                    paused.countDown()
+                    // Pause before SQLite acquires a read connection, not inside the underlying read.
+                    check(release.await(20, TimeUnit.SECONDS)) { "Recovery read was not released" }
+                }
+            }
+        }
+        return paused to release
+    }
 
     private fun chat(
         nick: String,
@@ -572,6 +668,127 @@ class MotdNotificationsAlertingTest {
             val posted = postedNotifications().single().notification
             assertSilent(posted)
             assertEquals(true, db.messageDao().byId(row.id)?.notificationHandled)
+        }
+
+    @Test
+    fun startupRecoveryRacingLiveMessage_keepsBothBodiesAndCanonicalAnchors() =
+        runBlocking {
+            resetImmediateFixture()
+            val live = EventProcessor(db, TypingTrackerImpl(), notifications)
+            live.onRegistered(networkId, "me", emptyMap())
+            live.process(networkId, chat("alert-peer", "race A", "race-a", 1_000))
+            val a = requireNotNull(db.messageDao().byMsgid(dmBufferId, "race-a"))
+            val interrupted = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier)
+            interrupted.onRegistered(networkId, "me", emptyMap())
+            interrupted.process(networkId, chat("alert-peer", "race B", "race-b", 2_000))
+            assertFalse(requireNotNull(db.messageDao().byMsgid(dmBufferId, "race-b")).notificationHandled)
+
+            val (paused, release) = pauseCanonicalRead(a.id)
+            val recovery = async(Dispatchers.Default) { notifications.recoverCanonicalNotifications() }
+            try {
+                assertTrue("Recovery must suspend after taking its cached-A snapshot", paused.await(10, TimeUnit.SECONDS))
+                // Direct Room executors and constant preference flows run live C before recovery
+                // resumes. Recovery must retry against C's committed history, not overwrite it.
+                val incoming =
+                    async(start = CoroutineStart.UNDISPATCHED) {
+                        live.process(networkId, chat("alert-peer", "race C", "race-c", 3_000))
+                    }
+                release.countDown()
+                withTimeout(20_000) {
+                    recovery.await()
+                    incoming.await()
+                }
+                val b = requireNotNull(db.messageDao().byMsgid(dmBufferId, "race-b"))
+                val c = requireNotNull(db.messageDao().byMsgid(dmBufferId, "race-c"))
+                val posted = lane(null)
+                assertEquals(listOf("race A", "race B", "race C"), bodies(posted).sorted())
+                assertEquals(
+                    setOf(a.id, b.id, c.id),
+                    posted.extras.getLongArray("motd.notificationEventIds")?.toSet(),
+                )
+                assertLaneAnchor(posted, c)
+                assertTrue(b.notificationHandled)
+                assertTrue(c.notificationHandled)
+            } finally {
+                beforeBoundDatabaseQuery = null
+                release.countDown()
+                recovery.cancel()
+                recovery.join()
+            }
+        }
+
+    @Test
+    fun historicalReplyParentEnrichment_finishesInsideTransactionWhileRecoveryReadIsPaused() =
+        runBlocking {
+            val settingsScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            try {
+                resetImmediateFixture()
+                val channelId = channel()
+                val settings = NotificationSettingsImpl(settingsScope, AppClock { 0L }, onExpired = {})
+                settings.setServer(networkId, NotificationMode.ALL)
+                val processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
+                processor.onRegistered(networkId, "me", emptyMap())
+                processor.process(networkId, chat("me", "my parent", "self-parent", 500).copy(target = "#chan", isSelf = true))
+                processor.process(networkId, chat("alert-peer", "race A", "race-a", 1_000).copy(target = "#chan"))
+                val toPromote = chat("alert-peer", "reply without literal nick", "promoted", 2_000).copy(target = "#chan")
+                processor.process(networkId, toPromote)
+                processor.process(networkId, chat("alert-peer", "me: later", "later", 3_000).copy(target = "#chan"))
+                val a = requireNotNull(db.messageDao().byMsgid(channelId, "race-a"))
+                val later = requireNotNull(db.messageDao().byMsgid(channelId, "later"))
+                val interrupted = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier, notificationSettings = settings)
+                interrupted.onRegistered(networkId, "me", emptyMap())
+                interrupted.process(networkId, chat("alert-peer", "race B", "race-b", 4_000).copy(target = "#chan"))
+                val (paused, release) = pauseCanonicalRead(a.id)
+                val historical =
+                    async(Dispatchers.Default, start = CoroutineStart.LAZY) {
+                        processor.process(
+                            networkId,
+                            IrcEvent.HistoryBatch("#chan", listOf(toPromote.copy(replyToMsgid = "self-parent"))),
+                        )
+                    }
+                val recovery = async(Dispatchers.Default) { notifications.recoverCanonicalNotifications() }
+                try {
+                    assertTrue("Recovery must pause before its cached-A SQLite read", paused.await(10, TimeUnit.SECONDS))
+                    // HistoryBatch owns Room's outer TRUNCATE transaction while the real Enriched
+                    // refresh moves this body between lanes. Its progress must not depend on recovery.
+                    withTimeout(5_000) {
+                        historical.start()
+                        historical.await()
+                    }
+                    assertEquals(1L, release.count)
+                    assertEquals(listOf("race A"), bodies(lane(null)))
+                    assertEquals(listOf("me: later", toPromote.text).sorted(), bodies(lane("channel_mentions")).sorted())
+                    assertLaneAnchor(lane(null), a)
+                    assertLaneAnchor(lane("channel_mentions"), later)
+                    processor.process(networkId, chat("alert-peer", "race C", "race-c", 5_000).copy(target = "#chan"))
+                    val c = requireNotNull(db.messageDao().byMsgid(channelId, "race-c"))
+                    val capturedRead = lane(null).actions.single { it.title.toString() == "Mark read" }.actionIntent
+                    release.countDown()
+                    withTimeout(10_000) { recovery.await() }
+                    val b = requireNotNull(db.messageDao().byMsgid(channelId, "race-b"))
+                    val promoted = requireNotNull(db.messageDao().byMsgid(channelId, "promoted"))
+                    assertEquals(listOf("race A", "race B", "race C"), bodies(lane(null)).sorted())
+                    assertEquals(setOf(a.id, b.id, c.id), lane(null).extras.getLongArray("motd.notificationEventIds")?.toSet())
+                    assertEquals(listOf("me: later", toPromote.text).sorted(), bodies(lane("channel_mentions")).sorted())
+                    assertEquals(setOf(promoted.id, later.id), lane("channel_mentions").extras.getLongArray("motd.notificationEventIds")?.toSet())
+                    assertLaneAnchor(lane(null), c)
+                    assertLaneAnchor(lane("channel_mentions"), later)
+                    val read = shadowOf(capturedRead).savedIntent
+                    assertEquals(c.serverTime, read.getLongExtra(ReplyReceiver.EXTRA_UP_TO_TIME, -1))
+                    assertEquals(c.id, read.getLongExtra(ReplyReceiver.EXTRA_UP_TO_EVENT_ID, -1))
+                    assertTrue(b.notificationHandled)
+                    assertTrue(promoted.hasMention)
+                } finally {
+                    beforeBoundDatabaseQuery = null
+                    historical.cancel()
+                    release.countDown()
+                    historical.join()
+                    recovery.cancel()
+                    recovery.join()
+                }
+            } finally {
+                settingsScope.cancel()
+            }
         }
 
     /**

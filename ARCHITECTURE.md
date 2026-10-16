@@ -195,6 +195,8 @@ flowchart TD
   glyph without shortening the morph or taking ownership from the accessible real row.
 - Inline reaction chips clip their press indication to the same capsule shape as
   their fill and border, independently of chat-shadow elevation.
+  Reaction-window, saved-position and displayed-depth observers follow the current paging-items
+  instance when a visibility change replaces the generation.
 - Timeline paging subscribes to native `messages` invalidation before reading a Room page.
   A confirmation committed after the first SQL read but before its caller resumes discards that
   generation; the replacement page keeps the canonical event ID and viewport/read anchors.
@@ -225,6 +227,8 @@ flowchart TD
   category permission. Previews, activity ordering and the ALL feed still exclude fools.
   Explicit jumps reveal Hidden before positional counting and wait for the matching
   paging generation. Show fools and per-row expansion are session-local, not preferences.
+  Automatic entry repair never reveals Hidden: it reapplies current visibility through the shared
+  unread/saved-anchor resolver, preserving offsets only while their row identity remains meaningful.
   Exact jumps accept native short-chat scroll clamping only when the exact measured
   row is fully inside the usable viewport, clear of the composer.
   Dimmed ink uses a known opaque fill and a 4.5:1 contrast floor, not whole-row alpha.
@@ -341,6 +345,11 @@ flowchart TD
   Cached/restored notification bodies reapply current category permissions on their
   next update; preference edits neither replay handled events nor rebuild posted rows.
   Interrupted recovery retains the frozen decision and always presents silently.
+  Recovery and live message presentation stage canonical reads and lane promotion without holding
+  a presentation lock across suspension, including historical refreshes inside Room transactions.
+  A shared history revision rejects stale staging; one short synchronous commit validates it before
+  constructing PendingIntents, publishing both lane histories and posting/canceling Android rows.
+  Read clears and room retirement advance the same revision and cancel within their commit.
   Android Auto support is notification-only in the same Google-free APK: DMs and channel
   mentions expose no-UI semantic reply/mark-read actions. Ordinary `ALL`/watch channel
   messages use disjoint local-only rows; body histories and canonical read/open anchors

@@ -98,6 +98,9 @@ class MotdNotifications
         private val historyKeys = HashMap<NotificationThreadKey, MutableList<NotificationMessageKey>>()
         private val dickordBatches = HashMap<NotificationThreadKey, Boolean>()
 
+        // Guarded by history; no presentation lock may span a Room read inside playback's transaction.
+        private var historyRevision = 0L
+
         init {
             ensureChannels()
             applicationScope?.launch {
@@ -338,289 +341,299 @@ class MotdNotifications
             watched: Boolean = false,
             refreshOnly: Boolean = false,
         ) {
-            // Plain suspend reads: Room and DataStore dispatch off the main thread on their own. The
-            // events collector runs on Dispatchers.Main, so the previous runBlocking { suspend query }
-            // blocked the main thread and crashed once a (freshly-added) fool's message arrived.
-            val buffer =
-                runCatching { db.bufferDao().observeById(bufferId) }.getOrElse { error ->
-                    if (refreshOnly) throw error
-                    null
-                }
-            val canonicalEvent =
-                eventId?.let { id ->
-                    db.messageDao().byCanonicalId(id)?.takeIf { event ->
-                        buffer != null && db.bufferDao().canonicalId(event.bufferId) == buffer.id
+            while (true) {
+                val revision = synchronized(history) { historyRevision }
+                // Plain suspend reads: Room and DataStore dispatch off the main thread on their own.
+                // Historical enrichment can call this inside Room's exclusive playback transaction.
+                val buffer =
+                    runCatching { db.bufferDao().observeById(bufferId) }.getOrElse { error ->
+                        if (refreshOnly) throw error
+                        null
                     }
-                }
-            val canonicalEventId = canonicalEvent?.id
-            val canonicalEventTime = canonicalEvent?.serverTime ?: message.ctx.serverTime
-            val thread = NotificationThreadKey(bufferId, type == BufferType.CHANNEL && (canonicalEvent?.hasMention ?: hasMention))
-            if (refreshOnly &&
-                (
-                    !thread.channelMentions || canonicalEvent == null || canonicalEvent.isSelf ||
-                        !canonicalEvent.notificationHandled || !canonicalEvent.notificationEligible ||
-                        !canonicalEvent.notificationEligibilityResolved || buffer == null ||
-                        buffer.dismissed || buffer.pendingCloseAt != null
-                )
-            ) {
-                return
-            }
-            // One bounded DataStore read supplies both membership and category preferences.
-            val settings = runCatching { settingsRepository.settings.first() }.getOrNull() ?: Settings()
-            val identityRules =
-                db.networkIdentityDao().byNetwork(networkId)?.identityRules
-                    ?: IrcIdentityRules()
-            val foolPolicy =
-                MessageVisibilityPolicy(
-                    MessageVisibilitySpec.from(settings),
-                    identityRules,
-                )
-
-            // Only a watch bypasses buffer mute, never sender category permission or read/foreground.
-            val foreground = foregroundBufferTracker.foregroundBufferId.value == bufferId
-            val muted = buffer?.muted == true
-            val senderIsFriend = identityRules.matchesConfiguredNick(message.source.nick, settings.friends)
-            val senderIsFool =
-                foolPolicy.matchesFoolIdentity(
-                    if (canonicalEvent != null) canonicalEvent.senderAccount else message.ctx.account,
-                    canonicalEvent?.normalizedActor ?: identityRules.normalize(message.source.nick),
-                )
-            val senderAllowsNotification =
-                if (type == BufferType.SERVER) {
-                    !senderIsFool
-                } else {
-                    foolPolicy.allowsNotification(
-                        if (canonicalEvent != null) canonicalEvent.senderAccount else message.ctx.account,
-                        canonicalEvent?.normalizedActor ?: identityRules.normalize(message.source.nick),
-                        directMessage = type == BufferType.QUERY,
-                        hasMention = canonicalEvent?.hasMention ?: hasMention,
-                    )
-                }
-            val incomingAnchor =
-                canonicalEvent?.let {
-                    TimelineAnchor(it.serverTime, it.id, it.timelineOrder)
-                }
-                    ?: TimelineAnchor(message.ctx.serverTime, 0L)
-            val effectiveReadAnchor = buffer?.let { effectiveLocalReadAnchor(it) }
-            val alreadyRead = effectiveReadAnchor?.let { incomingAnchor <= it } == true
-            val decision =
-                shouldPostNotification(foreground, muted, senderAllowsNotification, alreadyRead, watched = watched)
-            diagnostics.record("notifications", "message_evaluated") {
-                mapOf(
-                    "network_id" to networkId,
-                    "buffer_id" to bufferId,
-                    "msgid_fp" to diagnostics.fingerprint(message.ctx.msgid),
-                    "sender_fp" to diagnostics.fingerprint(message.source.nick),
-                    "body_fp" to diagnostics.fingerprint(message.text),
-                    "foreground" to foreground,
-                    "muted" to muted,
-                    "friend" to senderIsFriend,
-                    "fool" to senderIsFool,
-                    "already_read" to alreadyRead,
-                    "watched" to watched,
-                    "post" to decision,
-                    "mention" to hasMention,
-                )
-            }
-            if (!decision) return
-
-            val dickordEnabled = runCatching { dickordLabsPrefs.enabled.first() }.getOrDefault(false)
-            // Stage the remaining ordinary row before touching either lane. A failed rebuild is not
-            // an empty conversation: let the caller's notification error boundary report it.
-            val promotedOrdinary =
-                if (thread.channelMentions && buffer != null && canonicalEvent != null &&
-                    !buffer.dismissed && buffer.pendingCloseAt == null
-                ) {
-                    stageOrdinaryPromotion(
-                        buffer,
-                        canonicalEvent,
-                        effectiveReadAnchor,
-                        foolPolicy,
-                        settings,
-                        identityRules,
-                        dickordEnabled,
-                    )
-                } else {
-                    null
-                }
-            if (refreshOnly && promotedOrdinary == null) return
-
-            val channel = if (canonicalEvent?.hasMention ?: hasMention) CHANNEL_MENTIONS else CHANNEL_MESSAGES
-            val title =
-                if (thread.channelMentions) buffer?.ircTarget ?: message.target else buffer?.displayName ?: message.target
-            val dickordBatch =
-                synchronized(history) {
-                    dickordBatches[thread] ?: (dickordEnabled && isDickordChannel(title))
-                }
-            val person =
-                notificationPerson(
-                    networkId,
-                    message.source.nick,
-                    dickordNickLabel(message.source.nick, dickordBatch),
-                    settings.avatarStyle,
-                    identityRules,
-                )
-            val cached =
-                synchronized(history) {
-                    history[thread]?.let { style ->
-                        style.messages.toList() to historyKeys[thread].orEmpty().toList()
-                    }
-                }
-            val cachedRows =
-                cached?.let { (_, keys) ->
-                    keys.map { key ->
-                        key.eventId?.let { db.messageDao().byCanonicalId(it) }?.also { row ->
-                            check(db.bufferDao().canonicalId(row.bufferId) == bufferId) { "Notification anchor belongs to another room" }
+                val canonicalEvent =
+                    eventId?.let { id ->
+                        db.messageDao().byCanonicalId(id)?.takeIf { event ->
+                            buffer != null && db.bufferDao().canonicalId(event.bufferId) == buffer.id
                         }
                     }
+                val canonicalEventId = canonicalEvent?.id
+                val canonicalEventTime = canonicalEvent?.serverTime ?: message.ctx.serverTime
+                val thread = NotificationThreadKey(bufferId, type == BufferType.CHANNEL && (canonicalEvent?.hasMention ?: hasMention))
+                if (refreshOnly &&
+                    (
+                        !thread.channelMentions || canonicalEvent == null || canonicalEvent.isSelf ||
+                            !canonicalEvent.notificationHandled || !canonicalEvent.notificationEligible ||
+                            !canonicalEvent.notificationEligibilityResolved || buffer == null ||
+                            buffer.dismissed || buffer.pendingCloseAt != null
+                    )
+                ) {
+                    return
                 }
-            val rebuild = cached == null || cached.first.size != cached.second.size || cachedRows.orEmpty().any { it == null }
-            val restored =
-                if (rebuild) {
-                    runCatching {
-                        db.messageDao().recentNotifiable(
-                            bufferId = bufferId,
-                            afterTime = effectiveReadAnchor?.serverTime ?: Long.MIN_VALUE,
-                            afterEventId = effectiveReadAnchor?.eventId ?: Long.MIN_VALUE,
-                            excludeEventId = canonicalEventId ?: -1L,
-                            limit = MAX_NOTIFICATION_MESSAGES - 1,
-                            hasMention = if (type == BufferType.CHANNEL) thread.channelMentions else null,
-                        )
-                    }.getOrElse { error ->
-                        if (error is CancellationException || refreshOnly || promotedOrdinary != null || cached != null) throw error
-                        emptyList()
-                    }.filter { foolPolicy.allowsNotification(it, type) }
-                        .asReversed()
-                } else {
-                    emptyList()
-                }
-            val keys = mutableListOf<NotificationMessageKey>()
-            val style =
-                NotificationCompat
-                    .MessagingStyle(Person.Builder().setName("me").build())
-                    .setConversationTitle(if (thread.channelMentions) title else dickordChannelLabel(title, dickordBatch))
-                    .setGroupConversation(type == BufferType.CHANNEL)
-            if (rebuild) {
-                restored.forEach { row ->
-                    val key = NotificationMessageKey.from(row)
-                    if (keys.none { it.matches(key) }) {
-                        keys += key
-                        style.addMessage(
-                            row.text,
-                            row.serverTime,
-                            notificationPerson(
-                                networkId,
-                                row.sender,
-                                dickordNickLabel(row.sender, dickordBatch),
-                                settings.avatarStyle,
-                                identityRules,
-                            ),
+                // One bounded DataStore read supplies both membership and category preferences.
+                val settings = runCatching { settingsRepository.settings.first() }.getOrNull() ?: Settings()
+                val identityRules =
+                    db.networkIdentityDao().byNetwork(networkId)?.identityRules
+                        ?: IrcIdentityRules()
+                val foolPolicy =
+                    MessageVisibilityPolicy(
+                        MessageVisibilitySpec.from(settings),
+                        identityRules,
+                    )
+
+                // Only a watch bypasses buffer mute, never sender category permission or read/foreground.
+                val foreground = foregroundBufferTracker.foregroundBufferId.value == bufferId
+                val muted = buffer?.muted == true
+                val senderIsFriend = identityRules.matchesConfiguredNick(message.source.nick, settings.friends)
+                val senderIsFool =
+                    foolPolicy.matchesFoolIdentity(
+                        if (canonicalEvent != null) canonicalEvent.senderAccount else message.ctx.account,
+                        canonicalEvent?.normalizedActor ?: identityRules.normalize(message.source.nick),
+                    )
+                val senderAllowsNotification =
+                    if (type == BufferType.SERVER) {
+                        !senderIsFool
+                    } else {
+                        foolPolicy.allowsNotification(
+                            if (canonicalEvent != null) canonicalEvent.senderAccount else message.ctx.account,
+                            canonicalEvent?.normalizedActor ?: identityRules.normalize(message.source.nick),
+                            directMessage = type == BufferType.QUERY,
+                            hasMention = canonicalEvent?.hasMention ?: hasMention,
                         )
                     }
+                val incomingAnchor =
+                    canonicalEvent?.let {
+                        TimelineAnchor(it.serverTime, it.id, it.timelineOrder)
+                    }
+                        ?: TimelineAnchor(message.ctx.serverTime, 0L)
+                val effectiveReadAnchor = buffer?.let { effectiveLocalReadAnchor(it) }
+                val alreadyRead = effectiveReadAnchor?.let { incomingAnchor <= it } == true
+                val decision =
+                    shouldPostNotification(foreground, muted, senderAllowsNotification, alreadyRead, watched = watched)
+                diagnostics.record("notifications", "message_evaluated") {
+                    mapOf(
+                        "network_id" to networkId,
+                        "buffer_id" to bufferId,
+                        "msgid_fp" to diagnostics.fingerprint(message.ctx.msgid),
+                        "sender_fp" to diagnostics.fingerprint(message.source.nick),
+                        "body_fp" to diagnostics.fingerprint(message.text),
+                        "foreground" to foreground,
+                        "muted" to muted,
+                        "friend" to senderIsFriend,
+                        "fool" to senderIsFool,
+                        "already_read" to alreadyRead,
+                        "watched" to watched,
+                        "post" to decision,
+                        "mention" to hasMention,
+                    )
                 }
-            } else {
-                cachedRows.orEmpty().forEachIndexed { index, row ->
-                    checkNotNull(row)
-                    if (foolPolicy.allowsNotification(row, type) &&
-                        (type != BufferType.CHANNEL || row.hasMention == thread.channelMentions) &&
-                        (effectiveReadAnchor == null || TimelineAnchor(row.serverTime, row.id, row.timelineOrder) > effectiveReadAnchor)
+                if (!decision) return
+
+                val dickordEnabled = runCatching { dickordLabsPrefs.enabled.first() }.getOrDefault(false)
+                // Stage the remaining ordinary row before touching either lane. A failed rebuild is not
+                // an empty conversation: let the caller's notification error boundary report it.
+                val promotedOrdinary =
+                    if (thread.channelMentions && buffer != null && canonicalEvent != null &&
+                        !buffer.dismissed && buffer.pendingCloseAt == null
                     ) {
+                        stageOrdinaryPromotion(
+                            buffer,
+                            canonicalEvent,
+                            effectiveReadAnchor,
+                            foolPolicy,
+                            settings,
+                            identityRules,
+                            dickordEnabled,
+                        )
+                    } else {
+                        null
+                    }
+                if (refreshOnly && promotedOrdinary == null) {
+                    if (synchronized(history) { historyRevision != revision }) continue
+                    return
+                }
+
+                val channel = if (canonicalEvent?.hasMention ?: hasMention) CHANNEL_MENTIONS else CHANNEL_MESSAGES
+                val title =
+                    if (thread.channelMentions) buffer?.ircTarget ?: message.target else buffer?.displayName ?: message.target
+                val dickordBatch =
+                    synchronized(history) {
+                        dickordBatches[thread] ?: (dickordEnabled && isDickordChannel(title))
+                    }
+                val person =
+                    notificationPerson(
+                        networkId,
+                        message.source.nick,
+                        dickordNickLabel(message.source.nick, dickordBatch),
+                        settings.avatarStyle,
+                        identityRules,
+                    )
+                val cached =
+                    synchronized(history) {
+                        history[thread]?.let { style ->
+                            style.messages.toList() to historyKeys[thread].orEmpty().toList()
+                        }
+                    }
+                val cachedRows =
+                    cached?.let { (_, keys) ->
+                        keys.map { key ->
+                            key.eventId?.let { db.messageDao().byCanonicalId(it) }?.also { row ->
+                                check(db.bufferDao().canonicalId(row.bufferId) == bufferId) { "Notification anchor belongs to another room" }
+                            }
+                        }
+                    }
+                val rebuild = cached == null || cached.first.size != cached.second.size || cachedRows.orEmpty().any { it == null }
+                val restored =
+                    if (rebuild) {
+                        runCatching {
+                            db.messageDao().recentNotifiable(
+                                bufferId = bufferId,
+                                afterTime = effectiveReadAnchor?.serverTime ?: Long.MIN_VALUE,
+                                afterEventId = effectiveReadAnchor?.eventId ?: Long.MIN_VALUE,
+                                excludeEventId = canonicalEventId ?: -1L,
+                                limit = MAX_NOTIFICATION_MESSAGES - 1,
+                                hasMention = if (type == BufferType.CHANNEL) thread.channelMentions else null,
+                            )
+                        }.getOrElse { error ->
+                            if (error is CancellationException || refreshOnly || promotedOrdinary != null || cached != null) throw error
+                            emptyList()
+                        }.filter { foolPolicy.allowsNotification(it, type) }
+                            .asReversed()
+                    } else {
+                        emptyList()
+                    }
+                val keys = mutableListOf<NotificationMessageKey>()
+                val style =
+                    NotificationCompat
+                        .MessagingStyle(Person.Builder().setName("me").build())
+                        .setConversationTitle(if (thread.channelMentions) title else dickordChannelLabel(title, dickordBatch))
+                        .setGroupConversation(type == BufferType.CHANNEL)
+                if (rebuild) {
+                    restored.forEach { row ->
                         val key = NotificationMessageKey.from(row)
                         if (keys.none { it.matches(key) }) {
                             keys += key
-                            style.addMessage(checkNotNull(cached).first[index])
+                            style.addMessage(
+                                row.text,
+                                row.serverTime,
+                                notificationPerson(
+                                    networkId,
+                                    row.sender,
+                                    dickordNickLabel(row.sender, dickordBatch),
+                                    settings.avatarStyle,
+                                    identityRules,
+                                ),
+                            )
+                        }
+                    }
+                } else {
+                    cachedRows.orEmpty().forEachIndexed { index, row ->
+                        checkNotNull(row)
+                        if (foolPolicy.allowsNotification(row, type) &&
+                            (type != BufferType.CHANNEL || row.hasMention == thread.channelMentions) &&
+                            (effectiveReadAnchor == null || TimelineAnchor(row.serverTime, row.id, row.timelineOrder) > effectiveReadAnchor)
+                        ) {
+                            val key = NotificationMessageKey.from(row)
+                            if (keys.none { it.matches(key) }) {
+                                keys += key
+                                style.addMessage(checkNotNull(cached).first[index])
+                            }
                         }
                     }
                 }
-            }
-            val key = canonicalEvent?.let(NotificationMessageKey::from) ?: NotificationMessageKey.from(canonicalEventId, message)
-            val existingIndex = keys.indexOfFirst { it.matches(key) }
-            // Rebuilding unresolved transport bodies must not turn an identity upgrade/duplicate
-            // into another first alert, even when that old body could not be retained.
-            val addedNewBody = existingIndex < 0 && cached?.second.orEmpty().none { it.matches(key) }
-            if (existingIndex >= 0) {
-                keys[existingIndex] = keys[existingIndex].withDurableIdentityFrom(key)
-                diagnostics.record("notifications", "message_deduplicated") {
+                val key = canonicalEvent?.let(NotificationMessageKey::from) ?: NotificationMessageKey.from(canonicalEventId, message)
+                val existingIndex = keys.indexOfFirst { it.matches(key) }
+                // Rebuilding unresolved transport bodies must not turn an identity upgrade/duplicate
+                // into another first alert, even when that old body could not be retained.
+                val addedNewBody = existingIndex < 0 && cached?.second.orEmpty().none { it.matches(key) }
+                if (existingIndex >= 0) {
+                    keys[existingIndex] = keys[existingIndex].withDurableIdentityFrom(key)
+                    diagnostics.record("notifications", "message_deduplicated") {
+                        mapOf(
+                            "buffer_id" to bufferId,
+                            "msgid_fp" to diagnostics.fingerprint(message.ctx.msgid),
+                            "body_fp" to diagnostics.fingerprint(message.text),
+                            "existing_index" to existingIndex,
+                        )
+                    }
+                } else {
+                    keys += key
+                    if (keys.size > MAX_NOTIFICATION_MESSAGES) keys.removeAt(0)
+                    style.addMessage(message.text, canonicalEventTime, person)
+                }
+                val notificationEventIds = keys.mapNotNull { it.eventId }.distinct().toLongArray()
+                val ordinaryEventIds =
+                    promotedOrdinary
+                        ?.takeIf { it.keys.isNotEmpty() }
+                        ?.keys
+                        ?.mapNotNull { it.eventId }
+                        ?.distinct()
+                        ?.toLongArray()
+                val latestAnchor = resolveLatestNotificationAnchor(db, bufferId, notificationEventIds.toList())
+                val latestEvent = latestAnchor?.let { db.messageDao().byCanonicalId(it.eventId) }
+                val canPost =
+                    synchronized(history) {
+                        if (historyRevision != revision) return@synchronized null
+                        // FLAG_UPDATE_CURRENT mutates already-posted action anchors, so build only
+                        // after validation and commit both lanes without another presentation interleaving.
+                        val notification =
+                            buildMessageNotification(
+                                thread,
+                                type,
+                                channel,
+                                style,
+                                notificationEventIds,
+                                if (latestEvent != null) latestEvent.msgid else message.ctx.msgid,
+                                latestAnchor?.serverTime ?: canonicalEventTime,
+                                latestAnchor?.eventId ?: canonicalEventId,
+                                silent = !(firstPresentation && addedNewBody),
+                            )
+                        val ordinaryNotification =
+                            promotedOrdinary?.takeIf { it.keys.isNotEmpty() }?.let { staged ->
+                                buildMessageNotification(
+                                    NotificationThreadKey(bufferId, false),
+                                    BufferType.CHANNEL,
+                                    staged.channel,
+                                    staged.style,
+                                    checkNotNull(ordinaryEventIds),
+                                    staged.msgid,
+                                    staged.anchor.serverTime,
+                                    staged.anchor.eventId.takeIf { it != 0L },
+                                    silent = true,
+                                )
+                            }
+                        historyRevision++
+                        history[thread] = style
+                        historyKeys[thread] = keys
+                        dickordBatches[thread] = dickordBatch
+                        promotedOrdinary?.let { staged ->
+                            val ordinary = NotificationThreadKey(bufferId, false)
+                            if (staged.keys.isEmpty()) {
+                                history.remove(ordinary)
+                                historyKeys.remove(ordinary)
+                                dickordBatches.remove(ordinary)
+                            } else {
+                                history[ordinary] = staged.style
+                                historyKeys[ordinary] = staged.keys
+                                dickordBatches[ordinary] = staged.dickordBatch
+                            }
+                            if (ordinaryNotification == null) {
+                                manager.cancel(messageNotificationId(bufferId))
+                            } else {
+                                postMessageNotification(ordinary, ordinaryNotification)
+                            }
+                        }
+                        postMessageNotification(thread, notification)
+                    } ?: continue
+                diagnostics.record("notifications", "message_post_finished") {
                     mapOf(
                         "buffer_id" to bufferId,
                         "msgid_fp" to diagnostics.fingerprint(message.ctx.msgid),
                         "body_fp" to diagnostics.fingerprint(message.text),
-                        "existing_index" to existingIndex,
+                        "permission" to canPost,
+                        "alerted" to (firstPresentation && addedNewBody),
                     )
                 }
-            } else {
-                keys += key
-                if (keys.size > MAX_NOTIFICATION_MESSAGES) keys.removeAt(0)
-                style.addMessage(message.text, canonicalEventTime, person)
-            }
-            val notificationEventIds = keys.mapNotNull { it.eventId }.distinct().toLongArray()
-
-            val latestAnchor = resolveLatestNotificationAnchor(db, bufferId, notificationEventIds.toList())
-            val latestEvent = latestAnchor?.let { db.messageDao().byCanonicalId(it.eventId) }
-            val notification =
-                buildMessageNotification(
-                    thread,
-                    type,
-                    channel,
-                    style,
-                    notificationEventIds,
-                    if (latestEvent != null) latestEvent.msgid else message.ctx.msgid,
-                    latestAnchor?.serverTime ?: canonicalEventTime,
-                    latestAnchor?.eventId ?: canonicalEventId,
-                    silent = !(firstPresentation && addedNewBody),
-                )
-            val ordinaryNotification =
-                promotedOrdinary?.takeIf { it.keys.isNotEmpty() }?.let { staged ->
-                    buildMessageNotification(
-                        NotificationThreadKey(bufferId, false),
-                        BufferType.CHANNEL,
-                        staged.channel,
-                        staged.style,
-                        staged.keys
-                            .mapNotNull { it.eventId }
-                            .distinct()
-                            .toLongArray(),
-                        staged.msgid,
-                        staged.anchor.serverTime,
-                        staged.anchor.eventId.takeIf { it != 0L },
-                        silent = true,
-                    )
-                }
-
-            synchronized(history) {
-                history[thread] = style
-                historyKeys[thread] = keys
-                dickordBatches[thread] = dickordBatch
-            }
-
-            promotedOrdinary?.let { staged ->
-                val ordinary = NotificationThreadKey(bufferId, false)
-                synchronized(history) {
-                    if (staged.keys.isEmpty()) {
-                        history.remove(ordinary)
-                        historyKeys.remove(ordinary)
-                        dickordBatches.remove(ordinary)
-                    } else {
-                        history[ordinary] = staged.style
-                        historyKeys[ordinary] = staged.keys
-                        dickordBatches[ordinary] = staged.dickordBatch
-                    }
-                }
-                if (ordinaryNotification == null) {
-                    manager.cancel(messageNotificationId(bufferId))
-                } else {
-                    postMessageNotification(ordinary, ordinaryNotification)
-                }
-            }
-            val canPost = postMessageNotification(thread, notification)
-            diagnostics.record("notifications", "message_post_finished") {
-                mapOf(
-                    "buffer_id" to bufferId,
-                    "msgid_fp" to diagnostics.fingerprint(message.ctx.msgid),
-                    "body_fp" to diagnostics.fingerprint(message.text),
-                    "permission" to canPost,
-                    "alerted" to (firstPresentation && addedNewBody),
-                )
+                return
             }
         }
 
@@ -897,38 +910,51 @@ class MotdNotifications
             bufferId: Long,
             anchor: TimelineAnchor,
         ) {
+            // Invalidate a staged post even when it has not published any tracked IDs yet.
+            synchronized(history) { historyRevision++ }
             for (thread in listOf(NotificationThreadKey(bufferId, false), NotificationThreadKey(bufferId, true))) {
-                val inMemoryIds =
-                    synchronized(history) {
-                        historyKeys[thread].orEmpty().mapNotNull { it.eventId }
+                while (true) {
+                    val (revision, inMemoryIds) =
+                        synchronized(history) {
+                            historyRevision to historyKeys[thread].orEmpty().mapNotNull { it.eventId }
+                        }
+                    val tag = if (thread.channelMentions) CHANNEL_MENTION_TAG else null
+                    val activeIds =
+                        runCatching {
+                            manager.activeNotifications
+                                .firstOrNull { it.id == messageNotificationId(bufferId) && it.tag == tag }
+                                ?.notification
+                                ?.extras
+                                ?.getLongArray(EXTRA_NOTIFICATION_EVENT_IDS)
+                                ?.toList()
+                                .orEmpty()
+                        }.getOrDefault(emptyList())
+                    val trackedIds = (inMemoryIds + activeIds).distinct()
+                    if (trackedIds.isEmpty()) break
+                    val latest = resolveLatestNotificationAnchor(db, bufferId, trackedIds) ?: break
+                    if (!readMarkerCoversNotification(anchor, latest)) break
+                    val cleared =
+                        synchronized(history) {
+                            if (historyRevision != revision) {
+                                false
+                            } else {
+                                historyRevision++
+                                history.remove(thread)
+                                historyKeys.remove(thread)
+                                dickordBatches.remove(thread)
+                                manager.cancel(tag, messageNotificationId(bufferId))
+                                true
+                            }
+                        }
+                    if (!cleared) continue
+                    diagnostics.record("notifications", "message_notification_cleared") {
+                        mapOf(
+                            "buffer_id" to bufferId,
+                            "up_to_time" to anchor.serverTime,
+                            "up_to_event_id" to anchor.eventId,
+                        )
                     }
-                val tag = if (thread.channelMentions) CHANNEL_MENTION_TAG else null
-                val activeIds =
-                    runCatching {
-                        manager.activeNotifications
-                            .firstOrNull { it.id == messageNotificationId(bufferId) && it.tag == tag }
-                            ?.notification
-                            ?.extras
-                            ?.getLongArray(EXTRA_NOTIFICATION_EVENT_IDS)
-                            ?.toList()
-                            .orEmpty()
-                    }.getOrDefault(emptyList())
-                val trackedIds = (inMemoryIds + activeIds).distinct()
-                if (trackedIds.isEmpty()) continue
-                val latest = resolveLatestNotificationAnchor(db, bufferId, trackedIds) ?: continue
-                if (!readMarkerCoversNotification(anchor, latest)) continue
-                synchronized(history) {
-                    history.remove(thread)
-                    historyKeys.remove(thread)
-                    dickordBatches.remove(thread)
-                }
-                manager.cancel(tag, messageNotificationId(bufferId))
-                diagnostics.record("notifications", "message_notification_cleared") {
-                    mapOf(
-                        "buffer_id" to bufferId,
-                        "up_to_time" to anchor.serverTime,
-                        "up_to_event_id" to anchor.eventId,
-                    )
+                    break
                 }
             }
         }
@@ -937,13 +963,14 @@ class MotdNotifications
             winnerId: Long,
             loserId: Long,
         ) {
-            for (thread in listOf(NotificationThreadKey(loserId, false), NotificationThreadKey(loserId, true))) {
-                synchronized(history) {
+            synchronized(history) {
+                historyRevision++
+                for (thread in listOf(NotificationThreadKey(loserId, false), NotificationThreadKey(loserId, true))) {
                     history.remove(thread)
                     historyKeys.remove(thread)
                     dickordBatches.remove(thread)
+                    manager.cancel(if (thread.channelMentions) CHANNEL_MENTION_TAG else null, messageNotificationId(loserId))
                 }
-                manager.cancel(if (thread.channelMentions) CHANNEL_MENTION_TAG else null, messageNotificationId(loserId))
             }
             diagnostics.record("notifications", "room_notification_retired") {
                 mapOf("winner_id" to winnerId, "loser_id" to loserId)

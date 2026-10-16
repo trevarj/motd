@@ -3686,7 +3686,7 @@ class ChatViewModel
                 }
         }
 
-        /** Saved positions use the same exact one-shot index repair as explicit jumps. */
+        /** Repair normal entry against current visibility without opting into explicit-jump reveal. */
         fun reresolveInitialOnce(target: ChatPositionTarget) =
             viewModelScope.launch {
                 if (initialReresolveUsed) {
@@ -3694,33 +3694,18 @@ class ChatViewModel
                     return@launch
                 }
                 initialReresolveUsed = true
-                when (
-                    val result =
-                        resolver.resolve(
-                            bufferId = bufferId,
-                            msgid = target.expectedMsgid,
-                            timeMs = target.serverTime,
-                            bufferName = null,
-                            eventId = target.expectedEventId,
-                        )
-                ) {
-                    is ChatJumpResolver.Result.Resolved -> {
-                        _initialTarget.value = null
-                        _initialTarget.value =
-                            result.target.copy(
-                                offset = target.offset,
-                                highlightMsgid = null,
-                                highlightEventId = null,
-                                fromSavedPosition = target.fromSavedPosition,
-                                forceScrollOnEntry = target.forceScrollOnEntry,
-                                placeAtTop = target.placeAtTop,
-                            )
-                    }
-
-                    ChatJumpResolver.Result.NotFound -> {
-                        onInitialPositionUnresolved()
-                    }
-                }
+                val spec = filterSpecs.first()
+                val repaired = resolveEntryAnchors(spec, discardUnresolvedSaved = false).target
+                _initialTarget.value = null
+                _initialTarget.value =
+                    repaired.copy(
+                        offset =
+                            target.offset.takeIf {
+                                repaired.expectedEventId != null && repaired.expectedEventId == target.expectedEventId &&
+                                    repaired.fromSavedPosition == target.fromSavedPosition
+                            } ?: repaired.offset,
+                        requiredVisibilitySpec = spec,
+                    )
             }
 
         /**
