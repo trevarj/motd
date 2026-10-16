@@ -3889,6 +3889,60 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun `unread entry publishes canonical room metadata while the full chat list is withheld`() =
+        runTest {
+            val (entered, unread) = seedContextUnread()
+            val nextId =
+                db
+                    .messageDao()
+                    .insertAll(
+                        listOf(message(channel.id, "third unread", "third", "bob").copy(serverTime = 103)),
+                    ).single()
+            db.bufferDao().update(entered)
+            db.roomAliasDao().markRedirect(query.id, entered.id)
+            db.historyGapDao().insert(
+                HistoryGapEntity(
+                    roomId = entered.id,
+                    olderMsgid = null,
+                    olderServerTime = 101,
+                    newerMsgid = null,
+                    newerServerTime = 102,
+                ),
+            )
+            val settings =
+                FakeSettingsRepository().apply {
+                    this.settings.value = Settings(fools = setOf("alice"), foolsMode = FoolsMode.HIDE)
+                }
+            val buffers =
+                object : BufferRepository by FakeBufferRepository(entered, query.id) {
+                    override fun observeChatList(): Flow<List<ChatListRow>> = flow { awaitCancellation() }
+                }
+            var fullListEmitted = false
+            backgroundScope.launch { buffers.observeChatList().collect { fullListEmitted = true } }
+            val manager = FakeConnectionManager(network.id)
+            val vm =
+                viewModel(
+                    entered,
+                    manager,
+                    routeBufferId = query.id,
+                    buffers = buffers,
+                    settings = settings,
+                    messages = FakeMessageRepository(events = unread + checkNotNull(db.messageDao().byId(nextId)), newerCount = 1),
+                )
+
+            val target = checkNotNull(withTimeoutOrNull(1_000) { vm.initialTarget.first { it != null } })
+            val snapshot = checkNotNull(vm.unreadEntrySnapshot.value)
+            assertFalse(fullListEmitted)
+            assertEquals(unread[1].id, target.expectedEventId)
+            assertEquals(1, target.index)
+            assertEquals(unread[1].id - 1, snapshot.marker.eventId)
+            assertEquals(2, snapshot.loadedCount)
+            assertTrue(snapshot.lowerBound)
+            assertEquals(EntryPositionState.Pending, vm.entryState.value)
+            assertTrue(manager.readMarkers.isEmpty())
+        }
+
+    @Test
     fun `cold ready entry anchors immediately from at-rest data`() =
         runTest {
             // Entry does not wait for the network's history catch-up. `historyCatchUpPending` is held
@@ -3945,11 +3999,18 @@ class ChatViewModelTest {
                     historyPending = setOf(network.id),
                 )
             val messages = FakeMessageRepository()
+            val enteredRoom = channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId)
+            db.bufferDao().update(enteredRoom)
+            val buffers =
+                object : BufferRepository by FakeBufferRepository(enteredRoom) {
+                    override fun observeChatList(): Flow<List<ChatListRow>> = flow { awaitCancellation() }
+                }
             val vm =
                 viewModel(
-                    channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId),
+                    enteredRoom,
                     manager,
                     messages = messages,
+                    buffers = buffers,
                 )
             vm.state.first { it.buffer != null }
             val entered = checkNotNull(vm.initialTarget.first { it != null })
@@ -3969,7 +4030,7 @@ class ChatViewModelTest {
             messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(caughtUpId))
             manager.finishHistoryCatchUp(network.id)
 
-            val repaired = checkNotNull(vm.initialTarget.first { it?.expectedEventId != null })
+            val repaired = checkNotNull(withTimeoutOrNull(1_000) { vm.initialTarget.first { it?.expectedEventId != null } })
             assertEquals(caughtUpId, repaired.expectedEventId)
             assertEquals(101L, repaired.serverTime)
             assertTrue(repaired.placeAtTop)
@@ -3981,6 +4042,7 @@ class ChatViewModelTest {
                     ?.marker
                     ?.eventId,
             )
+            assertEquals(2, vm.unreadEntrySnapshot.value?.loadedCount)
 
             // EXACTLY once: the correction is a single-shot arm, so a later catch-up edge is inert.
             vm.onInitialPositionHandled()

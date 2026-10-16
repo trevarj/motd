@@ -180,6 +180,11 @@ flowchart TD
   bottom restores expanded chrome and waits for that layout before consuming the target.
   Target consumption preserves the final header, viewport and unread placement; settled
   reader scrolls still animate, and latest stays expanded.
+  Entry's frozen unread metadata reads only the resolved canonical room, reusing the
+  chat-list visibility policy and entry's paging spec rather than awaiting the whole list.
+  The timeline paints at full opacity and releases input as soon as its existing entry
+  readiness gate lifts; there is no post-placement fade. Materialization, measured placement,
+  exact identity, timeout fallback and read-state gates remain independent and unchanged.
 - Chat wallpaper fills the outer Scaffold's unpadded viewport, so header collapse
   and reexpansion cannot translate builtin tiles or resize a cropped image.
   The transparent foreground alone consumes Scaffold, navigation-bar and IME

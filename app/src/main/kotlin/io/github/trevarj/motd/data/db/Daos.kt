@@ -295,6 +295,8 @@ interface BufferDao {
     // Unread/mention counts remain chat kinds only; self messages never count as unread.
     // Counts are capped at 1000 (the badge renders 999+) so a buffer holding a huge unread
     // backlog cannot turn every invalidation into a full-buffer scan.
+    // Entry can scope this same projection to one canonical room before any counts or previews run;
+    // the default null roomId retains the whole chat list.
     // Sort: pinned first, then latest KNOWN activity DESC (nulls last), where "known" is the newer
     // of the local preview row and what CHATHISTORY TARGETS last advertised. Discovery therefore
     // re-sorts the list on its first response, before any per-room page has been fetched.
@@ -318,6 +320,7 @@ interface BufferDao {
             LEFT JOIN messages anchor ON anchor.id = base.localReadAnchorEventId
             WHERE base.type != 'SERVER' AND base.dismissed = 0
               AND base.pendingCloseAt IS NULL AND base.redirectToRoomId IS NULL
+              AND (:roomId IS NULL OR base.id = :roomId)
         )
         SELECT
             b.id AS bufferId,
@@ -421,7 +424,7 @@ interface BufferDao {
                  b.id DESC
         """,
     )
-    fun observeChatList(): Flow<List<ChatListRow>>
+    fun observeChatList(roomId: Long? = null): Flow<List<ChatListRow>>
 
     // QUERY-only materialization keeps channel traffic from invalidating this always-on projection.
     @Query(

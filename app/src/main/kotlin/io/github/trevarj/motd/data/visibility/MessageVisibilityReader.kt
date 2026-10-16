@@ -12,6 +12,7 @@ import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -427,6 +428,12 @@ class MessageVisibilityReader
         }
 
         suspend fun resolveCanonicalEventId(eventId: Long): Long = db.canonicalTimelineDao().canonicalEventId(eventId)
+
+        /** Entry already resolved the canonical room; reuse list policy without reading other rooms. */
+        suspend fun chatListRow(
+            roomId: Long,
+            spec: MessageVisibilitySpec,
+        ): ChatListRow? = resolveChatList(db.bufferDao().observeChatList(roomId).first(), spec).singleOrNull()
 
         /** Replace fool-authored chat-list state, then re-sort by the resulting meaningful activity. */
         suspend fun resolveChatList(

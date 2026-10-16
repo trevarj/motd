@@ -1626,8 +1626,6 @@ internal fun ChatContent(
             ),
         )
     }
-    // The overlay outlives the lift by the length of the fade; see the veil at the list call site.
-    var entryVeilCleared by remember { mutableStateOf(entryVeilLifted) }
     LaunchedEffect(Unit) {
         if (entryVeilLifted) return@LaunchedEffect
         // Bounded wait: a slow or offline entry degrades to today's visible correction rather than
@@ -3707,19 +3705,9 @@ internal fun ChatContent(
                                                 }
                                             }
                                         }
-                                    // Entry veil: the list is transparent until entry positioning settles, then
-                                    // fades in. The animated value is read inside the graphicsLayer lambda so the
-                                    // fade never recomposes the timeline subtree. Starting lifted (a restored
-                                    // visit) initializes at 1f, so there is no fade-in on re-entry -- which is also
-                                    // why the overlay's own gate is seeded from the initial state rather than
-                                    // waiting for a finish callback that never fires.
-                                    val veilAlpha by animateFloatAsState(
-                                        targetValue = if (entryVeilLifted) 1f else 0f,
-                                        animationSpec = MotdMotion.fadeIn,
-                                        label = "chat_entry_veil_alpha",
-                                        finishedListener = { entryVeilCleared = true },
-                                    )
-                                    Box(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = veilAlpha }) {
+                                    // Keep positioning hidden, then paint and release input together on
+                                    // readiness; a post-placement fade only delays already-available rows.
+                                    Box(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = if (entryVeilLifted) 1f else 0f }) {
                                         MessageList(
                                             items = items,
                                             listState = listState,
@@ -3804,12 +3792,8 @@ internal fun ChatContent(
                                             onSenderClick = onSenderClick,
                                         )
                                     }
-                                    // Swallow input until the fade has actually finished, not merely started: a
-                                    // barely-visible list is still a list, and a drag or long-press landing on a row
-                                    // the user cannot see yet is the same bug as one landing on a hidden row. Gated
-                                    // on a boolean rather than on veilAlpha directly so the reveal costs two
-                                    // recompositions instead of one per animation frame.
-                                    if (!entryVeilCleared) {
+                                    // Hidden rows cannot receive input; readiness removes this immediately.
+                                    if (!entryVeilLifted) {
                                         Box(
                                             modifier =
                                                 Modifier

@@ -148,7 +148,7 @@ internal class TimelineRobot(
      * The chat timeline is veiled (alpha 0) until entry positioning settles, and ui-test geometry
      * and `assertIsDisplayed` both ignore `graphicsLayer` alpha, so every entry assertion would
      * pass against an invisible pane. Node presence is observable where alpha is not, so wait the
-     * veil out: it leaves the composition only once the reveal has finished.
+     * veil out: readiness removes it in the same frame that paints the timeline at full opacity.
      */
     fun awaitEntryVeilLifted(timeoutMs: Long = 30_000) = awaitTagGone(CHAT_ENTRY_VEIL_TAG, timeoutMs)
 

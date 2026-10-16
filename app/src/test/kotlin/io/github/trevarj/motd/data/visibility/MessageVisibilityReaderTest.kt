@@ -16,6 +16,7 @@ import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
@@ -87,6 +88,7 @@ class MessageVisibilityReaderTest {
                 val current = spec.copy(revealHiddenFools = reveal)
                 val raw = db.bufferDao().observeChatList().first()
                 val resolved = reader.resolveChatList(raw, current).single()
+                assertEquals(resolved, reader.chatListRow(bufferId, current))
                 assertEquals(2, resolved.unreadCount)
                 assertEquals(1, resolved.mentionCount)
                 assertNull(resolved.lastMessageText)
@@ -121,6 +123,8 @@ class MessageVisibilityReaderTest {
                         foolPreferences = mapOf("alice" to FoolPreferences(notifyMentions = !dmEnabled, notifyDirectMessages = dmEnabled)),
                     )
                 val resolved = reader.resolveChatList(db.bufferDao().observeChatList().first(), current).associateBy { it.bufferId }
+                assertEquals(resolved.getValue(bufferId), reader.chatListRow(bufferId, current))
+                assertEquals(resolved.getValue(queryId), reader.chatListRow(queryId, current))
                 assertEquals(if (dmEnabled) 1 else 0, resolved.getValue(queryId).mentionCount)
                 assertEquals(if (dmEnabled) 0 else 1, resolved.getValue(bufferId).mentionCount)
                 assertEquals(1, resolved.getValue(queryId).unreadCount)
@@ -154,6 +158,106 @@ class MessageVisibilityReaderTest {
             assertEquals(100L, resolved.lastMessageTime)
             assertEquals(2, resolved.unreadCount)
             assertEquals(0, resolved.mentionCount)
+        }
+
+    @Test
+    fun roomChatListRowMatchesWholeListPolicyWithoutMixingRooms() =
+        runTest {
+            val otherNetwork = db.networkDao().insert(network(name = "other"))
+            val otherRoom = db.bufferDao().insert(buffer(otherNetwork, "#test", readMarkerTime = 50).copy(localUnreadFloorTime = 120))
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(networkId, caseMapping = "ascii"))
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(otherNetwork, caseMapping = "rfc1459"))
+            for (room in listOf(bufferId, otherRoom)) {
+                val rules = IrcIdentityRules.from(if (room == bufferId) "ascii" else "rfc1459", null)
+                db.messageDao().insertAll(
+                    listOf(
+                        message(room, "ordinary-$room", sender = "bob", serverTime = 100, dedupKey = "ordinary", hasMention = true),
+                        message(room, "fool-$room", sender = "[Alice", serverTime = 150, dedupKey = "fool", hasMention = true)
+                            // Raw DAO inserts must carry the network-normalized identity, as EventProcessor writes it.
+                            .copy(normalizedActor = rules.normalize("[Alice")),
+                        message(room, "self-$room", serverTime = 160, dedupKey = "self", isSelf = true),
+                        message(room, "join-$room", serverTime = 170, dedupKey = "join", kind = MessageKind.JOIN),
+                        message(room, "redacted-$room", serverTime = 180, dedupKey = "redacted", kind = MessageKind.REDACTED),
+                    ),
+                )
+            }
+            db.historyGapDao().insert(
+                HistoryGapEntity(
+                    roomId = bufferId,
+                    olderMsgid = null,
+                    olderServerTime = 60,
+                    newerMsgid = null,
+                    newerServerTime = 90,
+                ),
+            )
+            val raw = db.bufferDao().observeChatList().first()
+            assertEquals(setOf(bufferId, otherRoom), raw.map { it.bufferId }.toSet())
+            for (mode in FoolsMode.entries) {
+                for (showRedacted in listOf(false, true)) {
+                    val current = MessageVisibilitySpec(fools = setOf("{alice"), foolsMode = mode, showRedactedMessages = showRedacted)
+                    val expected = reader.resolveChatList(raw, current).associateBy { it.bufferId }
+                    for (room in listOf(bufferId, otherRoom)) {
+                        assertEquals(
+                            raw.single { it.bufferId == room },
+                            db
+                                .bufferDao()
+                                .observeChatList(room)
+                                .first()
+                                .single(),
+                        )
+                        assertEquals(expected.getValue(room), reader.chatListRow(room, current))
+                    }
+                    val selected = checkNotNull(reader.chatListRow(bufferId, current))
+                    val other = checkNotNull(reader.chatListRow(otherRoom, current))
+                    assertEquals(2, selected.unreadCount)
+                    assertEquals(if (mode == FoolsMode.HIDE) 0 else 1, other.unreadCount)
+                    assertEquals(if (showRedacted) "redacted-$bufferId" else "self-$bufferId", selected.lastMessageText)
+                    assertTrue(selected.unreadCountIncomplete)
+                    assertFalse(other.unreadCountIncomplete)
+                }
+            }
+        }
+
+    @Test
+    fun roomChatListRowDoesNotSubstituteAnotherRoomForAnExcludedOrRedirectedRoom() =
+        runTest {
+            val excluded =
+                listOf(
+                    buffer(networkId, "server", type = BufferType.SERVER),
+                    buffer(networkId, "#dismissed").copy(dismissed = true),
+                    buffer(networkId, "#closing").copy(pendingCloseAt = 1),
+                    buffer(networkId, "#alias").copy(redirectToRoomId = bufferId),
+                ).map { db.bufferDao().insert(it) }
+            val current = MessageVisibilitySpec()
+            val canonical = checkNotNull(reader.chatListRow(bufferId, current))
+            assertEquals(bufferId, canonical.bufferId)
+            for (room in excluded + Long.MAX_VALUE) {
+                assertTrue(
+                    db
+                        .bufferDao()
+                        .observeChatList(room)
+                        .first()
+                        .isEmpty(),
+                )
+                assertNull(reader.chatListRow(room, current))
+            }
+            assertEquals(listOf(canonical), db.bufferDao().observeChatList().first())
+        }
+
+    @Test
+    fun roomChatListRowKeepsCappedCountsWithAndWithoutVisibilityReplacement() =
+        runTest {
+            db.messageDao().insertAll(
+                List(1_005) { index ->
+                    message(bufferId, "unread-$index", sender = "bob", serverTime = 100L + index, dedupKey = "$index", hasMention = true)
+                },
+            )
+            for (current in listOf(MessageVisibilitySpec(), spec(FoolsMode.HIDE))) {
+                val scoped = checkNotNull(reader.chatListRow(bufferId, current))
+                assertEquals(1_000, scoped.unreadCount)
+                assertEquals(1_000, scoped.mentionCount)
+                assertEquals(reader.resolveChatList(db.bufferDao().observeChatList().first(), current).single(), scoped)
+            }
         }
 
     @Test

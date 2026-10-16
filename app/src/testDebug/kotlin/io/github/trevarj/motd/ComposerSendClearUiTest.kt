@@ -465,6 +465,7 @@ class ComposerSendClearUiTest {
         onOpenConversationList: (() -> Unit)? = null,
         historySyncStatus: HistorySyncStatus = HistorySyncStatus.Idle,
         onOpenChannelInfo: (Long) -> Unit = {},
+        onSenderClick: (String) -> Unit = {},
         onOpenSearch: (Long) -> Unit = {},
         parted: Boolean = false,
         onInviteUser: () -> Unit = {},
@@ -547,6 +548,7 @@ class ComposerSendClearUiTest {
                             onOpenConversationList = onOpenConversationList,
                             historySyncStatus = historySyncStatus,
                             onOpenChannelInfo = onOpenChannelInfo,
+                            onSenderClick = onSenderClick,
                             ebooksHelperRoomId = ebooksHelperRoomId(),
                             ebooksDccOffers = ebooksDccOffers(),
                             onAcceptDccTransfer = onAcceptDccTransfer,
@@ -2769,6 +2771,102 @@ class ComposerSendClearUiTest {
         compose.runOnIdle { contentHeight = 580.dp }
         assertEquals(collapsed, assertNewestAboveHost(), 1f)
         compose.onNodeWithTag("chat_composer_field").assertTextEquals("al")
+    }
+
+    @Test
+    fun entryReadinessPaintsFullyAndAcceptsTouchOnTheNextFrame() {
+        val row =
+            MessageEntity(
+                id = 701,
+                bufferId = buffer.id,
+                serverTime = 100,
+                sender = "entry-peer",
+                kind = MessageKind.PRIVMSG,
+                text = "Already stored and measured",
+                dedupKey = "entry-paint",
+            )
+        var target by mutableStateOf<ChatPositionTarget?>(null)
+        var entry by mutableStateOf<EntryPositionState>(EntryPositionState.Pending)
+        var positionsHandled = 0
+        val senderClicks = mutableListOf<String>()
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            pages =
+                flowOf(
+                    PagingData.from(
+                        listOf(row),
+                        sourceLoadStates =
+                            LoadStates(
+                                refresh = LoadState.NotLoading(endOfPaginationReached = false),
+                                prepend = LoadState.NotLoading(endOfPaginationReached = true),
+                                append = LoadState.NotLoading(endOfPaginationReached = true),
+                            ),
+                    ),
+                ),
+            chatWallpaper = WallpaperSelection(ChatWallpaperPreset.NONE),
+            initialTarget = { target },
+            entryState = { entry },
+            onInitialPositionHandled = {
+                positionsHandled++
+                target = null
+                entry = EntryPositionState.Settled
+            },
+            onSenderClick = { senderClicks += it },
+            onSubmit = {},
+        )
+        compose.mainClock.autoAdvance = false
+        val root = compose.onNodeWithTag("chat_surface_root")
+        val message = compose.onNodeWithTag("chat_message_701", useUnmergedTree = true)
+        val sender = compose.onNodeWithText("entry-peer", useUnmergedTree = true)
+        val bounds = message.fetchSemanticsNode().boundsInRoot
+        val rootBounds = root.fetchSemanticsNode().boundsInRoot
+
+        fun paintedRow(): Bitmap {
+            // Capture the root, not the row's layer: parent alpha must affect these real pixels.
+            val screen = root.captureToImage().asAndroidBitmap()
+            return Bitmap.createBitmap(
+                screen,
+                (bounds.left - rootBounds.left).toInt(),
+                (bounds.top - rootBounds.top).toInt(),
+                bounds.width.toInt(),
+                bounds.height.toInt(),
+            )
+        }
+        compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertExists()
+        val hidden = paintedRow()
+        sender.performTouchInput { click() }
+        compose.runOnIdle {
+            assertTrue("Hidden timeline input must still be blocked", senderClicks.isEmpty())
+            target = ChatPositionTarget(index = 0, expectedEventId = row.id, forceScrollOnEntry = true)
+        }
+        // Observe actual materialization/identity/placement completion, never the overlay's removal
+        // (which used to wait another 210ms and would make a fade regression pass).
+        // MainTestClock.advanceTimeUntil runs its loop on the UI thread without draining Android
+        // measure/layout. Drive one frame at a time and drain the paused looper as the other entry
+        // regressions do; otherwise the exact row's requested placement can never complete.
+        val placementDeadline = compose.mainClock.currentTime + 1_000
+        while (positionsHandled == 0 && compose.mainClock.currentTime < placementDeadline) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+        }
+        assertEquals("The real exact-row placement must settle before reveal", 1, positionsHandled)
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        val ready = paintedRow()
+        assertFalse("Readiness must paint messages, not just expose semantics", hidden.sameAs(ready))
+        compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertDoesNotExist()
+        val readyFrame = compose.mainClock.currentTime
+        // The click helper advances gesture time by one frame; inject the ready-frame touch directly.
+        sender.performTouchInput {
+            down(center)
+            up()
+        }
+        compose.runOnIdle { assertEquals(listOf("entry-peer"), senderClicks) }
+        assertEquals("Touch must be accepted without advancing the animation clock", readyFrame, compose.mainClock.currentTime)
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.waitForIdle()
+        assertEquals(bounds, message.fetchSemanticsNode().boundsInRoot)
+        assertTrue("The first ready frame must already have full opacity", ready.sameAs(paintedRow()))
     }
 
     @Test

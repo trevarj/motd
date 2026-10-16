@@ -3146,7 +3146,7 @@ class ChatViewModel
                     }
                     anchors = resolveEntryAnchors(entrySpec, discardUnresolvedSaved = true)
                 }
-                freezeUnreadEntrySnapshot(anchors)
+                freezeUnreadEntrySnapshot(anchors, entrySpec)
                 if (!hasDeepJump && _entryState.value !is EntryPositionState.Settled) {
                     _initialTarget.value = anchors.target
                 }
@@ -3173,6 +3173,7 @@ class ChatViewModel
          *
          * It uses the SAME `firstUnread` the entry target was resolved from, so the divider and the row
          * entry lands on name one row by construction.
+         * Counts use that same entry spec and canonical room, without awaiting the whole chat list.
          *
          * Frozen once per VISIT. A restored snapshot already IS this visit's boundary; re-deriving it
          * would place the divider at what is unread NOW rather than on entry, which is exactly what
@@ -3180,13 +3181,16 @@ class ChatViewModel
          * a re-derivation of a settled boundary: it refines a boundary this same visit froze from
          * not-yet-caught-up data, only while the reader has not touched the viewport, and at most once.
          */
-        private suspend fun freezeUnreadEntrySnapshot(anchors: EntryAnchors) {
+        private suspend fun freezeUnreadEntrySnapshot(
+            anchors: EntryAnchors,
+            spec: MessageVisibilitySpec,
+        ) {
             if (unreadEntrySnapshotRestored) return
             val frozen =
                 anchors.firstUnread?.let { first ->
                     val unreadRow =
                         anchors.room?.let { room ->
-                            bufferRepository.observeChatList().first().firstOrNull { it.bufferId == room.id }
+                            visibilityReader.chatListRow(room.id, spec)
                         }
                     UnreadEntrySnapshot(
                         marker = TimelineAnchor(first.serverTime, first.eventId - 1L, first.timelineOrder),
@@ -3260,7 +3264,7 @@ class ChatViewModel
                 // Re-checked after the queries: the screen may have placed the entered target, or the
                 // reader taken the viewport over, while they ran.
                 if (!entryCorrectable(entered)) return@launch
-                freezeUnreadEntrySnapshot(repaired)
+                freezeUnreadEntrySnapshot(repaired, spec)
                 // The screen may already have settled the entered position, so force a distinct emission —
                 // as [restoreRedirectedViewport] does — and give the correction its own one-shot index
                 // repair budget.
