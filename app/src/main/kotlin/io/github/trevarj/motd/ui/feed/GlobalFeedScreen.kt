@@ -64,14 +64,19 @@ import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ai.AiFeature
+import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.SearchHit
+import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.dickord.dickordChannelLabel
 import io.github.trevarj.motd.dickord.dickordNickLabel
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.ai.AiTextSheet
 import io.github.trevarj.motd.ui.ai.AiTextViewModel
+import io.github.trevarj.motd.ui.chat.FoolPlaceholder
 import io.github.trevarj.motd.ui.chat.messageContentType
 import io.github.trevarj.motd.ui.chat.showsSender
 import io.github.trevarj.motd.ui.components.EmptyState
@@ -161,6 +166,7 @@ fun MentionsScreen(
 ) {
     val rows = viewModel.items.collectAsLazyPagingItems()
     val showNetwork by viewModel.showNetwork.collectAsStateWithLifecycle()
+    val visibilitySpec by viewModel.visibilitySpec.collectAsStateWithLifecycle()
     val aiState by aiTextViewModel.state.collectAsStateWithLifecycle()
     val aiLabs by aiTextViewModel.labsState.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -211,6 +217,7 @@ fun MentionsScreen(
             onOpenMessage = onOpenMessage,
             modifier = Modifier.padding(padding),
             mentions = true,
+            visibilitySpec = visibilitySpec,
             listState = listState,
             onTranslateMessage =
                 if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures) {
@@ -254,6 +261,7 @@ internal fun GlobalFeedContent(
     mentions: Boolean = false,
     listState: LazyListState = rememberLazyListState(),
     onTranslateMessage: ((MessageEntity) -> Unit)? = null,
+    visibilitySpec: MessageVisibilitySpec = MessageVisibilitySpec(),
 ) {
     val refresh = rows.loadState.refresh
     when {
@@ -289,6 +297,7 @@ internal fun GlobalFeedContent(
                 mentions = mentions,
                 listState = listState,
                 onTranslateMessage = onTranslateMessage,
+                visibilitySpec = visibilitySpec,
             )
         }
     }
@@ -303,6 +312,7 @@ private fun GlobalFeedList(
     mentions: Boolean = false,
     listState: LazyListState,
     onTranslateMessage: ((MessageEntity) -> Unit)? = null,
+    visibilitySpec: MessageVisibilitySpec = MessageVisibilitySpec(),
 ) {
     // One list-scoped formatter: MessageBubble's per-row fallback ignores the app's timestamp
     // preference.
@@ -328,6 +338,7 @@ private fun GlobalFeedList(
                     onOpenMessage = onOpenMessage,
                     mentions = mentions,
                     onTranslateMessage = onTranslateMessage,
+                    visibilitySpec = visibilitySpec,
                 )
             }
         }
@@ -515,6 +526,7 @@ private fun GlobalFeedLineRow(
     onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit,
     mentions: Boolean,
     onTranslateMessage: ((MessageEntity) -> Unit)? = null,
+    visibilitySpec: MessageVisibilitySpec,
 ) {
     val message = row.message
     val dickordEnabled = LocalDickordLabsEnabled.current
@@ -525,6 +537,9 @@ private fun GlobalFeedLineRow(
         remember(row.caseMapping, row.chanTypes) {
             IrcIdentityRules.from(row.caseMapping, row.chanTypes)
         }
+    val policy = remember(visibilitySpec, identityRules) { MessageVisibilityPolicy(visibilitySpec, identityRules) }
+    val foolMode = if (mentions) policy.foolPreferences(message)?.visibility else null
+    if (mentions && foolMode != null && !policy.mentionAttention(message, row.bufferType == BufferType.QUERY)) return
     val newerMessage = newer?.message
     // Mention rows skip intervening chat lines, so each one needs its own conversation label.
     val sameBuffer = !mentions && newerMessage?.bufferId == message.bufferId
@@ -547,6 +562,10 @@ private fun GlobalFeedLineRow(
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
             )
         }
+        if (foolMode == FoolsMode.COLLAPSE) {
+            FoolPlaceholder(sender = displaySender, onExpand = { onOpenMessage(message.bufferId, message.id, message.serverTime) })
+            return@Column
+        }
         MessageBubble(
             sender = message.sender,
             displaySender = displaySender,
@@ -558,7 +577,8 @@ private fun GlobalFeedLineRow(
             kind = message.kind,
             showSender = showSender,
             isBot = message.isBot,
-            hasMention = message.hasMention,
+            hasMention = if (mentions) policy.mentionAttention(message, row.bufferType == BufferType.QUERY) else message.hasMention,
+            dimmed = foolMode == FoolsMode.DIMMED,
             // The contentType pool already splits SELF_FAILED out; the row must render it too.
             failed = message.failed,
             pending = message.pendingLabel != null,

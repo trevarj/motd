@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaper
+import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
@@ -419,6 +420,39 @@ class ChannelInfoTopicMutationTest {
             assertTrue(viewModel.notificationSummary.value.muted)
         }
 
+    @Test
+    fun `fool controls serialize rapid distinct changes while writes and settings emissions are delayed`() =
+        runTest {
+            val gate = CompletableDeferred<Unit>()
+            val settings =
+                FakeSettingsRepository().apply {
+                    this.settings.value = Settings(fools = setOf("Nick[", "nick{"))
+                    foolWriteGate = gate
+                }
+            val viewModel = viewModel(FakeConnectionManager(), settings = settings)
+            viewModel.init(BUFFER_ID)
+            viewModel.state.first { it.buffer != null }
+
+            viewModel.updateFoolPreferences("NICK{") { it.copy(notifyMentions = true) }
+            viewModel.updateFoolPreferences("NICK{") { it.copy(notifyDirectMessages = true) }
+            viewModel.updateFoolPreferences("NICK{") { it.copy(visibility = FoolsMode.COLLAPSE) }
+            runCurrent()
+            assertEquals(listOf(FoolPreferences(notifyMentions = true)), settings.foolWrites)
+            assertTrue(
+                settings.settings.value.foolPreferences
+                    .isEmpty(),
+            )
+
+            gate.complete(Unit)
+            advanceUntilIdle()
+            val saved = FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true, notifyDirectMessages = true)
+            assertEquals(mapOf("Nick[" to saved, "nick{" to saved), settings.settings.value.foolPreferences)
+            assertEquals(
+                listOf(FoolPreferences(notifyMentions = true), FoolPreferences(notifyMentions = true, notifyDirectMessages = true), saved),
+                settings.foolWrites,
+            )
+        }
+
     private suspend fun TestScope.assertRejectedLeaveDoesNotNavigate(manager: FakeConnectionManager) {
         val viewModel = viewModel(manager)
         viewModel.init(BUFFER_ID)
@@ -440,11 +474,12 @@ class ChannelInfoTopicMutationTest {
         buffers: BufferRepository = FakeBufferRepository(),
         notificationSettings: NotificationSettings = NotificationSettings.Noop,
         clock: AppClock = AppClock(System::currentTimeMillis),
+        settings: SettingsRepository = FakeSettingsRepository(),
     ) = ChannelInfoViewModel(
         bufferRepository = buffers,
         connectionManager = manager,
         draftStore = ComposerDraftStore(database),
-        settingsRepository = FakeSettingsRepository(),
+        settingsRepository = settings,
         userDao = database.userDao(),
         networkIdentityDao = database.networkIdentityDao(),
         notificationSettings = notificationSettings,
@@ -537,6 +572,8 @@ class ChannelInfoTopicMutationTest {
 
     private class FakeSettingsRepository : SettingsRepository {
         override val settings = MutableStateFlow(Settings())
+        var foolWriteGate: CompletableDeferred<Unit>? = null
+        val foolWrites = mutableListOf<FoolPreferences>()
 
         override suspend fun setThemeMode(m: ThemeMode) = Unit
 
@@ -564,6 +601,40 @@ class ChannelInfoTopicMutationTest {
             nick: String,
             isFool: Boolean,
         ) = Unit
+
+        override suspend fun setFoolPreferences(
+            nick: String,
+            preferences: io.github.trevarj.motd.data.prefs.FoolPreferences,
+            identityRules: io.github.trevarj.motd.irc.proto.IrcIdentityRules?,
+        ) {
+            foolWrites += preferences
+            foolWriteGate?.await()
+            val current = settings.value
+            val keys =
+                current.fools.filter {
+                    identityRules?.normalize(it) == identityRules?.normalize(nick.trim()) && (
+                        identityRules != null || it ==
+                            io.github.trevarj.motd.data.prefs
+                                .normalizeNick(nick)
+                    )
+                }
+            settings.value =
+                current.copy(
+                    foolPreferences =
+                        current.foolPreferences.toMutableMap().apply {
+                            keys.forEach {
+                                if (preferences ==
+                                    io.github.trevarj.motd.data.prefs
+                                        .FoolPreferences()
+                                ) {
+                                    remove(it)
+                                } else {
+                                    put(it, preferences)
+                                }
+                            }
+                        },
+                )
+        }
 
         override suspend fun setFoolsMode(m: FoolsMode) = Unit
 

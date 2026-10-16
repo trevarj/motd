@@ -486,7 +486,7 @@ class MessageVisibilityReader
                     "SELECT b.id AS bufferId, preview.text AS lastMessageText, " +
                     "preview.sender AS lastMessageSender, preview.serverTime AS lastMessageTime, " +
                     cappedChatListCountSql(visibility.visibleUnread(), mentionsOnly = false) + " AS unreadCount, " +
-                    cappedChatListCountSql(visibility.visibleUnread(), mentionsOnly = true) + " AS mentionCount " +
+                    cappedChatListCountSql(visibility.mentionAttention("b.type"), mentionsOnly = true) + " AS mentionCount " +
                     "FROM selected b LEFT JOIN messages preview ON preview.id = (" +
                     "SELECT m.id FROM messages m WHERE m.bufferId = b.id AND ${visibility.preview()} " +
                     "ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT 1)",

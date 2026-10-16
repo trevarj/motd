@@ -361,6 +361,38 @@ class ChatListHistoryRecoveryTest {
         private val settings =
             object : SettingsRepository by DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>()) {
                 override val settings = MutableStateFlow(Settings(historySyncMode = HistorySyncMode.LAZY))
+
+                override suspend fun setFoolPreferences(
+                    nick: String,
+                    preferences: io.github.trevarj.motd.data.prefs.FoolPreferences,
+                    identityRules: io.github.trevarj.motd.irc.proto.IrcIdentityRules?,
+                ) {
+                    val current = settings.value
+                    val keys =
+                        current.fools.filter {
+                            identityRules?.normalize(it) == identityRules?.normalize(nick.trim()) && (
+                                identityRules != null || it ==
+                                    io.github.trevarj.motd.data.prefs
+                                        .normalizeNick(nick)
+                            )
+                        }
+                    settings.value =
+                        current.copy(
+                            foolPreferences =
+                                current.foolPreferences.toMutableMap().apply {
+                                    keys.forEach {
+                                        if (preferences ==
+                                            io.github.trevarj.motd.data.prefs
+                                                .FoolPreferences()
+                                        ) {
+                                            remove(it)
+                                        } else {
+                                            put(it, preferences)
+                                        }
+                                    }
+                                },
+                        )
+                }
             }
         private val processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
         private val loader = HistoryPageLoader(processor)

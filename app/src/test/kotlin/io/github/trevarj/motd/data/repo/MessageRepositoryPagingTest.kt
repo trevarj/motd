@@ -19,13 +19,16 @@ import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.history.seamAbove
+import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_WINDOW_MS
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySql
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
+import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -79,6 +82,90 @@ class MessageRepositoryPagingTest {
             ChatHistoryMediatorFactory { _, _, _ -> error("paging is driven by the source directly here") },
             db.historyGapDao(),
         )
+
+    @Test
+    fun mixedFoolSqlMatchesKotlinForEveryPredicateCasemapAndCollisionOrderPastBindLimit() =
+        runTest {
+            for (mapping in listOf(IrcCaseMapping.Rfc1459, IrcCaseMapping.Rfc1459Strict, IrcCaseMapping.Ascii)) {
+                val rules = IrcIdentityRules(mapping)
+                val networkId = db.networkDao().insert(network(mapping.rawName))
+                val room = db.bufferDao().insert(buffer(networkId, "#mixed"))
+                val quoted = "quoted-' OR 1=1 -- λ"
+                val rows =
+                    listOf(
+                        message(room, "a", "a", 100, "a", hasMention = true),
+                        message(room, "b", "b", 200, "b", hasMention = true),
+                        message(room, "c", "c", 300, "c", hasMention = true),
+                        message(room, "collision", "actor", 400, "collision", hasMention = true).copy(senderAccount = "account"),
+                        message(room, "equivalent", "nick[", 500, "equivalent", hasMention = true),
+                        message(room, "tilde", "nick^", 600, "tilde", hasMention = true),
+                        message(room, "quoted", quoted, 700, "quoted", hasMention = true),
+                        message(room, "self", "c", 800, "self", isSelf = true, hasMention = true),
+                        message(room, "system", "c", 900, "system", kind = MessageKind.TOPIC, hasMention = true),
+                        message(room, "ordinary", "person", 1_000, "ordinary", hasMention = true),
+                        message(room, "offer", "c", 1_100, "offer", kind = MessageKind.DCC_TRANSFER).copy(eventPayload = "offer"),
+                    ).map { it.copy(normalizedActor = rules.normalize(it.sender)) }
+                db.messageDao().insertAll(rows)
+                val configured =
+                    buildList {
+                        repeat(1_501) { add("filler-$it") }
+                        addAll(listOf("a", "b", "c", "actor", "account", "nick[", "nick{", "nick~", quoted))
+                    }
+                val preferences =
+                    mapOf(
+                        "b" to FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true),
+                        "c" to FoolPreferences(FoolsMode.HIDE, notifyMentions = true, notifyDirectMessages = true),
+                        "actor" to FoolPreferences(FoolsMode.DIMMED, notifyMentions = true, notifyDirectMessages = true),
+                        "account" to FoolPreferences(FoolsMode.HIDE),
+                        "nick[" to FoolPreferences(FoolsMode.DIMMED, notifyMentions = true, notifyDirectMessages = true),
+                        "nick{" to FoolPreferences(FoolsMode.COLLAPSE),
+                        "nick~" to FoolPreferences(FoolsMode.HIDE),
+                        quoted to FoolPreferences(FoolsMode.HIDE, notifyMentions = true),
+                    )
+                for (reverse in listOf(false, true)) {
+                    for (reveal in listOf(false, true)) {
+                        val spec =
+                            MessageVisibilitySpec(
+                                fools = (if (reverse) configured.reversed() else configured).toSet(),
+                                foolPreferences = preferences,
+                                revealHiddenFools = reveal,
+                            )
+                        val policy = MessageVisibilityPolicy(spec, rules)
+                        val sql = MessageVisibilitySql(spec, rules)
+
+                        suspend fun assertParity(
+                            predicate: String,
+                            keep: (MessageEntity) -> Boolean,
+                        ) {
+                            val actual =
+                                db.messageDao().rawMessages(
+                                    androidx.sqlite.db.SimpleSQLiteQuery(
+                                        "SELECT m.* FROM messages m WHERE m.bufferId = ? AND $predicate ORDER BY m.serverTime",
+                                        arrayOf(room),
+                                    ),
+                                )
+                            assertEquals("$mapping/$reverse/$reveal: $predicate", rows.filter(keep).map { it.text }, actual.map { it.text })
+                        }
+                        assertParity(sql.timeline(), policy::timeline)
+                        assertParity(sql.visibleUnread(), policy::visibleUnread)
+                        assertParity(sql.anchor(), policy::anchor)
+                        assertParity(sql.preview(), policy::preview)
+                        for (direct in listOf(false, true)) {
+                            assertParity(sql.mentionAttention(if (direct) "'QUERY'" else "'CHANNEL'")) { policy.mentionAttention(it, direct) }
+                        }
+                        assertEquals(FoolPreferences(FoolsMode.HIDE), policy.foolPreferences("account", "actor"))
+                        val expected = rows.filter(policy::timeline).map { it.text }.reversed()
+                        val page =
+                            db
+                                .messageDao()
+                                .pagingSource(messagePagingQuery(room, spec, rules))
+                                .load(PagingSource.LoadParams.Refresh(null, 50, true))
+                                .requirePage()
+                        assertEquals(expected, page.data.map { it.text })
+                    }
+                }
+            }
+        }
 
     @Test
     fun observeReplyTarget_keepsLocalParentThroughPromotionAndRedaction() =

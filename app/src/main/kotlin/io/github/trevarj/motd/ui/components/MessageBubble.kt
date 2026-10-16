@@ -120,6 +120,27 @@ private const val ACTION_ROW_TINT_ALPHA = 0.22f
 
 /** Sustained message reading targets 7:1; ensureContrast keeps the best ink on mid-tone fills. */
 internal const val MESSAGE_TEXT_CONTRAST = 7.0
+internal const val DIMMED_MESSAGE_TEXT_CONTRAST = 4.5
+
+/** Dimmed rows paint an opaque fill, so wallpapers cannot defeat their reading contrast. */
+internal fun messageContainerColor(
+    normal: Color,
+    canvas: Color,
+    dimmed: Boolean,
+): Color = if (dimmed) lerp(normal.compositeOver(canvas.copy(alpha = 1f)), canvas.copy(alpha = 1f), 0.35f) else normal
+
+internal fun messageContentColor(
+    normal: Color,
+    fill: Color,
+    dimmed: Boolean,
+    normalFill: Color = fill,
+): Color =
+    ensureContrast(
+        if (dimmed) lerp(ensureContrast(normal, listOf(normalFill), MESSAGE_TEXT_CONTRAST), fill, 0.35f) else normal,
+        listOf(fill),
+        if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
+    )
+
 private val COMFORTABLE_BUBBLE_ELEVATION = 2.dp
 private val COMFORTABLE_CONTENT_ELEVATION = 1.dp
 
@@ -145,6 +166,8 @@ internal fun bubbleMaxWidthPx(
 internal data class MessageBubbleRoleColors(
     val container: Color,
     val content: Color,
+    val normalContainer: Color = container,
+    val normalContent: Color = content,
 )
 
 /** How far an own bubble's container is pulled off `primaryContainer` toward the primary accent. */
@@ -157,6 +180,7 @@ internal fun messageBubbleRoleColors(
     mentionHighlighted: Boolean,
     kind: MessageKind,
     semantic: MotdSemanticColors,
+    dimmed: Boolean = false,
 ): MessageBubbleRoleColors {
     val content: Color
     val container =
@@ -182,7 +206,10 @@ internal fun messageBubbleRoleColors(
                 scheme.surfaceContainerHigh
             }
         }
-    return MessageBubbleRoleColors(container, ensureContrast(content, listOf(container), MESSAGE_TEXT_CONTRAST))
+    val normalInk = ensureContrast(content, listOf(container), MESSAGE_TEXT_CONTRAST)
+    val fill = messageContainerColor(container, scheme.background, dimmed)
+    val ink = if (dimmed) ensureContrast(lerp(normalInk, fill, 0.35f), listOf(fill), DIMMED_MESSAGE_TEXT_CONTRAST) else normalInk
+    return MessageBubbleRoleColors(fill, ink, container, normalInk)
 }
 
 /**
@@ -306,6 +333,7 @@ fun MessageBubble(
     displaySender: String = sender,
     isBot: Boolean = false,
     hasMention: Boolean = false,
+    dimmed: Boolean = false,
     networkId: Long? = null,
     senderAccount: String? = null,
     formattedTime: String? = null,
@@ -376,6 +404,7 @@ fun MessageBubble(
                 nickColors = nickColors,
                 modifier = renderedModifier,
                 hasMention = mentionHighlighted,
+                dimmed = dimmed,
                 senderIsFriend = senderIsFriend,
                 failed = failed,
                 pending = pending,
@@ -416,6 +445,7 @@ fun MessageBubble(
                 modifier = renderedModifier,
                 showSender = showSender,
                 hasMention = mentionHighlighted,
+                dimmed = dimmed,
                 senderIsFriend = senderIsFriend,
                 failed = failed,
                 pending = pending,
@@ -460,6 +490,7 @@ fun MessageBubble(
             nickColors = nickColors,
             modifier = renderedModifier,
             hasMention = mentionHighlighted,
+            dimmed = dimmed,
             senderIsFriend = senderIsFriend,
             failed = failed,
             pending = pending,
@@ -506,6 +537,7 @@ fun MessageBubble(
             spacing = spacing,
             modifier = renderedModifier,
             hasMention = mentionHighlighted,
+            dimmed = dimmed,
             senderIsFriend = senderIsFriend,
             failed = failed,
             pending = pending,
@@ -552,15 +584,17 @@ fun MessageBubble(
             scheme.surfaceContainerHigh,
             scheme.onSurface,
             isSelf,
+            dimmed,
+            scheme.background,
             mentionHighlighted,
             kind,
             semantic.warningContainer,
             semantic.onWarningContainer,
-        ) { messageBubbleRoleColors(scheme, isSelf, mentionHighlighted, kind, semantic) }
+        ) { messageBubbleRoleColors(scheme, isSelf, mentionHighlighted, kind, semantic, dimmed) }
     val bubbleColor = bubbleRoles.container
     val textColor = bubbleRoles.content
     val bodyInk = readingInk(scheme)
-    val bodyColor = remember(bodyInk, bubbleColor) { ensureContrast(bodyInk, listOf(bubbleColor), MESSAGE_TEXT_CONTRAST) }
+    val bodyColor = remember(bodyInk, bubbleRoles, dimmed) { messageContentColor(bodyInk, bubbleColor, dimmed, bubbleRoles.normalContainer) }
     // Tighten the inner grouped edge while retaining the shared outer silhouette.
     val groupedCorner = spacing.bubbleGroupedCorner
     val topCorner = if (showSender) spacing.bubbleCorner else groupedCorner
@@ -654,7 +688,9 @@ fun MessageBubble(
                     } else {
                         bubbleColor
                     }
-                val nameColor = remember(nameInk, nameBackground) { ensureContrast(nameInk, listOf(nameBackground), MESSAGE_TEXT_CONTRAST) }
+                val normalNameBackground =
+                    if (senderIsFriend) scheme.primary.copy(alpha = 0.12f).compositeOver(bubbleRoles.normalContainer) else bubbleRoles.normalContainer
+                val nameColor = remember(nameInk, nameBackground, normalNameBackground, dimmed) { messageContentColor(nameInk, nameBackground, dimmed, normalNameBackground) }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = if (onSenderClick != null) Modifier.clickable(onClick = onSenderClick) else Modifier,
@@ -690,7 +726,7 @@ fun MessageBubble(
                 )
             }
 
-            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, bubbleColor) }
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, bubbleColor, dimmed) }
 
             if (text.isNotBlank()) {
                 // Linkify http(s) URLs so the body is tappable even when the preview fails
@@ -699,7 +735,7 @@ fun MessageBubble(
                 // (text, mention inputs) so it doesn't re-run every recomposition/scroll frame.
                 val linkColor =
                     if (isSelf || mentionHighlighted || kind == MessageKind.NOTICE) {
-                        textColor
+                        bubbleRoles.normalContent
                     } else {
                         MaterialTheme.colorScheme.primary
                     }
@@ -717,6 +753,7 @@ fun MessageBubble(
                         codeColor,
                         bubbleColor,
                         bodyColor,
+                        dimmed,
                     ) {
                         linkifiedBody(
                             text,
@@ -727,6 +764,8 @@ fun MessageBubble(
                             codeColor,
                             bubbleColor,
                             bodyColor,
+                            minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
+                            normalContainerColor = bubbleRoles.normalContainer,
                         ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
                     }
                 if (body.isNotBlank()) {
@@ -783,7 +822,7 @@ fun MessageBubble(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val metadataInk = if (failed) MaterialTheme.colorScheme.error else textColor
-                val metadataColor = remember(metadataInk, bubbleColor) { ensureContrast(metadataInk, listOf(bubbleColor), MESSAGE_TEXT_CONTRAST) }
+                val metadataColor = if (failed) messageContentColor(metadataInk, bubbleColor, dimmed, bubbleRoles.normalContainer) else textColor
                 if (isSelf && showSender) {
                     Text(
                         text = botDisplayName(displaySender, isBot),
@@ -840,6 +879,7 @@ private fun ComfortableActionBubble(
     modifier: Modifier = Modifier,
     showSender: Boolean = true,
     hasMention: Boolean = false,
+    dimmed: Boolean = false,
     senderIsFriend: Boolean = false,
     failed: Boolean = false,
     pending: Boolean = false,
@@ -871,14 +911,14 @@ private fun ComfortableActionBubble(
     val scheme = MaterialTheme.colorScheme
     val semanticColors = LocalMotdSemanticColors.current
     val roles =
-        remember(scheme.tertiaryContainer, scheme.onTertiaryContainer, semanticColors.warningContainer, semanticColors.onWarningContainer, isSelf, hasMention) {
-            messageBubbleRoleColors(scheme, isSelf, hasMention, MessageKind.ACTION, semanticColors)
+        remember(scheme.tertiaryContainer, scheme.onTertiaryContainer, scheme.background, semanticColors.warningContainer, semanticColors.onWarningContainer, isSelf, hasMention, dimmed) {
+            messageBubbleRoleColors(scheme, isSelf, hasMention, MessageKind.ACTION, semanticColors, dimmed)
         }
     val rowColor = roles.container
     val bodyInk = readingInk(scheme)
-    val bodyColor = remember(bodyInk, rowColor) { ensureContrast(bodyInk, listOf(rowColor), MESSAGE_TEXT_CONTRAST) }
+    val bodyColor = remember(bodyInk, roles, dimmed) { messageContentColor(bodyInk, rowColor, dimmed, roles.normalContainer) }
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
-    val linkColor = roles.content
+    val linkColor = roles.normalContent
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
     val codeColor = bodyInk
     val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
@@ -932,11 +972,12 @@ private fun ComfortableActionBubble(
             senderLink,
             rowColor,
             hideAvatar,
+            dimmed,
         ) {
             buildActionLine(
                 sender = botDisplayName(displaySender, isBot),
                 text = text,
-                accentColor = roles.content,
+                accentColor = roles.normalContent,
                 nameColor = nameColor,
                 bodyColor = bodyColor,
                 linkColor = linkColor,
@@ -948,6 +989,8 @@ private fun ComfortableActionBubble(
                 senderLink = senderLink,
                 includeStar = hideAvatar,
                 containerColor = rowColor,
+                minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
+                normalContainerColor = roles.normalContainer,
             ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
         }
 
@@ -984,7 +1027,7 @@ private fun ComfortableActionBubble(
             sourceWrapper = sourceWrapper,
             trailingContent = trailingContent,
         ) {
-            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, rowColor) }
+            reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, rowColor, dimmed) }
 
             Row(verticalAlignment = Alignment.Top) {
                 if (!hideAvatar) {
@@ -1023,7 +1066,7 @@ private fun ComfortableActionBubble(
                             .padding(start = 8.dp, bottom = 1.dp),
                 ) {
                     val metadataInk = if (failed) MaterialTheme.colorScheme.error else roles.content
-                    val metadataColor = remember(metadataInk, rowColor) { ensureContrast(metadataInk, listOf(rowColor), MESSAGE_TEXT_CONTRAST) }
+                    val metadataColor = if (failed) messageContentColor(metadataInk, rowColor, dimmed, roles.normalContainer) else roles.content
                     MessageStatusIcon(
                         isSelf = isSelf,
                         pending = pending,
@@ -1092,6 +1135,7 @@ private fun ActionMessageRow(
     nickColors: NickColorScheme,
     modifier: Modifier = Modifier,
     hasMention: Boolean = false,
+    dimmed: Boolean = false,
     senderIsFriend: Boolean = false,
     failed: Boolean = false,
     pending: Boolean = false,
@@ -1134,9 +1178,10 @@ private fun ActionMessageRow(
         } else {
             MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = ACTION_ROW_TINT_ALPHA)
         }
-    val paintedRow = rowColor.compositeOver(MaterialTheme.colorScheme.background)
+    val normalPaintedRow = rowColor.compositeOver(MaterialTheme.colorScheme.background)
+    val paintedRow = messageContainerColor(normalPaintedRow, MaterialTheme.colorScheme.background, dimmed)
     val bodyInk = readingInk(MaterialTheme.colorScheme)
-    val bodyColor = remember(bodyInk, paintedRow) { ensureContrast(bodyInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
+    val bodyColor = remember(bodyInk, paintedRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, paintedRow, dimmed, normalPaintedRow) }
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
@@ -1176,6 +1221,7 @@ private fun ActionMessageRow(
             codeColor,
             senderLink,
             paintedRow,
+            dimmed,
         ) {
             buildActionLine(
                 sender = botDisplayName(displaySender, isBot),
@@ -1191,6 +1237,8 @@ private fun ActionMessageRow(
                 codeColor = codeColor,
                 senderLink = senderLink,
                 containerColor = paintedRow,
+                minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
+                normalContainerColor = normalPaintedRow,
             ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
         }
 
@@ -1222,7 +1270,7 @@ private fun ActionMessageRow(
             trailingContent = trailingContent,
         ) {
             reply?.let {
-                ReplyMiniBubble(it, nickColors, onReplyClick, paintedRow)
+                ReplyMiniBubble(it, nickColors, onReplyClick, paintedRow, dimmed)
             }
 
             Row(verticalAlignment = Alignment.Bottom) {
@@ -1243,8 +1291,8 @@ private fun ActionMessageRow(
                     modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
                 ) {
                     val metadataInk = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                    val metadataColor = remember(metadataInk, paintedRow) { ensureContrast(metadataInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
-                    MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
+                    val metadataColor = remember(metadataInk, paintedRow, normalPaintedRow, dimmed) { messageContentColor(metadataInk, paintedRow, dimmed, normalPaintedRow) }
+                    MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed, contentColor = metadataColor)
                     if (LocalTimestampConfig.current.show) {
                         Text(
                             text = formattedTime,
@@ -1300,6 +1348,8 @@ internal fun buildActionBody(
     codeBackground: Color = Color.Unspecified,
     codeColor: Color = Color.Unspecified,
     containerColor: Color = Color.Unspecified,
+    minimumContrast: Double = MESSAGE_TEXT_CONTRAST,
+    normalContainerColor: Color = containerColor,
 ): AnnotatedString =
     buildAnnotatedString {
         // fontSynthesis is explicit because some OEM system fonts (e.g. Nothing OS) ship no italic
@@ -1331,6 +1381,8 @@ internal fun buildActionBody(
             mentionColor = if (mentionsActive) mentionColor else ({ null }),
             containerColor = containerColor,
             contentColor = bodyColor,
+            minimumContrast = minimumContrast,
+            normalContainerColor = normalContainerColor,
         )
     }
 
@@ -1354,18 +1406,22 @@ internal fun buildActionLine(
     senderLink: LinkAnnotation? = null,
     includeStar: Boolean = true,
     containerColor: Color = Color.Unspecified,
+    minimumContrast: Double = MESSAGE_TEXT_CONTRAST,
+    normalContainerColor: Color = containerColor,
 ): AnnotatedString =
     buildAnnotatedString {
         if (includeStar) {
             val starColor =
-                if (containerColor == Color.Unspecified) accentColor else ensureContrast(accentColor, listOf(containerColor), MESSAGE_TEXT_CONTRAST)
+                if (containerColor == Color.Unspecified) accentColor else messageContentColor(accentColor, containerColor, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalContainerColor)
             withStyle(SpanStyle(color = starColor, fontStyle = FontStyle.Normal)) { append("* ") }
         }
         val nameBackground =
             if (friendTint == Color.Unspecified || containerColor == Color.Unspecified) containerColor else friendTint.compositeOver(containerColor)
+        val normalNameBackground =
+            if (friendTint == Color.Unspecified || normalContainerColor == Color.Unspecified) normalContainerColor else friendTint.compositeOver(normalContainerColor)
         val senderStyle =
             SpanStyle(
-                color = if (nameBackground == Color.Unspecified) nameColor else ensureContrast(nameColor, listOf(nameBackground), MESSAGE_TEXT_CONTRAST),
+                color = if (nameBackground == Color.Unspecified) nameColor else messageContentColor(nameColor, nameBackground, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalNameBackground),
                 fontWeight = FontWeight.Bold,
                 fontStyle = FontStyle.Normal,
                 background = friendTint,
@@ -1386,6 +1442,8 @@ internal fun buildActionLine(
                 codeBackground = codeBackground,
                 codeColor = codeColor,
                 containerColor = containerColor,
+                minimumContrast = minimumContrast,
+                normalContainerColor = normalContainerColor,
             ),
         )
     }
@@ -1437,6 +1495,7 @@ private fun TwoLineMessageRow(
     showSender: Boolean,
     modifier: Modifier = Modifier,
     hasMention: Boolean = false,
+    dimmed: Boolean = false,
     senderIsFriend: Boolean = false,
     failed: Boolean = false,
     pending: Boolean = false,
@@ -1475,9 +1534,10 @@ private fun TwoLineMessageRow(
         } else {
             nameInk.copy(alpha = TWO_LINE_ROW_TINT_ALPHA)
         }
-    val paintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
+    val normalPaintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
+    val paintedRow = messageContainerColor(normalPaintedRow, MaterialTheme.colorScheme.background, dimmed)
     val bodyInk = codeColor
-    val bodyColor = remember(bodyInk, paintedRow) { ensureContrast(bodyInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
+    val bodyColor = remember(bodyInk, paintedRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, paintedRow, dimmed, normalPaintedRow) }
     val nameBackground =
         if (senderIsFriend) {
             MaterialTheme.colorScheme.primary
@@ -1486,7 +1546,15 @@ private fun TwoLineMessageRow(
         } else {
             paintedRow
         }
-    val nameColor = remember(nameInk, nameBackground) { ensureContrast(nameInk, listOf(nameBackground), MESSAGE_TEXT_CONTRAST) }
+    val normalNameBackground =
+        if (senderIsFriend) {
+            MaterialTheme.colorScheme.primary
+                .copy(alpha = 0.12f)
+                .compositeOver(normalPaintedRow)
+        } else {
+            normalPaintedRow
+        }
+    val nameColor = remember(nameInk, nameBackground, normalNameBackground, dimmed) { messageContentColor(nameInk, nameBackground, dimmed, normalNameBackground) }
 
     MessagePaintedContent(
         modifier =
@@ -1558,8 +1626,8 @@ private fun TwoLineMessageRow(
                     modifier = Modifier.padding(start = 6.dp),
                 ) {
                     val metadataInk = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                    val metadataColor = remember(metadataInk, paintedRow) { ensureContrast(metadataInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
-                    MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
+                    val metadataColor = remember(metadataInk, paintedRow, normalPaintedRow, dimmed) { messageContentColor(metadataInk, paintedRow, dimmed, normalPaintedRow) }
+                    MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed, contentColor = metadataColor)
                     if (LocalTimestampConfig.current.show) {
                         Text(
                             text = formattedTime,
@@ -1584,7 +1652,7 @@ private fun TwoLineMessageRow(
                     ).testTag("message_two_line_body"),
         ) {
             reply?.let {
-                ReplyMiniBubble(it, nickColors, onReplyClick, paintedRow)
+                ReplyMiniBubble(it, nickColors, onReplyClick, paintedRow, dimmed)
             }
 
             if (kind == MessageKind.NOTICE) {
@@ -1613,6 +1681,7 @@ private fun TwoLineMessageRow(
                         codeColor,
                         paintedRow,
                         bodyColor,
+                        dimmed,
                     ) {
                         linkifiedBody(
                             text,
@@ -1623,6 +1692,8 @@ private fun TwoLineMessageRow(
                             codeColor,
                             paintedRow,
                             bodyColor,
+                            minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
+                            normalContainerColor = normalPaintedRow,
                         ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
                     }
                 if (richBody.isNotBlank()) {
@@ -1986,6 +2057,8 @@ internal fun linkifiedBody(
     codeColor: Color = Color.Unspecified,
     containerColor: Color = Color.Unspecified,
     contentColor: Color = Color.Unspecified,
+    minimumContrast: Double = MESSAGE_TEXT_CONTRAST,
+    normalContainerColor: Color = containerColor,
 ): AnnotatedString {
     // Most chat rows are plain text. Avoid the URL regex, nick token walk, and builder allocation
     // when neither link annotations, mention styling, nor mIRC formatting can affect the result.
@@ -2009,6 +2082,8 @@ internal fun linkifiedBody(
             mentionColor = if (mentionsActive) mentionColor else ({ null }),
             containerColor = containerColor,
             contentColor = contentColor,
+            minimumContrast = minimumContrast,
+            normalContainerColor = normalContainerColor,
         )
     }
 }
@@ -2025,24 +2100,36 @@ internal fun AnnotatedString.Builder.appendRichText(
     mentionColor: (String) -> Color? = { null },
     containerColor: Color = Color.Unspecified,
     contentColor: Color = Color.Unspecified,
+    minimumContrast: Double = MESSAGE_TEXT_CONTRAST,
+    normalContainerColor: Color = containerColor,
 ) {
     val formatted = parseIrcFormatting(text)
     val segments = parseInlineCode(formatted.visibleText)
     val renderedOffsets = inlineCodeRenderedOffsets(formatted.visibleText, segments)
     val bodyStart = length
 
-    fun readingStyle(style: SpanStyle): SpanStyle {
+    fun readingStyle(
+        style: SpanStyle,
+        backing: Color = containerColor,
+        normalBacking: Color = normalContainerColor,
+    ): SpanStyle {
         if (containerColor == Color.Unspecified || style.color == Color.Unspecified) return style
-        val background =
-            if (style.background == Color.Unspecified) containerColor else style.background.compositeOver(containerColor)
-        return style.copy(color = ensureContrast(style.color, listOf(background), MESSAGE_TEXT_CONTRAST))
+        val background = if (style.background == Color.Unspecified) backing else style.background.compositeOver(backing)
+        val normalBackground = if (style.background == Color.Unspecified) normalBacking else style.background.compositeOver(normalBacking)
+        val ink =
+            if (style.color == contentColor) {
+                ensureContrast(style.color, listOf(background), minimumContrast)
+            } else {
+                messageContentColor(style.color, background, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalBackground)
+            }
+        return style.copy(color = ink)
     }
     val readingPlain = readingStyle(plainStyle)
     val readingLink = readingStyle(linkStyle)
     val readingCode = readingStyle(codeStyle)
     val readingMention: (String) -> Color? = { nick ->
         mentionColor(nick)?.let { ink ->
-            if (containerColor == Color.Unspecified) ink else ensureContrast(ink, listOf(containerColor), MESSAGE_TEXT_CONTRAST)
+            if (containerColor == Color.Unspecified) ink else messageContentColor(ink, containerColor, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalContainerColor)
         }
     }
     for (segment in segments) {
@@ -2074,7 +2161,7 @@ internal fun AnnotatedString.Builder.appendRichText(
         val end = bodyStart + renderedOffsets[run.end]
         if (start >= end || run.state.isDefault) return@forEach
         if (overlays.isEmpty() || run.state.foreground == null && run.state.background == null) {
-            addStyle(run.state.toSpanStyle(containerColor, contentColor, MESSAGE_TEXT_CONTRAST), start, end)
+            addStyle(readingStyle(run.state.toSpanStyle(normalContainerColor, contentColor, MESSAGE_TEXT_CONTRAST)), start, end)
         } else {
             val boundaries = mutableSetOf(start, end)
             overlays.forEach { overlay ->
@@ -2089,15 +2176,17 @@ internal fun AnnotatedString.Builder.appendRichText(
                 val to = sorted[index + 1]
                 var ink = contentColor
                 var background = containerColor
+                var normalBackground = normalContainerColor
                 overlays.forEach { overlay ->
                     if (overlay.start <= from && overlay.end >= to) {
                         if (overlay.item.color != Color.Unspecified) ink = overlay.item.color
                         if (overlay.item.background != Color.Unspecified) {
                             background = overlay.item.background.compositeOver(containerColor)
+                            normalBackground = overlay.item.background.compositeOver(normalContainerColor)
                         }
                     }
                 }
-                addStyle(run.state.toSpanStyle(background, ink, MESSAGE_TEXT_CONTRAST), from, to)
+                addStyle(readingStyle(run.state.toSpanStyle(normalBackground, ink, MESSAGE_TEXT_CONTRAST), background, normalBackground), from, to)
             }
         }
     }
@@ -2253,20 +2342,25 @@ internal fun ReplyMiniBubble(
     nickColors: NickColorScheme,
     onClick: (() -> Unit)? = null,
     parentColor: Color = MaterialTheme.colorScheme.background,
+    dimmed: Boolean = false,
 ) {
     val openLabel = stringResource(R.string.chat_reply_open)
     val previewColor =
-        MaterialTheme.colorScheme.surfaceContainerHighest
-            .copy(alpha = 0.6f)
-            .compositeOver(parentColor)
+        messageContainerColor(
+            MaterialTheme.colorScheme.surfaceContainerHighest
+                .copy(alpha = 0.6f)
+                .compositeOver(parentColor),
+            parentColor,
+            dimmed,
+        )
     val bodyInk = readingInk(MaterialTheme.colorScheme)
-    val bodyColor = remember(bodyInk, previewColor) { ensureContrast(bodyInk, listOf(previewColor), MESSAGE_TEXT_CONTRAST) }
+    val bodyColor = remember(bodyInk, previewColor, dimmed) { messageContentColor(bodyInk, previewColor, dimmed) }
     val nameInk = nickColors.nick(reply.sender, MaterialTheme.colorScheme.onSurfaceVariant)
-    val accent = remember(nameInk, previewColor) { ensureContrast(nameInk, listOf(previewColor), MESSAGE_TEXT_CONTRAST) }
+    val accent = remember(nameInk, previewColor, dimmed) { messageContentColor(nameInk, previewColor, dimmed) }
     val formattedText = reply.ircFormattedText ?: reply.text
     val previewText =
-        remember(formattedText, previewColor, bodyColor) {
-            mircFormattedText(formattedText, previewColor, bodyColor, MESSAGE_TEXT_CONTRAST)
+        remember(formattedText, previewColor, bodyColor, dimmed) {
+            mircFormattedText(formattedText, previewColor, bodyColor, if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST)
         }
     Row(
         modifier =

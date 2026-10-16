@@ -20,6 +20,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.luminance
@@ -50,6 +51,8 @@ import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.UiDispatcherResetRule
+import io.github.trevarj.motd.audio.AudioAttachment
+import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
@@ -617,6 +620,46 @@ class MessageBubbleFooterUiTest {
         }
     }
 
+    @Test
+    fun dimmedMessagesPaintReadableSubduedInkAcrossEveryDensityKindSenderAndMetadata() {
+        val density = mutableStateOf(LayoutDensity.COMFORTABLE)
+        val kind = mutableStateOf(MessageKind.PRIVMSG)
+        val dimmed = mutableStateOf(false)
+        compose.setContent {
+            ContrastSample(density = density.value, kind = kind.value, dimmed = dimmed.value, showSender = true, showTimestamp = true, wallpaperIntensity = 100)
+        }
+        for (layout in LayoutDensity.entries) {
+            for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)) {
+                compose.runOnIdle {
+                    density.value = layout
+                    kind.value = messageKind
+                    dimmed.value = false
+                }
+                val normal = compose.onNodeWithTag("contrast_sample").captureToImage().asAndroidBitmap()
+                compose.runOnIdle { dimmed.value = true }
+                val subdued = compose.onNodeWithTag("contrast_sample").captureToImage().asAndroidBitmap()
+                assertFalse("$layout $messageKind must change its painted palette", normal.sameAs(subdued))
+                assertPaintedTextContrast("$layout $messageKind dimmed body", compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true), 4.5)
+                val sender = compose.onNodeWithText("alice", substring = messageKind == MessageKind.ACTION || layout == LayoutDensity.COMPACT, useUnmergedTree = true)
+                assertPaintedTextContrast("$layout $messageKind dimmed sender", sender, 4.5)
+                assertPaintedTextContrast("$layout $messageKind dimmed timestamp", compose.onNodeWithText(TIME, useUnmergedTree = true), 4.5)
+            }
+        }
+    }
+
+    @Test
+    fun dimmedStandaloneAudioPaintsItsOwnOpaqueReadableSurfaceAndPreservesPlayAction() {
+        val dimmed = mutableStateOf(false)
+        compose.setContent { ContrastSample(dimmed = dimmed.value, audio = true, showTimestamp = true, wallpaperIntensity = 100) }
+        val normal = compose.onNodeWithTag("audio_player", useUnmergedTree = true).captureToImage().asAndroidBitmap()
+        compose.runOnIdle { dimmed.value = true }
+        val subdued = compose.onNodeWithTag("audio_player", useUnmergedTree = true).captureToImage().asAndroidBitmap()
+        assertFalse(normal.sameAs(subdued))
+        assertPaintedTextContrast("dimmed standalone audio title", compose.onNodeWithText("Reading audio", useUnmergedTree = true), 4.5)
+        assertPaintedTextContrast("dimmed standalone audio timestamp", compose.onNodeWithText(TIME, useUnmergedTree = true), 4.5)
+        compose.onNodeWithContentDescription("Download and play audio").assertIsDisplayed().performClick()
+    }
+
     @Composable
     private fun ContrastSample(
         isSelf: Boolean = false,
@@ -626,13 +669,17 @@ class MessageBubbleFooterUiTest {
         wallpaperIntensity: Int? = null,
         wallpaperImage: String? = null,
         reply: ReplyPreviewData? = null,
+        dimmed: Boolean = false,
+        showSender: Boolean = false,
+        showTimestamp: Boolean = false,
+        audio: Boolean = false,
     ) {
         MotdTheme(
             dynamicColor = false,
             themePreset = ColorThemePreset.AYU_LIGHT,
             layoutDensity = density,
             avatarStyle = AvatarStyle.NONE,
-            timestampConfig = TimestampConfig(show = false),
+            timestampConfig = TimestampConfig(show = showTimestamp),
         ) {
             Box(
                 Modifier
@@ -643,19 +690,33 @@ class MessageBubbleFooterUiTest {
             ) {
                 wallpaperIntensity?.let { ChatWallpaperBackground(WallpaperSelection(ChatWallpaperPreset.MOTD, it, wallpaperImage)) }
                 Column(Modifier.padding(top = 96.dp)) {
-                    MessageBubble(
-                        sender = "alice",
-                        text = "Reading https://example.com @bob \u000315grey\u000f `code  `",
-                        timeMs = 0,
-                        formattedTime = TIME,
-                        isSelf = isSelf,
-                        kind = kind,
-                        showSender = false,
-                        hasMention = hasMention,
-                        knownNicks = setOf("bob"),
-                        reply = reply,
-                        modifier = Modifier.testTag("contrast_message"),
-                    )
+                    if (audio) {
+                        AudioAttachmentPlayers(
+                            attachments = listOf(AudioAttachment(url = "https://files.example/audio.ogg", title = "Reading audio", durationMs = 60_000)),
+                            playbackState = AudioPlaybackState(),
+                            networkId = null,
+                            isSelf = false,
+                            dimmed = dimmed,
+                            formattedTime = TIME,
+                            onToggle = { _, _ -> },
+                            onSeek = { _, _ -> },
+                        )
+                    } else {
+                        MessageBubble(
+                            sender = "alice",
+                            text = "Reading https://example.com @bob \u000315grey\u000f `code  `",
+                            timeMs = 0,
+                            formattedTime = TIME,
+                            isSelf = isSelf,
+                            kind = kind,
+                            showSender = showSender,
+                            hasMention = hasMention,
+                            dimmed = dimmed,
+                            knownNicks = setOf("bob"),
+                            reply = reply,
+                            modifier = Modifier.testTag("contrast_message"),
+                        )
+                    }
                 }
             }
         }
@@ -664,6 +725,7 @@ class MessageBubbleFooterUiTest {
     private fun assertPaintedTextContrast(
         label: String,
         node: SemanticsNodeInteraction,
+        minimumTarget: Double = 7.0,
     ) {
         val layout = node.textLayout()
         val sample = compose.onNodeWithTag("contrast_sample")
@@ -671,7 +733,7 @@ class MessageBubbleFooterUiTest {
         val textBounds = node.fetchSemanticsNode().boundsInRoot
         val pixels = sample.captureToImage().toPixelMap()
         val container = pixels[(textBounds.left - sampleBounds.left - 3).toInt(), (textBounds.top - sampleBounds.top + 3).toInt()]
-        for (word in listOf("Reading", "https://", "@bob", "grey", "code", "Quoted")) {
+        for (word in listOf("Reading", "https://", "@bob", "grey", "code", "Quoted", "alice", TIME)) {
             val offset = layout.layoutInput.text.indexOf(word)
             if (offset < 0) continue
             var ink = layout.layoutInput.style.color
@@ -689,8 +751,17 @@ class MessageBubbleFooterUiTest {
                 }
             }
             val attainable = maxOf(contrastRatio(Color.Black, fill), contrastRatio(Color.White, fill))
-            val minimum = if (attainable >= 7.0) 7.0 else 4.5
+            val minimum = if (attainable >= minimumTarget) minimumTarget else 4.5
             assertTrue("$label $word ink=$ink fill=$fill contrast=${contrastRatio(ink, fill)}", contrastRatio(ink, fill) >= minimum - 0.05)
+            if (minimumTarget == 4.5) {
+                val glyph = layout.getBoundingBox(offset)
+                val left = (textBounds.left - sampleBounds.left + glyph.left).toInt().coerceIn(0, pixels.width - 1)
+                val right = (textBounds.left - sampleBounds.left + glyph.right).toInt().coerceIn(left + 1, pixels.width)
+                val top = (textBounds.top - sampleBounds.top + glyph.top).toInt().coerceIn(0, pixels.height - 1)
+                val bottom = (textBounds.top - sampleBounds.top + glyph.bottom).toInt().coerceIn(top + 1, pixels.height)
+                val paintedContrast = (left until right).maxOf { x -> (top until bottom).maxOf { y -> contrastRatio(pixels[x, y], fill) } }
+                assertTrue("$label $word actual glyph contrast=$paintedContrast", paintedContrast >= 4.5 - 0.2)
+            }
         }
     }
 

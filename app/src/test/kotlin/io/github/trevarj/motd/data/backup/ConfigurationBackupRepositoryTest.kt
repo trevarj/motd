@@ -29,6 +29,8 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.FontChoice
+import io.github.trevarj.motd.data.prefs.FoolPreferences
+import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
@@ -46,6 +48,9 @@ import io.github.trevarj.motd.gesture.removeNode
 import io.github.trevarj.motd.gesture.updateNode
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -57,6 +62,73 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class ConfigurationBackupRepositoryTest {
+    @Test
+    fun mixedFoolPreferencesRoundTripAndLegacyImportClearsDestinationOptIns() =
+        runTest {
+            val settings = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                val selected =
+                    mapOf(
+                        "b" to FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true),
+                        "c" to FoolPreferences(FoolsMode.HIDE, notifyDirectMessages = true),
+                    )
+                for (mode in listOf(FoolsMode.COLLAPSE, FoolsMode.HIDE)) {
+                    for (nick in listOf("a", "b", "c")) settings.setFool(nick, true)
+                    settings.setFoolsMode(mode)
+                    settings.setFoolPreferences("a", FoolPreferences())
+                    selected.forEach { (nick, preferences) -> settings.setFoolPreferences(nick, preferences) }
+                    val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                    settings.setFoolPreferences("a", FoolPreferences(notifyMentions = true, notifyDirectMessages = true))
+                    settings.setFoolPreferences("b", FoolPreferences(FoolsMode.DIMMED, notifyDirectMessages = true))
+                    settings.setFoolsMode(FoolsMode.DIMMED)
+                    backup.import(raw, importMode = BackupImportMode.MERGE)
+                    assertEquals(selected, settings.settings.first().foolPreferences)
+                    assertEquals(mode, settings.settings.first().foolsMode)
+
+                    val envelope = Json.parseToJsonElement(raw).jsonObject
+                    val payload = envelope.getValue("payload").jsonObject
+                    val portable = payload.getValue("settings").jsonObject
+                    val general = portable.getValue("general").jsonObject
+                    val legacy =
+                        JsonObject(
+                            envelope + (
+                                "payload" to
+                                    JsonObject(
+                                        payload + (
+                                            "settings" to
+                                                JsonObject(
+                                                    portable + ("general" to JsonObject(general - "foolPreferences")),
+                                                )
+                                        ),
+                                    )
+                            ),
+                        ).toString()
+                    assertFalse(legacy.contains("foolPreferences"))
+                    settings.setFoolPreferences("b", FoolPreferences(notifyMentions = true, notifyDirectMessages = true))
+                    backup.import(legacy, importMode = BackupImportMode.MERGE)
+                    assertEquals(setOf("a", "b", "c"), settings.settings.first().fools)
+                    assertTrue(
+                        settings.settings
+                            .first()
+                            .foolPreferences
+                            .isEmpty(),
+                    )
+                    assertEquals(mode, settings.settings.first().foolsMode)
+                    val policy =
+                        io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy(
+                            io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+                                .from(settings.settings.first()),
+                        )
+                    assertFalse(policy.allowsNotification(null, "b", directMessage = false, hasMention = true))
+                    assertFalse(policy.allowsNotification(null, "b", directMessage = true, hasMention = true))
+                }
+            } finally {
+                db.close()
+            }
+        }
+
     @Test
     fun plaintextBackupCannotReplaceTrustedFileHostAndMalformedImportFailsClosed() =
         runTest {

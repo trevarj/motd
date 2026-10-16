@@ -102,6 +102,38 @@ class HistoryResyncCoordinatorTest {
     private val settingsRepository =
         object : SettingsRepository by DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>()) {
             override val settings = settingsState
+
+            override suspend fun setFoolPreferences(
+                nick: String,
+                preferences: io.github.trevarj.motd.data.prefs.FoolPreferences,
+                identityRules: io.github.trevarj.motd.irc.proto.IrcIdentityRules?,
+            ) {
+                val current = settings.value
+                val keys =
+                    current.fools.filter {
+                        identityRules?.normalize(it) == identityRules?.normalize(nick.trim()) && (
+                            identityRules != null || it ==
+                                io.github.trevarj.motd.data.prefs
+                                    .normalizeNick(nick)
+                        )
+                    }
+                settings.value =
+                    current.copy(
+                        foolPreferences =
+                            current.foolPreferences.toMutableMap().apply {
+                                keys.forEach {
+                                    if (preferences ==
+                                        io.github.trevarj.motd.data.prefs
+                                            .FoolPreferences()
+                                    ) {
+                                        remove(it)
+                                    } else {
+                                        put(it, preferences)
+                                    }
+                                }
+                            },
+                    )
+            }
         }
     private val syncPrefs =
         object : HistorySyncPrefs {

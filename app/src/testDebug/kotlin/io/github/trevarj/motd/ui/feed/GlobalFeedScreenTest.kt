@@ -38,6 +38,9 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.SearchHit
+import io.github.trevarj.motd.data.prefs.FoolPreferences
+import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.ui.ai.AiTextSheet
 import io.github.trevarj.motd.ui.ai.AiTextSource
@@ -159,6 +162,7 @@ class GlobalFeedScreenTest {
         mentions: Boolean = false,
         showMentionsNavigation: Boolean = false,
         onMentionsViewportAtNewest: ((Boolean) -> Unit)? = null,
+        visibilitySpec: () -> MessageVisibilitySpec = { MessageVisibilitySpec() },
     ) {
         compose.setContent {
             // Motion off: the caption waits on a Lottie clock a stub composition never advances.
@@ -179,6 +183,7 @@ class GlobalFeedScreenTest {
                             },
                             mentions = mentions,
                             listState = listState,
+                            visibilitySpec = visibilitySpec(),
                         )
                         onMentionsViewportAtNewest?.let { callback ->
                             ReportMentionsViewportAtNewest(
@@ -252,6 +257,40 @@ class GlobalFeedScreenTest {
 
         awaitTag("mentions_row_21")
         assertEquals(2, compose.onAllNodesWithText("#kotlin").fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun collapsedMentionsNeverExposeTheBodyAndOpenTheExactMessageWhileDimmedRemainReadable() {
+        var spec by mutableStateOf(
+            MessageVisibilitySpec(
+                fools = setOf("a", "b", "c"),
+                foolPreferences =
+                    mapOf(
+                        "a" to FoolPreferences(FoolsMode.DIMMED, notifyMentions = true),
+                        "b" to FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true),
+                        "c" to FoolPreferences(FoolsMode.HIDE, notifyMentions = true),
+                    ),
+            ),
+        )
+        val rows =
+            listOf("a", "b", "c").mapIndexed { index, nick ->
+                row(id = 31L + index, sender = nick, text = "$nick private body").let {
+                    it.copy(message = it.message.copy(normalizedActor = nick, hasMention = true))
+                }
+            }
+        setContent(flowOf(PagingData.from(rows)), mentions = true, visibilitySpec = { spec })
+        awaitTag("mentions_row_31")
+        compose.onNodeWithText("a private body").assertIsDisplayed()
+        compose.onNodeWithText("b private body", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("c private body", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("mentions_row_33", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("b · hidden").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(Triple(7L, 32L, 1_700_000_000_000L), opened) }
+        compose.runOnIdle {
+            spec = spec.copy(foolPreferences = spec.foolPreferences + ("b" to FoolPreferences(FoolsMode.COLLAPSE)))
+        }
+        compose.onNodeWithText("b · hidden").assertDoesNotExist()
+        compose.onNodeWithText("b private body", useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test

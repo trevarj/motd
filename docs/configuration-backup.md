@@ -28,6 +28,7 @@ export. Envelope metadata is authenticated as associated data.
 - User-facing settings for appearance, chat behavior, previews, replies,
   upload backend configuration, avatar display, per-network self-avatar setting,
   and delivery mode
+- Fool membership, default visibility, and sparse per-fool visibility/notification preferences
 
 ## Excluded
 
@@ -51,6 +52,10 @@ tampered ciphertext fail without applying the backup.
 `REPLACE` updates matching networks in place, adds missing networks, and deletes
 local-only network trees with their local history through existing Room
 cascades.
+
+Importing general settings replaces per-fool overrides, including for retained fools. Older backups
+without per-fool preferences reset them to inherited visibility with both notification permissions
+off; saved `COLLAPSE` and `HIDE` default visibility values remain compatible.
 
 Credentials-excluded imports keep already stored local credentials on matching
 networks. New networks that require omitted SASL passwords, server passwords,

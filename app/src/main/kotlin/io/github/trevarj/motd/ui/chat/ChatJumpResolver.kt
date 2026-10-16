@@ -19,9 +19,9 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
  */
 class ChatJumpResolver(
     private val messages: MessageRepository,
-    private val countNewer: suspend (bufferId: Long, serverTime: Long, id: Long) -> Int =
+    private val countNewer: suspend (bufferId: Long, serverTime: Long, id: Long) -> ChatPositionTarget =
         { bufferId, serverTime, id ->
-            messages.countNewerThan(bufferId, serverTime, id, MessageVisibilitySpec())
+            ChatPositionTarget(messages.countNewerThan(bufferId, serverTime, id, MessageVisibilitySpec()))
         },
     private val fetchAround: suspend (
         bufferName: String,
@@ -59,7 +59,7 @@ class ChatJumpResolver(
             messages.byId(id)?.takeIf { it.bufferId == canonicalRoomId }?.let { row ->
                 return Result.Resolved(
                     row.toPositionTarget(
-                        index = countNewer(bufferId, row.serverTime, row.id),
+                        position = countNewer(bufferId, row.serverTime, row.id),
                         expectedMsgid = msgid ?: row.msgid,
                         highlightMsgid = msgid ?: row.msgid,
                     ),
@@ -70,15 +70,15 @@ class ChatJumpResolver(
             // No exact target: approximate by time. Long.MAX_VALUE id makes the count include
             // every row at the same serverTime, landing at (or just above) the time boundary.
             if (timeMs <= 0) return Result.NotFound
-            val index = countNewer(bufferId, timeMs, Long.MAX_VALUE)
-            return Result.Resolved(ChatPositionTarget(index = index, serverTime = timeMs))
+            val position = countNewer(bufferId, timeMs, Long.MAX_VALUE)
+            return Result.Resolved(position.copy(serverTime = timeMs))
         }
 
         // 1. Local hit → its index is the count of strictly-newer rows.
         messages.byMsgid(bufferId, msgid)?.let { row ->
             return Result.Resolved(
                 row.toPositionTarget(
-                    index = countNewer(bufferId, row.serverTime, row.id),
+                    position = countNewer(bufferId, row.serverTime, row.id),
                     expectedMsgid = msgid,
                     highlightMsgid = msgid,
                 ),
@@ -90,7 +90,7 @@ class ChatJumpResolver(
             messages.byMsgid(bufferId, msgid)?.let { row ->
                 return Result.Resolved(
                     row.toPositionTarget(
-                        index = countNewer(bufferId, row.serverTime, row.id),
+                        position = countNewer(bufferId, row.serverTime, row.id),
                         expectedMsgid = msgid,
                         highlightMsgid = msgid,
                     ),
@@ -103,12 +103,11 @@ class ChatJumpResolver(
 }
 
 private fun io.github.trevarj.motd.data.db.MessageEntity.toPositionTarget(
-    index: Int,
+    position: ChatPositionTarget,
     expectedMsgid: String?,
     highlightMsgid: String?,
 ): ChatPositionTarget =
-    ChatPositionTarget(
-        index = index,
+    position.copy(
         expectedEventId = id,
         expectedMsgid = expectedMsgid,
         serverTime = serverTime,

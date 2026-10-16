@@ -519,6 +519,17 @@ class ConfigurationBackupRepositoryImpl
                     .filter { nick -> nick !in it.fools }
                     .forEach { nick -> settingsRepository.setFool(nick, false) }
                 it.fools.forEach { nick -> settingsRepository.setFool(nick, true) }
+                // Legacy archives have no overrides: never retain destination notification opt-ins.
+                settingsRepository.settings.first().fools.forEach { nick ->
+                    settingsRepository.setFoolPreferences(
+                        nick,
+                        io.github.trevarj.motd.data.prefs
+                            .FoolPreferences(),
+                    )
+                }
+                it.foolPreferences.forEach { (nick, preferences) ->
+                    settingsRepository.setFoolPreferences(nick, preferences)
+                }
                 settingsRepository.setFoolsMode(it.foolsMode)
                 settingsRepository.setPresenceMode(it.restoredPresenceMode())
                 settingsRepository.setShowRedactedMessages(it.showRedactedMessages)

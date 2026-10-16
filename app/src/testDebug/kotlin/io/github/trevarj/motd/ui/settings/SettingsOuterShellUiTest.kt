@@ -1,17 +1,33 @@
 package io.github.trevarj.motd.ui.settings
 
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.datastore.preferences.core.edit
+import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.bouncer.BouncerServCapabilities
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.FoolPreferences
+import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.settingsDataStore
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkContent
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkUiState
@@ -25,6 +41,9 @@ import io.github.trevarj.motd.ui.settings.labs.GestureEditorCallbacks
 import io.github.trevarj.motd.ui.settings.labs.GestureEditorUiState
 import io.github.trevarj.motd.ui.settings.labs.GestureMenuEditorContent
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,11 +64,72 @@ class SettingsOuterShellUiTest {
     fun manage_nicks_uses_shared_settings_shell() {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
-                ManageNicksContent(ManageNicksUiState(kind = NickListKind.FRIENDS), {}, {}, {}, { _, _ -> })
+                ManageNicksContent(ManageNicksUiState(kind = NickListKind.FRIENDS), {}, {}, {}, { _, _ -> }, { _, _ -> })
             }
         }
 
         assertSharedShell()
+    }
+
+    @Test
+    fun management_editor_persists_each_switch_and_live_inheritance_and_closes_on_removal() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repo = DataStoreSettingsRepository(context)
+        runBlocking {
+            context.settingsDataStore.edit { it.clear() }
+            repo.setFoolsMode(FoolsMode.DIMMED)
+            repo.setFool("managed", true)
+        }
+        val vm = ManageNicksViewModel(repo)
+        compose.setContent { MotdTheme(dynamicColor = false) { ManageNicksScreen(NickListKind.FOOLS, viewModel = vm) } }
+        compose.onNodeWithTag("manage_nick_managed").performClick()
+        compose.onNodeWithTag("fool_visibility_inherit").assertIsSelected()
+        compose.onNodeWithTag("fool_notify_mentions").assertIsOff().performClick()
+        awaitFoolPreferences(repo, FoolPreferences(notifyMentions = true))
+        compose.onNodeWithTag("fool_notify_direct_messages").assertIsOff()
+        compose.onNodeWithTag("fool_visibility_collapse").performClick()
+        awaitFoolPreferences(repo, FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true))
+        dismissFoolSettings()
+        compose.onNodeWithTag("manage_nick_managed").performClick()
+        compose.onNodeWithTag("fool_visibility_collapse").assertIsSelected()
+        compose.onNodeWithTag("fool_notify_mentions").assertIsOn()
+        compose.onNodeWithTag("fool_notify_direct_messages").assertIsOff().performClick()
+        awaitFoolPreferences(repo, FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true, notifyDirectMessages = true))
+        compose.onNodeWithTag("fool_notify_mentions").performClick()
+        awaitFoolPreferences(repo, FoolPreferences(FoolsMode.COLLAPSE, notifyDirectMessages = true))
+        compose.onNodeWithTag("fool_visibility_inherit").performClick()
+        awaitFoolPreferences(repo, FoolPreferences(notifyDirectMessages = true))
+        runBlocking { repo.setFoolsMode(FoolsMode.HIDE) }
+        compose.onNodeWithText("Follow global (Hidden)").assertIsDisplayed()
+        compose.onNodeWithTag("fool_visibility_inherit").assertIsSelected()
+        dismissFoolSettings()
+        compose.onNodeWithTag("manage_nick_managed").performClick()
+        compose.onNodeWithTag("fool_notify_mentions").assertIsOff()
+        compose.onNodeWithTag("fool_notify_direct_messages").assertIsOn()
+        runBlocking { repo.setFool("managed", false) }
+        compose.waitUntil(10_000) {
+            compose.waitForIdle()
+            compose.onAllNodesWithTag("fool_settings_sheet").fetchSemanticsNodes().isEmpty()
+        }
+        assertEquals(emptyMap<String, FoolPreferences>(), runBlocking { repo.settings.first() }.foolPreferences)
+    }
+
+    private fun awaitFoolPreferences(
+        repo: DataStoreSettingsRepository,
+        expected: FoolPreferences,
+    ) {
+        compose.waitUntil(10_000) {
+            compose.waitForIdle()
+            runBlocking { repo.settings.first() }.foolPreferences["managed"] == expected
+        }
+    }
+
+    private fun dismissFoolSettings() {
+        val sheet = hasTestTag("fool_settings_sheet")
+        compose
+            .onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and (sheet or hasAnyAncestor(sheet)), useUnmergedTree = true)[0]
+            .performSemanticsAction(SemanticsActions.Dismiss)
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("fool_settings_sheet").fetchSemanticsNodes().isEmpty() }
     }
 
     @Test

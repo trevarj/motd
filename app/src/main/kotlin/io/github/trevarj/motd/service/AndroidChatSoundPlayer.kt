@@ -46,8 +46,8 @@ internal fun shouldPlayIncomingChatSound(
     bufferId: Long,
     type: BufferType,
     muted: Boolean,
-    senderIsFool: Boolean,
-): Boolean = enabled && foregroundBufferId == bufferId && type != BufferType.SERVER && !muted && !senderIsFool
+    senderAllowsNotification: Boolean,
+): Boolean = enabled && foregroundBufferId == bufferId && type != BufferType.SERVER && !muted && senderAllowsNotification
 
 internal fun shouldPlayOutgoingChatSound(
     enabled: Boolean,
@@ -69,8 +69,8 @@ internal fun incomingChatSoundCue(
     bufferId: Long,
     type: BufferType,
     muted: Boolean,
-    senderIsFool: Boolean,
-): ChatSoundCue? = ChatSoundCue.RECEIVE.takeIf { shouldPlayIncomingChatSound(enabled, foregroundBufferId, bufferId, type, muted, senderIsFool) }
+    senderAllowsNotification: Boolean,
+): ChatSoundCue? = ChatSoundCue.RECEIVE.takeIf { shouldPlayIncomingChatSound(enabled, foregroundBufferId, bufferId, type, muted, senderAllowsNotification) }
 
 internal fun outgoingChatSoundCue(
     enabled: Boolean,
@@ -406,14 +406,26 @@ class AndroidChatSoundPlayer
             bufferId: Long,
             type: BufferType,
             message: IrcEvent.ChatMessage,
-        ) = playIncoming(bufferId, type, message.ctx.account, message.source.nick, null)
+        ) {
+            // Event-only callers have no computed reply/mention fact. Use a durable row when
+            // available; production delivery supplies it directly through onCanonicalIncoming.
+            val canonical = message.ctx.msgid?.let { db.messageDao().byMsgid(bufferId, it) }
+            playIncoming(
+                bufferId,
+                type,
+                if (canonical != null) canonical.senderAccount else message.ctx.account,
+                message.source.nick,
+                canonical?.normalizedActor,
+                canonical?.hasMention ?: false,
+            )
+        }
 
         override suspend fun onCanonicalIncoming(
             bufferId: Long,
             type: BufferType,
             message: IrcEvent.ChatMessage,
             canonical: MessageEntity,
-        ) = playIncoming(bufferId, type, canonical.senderAccount, null, canonical.normalizedActor)
+        ) = playIncoming(bufferId, type, canonical.senderAccount, null, canonical.normalizedActor, canonical.hasMention)
 
         private suspend fun playIncoming(
             bufferId: Long,
@@ -421,12 +433,27 @@ class AndroidChatSoundPlayer
             senderAccount: String?,
             senderNick: String?,
             normalizedActor: String?,
+            hasMention: Boolean,
         ) {
             val buffer = db.bufferDao().observeById(bufferId) ?: return
             if (audioActivityTracker.recording.value || audioPlaybackController.state.value.playing) return
             val settings = settingsRepository.settings.first()
             val rules = db.networkIdentityDao().byNetwork(buffer.networkId)?.identityRules ?: IrcIdentityRules()
-            val eligible = incomingChatSoundCue(settings.chatSoundsEnabled, foregroundBufferTracker.foregroundBufferId.value, bufferId, type, buffer.muted, isFoolForChatSound(settings.fools, rules, senderAccount, normalizedActor ?: rules.normalize(senderNick.orEmpty())))
+            val policy = MessageVisibilityPolicy(MessageVisibilitySpec.from(settings), rules)
+            val eligible =
+                incomingChatSoundCue(
+                    settings.chatSoundsEnabled,
+                    foregroundBufferTracker.foregroundBufferId.value,
+                    bufferId,
+                    type,
+                    buffer.muted,
+                    policy.allowsNotification(
+                        senderAccount,
+                        normalizedActor ?: rules.normalize(senderNick.orEmpty()),
+                        directMessage = type == BufferType.QUERY,
+                        hasMention = hasMention,
+                    ),
+                )
             if (eligible == null) return
             playConfigured(ChatSoundCue.RECEIVE, bufferId)
         }

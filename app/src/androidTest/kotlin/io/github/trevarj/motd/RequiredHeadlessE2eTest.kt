@@ -776,6 +776,7 @@ class RequiredHeadlessE2eTest {
             searchPresence()
             returnToPresenceSearch()
             returnToRoot()
+            exerciseFoolSettings("motd-fool-settings-e2e")
             networks()
         }
         NetworksRobot(compose).openRoot(network.rootId)

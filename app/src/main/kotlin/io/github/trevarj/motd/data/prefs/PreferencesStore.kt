@@ -14,8 +14,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
@@ -26,7 +28,7 @@ import javax.inject.Singleton
 
 // Single Preferences DataStore named "settings" shared by SettingsRepository, PushPrefs, and the
 // internal STS-policy accessor. Property delegate scopes one instance per process.
-private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
+internal val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
 internal object PrefKeys {
     val THEME_MODE = stringPreferencesKey("theme_mode")
@@ -50,6 +52,7 @@ internal object PrefKeys {
     val FRIEND_NICKS = stringPreferencesKey("friend_nicks")
     val FOOL_NICKS = stringPreferencesKey("fool_nicks")
     val FOOLS_MODE = stringPreferencesKey("fools_mode")
+    val FOOL_PREFERENCES = stringPreferencesKey("fool_preferences")
 
     /** Superseded by [PRESENCE_MODE]; still read so an existing hide/show choice is honored. */
     val SHOW_JOIN_PART_QUIT = stringPreferencesKey("show_join_part_quit")
@@ -101,6 +104,54 @@ internal fun decodeHueOverrides(raw: String?): Map<String, Int> {
 /** Encode a nick->hue map as a JSON object (hues coerced into 0..359). */
 internal fun encodeHueOverrides(map: Map<String, Int>): String = buildJsonObject { for ((k, v) in map) put(k, v.coerceIn(0, 359)) }.toString()
 
+/** Fail closed per record; unknown visibility is inheritance, not a lost valid permission. */
+internal fun decodeFoolPreferences(
+    raw: String?,
+    fools: Set<String>,
+    globalMode: FoolsMode,
+): Map<String, FoolPreferences> {
+    val entries = runCatching { nickJson.parseToJsonElement(raw ?: return emptyMap()) as JsonObject }.getOrNull() ?: return emptyMap()
+    val result = mutableMapOf<String, FoolPreferences>()
+    for ((nick, value) in entries) {
+        val key = normalizeNick(nick)
+        if (key !in fools) continue
+        val preferences =
+            runCatching {
+                val record = value as JsonObject
+
+                fun permission(name: String): Boolean {
+                    val primitive = record[name] ?: return false
+                    require(primitive is JsonPrimitive && !primitive.isString)
+                    return requireNotNull(primitive.booleanOrNull)
+                }
+                val visibility = record["visibility"]
+                require(visibility == null || visibility == JsonNull || (visibility is JsonPrimitive && visibility.isString))
+                FoolPreferences(
+                    visibility = (visibility as? JsonPrimitive)?.content?.let { runCatching { FoolsMode.valueOf(it) }.getOrNull() },
+                    notifyMentions = permission("notifyMentions"),
+                    notifyDirectMessages = permission("notifyDirectMessages"),
+                )
+            }.getOrNull() ?: FoolPreferences()
+        result[key] = result[key]?.merge(preferences, globalMode) ?: preferences
+    }
+    return result.filterValues { it != FoolPreferences() }
+}
+
+internal fun encodeFoolPreferences(preferences: Map<String, FoolPreferences>): String =
+    buildJsonObject {
+        for ((key, value) in preferences) {
+            if (value == FoolPreferences()) continue
+            put(
+                key,
+                buildJsonObject {
+                    value.visibility?.let { put("visibility", it.name) }
+                    put("notifyMentions", value.notifyMentions)
+                    put("notifyDirectMessages", value.notifyDirectMessages)
+                },
+            )
+        }
+    }.toString()
+
 // Implements SettingsRepository, PushPrefs, and exposes STS-policy JSON storage (internal, for
 // WP5) all over the one DataStore. Constructor-injectable so WP10 can rebind the interfaces.
 @Singleton
@@ -118,6 +169,8 @@ class DataStoreSettingsRepository
 
         override val settings: Flow<Settings> =
             store.data.map { prefs ->
+                val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS])
+                val foolsMode = foolsModeFromPreference(prefs[PrefKeys.FOOLS_MODE], fools)
                 Settings(
                     themeMode =
                         prefs[PrefKeys.THEME_MODE]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
@@ -134,10 +187,9 @@ class DataStoreSettingsRepository
                     nickColorPalette = nickColorPaletteFromPreference(prefs[PrefKeys.NICK_COLOR_PALETTE]),
                     nickColorOverrides = decodeHueOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]),
                     friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]),
-                    fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]),
-                    foolsMode =
-                        prefs[PrefKeys.FOOLS_MODE]?.let { runCatching { FoolsMode.valueOf(it) }.getOrNull() }
-                            ?: FoolsMode.COLLAPSE,
+                    fools = fools,
+                    foolPreferences = decodeFoolPreferences(prefs[PrefKeys.FOOL_PREFERENCES], fools, foolsMode),
+                    foolsMode = foolsMode,
                     presenceMode =
                         presenceModeFromPreference(
                             prefs[PrefKeys.PRESENCE_MODE],
@@ -251,6 +303,8 @@ class DataStoreSettingsRepository
             store.edit { prefs ->
                 val friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]).toMutableSet()
                 val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]).toMutableSet()
+                val mode = foolsModeFromPreference(prefs[PrefKeys.FOOLS_MODE], fools)
+                val overrides = decodeFoolPreferences(prefs[PrefKeys.FOOL_PREFERENCES], fools, mode)
                 if (isFriend) {
                     friends.add(key)
                     fools.remove(key)
@@ -259,6 +313,8 @@ class DataStoreSettingsRepository
                 }
                 writeNickSet(prefs, PrefKeys.FRIEND_NICKS, friends)
                 writeNickSet(prefs, PrefKeys.FOOL_NICKS, fools)
+                prefs[PrefKeys.FOOLS_MODE] = mode.name
+                writeFoolPreferences(prefs, overrides.filterKeys { it in fools })
             }
         }
 
@@ -270,6 +326,8 @@ class DataStoreSettingsRepository
             store.edit { prefs ->
                 val friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]).toMutableSet()
                 val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]).toMutableSet()
+                val mode = foolsModeFromPreference(prefs[PrefKeys.FOOLS_MODE], fools)
+                val overrides = decodeFoolPreferences(prefs[PrefKeys.FOOL_PREFERENCES], fools, mode)
                 if (isFool) {
                     fools.add(key)
                     friends.remove(key)
@@ -278,6 +336,8 @@ class DataStoreSettingsRepository
                 }
                 writeNickSet(prefs, PrefKeys.FRIEND_NICKS, friends)
                 writeNickSet(prefs, PrefKeys.FOOL_NICKS, fools)
+                prefs[PrefKeys.FOOLS_MODE] = mode.name
+                writeFoolPreferences(prefs, overrides.filterKeys { it in fools })
             }
         }
 
@@ -304,6 +364,15 @@ class DataStoreSettingsRepository
             store.edit { prefs ->
                 val friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]).toMutableSet()
                 val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS]).toMutableSet()
+                val mode = foolsModeFromPreference(prefs[PrefKeys.FOOLS_MODE], fools)
+                val overrides = decodeFoolPreferences(prefs[PrefKeys.FOOL_PREFERENCES], fools, mode).toMutableMap()
+                val equivalentFools = fools.filter { identityRules.normalize(it.trim()) == actor }
+                val retained =
+                    if (!friend && enabled && equivalentFools.isNotEmpty()) {
+                        equivalentFools.map { overrides[it] ?: FoolPreferences() }.reduce { a, b -> a.merge(b, mode) }
+                    } else {
+                        FoolPreferences()
+                    }
                 val target = if (friend) friends else fools
                 target.removeAll { identityRules.normalize(it.trim()) == actor }
                 if (enabled) {
@@ -311,9 +380,45 @@ class DataStoreSettingsRepository
                     other.removeAll { identityRules.normalize(it.trim()) == actor }
                     target.add(key)
                 }
+                if (!friend || enabled) equivalentFools.forEach(overrides::remove)
+                if (!friend && enabled && retained != FoolPreferences()) overrides[key] = retained
                 writeNickSet(prefs, PrefKeys.FRIEND_NICKS, friends)
                 writeNickSet(prefs, PrefKeys.FOOL_NICKS, fools)
+                prefs[PrefKeys.FOOLS_MODE] = mode.name
+                writeFoolPreferences(prefs, overrides.filterKeys { it in fools })
             }
+        }
+
+        override suspend fun setFoolPreferences(
+            nick: String,
+            preferences: FoolPreferences,
+            identityRules: IrcIdentityRules?,
+        ) {
+            val key = normalizeNick(nick)
+            store.edit { prefs ->
+                val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS])
+                val matching =
+                    if (identityRules == null) {
+                        fools.filter { it == key }
+                    } else {
+                        val actor = identityRules.normalize(nick.trim())
+                        fools.filter { identityRules.normalize(it.trim()) == actor }
+                    }
+                if (matching.isEmpty()) return@edit
+                val mode = foolsModeFromPreference(prefs[PrefKeys.FOOLS_MODE], fools)
+                val overrides = decodeFoolPreferences(prefs[PrefKeys.FOOL_PREFERENCES], fools, mode).toMutableMap()
+                for (configured in matching) {
+                    if (preferences == FoolPreferences()) overrides.remove(configured) else overrides[configured] = preferences
+                }
+                writeFoolPreferences(prefs, overrides)
+            }
+        }
+
+        private fun writeFoolPreferences(
+            prefs: androidx.datastore.preferences.core.MutablePreferences,
+            preferences: Map<String, FoolPreferences>,
+        ) {
+            if (preferences.isEmpty()) prefs.remove(PrefKeys.FOOL_PREFERENCES) else prefs[PrefKeys.FOOL_PREFERENCES] = encodeFoolPreferences(preferences)
         }
 
         override suspend fun setFoolsMode(m: FoolsMode) {

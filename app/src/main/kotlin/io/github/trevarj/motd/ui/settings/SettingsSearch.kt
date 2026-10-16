@@ -189,7 +189,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_show_typing_indicators, R.string.settings_show_typing_indicators_desc, "ircv3 typing privacy", SettingsSearchPage.SECURITY, SettingsTarget.SHOW_TYPING),
         spec(R.string.settings_friends, R.string.settings_people, "people nicks", SettingsSearchPage.CHAT, SettingsTarget.FRIENDS),
         spec(R.string.settings_fools, R.string.settings_people, "ignore people nicks", SettingsSearchPage.CHAT, SettingsTarget.FOOLS),
-        spec(R.string.settings_fools_mode, R.string.settings_fools_hide_desc, "collapse hide", SettingsSearchPage.CHAT, SettingsTarget.FOOLS_MODE),
+        spec(R.string.settings_fools_mode, R.string.settings_fools_mode_desc, "default inherit dim dimmed collapse collapsed hide hidden visibility", SettingsSearchPage.CHAT, SettingsTarget.FOOLS_MODE),
         spec(R.string.mentions_title, R.string.settings_mentions_desc, "mentions replies feed", SettingsSearchPage.CHAT, SettingsTarget.MENTIONS),
         spec(R.string.settings_mentions_location, R.string.settings_mentions_desc, "mentions drawer chat list folder tab", SettingsSearchPage.CHAT, SettingsTarget.MENTIONS_LOCATION),
         spec(R.string.settings_history_sync_mode, R.string.settings_history_sync_disclosure, "sync history balanced aggressive lazy gaps", SettingsSearchPage.HISTORY, SettingsTarget.HISTORY_SYNC_MODE),

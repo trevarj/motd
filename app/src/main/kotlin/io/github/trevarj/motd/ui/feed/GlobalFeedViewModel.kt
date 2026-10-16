@@ -25,19 +25,23 @@ import javax.inject.Inject
 /**
  * Recreate the Paging generation only when the part of the spec the query actually reads changes.
  *
- * `globalFeedPagingQuery` consumes `fools` and nothing else — presence mode, fools mode, and the
- * chat-local reveal never reach it — so projecting first keeps toggling those prefs from tearing
- * down the Pager and resetting scroll for an identical query. An equal projection keeps the
- * generation, since transforming the same PagingData would re-emit its single-collector page flow.
+ * ALL consumes only membership. MENTIONS also consumes visibility and category permissions;
+ * unrelated settings must not reset either feed's paging generation.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 internal fun globalFeedPages(
     source: (MessageVisibilitySpec) -> Flow<PagingData<SearchHit>>,
     specs: Flow<MessageVisibilitySpec>,
+    mentionsOnly: Boolean = false,
 ): Flow<PagingData<SearchHit>> =
     specs
-        .map { MessageVisibilitySpec(fools = it.fools) }
-        .distinctUntilChanged()
+        .map {
+            MessageVisibilitySpec(
+                fools = it.fools,
+                foolsMode = if (mentionsOnly) it.foolsMode else io.github.trevarj.motd.data.prefs.FoolsMode.DIMMED,
+                foolPreferences = if (mentionsOnly) it.foolPreferences else emptyMap(),
+            )
+        }.distinctUntilChanged()
         .flatMapLatest(source)
 
 /** Rows name their network only when more than one exists — identically named channels otherwise collide. */
@@ -77,10 +81,16 @@ class MentionsViewModel
         // Start at newest so the initial page and an initially empty feed pick up new mentions.
         private val atNewest = AtomicBoolean(true)
 
+        val visibilitySpec: StateFlow<MessageVisibilitySpec> =
+            settingsRepository.settings
+                .map(MessageVisibilitySpec::from)
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MessageVisibilitySpec())
+
         val items: Flow<PagingData<SearchHit>> =
             globalFeedPages(
                 source = { spec -> globalFeedRepository.mentionsFeed(spec, atNewest::get) },
                 specs = settingsRepository.settings.map(MessageVisibilitySpec::from),
+                mentionsOnly = true,
             ).cachedIn(viewModelScope)
 
         val showNetwork: StateFlow<Boolean> =

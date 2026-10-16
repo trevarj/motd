@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chat
 
 import androidx.paging.LoadState
+import androidx.paging.PagingData
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
@@ -556,16 +557,6 @@ fun MessageEntity.matchesConfiguredActor(
         senderAccount?.let { it in accounts } == true
 }
 
-/** Fool treatment is limited to incoming conversation rows. */
-fun isFoolMessage(
-    message: MessageEntity,
-    fools: Set<String>,
-    identityRules: IrcIdentityRules = IrcIdentityRules(),
-): Boolean =
-    message.kind in CONVERSATION_KINDS &&
-        !message.isSelf &&
-        message.matchesConfiguredActor(fools, identityRules)
-
 /**
  * Policy predicate: drops presence rows when hidden, and drops fool rows only in HIDE mode.
  * System-event kinds are never fool-treated (presence visibility governs those). COLLAPSE keeps the row
@@ -1052,6 +1043,12 @@ internal fun scrollPositionOutcome(
     return ScrollPositionOutcome.Save(anchorIndex, row)
 }
 
+/** The collector and its positional spec move together; an old snapshot cannot satisfy a new spec. */
+data class ChatPagingGeneration(
+    val spec: MessageVisibilitySpec,
+    val pages: Flow<PagingData<MessageEntity>>,
+)
+
 /** One exact destination model shared by deep links and saved positions. */
 data class ChatPositionTarget(
     val index: Int,
@@ -1076,6 +1073,7 @@ data class ChatPositionTarget(
     /** Opaque ViewModel request identity; stale UI completions must not consume a newer jump. */
     val requestToken: Long = 0,
     val highlightEventId: Long? = null,
+    val requiredVisibilitySpec: MessageVisibilitySpec? = null,
 )
 
 internal fun messageHighlightMatches(
@@ -1274,15 +1272,22 @@ internal fun exactTargetPlacement(
     firstVisibleIndex: Int,
     firstVisibleOffset: Int,
     targetOffset: Int,
+    canScrollForward: Boolean,
+    targetFullyVisible: Boolean,
     eventId: Long,
 ): ExactTargetPlacement {
     val snapshotIndex =
         materializedTargetSnapshotIndex(loadedStart, loadedItems, eventId)
             ?: return ExactTargetPlacement.Missing
+    val aligned = firstVisibleIndex == snapshotIndex && firstVisibleOffset == targetOffset
+    // A short chat cannot scroll its target to the requested edge. Native clamping is enough only
+    // when the exact measured row is fully readable, not merely present in the loaded window.
+    val clampedAtOlderEnd =
+        !canScrollForward && targetFullyVisible &&
+            (firstVisibleIndex < snapshotIndex || (firstVisibleIndex == snapshotIndex && firstVisibleOffset < targetOffset))
     return if (
         materializedTargetVisibleIndex(visibleItems, eventId) == snapshotIndex &&
-        firstVisibleIndex == snapshotIndex &&
-        firstVisibleOffset == targetOffset
+        (aligned || clampedAtOlderEnd)
     ) {
         ExactTargetPlacement.Positioned(snapshotIndex)
     } else {

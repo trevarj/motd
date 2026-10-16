@@ -557,7 +557,7 @@ class ChatJumpResolverTest {
             val resolver =
                 ChatJumpResolver(
                     messages = repo,
-                    countNewer = { _, _, _ -> 0 },
+                    countNewer = { _, _, _ -> ChatPositionTarget(index = 0) },
                     fetchAround = { _, _, _, _ -> false },
                 )
 

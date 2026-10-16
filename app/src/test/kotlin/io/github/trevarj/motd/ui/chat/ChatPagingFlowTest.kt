@@ -9,6 +9,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -35,7 +36,7 @@ class ChatPagingFlowTest {
                 )
             val job =
                 backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-                    flow.collect()
+                    flow.collectLatest { it.pages.collect() }
                 }
             runCurrent()
             assertEquals(1, sourceGenerations)
@@ -70,7 +71,7 @@ class ChatPagingFlowTest {
                     },
                     specs = specs,
                 )
-            val job = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { pages.collect() }
+            val job = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { pages.collectLatest { it.pages.collect() } }
             runCurrent()
 
             specs.value = MessageVisibilitySpec(presenceMode = PresenceMode.HIDDEN)

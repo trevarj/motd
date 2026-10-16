@@ -2,8 +2,10 @@ package io.github.trevarj.motd.ui.chat
 
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import org.junit.Assert.assertFalse
@@ -31,18 +33,18 @@ class MessageFilterTest {
         dedupKey = "k",
     )
 
-    // --- isFoolMessage ---
+    // --- resolved fool membership ---
 
     @Test fun `fool sender matches case-insensitively`() {
-        assertTrue(isFoolMessage(msg(sender = "Alice"), fools = setOf("alice")))
+        assertTrue(MessageVisibilityPolicy(MessageFilterSpec(fools = setOf("alice"))).isFool(msg(sender = "Alice")))
     }
 
     @Test fun `own messages are never fools`() {
-        assertFalse(isFoolMessage(msg(sender = "alice", isSelf = true), fools = setOf("alice")))
+        assertFalse(MessageVisibilityPolicy(MessageFilterSpec(fools = setOf("alice"))).isFool(msg(sender = "alice", isSelf = true)))
     }
 
     @Test fun `non-listed sender is not a fool`() {
-        assertFalse(isFoolMessage(msg(sender = "bob"), fools = setOf("alice")))
+        assertFalse(MessageVisibilityPolicy(MessageFilterSpec(fools = setOf("alice"))).isFool(msg(sender = "bob")))
     }
 
     // --- keepMessage: presence events ---
@@ -124,13 +126,45 @@ class MessageFilterTest {
         assertTrue(keepMessage(msg(sender = "bob"), spec))
     }
 
+    @Test fun `mixed modes use individual visibility while reveal only admits Hidden timeline rows`() {
+        val spec =
+            MessageFilterSpec(
+                fools = setOf("a", "b", "c"),
+                foolPreferences =
+                    mapOf(
+                        "b" to FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true),
+                        "c" to FoolPreferences(FoolsMode.HIDE, notifyMentions = true),
+                    ),
+            )
+        assertTrue(keepMessage(msg(sender = "a"), spec))
+        assertTrue(keepMessage(msg(sender = "b"), spec))
+        assertFalse(keepMessage(msg(sender = "c"), spec))
+        assertTrue(keepMessage(msg(sender = "c"), spec.copy(revealHiddenFools = true)))
+        assertFalse(keepMessage(msg(sender = "c"), spec))
+    }
+
+    @Test fun `account nick collision keeps most restrictive individual visibility`() {
+        val spec =
+            MessageFilterSpec(
+                fools = setOf("actor", "account"),
+                foolPreferences =
+                    mapOf(
+                        "actor" to FoolPreferences(FoolsMode.DIMMED, notifyMentions = true),
+                        "account" to FoolPreferences(FoolsMode.HIDE),
+                    ),
+            )
+        assertFalse(keepMessage(msg(sender = "actor", senderAccount = "account"), spec))
+        assertTrue(keepMessage(msg(sender = "actor", senderAccount = "account", isSelf = true), spec))
+        assertTrue(keepMessage(msg(sender = "actor", senderAccount = "account", kind = MessageKind.TOPIC), spec))
+    }
+
     @Test fun `friend and fool matching obey strict casemap without merging tilde`() {
         val strict = IrcIdentityRules(IrcCaseMapping.Rfc1459Strict)
         val message = msg(sender = "nick~", normalizedActor = strict.normalize("nick~"))
 
         assertFalse(message.matchesConfiguredActor(setOf("nick^"), strict))
         assertTrue(message.matchesConfiguredActor(setOf("NICK~"), strict))
-        assertFalse(isFoolMessage(message, setOf("nick^"), strict))
+        assertFalse(MessageVisibilityPolicy(MessageFilterSpec(fools = setOf("nick^")), strict).isFool(message))
     }
 
     @Test fun `unknown custom casemap uses conservative ASCII actor matching`() {
@@ -145,6 +179,6 @@ class MessageFilterTest {
         val message = msg(sender = "newNick", senderAccount = "stable-account")
 
         assertTrue(message.matchesConfiguredActor(setOf("stable-account"), IrcIdentityRules()))
-        assertTrue(isFoolMessage(message, setOf("stable-account")))
+        assertTrue(MessageVisibilityPolicy(MessageFilterSpec(fools = setOf("stable-account"))).isFool(message))
     }
 }

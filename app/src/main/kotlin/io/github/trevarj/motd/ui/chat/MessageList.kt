@@ -102,12 +102,15 @@ import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.repo.CachedLinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.sync.COMMAND_RESPONSE_PAYLOAD_PREFIX
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
+import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.dcc.DccEndpointRisk
 import io.github.trevarj.motd.dcc.dccEndpointRisk
 import io.github.trevarj.motd.dcc.resolveDccAddress
@@ -378,7 +381,8 @@ fun MessageList(
     // concerns (density, nick color) flow through CompositionLocals instead.
     friends: Set<String> = emptySet(),
     fools: Set<String> = emptySet(),
-    foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+    foolsMode: FoolsMode = FoolsMode.DIMMED,
+    foolPreferences: Map<String, FoolPreferences> = emptyMap(),
     identityRules: IrcIdentityRules = IrcIdentityRules(),
     historyUiState: ChatHistoryUiState = ChatHistoryUiState.Hidden,
     onHistoryRetry: () -> Unit = {},
@@ -404,6 +408,13 @@ fun MessageList(
     bottomContentPadding: PaddingValues? = null,
 ) {
     val dickordEnabled = LocalDickordLabsEnabled.current
+    val foolPolicy =
+        remember(fools, foolsMode, foolPreferences, identityRules) {
+            MessageVisibilityPolicy(
+                MessageVisibilitySpec(fools = fools, foolsMode = foolsMode, foolPreferences = foolPreferences),
+                identityRules,
+            )
+        }
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
     // Keep the user's expanded JOIN/PART runs above the volatile Paging rows. A history sync may
     // briefly replace or rechunk those rows, but overlapping event identities remain stable.
@@ -630,13 +641,10 @@ fun MessageList(
                 return@items
             }
 
-            // Fool COLLAPSE: render a tap-to-expand placeholder in place of the
-            // bubble until its id is expanded. HIDE mode is filtered upstream so it never reaches
-            // here; system-kind rows are handled above and never fool-treated.
-            val isFool =
-                foolsMode == FoolsMode.COLLAPSE &&
-                    isFoolMessage(msg, fools, identityRules)
-            if (isFool && !foolExpanded(msg.id)) {
+            val foolMode = foolPolicy.foolPreferences(msg)?.visibility
+            val isFool = foolMode != null
+            val dimmed = foolMode == FoolsMode.DIMMED && !foolExpanded(msg.id)
+            if (isFool && foolMode != FoolsMode.DIMMED && !foolExpanded(msg.id)) {
                 LiveTimelineEntry(
                     liveEntryIds,
                     msg,
@@ -708,6 +716,8 @@ fun MessageList(
                         conversationName = conversationName,
                         hideInlineAudioLinks = hideInlineAudioLinks,
                         directMessage = directMessage,
+                        dimmed = dimmed,
+                        mentionAttention = foolPolicy.mentionAttention(msg, directMessage),
                         fallbackSender = conversationName.takeUnless { collapseSystemEvents },
                         dickordEnabled = dickordEnabled,
                         older = older,
@@ -1637,6 +1647,8 @@ private fun MessageRow(
     conversationName: String?,
     hideInlineAudioLinks: Boolean,
     directMessage: Boolean,
+    dimmed: Boolean,
+    mentionAttention: Boolean,
     fallbackSender: String?,
     dickordEnabled: Boolean,
     older: MessageEntity?,
@@ -1898,7 +1910,7 @@ private fun MessageRow(
     // string; mention state is immutable for a stored row and only the sparse highlighted rows
     // need it.
     val mentionDescription =
-        if (msg.hasMention && !msg.isSelf) {
+        if (mentionAttention) {
             stringResource(R.string.chat_message_mentions_you)
         } else {
             null
@@ -1926,6 +1938,7 @@ private fun MessageRow(
             sender = displaySender,
             tag = foolCollapseTag(msg.msgid, msg.id),
             onCollapse = it,
+            showNormally = dimmed,
         )
     }
 
@@ -1971,7 +1984,8 @@ private fun MessageRow(
                         isBot = msg.isBot,
                         kind = msg.kind,
                         showSender = showSender,
-                        hasMention = msg.hasMention,
+                        hasMention = mentionAttention,
+                        dimmed = dimmed,
                         senderIsFriend = senderIsFriend,
                         failed = msg.failed,
                         // Subtle "sending…" state before the 30s failure flip.
@@ -2074,6 +2088,7 @@ private fun MessageRow(
                 cacheStatuses = audioCacheStatuses,
                 networkId = networkId,
                 isSelf = msg.isSelf,
+                dimmed = dimmed,
                 formattedTime = if (standaloneAudio) formattedTime else null,
                 pending = msg.pendingLabel != null,
                 failed = msg.failed,
@@ -2235,34 +2250,42 @@ private fun FoolPlaceholderRow(
                 modifier = Modifier.testTag("chat_read_marker_divider"),
             )
         }
-        Row(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    // Collapsed fool row is still a message container; keep it selectable/tappable.
-                    .testTag(messageTag(msg))
-                    .combinedClickable(onClick = onExpand, onLongClick = onExpand)
-                    .alpha(0.7f)
-                    .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Filled.VisibilityOff,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(14.dp),
-            )
-            Spacer(Modifier.size(6.dp))
-            Text(
-                text =
-                    stringResource(
-                        R.string.chat_fool_hidden,
-                        dickordNickLabel(msg.sender, dickordEnabled),
-                    ),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        FoolPlaceholder(
+            sender = dickordNickLabel(msg.sender, dickordEnabled),
+            modifier = Modifier.testTag(messageTag(msg)),
+            onExpand = onExpand,
+        )
+    }
+}
+
+/** Body-free affordance shared with the Mentions feed's exact-message route. */
+@Composable
+internal fun FoolPlaceholder(
+    sender: String,
+    modifier: Modifier = Modifier,
+    onExpand: () -> Unit,
+) {
+    Row(
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .combinedClickable(onClick = onExpand, onLongClick = onExpand)
+                .alpha(0.7f)
+                .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.VisibilityOff,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.size(6.dp))
+        Text(
+            text = stringResource(R.string.chat_fool_hidden, sender),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -2275,6 +2298,7 @@ private fun FoolPlaceholderRow(
 internal fun FoolCollapseChip(
     sender: String,
     tag: String,
+    showNormally: Boolean = false,
     onCollapse: () -> Unit,
 ) {
     Row(
@@ -2295,7 +2319,7 @@ internal fun FoolCollapseChip(
         )
         Spacer(Modifier.size(6.dp))
         Text(
-            text = stringResource(R.string.chat_fool_collapse, sender),
+            text = stringResource(if (showNormally) R.string.chat_fool_show_normally else R.string.chat_fool_collapse, sender),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

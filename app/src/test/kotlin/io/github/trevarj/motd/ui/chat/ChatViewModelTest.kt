@@ -34,6 +34,7 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ReactionEntity
@@ -45,6 +46,7 @@ import io.github.trevarj.motd.data.prefs.ChatWallpaper
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.EbooksLabsPrefs
+import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
@@ -131,6 +133,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.emitAll
@@ -181,14 +184,15 @@ class ChatViewModelTest {
             sendGate: CompletableDeferred<Unit>? = null,
             immediateWireAcceptance: ImmediateWireAcceptance = ImmediateWireAcceptance.ACCEPTED,
             sendRejection: SendRejectionReason? = null,
+            settings: SettingsRepository = FakeSettingsRepository(),
+            messages: MessageRepository? = null,
         ): ChatViewModel {
-            val settings = FakeSettingsRepository()
             val foreground = FakeForegroundBufferTracker()
             val processor = EventProcessor(db, TypingTrackerImpl(), io.github.trevarj.motd.data.sync.MessageNotifier.Noop)
             return ChatViewModel(
                 savedStateHandle = savedStateHandle,
                 messageRepository =
-                    MessageRepositoryImpl(
+                    messages ?: MessageRepositoryImpl(
                         bufferDao = db.bufferDao(),
                         networkIdentityDao = db.networkIdentityDao(),
                         db = db,
@@ -4555,6 +4559,154 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun `Hidden exact jump reveals before counting and carries its paging spec without persisting`() =
+        runTest {
+            val hidden = message(channel.id, "hidden body", "hidden", "bot", id = 42).copy(normalizedActor = "bot")
+            val settings =
+                FakeSettingsRepository().apply {
+                    this.settings.value =
+                        Settings(
+                            fools = setOf("bot"),
+                            foolPreferences =
+                                mapOf(
+                                    "bot" to
+                                        io.github.trevarj.motd.data.prefs
+                                            .FoolPreferences(FoolsMode.HIDE, notifyMentions = true),
+                                ),
+                        )
+                }
+            val saved = settings.settings.value
+            val messages = FakeMessageRepository(events = listOf(hidden), newerCount = 3)
+            val vm =
+                viewModel(
+                    channel,
+                    FakeConnectionManager(network.id),
+                    messages = messages,
+                    settings = settings,
+                    jumpToEventId = hidden.id,
+                )
+            val target = checkNotNull(vm.jumpTarget.first { it != null })
+            assertEquals(3, target.index)
+            assertTrue(vm.hiddenFoolsRevealed.value)
+            assertTrue(checkNotNull(target.requiredVisibilitySpec).revealHiddenFools)
+            assertEquals(target.requiredVisibilitySpec, messages.lastCountVisibility)
+            assertEquals(target.requiredVisibilitySpec, vm.messageGeneration.first { it?.spec == target.requiredVisibilitySpec }?.spec)
+            assertEquals(saved, settings.settings.value)
+        }
+
+    @Test
+    fun `cold ASCII Hidden bracket nick jump loads persisted rules before delayed identity observation`() =
+        runTest {
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(network.id, caseMapping = "ascii"))
+            val hidden =
+                message(channel.id, "ASCII hidden body", "ascii-hidden", "bot[", id = 42)
+                    .copy(normalizedActor = "bot[", serverTime = 1_000, timelineOrder = 42)
+            val newer =
+                message(channel.id, "ordinary body", "ordinary", "alice", id = 43)
+                    .copy(normalizedActor = "alice", serverTime = 2_000, timelineOrder = 43)
+            db.messageDao().insertAll(listOf(hidden, newer))
+            val settings =
+                FakeSettingsRepository().apply {
+                    this.settings.value =
+                        Settings(fools = setOf("bot["), foolPreferences = mapOf("bot[" to FoolPreferences(FoolsMode.HIDE)))
+                }
+            val saved = settings.settings.value
+            val observationStarted = CompletableDeferred<Unit>()
+            val releaseObservation = CompletableDeferred<Unit>()
+            val identities = db.networkIdentityDao()
+            val delayedIdentities =
+                object : NetworkIdentityDao by identities {
+                    override fun observe(networkId: Long): Flow<NetworkIdentityEntity?> =
+                        flow {
+                            observationStarted.complete(Unit)
+                            releaseObservation.await()
+                            emitAll(identities.observe(networkId))
+                        }
+                }
+            val messages = FakeMessageRepository(events = listOf(hidden, newer), counts = MessageVisibilityReader(db))
+            val vm =
+                viewModel(
+                    channel,
+                    FakeConnectionManager(network.id, state = IrcClientState.Disconnected),
+                    messages = messages,
+                    settings = settings,
+                    jumpToEventId = hidden.id,
+                    identities = delayedIdentities,
+                )
+            val target = checkNotNull(vm.jumpTarget.first { it != null })
+            observationStarted.await()
+            assertFalse(releaseObservation.isCompleted)
+            assertEquals("bot{", vm.identityRules.value.normalize("bot["))
+            assertEquals(hidden.id, target.expectedEventId)
+            assertEquals(1, target.index)
+            assertTrue(vm.hiddenFoolsRevealed.value)
+            val spec = checkNotNull(target.requiredVisibilitySpec)
+            assertTrue(spec.revealHiddenFools)
+            assertEquals(spec, messages.lastCountVisibility)
+            val page =
+                db.messageDao().pagingSource(messagePagingQuery(channel.id, spec)).load(
+                    PagingSource.LoadParams.Refresh(key = 0, loadSize = 20, placeholdersEnabled = true),
+                ) as PagingSource.LoadResult.Page<Int, MessageEntity>
+            assertEquals(listOf(newer.id, hidden.id), page.data.map { it.id })
+            assertEquals(spec, vm.messageGeneration.first { it?.spec == spec }?.spec)
+            assertEquals(saved, settings.settings.value)
+            releaseObservation.complete(Unit)
+        }
+
+    @Test
+    fun `profile fool editor writes equivalent configured keys with independent notifications`() =
+        runTest {
+            val settings = FakeSettingsRepository().apply { this.settings.value = Settings(fools = setOf("Nick[")) }
+            val vm = viewModel(channel, FakeConnectionManager(network.id), settings = settings)
+            vm.state.first { it.buffer != null }
+            val preferences =
+                io.github.trevarj.motd.data.prefs
+                    .FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true)
+            vm.updateFoolPreferences("NICK{") { preferences }
+            advanceUntilIdle()
+            assertEquals(mapOf("Nick[" to preferences), settings.settings.value.foolPreferences)
+            vm.updateFoolPreferences("NICK{") { it.copy(visibility = null, notifyMentions = false, notifyDirectMessages = true) }
+            advanceUntilIdle()
+            assertEquals(
+                io.github.trevarj.motd.data.prefs
+                    .FoolPreferences(notifyDirectMessages = true),
+                settings.settings.value.foolPreferences["Nick["],
+            )
+        }
+
+    @Test
+    fun `profile fool controls serialize rapid distinct changes while writes and settings emissions are delayed`() =
+        runTest {
+            val gate = CompletableDeferred<Unit>()
+            val settings =
+                FakeSettingsRepository().apply {
+                    this.settings.value = Settings(fools = setOf("Nick[", "nick{"))
+                    foolWriteGate = gate
+                }
+            val vm = viewModel(channel, FakeConnectionManager(network.id), settings = settings)
+            vm.state.first { it.buffer != null }
+
+            vm.updateFoolPreferences("NICK{") { it.copy(notifyMentions = true) }
+            vm.updateFoolPreferences("NICK{") { it.copy(notifyDirectMessages = true) }
+            vm.updateFoolPreferences("NICK{") { it.copy(visibility = FoolsMode.COLLAPSE) }
+            runCurrent()
+            assertEquals(listOf(FoolPreferences(notifyMentions = true)), settings.foolWrites)
+            assertTrue(
+                settings.settings.value.foolPreferences
+                    .isEmpty(),
+            )
+
+            gate.complete(Unit)
+            advanceUntilIdle()
+            val saved = FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true, notifyDirectMessages = true)
+            assertEquals(mapOf("Nick[" to saved, "nick{" to saved), settings.settings.value.foolPreferences)
+            assertEquals(
+                listOf(FoolPreferences(notifyMentions = true), FoolPreferences(notifyMentions = true, notifyDirectMessages = true), saved),
+                settings.foolWrites,
+            )
+        }
+
+    @Test
     fun `a deep jump publishes a global index and the newest escape abandons it`() =
         runTest {
             // The deep jump lands in the ONE unbounded timeline: its index is the repository's global
@@ -5104,7 +5256,7 @@ class ChatViewModelTest {
                             displayed = ids[1] to 2L,
                         ),
                 )
-            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.messages.collect { } }
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.messageGeneration.filterNotNull().collectLatest { it.pages.collect { } } }
 
             // entryAnchorPagingKey(679) for the park, NOT entryAnchorPagingKey(698) for the divider.
             assertEquals(129, messages.firstInitialKey.await())
@@ -5141,7 +5293,7 @@ class ChatViewModelTest {
                     // The oldest row: 699 newer rows sit below it.
                     scrollPositions = savedAt(ids.first(), "m1", serverTime = 1),
                 )
-            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.messages.collect { } }
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.messageGeneration.filterNotNull().collectLatest { it.pages.collect { } } }
 
             // entryAnchorPagingKey(699): the anchor shifted back by initialLoadSize - pageSize.
             assertEquals(149, messages.firstInitialKey.await())
@@ -5162,7 +5314,7 @@ class ChatViewModelTest {
                     messages = messages,
                     scrollPositions = savedAt(ids.first(), "m1", serverTime = 100),
                 )
-            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.messages.collect { } }
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.messageGeneration.filterNotNull().collectLatest { it.pages.collect { } } }
 
             assertNull(messages.firstInitialKey.await())
         }
@@ -5897,6 +6049,7 @@ class ChatViewModelTest {
         notificationSettings: NotificationSettings = NotificationSettings.Noop,
         clock: AppClock = AppClock(System::currentTimeMillis),
         reader: ReadAloudController? = null,
+        identities: NetworkIdentityDao = db.networkIdentityDao(),
     ): ChatViewModel {
         val routeState = mutableMapOf<String, Any>("bufferId" to routeBufferId)
         jumpToMsgid?.let { routeState["jumpToMsgid"] = it }
@@ -5909,7 +6062,7 @@ class ChatViewModelTest {
             messageRepository = messages,
             bufferRepository = buffers,
             networkDao = db.networkDao(),
-            networkIdentityDao = db.networkIdentityDao(),
+            networkIdentityDao = identities,
             dccTransferDao = db.dccTransferDao(),
             dccTransferController = FakeDccTransferController(),
             connectionManager = manager,
@@ -6360,6 +6513,7 @@ class ChatViewModelTest {
         val requestedMsgids = mutableListOf<String>()
         var resolvedByMsgid: MessageEntity? = null
         var resolvedById: MessageEntity? = null
+        var lastCountVisibility: MessageVisibilitySpec? = null
         var reactionRows: List<ReactionEntity> = emptyList()
         var blockedMsgid: String? = null
         val blockedResolutionStarted = CompletableDeferred<Unit>()
@@ -6434,7 +6588,10 @@ class ChatViewModelTest {
             serverTime: Long,
             id: Long,
             visibility: MessageVisibilitySpec,
-        ): Int = counts?.countTimelineNewer(bufferId, serverTime, id, visibility) ?: newerCount
+        ): Int {
+            lastCountVisibility = visibility
+            return counts?.countTimelineNewer(bufferId, serverTime, id, visibility) ?: newerCount
+        }
 
         override suspend fun deleteMessage(id: Long) {
             deletedIds += id
@@ -6472,6 +6629,8 @@ class ChatViewModelTest {
 
     private class FakeSettingsRepository : SettingsRepository {
         override val settings = MutableStateFlow(Settings())
+        var foolWriteGate: CompletableDeferred<Unit>? = null
+        val foolWrites = mutableListOf<FoolPreferences>()
 
         data class SocialMutation(
             val nick: String,
@@ -6517,6 +6676,40 @@ class ChatViewModelTest {
             identityRules: IrcIdentityRules,
         ) {
             foolMutations += SocialMutation(nick, isFool, identityRules)
+        }
+
+        override suspend fun setFoolPreferences(
+            nick: String,
+            preferences: io.github.trevarj.motd.data.prefs.FoolPreferences,
+            identityRules: io.github.trevarj.motd.irc.proto.IrcIdentityRules?,
+        ) {
+            foolWrites += preferences
+            foolWriteGate?.await()
+            val current = settings.value
+            val keys =
+                current.fools.filter {
+                    identityRules?.normalize(it) == identityRules?.normalize(nick.trim()) && (
+                        identityRules != null || it ==
+                            io.github.trevarj.motd.data.prefs
+                                .normalizeNick(nick)
+                    )
+                }
+            settings.value =
+                current.copy(
+                    foolPreferences =
+                        current.foolPreferences.toMutableMap().apply {
+                            keys.forEach {
+                                if (preferences ==
+                                    io.github.trevarj.motd.data.prefs
+                                        .FoolPreferences()
+                                ) {
+                                    remove(it)
+                                } else {
+                                    put(it, preferences)
+                                }
+                            }
+                        },
+                )
         }
 
         override suspend fun setFoolsMode(m: FoolsMode) = Unit

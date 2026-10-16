@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaper
+import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
@@ -125,6 +126,42 @@ class SearchRepositoryTest {
                     .first()
                     .hits
                     .isEmpty(),
+            )
+        }
+
+    @Test
+    fun mixedDimmedCollapsedAndHiddenSearchUsesIndividualVisibilityAndCurrentPreferences() =
+        runTest {
+            db.messageDao().insertAll(
+                listOf("a", "b", "c").mapIndexed { index, sender ->
+                    message(b1, "mixedfool $sender", sender = sender, serverTime = 100L + index, dedupKey = sender)
+                },
+            )
+            settings.state.value =
+                Settings(
+                    fools = setOf("a", "b", "c"),
+                    foolPreferences =
+                        mapOf(
+                            "b" to FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true),
+                            "c" to FoolPreferences(FoolsMode.HIDE, notifyMentions = true),
+                        ),
+                )
+            assertEquals(
+                listOf("b", "a"),
+                repo
+                    .search("mixedfool", null)
+                    .first()
+                    .hits
+                    .map { it.message.sender },
+            )
+            settings.setFoolPreferences("b", FoolPreferences(FoolsMode.HIDE), null)
+            assertEquals(
+                listOf("a"),
+                repo
+                    .search("mixedfool", null)
+                    .first()
+                    .hits
+                    .map { it.message.sender },
             )
         }
 
@@ -291,6 +328,38 @@ class SearchRepositoryTest {
             nick: String,
             isFool: Boolean,
         ) = Unit
+
+        override suspend fun setFoolPreferences(
+            nick: String,
+            preferences: io.github.trevarj.motd.data.prefs.FoolPreferences,
+            identityRules: io.github.trevarj.motd.irc.proto.IrcIdentityRules?,
+        ) {
+            val current = state.value
+            val keys =
+                current.fools.filter {
+                    identityRules?.normalize(it) == identityRules?.normalize(nick.trim()) && (
+                        identityRules != null || it ==
+                            io.github.trevarj.motd.data.prefs
+                                .normalizeNick(nick)
+                    )
+                }
+            state.value =
+                current.copy(
+                    foolPreferences =
+                        current.foolPreferences.toMutableMap().apply {
+                            keys.forEach {
+                                if (preferences ==
+                                    io.github.trevarj.motd.data.prefs
+                                        .FoolPreferences()
+                                ) {
+                                    remove(it)
+                                } else {
+                                    put(it, preferences)
+                                }
+                            }
+                        },
+                )
+        }
 
         override suspend fun setFoolsMode(m: FoolsMode) = Unit
 

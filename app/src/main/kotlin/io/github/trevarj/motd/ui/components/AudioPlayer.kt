@@ -102,6 +102,7 @@ fun AudioAttachmentPlayers(
     onSeek: (AudioAttachment, Long) -> Unit,
     modifier: Modifier = Modifier,
     origin: AudioPlaybackOrigin? = null,
+    dimmed: Boolean = false,
     derivedWaveforms: Map<String, AudioWaveform> = emptyMap(),
     cacheStatuses: Map<String, AudioCacheStatus> = emptyMap(),
     formattedTime: String? = null,
@@ -145,6 +146,7 @@ fun AudioAttachmentPlayers(
                         playbackState = playbackState,
                         networkId = networkId,
                         origin = origin,
+                        dimmed = dimmed,
                         derivedWaveform = derivedWaveforms[attachment.playbackId],
                         cacheStatus = cacheStatuses[attachment.playbackId] ?: AudioCacheStatus.UNKNOWN,
                         transcript = transcripts[attachment.playbackId],
@@ -195,6 +197,7 @@ private fun AudioAttachmentPlayer(
     origin: AudioPlaybackOrigin?,
     derivedWaveform: AudioWaveform?,
     cacheStatus: AudioCacheStatus,
+    dimmed: Boolean,
     formattedTime: String?,
     pending: Boolean,
     failed: Boolean,
@@ -214,6 +217,12 @@ private fun AudioAttachmentPlayer(
     trailingContent: (@Composable (Color) -> Unit)?,
 ) {
     val context = LocalContext.current
+    val scheme = MaterialTheme.colorScheme
+    val playerColor = messageContainerColor(scheme.surfaceContainer, scheme.background, dimmed)
+    val playerInk = if (dimmed) messageContentColor(scheme.onSurfaceVariant, playerColor, true, scheme.surfaceContainer) else scheme.onSurfaceVariant
+    val errorInk = if (dimmed) messageContentColor(scheme.error, playerColor, true, scheme.surfaceContainer) else scheme.error
+    val buttonColor = messageContainerColor(scheme.primary, playerColor, dimmed)
+    val buttonInk = if (dimmed) messageContentColor(scheme.onPrimary, buttonColor, true, scheme.primary) else scheme.onPrimary
     val active = playbackState.activeId == attachment.playbackId
     val playing = active && playbackState.playing
     val loading = active && playbackState.loading
@@ -245,6 +254,7 @@ private fun AudioAttachmentPlayer(
 
     AudioPlayerSurface(
         modifier = modifier,
+        color = playerColor,
         sourceModifier =
             Modifier.combinedClickable(
                 onClick = onClick ?: {},
@@ -279,7 +289,7 @@ private fun AudioAttachmentPlayer(
                             .testTag("audio_player_toggle")
                             .semantics { contentDescription = toggleLabel },
                 ) {
-                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
+                    Surface(shape = CircleShape, color = buttonColor) {
                         Box(
                             Modifier.size(40.dp),
                             contentAlignment = Alignment.Center,
@@ -306,12 +316,12 @@ private fun AudioAttachmentPlayer(
                                         CircularProgressIndicator(
                                             progress = { fraction },
                                             modifier = Modifier.size(20.dp),
-                                            color = MaterialTheme.colorScheme.onPrimary,
+                                            color = buttonInk,
                                             strokeWidth = 2.5.dp,
                                         )
                                     } ?: CircularProgressIndicator(
                                         modifier = Modifier.size(20.dp),
-                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        color = buttonInk,
                                         strokeWidth = 2.5.dp,
                                     )
                                 } else {
@@ -323,7 +333,7 @@ private fun AudioAttachmentPlayer(
                                                 else -> Icons.Filled.PlayArrow
                                             },
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        tint = buttonInk,
                                     )
                                 }
                             }
@@ -340,7 +350,7 @@ private fun AudioAttachmentPlayer(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = playerInk,
                     )
                 }
                 val scrubDuration = (duration ?: 1L).coerceAtLeast(1L)
@@ -364,7 +374,7 @@ private fun AudioAttachmentPlayer(
                             ?: "${formatAudioDuration(position)} / ${formatAudioDuration(duration)}",
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (error == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                        color = if (error == null) playerInk else errorInk,
                         maxLines = if (error == null) 1 else 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -373,21 +383,16 @@ private fun AudioAttachmentPlayer(
                             Icons.Outlined.Lock,
                             contentDescription = "Encrypted audio",
                             modifier = Modifier.padding(start = 4.dp).size(13.dp),
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = if (dimmed) messageContentColor(scheme.primary, playerColor, true, scheme.surfaceContainer) else scheme.primary,
                         )
                     }
                     formattedTime?.let { time ->
                         Spacer(Modifier.width(6.dp))
-                        MessageStatusIcon(isSelf = origin?.isSelf == true, pending = pending, failed = failed)
+                        MessageStatusIcon(isSelf = origin?.isSelf == true, pending = pending, failed = failed, contentColor = if (failed) errorInk else playerInk)
                         Text(
                             time,
                             style = MaterialTheme.typography.labelSmall,
-                            color =
-                                if (failed) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
+                            color = if (failed) errorInk else playerInk,
                             maxLines = 1,
                         )
                     }
@@ -396,7 +401,7 @@ private fun AudioAttachmentPlayer(
                             Icons.Outlined.Warning,
                             null,
                             modifier = Modifier.padding(start = 4.dp).size(14.dp),
-                            tint = MaterialTheme.colorScheme.error,
+                            tint = errorInk,
                         )
                     }
                     IconButton(
@@ -407,7 +412,7 @@ private fun AudioAttachmentPlayer(
                             Icons.Filled.MoreVert,
                             contentDescription = "Audio details",
                             modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = playerInk,
                         )
                     }
                 }
@@ -469,12 +474,12 @@ private fun AudioAttachmentPlayer(
 @Composable
 private fun AudioPlayerSurface(
     modifier: Modifier,
+    color: Color,
     sourceModifier: Modifier,
     sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)?,
     trailingContent: (@Composable (Color) -> Unit)?,
     content: @Composable () -> Unit,
 ) {
-    val color = MaterialTheme.colorScheme.surfaceContainer
     if (trailingContent == null) {
         if (sourceWrapper == null) {
             Surface(modifier = modifier.then(sourceModifier), shape = MotdShapes.card, color = color, content = content)

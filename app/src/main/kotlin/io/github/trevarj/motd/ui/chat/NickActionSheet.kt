@@ -74,6 +74,7 @@ fun NickActionSheet(
     onMention: () -> Unit,
     onToggleFriend: () -> Unit,
     onToggleFool: () -> Unit,
+    onOpenFoolSettings: () -> Unit,
     onIgnoreNetwork: () -> Unit = {},
     onInviteToChannel: (() -> Unit)? = null,
     onOp: (grant: Boolean) -> Unit,
@@ -168,6 +169,14 @@ fun NickActionSheet(
                     stringResource(if (isFool) R.string.nick_sheet_remove_fool else R.string.nick_sheet_add_fool),
                     onToggleFool,
                 )
+                if (isFool) {
+                    NickAction(
+                        Icons.Outlined.Edit,
+                        stringResource(R.string.nick_sheet_fool_settings),
+                        onOpenFoolSettings,
+                        tag = "nick_sheet_fool_settings",
+                    )
+                }
                 NickAction(Icons.Outlined.Block, stringResource(R.string.nick_sheet_ignore_network), onIgnoreNetwork)
             }
 

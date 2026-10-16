@@ -22,6 +22,7 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.MessageNotifier
@@ -125,9 +126,13 @@ class MotdNotificationsAlertingTest {
         }
 
     @After
-    fun tearDown() {
-        db.close()
-    }
+    fun tearDown() =
+        runTest {
+            repo.setFool("alert-fool", false)
+            repo.setFool("stable-account", false)
+            repo.setFool("earlier-fool", false)
+            db.close()
+        }
 
     private fun interceptQueries(database: SupportSQLiteDatabase): SupportSQLiteDatabase =
         object : SupportSQLiteDatabase by database {
@@ -809,10 +814,10 @@ class MotdNotificationsAlertingTest {
         }
 
     @Test
-    fun promotionWithUnresolvableRemainingAnchor_preservesBothPostedRowsAndReportsFailure() = runTest { assertUnresolvableRemainingAnchor(recreate = false) }
+    fun promotionWithUnresolvableRemainingAnchor_rebuildsBothLanesSilently() = runTest { assertUnresolvableRemainingAnchor(recreate = false) }
 
     @Test
-    fun recreatedPromotionWithUnresolvableRemainingAnchor_preservesBothPostedRowsAndReportsFailure() = runTest { assertUnresolvableRemainingAnchor(recreate = true) }
+    fun recreatedPromotionWithUnresolvableRemainingAnchor_rebuildsBothLanesSilently() = runTest { assertUnresolvableRemainingAnchor(recreate = true) }
 
     private suspend fun TestScope.assertUnresolvableRemainingAnchor(recreate: Boolean) {
         val channelId = channel()
@@ -835,9 +840,6 @@ class MotdNotificationsAlertingTest {
         val incoming = chat("alert-peer", "promote", "promote", 2_000).copy(target = "#chan")
         processor.process(networkId, incoming)
         processor.process(networkId, chat("alert-peer", "me: existing", "existing", 3_000).copy(target = "#chan"))
-        val ordinary = lane(null)
-        val mentions = lane("channel_mentions")
-        val promoted = requireNotNull(db.messageDao().byMsgid(channelId, "promote"))
         val existing = requireNotNull(db.messageDao().byMsgid(channelId, "existing"))
         db.messageDao().deleteById(requireNotNull(db.messageDao().byMsgid(channelId, "remaining")).id)
         if (recreate) {
@@ -848,13 +850,11 @@ class MotdNotificationsAlertingTest {
 
         processor.process(networkId, incoming.copy(replyToMsgid = "self-parent"))
 
-        assertSame(ordinary, lane(null))
-        assertSame(mentions, lane("channel_mentions"))
-        assertEquals(listOf("remaining ordinary", "promote"), bodies(lane(null)))
-        assertEquals(listOf("me: existing"), bodies(lane("channel_mentions")))
-        assertLaneAnchor(ordinary, promoted)
-        assertLaneAnchor(mentions, existing)
-        assertTrue("refresh_failed" in failures)
+        assertEquals(listOf("channel_mentions"), postedNotifications().map { it.tag })
+        assertEquals(listOf("me: existing", "promote").sorted(), bodies(lane("channel_mentions")).sorted())
+        assertLaneAnchor(lane("channel_mentions"), existing)
+        assertSilent(lane("channel_mentions"))
+        assertFalse("refresh_failed" in failures)
     }
 
     @Test
@@ -941,7 +941,7 @@ class MotdNotificationsAlertingTest {
     }
 
     @Test
-    fun promotionWithFallbackBody_doesNotAlignShorterEventIdExtrasWithStyleMessages() =
+    fun promotionWithFallbackBody_rebuildsUnknownIdentityWithoutAligningShorterEventExtras() =
         runTest {
             val channelId = channel()
             val settings = allSettings()
@@ -949,15 +949,15 @@ class MotdNotificationsAlertingTest {
             processor.onRegistered(networkId, "me", emptyMap())
             processor.process(networkId, chat("me", "parent", "self-parent", 500).copy(target = "#chan", isSelf = true))
             processor.process(networkId, chat("alert-peer", "canonical ordinary", serverTime = 1_000).copy(target = "#chan"))
-            notifications.onIncoming(networkId, channelId, BufferType.CHANNEL, false, chat("alert-peer", "fallback ordinary", serverTime = 1_500).copy(target = "#chan"))
             val incoming = chat("alert-peer", "promote", "promote", 2_000).copy(target = "#chan")
             processor.process(networkId, incoming)
-            assertEquals(3, bodies(lane(null)).size)
+            notifications.onIncoming(networkId, channelId, BufferType.CHANNEL, false, chat("alert-peer", "fallback ordinary", serverTime = 1_500).copy(target = "#chan"))
+            assertEquals(listOf("canonical ordinary", "promote", "fallback ordinary"), bodies(lane(null)))
             assertEquals(2, lane(null).extras.getLongArray("motd.notificationEventIds")?.size)
 
             processor.process(networkId, incoming.copy(replyToMsgid = "self-parent"))
 
-            assertEquals(listOf("canonical ordinary", "fallback ordinary"), bodies(lane(null)))
+            assertEquals(listOf("canonical ordinary"), bodies(lane(null)))
             assertEquals(listOf("promote"), bodies(lane("channel_mentions")))
             val older = db.messageDao().historyRowsForMerge(channelId).single { it.text == "canonical ordinary" }
             assertLaneAnchor(lane(null), older)
@@ -1032,35 +1032,151 @@ class MotdNotificationsAlertingTest {
         }
 
     @Test
-    fun recreatedPromotion_rebuildsRemainingOrdinaryHistoryAboveReadFloorAndExcludesFools() =
-        runTest {
-            val channelId = channel()
-            val settings = allSettings()
-            var processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
-            processor.onRegistered(networkId, "me", emptyMap())
-            processor.process(networkId, chat("me", "parent", "self-parent", 500).copy(target = "#chan", isSelf = true))
-            processor.process(networkId, chat("alert-peer", "read ordinary", "read", 1_000).copy(target = "#chan"))
-            processor.process(networkId, chat("earlier-fool", "hidden ordinary", "hidden", 1_500).copy(target = "#chan"))
-            processor.process(networkId, chat("alert-peer", "remaining ordinary", "remaining", 2_000).copy(target = "#chan"))
-            val incoming = chat("alert-peer", "promote", "promote", 3_000).copy(target = "#chan")
-            processor.process(networkId, incoming)
-            val read = requireNotNull(db.messageDao().byMsgid(channelId, "read"))
-            val remaining = requireNotNull(db.messageDao().byMsgid(channelId, "remaining"))
-            val buffer = requireNotNull(db.bufferDao().observeById(channelId))
-            db.bufferDao().update(buffer.copy(localReadAnchorTime = read.serverTime, localReadAnchorEventId = read.id))
-            repo.setFool("earlier-fool", true)
+    fun recreatedPromotion_rebuildsRemainingOrdinaryHistoryAboveReadFloorAndExcludesFools() = runTest { assertPromotionFiltersCurrentPermissions(recreate = true) }
+
+    @Test
+    fun cachedPromotion_filtersRemainingOrdinaryHistoryAboveReadFloorEvenWhenFoolMentionsEnabled() = runTest { assertPromotionFiltersCurrentPermissions(recreate = false) }
+
+    private suspend fun TestScope.assertPromotionFiltersCurrentPermissions(recreate: Boolean) {
+        val channelId = channel()
+        val settings = allSettings()
+        var processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
+        processor.onRegistered(networkId, "me", emptyMap())
+        processor.process(networkId, chat("me", "parent", "self-parent", 500).copy(target = "#chan", isSelf = true))
+        processor.process(networkId, chat("alert-peer", "read ordinary", "read", 1_000).copy(target = "#chan"))
+        processor.process(networkId, chat("earlier-fool", "hidden ordinary", "hidden", 1_500).copy(target = "#chan"))
+        processor.process(networkId, chat("alert-peer", "remaining ordinary", "remaining", 2_000).copy(target = "#chan"))
+        val incoming = chat("alert-peer", "promote", "promote", 3_000).copy(target = "#chan")
+        processor.process(networkId, incoming)
+        val read = requireNotNull(db.messageDao().byMsgid(channelId, "read"))
+        val remaining = requireNotNull(db.messageDao().byMsgid(channelId, "remaining"))
+        val buffer = requireNotNull(db.bufferDao().observeById(channelId))
+        db.bufferDao().update(buffer.copy(localReadAnchorTime = read.serverTime, localReadAnchorEventId = read.id))
+        repo.setFool("earlier-fool", true)
+        repo.setFoolPreferences("earlier-fool", FoolPreferences(notifyMentions = true))
+        if (recreate) {
             notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
             processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
             processor.onRegistered(networkId, "me", emptyMap())
+        }
 
-            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(incoming.copy(replyToMsgid = "self-parent"))))
+        processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(incoming.copy(replyToMsgid = "self-parent"))))
 
-            assertEquals(listOf("remaining ordinary"), bodies(lane(null)))
-            assertEquals(listOf("promote"), bodies(lane("channel_mentions")))
-            assertLaneAnchor(lane(null), remaining)
-            assertEquals(listOf(remaining.id), lane(null).extras.getLongArray("motd.notificationEventIds")?.toList())
-            postedNotifications().forEach { assertSilent(it.notification) }
-            repo.setFool("earlier-fool", false)
+        assertEquals(listOf("remaining ordinary"), bodies(lane(null)))
+        assertEquals(listOf("promote"), bodies(lane("channel_mentions")))
+        assertLaneAnchor(lane(null), remaining)
+        assertEquals(listOf(remaining.id), lane(null).extras.getLongArray("motd.notificationEventIds")?.toList())
+        postedNotifications().forEach { assertSilent(it.notification) }
+        repo.setFool("earlier-fool", false)
+    }
+
+    @Test
+    fun cachedMentionUpdate_removesDisabledFoolOnlyOnNextUpdate_andKeepsDuplicateSilent() = runTest { assertCurrentFoolBodies(recreate = false) }
+
+    @Test
+    fun recreatedMentionLane_restoresAllowedFoolThenRemovesDisabledFoolOnNextRebuild() = runTest { assertCurrentFoolBodies(recreate = true) }
+
+    private suspend fun TestScope.assertCurrentFoolBodies(recreate: Boolean) {
+        val channelId = channel()
+        val settings = allSettings()
+        repo.setFool("alert-fool", true)
+        repo.setFoolPreferences("alert-fool", FoolPreferences(notifyMentions = true))
+        var processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
+        processor.onRegistered(networkId, "me", emptyMap())
+        val first = chat("alert-fool", "me: opted-in fool", "fool-first", 1_000).copy(target = "#chan")
+        processor.processPush(networkId, first)
+        val firstPosted = lane("channel_mentions")
+        assertAlerting(firstPosted)
+        processor.process(networkId, first)
+        assertSame(firstPosted, lane("channel_mentions"))
+        if (recreate) {
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
+            processor.onRegistered(networkId, "me", emptyMap())
+        }
+        processor.process(networkId, chat("alert-peer", "me: normal", "normal", 2_000).copy(target = "#chan"))
+        assertEquals(listOf(first.text, "me: normal"), bodies(lane("channel_mentions")))
+        val beforeEdit = lane("channel_mentions")
+        repo.setFoolPreferences("alert-fool", FoolPreferences())
+        assertSame(beforeEdit, lane("channel_mentions"))
+        if (recreate) {
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
+            processor.onRegistered(networkId, "me", emptyMap())
+        }
+        processor.process(networkId, chat("alert-peer", "me: latest", "latest", 3_000).copy(target = "#chan"))
+        val updated = lane("channel_mentions")
+        assertEquals(listOf("me: normal", "me: latest"), bodies(updated))
+        val latest = requireNotNull(db.messageDao().byMsgid(channelId, "latest"))
+        assertLaneAnchor(updated, latest)
+        assertAlerting(updated)
+        assertEquals(
+            listOf(requireNotNull(db.messageDao().byMsgid(channelId, "normal")).id, latest.id),
+            updated.extras.getLongArray("motd.notificationEventIds")?.toList(),
+        )
+    }
+
+    @Test
+    fun cachedDmUpdate_rechecksCanonicalAccountEnrichmentAndDirectMessagePermission() = runTest { assertCurrentDmPermissions(recreate = false) }
+
+    @Test
+    fun recreatedDmLane_restoresAllowedFoolAndRechecksMentionedDmCategoryAfterDisabling() = runTest { assertCurrentDmPermissions(recreate = true) }
+
+    private suspend fun TestScope.assertCurrentDmPermissions(recreate: Boolean) {
+        repo.setFool("stable-account", true)
+        repo.setFoolPreferences("stable-account", FoolPreferences(notifyDirectMessages = true))
+        var processor = EventProcessor(db, TypingTrackerImpl(), notifications)
+        processor.onRegistered(networkId, "me", emptyMap())
+        val first = chat("alert-peer", "old identity", "identity-first").copy(ctx = chat("alert-peer", "", "identity-first").ctx.copy(account = "stable-account"))
+        processor.process(networkId, first)
+        if (recreate) {
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            processor = EventProcessor(db, TypingTrackerImpl(), notifications)
+            processor.onRegistered(networkId, "me", emptyMap())
+        }
+        processor.process(networkId, chat("alert-peer", "me: retained DM", "identity-second", 2_000))
+        assertEquals(listOf(first.text, "me: retained DM"), bodies(lane(null)))
+        val second = requireNotNull(db.messageDao().byMsgid(dmBufferId, "identity-second"))
+        db.messageDao().update(second.copy(senderAccount = "stable-account"))
+        val beforeEdit = lane(null)
+        repo.setFoolPreferences("stable-account", FoolPreferences(notifyMentions = true))
+        assertSame(beforeEdit, lane(null))
+        if (recreate) {
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            processor = EventProcessor(db, TypingTrackerImpl(), notifications)
+            processor.onRegistered(networkId, "me", emptyMap())
+        }
+
+        processor.process(networkId, chat("alert-peer", "new normal DM", "identity-third", 3_000))
+
+        assertEquals(listOf("new normal DM"), bodies(lane(null)))
+        assertLaneAnchor(lane(null), requireNotNull(db.messageDao().byMsgid(dmBufferId, "identity-third")))
+        assertAlerting(lane(null))
+    }
+
+    @Test
+    fun recovery_rebuildsOnlyCurrentlyAllowedFoolBodiesSilently() =
+        runTest {
+            val channelId = channel()
+            repo.setFool("alert-fool", true)
+            repo.setFoolPreferences("alert-fool", FoolPreferences(notifyMentions = true))
+            val processor = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier)
+            processor.onRegistered(networkId, "me", emptyMap())
+            processor.processPush(networkId, chat("alert-fool", "me: recover opted-in", "recover-fool").copy(target = "#chan"))
+            assertFalse(requireNotNull(db.messageDao().byMsgid(channelId, "recover-fool")).notificationHandled)
+            notifications.recoverCanonicalNotifications()
+            assertEquals(listOf("me: recover opted-in"), bodies(lane("channel_mentions")))
+            assertSilent(lane("channel_mentions"))
+            processor.processPush(networkId, chat("alert-fool", "me: disabled before recovery", "recover-disabled", 2_000).copy(target = "#chan"))
+            repo.setFoolPreferences("alert-fool", FoolPreferences())
+            notifications.recoverCanonicalNotifications()
+            assertTrue(requireNotNull(db.messageDao().byMsgid(channelId, "recover-disabled")).notificationHandled)
+            val beforeUpdate = lane("channel_mentions")
+            val live = EventProcessor(db, TypingTrackerImpl(), notifications)
+            live.onRegistered(networkId, "me", emptyMap())
+            live.process(networkId, chat("alert-peer", "me: retained", "recover-normal", 3_000).copy(target = "#chan"))
+            assertEquals(listOf("me: recover opted-in"), bodies(beforeUpdate))
+            assertEquals(listOf("me: retained"), bodies(lane("channel_mentions")))
         }
 
     @Test
@@ -1075,6 +1191,10 @@ class MotdNotificationsAlertingTest {
             val posted = postedNotifications().single().notification
             assertEquals(listOf("server notice"), bodies(posted))
             assertMessageActions(posted, serverId, null, automotiveMessaging = false)
+            repo.setFool("alert-fool", true)
+            repo.setFoolPreferences("alert-fool", FoolPreferences(notifyMentions = true, notifyDirectMessages = true))
+            notifications.onIncoming(networkId, serverId, BufferType.SERVER, true, chat("alert-fool", "server remains silenced"))
+            assertSame(posted, postedNotifications().single().notification)
         }
 
     @Test

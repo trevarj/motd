@@ -204,6 +204,15 @@ class HistorySyncSettingsUiTest {
         override val settings: Flow<Settings> = initialSettings?.let(::MutableStateFlow) ?: delegate.settings
         var failWrites = false
 
+        override suspend fun setFoolPreferences(
+            nick: String,
+            preferences: io.github.trevarj.motd.data.prefs.FoolPreferences,
+            identityRules: io.github.trevarj.motd.irc.proto.IrcIdentityRules?,
+        ) {
+            if (failWrites) throw IOException("failed")
+            delegate.setFoolPreferences(nick, preferences, identityRules)
+        }
+
         override suspend fun setHistorySyncMode(mode: HistorySyncMode) {
             if (failWrites) throw IOException("failed")
             try {

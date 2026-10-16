@@ -4,12 +4,14 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_COMMON_MIN_MESSAGES
 import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_COMMON_WINDOW_MS
 import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_WINDOW_MS
 import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.merge
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 
@@ -46,7 +48,8 @@ data class MessageVisibilitySpec(
     val showRedactedMessages: Boolean = true,
     /** Stored configured nicks; consumers normalize them with the room's IRC identity rules. */
     val fools: Set<String> = emptySet(),
-    val foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+    val foolsMode: FoolsMode = FoolsMode.DIMMED,
+    val foolPreferences: Map<String, FoolPreferences> = emptyMap(),
     /** Chat-local escape hatch: reveal HIDE-mode rows without making them meaningful activity. */
     val revealHiddenFools: Boolean = false,
 ) {
@@ -61,6 +64,7 @@ data class MessageVisibilitySpec(
                 showRedactedMessages = settings.showRedactedMessages,
                 fools = settings.fools,
                 foolsMode = settings.foolsMode,
+                foolPreferences = settings.foolPreferences,
             )
     }
 }
@@ -70,18 +74,66 @@ class MessageVisibilityPolicy(
     private val spec: MessageVisibilitySpec,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
 ) {
-    private val foolActors = spec.fools.mapTo(hashSetOf<String>()) { identityRules.normalize(it.trim()) }
-    private val foolAccounts = spec.fools.mapTo(hashSetOf<String>()) { it.trim() }
+    private val actorPreferences = mutableMapOf<String, FoolPreferences>()
+    private val accountPreferences = mutableMapOf<String, FoolPreferences>()
+
+    init {
+        for (configured in spec.fools) {
+            val account = configured.trim()
+            val actor = identityRules.normalize(account)
+            val saved = spec.foolPreferences[configured] ?: FoolPreferences()
+            val resolved = saved.copy(visibility = saved.visibility ?: spec.foolsMode)
+            actorPreferences[actor] = actorPreferences[actor]?.merge(resolved, spec.foolsMode) ?: resolved
+            accountPreferences[account] = accountPreferences[account]?.merge(resolved, spec.foolsMode) ?: resolved
+        }
+    }
+
+    fun foolPreferences(
+        senderAccount: String?,
+        normalizedActor: String,
+    ): FoolPreferences? {
+        val actor = actorPreferences[normalizedActor]
+        val account = senderAccount?.let(accountPreferences::get)
+        return when {
+            actor == null -> account
+            account == null || account === actor -> actor
+            else -> actor.merge(account, spec.foolsMode)
+        }
+    }
+
+    fun foolPreferences(message: MessageEntity): FoolPreferences? =
+        if (message.kind in CONVERSATION_KINDS && !message.isSelf) {
+            foolPreferences(message.senderAccount, message.normalizedActor)
+        } else {
+            null
+        }
 
     fun matchesFoolIdentity(
         senderAccount: String?,
         normalizedActor: String,
-    ): Boolean = senderAccount?.let { it in foolAccounts } == true || normalizedActor in foolActors
+    ): Boolean = foolPreferences(senderAccount, normalizedActor) != null
 
-    fun isFool(message: MessageEntity): Boolean =
-        message.kind in CONVERSATION_KINDS &&
+    fun isFool(message: MessageEntity): Boolean = foolPreferences(message) != null
+
+    fun allowsNotification(
+        senderAccount: String?,
+        normalizedActor: String,
+        directMessage: Boolean,
+        hasMention: Boolean,
+    ): Boolean {
+        val preferences = foolPreferences(senderAccount, normalizedActor) ?: return true
+        return if (directMessage) preferences.notifyDirectMessages else hasMention && preferences.notifyMentions
+    }
+
+    fun mentionAttention(
+        message: MessageEntity,
+        directMessage: Boolean,
+    ): Boolean =
+        message.hasMention &&
+            message.kind in CONVERSATION_KINDS &&
             !message.isSelf &&
-            matchesFoolIdentity(message.senderAccount, message.normalizedActor)
+            foolPreferences(message)?.visibility != FoolsMode.HIDE &&
+            allowsNotification(message.senderAccount, message.normalizedActor, directMessage, message.hasMention)
 
     /**
      * Rows physically presented by the timeline. Collapse retains its expandable placeholder.
@@ -95,7 +147,7 @@ class MessageVisibilityPolicy(
     fun timeline(message: MessageEntity): Boolean =
         (spec.presenceMode != PresenceMode.HIDDEN || message.kind !in PRESENCE_KINDS) &&
             (spec.showRedactedMessages || message.kind != MessageKind.REDACTED) &&
-            !(spec.foolsMode == FoolsMode.HIDE && !spec.revealHiddenFools && isFool(message))
+            (spec.revealHiddenFools || foolPreferences(message)?.visibility != FoolsMode.HIDE)
 
     /** Preview and activity use the same eligibility; fools never reorder the chat list. */
     fun preview(message: MessageEntity): Boolean =
@@ -106,24 +158,23 @@ class MessageVisibilityPolicy(
     fun activity(message: MessageEntity): Boolean = preview(message)
 
     /**
-     * Visible unread and mention counts include only other users' meaningful chat rows, plus
-     * incoming file offers: the chat-list cue counts payload-bearing DCC_TRANSFER rows, so the
-     * unread anchor must too or the badge promises a divider entry never resolves.
+     * Ordinary unread includes dimmed messages and collapsed placeholders, plus incoming file offers.
+     * Mention attention is independently restricted by category permission and Hidden visibility.
      */
     fun visibleUnread(message: MessageEntity): Boolean =
         (
             message.kind in CONVERSATION_KINDS ||
                 (message.kind == MessageKind.DCC_TRANSFER && message.eventPayload != null)
         ) &&
-            !message.isSelf && !isFool(message)
+            !message.isSelf && foolPreferences(message)?.visibility != FoolsMode.HIDE
 
-    /** Hide removes fool results; Collapse keeps them so the target can be expanded on open. */
+    /** Hidden results stay excluded even during a temporary timeline reveal. */
     fun search(message: MessageEntity): Boolean =
         message.kind in CONVERSATION_KINDS &&
-            !(spec.foolsMode == FoolsMode.HIDE && isFool(message))
+            foolPreferences(message)?.visibility != FoolsMode.HIDE
 
-    /** Anchors never attach to ignored activity, including a collapsed fool placeholder. */
-    fun anchor(message: MessageEntity): Boolean = timeline(message) && !isFool(message)
+    /** Dimmed rows and collapsed placeholders can anchor the reader; revealed Hidden rows cannot. */
+    fun anchor(message: MessageEntity): Boolean = timeline(message) && foolPreferences(message)?.visibility != FoolsMode.HIDE
 
     /** Ignored raw tails are already settled when the newest meaningful row is at the viewport. */
     fun effectiveBottom(message: MessageEntity): Boolean = anchor(message)
@@ -132,12 +183,16 @@ class MessageVisibilityPolicy(
 /** SQL equivalent of [MessageVisibilityPolicy], shared by paging and positional reads. */
 internal class MessageVisibilitySql(
     private val spec: MessageVisibilitySpec,
-    identityRules: IrcIdentityRules = IrcIdentityRules(),
+    private val identityRules: IrcIdentityRules = IrcIdentityRules(),
 ) {
-    private val foolIdentities =
+    private val defaultPreferences = FoolPreferences()
+
+    private fun identities(include: (FoolPreferences) -> Boolean): String =
         spec.fools
             .asSequence()
-            .map { configured ->
+            .filter { configured ->
+                include(spec.foolPreferences[configured] ?: defaultPreferences)
+            }.map { configured ->
                 val account = configured.trim()
                 identityRules.normalize(account) to account
             }.distinct()
@@ -146,7 +201,12 @@ internal class MessageVisibilitySql(
                 val accountLiteral = if (account == actor) "NULL" else sqlBlobLiteral(account)
                 "(${sqlBlobLiteral(actor)},$accountLiteral)"
             }
-    private val defaultNotFoolPredicate = buildNotFoolPredicate()
+
+    private val foolIdentities = identities { true }
+    private val hiddenIdentities = identities { (it.visibility ?: spec.foolsMode) == FoolsMode.HIDE }
+    private val mentionsDisabled = identities { !it.notifyMentions }
+    private val directMessagesDisabled = identities { !it.notifyDirectMessages }
+    private val defaultNotFoolPredicate = buildNotFoolPredicate(foolIdentities)
 
     fun timeline(alias: String = "m"): String =
         allOf(
@@ -156,10 +216,10 @@ internal class MessageVisibilitySql(
                 PresenceMode.SMART -> smartPresence(alias)
             },
             redactionVisibility(alias),
-            if (spec.foolsMode == FoolsMode.HIDE && !spec.revealHiddenFools) notFool(alias) else TRUE,
+            if (spec.revealHiddenFools) TRUE else notHidden(alias),
         )
 
-    fun anchor(alias: String = "m"): String = allOf(timeline(alias), notFool(alias))
+    fun anchor(alias: String = "m"): String = allOf(timeline(alias), notHidden(alias))
 
     fun preview(alias: String = "m"): String = allOf(notPresence(alias), redactionVisibility(alias), notFool(alias))
 
@@ -171,8 +231,23 @@ internal class MessageVisibilitySql(
                 "OR (${column(alias, "kind")} = '${MessageKind.DCC_TRANSFER.name}' " +
                 "AND ${column(alias, "eventPayload")} IS NOT NULL))",
             "${column(alias, "isSelf")} = 0",
-            notFool(alias),
+            notHidden(alias),
         )
+
+    fun mentionAttention(
+        bufferTypeExpr: String,
+        alias: String = "m",
+    ): String =
+        allOf(
+            "${column(alias, "kind")} IN ($CONVERSATION_KIND_SQL)",
+            "${column(alias, "isSelf")} = 0",
+            "${column(alias, "hasMention")} = 1",
+            notHidden(alias),
+            "(($bufferTypeExpr = 'QUERY' AND ${buildNotFoolPredicate(directMessagesDisabled, alias)}) " +
+                "OR ($bufferTypeExpr != 'QUERY' AND ${buildNotFoolPredicate(mentionsDisabled, alias)}))",
+        )
+
+    private fun notHidden(alias: String): String = buildNotFoolPredicate(hiddenIdentities, alias)
 
     private fun notPresence(alias: String): String = "${column(alias, "kind")} NOT IN ($PRESENCE_KIND_SQL)"
 
@@ -218,13 +293,16 @@ internal class MessageVisibilitySql(
             "AND spoke.serverTime <= $serverTime + $SMART_PRESENCE_WINDOW_MS)))"
     }
 
-    private fun notFool(alias: String): String = if (alias == "m") defaultNotFoolPredicate else buildNotFoolPredicate(alias)
+    private fun notFool(alias: String): String = if (alias == "m") defaultNotFoolPredicate else buildNotFoolPredicate(foolIdentities, alias)
 
-    private fun buildNotFoolPredicate(alias: String = "m"): String {
-        if (foolIdentities.isEmpty()) return TRUE
+    private fun buildNotFoolPredicate(
+        identities: String,
+        alias: String = "m",
+    ): String {
+        if (identities.isEmpty()) return TRUE
         return "NOT (${column(alias, "kind")} IN ($CONVERSATION_KIND_SQL) " +
             "AND ${column(alias, "isSelf")} = 0 " +
-            "AND EXISTS (SELECT 1 FROM (VALUES $foolIdentities) AS fool " +
+            "AND EXISTS (SELECT 1 FROM (VALUES $identities) AS fool " +
             "WHERE fool.column1 = CAST(${column(alias, "normalizedActor")} AS BLOB) " +
             "OR (${column(alias, "senderAccount")} IS NOT NULL " +
             "AND COALESCE(fool.column2, fool.column1) = " +
@@ -242,8 +320,20 @@ internal class MessageVisibilitySql(
             spec: MessageVisibilitySpec,
             caseMappingExpr: String,
             alias: String = "m",
+        ): String = anyCasemap(spec, caseMappingExpr) { it.notFool(alias) }
+
+        fun mentionAttentionAnyCasemap(
+            spec: MessageVisibilitySpec,
+            caseMappingExpr: String,
+            bufferTypeExpr: String,
+            alias: String = "m",
+        ): String = anyCasemap(spec, caseMappingExpr) { it.mentionAttention(bufferTypeExpr, alias) }
+
+        private fun anyCasemap(
+            spec: MessageVisibilitySpec,
+            caseMappingExpr: String,
+            predicate: (MessageVisibilitySql) -> String,
         ): String {
-            if (spec.fools.isEmpty()) return TRUE
             val rfc1459 = IrcCaseMapping.Rfc1459.rawName
             val strict = IrcCaseMapping.Rfc1459Strict.rawName
             val casemap = "LOWER(COALESCE($caseMappingExpr,'$rfc1459'))"
@@ -253,7 +343,7 @@ internal class MessageVisibilitySql(
                 // ASCII, plus every unrecognized advertisement.
                 "$casemap NOT IN ('$rfc1459','$strict')" to IrcCaseMapping.Ascii,
             ).joinToString(separator = " OR ", prefix = "(", postfix = ")") { (test, mapping) ->
-                "($test AND ${MessageVisibilitySql(spec, IrcIdentityRules(mapping)).notFool(alias)})"
+                "($test AND ${predicate(MessageVisibilitySql(spec, IrcIdentityRules(mapping)))})"
             }
         }
     }
@@ -382,9 +472,8 @@ internal fun firstVisibleUnreadQuery(
 /**
  * Oldest unread nick mention among the newest [beforeIndex] visible-timeline rows: the nearest
  * such mention sitting strictly below the viewport (reversed list, index < firstVisibleItemIndex).
- * `visibleUnread` already excludes self/fools and non-chat kinds (its DCC-offer disjunct never
- * carries a mention), so `hasMention = 1` narrows it to mentions of our nick. Ordered ascending so
- * the oldest (closest to the viewport edge) wins.
+ * Mention attention uses the message buffer's category permission, independently of ordinary unread.
+ * Ordered ascending so the oldest (closest to the viewport edge) wins.
  */
 internal fun nearestUnreadMentionInPrefixQuery(
     bufferId: Long,
@@ -401,8 +490,7 @@ internal fun nearestUnreadMentionInPrefixQuery(
             ") AS viewport WHERE (viewport.serverTime > ? OR " +
             "(viewport.serverTime = ? AND (viewport.timelineOrder > ? OR " +
             "(viewport.timelineOrder = ? AND viewport.id > ?)))) " +
-            "AND ${visibility.visibleUnread("viewport")} " +
-            "AND viewport.hasMention = 1 " +
+            "AND ${visibility.mentionAttention("(SELECT type FROM buffers WHERE id = viewport.bufferId)", "viewport")} " +
             "ORDER BY viewport.serverTime ASC, viewport.timelineOrder ASC, viewport.id ASC LIMIT 1",
         arrayOf<Any>(
             bufferId,
@@ -443,8 +531,8 @@ internal enum class GlobalFeedMode { ALL, MENTIONS }
  * `event_redirects` anti-join is defensive only — `CanonicalTimelineStore.coalesce` already deletes
  * the losing row.
  *
- * Fools are excluded in both modes (preview semantics: a collapsed placeholder means nothing here),
- * keyed on each row's own network casemap so the SQL never depends on which networks exist.
+ * ALL excludes every fool. MENTIONS admits only non-Hidden, permitted mention attention, keyed on
+ * each row's own network casemap so the SQL never depends on which networks exist.
  *
  * [key] seeks one page without OFFSET; a null key reads the newest page. [GlobalFeedSeek.NEWER] is the
  * prepend direction and returns rows oldest-first, so the caller reverses them.
@@ -477,7 +565,13 @@ internal fun globalFeedPagingQuery(
             "AND redirect.losingEventId IS NULL " +
             "AND m.kind IN ($CONVERSATION_KIND_SQL) " +
             (if (mode == GlobalFeedMode.MENTIONS) "AND m.hasMention = 1 AND m.isSelf = 0 " else "") +
-            "AND ${MessageVisibilitySql.notFoolAnyCasemap(spec, "ni.caseMapping")} " +
+            "AND ${
+                if (mode == GlobalFeedMode.MENTIONS) {
+                    MessageVisibilitySql.mentionAttentionAnyCasemap(spec, "ni.caseMapping", "b.type")
+                } else {
+                    MessageVisibilitySql.notFoolAnyCasemap(spec, "ni.caseMapping")
+                }
+            } " +
             keyset +
             "ORDER BY m.serverTime $direction, m.id $direction" +
             limitClause,

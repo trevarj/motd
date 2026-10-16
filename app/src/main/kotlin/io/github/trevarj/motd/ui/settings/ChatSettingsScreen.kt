@@ -422,7 +422,8 @@ fun ChatSettingsContent(
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsNavigationRow(
                 title = stringResource(R.string.settings_fools_mode),
-                value = stringResource(if (settings.foolsMode == FoolsMode.COLLAPSE) R.string.settings_fools_collapse else R.string.settings_fools_hide),
+                summary = stringResource(R.string.settings_fools_mode_desc),
+                value = stringResource(foolVisibilityLabel(settings.foolsMode)),
                 modifier = Modifier.testTag("settings_fools_mode_picker"),
                 requestedTarget = target?.name,
                 targetName = SettingsTarget.FOOLS_MODE.name,
@@ -532,6 +533,7 @@ fun ChatSettingsContent(
             selected = settings.foolsMode,
             options =
                 listOf(
+                    ChoiceOption(FoolsMode.DIMMED, stringResource(R.string.settings_fools_dimmed), stringResource(R.string.settings_fools_dimmed_desc), "settings_fools_mode_dimmed"),
                     ChoiceOption(FoolsMode.COLLAPSE, stringResource(R.string.settings_fools_collapse), stringResource(R.string.settings_fools_collapse_desc), "settings_fools_mode_collapse"),
                     ChoiceOption(FoolsMode.HIDE, stringResource(R.string.settings_fools_hide), stringResource(R.string.settings_fools_hide_desc), "settings_fools_mode_hide"),
                 ),

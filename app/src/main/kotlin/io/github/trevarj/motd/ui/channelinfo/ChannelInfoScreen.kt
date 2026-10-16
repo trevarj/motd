@@ -94,6 +94,8 @@ import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.botDisplayName
 import io.github.trevarj.motd.ui.components.summary
+import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
+import io.github.trevarj.motd.ui.settings.foolEditorPreferences
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
@@ -119,6 +121,7 @@ fun ChannelInfoScreen(
     val inviteFeedback by viewModel.inviteFeedback.collectAsStateWithLifecycle()
     val presenceStates by viewModel.presenceStates.collectAsStateWithLifecycle()
     val notificationSummary by viewModel.notificationSummary.collectAsStateWithLifecycle()
+    var editingFool by remember { mutableStateOf<String?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(viewModel, onBack, resources) {
@@ -315,6 +318,22 @@ fun ChannelInfoScreen(
         )
     }
 
+    editingFool?.let { nick ->
+        val preferences = foolEditorPreferences(nick, state.foolsMode, state.fools, state.foolPreferences, state.identityRules)
+        LaunchedEffect(preferences) {
+            if (preferences == null) editingFool = null
+        }
+        if (preferences != null) {
+            FoolSettingsSheet(
+                nick = nick,
+                globalMode = state.foolsMode,
+                preferences = preferences,
+                onChange = { viewModel.updateFoolPreferences(nick, it) },
+                onDismiss = { editingFool = null },
+            )
+        }
+    }
+
     // Nick sheet: shared with the chat timeline. Moderation shown only when op.
     nickSheet?.let { sheet ->
         NickActionSheet(
@@ -337,6 +356,10 @@ fun ChannelInfoScreen(
             },
             onToggleFriend = { viewModel.toggleFriend(sheet.nick) },
             onToggleFool = { viewModel.toggleFool(sheet.nick) },
+            onOpenFoolSettings = {
+                viewModel.dismissNickSheet()
+                editingFool = sheet.nick
+            },
             onIgnoreNetwork = { viewModel.ignoreNickOnNetwork(sheet.nick) },
             onInviteToChannel = {
                 viewModel.dismissNickSheet()

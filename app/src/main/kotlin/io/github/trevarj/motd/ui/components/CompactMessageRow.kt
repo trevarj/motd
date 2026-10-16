@@ -72,6 +72,7 @@ internal fun CompactMessageRow(
     nickColors: NickColorScheme,
     modifier: Modifier = Modifier,
     hasMention: Boolean = false,
+    dimmed: Boolean = false,
     // Group continuation flag: false = omit the `nick:` prefix so the line reads as a continued run.
     showSender: Boolean = true,
     senderIsFriend: Boolean = false,
@@ -118,9 +119,10 @@ internal fun CompactMessageRow(
         } else {
             nameColor.copy(alpha = COMPACT_ROW_TINT_ALPHA)
         }
-    val paintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
+    val normalPaintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
+    val paintedRow = messageContainerColor(normalPaintedRow, MaterialTheme.colorScheme.background, dimmed)
     val bodyInk = codeColor
-    val bodyColor = remember(bodyInk, paintedRow) { ensureContrast(bodyInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
+    val bodyColor = remember(bodyInk, paintedRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, paintedRow, dimmed, normalPaintedRow) }
 
     // The `nick: text` content is a single flowing AnnotatedString so it wraps as one paragraph
     // like a real IRC line, with the nick colored (+ friend tint) and URLs linkified.
@@ -146,6 +148,7 @@ internal fun CompactMessageRow(
             codeColor,
             nickFontSize,
             paintedRow,
+            dimmed,
         ) {
             buildCompactLine(
                 displaySender,
@@ -162,6 +165,8 @@ internal fun CompactMessageRow(
                 codeColor,
                 nickFontSize = nickFontSize,
                 containerColor = paintedRow,
+                minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
+                normalContainerColor = normalPaintedRow,
             ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
         }
 
@@ -185,7 +190,7 @@ internal fun CompactMessageRow(
         trailingContent = trailingContent,
     ) {
         reply?.let {
-            ReplyMiniBubble(it, nickColors, onReplyClick, paintedRow)
+            ReplyMiniBubble(it, nickColors, onReplyClick, paintedRow, dimmed)
         }
 
         Row(verticalAlignment = Alignment.Top) {
@@ -203,8 +208,8 @@ internal fun CompactMessageRow(
             // Trailing timestamp keeps the IRC "right gutter" feel without a bubble.
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                 val metadataInk = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                val metadataColor = remember(metadataInk, paintedRow) { ensureContrast(metadataInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
-                MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed)
+                val metadataColor = remember(metadataInk, paintedRow, normalPaintedRow, dimmed) { messageContentColor(metadataInk, paintedRow, dimmed, normalPaintedRow) }
+                MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed, contentColor = metadataColor)
                 if (LocalTimestampConfig.current.show) {
                     Text(
                         text = formattedTime,
@@ -266,13 +271,17 @@ internal fun buildCompactLine(
     codeColor: Color = Color.Unspecified,
     nickFontSize: androidx.compose.ui.unit.TextUnit = 14.sp,
     containerColor: Color = Color.Unspecified,
+    minimumContrast: Double = MESSAGE_TEXT_CONTRAST,
+    normalContainerColor: Color = containerColor,
 ): AnnotatedString =
     buildAnnotatedString {
         val nameBackground =
             if (friendTint == Color.Unspecified || containerColor == Color.Unspecified) containerColor else friendTint.compositeOver(containerColor)
+        val normalNameBackground =
+            if (friendTint == Color.Unspecified || normalContainerColor == Color.Unspecified) normalContainerColor else friendTint.compositeOver(normalContainerColor)
         val nickStyle =
             SpanStyle(
-                color = if (nameBackground == Color.Unspecified) nameColor else ensureContrast(nameColor, listOf(nameBackground), MESSAGE_TEXT_CONTRAST),
+                color = if (nameBackground == Color.Unspecified) nameColor else messageContentColor(nameColor, nameBackground, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalNameBackground),
                 fontSize = nickFontSize,
                 fontWeight = FontWeight.Bold,
                 background = friendTint,
@@ -306,6 +315,8 @@ internal fun buildCompactLine(
             mentionColor = mentionColor,
             containerColor = containerColor,
             contentColor = bodyColor,
+            minimumContrast = minimumContrast,
+            normalContainerColor = normalContainerColor,
         )
     }
 

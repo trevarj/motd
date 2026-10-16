@@ -52,6 +52,38 @@ internal class ReadAloudHarness(
             },
             settings ?: object : SettingsRepository by DataStoreSettingsRepository(context) {
                 override val settings = social
+
+                override suspend fun setFoolPreferences(
+                    nick: String,
+                    preferences: io.github.trevarj.motd.data.prefs.FoolPreferences,
+                    identityRules: io.github.trevarj.motd.irc.proto.IrcIdentityRules?,
+                ) {
+                    val current = social.value
+                    val keys =
+                        current.fools.filter {
+                            identityRules?.normalize(it) == identityRules?.normalize(nick.trim()) && (
+                                identityRules != null || it ==
+                                    io.github.trevarj.motd.data.prefs
+                                        .normalizeNick(nick)
+                            )
+                        }
+                    social.value =
+                        current.copy(
+                            foolPreferences =
+                                current.foolPreferences.toMutableMap().apply {
+                                    keys.forEach {
+                                        if (preferences ==
+                                            io.github.trevarj.motd.data.prefs
+                                                .FoolPreferences()
+                                        ) {
+                                            remove(it)
+                                        } else {
+                                            put(it, preferences)
+                                        }
+                                    }
+                                },
+                        )
+                }
             },
             audio,
             activity,

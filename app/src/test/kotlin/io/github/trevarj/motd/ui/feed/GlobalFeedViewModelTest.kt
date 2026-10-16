@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.feed
 import androidx.paging.PagingData
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.db.network
+import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
@@ -91,6 +92,49 @@ class GlobalFeedViewModelTest {
             assertEquals(2, generations)
 
             job.cancel()
+        }
+
+    @Test
+    fun mentionsProjectionRetainsPermissionsAndVisibilityButAllKeepsNarrowMembershipProjection() =
+        runTest {
+            val specs = MutableStateFlow(MessageVisibilitySpec(fools = setOf("b")))
+            val mentionsGenerations = mutableListOf<MessageVisibilitySpec>()
+            var allGenerations = 0
+            val mentions =
+                globalFeedPages(
+                    source = { spec ->
+                        mentionsGenerations += spec
+                        flowOf(PagingData.empty<SearchHit>())
+                    },
+                    specs = specs,
+                    mentionsOnly = true,
+                )
+            val all =
+                globalFeedPages(
+                    source = {
+                        allGenerations++
+                        flowOf(PagingData.empty<SearchHit>())
+                    },
+                    specs = specs,
+                )
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { mentions.collect() }
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { all.collect() }
+            runCurrent()
+            assertEquals(1, mentionsGenerations.size)
+            specs.value = specs.value.copy(foolPreferences = mapOf("b" to FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true)))
+            runCurrent()
+            assertEquals(2, mentionsGenerations.size)
+            assertEquals(specs.value.foolPreferences, mentionsGenerations.last().foolPreferences)
+            specs.value = specs.value.copy(foolPreferences = mapOf("b" to FoolPreferences(FoolsMode.COLLAPSE)))
+            runCurrent()
+            assertEquals(3, mentionsGenerations.size)
+            specs.value = specs.value.copy(foolsMode = FoolsMode.HIDE)
+            runCurrent()
+            assertEquals(4, mentionsGenerations.size)
+            specs.value = specs.value.copy(presenceMode = PresenceMode.HIDDEN, showRedactedMessages = false, revealHiddenFools = true)
+            runCurrent()
+            assertEquals(4, mentionsGenerations.size)
+            assertEquals(1, allGenerations)
         }
 
     @Test

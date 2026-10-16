@@ -244,9 +244,9 @@ class BoundedIslandMarkReadTest {
     fun aMaterializedIgnoredTailIsStillSkippedPastAndAcknowledged() =
         runTest {
             // The rule the hardened predicate must NOT have broken: rows the policy ignores are settled
-            // by definition, so a viewport sitting above a materialized fool tail is still the bottom
-            // and still acknowledges the room's newest raw row (which is that fool row).
-            val foolSpec = MessageVisibilitySpec(fools = setOf("fool"), foolsMode = FoolsMode.COLLAPSE)
+            // by definition, so a viewport above temporarily revealed Hidden rows is still at bottom
+            // and still acknowledges the room's newest raw row. Collapsed placeholders are not ignored.
+            val foolSpec = MessageVisibilitySpec(fools = setOf("fool"), foolsMode = FoolsMode.HIDE, revealHiddenFools = true)
             val foolPolicy = MessageVisibilityPolicy(foolSpec)
             insert("noise-1", serverTime = 6_000, sender = "fool")
             insert("noise-2", serverTime = 6_010, sender = "fool")

@@ -541,21 +541,23 @@ class ChatModelsTest {
         }
     }
 
-    @Test fun `collapsed fool tail counts as effective bottom and cannot become saved anchor`() {
+    @Test fun `dimmed and collapsed fool tails must actually enter viewport and can become saved anchors`() {
         val rows =
             listOf(
                 message(id = 3, sender = "fool"),
                 message(id = 2, sender = "alice"),
                 message(id = 1, sender = "bob"),
             )
-        val policy =
-            MessageVisibilityPolicy(
-                MessageVisibilitySpec(fools = setOf("fool"), foolsMode = FoolsMode.COLLAPSE),
-            )
-
-        assertTrue(isAtEffectiveBottom(1, 0, rows.size, rows::getOrNull, policy))
-        assertEquals(2L, newestEffectiveMessageId(rows.size, rows::getOrNull, policy))
-        assertEquals(2L, nearestAnchorRow(0, rows.size, rows::getOrNull, policy)?.second?.id)
+        for (mode in listOf(FoolsMode.DIMMED, FoolsMode.COLLAPSE)) {
+            val policy =
+                MessageVisibilityPolicy(
+                    MessageVisibilitySpec(fools = setOf("fool"), foolsMode = mode),
+                )
+            assertFalse(isAtEffectiveBottom(1, 0, rows.size, rows::getOrNull, policy))
+            assertTrue(isAtEffectiveBottom(0, 0, rows.size, rows::getOrNull, policy))
+            assertEquals(3L, newestEffectiveMessageId(rows.size, rows::getOrNull, policy))
+            assertEquals(3L, nearestAnchorRow(0, rows.size, rows::getOrNull, policy)?.second?.id)
+        }
     }
 
     @Test fun `meaningful row below viewport means it is not effective bottom`() {
@@ -578,7 +580,7 @@ class ChatModelsTest {
         // placeholders under it either.
         val foolPolicy =
             MessageVisibilityPolicy(
-                MessageVisibilitySpec(fools = setOf("fool"), foolsMode = FoolsMode.COLLAPSE),
+                MessageVisibilitySpec(fools = setOf("fool"), foolsMode = FoolsMode.HIDE, revealHiddenFools = true),
             )
         val foolThenPlaceholders: (Int) -> MessageEntity? = { index ->
             message(id = 3, sender = "fool").takeIf { index == 0 }
@@ -1175,6 +1177,8 @@ class ChatModelsTest {
                 firstVisibleIndex = 4,
                 firstVisibleOffset = 0,
                 targetOffset = 0,
+                canScrollForward = true,
+                targetFullyVisible = true,
                 eventId = row.id,
             ),
         )
@@ -1187,6 +1191,8 @@ class ChatModelsTest {
                 firstVisibleIndex = 5,
                 firstVisibleOffset = 0,
                 targetOffset = 0,
+                canScrollForward = true,
+                targetFullyVisible = true,
                 eventId = row.id,
             ),
         )
@@ -1199,6 +1205,8 @@ class ChatModelsTest {
                 firstVisibleIndex = 5,
                 firstVisibleOffset = 1,
                 targetOffset = 0,
+                canScrollForward = true,
+                targetFullyVisible = true,
                 eventId = row.id,
             ),
         )
@@ -1211,9 +1219,42 @@ class ChatModelsTest {
                 firstVisibleIndex = 4,
                 firstVisibleOffset = 0,
                 targetOffset = 0,
+                canScrollForward = true,
+                targetFullyVisible = true,
                 eventId = row.id,
             ),
         )
+    }
+
+    @Test
+    fun `exact jump accepts older boundary clamp only for the fully visible exact row`() {
+        val row = message(id = 7, serverTime = 100)
+        val loaded = listOf(message(id = 99, serverTime = 101), row)
+
+        fun placement(
+            canScrollForward: Boolean = false,
+            targetFullyVisible: Boolean = true,
+            firstVisibleIndex: Int = 0,
+            measuredKey: Long = row.id,
+            measuredIndex: Int = 1,
+        ) = exactTargetPlacement(
+            loadedStart = 0,
+            loadedItems = loaded,
+            visibleItems = listOf(measuredKey to measuredIndex),
+            firstVisibleIndex = firstVisibleIndex,
+            firstVisibleOffset = 0,
+            targetOffset = 0,
+            canScrollForward = canScrollForward,
+            targetFullyVisible = targetFullyVisible,
+            eventId = row.id,
+        )
+
+        assertEquals(ExactTargetPlacement.Positioned(1), placement())
+        assertEquals(ExactTargetPlacement.NeedsScroll(1), placement(canScrollForward = true))
+        assertEquals(ExactTargetPlacement.NeedsScroll(1), placement(targetFullyVisible = false))
+        assertEquals(ExactTargetPlacement.NeedsScroll(1), placement(measuredKey = 99))
+        assertEquals(ExactTargetPlacement.NeedsScroll(1), placement(measuredIndex = 0))
+        assertEquals(ExactTargetPlacement.NeedsScroll(1), placement(firstVisibleIndex = 2))
     }
 
     @Test
@@ -1285,7 +1326,7 @@ class ChatModelsTest {
 
     @Test
     fun `rendered bottom anchor skips an ignored row the way the effective bottom does`() {
-        val policy = MessageVisibilityPolicy(MessageVisibilitySpec(fools = setOf("troll")))
+        val policy = MessageVisibilityPolicy(MessageVisibilitySpec(fools = setOf("troll"), foolsMode = io.github.trevarj.motd.data.prefs.FoolsMode.HIDE))
         val rows =
             listOf(
                 message(id = 40, sender = "troll", serverTime = 5_000),
@@ -2077,7 +2118,7 @@ class ChatModelsTest {
 
     @Test
     fun `the displayed watermark never claims a row the reader could not read`() {
-        val policy = MessageVisibilityPolicy(MessageVisibilitySpec(fools = setOf("troll")))
+        val policy = MessageVisibilityPolicy(MessageVisibilitySpec(fools = setOf("troll"), foolsMode = io.github.trevarj.motd.data.prefs.FoolsMode.HIDE))
         val rows =
             listOf(
                 message(id = 40, serverTime = 5_000),

@@ -177,6 +177,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.ItemSnapshotList
 import androidx.paging.LoadState
+import androidx.paging.PagingData
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.R
@@ -206,6 +207,7 @@ import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.ComposerStyle
+import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
@@ -255,6 +257,8 @@ import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.historySyncModeLabel
 import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.components.typingText
+import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
+import io.github.trevarj.motd.ui.settings.foolEditorPreferences
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.ConversationTypography
 import io.github.trevarj.motd.ui.theme.LocalSpacing
@@ -273,6 +277,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -404,6 +409,7 @@ fun ChatScreen(
     var avatarUploadOpen by rememberSaveable { mutableStateOf(false) }
     var inviteNick by rememberSaveable { mutableStateOf<String?>(null) }
     var inviteChannelOpen by rememberSaveable { mutableStateOf(false) }
+    var editingFool by rememberSaveable { mutableStateOf<String?>(null) }
     // A prefill aimed at this conversation while it is already open (gesture orb). It arrives as
     // text rather than as an entry to drain, and rides the same append path as a nick-sheet mention.
     LaunchedEffect(viewModel) {
@@ -424,7 +430,12 @@ fun ChatScreen(
     // with the choreographer, which can stay quiescent indefinitely on an idle screen. That wedge
     // froze automatic history backfill after one page. Main.immediate resumes with ordinary Main
     // messages instead, so generation handoff never depends on frame traffic.
-    val items = viewModel.messages.collectAsLazyPagingItems(Dispatchers.Main.immediate)
+    val pagingGeneration by viewModel.messageGeneration.collectAsStateWithLifecycle()
+    val items =
+        key(pagingGeneration) {
+            val pages = pagingGeneration?.pages ?: remember { flowOf(PagingData.empty<MessageEntity>()) }
+            pages.collectAsLazyPagingItems(Dispatchers.Main.immediate)
+        }
     val memberNicks by viewModel.memberNicks.collectAsStateWithLifecycle()
     val knownNicks by viewModel.knownNicks.collectAsStateWithLifecycle()
     val joinedChannels by viewModel.joinedChannels.collectAsStateWithLifecycle()
@@ -570,6 +581,8 @@ fun ChatScreen(
         friends = settings.friends,
         fools = settings.fools,
         foolsMode = settings.foolsMode,
+        foolPreferences = settings.foolPreferences,
+        presentedVisibilitySpec = pagingGeneration?.spec,
         showRedactedMessages = settings.showRedactedMessages,
         hiddenFoolsRevealed = hiddenFoolsRevealed,
         onHiddenFoolsRevealedChange = viewModel::setHiddenFoolsRevealed,
@@ -839,6 +852,22 @@ fun ChatScreen(
         )
     }
 
+    editingFool?.let { nick ->
+        val preferences = foolEditorPreferences(nick, settings.foolsMode, settings.fools, settings.foolPreferences, identityRules)
+        LaunchedEffect(preferences) {
+            if (preferences == null) editingFool = null
+        }
+        if (preferences != null) {
+            FoolSettingsSheet(
+                nick = nick,
+                globalMode = settings.foolsMode,
+                preferences = preferences,
+                onChange = { viewModel.updateFoolPreferences(nick, it) },
+                onDismiss = { editingFool = null },
+            )
+        }
+    }
+
     // Nick sheet: actions render immediately; whois fills in when it lands.
     nickSheet?.let { sheet ->
         val norm = identityRules::normalize
@@ -874,6 +903,10 @@ fun ChatScreen(
             },
             onToggleFriend = { viewModel.toggleFriend(sheet.nick) },
             onToggleFool = { viewModel.toggleFool(sheet.nick) },
+            onOpenFoolSettings = {
+                viewModel.dismissNickSheet()
+                editingFool = sheet.nick
+            },
             onIgnoreNetwork = { viewModel.ignoreNickOnNetwork(sheet.nick) },
             onInviteToChannel = {
                 viewModel.dismissNickSheet()
@@ -1058,7 +1091,9 @@ internal fun ChatContent(
     identityRules: IrcIdentityRules = IrcIdentityRules(),
     friends: Set<String> = emptySet(),
     fools: Set<String> = emptySet(),
-    foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+    foolsMode: FoolsMode = FoolsMode.DIMMED,
+    foolPreferences: Map<String, FoolPreferences> = emptyMap(),
+    presentedVisibilitySpec: MessageVisibilitySpec? = null,
     showRedactedMessages: Boolean = true,
     hiddenFoolsRevealed: Boolean = false,
     onHiddenFoolsRevealedChange: (Boolean) -> Unit = {},
@@ -1247,6 +1282,7 @@ internal fun ChatContent(
             presenceMode,
             fools,
             foolsMode,
+            foolPreferences,
             hiddenFoolsRevealed,
             showRedactedMessages,
             identityRules,
@@ -1257,6 +1293,7 @@ internal fun ChatContent(
                     showRedactedMessages = showRedactedMessages,
                     fools = fools,
                     foolsMode = foolsMode,
+                    foolPreferences = foolPreferences,
                     revealHiddenFools = hiddenFoolsRevealed,
                 ),
                 identityRules,
@@ -1891,10 +1928,19 @@ internal fun ChatContent(
         )
     }
 
+    val currentPresentedVisibilitySpec by rememberUpdatedState(presentedVisibilitySpec)
+
     suspend fun materializeTarget(
         target: ChatPositionTarget,
         scroll: Boolean,
     ): MaterializedChatTarget? {
+        target.requiredVisibilitySpec?.let { required ->
+            val matched =
+                withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
+                    snapshotFlow { currentPresentedVisibilitySpec }.first { it == required }
+                }
+            if (matched == null) return null
+        }
         // itemCount is used only to establish that the position is addressable. A non-null peek is
         // the sole proof that the target placeholder has materialized.
         val pageReady =
@@ -1975,6 +2021,13 @@ internal fun ChatContent(
             }
         }
         return row?.let { targetRow ->
+            if (positionTargetMatches(target, targetRow) &&
+                (target.requestToken != 0L || target.highlightMsgid != null || target.highlightEventId != null) &&
+                visibilityPolicy.isFool(targetRow)
+            ) {
+                expandedFools += targetRow.id
+                collapsedFools -= targetRow.id
+            }
             if (!scroll || target.expectedEventId != targetRow.id) {
                 return@let MaterializedChatTarget(targetRow, currentIndex() ?: materializedIndex)
             }
@@ -1985,13 +2038,22 @@ internal fun ChatContent(
 
             fun exactPlacement(): ExactTargetPlacement {
                 val snapshot = items.itemSnapshotList
+                val layout = listState.layoutInfo
+                val measured = layout.visibleItemsInfo.firstOrNull { it.key == targetRow.id }
+                val bottomHostHeightPx = readBottomHostHeightPx()
                 return exactTargetPlacement(
                     loadedStart = snapshot.placeholdersBefore,
                     loadedItems = snapshot.items,
-                    visibleItems = listState.layoutInfo.visibleItemsInfo.map { it.key to it.index },
+                    visibleItems = layout.visibleItemsInfo.map { it.key to it.index },
                     firstVisibleIndex = listState.firstVisibleItemIndex,
                     firstVisibleOffset = listState.firstVisibleItemScrollOffset,
                     targetOffset = target.offset,
+                    canScrollForward = listState.canScrollForward,
+                    targetFullyVisible =
+                        measured != null && measured.size > 0 &&
+                            bottomHostHeightPx > 0 && layout.beforeContentPadding >= bottomHostHeightPx &&
+                            measured.offset >= layout.viewportStartOffset + bottomHostHeightPx &&
+                            measured.offset + measured.size <= layout.viewportEndOffset,
                     eventId = targetRow.id,
                 )
             }
@@ -2026,7 +2088,7 @@ internal fun ChatContent(
     }
 
     // Deep jumps request one resolved placeholder, then validate both of its exact identities.
-    LaunchedEffect(jumpTarget) {
+    LaunchedEffect(jumpTarget, items) {
         val j = jumpTarget ?: return@LaunchedEffect
         onViewportRefreshAnchor(null)
         AutoFollowTrace.record("deep_jump_start", traceBufferId, traceSessionId) {
@@ -2052,7 +2114,6 @@ internal fun ChatContent(
             AutoFollowTrace.record("deep_jump_settled", traceBufferId, traceSessionId) {
                 "target_index=${j.index} item_count=${items.itemCount}"
             }
-            if (visibilityPolicy.isFool(targetRow)) expandedFools += targetRow.id
             highlightMsgid = j.highlightMsgid
             highlightEventId = j.highlightEventId
             initialPositionSettled = true
@@ -2063,7 +2124,7 @@ internal fun ChatContent(
 
     // Normal entry shares the deep-link paging mechanics but has no highlight. It is separate so
     // a deep link always wins and so a completed normal entry cannot be replayed on recomposition.
-    LaunchedEffect(initialTarget) {
+    LaunchedEffect(initialTarget, items) {
         recordEntryStage("initial_position_start", initialTarget, if (initialTarget == null) "no_target" else "waiting")
         val target = initialTarget ?: return@LaunchedEffect
         AutoFollowTrace.record("initial_position_start", traceBufferId, traceSessionId) {
@@ -3103,12 +3164,7 @@ internal fun ChatContent(
                 },
             )
             if (fools.isNotEmpty()) {
-                val foolsShown =
-                    if (foolsMode == FoolsMode.HIDE) {
-                        hiddenFoolsRevealed
-                    } else {
-                        expandAllFools
-                    }
+                val foolsShown = expandAllFools
                 DropdownMenuItem(
                     modifier = Modifier.testTag("chat_toggle_fools_visibility"),
                     text = {
@@ -3124,13 +3180,11 @@ internal fun ChatContent(
                     },
                     onClick = {
                         overflowOpen = false
-                        if (foolsMode == FoolsMode.HIDE) {
-                            onHiddenFoolsRevealedChange(!hiddenFoolsRevealed)
-                        } else {
-                            expandAllFools = !expandAllFools
-                            expandedFools = emptySet()
-                            collapsedFools = emptySet()
-                        }
+                        val shown = !expandAllFools
+                        onHiddenFoolsRevealedChange(shown)
+                        expandAllFools = shown
+                        expandedFools = emptySet()
+                        collapsedFools = emptySet()
                     },
                     leadingIcon = {
                         Icon(
@@ -3742,6 +3796,7 @@ internal fun ChatContent(
                                             friends = friends,
                                             fools = fools,
                                             foolsMode = foolsMode,
+                                            foolPreferences = foolPreferences,
                                             identityRules = identityRules,
                                             historyUiState = historyUiState,
                                             foolExpanded = foolExpanded,

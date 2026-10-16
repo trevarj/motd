@@ -14,6 +14,7 @@ import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
+import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.visibility.GlobalFeedKey
 import io.github.trevarj.motd.data.visibility.GlobalFeedMode
@@ -55,6 +56,81 @@ class GlobalFeedPagingDbTest {
 
     @After
     fun tearDown() = db.close()
+
+    @Test
+    fun mixedFoolsRemainExcludedFromAllButOnlyPermittedVisibleMentionAppears() =
+        runTest {
+            db.messageDao().insertAll(
+                listOf("a", "b", "c").mapIndexed { index, sender ->
+                    message(bufferA, sender, sender = sender, serverTime = 100L * (index + 1), dedupKey = sender, hasMention = true)
+                },
+            )
+            val spec =
+                MessageVisibilitySpec(
+                    fools = setOf("a", "b", "c"),
+                    foolPreferences =
+                        mapOf(
+                            "b" to FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true),
+                            "c" to FoolPreferences(FoolsMode.HIDE, notifyMentions = true),
+                        ),
+                )
+            for (reveal in listOf(false, true)) {
+                val current = spec.copy(revealHiddenFools = reveal)
+                assertTrue(db.messageDao().globalFeedRows(globalFeedPagingQuery(current)).isEmpty())
+                assertEquals(listOf("b"), db.messageDao().globalFeedRows(globalFeedPagingQuery(current, mode = GlobalFeedMode.MENTIONS)).map { it.message.sender })
+            }
+            val disabled = spec.copy(foolPreferences = spec.foolPreferences + ("b" to FoolPreferences(FoolsMode.COLLAPSE)))
+            assertTrue(db.messageDao().globalFeedRows(globalFeedPagingQuery(disabled, mode = GlobalFeedMode.MENTIONS)).isEmpty())
+        }
+
+    @Test
+    fun mentionFeedUsesEachRowsCasemapCategoryAndConservativeAccountActorMergePastBindLimit() =
+        runTest {
+            val quoted = "fool-' or 1=1 -- λ"
+            val configured =
+                buildList {
+                    repeat(1_501) { add("fool-$it") }
+                    addAll(listOf("nick[", "account", quoted, "dm"))
+                }
+            val preferences =
+                mapOf(
+                    "nick[" to FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true),
+                    "account" to FoolPreferences(FoolsMode.HIDE, notifyDirectMessages = true),
+                    quoted to FoolPreferences(FoolsMode.DIMMED, notifyMentions = true),
+                    "dm" to FoolPreferences(notifyDirectMessages = true),
+                )
+            val expected = mutableSetOf<String>()
+            for (mapping in listOf("rfc1459", "rfc1459-strict", "ascii")) {
+                val network = db.networkDao().insert(network(name = mapping))
+                db.networkIdentityDao().upsert(NetworkIdentityEntity(network, caseMapping = mapping))
+                val channel = db.bufferDao().insert(buffer(network, "#$mapping"))
+                val query = db.bufferDao().insert(buffer(network, "dm", type = BufferType.QUERY))
+                db.messageDao().insertAll(
+                    listOf(
+                        message(channel, "$mapping-nick", sender = "nick{", serverTime = 100, dedupKey = "nick", hasMention = true),
+                        message(channel, "$mapping-collision", sender = "nick{", serverTime = 200, dedupKey = "collision", hasMention = true).copy(senderAccount = "account"),
+                        message(channel, "$mapping-quoted", sender = quoted, serverTime = 300, dedupKey = "quoted", hasMention = true),
+                        message(channel, "$mapping-channel-dm-only", sender = "dm", serverTime = 400, dedupKey = "channel-dm", hasMention = true),
+                        message(query, "$mapping-dm", sender = "dm", serverTime = 500, dedupKey = "dm", hasMention = true),
+                        message(query, "$mapping-dm-mention-only", sender = "nick{", serverTime = 600, dedupKey = "dm-no", hasMention = true),
+                    ),
+                )
+                expected += "$mapping-nick"
+                expected += "$mapping-quoted"
+                expected += "$mapping-dm"
+                // ASCII nick{ is not a fool and therefore is not restricted by nick['s DM switch.
+                if (mapping == "ascii") expected += "$mapping-dm-mention-only"
+            }
+            for (reverse in listOf(false, true)) {
+                val spec =
+                    MessageVisibilitySpec(
+                        fools = (if (reverse) configured.reversed() else configured).toSet(),
+                        foolPreferences = preferences,
+                    )
+                val rows = db.messageDao().globalFeedRows(globalFeedPagingQuery(spec, mode = GlobalFeedMode.MENTIONS))
+                assertEquals(expected, rows.mapTo(mutableSetOf()) { it.message.text })
+            }
+        }
 
     @Test
     fun interleavesConversationRowsAcrossNetworksAndScopesFoolsToTheirOwnCasemap() =

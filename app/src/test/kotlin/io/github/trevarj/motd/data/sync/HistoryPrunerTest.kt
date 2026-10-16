@@ -27,8 +27,7 @@ import io.github.trevarj.motd.service.DeliveryMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -298,7 +297,7 @@ class HistoryPrunerTest {
         }
 
     private object StubSettings : SettingsRepository {
-        override val settings: Flow<Settings> = flowOf(Settings())
+        override val settings = MutableStateFlow(Settings())
 
         override suspend fun setThemeMode(m: ThemeMode) = Unit
 
@@ -326,6 +325,38 @@ class HistoryPrunerTest {
             nick: String,
             isFool: Boolean,
         ) = Unit
+
+        override suspend fun setFoolPreferences(
+            nick: String,
+            preferences: io.github.trevarj.motd.data.prefs.FoolPreferences,
+            identityRules: io.github.trevarj.motd.irc.proto.IrcIdentityRules?,
+        ) {
+            val current = settings.value
+            val keys =
+                current.fools.filter {
+                    identityRules?.normalize(it) == identityRules?.normalize(nick.trim()) && (
+                        identityRules != null || it ==
+                            io.github.trevarj.motd.data.prefs
+                                .normalizeNick(nick)
+                    )
+                }
+            settings.value =
+                current.copy(
+                    foolPreferences =
+                        current.foolPreferences.toMutableMap().apply {
+                            keys.forEach {
+                                if (preferences ==
+                                    io.github.trevarj.motd.data.prefs
+                                        .FoolPreferences()
+                                ) {
+                                    remove(it)
+                                } else {
+                                    put(it, preferences)
+                                }
+                            }
+                        },
+                )
+        }
 
         override suspend fun setFoolsMode(m: FoolsMode) = Unit
 

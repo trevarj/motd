@@ -16,6 +16,8 @@ import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.db.ircTarget
+import io.github.trevarj.motd.data.prefs.FoolPreferences
+import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.data.repo.BufferRepository
@@ -36,6 +38,7 @@ import io.github.trevarj.motd.ui.chat.WhoisInfo
 import io.github.trevarj.motd.ui.chat.parseWhois
 import io.github.trevarj.motd.ui.components.ChannelNotificationPresentation
 import io.github.trevarj.motd.ui.components.deriveChannelNotificationPresentation
+import io.github.trevarj.motd.ui.settings.FoolPreferencesEditor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -67,6 +70,8 @@ data class ChannelInfoUiState(
     val foolMembers: List<MemberEntity> = emptyList(),
     val friends: Set<String> = emptySet(),
     val fools: Set<String> = emptySet(),
+    val foolsMode: FoolsMode = FoolsMode.DIMMED,
+    val foolPreferences: Map<String, FoolPreferences> = emptyMap(),
     val identityRules: IrcIdentityRules = IrcIdentityRules(),
     // Round 5: true when the viewer holds op in this channel (moderation gate).
     val canModerate: Boolean = false,
@@ -181,6 +186,7 @@ class ChannelInfoViewModel
         private val clock: AppClock = AppClock(System::currentTimeMillis),
     ) : ViewModel() {
         private val bufferIdFlow = MutableStateFlow<Long?>(null)
+        private val foolPreferencesEditor = FoolPreferencesEditor(settingsRepository)
         val presenceStates = connectionManager.presenceStates
         private val _topicMutation = MutableStateFlow<TopicMutationState>(TopicMutationState.Idle)
         val topicMutation: StateFlow<TopicMutationState> = _topicMutation
@@ -245,6 +251,8 @@ class ChannelInfoViewModel
             val query: String,
             val friends: Set<String>,
             val fools: Set<String>,
+            val foolsMode: FoolsMode,
+            val foolPreferences: Map<String, FoolPreferences>,
             val identityRules: IrcIdentityRules,
             val joinedChannels: List<JoinedChannelRow>,
         )
@@ -257,7 +265,7 @@ class ChannelInfoViewModel
                 identityRulesFlow,
                 joinedChannelsFlow,
             ) { lastSpoke, query, settings, identityRules, joinedChannels ->
-                DerivedRoster(lastSpoke, query, settings.friends, settings.fools, identityRules, joinedChannels)
+                DerivedRoster(lastSpoke, query, settings.friends, settings.fools, settings.foolsMode, settings.foolPreferences, identityRules, joinedChannels)
             }
 
         // Latency, Ready flag and the live ISUPPORT snapshot for this channel's network. Reading
@@ -324,6 +332,8 @@ class ChannelInfoViewModel
                     foolMembers = foolMembers,
                     friends = derived.friends,
                     fools = derived.fools,
+                    foolsMode = derived.foolsMode,
+                    foolPreferences = derived.foolPreferences,
                     identityRules = identityRules,
                     canModerate = viewerCanModerate(buffer, members, order),
                     query = derived.query,
@@ -514,6 +524,13 @@ class ChannelInfoViewModel
                     current.identityRules,
                 )
             }
+
+        fun updateFoolPreferences(
+            nick: String,
+            transform: (FoolPreferences) -> FoolPreferences,
+        ) = viewModelScope.launch {
+            foolPreferencesEditor.update(nick, state.value.identityRules, transform)
+        }
 
         fun ignoreNickOnNetwork(nick: String) =
             viewModelScope.launch {

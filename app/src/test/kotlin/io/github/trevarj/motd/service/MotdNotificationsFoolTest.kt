@@ -16,20 +16,30 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.FoolPreferences
+import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
+import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.di.ForegroundBufferTrackerImpl
+import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.dickord.DickordLabsPrefs
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -101,6 +111,7 @@ class MotdNotificationsFoolTest {
             repo.setFool("troll", false)
             repo.setFool("troll~", false)
             repo.setFool("stable-account", false)
+            repo.setFool("new-nick", false)
             db.close()
         }
 
@@ -314,6 +325,176 @@ class MotdNotificationsFoolTest {
             )
 
             assertEquals(0, postedCount())
+        }
+
+    @Test
+    fun defaultFool_liveAndPushMentionsAndDms_areHandledWithoutReplayAfterOptIn() =
+        runTest {
+            val channelId =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = networkId, name = "#fools", displayName = "#fools", type = BufferType.CHANNEL),
+                )
+            repo.setFool("troll", true)
+            val processor = EventProcessor(db, TypingTrackerImpl(), notifications)
+            processor.onRegistered(networkId, "me", emptyMap())
+            val deliveries =
+                listOf(false, true).flatMap { push ->
+                    listOf(false, true).map { direct ->
+                        val key = "default-$push-$direct"
+                        val message =
+                            chat("troll", "me: $key").copy(
+                                ctx = chat("troll", key).ctx.copy(msgid = key, serverTime = 2_000L + (if (push) 100 else 0) + (if (direct) 10 else 0)),
+                                target = if (direct) "me" else "#fools",
+                            )
+                        if (push) processor.processPush(networkId, message) else processor.process(networkId, message)
+                        val row = requireNotNull(db.messageDao().byMsgid(if (direct) bufferId else channelId, key))
+                        assertTrue(row.notificationHandled)
+                        assertFalse(row.notificationClaimed)
+                        message
+                    }
+                }
+            assertEquals(0, postedCount())
+            repo.setFoolPreferences("troll", FoolPreferences(notifyMentions = true, notifyDirectMessages = true))
+            notifications.recoverCanonicalNotifications()
+            deliveries.forEach { processor.process(networkId, it) }
+            assertEquals(0, postedCount())
+        }
+
+    @Test
+    fun independentSwitches_useBufferTypeAndCanonicalReply_notAllOrWatchTraffic() =
+        runTest {
+            val channelId =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = networkId, name = "#fools", displayName = "#fools", type = BufferType.CHANNEL),
+                )
+            repo.setFool("troll", true)
+            val settings = NotificationSettingsImpl(backgroundScope, AppClock { 0L }, onExpired = {})
+            settings.setServer(networkId, NotificationMode.ALL)
+            settings.startWatch(channelId, null)
+            val processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
+            processor.onRegistered(networkId, "me", emptyMap())
+            processor.process(
+                networkId,
+                chat("me", "parent").copy(target = "#fools", isSelf = true, ctx = chat("me", "parent").ctx.copy(msgid = "self-parent", serverTime = 500)),
+            )
+            for (mentions in listOf(false, true)) {
+                repo.setFoolPreferences("troll", FoolPreferences(notifyMentions = mentions, notifyDirectMessages = !mentions))
+                for (category in listOf("mention", "reply", "ordinary", "dm", "dm-mention")) {
+                    context.getSystemService(android.app.NotificationManager::class.java).cancelAll()
+                    val key = "$mentions-$category"
+                    val direct = category.startsWith("dm")
+                    val expected = if (direct) !mentions else mentions && category != "ordinary"
+                    val message =
+                        chat("troll", if (category.endsWith("mention")) "me: $key" else key).copy(
+                            ctx = chat("troll", key).ctx.copy(msgid = key, serverTime = if (mentions) 3_000 else 2_000),
+                            target = if (direct) "me" else "#fools",
+                            replyToMsgid = "self-parent".takeIf { category == "reply" },
+                        )
+                    processor.process(networkId, message)
+                    assertEquals(key, if (expected) 1 else 0, postedCount())
+                    val row = requireNotNull(db.messageDao().byMsgid(if (direct) bufferId else channelId, key))
+                    assertEquals(category == "mention" || category == "reply" || category == "dm-mention", row.hasMention)
+                    assertTrue(row.notificationHandled)
+                }
+            }
+        }
+
+    @Test
+    fun hiddenOptIn_allowsDeviceDeliveryButRespectsScopeReadForegroundMuteAndWatchCategory() =
+        runTest {
+            repo.setFool("troll", true)
+            for (guard in listOf("allowed", "off", "read", "foreground", "mute", "watched", "category-off")) {
+                context.getSystemService(android.app.NotificationManager::class.java).cancelAll()
+                val target = "#$guard"
+                val channelId =
+                    db.bufferDao().insert(
+                        BufferEntity(
+                            networkId = networkId,
+                            name = target,
+                            displayName = target,
+                            type = BufferType.CHANNEL,
+                            muted = guard in setOf("mute", "watched", "category-off"),
+                            localUnreadFloorTime = 5_000L.takeIf { guard == "read" },
+                        ),
+                    )
+                val tracker = ForegroundBufferTrackerImpl()
+                if (guard == "foreground") tracker.set(channelId)
+                notifications = MotdNotifications(context, db, tracker, repo)
+                repo.setFoolPreferences("troll", FoolPreferences(visibility = FoolsMode.HIDE, notifyMentions = guard != "category-off"))
+                val settings = NotificationSettingsImpl(backgroundScope, AppClock { 0L }, onExpired = {})
+                settings.setServer(networkId, if (guard == "off") NotificationMode.OFF else NotificationMode.MENTIONS)
+                if (guard == "watched" || guard == "category-off") settings.startWatch(channelId, null)
+                val processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
+                processor.onRegistered(networkId, "me", emptyMap())
+                processor.process(
+                    networkId,
+                    chat("troll", "me: $guard").copy(target = target, ctx = chat("troll", guard).ctx.copy(msgid = guard)),
+                )
+                assertEquals(guard, if (guard == "allowed" || guard == "watched") 1 else 0, postedCount())
+                val row = requireNotNull(db.messageDao().byMsgid(channelId, guard))
+                val policy = MessageVisibilityPolicy(MessageVisibilitySpec.from(repo.settings.first()))
+                assertFalse(policy.visibleUnread(row))
+                assertFalse(policy.mentionAttention(row, directMessage = false))
+            }
+        }
+
+    @Test
+    fun canonicalIdentityAndMention_controlPermissionWhileDiagnosticsKeepActualMembership() =
+        runTest {
+            val channelId =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = networkId, name = "#fools", displayName = "#fools", type = BufferType.CHANNEL),
+                )
+            repo.setFool("stable-account", true)
+            repo.setFoolPreferences("stable-account", FoolPreferences(visibility = FoolsMode.HIDE, notifyMentions = true))
+            var evaluatedFields = emptyMap<String, Any?>()
+            val diagnostics =
+                object : DiagnosticLogger by DiagnosticLogger.Noop {
+                    override fun record(
+                        component: String,
+                        event: String,
+                        fields: () -> Map<String, Any?>,
+                    ) {
+                        if (component == "notifications" && event == "message_evaluated") evaluatedFields = fields()
+                    }
+                }
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, diagnostics = diagnostics)
+            val row =
+                MessageEntity(
+                    bufferId = channelId,
+                    serverTime = 2_000,
+                    sender = "new-nick",
+                    normalizedActor = "new-nick",
+                    senderAccount = "stable-account",
+                    kind = MessageKind.PRIVMSG,
+                    text = "reply without literal nickname",
+                    hasMention = true,
+                    dedupKey = "canonical-category",
+                )
+            val id = db.messageDao().insertAll(listOf(row)).single()
+            notifications.onCanonicalIncoming(networkId, channelId, BufferType.CHANNEL, false, id, chat("new-nick", row.text), refreshOnly = false)
+            assertEquals(1, postedCount())
+            assertEquals(true, evaluatedFields["fool"])
+            assertEquals(true, evaluatedFields["post"])
+            val posted =
+                NotificationManagerCompat
+                    .from(context)
+                    .activeNotifications
+                    .single()
+                    .notification
+            repo.setFool("new-nick", true)
+            val nextId = db.messageDao().insertAll(listOf(row.copy(serverTime = 3_000, dedupKey = "canonical-collision"))).single()
+            notifications.onCanonicalIncoming(networkId, channelId, BufferType.CHANNEL, true, nextId, chat("new-nick", "collision"), refreshOnly = false)
+            assertEquals(true, evaluatedFields["fool"])
+            assertEquals(false, evaluatedFields["post"])
+            assertSame(
+                posted,
+                NotificationManagerCompat
+                    .from(context)
+                    .activeNotifications
+                    .single()
+                    .notification,
+            )
         }
 
     @Test
@@ -534,20 +715,34 @@ class MotdNotificationsFoolTest {
         runTest {
             val message = chat("durable-identity-fixture", "legitimately repeated")
 
-            notifications.onIncoming(
-                networkId = networkId,
-                bufferId = bufferId,
-                type = BufferType.QUERY,
-                hasMention = false,
-                message = message.copy(ctx = message.ctx.copy(msgid = "durable-a")),
-            )
-            notifications.onIncoming(
-                networkId = networkId,
-                bufferId = bufferId,
-                type = BufferType.QUERY,
-                hasMention = false,
-                message = message.copy(ctx = message.ctx.copy(msgid = "durable-b")),
-            )
+            for (msgid in listOf("durable-a", "durable-b")) {
+                val id =
+                    db
+                        .messageDao()
+                        .insertAll(
+                            listOf(
+                                MessageEntity(
+                                    bufferId = bufferId,
+                                    msgid = msgid,
+                                    serverTime = message.ctx.serverTime,
+                                    sender = message.source.nick,
+                                    normalizedActor = message.source.nick,
+                                    kind = MessageKind.PRIVMSG,
+                                    text = message.text,
+                                    dedupKey = msgid,
+                                ),
+                            ),
+                        ).single()
+                notifications.onCanonicalIncoming(
+                    networkId,
+                    bufferId,
+                    BufferType.QUERY,
+                    false,
+                    id,
+                    message.copy(ctx = message.ctx.copy(msgid = msgid)),
+                    refreshOnly = false,
+                )
+            }
 
             val posted =
                 shadowOf(context.getSystemService(android.app.NotificationManager::class.java))

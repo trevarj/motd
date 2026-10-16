@@ -34,7 +34,37 @@ enum class LayoutDensity { COMPACT, COMFORTABLE, TWO_LINE }
 
 enum class NickColorPalette { THEME, CLASSIC, VIVID }
 
-enum class FoolsMode { COLLAPSE, HIDE }
+enum class FoolsMode { DIMMED, COLLAPSE, HIDE }
+
+@Serializable
+data class FoolPreferences(
+    val visibility: FoolsMode? = null,
+    val notifyMentions: Boolean = false,
+    val notifyDirectMessages: Boolean = false,
+)
+
+/** Coalescing equivalent identities must never make either identity less restrictive. */
+internal fun FoolPreferences.merge(
+    other: FoolPreferences,
+    globalMode: FoolsMode,
+): FoolPreferences =
+    FoolPreferences(
+        visibility =
+            if (visibility == null && other.visibility == null) {
+                null
+            } else {
+                maxOf(visibility ?: globalMode, other.visibility ?: globalMode)
+            },
+        notifyMentions = notifyMentions && other.notifyMentions,
+        notifyDirectMessages = notifyDirectMessages && other.notifyDirectMessages,
+    )
+
+internal fun foolsModeFromPreference(
+    saved: String?,
+    fools: Set<String>,
+): FoolsMode =
+    saved?.let { runCatching { FoolsMode.valueOf(it) }.getOrNull() }
+        ?: if (fools.isEmpty()) FoolsMode.DIMMED else FoolsMode.COLLAPSE
 
 enum class FolderDisplayMode { INLINE, TABS }
 
@@ -241,7 +271,9 @@ data class Settings(
     /** Normalized nicks. friends and fools are kept disjoint by the repository. */
     val friends: Set<String> = emptySet(),
     val fools: Set<String> = emptySet(),
-    val foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+    /** Sparse overrides; [fools] remains the membership authority. */
+    val foolPreferences: Map<String, FoolPreferences> = emptyMap(),
+    val foolsMode: FoolsMode = FoolsMode.DIMMED,
     /** Global presence-event presentation; a conversation may override it (RoomEntity). */
     val presenceMode: PresenceMode = PresenceMode.SMART,
     /** Keep visible accountability tombstones for messages deleted through IRCv3 redaction. */
@@ -367,6 +399,13 @@ interface SettingsRepository {
     ) {
         setFool(nick, isFool)
     }
+
+    /** Editing a nonmember does not add it; null visibility inherits the current global mode. */
+    suspend fun setFoolPreferences(
+        nick: String,
+        preferences: FoolPreferences,
+        identityRules: IrcIdentityRules? = null,
+    )
 
     suspend fun setFoolsMode(m: FoolsMode)
 

@@ -209,6 +209,19 @@ flowchart TD
   Speech evidence uses the covering `(bufferId, normalizedActor, kind, serverTime)` index:
   conversation-kind seeks exclude presence churn before either time window is scanned,
   keeping exact entry counts and paging refreshes bounded by speech rather than join/part history.
+- Fool membership stays global; sparse preferences independently inherit or override
+  Dimmed/Collapsed/Hidden visibility and opt into mention/reply or DM notifications.
+  Fresh lists default to Dimmed; legacy populated lists retain implicit Collapsed.
+  Shared Kotlin/SQL policy merges matching account/nick entries conservatively.
+  Dimmed messages and Collapsed placeholders count as ordinary unread; Hidden never
+  counts, even during temporary reveal. Mention attention additionally requires its
+  category permission. Previews, activity ordering and the ALL feed still exclude fools.
+  Explicit jumps reveal Hidden before positional counting and wait for the matching
+  paging generation. Show fools and per-row expansion are session-local, not preferences.
+  Exact jumps accept native short-chat scroll clamping only when the exact measured
+  row is fully inside the usable viewport, clear of the composer.
+  Dimmed ink uses a known opaque fill and a 4.5:1 contrast floor, not whole-row alpha.
+  The shared immediate editor serializes field changes against committed preferences.
 - TLS policy, Android KeyChain integration, proxy selection, and embedded
   obfuscation are injected at the `:app` boundary so `:irc` stays pure JVM.
 - Each saved network owns its own ordered post-connect commands. `ConnectionActor`
@@ -314,9 +327,13 @@ flowchart TD
   policies. The first LIVE/PUSH observation freezes each event's eligibility and watch mute
   bypass; HISTORY/REPLAY supply notification context without resolving that decision.
   Watches admit live channel PRIVMSG/ACTION and pushed highlights despite policy or mute;
-  ordinary `ALL` policy never bypasses mute or broadens push delivery. Self, ignore, fool,
-  foreground, and read suppression remain. Interrupted notification recovery reads the stored
-  decision, never later settings, and always presents silently.
+  ordinary `ALL` policy never bypasses mute or broadens push delivery. Self, ignore,
+  foreground and read suppression remain. Fool category permissions restrict delivery
+  and foreground sounds without changing frozen eligibility; watches cannot bypass them.
+  Hidden can still notify when explicitly opted in, but never gains in-app attention.
+  Cached/restored notification bodies reapply current category permissions on their
+  next update; preference edits neither replay handled events nor rebuild posted rows.
+  Interrupted recovery retains the frozen decision and always presents silently.
   Android Auto support is notification-only in the same Google-free APK: DMs and channel
   mentions expose no-UI semantic reply/mark-read actions. Ordinary `ALL`/watch channel
   messages use disjoint local-only rows; body histories and canonical read/open anchors

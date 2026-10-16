@@ -3,6 +3,7 @@ package io.github.trevarj.motd.data.visibility
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.EventRedirectEntity
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MessageKind
@@ -12,6 +13,7 @@ import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
+import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import kotlinx.coroutines.CompletableDeferred
@@ -63,7 +65,73 @@ class MessageVisibilityReaderTest {
     fun tearDown() = db.close()
 
     @Test
-    fun chatListFallsBackPastFoolAndExcludesFoolUnreadAndMention() =
+    fun mixedFoolsKeepSqlUnreadAttentionAndAnchorsAlignedDuringHiddenReveal() =
+        runTest {
+            val ids =
+                db.messageDao().insertAll(
+                    listOf("a", "b", "c").mapIndexed { index, sender ->
+                        message(bufferId, sender, sender = sender, serverTime = 100L * (index + 1), dedupKey = sender, hasMention = true)
+                    },
+                )
+            val spec =
+                MessageVisibilitySpec(
+                    fools = setOf("a", "b", "c"),
+                    foolPreferences =
+                        mapOf(
+                            "b" to FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true),
+                            "c" to FoolPreferences(FoolsMode.HIDE, notifyMentions = true),
+                        ),
+                )
+            val marker = TimelineAnchor(50, 0)
+            for (reveal in listOf(false, true)) {
+                val current = spec.copy(revealHiddenFools = reveal)
+                val raw = db.bufferDao().observeChatList().first()
+                val resolved = reader.resolveChatList(raw, current).single()
+                assertEquals(2, resolved.unreadCount)
+                assertEquals(1, resolved.mentionCount)
+                assertNull(resolved.lastMessageText)
+                assertEquals(if (reveal) 3 else 2, reader.countTimelineNewer(bufferId, 50, 0, current))
+                assertEquals(2, reader.countVisibleUnreadInTimelinePrefix(bufferId, 3, marker, 100, current))
+                assertEquals(ids[0], reader.firstVisibleUnreadAnchor(bufferId, marker, current)?.eventId)
+                assertEquals(ids[1], reader.firstVisibleUnreadAnchor(bufferId, TimelineAnchor(100, ids[0]), current)?.eventId)
+                assertEquals(ids[0], reader.resolveSavedAnchor(bufferId, null, 100, ids[0], current)?.id)
+                assertEquals(ids[1], reader.resolveSavedAnchor(bufferId, null, 200, ids[1], current)?.id)
+                assertEquals(ids[1], reader.resolveSavedAnchor(bufferId, null, 300, ids[2], current)?.id)
+                assertEquals(ids[1], reader.latestEffectiveAnchor(bufferId, current)?.id)
+                assertEquals(if (reveal) 1 else 0, reader.nearestUnreadMentionBelowIndex(bufferId, 3, marker, current))
+                val rows = db.messageDao().rawMessages(messagePagingQuery(bufferId, current))
+                val policy = MessageVisibilityPolicy(current)
+                assertEquals(2, rows.count(policy::visibleUnread))
+                assertEquals(1, rows.count { policy.mentionAttention(it, false) })
+            }
+            assertEquals(50L, db.bufferDao().observeById(bufferId)?.localReadAnchorTime)
+        }
+
+    @Test
+    fun directMentionAttentionUsesQueryPermissionNotChannelMentionPermission() =
+        runTest {
+            val queryId = db.bufferDao().insert(buffer(networkId, "alice", type = BufferType.QUERY, readMarkerTime = 50))
+            for (room in listOf(bufferId, queryId)) {
+                db.messageDao().insertAll(listOf(message(room, "mention", serverTime = 100, dedupKey = "mention-$room", hasMention = true)))
+            }
+            for (dmEnabled in listOf(false, true)) {
+                val current =
+                    MessageVisibilitySpec(
+                        fools = setOf("alice"),
+                        foolPreferences = mapOf("alice" to FoolPreferences(notifyMentions = !dmEnabled, notifyDirectMessages = dmEnabled)),
+                    )
+                val resolved = reader.resolveChatList(db.bufferDao().observeChatList().first(), current).associateBy { it.bufferId }
+                assertEquals(if (dmEnabled) 1 else 0, resolved.getValue(queryId).mentionCount)
+                assertEquals(if (dmEnabled) 0 else 1, resolved.getValue(bufferId).mentionCount)
+                assertEquals(1, resolved.getValue(queryId).unreadCount)
+                assertEquals(1, resolved.getValue(bufferId).unreadCount)
+                assertEquals(if (dmEnabled) 0 else null, reader.nearestUnreadMentionBelowIndex(queryId, 1, TimelineAnchor(50, 0), current))
+                assertEquals(if (dmEnabled) null else 0, reader.nearestUnreadMentionBelowIndex(bufferId, 1, TimelineAnchor(50, 0), current))
+            }
+        }
+
+    @Test
+    fun chatListFallsBackPastFoolAndKeepsOrdinaryUnreadSeparateFromMention() =
         runTest {
             db.messageDao().insertAll(
                 listOf(
@@ -84,7 +152,7 @@ class MessageVisibilityReaderTest {
             assertEquals("meaningful", resolved.lastMessageText)
             assertEquals("bob", resolved.lastMessageSender)
             assertEquals(100L, resolved.lastMessageTime)
-            assertEquals(1, resolved.unreadCount)
+            assertEquals(2, resolved.unreadCount)
             assertEquals(0, resolved.mentionCount)
         }
 
@@ -132,7 +200,7 @@ class MessageVisibilityReaderTest {
             val enrichedRaw = db.bufferDao().observeChatList().first()
             val enriched = reader.resolveChatList(enrichedRaw, spec).single()
             assertNull(enriched.lastMessageText)
-            assertEquals(0, enriched.unreadCount)
+            assertEquals(1, enriched.unreadCount)
         }
 
     @Test
@@ -219,7 +287,7 @@ class MessageVisibilityReaderTest {
                     .TimelineAnchor(50, 0)
 
             assertEquals(
-                1,
+                2,
                 reader.countVisibleUnreadInTimelinePrefix(
                     bufferId,
                     beforeIndex = 4,
@@ -299,7 +367,7 @@ class MessageVisibilityReaderTest {
         }
 
     @Test
-    fun savedAnchorAndUnreadSkipFoolRowsAndRawTailStillAdvances() =
+    fun savedAnchorAdmitsCollapsedFoolAndRawTailStillAdvances() =
         runTest {
             val ids =
                 db.messageDao().insertAll(
@@ -319,7 +387,7 @@ class MessageVisibilityReaderTest {
             val spec = spec(FoolsMode.COLLAPSE, presenceMode = PresenceMode.HIDDEN)
             val anchor = reader.resolveSavedAnchor(bufferId, null, 200, ids[1], spec)
 
-            assertEquals(ids[0], anchor?.id)
+            assertEquals(ids[1], anchor?.id)
             assertEquals(
                 100L,
                 reader
@@ -415,7 +483,7 @@ class MessageVisibilityReaderTest {
         }
 
     @Test
-    fun foolOnlyBufferHasNoAnchorOrVisibleUnread() =
+    fun collapsedFoolOnlyBufferHasUnreadAnchorButNoPreviewOrAttention() =
         runTest {
             val id =
                 db
@@ -426,18 +494,11 @@ class MessageVisibilityReaderTest {
             val spec = spec(FoolsMode.COLLAPSE)
             val resolved = reader.resolveChatList(db.bufferDao().observeChatList().first(), spec).single()
 
-            assertNull(reader.resolveSavedAnchor(bufferId, null, 100, id, spec))
-            assertNull(
-                reader.firstVisibleUnreadAnchor(
-                    bufferId,
-                    io.github.trevarj.motd.data.db
-                        .TimelineAnchor(50, 0),
-                    spec,
-                ),
-            )
+            assertEquals(id, reader.resolveSavedAnchor(bufferId, null, 100, id, spec)?.id)
+            assertEquals(id, reader.firstVisibleUnreadAnchor(bufferId, TimelineAnchor(50, 0), spec)?.eventId)
             assertNull(resolved.lastMessageText)
             assertNull(resolved.lastMessageTime)
-            assertEquals(0, resolved.unreadCount)
+            assertEquals(1, resolved.unreadCount)
             assertEquals(0, resolved.mentionCount)
         }
 
@@ -520,8 +581,8 @@ class MessageVisibilityReaderTest {
             )
             // firstVisible=1 => below = {0}; plain(500) has no mention => null (fall through to bottom).
             assertNull(reader.nearestUnreadMentionBelowIndex(bufferId, beforeIndex = 1, after = marker, spec = spec))
-            // firstVisible=4 => below = {0,1,2,3}; fool(200) is timeline-visible but visibleUnread excludes
-            // it, so the nearest mention is still mention-a (index 2), never the fool.
+            // The default fool is ordinary unread, but disabled mention attention still excludes it.
+            // The nearest mention is therefore mention-a (index 2), never the fool.
             assertEquals(
                 2,
                 reader.nearestUnreadMentionBelowIndex(bufferId, beforeIndex = 4, after = marker, spec = spec),

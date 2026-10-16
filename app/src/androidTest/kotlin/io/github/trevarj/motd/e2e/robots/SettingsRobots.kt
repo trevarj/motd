@@ -2,13 +2,17 @@ package io.github.trevarj.motd.e2e.robots
 
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.AnnotatedString
@@ -91,6 +95,94 @@ internal class SettingsRobot(
     fun chat() {
         swipeUntilTag("screen_settings", "settings_category_chat")
         click("settings_category_chat")
+    }
+
+    fun exerciseFoolSettings(nick: String) {
+        chat()
+        scrollToAndClick("settings_fools_mode_picker")
+        val modes = listOf("dimmed", "collapse", "hide")
+        val original =
+            modes.single { mode ->
+                compose
+                    .onNodeWithTag("settings_fools_mode_$mode", useUnmergedTree = true)
+                    .fetchSemanticsNode()
+                    .config
+                    .getOrNull(SemanticsProperties.Selected) == true
+            }
+        click("settings_fools_mode_dimmed")
+        awaitTagGone("settings_fools_mode_sheet")
+        scrollToAndClick("settings_fools")
+        replace("manage_nick_input", nick)
+        click("manage_nick_add")
+        click("manage_nick_$nick")
+        compose.onNodeWithTag("fool_visibility_inherit", useUnmergedTree = true).assertIsSelected()
+        click("fool_visibility_collapse")
+        awaitFoolSelection("fool_visibility_collapse")
+        scrollToAndClick("fool_notify_mentions")
+        awaitFoolSwitch("fool_notify_mentions", true)
+        compose.onNodeWithTag("fool_notify_direct_messages", useUnmergedTree = true).assertIsOff()
+        dismissFoolSettings()
+        click("manage_nick_$nick")
+        awaitFoolSelection("fool_visibility_collapse")
+        awaitFoolSwitch("fool_notify_mentions", true)
+        scrollToAndClick("fool_notify_direct_messages")
+        awaitFoolSwitch("fool_notify_direct_messages", true)
+        scrollToAndClick("fool_notify_mentions")
+        awaitFoolSwitch("fool_notify_mentions", false)
+        click("fool_visibility_inherit")
+        awaitFoolSelection("fool_visibility_inherit")
+        dismissFoolSettings()
+        click("settings_back")
+        selectDefaultFoolVisibility("hide")
+        scrollToAndClick("settings_fools")
+        click("manage_nick_$nick")
+        awaitFoolSelection("fool_visibility_inherit")
+        compose.onNodeWithText("Follow global (Hidden)", useUnmergedTree = true).assertExists()
+        awaitFoolSwitch("fool_notify_mentions", false)
+        awaitFoolSwitch("fool_notify_direct_messages", true)
+        dismissFoolSettings()
+        click("manage_remove_$nick")
+        awaitTagGone("manage_nick_$nick")
+        click("settings_back")
+        selectDefaultFoolVisibility(original)
+        returnToRoot()
+    }
+
+    private fun selectDefaultFoolVisibility(mode: String) {
+        scrollToAndClick("settings_fools_mode_picker")
+        click("settings_fools_mode_$mode")
+        awaitTagGone("settings_fools_mode_sheet")
+        // Reopen to prove this is persisted selection, not an old picker-local value.
+        scrollToAndClick("settings_fools_mode_picker")
+        compose.onNodeWithTag("settings_fools_mode_$mode", useUnmergedTree = true).assertIsSelected()
+        click("settings_fools_mode_$mode")
+        awaitTagGone("settings_fools_mode_sheet")
+    }
+
+    private fun awaitFoolSelection(tag: String) {
+        compose.waitUntil(10_000) {
+            runCatching { compose.onNodeWithTag(tag, useUnmergedTree = true).assertIsSelected() }.isSuccess
+        }
+    }
+
+    private fun awaitFoolSwitch(
+        tag: String,
+        enabled: Boolean,
+    ) {
+        compose.waitUntil(10_000) {
+            runCatching {
+                val node = compose.onNodeWithTag(tag, useUnmergedTree = true)
+                if (enabled) node.assertIsOn() else node.assertIsOff()
+            }.isSuccess
+        }
+    }
+
+    private fun dismissFoolSettings() {
+        val sheet = hasTestTag("fool_settings_sheet")
+        compose
+            .onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and (sheet or hasAnyAncestor(sheet)), useUnmergedTree = true)[0]
+            .performSemanticsAction(SemanticsActions.Dismiss)
+        awaitTagGone("fool_settings_sheet")
     }
 
     fun security() {

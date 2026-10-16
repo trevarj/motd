@@ -656,7 +656,7 @@ class RecentPagingAppendReproTest {
                 // Mimics ChatViewModel's exact flow shape on reopen: the screen first collects the
                 // UNKEYED Recent generation (fresh entryAnchorKey = null), then the entry computation
                 // sets the anchor key, which flatMapLatest-swaps in the keyed Pager mid-collection —
-                // all multicast through cachedIn like viewModel.messages. The keyed generation must
+                // all multicast through cachedIn like a chat paging generation. The keyed generation must
                 // PRESENT (refresh completes and the entry row materializes); a swap that leaves the
                 // differ's refresh stuck loading is the blank-reopen wedge.
                 processor.process(networkId, chatMsg("marker", 10))

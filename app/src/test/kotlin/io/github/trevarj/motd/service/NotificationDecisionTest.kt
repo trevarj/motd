@@ -12,39 +12,38 @@ import org.junit.Test
  * Truth table for [shouldPostNotification]. Persisted scope/watch eligibility is applied
  * upstream in EventProcessor; ALL and MENTIONS never bypass mute, only a watch does.
  *
- * Precedence: already-read > foreground > mute > fool; friend status never bypasses a mute.
+ * Precedence: already-read > foreground > mute > sender category permission.
  */
 class NotificationDecisionTest {
     @Test
-    fun `foreground buffer suppresses everything`() {
-        // Even a friend / normal / un-muted case is suppressed while foregrounded.
-        assertFalse(shouldPostNotification(foreground = true, muted = false, senderIsFriend = false, senderIsFool = false))
-        assertFalse(shouldPostNotification(foreground = true, muted = false, senderIsFriend = true, senderIsFool = false))
-        assertFalse(shouldPostNotification(foreground = true, muted = true, senderIsFriend = true, senderIsFool = false))
+    fun `foreground buffer suppresses every category`() {
+        for (muted in listOf(false, true)) {
+            for (allowed in listOf(false, true)) {
+                assertFalse(shouldPostNotification(foreground = true, muted = muted, senderAllowsNotification = allowed))
+            }
+        }
     }
 
     @Test
-    fun `fool sender is fully silenced`() {
-        // A fool never notifies, regardless of mute / friend-ness (disjoint sets, but assert both).
-        assertFalse(shouldPostNotification(foreground = false, muted = false, senderIsFriend = false, senderIsFool = true))
-        assertFalse(shouldPostNotification(foreground = false, muted = true, senderIsFriend = false, senderIsFool = true))
-        assertFalse(shouldPostNotification(foreground = false, muted = false, senderIsFriend = true, senderIsFool = true))
+    fun `disabled sender category is silenced even with a watch`() {
+        for (muted in listOf(false, true)) {
+            for (watched in listOf(false, true)) {
+                assertFalse(
+                    shouldPostNotification(
+                        foreground = false,
+                        muted = muted,
+                        senderAllowsNotification = false,
+                        watched = watched,
+                    ),
+                )
+            }
+        }
     }
 
     @Test
-    fun `explicit mute silences friends too`() {
-        assertFalse(shouldPostNotification(foreground = false, muted = true, senderIsFriend = true, senderIsFool = false))
-        assertTrue(shouldPostNotification(foreground = false, muted = false, senderIsFriend = true, senderIsFool = false))
-    }
-
-    @Test
-    fun `muted non-friend is suppressed`() {
-        assertFalse(shouldPostNotification(foreground = false, muted = true, senderIsFriend = false, senderIsFool = false))
-    }
-
-    @Test
-    fun `normal un-muted message notifies`() {
-        assertTrue(shouldPostNotification(foreground = false, muted = false, senderIsFriend = false, senderIsFool = false))
+    fun `enabled sender category still respects explicit mute`() {
+        assertFalse(shouldPostNotification(foreground = false, muted = true, senderAllowsNotification = true))
+        assertTrue(shouldPostNotification(foreground = false, muted = false, senderAllowsNotification = true))
     }
 
     @Test
@@ -53,49 +52,33 @@ class NotificationDecisionTest {
             shouldPostNotification(
                 foreground = false,
                 muted = false,
-                senderIsFriend = true,
-                senderIsFool = false,
+                senderAllowsNotification = true,
                 alreadyRead = true,
             ),
         )
     }
 
     @Test
-    fun `fool beats friend`() {
-        // If a nick were somehow in both, fool silencing wins.
-        assertFalse(shouldPostNotification(foreground = false, muted = false, senderIsFriend = true, senderIsFool = true))
-    }
-
-    @Test
     fun `watched posts despite mute`() {
-        assertTrue(
-            shouldPostNotification(
-                foreground = false,
-                muted = true,
-                senderIsFriend = false,
-                senderIsFool = false,
-                watched = true,
-            ),
-        )
-        assertTrue(
-            shouldPostNotification(
-                foreground = false,
-                muted = false,
-                senderIsFriend = false,
-                senderIsFool = false,
-                watched = true,
-            ),
-        )
+        for (muted in listOf(false, true)) {
+            assertTrue(
+                shouldPostNotification(
+                    foreground = false,
+                    muted = muted,
+                    senderAllowsNotification = true,
+                    watched = true,
+                ),
+            )
+        }
     }
 
     @Test
-    fun `watched still respects foreground, fool and already read`() {
+    fun `watched still respects foreground category permission and already read`() {
         assertFalse(
             shouldPostNotification(
                 foreground = true,
                 muted = true,
-                senderIsFriend = false,
-                senderIsFool = false,
+                senderAllowsNotification = true,
                 watched = true,
             ),
         )
@@ -103,8 +86,7 @@ class NotificationDecisionTest {
             shouldPostNotification(
                 foreground = false,
                 muted = true,
-                senderIsFriend = false,
-                senderIsFool = true,
+                senderAllowsNotification = false,
                 watched = true,
             ),
         )
@@ -112,8 +94,7 @@ class NotificationDecisionTest {
             shouldPostNotification(
                 foreground = false,
                 muted = true,
-                senderIsFriend = false,
-                senderIsFool = false,
+                senderAllowsNotification = true,
                 alreadyRead = true,
                 watched = true,
             ),
@@ -138,8 +119,7 @@ class NotificationDecisionTest {
                 shouldPostNotification(
                     foreground = false,
                     muted = true,
-                    senderIsFriend = false,
-                    senderIsFool = false,
+                    senderAllowsNotification = true,
                     watched = decision.bypassesMute,
                 ),
             )

@@ -3,6 +3,8 @@ package io.github.trevarj.motd.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.data.prefs.FoolPreferences
+import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +23,8 @@ data class ManageNicksUiState(
     val kind: NickListKind = NickListKind.FRIENDS,
     val nicks: List<String> = emptyList(), // sorted ascending
     val overrides: Map<String, Int> = emptyMap(), // COLORS: nick -> hue
+    val foolsMode: FoolsMode = FoolsMode.DIMMED,
+    val foolPreferences: Map<String, FoolPreferences> = emptyMap(),
 )
 
 /**
@@ -35,6 +39,7 @@ class ManageNicksViewModel
         private val settingsRepository: SettingsRepository,
     ) : ViewModel() {
         private val kind = MutableStateFlow(NickListKind.FRIENDS)
+        private val foolPreferencesEditor = FoolPreferencesEditor(settingsRepository)
 
         fun init(kind: NickListKind) {
             this.kind.value = kind
@@ -51,7 +56,12 @@ class ManageNicksViewModel
                             }
 
                             NickListKind.FOOLS -> {
-                                ManageNicksUiState(k, settings.fools.sorted())
+                                ManageNicksUiState(
+                                    kind = k,
+                                    nicks = settings.fools.sorted(),
+                                    foolsMode = settings.foolsMode,
+                                    foolPreferences = settings.foolPreferences,
+                                )
                             }
 
                             NickListKind.COLORS -> {
@@ -92,5 +102,12 @@ class ManageNicksViewModel
             hue: Int,
         ) = viewModelScope.launch {
             settingsRepository.setNickColorOverride(nick, hue)
+        }
+
+        fun updateFoolPreferences(
+            nick: String,
+            transform: (FoolPreferences) -> FoolPreferences,
+        ) = viewModelScope.launch {
+            foolPreferencesEditor.update(nick, transform = transform)
         }
     }

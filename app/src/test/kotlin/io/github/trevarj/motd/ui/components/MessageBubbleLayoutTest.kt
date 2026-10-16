@@ -4,6 +4,8 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.lerp
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.TimeFormat
@@ -80,6 +82,38 @@ class MessageBubbleLayoutTest {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    @Test fun dimmedRoles_blendOpaqueFillAndNormalInkWithReadableFloorAcrossPalettes() {
+        messageContrastSchemes().forEach { (name, scheme, dark) ->
+            for (kind in listOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)) {
+                val normal = messageBubbleRoleColors(scheme, false, false, kind, semanticColors(scheme, dark))
+                val dimmed = messageBubbleRoleColors(scheme, false, false, kind, semanticColors(scheme, dark), dimmed = true)
+                assertEquals("$name $kind fill", lerp(normal.container.compositeOver(scheme.background), scheme.background, 0.35f), dimmed.container)
+                assertEquals("$name $kind ink", ensureContrast(lerp(normal.content, dimmed.container, 0.35f), listOf(dimmed.container), 4.5), dimmed.content)
+                assertTrue("$name $kind opaque backing", dimmed.container.alpha == 1f)
+                assertTrue("$name $kind dimmed contrast", contrastRatio(dimmed.content, dimmed.container) >= 4.5 - 0.00001)
+                assertReadingContrast("$name $kind normal unchanged", normal.content, normal.container)
+            }
+        }
+    }
+
+    @Test fun dimmedRichSpans_keepTheLowerContrastTargetAcrossAllInlineRenderers() {
+        val fill = Color(0xFFEEEEEE)
+        val body = messageContentColor(Color.Black, fill, true)
+        val raw = "hello https://example.com @bob `code` \u000315grey\u000f"
+        val bodies =
+            listOf(
+                linkifiedBody(raw, Color.Blue, true, { Color.Magenta }, Color.LightGray, Color.Black, fill, body, DIMMED_MESSAGE_TEXT_CONTRAST),
+                buildCompactLine("alice", raw, MessageKind.NOTICE, Color.Red, body, Color.Blue, Color.Unspecified, mentionColor = { Color.Magenta }, codeBackground = Color.LightGray, codeColor = Color.Black, containerColor = fill, minimumContrast = DIMMED_MESSAGE_TEXT_CONTRAST),
+                buildActionLine("alice", raw, Color.Red, Color.Red, body, Color.Blue, mentionColor = { Color.Magenta }, codeBackground = Color.LightGray, codeColor = Color.Black, containerColor = fill, minimumContrast = DIMMED_MESSAGE_TEXT_CONTRAST),
+            )
+        for (text in bodies) {
+            text.spanStyles.filter { it.item.color != Color.Unspecified }.forEach { span ->
+                val backing = if (span.item.background == Color.Unspecified) fill else span.item.background.compositeOver(fill)
+                assertTrue("${text.text} $span", contrastRatio(span.item.color, backing) >= 4.5 - 0.00001)
             }
         }
     }

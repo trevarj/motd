@@ -45,6 +45,8 @@ import io.github.trevarj.motd.data.prefs.AccountReminderStore
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.EbooksLabsPrefs
+import io.github.trevarj.motd.data.prefs.FoolPreferences
+import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NoopAccountReminderStore
@@ -66,6 +68,7 @@ import io.github.trevarj.motd.data.sync.HistoryPageLoader
 import io.github.trevarj.motd.data.sync.NoopHistoryGapFiller
 import io.github.trevarj.motd.data.sync.historySource
 import io.github.trevarj.motd.data.visibility.MessageContextResult
+import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.dcc.DccTransferController
@@ -99,6 +102,7 @@ import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.components.deriveChannelNotificationPresentation
 import io.github.trevarj.motd.ui.nav.ChatRoute
+import io.github.trevarj.motd.ui.settings.FoolPreferencesEditor
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.PendingShareStore
 import io.github.trevarj.motd.ui.share.filterShareTargets
@@ -108,6 +112,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -137,6 +142,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -267,7 +273,14 @@ fun resendText(
 internal fun repositoryMessagePages(
     source: (MessageVisibilitySpec) -> Flow<PagingData<MessageEntity>>,
     specs: Flow<MessageVisibilitySpec>,
-): Flow<PagingData<MessageEntity>> = specs.flatMapLatest(source)
+): Flow<ChatPagingGeneration> =
+    specs.transformLatest { spec ->
+        coroutineScope {
+            // The child scope retires cached page events with their spec, not at ViewModel death.
+            emit(ChatPagingGeneration(spec, source(spec).cachedIn(this)))
+            awaitCancellation()
+        }
+    }
 
 @HiltViewModel
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -317,6 +330,8 @@ class ChatViewModel
         contentPreviewPrefs: ContentPreviewPrefs,
         private val readAloudController: ReadAloudController,
     ) : ViewModel() {
+        private val foolPreferencesEditor = FoolPreferencesEditor(settingsRepository)
+
         val contentPreviews: StateFlow<ContentPreviewConfig> =
             contentPreviewPrefs.config
                 // Start closed until DataStore emits, so a persisted opt-out cannot race initial composition.
@@ -588,19 +603,17 @@ class ChatViewModel
         }
 
         /** Every visibility change cancels the old generation and creates a positionally exact Pager. */
-        val messages: Flow<PagingData<MessageEntity>> =
-            filterSpecs
-                .flatMapLatest { spec ->
+        val messageGeneration: StateFlow<ChatPagingGeneration?> =
+            repositoryMessagePages(
+                source = { spec ->
                     flow {
                         viewportRefreshAnchor.value = null
-                        // Resolve the open-at-first-unread anchor BEFORE creating the Pager so a deep
-                        // entry collects ONE generation keyed from birth. Keying the already-collected
-                        // stream by swapping in a second Pager mid-presentation parks the new
-                        // generation's first page behind the cachedIn handoff, which left the reopened
-                        // timeline stuck on the stale generation with refresh loading (blank reopen).
+                        // Resolve the entry key before creating this spec's one unbounded Pager.
                         emitAll(messageRepository.messages(bufferId, spec, entryPagingKey(spec), viewportRefreshAnchor))
                     }
-                }.cachedIn(viewModelScope)
+                },
+                specs = filterSpecs,
+            ).stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
         /**
          * Pager initial key for the one-shot normal entry, taken from the SAME at-rest resolution the
@@ -2559,6 +2572,13 @@ class ChatViewModel
                 settingsRepository.setFool(nick, !exists, rules)
             }
 
+        fun updateFoolPreferences(
+            nick: String,
+            transform: (FoolPreferences) -> FoolPreferences,
+        ) = viewModelScope.launch {
+            foolPreferencesEditor.update(nick, identityRules.value, transform)
+        }
+
         fun ignoreNickOnNetwork(nick: String) =
             viewModelScope.launch {
                 val networkId = state.value.buffer?.networkId ?: return@launch
@@ -2939,6 +2959,36 @@ class ChatViewModel
             }
         private var jumpResolveJob: Job? = null
 
+        private suspend fun jumpPosition(
+            targetBufferId: Long,
+            serverTime: Long,
+            id: Long,
+        ): ChatPositionTarget {
+            var spec = filterSpecs.first()
+            val row = if (id != Long.MAX_VALUE) messageRepository.byId(id) else null
+            if (row != null && !spec.revealHiddenFools && spec.fools.isNotEmpty()) {
+                val networkId = bufferRepository.observeBuffer(row.bufferId).first()?.networkId
+                val rules =
+                    networkId?.let {
+                        val live =
+                            if (connectionManager.connectionActivity.value.states[it] is IrcClientState.Ready) {
+                                connectionManager.clientFor(it)?.isupport?.identityRules
+                            } else {
+                                null
+                            }
+                        live ?: networkIdentityDao.byNetwork(it)?.identityRules
+                    } ?: IrcIdentityRules()
+                if (MessageVisibilityPolicy(spec, rules).foolPreferences(row)?.visibility == FoolsMode.HIDE) {
+                    _hiddenFoolsRevealed.value = true
+                    spec = filterSpecs.first { it.revealHiddenFools }
+                }
+            }
+            return ChatPositionTarget(
+                index = messageRepository.countNewerThan(targetBufferId, serverTime, id, spec),
+                requiredVisibilitySpec = spec,
+            )
+        }
+
         /**
          * CHATHISTORY AROUND fetch used by [ChatJumpResolver] when a msgid target is not yet local.
          *
@@ -2971,9 +3021,7 @@ class ChatViewModel
                         false
                     }
                 },
-                countNewer = { targetBufferId, serverTime, id ->
-                    messageRepository.countNewerThan(targetBufferId, serverTime, id, filterSpecs.first())
-                },
+                countNewer = ::jumpPosition,
             )
 
         private val _jumpTarget = MutableStateFlow<ChatPositionTarget?>(null)
@@ -3461,17 +3509,12 @@ class ChatViewModel
             jumpResolveJob =
                 viewModelScope.launch {
                     val row = messageRepository.byId(eventId) ?: return@launch failActiveJump(request)
-                    val index =
-                        messageRepository.countNewerThan(
-                            bufferId,
-                            row.serverTime,
-                            row.id,
-                            filterSpecs.first(),
-                        )
+                    val position = jumpPosition(bufferId, row.serverTime, row.id)
                     if (activeJumpRequest?.token != request.token) return@launch
                     _jumpTarget.value =
                         target.copy(
-                            index = index,
+                            index = position.index,
+                            requiredVisibilitySpec = position.requiredVisibilitySpec,
                             expectedEventId = row.id,
                             expectedMsgid = row.msgid,
                             serverTime = row.serverTime,
