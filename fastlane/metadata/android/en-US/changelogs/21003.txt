@@ -1,0 +1,4 @@
+- Kept chat messages and scroll position when going Back and reopening, with snappier navigation.
+- Improved unread tracking and handling of your own message echoes.
+- Frequent-chatter status now expires after one hour of inactivity.
+- Added per-person fool visibility and separate mention and direct-message notification controls.
