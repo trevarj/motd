@@ -5903,6 +5903,9 @@ class ChatViewModelTest {
             // The screen's side of entry, collapsed to its two observable effects: the room is on
             // screen, and the one-shot entry placement finished.
             vm.onResume()
+            // Entry reads run on IO; draining the test scheduler does not await their result.
+            val target = checkNotNull(vm.initialTarget.first { it != null })
+            assertEquals(fixture.oldestCatchUpId, target.expectedEventId)
             vm.onInitialPositionHandled()
             advanceUntilIdle()
 

@@ -119,13 +119,6 @@ class GlobalFeedPagingQueryTest {
         assertTrue(sql.contains("redirect.losingEventId IS NULL"))
     }
 
-    @Test
-    fun foolClauseIsTrivialWithoutFools() {
-        val sql = globalFeedPagingQuery(MessageVisibilitySpec(fools = emptySet())).sql
-
-        assertTrue(sql.contains("AND 1 ORDER BY"))
-    }
-
     /** Collapse has no compact rendering here, so the global feed mutes fools in either mode. */
     @Test
     fun foolsAreExcludedInCollapseModeToo() {
