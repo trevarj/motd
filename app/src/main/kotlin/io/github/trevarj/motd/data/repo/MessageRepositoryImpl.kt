@@ -7,7 +7,11 @@ import androidx.paging.PagingData
 import androidx.paging.PagingSource
 import androidx.paging.PagingState
 import androidx.room.InvalidationTracker
+import androidx.room.RoomRawQuery
+import androidx.room.withTransaction
+import androidx.sqlite.SQLiteStatement
 import androidx.sqlite.db.SimpleSQLiteQuery
+import androidx.sqlite.db.SupportSQLiteProgram
 import io.github.trevarj.motd.data.db.BufferDao
 import io.github.trevarj.motd.data.db.HistoryGapDao
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -26,6 +30,7 @@ import io.github.trevarj.motd.data.visibility.countTimelineNewerQuery
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.data.visibility.newestPresentedMessageQuery
 import io.github.trevarj.motd.di.IoDispatcher
+import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -80,45 +85,97 @@ class MessageRepositoryImpl
             visibility: MessageVisibilitySpec,
             initialKey: Int?,
             viewport: StateFlow<ViewportRefreshAnchor?>,
+        ): Flow<PagingData<MessageEntity>> = messagePages(bufferId, visibility, initialKey, viewport)
+
+        internal fun retainedMessages(
+            bufferId: Long,
+            visibility: MessageVisibilitySpec,
+            initialKey: Int?,
+            entry: ChatPageCache.Entry,
+        ): Flow<PagingData<MessageEntity>> = messagePages(bufferId, visibility, initialKey, entry.viewport, entry)
+
+        @OptIn(ExperimentalPagingApi::class)
+        private fun messagePages(
+            bufferId: Long,
+            visibility: MessageVisibilitySpec,
+            initialKey: Int?,
+            viewport: StateFlow<ViewportRefreshAnchor?>,
+            entry: ChatPageCache.Entry? = null,
         ): Flow<PagingData<MessageEntity>> =
             pagingContextFlow(bufferId).flatMapLatest { context ->
+                entry?.contextChanged(context)
                 Pager(
                     config = MESSAGE_PAGING_CONFIG,
                     // Initial entry retains its own computed key until the screen has a laid-out
                     // viewport. Later invalidations use that viewport instead of collapsed-row hints.
                     initialKey = initialKey?.coerceAtLeast(0),
-                    remoteMediator = mediatorFactory.create(context.roomId, visibility, context.identityRules),
+                    remoteMediator =
+                        mediatorFactory.create(context.roomId, visibility, context.identityRules).let { mediator ->
+                            entry?.mediator(mediator) ?: mediator
+                        },
                     pagingSourceFactory = {
-                        ViewportPagingSource(
-                            messageDao.pagingSource(
-                                messagePagingQuery(context.roomId, visibility, context.identityRules),
-                            ),
-                            viewport,
-                            db.invalidationTracker,
-                            ioDispatcher = ioDispatcher,
-                        ) { id ->
-                            val row =
-                                messageDao.rawMessage(
-                                    SimpleSQLiteQuery(
-                                        "SELECT m.* FROM messages m WHERE m.id = ? AND m.bufferId = ? " +
-                                            "AND ${MessageVisibilitySql(visibility, context.identityRules).timeline()}",
-                                        arrayOf(id, context.roomId),
-                                    ),
-                                ) ?: return@ViewportPagingSource null
-                            messageDao.rawCount(
-                                countTimelineNewerQuery(
-                                    context.roomId,
-                                    row.serverTime,
-                                    row.id,
-                                    row.timelineOrder,
-                                    visibility,
-                                    context.identityRules,
-                                ),
-                            )
-                        }
+                        val query = messagePagingQuery(context.roomId, visibility, context.identityRules)
+                        lateinit var source: ViewportPagingSource
+                        val nativeSource =
+                            if (entry == null) {
+                                messageDao.pagingSource(query)
+                            } else {
+                                messageDao.pagingSource(
+                                    RoomRawQuery(query.sql) { statement ->
+                                        entry.requireQueryPermission(source)
+                                        query.bindTo(PagingStatementBindings(statement))
+                                    },
+                                )
+                            }
+                        source =
+                            ViewportPagingSource(
+                                nativeSource,
+                                viewport,
+                                db.invalidationTracker,
+                                bufferId = context.roomId,
+                                ioDispatcher = ioDispatcher,
+                                cacheEntry = entry,
+                            ) { id ->
+                                if (entry == null) {
+                                    resolveParkedIndex(context, visibility, id)
+                                } else {
+                                    // Ordinary DAO calls otherwise inherit Room's database Job too.
+                                    // The small anchor read stays in the caller's writer transaction.
+                                    db.withTransaction {
+                                        entry.requireQueryPermission(source)
+                                        resolveParkedIndex(context, visibility, id)
+                                    }
+                                }
+                            }
+                        source.also { entry?.sourceCreated(it) }
                     },
                 ).flow
             }
+
+        private suspend fun resolveParkedIndex(
+            context: PagingContext,
+            visibility: MessageVisibilitySpec,
+            id: Long,
+        ): Int? {
+            val row =
+                messageDao.rawMessage(
+                    SimpleSQLiteQuery(
+                        "SELECT m.* FROM messages m WHERE m.id = ? AND m.bufferId = ? " +
+                            "AND ${MessageVisibilitySql(visibility, context.identityRules).timeline()}",
+                        arrayOf(id, context.roomId),
+                    ),
+                ) ?: return null
+            return messageDao.rawCount(
+                countTimelineNewerQuery(
+                    context.roomId,
+                    row.serverTime,
+                    row.id,
+                    row.timelineOrder,
+                    visibility,
+                    context.identityRules,
+                ),
+            )
+        }
 
         // Kept for the frozen contract; scopes to a small, fixed msgid set (safe under 999 vars).
         override fun reactions(
@@ -234,28 +291,64 @@ class MessageRepositoryImpl
                         flowOf(PagingContext(bufferId, IrcIdentityRules()))
                     } else {
                         networkIdentityDao.observe(room.networkId).map { identity ->
-                            PagingContext(room.id, identity?.identityRules ?: IrcIdentityRules())
+                            PagingContext(room.id, identity?.identityRules ?: IrcIdentityRules(), room.networkId)
                         }
                     }
                 }.distinctUntilChanged()
 
-        private suspend fun resolvePagingContext(bufferId: Long): PagingContext {
+        internal suspend fun resolvePagingContext(bufferId: Long): PagingContext {
             val room =
                 bufferDao.observeById(bufferId)
                     ?: return PagingContext(bufferId, IrcIdentityRules())
             val identityRules =
                 networkIdentityDao.byNetwork(room.networkId)?.identityRules
                     ?: IrcIdentityRules()
-            return PagingContext(room.id, identityRules)
+            return PagingContext(room.id, identityRules, room.networkId)
         }
 
         private suspend fun resolveRoomId(bufferId: Long): Long = bufferDao.canonicalId(bufferId) ?: bufferId
 
-        private data class PagingContext(
+        internal data class PagingContext(
             val roomId: Long,
             val identityRules: IrcIdentityRules,
+            val networkId: Long? = null,
         )
     }
+
+/** Reuses the existing query's argument order/types without taking ownership of Room's statement. */
+private class PagingStatementBindings(
+    private val statement: SQLiteStatement,
+) : SupportSQLiteProgram {
+    override fun bindNull(index: Int) = statement.bindNull(index)
+
+    override fun bindLong(
+        index: Int,
+        value: Long,
+    ) = statement.bindLong(index, value)
+
+    override fun bindDouble(
+        index: Int,
+        value: Double,
+    ) = statement.bindDouble(index, value)
+
+    override fun bindString(
+        index: Int,
+        value: String,
+    ) = statement.bindText(index, value)
+
+    override fun bindBlob(
+        index: Int,
+        value: ByteArray,
+    ) = statement.bindBlob(index, value)
+
+    override fun clearBindings() {
+        error("Paging bindings must not clear Room-owned parameters")
+    }
+
+    override fun close() {
+        error("Room owns the paging statement")
+    }
+}
 
 // ponytail: Room still owns pages/counts; only the refresh key follows the visual viewport.
 @OptIn(ExperimentalPagingApi::class)
@@ -263,7 +356,9 @@ internal class ViewportPagingSource(
     private val room: PagingSource<Int, MessageEntity>,
     private val viewport: StateFlow<ViewportRefreshAnchor?>,
     private val invalidationTracker: InvalidationTracker,
+    private val bufferId: Long,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val cacheEntry: ChatPageCache.Entry? = null,
     private val resolveParkedIndex: suspend (Long) -> Int?,
 ) : PagingSource<Int, MessageEntity>() {
     // ponytail: remember loaded offsets for this generation; Room owns the actual rows and counts.
@@ -285,20 +380,74 @@ internal class ViewportPagingSource(
     override fun getRefreshKey(state: PagingState<Int, MessageEntity>): Int? = if (viewport.value != null) 0 else room.getRefreshKey(state)
 
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, MessageEntity> {
+        cacheEntry?.beginLoad()
+        try {
+            // Room keeps its own read transaction; the short writer checks bracket the whole load.
+            val result =
+                withContext(ioDispatcher) {
+                    try {
+                        val before = cacheEntry?.readVersion(this@ViewportPagingSource)
+                        if (before != null && cacheEntry?.acceptsVersion(this@ViewportPagingSource, before) == false) {
+                            invalidate()
+                            return@withContext LoadResult.Invalid()
+                        }
+                        val result = loadPage(params)
+                        if (result is LoadResult.Error && result.throwable is RevokedChatPageQuery) {
+                            invalidate()
+                            return@withContext LoadResult.Invalid()
+                        }
+                        if (result is LoadResult.Page && cacheEntry != null) {
+                            val after = cacheEntry.readVersion(this@ViewportPagingSource)
+                            if (!cacheEntry.loaded(this@ViewportPagingSource, params is LoadParams.Refresh, result, checkNotNull(before), after)) {
+                                invalidate()
+                                return@withContext LoadResult.Invalid()
+                            }
+                        }
+                        if (result is LoadResult.Error && params is LoadParams.Refresh) cacheEntry?.failed(this@ViewportPagingSource)
+                        result
+                    } catch (_: RevokedChatPageQuery) {
+                        invalidate()
+                        LoadResult.Invalid()
+                    }
+                }
+            // An invalidation can arrive while the IO result waits to resume on its caller.
+            return if (result is LoadResult.Page && invalid) LoadResult.Invalid() else result
+        } finally {
+            cacheEntry?.endLoad()
+        }
+    }
+
+    private suspend fun loadPage(params: LoadParams<Int>): LoadResult<Int, MessageEntity> {
+        AutoFollowTrace.record("paging_load_start", bufferId) {
+            val type =
+                when (params) {
+                    is LoadParams.Refresh -> "refresh"
+                    is LoadParams.Prepend -> "prepend"
+                    is LoadParams.Append -> "append"
+                }
+            "type=$type key=${params.key} loadSize=${params.loadSize}"
+        }
         // Room 2.8.5 drops invalidations until its first load returns to the caller. An echo can
         // commit after SQL finishes but before that handoff; observe it before any page is read.
         if (!observing.get()) {
+            AutoFollowTrace.record("paging_observer_wait_start", bufferId) { "key=${params.key} loadSize=${params.loadSize}" }
             withContext(ioDispatcher) {
                 if (observing.compareAndSet(false, true)) {
+                    AutoFollowTrace.record("paging_observer_register_start", bufferId) { "key=${params.key}" }
                     invalidationTracker.addObserver(observer)
                     // Registration cleans up even if Room invalidated us while adding the observer.
                     registerInvalidatedCallback { invalidationTracker.removeObserver(observer) }
+                    AutoFollowTrace.record("paging_observer_register_end", bufferId) { "key=${params.key}" }
                 }
             }
+            AutoFollowTrace.record("paging_observer_wait_end", bufferId) { "key=${params.key} loadSize=${params.loadSize}" }
         }
-        val result =
-            if (params !is LoadParams.Refresh || (params.key != null && params.key != 0)) {
-                room.load(params)
+        val adoptedKey = if (params is LoadParams.Refresh) cacheEntry?.takeRefreshKey() else null
+        val roomParams =
+            if (params is LoadParams.Refresh && adoptedKey != null) {
+                LoadParams.Refresh(adoptedKey, params.loadSize, params.placeholdersEnabled)
+            } else if (params !is LoadParams.Refresh || (params.key != null && params.key != 0)) {
+                params
             } else {
                 // ponytail: viewport invalidations use key zero; preserve explicit nonzero jumps/entries.
                 val key =
@@ -307,10 +456,38 @@ internal class ViewportPagingSource(
                         is ViewportRefreshAnchor.Parked -> resolveParkedIndex(anchor.id)?.let { entryAnchorPagingKey(it) ?: 0 }
                         null -> null
                     } ?: params.key
-                room.load(LoadParams.Refresh(key, params.loadSize, params.placeholdersEnabled))
+                LoadParams.Refresh(key, params.loadSize, params.placeholdersEnabled)
             }
+        AutoFollowTrace.record("paging_room_load_start", bufferId) {
+            val type =
+                when (roomParams) {
+                    is LoadParams.Refresh -> "refresh"
+                    is LoadParams.Prepend -> "prepend"
+                    is LoadParams.Append -> "append"
+                }
+            "type=$type key=${roomParams.key} loadSize=${roomParams.loadSize} requestedKey=${params.key}"
+        }
+        val result = room.load(roomParams)
+        AutoFollowTrace.record("paging_room_load_result", bufferId) {
+            when (result) {
+                is LoadResult.Page -> {
+                    "key=${roomParams.key} result=page loaded=${result.data.size} before=${result.itemsBefore} after=${result.itemsAfter}"
+                }
+
+                is LoadResult.Error -> {
+                    "key=${roomParams.key} result=error"
+                }
+
+                is LoadResult.Invalid -> {
+                    "key=${roomParams.key} result=invalid"
+                }
+            }
+        }
         synchronized(loadedOffsets) {
-            if (invalid) return LoadResult.Invalid()
+            if (invalid) {
+                AutoFollowTrace.record("paging_load_result", bufferId) { "key=${params.key} result=invalid reason=invalidated" }
+                return LoadResult.Invalid()
+            }
             // Unknown counts have no absolute offsets; the production Pager always enables placeholders.
             if (result is LoadResult.Page && result.itemsBefore != LoadResult.Page.COUNT_UNDEFINED) {
                 result.data.forEachIndexed { offset, message ->
@@ -318,8 +495,24 @@ internal class ViewportPagingSource(
                     val previous = loadedOffsets.put(message.id, position)
                     if (previous != null && previous != position) {
                         invalidate()
+                        AutoFollowTrace.record("paging_load_result", bufferId) { "key=${params.key} result=invalid reason=offset_overlap" }
                         return LoadResult.Invalid()
                     }
+                }
+            }
+        }
+        AutoFollowTrace.record("paging_load_result", bufferId) {
+            when (result) {
+                is LoadResult.Page -> {
+                    "key=${params.key} result=page loaded=${result.data.size} before=${result.itemsBefore} after=${result.itemsAfter}"
+                }
+
+                is LoadResult.Error -> {
+                    "key=${params.key} result=error"
+                }
+
+                is LoadResult.Invalid -> {
+                    "key=${params.key} result=invalid"
                 }
             }
         }

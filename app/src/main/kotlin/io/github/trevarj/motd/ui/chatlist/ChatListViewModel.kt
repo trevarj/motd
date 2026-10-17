@@ -23,6 +23,7 @@ import io.github.trevarj.motd.data.prefs.OnboardingPrefs
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.ChatFolderRepository
+import io.github.trevarj.motd.data.repo.ChatPageCache
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.data.sync.HistoryGapFiller
@@ -212,11 +213,13 @@ class ChatListViewModel
         private val savedStateHandle: SavedStateHandle,
         private val appVisibility: AppVisibility,
         bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
+        val chatPageCache: ChatPageCache? = null,
     ) : ViewModel() {
         init {
             // The coordinator is process-scoped and observes persisted pending closes, so creating a
             // fresh ViewModel after process/configuration recreation re-drives any unfinished leaves.
             channelCloseCoordinator.start()
+            chatPageCache?.start(viewModelScope, appVisibility, settingsRepository.settings)
         }
 
         // One-shot: unmuting marked a muted backlog read, so the screen can report it and offer an undo.

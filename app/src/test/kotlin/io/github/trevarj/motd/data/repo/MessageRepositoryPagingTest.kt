@@ -53,6 +53,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import kotlin.coroutines.CoroutineContext
+import kotlin.time.Duration.Companion.minutes
 
 @RunWith(RobolectricTestRunner::class)
 class MessageRepositoryPagingTest {
@@ -374,13 +375,15 @@ class MessageRepositoryPagingTest {
             assertEquals(listOf("newer" to seams.single().gapId), placements)
         }
 
+    // Dense fixture seeding includes real SQLite/FTS work, not virtual-time delays.
     @Test
-    fun fiftyThousandRowsKeepDeepRefreshCountAndSavedAnchorExact() =
-        runTest {
+    fun fiftyThousandRowsKeepEntryRefreshSavedAndUnreadAnchorsExact() =
+        runTest(timeout = 5.minutes) {
             val totalRows = 50_000
-            val targetOrdinal = 12_347
+            // The fixture starts empty: seed canonical IDs/order directly instead of updating and
+            // re-tokenizing every row through FTS after insertion.
             for (start in 1..totalRows step 500) {
-                db.messageDao().insertAll(
+                db.messageDao().insertAllRaw(
                     (start until minOf(start + 500, totalRows + 1)).map { ordinal ->
                         message(
                             bufferId = bufferId,
@@ -390,7 +393,7 @@ class MessageRepositoryPagingTest {
                             dedupKey = "row-$ordinal",
                             msgid = "row-$ordinal",
                             kind = if (ordinal % 19 == 0) MessageKind.JOIN else MessageKind.PRIVMSG,
-                        )
+                        ).copy(id = ordinal.toLong(), timelineOrder = ordinal.toLong())
                     },
                 )
             }
@@ -400,42 +403,74 @@ class MessageRepositoryPagingTest {
                     fools = setOf("fool"),
                     foolsMode = FoolsMode.HIDE,
                 )
-            val target = checkNotNull(db.messageDao().byMsgid(bufferId, "row-$targetOrdinal"))
-            val targetIndex = reader.countTimelineNewer(bufferId, target.serverTime, target.id, spec)
-            val source = db.messageDao().pagingSource(messagePagingQuery(bufferId, spec))
-            val result =
-                source
-                    .load(
-                        PagingSource.LoadParams.Refresh(
-                            key = targetIndex,
-                            loadSize = MESSAGE_PAGING_CONFIG.pageSize,
-                            placeholdersEnabled = true,
-                        ),
-                    ).requirePage()
+            val presentedOrdinals = (1..totalRows).filter { it % 17 != 0 && it % 19 != 0 }.asReversed()
+            val deepIndex = presentedOrdinals.indexOf(12_347)
+            val initialSize = MESSAGE_PAGING_CONFIG.initialLoadSize
+            val targetIndices =
+                listOf(
+                    0,
+                    initialSize - 2,
+                    initialSize - 1,
+                    initialSize,
+                    initialSize + 1,
+                    deepIndex,
+                    presentedOrdinals.size - 51,
+                    presentedOrdinals.size - 50,
+                    presentedOrdinals.size - 49,
+                    presentedOrdinals.lastIndex,
+                )
+            for (targetIndex in targetIndices) {
+                val targetOrdinal = presentedOrdinals[targetIndex]
+                val target = checkNotNull(db.messageDao().byMsgid(bufferId, "row-$targetOrdinal"))
+                assertEquals(targetIndex, reader.countTimelineNewer(bufferId, target.serverTime, target.id, spec))
+                assertEquals(
+                    target.id,
+                    reader.resolveSavedAnchor(bufferId, target.msgid, target.serverTime, target.id, spec)?.id,
+                )
+                val marker =
+                    if (targetOrdinal == 1) {
+                        TimelineAnchor(0, 0, Long.MIN_VALUE)
+                    } else {
+                        val row = checkNotNull(db.messageDao().byMsgid(bufferId, "row-${targetOrdinal - 1}"))
+                        TimelineAnchor(row.serverTime, row.id, row.timelineOrder)
+                    }
+                val unread = checkNotNull(reader.firstVisibleUnreadAnchor(bufferId, marker, spec))
+                assertEquals(target.id, unread.eventId)
+                assertEquals(targetIndex, reader.countTimelineNewer(bufferId, unread, spec))
+                val result =
+                    db
+                        .messageDao()
+                        .pagingSource(messagePagingQuery(bufferId, spec))
+                        .load(
+                            PagingSource.LoadParams.Refresh(
+                                key = entryAnchorPagingKey(targetIndex),
+                                loadSize = MESSAGE_PAGING_CONFIG.initialLoadSize,
+                                placeholdersEnabled = true,
+                            ),
+                        ).requirePage()
 
-            val localTargetIndex = targetIndex - result.itemsBefore
-            assertTrue(localTargetIndex in result.data.indices)
-            assertEquals(target.id, result.data[localTargetIndex].id)
-            assertEquals(targetIndex, reader.countTimelineNewer(bufferId, target.serverTime, target.id, spec))
-            assertEquals(
-                target.id,
-                reader
-                    .resolveSavedAnchor(
-                        bufferId,
-                        target.msgid,
-                        target.serverTime,
-                        target.id,
-                        spec,
-                    )?.id,
-            )
-            assertTrue(result.data.size <= MESSAGE_PAGING_CONFIG.pageSize)
-            val expectedVisible = (1..totalRows).count { it % 17 != 0 && it % 19 != 0 }
-            assertEquals(expectedVisible, result.itemsBefore + result.data.size + result.itemsAfter)
+                val localTargetIndex = targetIndex - result.itemsBefore
+                assertTrue("entry $targetIndex must be materialized", localTargetIndex in result.data.indices)
+                assertEquals(target.id, result.data[localTargetIndex].id)
+                assertEquals(
+                    presentedOrdinals.subList(result.itemsBefore, result.itemsBefore + result.data.size).map { "row-$it" },
+                    result.data.map { it.msgid },
+                )
+                assertEquals(MESSAGE_PAGING_CONFIG.initialLoadSize, result.data.size)
+                assertEquals(presentedOrdinals.size, result.itemsBefore + result.data.size + result.itemsAfter)
+                if (targetIndex > 0) {
+                    assertEquals("row-${presentedOrdinals[targetIndex - 1]}", result.data[localTargetIndex - 1].msgid)
+                }
+                if (targetIndex >= MESSAGE_PAGING_CONFIG.initialLoadSize && targetIndex < presentedOrdinals.lastIndex) {
+                    assertEquals("row-${presentedOrdinals[targetIndex + 1]}", result.data[localTargetIndex + 1].msgid)
+                }
+            }
         }
 
+    // Dense fixture seeding includes real SQLite/FTS work, not virtual-time delays.
     @Test
     fun smartPresenceChurnKeepsUnreadEntrySavedAnchorsAndAcknowledgedRefreshExact() =
-        runTest {
+        runTest(timeout = 5.minutes) {
             val dao = db.messageDao()
             val totalRows = 50_000
             val base = 1_700_000_000_000L
@@ -444,10 +479,11 @@ class MessageRepositoryPagingTest {
             val expectedIds = mutableListOf<Long>()
             // Nearly six days of repeated silent-actor churn used to be rescanned for every
             // presence row by the seven-day common-chatter lookup, including each paging count.
+            // Match the empty fixture's generated IDs without a second FTS write for each row.
             for (start in 1..totalRows step 500) {
                 val ordinals = start until minOf(start + 500, totalRows + 1)
                 val ids =
-                    dao.insertAll(
+                    dao.insertAllRaw(
                         ordinals.map { ordinal ->
                             val conversation = ordinal % 5 == 0
                             message(
@@ -458,7 +494,7 @@ class MessageRepositoryPagingTest {
                                 "row-$ordinal",
                                 kind = if (conversation) conversationKinds[ordinal % 3] else presenceKinds[ordinal % 6],
                                 msgid = "row-$ordinal",
-                            )
+                            ).copy(id = ordinal.toLong(), timelineOrder = ordinal.toLong())
                         },
                     )
                 expectedIds += ordinals.zip(ids).filter { (ordinal, _) -> ordinal % 5 == 0 }.map { it.second }
@@ -496,8 +532,11 @@ class MessageRepositoryPagingTest {
             assertEquals(presentedIds, dao.rawMessages(messagePagingQuery(bufferId, spec)).map { it.id })
 
             val source = dao.pagingSource(messagePagingQuery(bufferId, spec))
-            val page = source.load(PagingSource.LoadParams.Refresh(targetIndex, MESSAGE_PAGING_CONFIG.initialLoadSize, true)).requirePage()
-            assertEquals(target.id, page.data[targetIndex - page.itemsBefore].id)
+            val page = source.load(PagingSource.LoadParams.Refresh(entryAnchorPagingKey(targetIndex), MESSAGE_PAGING_CONFIG.initialLoadSize, true)).requirePage()
+            val localTargetIndex = targetIndex - page.itemsBefore
+            assertEquals(target.id, page.data[localTargetIndex].id)
+            assertEquals(presentedIds[targetIndex - 1], page.data[localTargetIndex - 1].id)
+            assertEquals(presentedIds[targetIndex + 1], page.data[localTargetIndex + 1].id)
             assertEquals(presentedIds.subList(page.itemsBefore, page.itemsBefore + page.data.size), page.data.map { it.id })
             assertEquals(10_006, page.itemsBefore + page.data.size + page.itemsAfter)
 
@@ -745,6 +784,7 @@ class MessageRepositoryPagingTest {
                         racingDb.messageDao().pagingSource(messagePagingQuery(roomId, MessageVisibilitySpec())),
                         MutableStateFlow(ViewportRefreshAnchor.Newest),
                         racingDb.invalidationTracker,
+                        bufferId = roomId,
                         ioDispatcher = databaseDispatcher,
                     ) { null }
                 val source = source()
@@ -752,8 +792,8 @@ class MessageRepositoryPagingTest {
                     async(start = CoroutineStart.UNDISPATCHED) {
                         source.load(PagingSource.LoadParams.Refresh(null, 50, true))
                     }
-                // SQL has finished, but the load continuation has not resumed on its caller.
-                // Room 2.8.5 still has refreshComplete=false here and drops the echo invalidation.
+                // SQL and the IO-side checks have finished, but the wrapper's load continuation
+                // has not resumed on its caller. Confirmation must still revoke that pending page.
                 readPageBeforeHandoff()
                 assertFalse(loading.isCompleted)
                 val confirmation =
@@ -764,6 +804,8 @@ class MessageRepositoryPagingTest {
                     }
                 drainDatabase()
                 assertNull(confirmation.await().pendingLabel)
+                assertTrue("Confirmation must invalidate the source before the caller resumes", source.invalid)
+                assertFalse("The public load must still be waiting at its caller handoff", loading.isCompleted)
                 runCurrent()
                 val result = loading.await()
                 assertTrue(
@@ -814,7 +856,7 @@ class MessageRepositoryPagingTest {
 
             // The same live Room source and viewport wrapper as the repository's Pager.
             fun freshSource(): ViewportPagingSource =
-                ViewportPagingSource(dao.pagingSource(messagePagingQuery(bufferId, spec)), viewport, db.invalidationTracker) { id ->
+                ViewportPagingSource(dao.pagingSource(messagePagingQuery(bufferId, spec)), viewport, db.invalidationTracker, bufferId) { id ->
                     val row = dao.byCanonicalId(id) ?: return@ViewportPagingSource null
                     repository.countNewerThan(bufferId, row.serverTime, row.id, spec)
                 }
@@ -1051,7 +1093,7 @@ class MessageRepositoryPagingTest {
                     }
                 }
             val room = roomSource()
-            val source = ViewportPagingSource(room, kotlinx.coroutines.flow.MutableStateFlow(null), db.invalidationTracker) { null }
+            val source = ViewportPagingSource(room, kotlinx.coroutines.flow.MutableStateFlow(null), db.invalidationTracker, bufferId) { null }
             val first = source.load(PagingSource.LoadParams.Refresh(0, 3, true)).requirePage()
             assertEquals(listOf(4L, 3L, 2L), first.data.map { it.id })
             val initialAppend = source.load(PagingSource.LoadParams.Append(3, 1, true)).requirePage()
@@ -1076,7 +1118,8 @@ class MessageRepositoryPagingTest {
             assertTrue(source.invalid)
             assertTrue(room.invalid)
 
-            val freshSource = ViewportPagingSource(roomSource(), kotlinx.coroutines.flow.MutableStateFlow(null), db.invalidationTracker) { null }
+            val freshSource =
+                ViewportPagingSource(roomSource(), kotlinx.coroutines.flow.MutableStateFlow(null), db.invalidationTracker, bufferId) { null }
             val canonical = freshSource.load(PagingSource.LoadParams.Refresh(0, 5, true)).requirePage()
             val visibleIds = canonical.data.map { it.id }
             assertEquals(listOf(5L, 4L, 3L, 2L, 1L), visibleIds)

@@ -182,11 +182,19 @@ flowchart TD
   reader scrolls still animate, and latest stays expanded.
   Entry's frozen unread metadata reads only the resolved canonical room, reusing the
   chat-list visibility policy and entry's paging spec rather than awaiting the whole list.
-  The timeline paints at full opacity and releases input as soon as its existing entry
-  readiness gate lifts; there is no post-placement fade. Materialization, measured placement,
-  exact identity, timeout fallback and read-state gates remain independent and unchanged.
+  Fresh anchor reads run sequentially on IO rather than returning through Main after
+  each query; the caller retains entry-snapshot and target publication.
+  The timeline paints at full opacity once fresh payload admission and measured entry placement
+  permit it; there is no post-placement fade. At the existing 1.5-second timeout, an ordinary
+  retained return can restore its freshly certified last confirmed viewport. That visit ignores
+  late automatic targets, but explicit jumps remain available and reading still waits for fresh metadata.
+- Forwarding destinations observe the whole chat list only while the forwarding picker
+  is open. Dismissal cancels that subscription and clears its targets; preview edits do
+  not restart it. Confirmation still freshly validates the source, destination and connection.
 - Chat wallpaper fills the outer Scaffold's unpadded viewport, so header collapse
   and reexpansion cannot translate builtin tiles or resize a cropped image.
+  Builtin alpha masks are process-cached by preset and pixel size; a matching ready
+  tile paints without dispatching another worker lookup.
   The transparent foreground alone consumes Scaffold, navigation-bar and IME
   padding; the send-flight overlay keeps its existing foreground coordinate origin.
   Its status comes from the matching loaded canonical row, preferring accepted event IDs
@@ -203,6 +211,26 @@ flowchart TD
   This covers Room 2.8.5's initial-load invalidation gap without a separate delivery-status store.
   Observer registration uses the repository's injected IO dispatcher (`Dispatchers.IO` in production);
   deterministic Paging fixtures supply their test scheduler so draining it also completes registration.
+- Chat-list navigation owns a two-room LRU of native `cachedIn` page events. A root UI-only
+  host retains each slot's native presenter, list state, header and confirmed viewport across Back;
+  it renders no hidden rows and owns no chat effects. A fresh ChatViewModel owns every visit's
+  unread snapshot, hidden reveal, drafts, positioning intent and read permission. Retained list
+  state is never measured against an artificial empty generation.
+  Admission validates canonical room/network/identity, complete visibility and a committed
+  per-room TEMP revision, session nonce and same-connection `data_version`. Native sources
+  bind pages to one cohort; publication acknowledgment requires actual returned references or
+  exact complete-window equality, including placeholders and every entity field. Fresh measured
+  placement and a final committed-context barrier precede first visibility.
+  Each retained slot is limited to 1500 resident entities and 1,048,576 UTF-16 characters,
+  accounting for coexisting native replacement windows rather than cumulative refresh traffic;
+  the two-slot logical text bound is 4 MiB, not a total heap cap.
+  Coarse Room invalidation does not clear detached presenters or eagerly reload them for unrelated
+  rooms. Detached slots pause new local and remote demand; a revoked queued source checks its own
+  permission before Room binds count/page SQL. An already-started local load remains accounted.
+  Backgrounding evicts detached slots; attached local refreshes retain their existing allowance,
+  while remote history requires foreground. Exclusive lease tokens reject stale disposal and
+  viewport callbacks. Owner destruction retires slots and awaits structured observer cleanup.
+  There is no persistent schema change, reconstructed message renderer or Room-internal API dependency.
 - Smart presence uses one shared SQL predicate for the timeline, positional counts,
   and anchors: a normalized actor must have sent a conversation message in the same
   room within the preceding five minutes, or at least five within the preceding
@@ -215,9 +243,10 @@ flowchart TD
   revealing the earlier JOIN in the same positional-count and saved-anchor domain.
   Own presence and netsplit/netjoin aggregates remain visible; Hide all still removes
   every presence kind. Presence never becomes preview, activity, or unread content.
-  Speech evidence uses the covering `(bufferId, normalizedActor, kind, serverTime)` index:
-  conversation-kind seeks exclude presence churn before the time windows are scanned,
-  keeping exact entry counts and paging refreshes bounded by speech rather than join/part history.
+  Speech evidence uses the covering `(bufferId, normalizedActor, kind, serverTime)` index.
+  A lazy hour-grace gate skips redundant recent/threshold seeks for silent actors;
+  recent speech is a subset of that grace window. Exact counts still traverse room
+  candidates, but each evidence seek excludes presence churn before its time range.
 - Fool membership stays global; sparse preferences independently inherit or override
   Dimmed/Collapsed/Hidden visibility and opt into mention/reply or DM notifications.
   Fresh lists default to Dimmed; legacy populated lists retain implicit Collapsed.

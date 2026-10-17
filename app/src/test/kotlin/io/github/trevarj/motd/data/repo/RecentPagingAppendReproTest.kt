@@ -530,7 +530,7 @@ class RecentPagingAppendReproTest {
      * row — the marker, on the far side of the seam — and the fixture server has nothing there.
      *
      * Paging3 still auto-fires that APPEND with no scroll whenever the initial source load returns
-     * `nextKey == null`, which a 50-row store under `initialLoadSize` (150) always does. That
+     * `nextKey == null`, which a 50-row store below the initial load size always does. That
      * behavior is unchanged and unchangeable; what changed is where it aims.
      */
     private suspend fun TestScope.assertPagingPagesBelowTheTimeline(
@@ -604,7 +604,7 @@ class RecentPagingAppendReproTest {
             try {
                 // Reopen state: an earlier visit filled the gap down to row62, and later live
                 // traffic added rows through 700. The oldest unread entry (row62) sits at index
-                // 638 — beyond the newest 600-row load. Scrolling into an unloaded placeholder
+                // 638 — beyond the newest load. Scrolling into an unloaded placeholder
                 // would drive a boundary APPEND and churn the generation before the row can compose.
                 // entryAnchorPagingKey shifts back by initialLoadSize - pageSize, materializing the
                 // entry AND newer rows below it in the FIRST refresh: Room treats a refresh key as
@@ -629,17 +629,18 @@ class RecentPagingAppendReproTest {
                 val repository = repository(history)
                 val entryIndex = 638
                 val anchorKey = entryAnchorPagingKey(entryIndex)
-                assertEquals("anchor key shifts back by initialLoadSize - pageSize", 88, anchorKey)
 
                 val keyed = openAndPeekIndex(repository, initialKey = anchorKey, index = entryIndex)
                 val unkeyed = openAndPeekIndex(repository, initialKey = null, index = entryIndex)
 
                 assertEquals("entry row materialized by the keyed initial refresh", "row62", keyed.first?.msgid)
+                assertEquals(db.messageDao().byMsgid(bufferId, "row62")?.id, keyed.first?.id)
                 assertEquals(
                     "newer sibling below the entry materialized by the same refresh",
                     "row63",
                     keyed.second?.msgid,
                 )
+                assertEquals("older neighbour across the seam materialized by the same refresh", "marker", keyed.third?.msgid)
                 // Without the key the same index is still an unloaded placeholder after the initial
                 // refresh: pins the boundary-churn condition the initialKey removes.
                 assertEquals("deep entry stays a placeholder without the key", null, unkeyed.first?.msgid)
@@ -712,14 +713,14 @@ class RecentPagingAppendReproTest {
         }
 
     /**
-     * Open one generation, settle the initial refresh, and peek [index] and its newer sibling
-     * ([index] - 1) without an access hint. Returns target to sibling.
+     * Open one generation, settle the initial refresh, and peek [index] and both neighbours without
+     * an access hint. Returns target, newer sibling, and older sibling.
      */
     private suspend fun TestScope.openAndPeekIndex(
         repository: MessageRepositoryImpl,
         initialKey: Int?,
         index: Int,
-    ): Pair<MessageEntity?, MessageEntity?> {
+    ): Triple<MessageEntity?, MessageEntity?, MessageEntity?> {
         val differ = differ()
         val job =
             launch(UnconfinedTestDispatcher(testScheduler)) {
@@ -731,6 +732,7 @@ class RecentPagingAppendReproTest {
         // peek never registers an access, so it cannot itself hint a boundary APPEND.
         val item = index.takeIf { it < differ.itemCount }?.let { differ.peek(it) }
         val newerSibling = (index - 1).takeIf { it in 0 until differ.itemCount }?.let { differ.peek(it) }
+        val olderSibling = (index + 1).takeIf { it in 0 until differ.itemCount }?.let { differ.peek(it) }
         // Diagnostic: report the materialized run around the target so the key-shift arithmetic
         // stays verifiable against Room's actual refresh-offset semantics.
         val loaded = (0 until differ.itemCount).count { differ.peek(it) != null }
@@ -739,7 +741,7 @@ class RecentPagingAppendReproTest {
                 "target=${item?.msgid} newerSibling=${newerSibling?.msgid}",
         )
         job.cancel()
-        return item to newerSibling
+        return Triple(item, newerSibling, olderSibling)
     }
 
     /** No live clients: every driver here is handed its scripted source explicitly. */

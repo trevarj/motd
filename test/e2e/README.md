@@ -326,8 +326,14 @@ adb logcat -v epoch MotdAutoFollow:D '*:S'
 The trace records row identity/classification, Paging state, follow decisions,
 viewport settlement, and read-marker timing; it never records message text,
 nicks, addresses, or credentials. It is disabled in release builds and remains
-dormant in debug builds until the log tag is enabled. Reset the tag to
-its normal threshold after capture:
+dormant in debug builds until the log tag is enabled.
+
+Entry and page-load markers separate anchor resolution, observer registration and Room load
+boundaries. `page_cache_*` records admission, reuse and retirement reasons without message text.
+Validate a cache hit against materialized rows, absence of a new initial Room load, exact target
+settlement and actual painted frames; a hit marker or veil timeout alone is not performance proof.
+
+Reset the tag to its normal threshold after capture:
 
 ```sh
 adb shell setprop log.tag.MotdAutoFollow INFO

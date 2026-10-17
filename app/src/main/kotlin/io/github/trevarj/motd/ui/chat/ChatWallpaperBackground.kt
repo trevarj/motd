@@ -94,6 +94,7 @@ fun ChatWallpaperBackground(
         initialValue = WallpaperTileCache[requestedTileKey]?.let { WallpaperTile(requestedTileKey, it) },
         requestedTileKey,
     ) {
+        if (value?.key == requestedTileKey) return@produceState
         value =
             WallpaperTile(
                 requestedTileKey,

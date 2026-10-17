@@ -56,6 +56,7 @@ import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.BufferRepository
+import io.github.trevarj.motd.data.repo.ChatPageCache
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
@@ -411,14 +412,18 @@ class ChatViewModel
 
         // The conversation's own presence choice participates in the paging spec: it changes which rows
         // the PagingSource emits, so switching it re-queries exactly like a global settings change does.
-        private val filterSpecs =
+        private val pagingSpecs =
             combine(
                 settingsRepository.settings,
                 _hiddenFoolsRevealed,
-                bufferRepository.observeBuffer(bufferId).map { it?.presenceModeOverride }.distinctUntilChanged(),
-            ) { settings, revealHiddenFools, presenceOverride ->
-                MessageVisibilitySpec.from(settings, presenceOverride).copy(revealHiddenFools = revealHiddenFools)
+                bufferRepository.observeBuffer(bufferId).distinctUntilChanged { previous, next ->
+                    previous?.id == next?.id && previous?.presenceModeOverride == next?.presenceModeOverride
+                },
+            ) { settings, revealHiddenFools, room ->
+                (room?.id ?: bufferId) to
+                    MessageVisibilitySpec.from(settings, room?.presenceModeOverride).copy(revealHiddenFools = revealHiddenFools)
             }.distinctUntilChanged()
+        private val filterSpecs = pagingSpecs.map { it.second }.distinctUntilChanged()
         private val filterSpec =
             filterSpecs
                 .stateIn(viewModelScope, SharingStarted.Eagerly, MessageVisibilitySpec())
@@ -510,13 +515,13 @@ class ChatViewModel
                         visibleSession,
                         historyAvailability,
                         connState,
-                        entryState,
+                        entryState.combine(entryPreparationReady) { entry, ready -> ready && entry !is EntryPositionState.Pending },
                         conversationHistorySync,
                     ) { session, availability, connection, entry, historySync ->
                         SeamLoadingGate(
                             onScreen = session != null,
                             historyReady = availability is HistoryAvailability.Ready,
-                            entrySettled = entry !is EntryPositionState.Pending,
+                            entrySettled = entry,
                             automaticAllowed = historySync.effective != HistorySyncMode.LAZY,
                             // NOT `!historyReady`: a fresh connection spends a moment negotiating, and painting
                             // "couldn't load" across every seam for that moment is an error the reader never had.
@@ -615,6 +620,107 @@ class ChatViewModel
                 specs = filterSpecs,
             ).stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+        /** A visit leases data; the root UI host, not this flow, owns its native presentation. */
+        internal fun retainedMessageGenerations(cache: ChatPageCache): Flow<ChatPagingGeneration> =
+            flow {
+                var continueLocalRefresh = false
+                emitAll(
+                    pagingSpecs.transformLatest { (roomId, spec) ->
+                        var staleAnchors = false
+                        while (true) {
+                            coroutineScope {
+                                val intent = _entryPositionIntent.value
+                                val resumingVisit = _entryState.value is EntryPositionState.Settled || _entryFallbackLatched.value
+                                val ownViewport = if (resumingVisit) storedVisitViewport() else scrollPositionStore.get(roomId)
+                                if (resumingVisit) _initialTarget.value = null
+                                val retained = if (routeHasDeepJump) null else cache.acquireRetained(bufferId, spec)
+                                val entry =
+                                    retained ?: run {
+                                        entryAnchorsLock.withLock {
+                                            if (staleAnchors || resolvedEntryAnchors?.second?.room?.id != roomId) resolvedEntryAnchors = null
+                                        }
+                                        val target =
+                                            when {
+                                                resumingVisit -> restoredVisitPosition(spec)
+                                                routeHasDeepJump -> null
+                                                else -> entryAnchors(spec).target
+                                            }
+                                        if (resumingVisit && intent == _entryPositionIntent.value) _initialTarget.value = target
+                                        val key = if (resumingVisit) target?.index?.let(::entryAnchorPagingKey) else entryPagingKey(spec)
+                                        if (target != null) {
+                                            viewportRefreshAnchor.value =
+                                                target.expectedEventId?.let(ViewportRefreshAnchor::Parked)
+                                                    ?: ViewportRefreshAnchor.Newest.takeIf { target.index == 0 }
+                                        }
+                                        cache.acquire(
+                                            bufferId,
+                                            spec,
+                                            key,
+                                            target?.index ?: 0,
+                                            target?.expectedEventId,
+                                            viewportRefreshAnchor.value,
+                                            allowRetention = !routeHasDeepJump,
+                                            continueLocalRefresh = continueLocalRefresh,
+                                        )
+                                    }
+                                if (retained != null) viewportRefreshAnchor.value = retained.entry.viewport.value
+                                val viewportJob = launch { viewportRefreshAnchor.collect(entry::updateViewport) }
+                                val targetJob =
+                                    launch {
+                                        initialTarget.filterNotNull().collect { target ->
+                                            val anchor =
+                                                target.expectedEventId?.let(ViewportRefreshAnchor::Parked)
+                                                    ?: ViewportRefreshAnchor.Newest.takeIf { target.index == 0 }
+                                            entry.prepareTarget(target.index, target.expectedEventId, entryAnchorPagingKey(target.index), anchor)
+                                            viewportRefreshAnchor.value = anchor
+                                        }
+                                    }
+                                val metadataJob =
+                                    if (retained != null) {
+                                        launch { entryPreparationReady.collect(entry::allowRemoteLoads) }
+                                    } else {
+                                        null
+                                    }
+                                val restoreJob =
+                                    if (retained != null && resumingVisit) {
+                                        launch {
+                                            val target = restoredVisitPosition(spec)
+                                            if (intent == _entryPositionIntent.value) _initialTarget.value = target
+                                        }
+                                    } else {
+                                        null
+                                    }
+                                try {
+                                    // This emission deliberately precedes the fresh target/unread wait.
+                                    emit(
+                                        ChatPagingGeneration(
+                                            spec,
+                                            entry.pages,
+                                            lease = entry,
+                                            fallback =
+                                                if (entry.retained && !routeHasDeepJump) {
+                                                    RetainedEntryFallback(intent, ownViewport, useSharedViewport = !resumingVisit)
+                                                } else {
+                                                    null
+                                                },
+                                        ),
+                                    )
+                                    entry.awaitRetirement()
+                                } finally {
+                                    continueLocalRefresh = entry.canContinueLocalRefresh
+                                    restoreJob?.cancel()
+                                    metadataJob?.cancel()
+                                    targetJob.cancel()
+                                    viewportJob.cancel()
+                                    entry.release()
+                                }
+                            }
+                            staleAnchors = true
+                        }
+                    },
+                )
+            }
+
         /**
          * Pager initial key for the one-shot normal entry, taken from the SAME at-rest resolution the
          * entry decision publishes ([entryAnchors]). Null unless a pending entry sits beyond the
@@ -676,12 +782,17 @@ class ChatViewModel
          * around a different set of rows, and an index counted under the previous spec would name a
          * different row in it.
          */
-        private suspend fun entryAnchors(spec: MessageVisibilitySpec): EntryAnchors =
-            entryAnchorsLock.withLock {
-                resolvedEntryAnchors?.takeIf { it.first == spec }?.second
-                    ?: resolveEntryAnchors(spec, discardUnresolvedSaved = false)
-                        .also { resolvedEntryAnchors = spec to it }
+        private suspend fun entryAnchors(spec: MessageVisibilitySpec): EntryAnchors {
+            AutoFollowTrace.record("entry_anchors_wait_start", bufferId) {
+                "presence=${spec.presenceMode} revealHidden=${spec.revealHiddenFools}"
             }
+            return entryAnchorsLock.withLock {
+                val cached = resolvedEntryAnchors?.takeIf { it.first == spec }?.second
+                AutoFollowTrace.record("entry_anchors_wait_end", bufferId) { "cached=${cached != null}" }
+                cached ?: resolveEntryAnchors(spec, discardUnresolvedSaved = false)
+                    .also { resolvedEntryAnchors = spec to it }
+            }
+        }
 
         /**
          * Resolve the entry anchors against the store exactly as it stands.
@@ -713,82 +824,94 @@ class ChatViewModel
         private suspend fun resolveEntryAnchors(
             spec: MessageVisibilitySpec,
             discardUnresolvedSaved: Boolean,
-        ): EntryAnchors {
-            val room = bufferRepository.observeBuffer(bufferId).firstOrNull()
-            val marker = room?.let { visibilityReader.effectiveLocalReadAnchor(it) }
-            // The timeline is unbounded, so this resolves against every retained row. That is the same
-            // answer a bounded call would give: a window bound could only ever hide rows the client
-            // already holds, and a gap's far side is by definition rows it does not.
-            //
-            // A never-read room has no marker to resolve from, but the chat-list cue still counts every
-            // visible row it holds as unread (its SQL COALESCEs the missing anchor to time zero), so the
-            // badge promises a divider. Resolving from an epoch anchor keeps that promise: first open of
-            // a room someone else has already written to lands at the divider instead of silently
-            // parking at the bottom the cue said had N new messages above it. SERVER buffers are outside
-            // that promise — the chat list never shows them — so their first open keeps the bottom.
-            val epochAnchor =
-                TimelineAnchor(0, 0, Long.MIN_VALUE)
-                    .takeIf { room?.type != BufferType.SERVER }
-            val firstUnread =
-                (marker ?: epochAnchor)?.let {
-                    visibilityReader.firstVisibleUnreadAnchor(bufferId, it, spec)
+        ): EntryAnchors =
+            withContext(Dispatchers.IO) {
+                // Keep this sequential fresh-read chain off Main between Room suspensions.
+                // The caller still owns entry cache, snapshot and target publication.
+                AutoFollowTrace.record("entry_anchors_resolve_start", bufferId) {
+                    "presence=${spec.presenceMode} revealHidden=${spec.revealHiddenFools} discardUnresolvedSaved=$discardUnresolvedSaved"
                 }
-            // A park cleared the saved viewport, so a follower has exactly one possible anchor: the
-            // unread divider, which they land on when unread arrived while they were away.
-            val parked = parkedAtBottom()
-            val saved = if (parked) null else restoredScrollPosition(spec, discardUnresolvedSaved)
-            val furthestDisplayedIndex = furthestDisplayedEntryIndex(spec)
-            val unreadTarget =
-                firstUnread?.let {
-                    readMarkerEntryTarget(it, spec, requireExactIdentity = true)
+                val room = bufferRepository.observeBuffer(bufferId).firstOrNull()
+                // Do not wait for Main's operationalBufferId collector to publish this same room.
+                val roomId = room?.id ?: bufferId
+                val marker = room?.let { visibilityReader.effectiveLocalReadAnchor(it) }
+                // The timeline is unbounded, so this resolves against every retained row. That is the same
+                // answer a bounded call would give: a window bound could only ever hide rows the client
+                // already holds, and a gap's far side is by definition rows it does not.
+                //
+                // A never-read room has no marker to resolve from, but the chat-list cue still counts every
+                // visible row it holds as unread (its SQL COALESCEs the missing anchor to time zero), so the
+                // badge promises a divider. Resolving from an epoch anchor keeps that promise: first open of
+                // a room someone else has already written to lands at the divider instead of silently
+                // parking at the bottom the cue said had N new messages above it. SERVER buffers are outside
+                // that promise — the chat list never shows them — so their first open keeps the bottom.
+                val epochAnchor =
+                    TimelineAnchor(0, 0, Long.MIN_VALUE)
+                        .takeIf { room?.type != BufferType.SERVER }
+                val firstUnread =
+                    (marker ?: epochAnchor)?.let {
+                        visibilityReader.firstVisibleUnreadAnchor(bufferId, it, spec)
+                    }
+                // A park cleared the saved viewport, so a follower has exactly one possible anchor: the
+                // unread divider, which they land on when unread arrived while they were away.
+                val parked = parkedAtBottom(roomId)
+                val saved = if (parked) null else restoredScrollPosition(roomId, spec, discardUnresolvedSaved)
+                val furthestDisplayedIndex =
+                    if (saved != null && firstUnread != null) furthestDisplayedEntryIndex(roomId, spec) else null
+                val unreadTarget =
+                    firstUnread?.let {
+                        readMarkerEntryTarget(it, spec, requireExactIdentity = true)
+                    }
+                val target =
+                    if (parked) {
+                        // A reader who left at the live bottom was following the conversation, so they return to
+                        // it — but only when there is nothing unread to return to instead. Messages that arrived
+                        // while they were away are exactly what the divider exists to announce, and entering at
+                        // the newest row buries it somewhere above the viewport, where finding out what was
+                        // missed means scrolling BACKWARDS past the very messages the divider was drawn for.
+                        //
+                        // Only the unread anchor may divert a follower, never the bare read marker: every room
+                        // anyone has read HAS a marker, so consulting it here would park them behind a divider
+                        // on a room that has nothing new at all.
+                        unreadTarget ?: ChatPositionTarget(index = 0)
+                    } else {
+                        preferredEntryTarget(saved, unreadTarget, furthestDisplayedIndex)
+                            ?: marker?.let { readMarkerEntryTarget(it, spec, requireExactIdentity = false) }
+                            ?: ChatPositionTarget(index = 0)
+                    }
+                EntryAnchors(
+                    room = room,
+                    firstUnread = firstUnread,
+                    target = target,
+                    // The key must name the anchor entry LANDS on, which is why it runs the same rule over
+                    // the same indices rather than picking the deeper of the two.
+                    pagingKey =
+                        preferredEntryIndex(
+                            savedIndex = saved?.index,
+                            firstUnreadIndex = unreadTarget?.index,
+                            furthestDisplayedIndex = furthestDisplayedIndex,
+                        )?.let { entryAnchorPagingKey(it) },
+                    // Ordered cheapest-first: the extra row lookup only runs for a room with no stored
+                    // anchor and no saved viewport at all.
+                    hasDurableContent =
+                        marker != null ||
+                            saved != null ||
+                            visibilityReader.latestRawAnchor(bufferId) != null,
+                ).also {
+                    AutoFollowTrace.record("entry_anchors_resolve_end", bufferId) {
+                        "canonical=${room?.id} index=${it.target.index} key=${it.pagingKey} " +
+                            "unread=${it.firstUnread != null} durable=${it.hasDurableContent}"
+                    }
                 }
-            val target =
-                if (parked) {
-                    // A reader who left at the live bottom was following the conversation, so they return to
-                    // it — but only when there is nothing unread to return to instead. Messages that arrived
-                    // while they were away are exactly what the divider exists to announce, and entering at
-                    // the newest row buries it somewhere above the viewport, where finding out what was
-                    // missed means scrolling BACKWARDS past the very messages the divider was drawn for.
-                    //
-                    // Only the unread anchor may divert a follower, never the bare read marker: every room
-                    // anyone has read HAS a marker, so consulting it here would park them behind a divider
-                    // on a room that has nothing new at all.
-                    unreadTarget ?: ChatPositionTarget(index = 0)
-                } else {
-                    preferredEntryTarget(saved, unreadTarget, furthestDisplayedIndex)
-                        ?: marker?.let { readMarkerEntryTarget(it, spec, requireExactIdentity = false) }
-                        ?: ChatPositionTarget(index = 0)
-                }
-            return EntryAnchors(
-                room = room,
-                firstUnread = firstUnread,
-                target = target,
-                // The key must name the anchor entry LANDS on, which is why it runs the same rule over
-                // the same indices rather than picking the deeper of the two.
-                pagingKey =
-                    preferredEntryIndex(
-                        savedIndex = saved?.index,
-                        firstUnreadIndex = unreadTarget?.index,
-                        furthestDisplayedIndex = furthestDisplayedIndex,
-                    )?.let { entryAnchorPagingKey(it) },
-                // Ordered cheapest-first: the extra row lookup only runs for a room with no stored
-                // anchor and no saved viewport at all.
-                hasDurableContent =
-                    marker != null ||
-                        saved != null ||
-                        visibilityReader.latestRawAnchor(bufferId) != null,
-            )
-        }
+            }
 
         /**
          * True when the reader left this room at the live bottom, using the same room-with-buffer
          * fallback keying as the rest of the viewport memory.
          */
-        private fun parkedAtBottom(): Boolean {
-            val roomId = operationalBufferId.value
-            return scrollPositionStore.isParkedAtBottom(roomId) ||
+        private fun parkedAtBottom(roomId: Long): Boolean =
+            scrollPositionStore.isParkedAtBottom(roomId) ||
                 (bufferId != roomId && scrollPositionStore.isParkedAtBottom(bufferId))
-        }
 
         /**
          * Timeline index of the deepest row this process has displayed in the room, or null if none.
@@ -797,8 +920,10 @@ class ChatViewModel
          * in one coordinate system. The identity-resolving overload is deliberate: a coalesced
          * watermark row follows its winner rather than counting against a retired event id.
          */
-        private suspend fun furthestDisplayedEntryIndex(spec: MessageVisibilitySpec): Int? {
-            val roomId = operationalBufferId.value
+        private suspend fun furthestDisplayedEntryIndex(
+            roomId: Long,
+            spec: MessageVisibilitySpec,
+        ): Int? {
             val seen =
                 scrollPositionStore.furthestDisplayed(roomId)
                     ?: bufferId.takeIf { it != roomId }?.let(scrollPositionStore::furthestDisplayed)
@@ -940,17 +1065,26 @@ class ChatViewModel
         private val _forwardState = MutableStateFlow<MessageForwardState?>(null)
         internal val forwardState: StateFlow<MessageForwardState?> = _forwardState.asStateFlow()
         internal val forwardTargets: StateFlow<List<ChatListRow>> =
-            combine(
-                bufferRepository.observeChatList(),
-                connectionManager.connectionStates,
-                operationalBufferId,
-            ) { rows, connections, sourceRoomId ->
-                filterShareTargets(rows, "").filter { row ->
-                    row.bufferId != sourceRoomId &&
-                        (row.type == BufferType.CHANNEL || row.type == BufferType.QUERY) &&
-                        connections[row.networkId] is IrcClientState.Ready
-                }
-            }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+            forwardState
+                .map { it != null }
+                .distinctUntilChanged()
+                .flatMapLatest { open ->
+                    if (!open) {
+                        flowOf(emptyList())
+                    } else {
+                        combine(
+                            bufferRepository.observeChatList(),
+                            connectionManager.connectionStates,
+                            operationalBufferId,
+                        ) { rows, connections, sourceRoomId ->
+                            filterShareTargets(rows, "").filter { row ->
+                                row.bufferId != sourceRoomId &&
+                                    (row.type == BufferType.CHANNEL || row.type == BufferType.QUERY) &&
+                                    connections[row.networkId] is IrcClientState.Ready
+                            }
+                        }
+                    }
+                }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
         internal fun openForward(message: MessageEntity) {
             if (_forwardState.value != null) return
@@ -3059,6 +3193,31 @@ class ChatViewModel
 
         /** One-shot entry/deep-link positioning state; read gating derives from it. */
         val entryState: StateFlow<EntryPositionState> = _entryState.asStateFlow()
+        private val _entryPreparationReady = MutableStateFlow(false)
+        val entryPreparationReady: StateFlow<Boolean> = _entryPreparationReady.asStateFlow()
+        private val _entryPositionIntent = MutableStateFlow(0L)
+        val entryPositionIntent: StateFlow<Long> = _entryPositionIntent.asStateFlow()
+        private val _entryFallbackLatched = MutableStateFlow(savedStateHandle.get<Boolean>(ENTRY_FALLBACK_KEY) == true)
+        val entryFallbackLatched: StateFlow<Boolean> = _entryFallbackLatched.asStateFlow()
+
+        fun canAdoptRetainedFallback(intent: Long): Boolean = !routeHasDeepJump && activeJumpRequest == null && _entryPositionIntent.value == intent
+
+        /** A freshly certified, measured position wins over this visit's late automatic target. */
+        fun adoptRetainedFallback(
+            position: ChatScrollPosition,
+            intent: Long,
+        ): Boolean {
+            if (!canAdoptRetainedFallback(intent)) return false
+            _entryPositionIntent.update { it + 1 }
+            _entryFallbackLatched.value = true
+            savedStateHandle[ENTRY_FALLBACK_KEY] = true
+            timelineInteracted = true
+            _initialTarget.value = null
+            saveScrollPosition(position)
+            viewportRefreshAnchor.value = ViewportRefreshAnchor.Parked(position.rowId)
+            if (_entryPreparationReady.value) transitionEntry(EntryPositionState.Settled)
+            return true
+        }
 
         // Started here, not in the first init block: viewModelScope dispatches on Main.immediate, so the
         // collector runs eagerly and would read `entryState` before this line initialized it.
@@ -3074,11 +3233,12 @@ class ChatViewModel
         // FAB, a send, or an explicit jump. [armPostCatchUpEntryRepair] is its only reader — a position
         // the reader is driving themselves is no longer entry's to correct.
         @Volatile
-        private var timelineInteracted = false
+        private var timelineInteracted = _entryFallbackLatched.value
 
         /** The timeline reported a user-driven scroll (as opposed to a programmatic one). */
         fun onTimelineInteraction() {
             timelineInteracted = true
+            _entryPositionIntent.update { it + 1 }
         }
 
         init {
@@ -3098,7 +3258,10 @@ class ChatViewModel
             // Normal entry, on the first buffer emission: freeze the visit's divider boundary
             // ([freezeUnreadEntrySnapshot]) and publish the one-shot entry target, both
             // from ONE at-rest resolution shared with the Pager key.
+            AutoFollowTrace.record("entry_init_launch", bufferId)
             viewModelScope.launch {
+                AutoFollowTrace.record("entry_init_start", bufferId)
+                val initialIntent = _entryPositionIntent.value
                 // A restored visit already positioned itself in a previous process; only a fresh one may
                 // still be corrected below.
                 val freshVisit = _entryState.value is EntryPositionState.Pending
@@ -3110,6 +3273,10 @@ class ChatViewModel
                         settingsRepository.settings.first(),
                         initialEntryBuffer?.presenceModeOverride,
                     )
+                AutoFollowTrace.record("entry_init_inputs", bufferId) {
+                    "canonical=${initialEntryBuffer?.id} presence=${entrySpec.presenceMode} " +
+                        "deepJump=$hasDeepJump fresh=$freshVisit"
+                }
                 // The room this open may position in: a deep link owns its own destination, and a SERVER
                 // buffer has no read-marker entry to resolve.
                 val entryRoom =
@@ -3146,14 +3313,22 @@ class ChatViewModel
                     }
                     anchors = resolveEntryAnchors(entrySpec, discardUnresolvedSaved = true)
                 }
-                freezeUnreadEntrySnapshot(anchors, entrySpec)
-                if (!hasDeepJump && _entryState.value !is EntryPositionState.Settled) {
+                freezeUnreadEntrySnapshot(readUnreadEntrySnapshot(anchors, entrySpec))
+                if (!hasDeepJump && !_entryFallbackLatched.value &&
+                    initialIntent == _entryPositionIntent.value && _entryState.value !is EntryPositionState.Settled
+                ) {
                     _initialTarget.value = anchors.target
+                } else if (_entryFallbackLatched.value) {
+                    transitionEntry(EntryPositionState.Settled)
                 }
                 // The wait path already resolved against caught-up data (or against an expired bound),
                 // so only an at-rest entry can still be owed a correction.
                 if (entryRoom != null && freshVisit && catchUpPending && enteredFromAtRest) {
                     armPostCatchUpEntryRepair(entryRoom.networkId, entrySpec, anchors)
+                }
+                _entryPreparationReady.value = true
+                AutoFollowTrace.record("entry_init_end", bufferId) {
+                    "canonical=${anchors.room?.id} index=${anchors.target.index} key=${anchors.pagingKey} atRest=$enteredFromAtRest"
                 }
             }
             viewModelScope.launch {
@@ -3164,7 +3339,7 @@ class ChatViewModel
         }
 
         /**
-         * Freeze the visit's "New messages" divider boundary from [anchors], absence included.
+         * Read the visit's "New messages" divider boundary from [anchors] without publishing it.
          *
          * The boundary is anchored to the first message from SOMEONE ELSE past the marker (minus 1, so
          * the existing `> marker` divider/badge comparisons land on that message): your own sent messages
@@ -3181,16 +3356,21 @@ class ChatViewModel
          * a re-derivation of a settled boundary: it refines a boundary this same visit froze from
          * not-yet-caught-up data, only while the reader has not touched the viewport, and at most once.
          */
-        private suspend fun freezeUnreadEntrySnapshot(
+        private suspend fun readUnreadEntrySnapshot(
             anchors: EntryAnchors,
             spec: MessageVisibilitySpec,
-        ) {
-            if (unreadEntrySnapshotRestored) return
+        ): UnreadEntrySnapshot? {
+            if (unreadEntrySnapshotRestored) return _unreadEntrySnapshot.value
             val frozen =
                 anchors.firstUnread?.let { first ->
                     val unreadRow =
                         anchors.room?.let { room ->
-                            visibilityReader.chatListRow(room.id, spec)
+                            AutoFollowTrace.record("entry_unread_metadata_start", bufferId) { "canonical=${room.id}" }
+                            withContext(Dispatchers.IO) { visibilityReader.chatListRow(room.id, spec) }.also {
+                                AutoFollowTrace.record("entry_unread_metadata_end", bufferId) {
+                                    "canonical=${room.id} unreadCount=${it?.unreadCount} incomplete=${it?.unreadCountIncomplete}"
+                                }
+                            }
                         }
                     UnreadEntrySnapshot(
                         marker = TimelineAnchor(first.serverTime, first.eventId - 1L, first.timelineOrder),
@@ -3203,8 +3383,13 @@ class ChatViewModel
                         lowerBound = unreadRow?.unreadCountIncomplete == true,
                     )
                 }
-            _unreadEntrySnapshot.value = frozen
-            persistUnreadEntrySnapshot(frozen)
+            return frozen
+        }
+
+        private fun freezeUnreadEntrySnapshot(snapshot: UnreadEntrySnapshot?) {
+            if (unreadEntrySnapshotRestored) return
+            _unreadEntrySnapshot.value = snapshot
+            persistUnreadEntrySnapshot(snapshot)
         }
 
         /**
@@ -3264,7 +3449,19 @@ class ChatViewModel
                 // Re-checked after the queries: the screen may have placed the entered target, or the
                 // reader taken the viewport over, while they ran.
                 if (!entryCorrectable(entered)) return@launch
-                freezeUnreadEntrySnapshot(repaired, spec)
+                val correctionIntent = _entryPositionIntent.value
+                val mayCorrectSettled =
+                    !unreadEntrySnapshotRestored && _unreadEntrySnapshot.value == null &&
+                        nullDividerBottomEntry(entered.firstUnread, entered.target)
+                val frozen = readUnreadEntrySnapshot(repaired, spec)
+                // Acquiring metadata must not change eligibility itself or overwrite a divider that
+                // the screen settled during the IO suspension. Publish both outcomes only afterward.
+                if (correctionIntent != _entryPositionIntent.value || _entryFallbackLatched.value || timelineInteracted ||
+                    (_entryState.value !is EntryPositionState.Pending && !mayCorrectSettled)
+                ) {
+                    return@launch
+                }
+                freezeUnreadEntrySnapshot(frozen)
                 // The screen may already have settled the entered position, so force a distinct emission —
                 // as [restoreRedirectedViewport] does — and give the correction its own one-shot index
                 // repair budget.
@@ -3329,14 +3526,23 @@ class ChatViewModel
          * usually means "not stored yet".
          */
         private suspend fun restoredScrollPosition(
+            roomId: Long,
             spec: MessageVisibilitySpec,
             discardUnresolved: Boolean = true,
         ): ChatPositionTarget? {
-            val roomId = operationalBufferId.value
             val saved =
                 scrollPositionStore.get(roomId)
                     ?: bufferId.takeIf { it != roomId }?.let(scrollPositionStore::get)
                     ?: return null
+            val target = resolveScrollPosition(saved, spec)
+            if (target == null && discardUnresolved) scrollPositionStore.remove(roomId)
+            return target
+        }
+
+        private suspend fun resolveScrollPosition(
+            saved: ChatScrollPosition,
+            spec: MessageVisibilitySpec,
+        ): ChatPositionTarget? {
             val anchor =
                 visibilityReader.resolveSavedAnchor(
                     bufferId = bufferId,
@@ -3344,10 +3550,7 @@ class ChatViewModel
                     serverTime = saved.serverTime,
                     id = saved.rowId,
                     spec = spec,
-                ) ?: run {
-                    if (discardUnresolved) scrollPositionStore.remove(roomId)
-                    return null
-                }
+                ) ?: return null
             val index =
                 visibilityReader.countTimelineNewer(
                     bufferId,
@@ -3365,11 +3568,42 @@ class ChatViewModel
             )
         }
 
+        /** A covered back-stack visit restores its own anchor, not a newer visit's room-wide park. */
+        private suspend fun restoredVisitPosition(spec: MessageVisibilitySpec): ChatPositionTarget {
+            val kind = savedStateHandle.get<String>(VISIT_VIEWPORT_KIND_KEY)
+            if (kind == "bottom") return ChatPositionTarget(index = 0)
+            val saved = storedVisitViewport()
+            return withContext(Dispatchers.IO) {
+                saved?.let { resolveScrollPosition(it, spec) }
+                    ?: resolveEntryAnchors(spec, discardUnresolvedSaved = false).target
+            }
+        }
+
+        private fun storedVisitViewport(): ChatScrollPosition? =
+            savedStateHandle
+                .get<Long>(VISIT_VIEWPORT_ROW_KEY)
+                ?.takeIf {
+                    savedStateHandle.get<String>(VISIT_VIEWPORT_KIND_KEY) != null
+                }?.let {
+                    ChatScrollPosition(
+                        index = savedStateHandle.get<Int>(VISIT_VIEWPORT_INDEX_KEY) ?: 0,
+                        offset = savedStateHandle.get<Int>(VISIT_VIEWPORT_OFFSET_KEY) ?: 0,
+                        msgid = savedStateHandle[VISIT_VIEWPORT_MSGID_KEY],
+                        serverTime = savedStateHandle.get<Long>(VISIT_VIEWPORT_TIME_KEY) ?: 0L,
+                        rowId = it,
+                    )
+                }
+
         /** Re-anchor an already-open viewport when coalescence replaces and retimestamps its row. */
         private suspend fun restoreRedirectedViewport(spec: MessageVisibilitySpec) {
+            if (_entryState.value !is EntryPositionState.Settled && !_entryFallbackLatched.value) return
+            val session = visibleSession.value
+            val intent = _entryPositionIntent.value
+            if (savedStateHandle.get<String>(VISIT_VIEWPORT_KIND_KEY) == "bottom") return
             val roomId = operationalBufferId.value
+            val ownViewport = storedVisitViewport()
             val saved =
-                scrollPositionStore.get(roomId)
+                ownViewport ?: scrollPositionStore.get(roomId)
                     ?: bufferId.takeIf { it != roomId }?.let(scrollPositionStore::get)
                     ?: return
             val canonicalSavedId = visibilityReader.resolveCanonicalEventId(saved.rowId)
@@ -3389,15 +3623,13 @@ class ChatViewModel
                     TimelineAnchor(anchor.serverTime, anchor.id, anchor.timelineOrder),
                     spec,
                 )
-            scrollPositionStore.put(
-                roomId,
-                saved.copy(
-                    index = index,
-                    msgid = anchor.msgid,
-                    serverTime = anchor.serverTime,
-                    rowId = anchor.id,
-                ),
-            )
+            if (intent != _entryPositionIntent.value || (ownViewport != null && storedVisitViewport() != ownViewport)) return
+            val shared = scrollPositionStore.get(roomId) ?: bufferId.takeIf { it != roomId }?.let(scrollPositionStore::get)
+            val currentVisit = session != null && visibleSession.value == session && operationalBufferId.value == roomId
+            if (ownViewport == null && (!currentVisit || shared != saved)) return
+            val redirected = saved.copy(index = index, msgid = anchor.msgid, serverTime = anchor.serverTime, rowId = anchor.id)
+            rememberVisitViewport(redirected)
+            if (currentVisit && shared == saved) scrollPositionStore.put(roomId, redirected)
             initialReresolveUsed = false
             _initialTarget.value =
                 ChatPositionTarget(
@@ -3486,6 +3718,7 @@ class ChatViewModel
          */
         fun jumpToNewest() {
             timelineInteracted = true
+            _entryPositionIntent.update { it + 1 }
             jumpResolveJob?.cancel()
             jumpResolveJob = null
             activeJumpRequest = null
@@ -3497,6 +3730,7 @@ class ChatViewModel
         /** Re-resolve an exact mention against the live timeline before scrolling to it. */
         fun focusRecentMention(target: ChatPositionTarget) {
             timelineInteracted = true
+            _entryPositionIntent.update { it + 1 }
             jumpResolveJob?.cancel()
             _jumpTarget.value = null
             activeJumpRequest = null
@@ -3527,7 +3761,17 @@ class ChatViewModel
                 }
         }
 
+        private fun rememberVisitViewport(position: ChatScrollPosition) {
+            savedStateHandle[VISIT_VIEWPORT_KIND_KEY] = "saved"
+            savedStateHandle[VISIT_VIEWPORT_INDEX_KEY] = position.index
+            savedStateHandle[VISIT_VIEWPORT_OFFSET_KEY] = position.offset
+            savedStateHandle[VISIT_VIEWPORT_MSGID_KEY] = position.msgid
+            savedStateHandle[VISIT_VIEWPORT_TIME_KEY] = position.serverTime
+            savedStateHandle[VISIT_VIEWPORT_ROW_KEY] = position.rowId
+        }
+
         fun saveScrollPosition(position: ChatScrollPosition) {
+            rememberVisitViewport(position)
             scrollPositionStore.put(operationalBufferId.value, position)
         }
 
@@ -3535,7 +3779,9 @@ class ChatViewModel
          * Called only from a provable bottom, so it states where entry should land rather than merely
          * forgetting where it was. See [ChatScrollPositionStore.markParkedAtBottom].
          */
-        fun clearScrollPosition() {
+        fun clearScrollPosition(position: ChatScrollPosition? = null) {
+            if (position != null) rememberVisitViewport(position)
+            savedStateHandle[VISIT_VIEWPORT_KIND_KEY] = "bottom"
             scrollPositionStore.markParkedAtBottom(operationalBufferId.value)
         }
 
@@ -3545,6 +3791,7 @@ class ChatViewModel
          * asserting a bottom park. See [ScrollPositionOutcome.Forget].
          */
         fun forgetScrollPosition() {
+            savedStateHandle.remove<String>(VISIT_VIEWPORT_KIND_KEY)
             scrollPositionStore.remove(operationalBufferId.value)
         }
 
@@ -3577,6 +3824,7 @@ class ChatViewModel
          */
         fun jumpToRepliedMessage(target: ReplyTarget) {
             timelineInteracted = true
+            _entryPositionIntent.update { it + 1 }
             val settlesEntryPosition = _entryState.value is EntryPositionState.Pending
             val request =
                 JumpRequest(
@@ -3689,13 +3937,17 @@ class ChatViewModel
         /** Repair normal entry against current visibility without opting into explicit-jump reveal. */
         fun reresolveInitialOnce(target: ChatPositionTarget) =
             viewModelScope.launch {
+                val intent = _entryPositionIntent.value
+                if (_entryFallbackLatched.value && _initialTarget.value == null) return@launch
                 if (initialReresolveUsed) {
                     onInitialPositionUnresolved()
                     return@launch
                 }
                 initialReresolveUsed = true
                 val spec = filterSpecs.first()
-                val repaired = resolveEntryAnchors(spec, discardUnresolvedSaved = false).target
+                val repaired =
+                    if (_entryFallbackLatched.value) restoredVisitPosition(spec) else resolveEntryAnchors(spec, discardUnresolvedSaved = false).target
+                if (intent != _entryPositionIntent.value || (_entryFallbackLatched.value && _initialTarget.value == null)) return@launch
                 _initialTarget.value = null
                 _initialTarget.value =
                     repaired.copy(
@@ -3722,6 +3974,13 @@ class ChatViewModel
             const val ENTRY_POSITION_SETTLED_KEY = "entry_position_settled"
             const val ENTRY_POSITION_UNRESOLVED_KEY = "entry_position_unresolved"
             const val ENTRY_MESSAGE_UNAVAILABLE_KEY = "entry_message_unavailable"
+            const val ENTRY_FALLBACK_KEY = "entry_retained_fallback"
+            const val VISIT_VIEWPORT_KIND_KEY = "chat_visit_viewport_kind"
+            const val VISIT_VIEWPORT_INDEX_KEY = "chat_visit_viewport_index"
+            const val VISIT_VIEWPORT_OFFSET_KEY = "chat_visit_viewport_offset"
+            const val VISIT_VIEWPORT_MSGID_KEY = "chat_visit_viewport_msgid"
+            const val VISIT_VIEWPORT_TIME_KEY = "chat_visit_viewport_time"
+            const val VISIT_VIEWPORT_ROW_KEY = "chat_visit_viewport_row"
 
             // The divider boundary frozen on entry, flattened into Bundle-safe primitives. New keys
             // only: no existing SavedState or preference projection changes shape.

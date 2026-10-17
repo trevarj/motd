@@ -87,6 +87,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -114,12 +115,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.referentialEqualityPolicy
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -157,6 +160,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
@@ -177,7 +181,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.ItemSnapshotList
 import androidx.paging.LoadState
-import androidx.paging.PagingData
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.R
@@ -269,6 +272,9 @@ import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.spacingFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
@@ -277,7 +283,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -378,6 +383,8 @@ fun ChatScreen(
     aiTextViewModel: AiTextViewModel = hiltViewModel(),
     onOpenAiSetup: () -> Unit = {},
     onOpenConversationList: (() -> Unit)? = null,
+    pageCache: io.github.trevarj.motd.data.repo.ChatPageCache? = null,
+    presentations: ChatPresentationRegistry? = null,
 ) {
     val dickordEnabled = LocalDickordLabsEnabled.current
     val focusManager = LocalFocusManager.current
@@ -422,19 +429,22 @@ fun ChatScreen(
     val externalTranslationInFlight by viewModel.externalTranslationInFlight.collectAsStateWithLifecycle()
     val forwardState by viewModel.forwardState.collectAsStateWithLifecycle()
     val forwardTargets by viewModel.forwardTargets.collectAsStateWithLifecycle()
-    // Collect paging off the frame-aligned AndroidUiDispatcher. Bounded-window paging swaps the
-    // whole Pager when a persisted older page recedes the gap edge, which emits two PagingData
-    // back-to-back (the old Pager's invalidation generation plus the new Pager's first). cachedIn
-    // multicasts through a one-slot shareIn(replay = 1), so the second emission suspends until this
-    // collector consumes the first — and a collector parked on AndroidUiDispatcher.Main only runs
-    // with the choreographer, which can stay quiescent indefinitely on an idle screen. That wedge
-    // froze automatic history backfill after one page. Main.immediate resumes with ordinary Main
-    // messages instead, so generation handoff never depends on frame traffic.
-    val pagingGeneration by viewModel.messageGeneration.collectAsStateWithLifecycle()
+    // The visit owns the lease; the root host owns native items and viewport across its disposal.
+    // A pending descriptor is not an empty PagingData and must never reset a retained viewport.
+    val pagingGeneration by androidx.compose.runtime.produceState<ChatPagingGeneration?>(null, viewModel, pageCache) {
+        val generations = pageCache?.let(viewModel::retainedMessageGenerations) ?: viewModel.messageGeneration
+        withContext(Dispatchers.Main.immediate) {
+            generations.collect { value = it }
+        }
+    }
+    val presentationLease = pagingGeneration?.lease
+    val presentationRevision = presentationLease?.changes?.collectAsState()?.value ?: 0L
+    val presentation = presentationLease?.let { presentations?.find(it) }
     val items =
-        key(pagingGeneration) {
-            val pages = pagingGeneration?.pages ?: remember { flowOf(PagingData.empty<MessageEntity>()) }
-            pages.collectAsLazyPagingItems(Dispatchers.Main.immediate)
+        if (presentationLease != null) {
+            presentation?.items
+        } else {
+            pagingGeneration?.pages?.collectAsLazyPagingItems(Dispatchers.Main.immediate)
         }
     val memberNicks by viewModel.memberNicks.collectAsStateWithLifecycle()
     val knownNicks by viewModel.knownNicks.collectAsStateWithLifecycle()
@@ -519,6 +529,8 @@ fun ChatScreen(
     val jumpTarget by viewModel.jumpTarget.collectAsStateWithLifecycle()
     val initialTarget by viewModel.initialTarget.collectAsStateWithLifecycle()
     val entryState by viewModel.entryState.collectAsStateWithLifecycle()
+    val entryPreparationReady by viewModel.entryPreparationReady.collectAsStateWithLifecycle()
+    val entryPositionIntent by viewModel.entryPositionIntent.collectAsStateWithLifecycle()
     // Held while the post-catch-up correction may still move a settled bottom entry that froze no
     // divider: settled-at-bottom mark-read would otherwise consume the arriving backlog before the
     // corrected position (and its divider) lands. Bounded on the ViewModel side.
@@ -572,11 +584,25 @@ fun ChatScreen(
     val isServerBuffer = state.buffer?.type == BufferType.SERVER
     val titleTarget = chatTitleTarget(state.buffer?.type)
 
+    if (items == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
     ChatContent(
         state = state,
         ebooksHelperRoomId = ebooksHelperRoomId,
         ebooksDccOffers = ebooksDccOffers,
         items = items,
+        presentation = presentation,
+        presentationLease = presentationLease,
+        presentationRevision = presentationRevision,
+        entryFallback = pagingGeneration?.fallback,
+        entryPreparationReady = entryPreparationReady,
+        entryPositionIntent = entryPositionIntent,
+        canAdoptRetainedFallback = viewModel::canAdoptRetainedFallback,
+        onAdoptRetainedFallback = viewModel::adoptRetainedFallback,
         composerEnabled = (!isServerBuffer || state.connState is IrcClientState.Ready) && !state.parted,
         friends = settings.friends,
         fools = settings.fools,
@@ -617,7 +643,7 @@ fun ChatScreen(
         readMarkerLive = localReadAnchor,
         rawNewestAnchor = rawNewestAnchor,
         onMarkRead = viewModel::markRead,
-        viewportReadEnabled = destinationResumed && !viewportReadHold,
+        viewportReadEnabled = destinationResumed && entryPreparationReady && !viewportReadHold,
         countUnreadBelowViewport = viewModel::countUnreadBelowViewport,
         nearestUnreadMentionBelow = viewModel::nearestUnreadMentionBelow,
         onBack = onHeaderBack,
@@ -1027,6 +1053,14 @@ internal fun ChatContent(
     state: ChatState,
     items: LazyPagingItems<MessageEntity>,
     composerEnabled: Boolean,
+    presentation: ChatPresentation? = null,
+    presentationLease: io.github.trevarj.motd.data.repo.ChatPageCache.Lease? = null,
+    presentationRevision: Long = 0L,
+    entryFallback: RetainedEntryFallback? = null,
+    entryPreparationReady: Boolean = true,
+    entryPositionIntent: Long = 0L,
+    canAdoptRetainedFallback: ((Long) -> Boolean)? = null,
+    onAdoptRetainedFallback: ((ChatScrollPosition, Long) -> Boolean)? = null,
     ebooksHelperRoomId: Long? = null,
     ebooksDccOffers: List<DccTransferEntity> = emptyList(),
     onBack: () -> Unit,
@@ -1173,7 +1207,7 @@ internal fun ChatContent(
     // correction: a viewport its reader is driving is no longer entry's to move.
     onTimelineInteraction: () -> Unit = {},
     onViewportRefreshAnchor: (ViewportRefreshAnchor?) -> Unit = {},
-    onClearScrollPosition: () -> Unit = {},
+    onClearScrollPosition: (ChatScrollPosition?) -> Unit = {},
     // Indeterminate snapshot at save time: drop the saved viewport WITHOUT asserting a bottom park.
     onForgetScrollPosition: () -> Unit = {},
     // Deepest row this visit put on screen. Local-only entry input; never read state, never wire.
@@ -1266,7 +1300,17 @@ internal fun ChatContent(
                 buffer.displayName
             }
         }
-    val listState = rememberLazyListState()
+    val listState = presentation?.listState ?: rememberLazyListState()
+    val layoutSnapshot = if (presentationLease != null) items.itemSnapshotList else null
+    val measuredSnapshot =
+        if (presentationLease != null) {
+            remember(presentationLease, items) {
+                mutableStateOf<ItemSnapshotList<MessageEntity>?>(null, referentialEqualityPolicy())
+            }
+        } else {
+            null
+        }
+    var payloadAdmitted by remember(presentationLease) { mutableStateOf(presentationLease == null) }
     // Keep Scaffold's stable measure-updated padding, not a post-measure height snapshot.
     var bottomHostPadding by remember { mutableStateOf<PaddingValues?>(null) }
     val bottomHostDensity by rememberUpdatedState(LocalDensity.current)
@@ -1277,7 +1321,7 @@ internal fun ChatContent(
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
     var liveEntryIds by remember(state.buffer?.id) { mutableStateOf(emptySet<Long>()) }
     val presenceMode = state.conversationPresence.effective
-    val visibilityPolicy =
+    val visibleSpec =
         remember(
             presenceMode,
             fools,
@@ -1285,20 +1329,27 @@ internal fun ChatContent(
             foolPreferences,
             hiddenFoolsRevealed,
             showRedactedMessages,
-            identityRules,
         ) {
-            MessageVisibilityPolicy(
-                MessageVisibilitySpec(
-                    presenceMode = presenceMode,
-                    showRedactedMessages = showRedactedMessages,
-                    fools = fools,
-                    foolsMode = foolsMode,
-                    foolPreferences = foolPreferences,
-                    revealHiddenFools = hiddenFoolsRevealed,
-                ),
-                identityRules,
+            MessageVisibilitySpec(
+                presenceMode = presenceMode,
+                showRedactedMessages = showRedactedMessages,
+                fools = fools,
+                foolsMode = foolsMode,
+                foolPreferences = foolPreferences,
+                revealHiddenFools = hiddenFoolsRevealed,
             )
         }
+    val visibilityPolicy = remember(visibleSpec, identityRules) { MessageVisibilityPolicy(visibleSpec, identityRules) }
+    val presentationCompatible =
+        presentationLease == null ||
+            (
+                presentedVisibilitySpec == visibleSpec &&
+                    state.buffer?.id == presentationLease.entry.key.context.roomId &&
+                    state.buffer?.networkId == presentationLease.entry.key.context.networkId &&
+                    identityRules == presentationLease.entry.key.context.identityRules
+            )
+    val currentPresentationCompatible by rememberUpdatedState(presentationCompatible)
+    val payloadAllowed = payloadAdmitted && presentationLease?.isActive != false && presentationCompatible
     // Scroll-driven paging: the footer reflects the Paging APPEND state at the older end directly.
     val olderHistoryLoad = items.loadState.append
     val historyUiState =
@@ -1602,13 +1653,22 @@ internal fun ChatContent(
 
     // Entry position is resolved once after refresh. Until then do not expose a transient FAB or
     // advance read state from a default index-0 layout.
-    val entryInitiallySettled = entryState is EntryPositionState.Settled
-    var initialPositionSettled by remember(entryInitiallySettled) {
+    val entryInitiallySettled = entryState is EntryPositionState.Settled && initialTarget == null && presentationLease == null
+    var initialPositionSettled by remember(presentationLease, entryInitiallySettled) {
         mutableStateOf(entryInitiallySettled)
     }
     // The first Paging emission after entry settlement reflects data loaded for the target, not a
     // live arrival. Consume it without auto-follow so an unread target remains on screen.
     var suppressNextAutoFollow by remember { mutableStateOf(!entryInitiallySettled) }
+    val retainedViewport =
+        remember(presentationLease, entryFallback) {
+            entryFallback?.viewport ?: presentation?.confirmedViewport?.takeIf { entryFallback?.useSharedViewport == true }
+        }
+    var entryTimedOut by remember(presentationLease) { mutableStateOf(false) }
+    var selectingRetainedViewport by remember(presentationLease) { mutableStateOf(false) }
+    var retainedViewportChosen by remember(presentationLease) { mutableStateOf(false) }
+    var supersededAutomaticTarget by remember(presentationLease) { mutableStateOf<ChatPositionTarget?>(null) }
+    val automaticPositionJob = remember(presentationLease) { mutableStateOf<Job?>(null) }
 
     // Veil over the timeline while entry positioning settles, so the entry frames (the bottom of
     // the buffer, then the alignment passes) are never shown before the divider lands. One-shot per
@@ -1617,7 +1677,7 @@ internal fun ChatContent(
     // re-engage it. A restored visit that already knows where it landed starts lifted.
     val latestEntryState by rememberUpdatedState(entryState)
     val latestUnreadEntrySnapshot by rememberUpdatedState(unreadEntrySnapshot)
-    var entryVeilLifted by remember {
+    var entryVeilLifted by remember(presentationLease) {
         mutableStateOf(
             shouldLiftEntryVeil(
                 initialPositionSettled = entryInitiallySettled,
@@ -1626,7 +1686,7 @@ internal fun ChatContent(
             ),
         )
     }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(presentationLease) {
         if (entryVeilLifted) return@LaunchedEffect
         // Bounded wait: a slow or offline entry degrades to today's visible correction rather than
         // a stuck blank pane.
@@ -1637,12 +1697,13 @@ internal fun ChatContent(
                     // Both statements of settlement: the screen's own flag reveals a frame or two
                     // earlier, and the entry state carries it when the flag's keyed remember is
                     // rebuilt by the very transition that settles it.
-                    val settled = initialPositionSettled || entry is EntryPositionState.Settled
+                    val settled = initialPositionSettled || (presentationLease == null && entry is EntryPositionState.Settled)
                     settled to (entry is EntryPositionState.Unresolved)
                 }.first { (settled, unresolved) ->
                     shouldLiftEntryVeil(settled, unresolved, timedOut = false)
                 }
             }
+        entryTimedOut = resolved == null
         entryVeilLifted =
             shouldLiftEntryVeil(
                 initialPositionSettled = resolved?.first == true,
@@ -1688,6 +1749,8 @@ internal fun ChatContent(
             targetValue =
                 if (placingTopEntry) {
                     if (topEntryClampedAtBottom) 1f else 0f
+                } else if (presentation != null && !initialPositionSettled && !entryVeilLifted) {
+                    presentation.headerExpansion
                 } else if ((initialPositionSettled || entryVeilLifted) && !atBottom) {
                     0f
                 } else {
@@ -1696,6 +1759,54 @@ internal fun ChatContent(
             animationSpec = if (placingTopEntry) snap() else MotdMotion.fadeIn,
             label = "chat_header_expansion",
         )
+
+    fun currentPlacementReady(target: ChatPositionTarget?): Boolean {
+        if (presentationLease != null && measuredSnapshot?.value !== items.itemSnapshotList) return false
+        if (target?.expectedEventId == null) return true
+        val layout = listState.layoutInfo
+        val row = layout.visibleItemsInfo.firstOrNull { it.key == target.expectedEventId } ?: return false
+        val hostHeight = readBottomHostHeightPx()
+        if (hostHeight <= 0 || layout.beforeContentPadding < hostHeight) return false
+        if (target.placeAtTop && placingTopEntry) {
+            val expansion = if (topEntryClampedAtBottom) 1f else 0f
+            return laidOutEntryHeaderExpansion == expansion &&
+                (
+                    topEntryClampedAtBottom ||
+                        kotlin.math.abs(reverseItemTopAlignmentCorrection(row.offset, row.size, layout.viewportEndOffset)) <= TOP_ALIGNMENT_TOLERANCE_PX
+                )
+        }
+        val snapshot = items.itemSnapshotList
+        return exactTargetPlacement(
+            loadedStart = snapshot.placeholdersBefore,
+            loadedItems = snapshot.items,
+            visibleItems = layout.visibleItemsInfo.map { it.key to it.index },
+            firstVisibleIndex = listState.firstVisibleItemIndex,
+            firstVisibleOffset = listState.firstVisibleItemScrollOffset,
+            targetOffset = target.offset,
+            canScrollForward = listState.canScrollForward,
+            targetFullyVisible =
+                row.size > 0 && row.offset >= layout.viewportStartOffset + hostHeight &&
+                    row.offset + row.size <= layout.viewportEndOffset,
+            eventId = target.expectedEventId,
+        ) is ExactTargetPlacement.Positioned
+    }
+
+    suspend fun admitPayload(target: ChatPositionTarget? = null) {
+        val lease = presentationLease ?: return
+        snapshotFlow {
+            if (lease.isActive && currentPresentationCompatible &&
+                lease.hasPublishedWindow(items.itemSnapshotList) && currentPlacementReady(target)
+            ) {
+                items.itemSnapshotList
+            } else {
+                null
+            }
+        }.filterNotNull().first { snapshot ->
+            lease.admit(snapshot) && items.itemSnapshotList === snapshot && lease.isActive &&
+                currentPresentationCompatible && currentPlacementReady(target)
+        }
+        payloadAdmitted = true
+    }
 
     // Capture only entry-stage boundaries, through the already opt-in structural journal.
     fun recordEntryStage(
@@ -1945,7 +2056,7 @@ internal fun ChatContent(
             withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
                 snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
                     .first { (refresh, append, count) ->
-                        refresh is LoadState.NotLoading &&
+                        (refresh is LoadState.NotLoading || presentationLease?.hasPublishedWindow(items.itemSnapshotList) == true) &&
                             initialPagingPage(count, append) != InitialPagingPage.Pending
                     }
             } != null
@@ -1987,7 +2098,9 @@ internal fun ChatContent(
                         false
                     } else {
                         try {
-                            if (scroll) listState.requestScrollToItem(index, target.offset)
+                            if (scroll && (listState.firstVisibleItemIndex != index || listState.firstVisibleItemScrollOffset != target.offset)) {
+                                listState.requestScrollToItem(index, target.offset)
+                            }
                             // This is the only item access: it sends Paging a load hint for the exact target.
                             items[index]
                             true
@@ -2085,8 +2198,90 @@ internal fun ChatContent(
         }
     }
 
+    // Only the existing target timeout selects a retained viewport. Explicit jumps remain separate.
+    LaunchedEffect(
+        entryVeilLifted,
+        entryTimedOut,
+        initialPositionSettled,
+        presentationLease,
+        presentationRevision,
+        measuredSnapshot?.value,
+        visibleSpec,
+        presentationCompatible,
+        entryPositionIntent,
+    ) {
+        if (!entryVeilLifted || payloadAdmitted || initialPositionSettled) return@LaunchedEffect
+        val lease = presentationLease
+        val fallback = entryFallback
+        val saved = retainedViewport
+        val snapshot = items.itemSnapshotList
+        val index = saved?.let { materializedTargetSnapshotIndex(snapshot.placeholdersBefore, snapshot.items, it.rowId) }
+        val target =
+            if (saved != null && index != null) {
+                ChatPositionTarget(
+                    index = index,
+                    offset = saved.offset,
+                    expectedEventId = saved.rowId,
+                    expectedMsgid = saved.msgid,
+                    serverTime = saved.serverTime,
+                    fromSavedPosition = true,
+                )
+            } else {
+                null
+            }
+        if (!entryTimedOut || lease == null || fallback == null || target == null ||
+            fallback.intent != entryPositionIntent || canAdoptRetainedFallback?.invoke(fallback.intent) != true ||
+            !positionTargetMatches(target, items.peek(target.index))
+        ) {
+            // Cold, unavailable and explicit-jump fallbacks retain their prior behavior, but never
+            // bypass the independent committed-payload admission barrier.
+            if (!payloadAdmitted) admitPayload()
+            return@LaunchedEffect
+        }
+        if (!currentPresentationCompatible || !lease.admit(snapshot) || items.itemSnapshotList !== snapshot) return@LaunchedEffect
+        if (canAdoptRetainedFallback?.invoke(fallback.intent) != true) return@LaunchedEffect
+        selectingRetainedViewport = true
+        try {
+            automaticPositionJob.value?.cancelAndJoin()
+            if (canAdoptRetainedFallback?.invoke(fallback.intent) != true) return@LaunchedEffect
+            lease.prepareTarget(
+                target.index,
+                target.expectedEventId,
+                io.github.trevarj.motd.data.repo
+                    .entryAnchorPagingKey(target.index),
+                ViewportRefreshAnchor.Parked(checkNotNull(target.expectedEventId)),
+            )
+            val placed = materializeTarget(target, scroll = true) ?: return@LaunchedEffect
+            if (!currentPlacementReady(target) || listState.firstVisibleItemIndex != placed.index ||
+                listState.firstVisibleItemScrollOffset != target.offset
+            ) {
+                return@LaunchedEffect
+            }
+            val presented = items.itemSnapshotList
+            if (!lease.admit(presented) || items.itemSnapshotList !== presented || !currentPlacementReady(target)) return@LaunchedEffect
+            val position =
+                ChatScrollPosition(
+                    index = placed.index,
+                    offset = target.offset,
+                    msgid = placed.row.msgid,
+                    serverTime = placed.row.serverTime,
+                    rowId = placed.row.id,
+                )
+            if (onAdoptRetainedFallback?.invoke(position, fallback.intent) == true) {
+                supersededAutomaticTarget = initialTarget
+                retainedViewportChosen = true
+                presentation?.confirmedViewport = position
+                payloadAdmitted = true
+                initialPositionSettled = true
+                suppressNextAutoFollow = true
+            }
+        } finally {
+            selectingRetainedViewport = false
+        }
+    }
+
     // Deep jumps request one resolved placeholder, then validate both of its exact identities.
-    LaunchedEffect(jumpTarget, items) {
+    LaunchedEffect(jumpTarget, items, presentationLease, presentationRevision, visibleSpec) {
         val j = jumpTarget ?: return@LaunchedEffect
         onViewportRefreshAnchor(null)
         AutoFollowTrace.record("deep_jump_start", traceBufferId, traceSessionId) {
@@ -2109,6 +2304,7 @@ internal fun ChatContent(
         } else if (!positionTargetMatches(j, targetRow)) {
             onReresolveJump(j.requestToken)
         } else {
+            admitPayload(j)
             AutoFollowTrace.record("deep_jump_settled", traceBufferId, traceSessionId) {
                 "target_index=${j.index} item_count=${items.itemCount}"
             }
@@ -2122,9 +2318,11 @@ internal fun ChatContent(
 
     // Normal entry shares the deep-link paging mechanics but has no highlight. It is separate so
     // a deep link always wins and so a completed normal entry cannot be replayed on recomposition.
-    LaunchedEffect(initialTarget, items) {
+    LaunchedEffect(initialTarget, items, presentationLease, presentationRevision, visibleSpec, selectingRetainedViewport) {
+        if (selectingRetainedViewport || (retainedViewportChosen && initialTarget == supersededAutomaticTarget)) return@LaunchedEffect
         recordEntryStage("initial_position_start", initialTarget, if (initialTarget == null) "no_target" else "waiting")
         val target = initialTarget ?: return@LaunchedEffect
+        automaticPositionJob.value = currentCoroutineContext()[Job]
         AutoFollowTrace.record("initial_position_start", traceBufferId, traceSessionId) {
             "target_index=${target.index} target_offset=${target.offset} " +
                 "saved=${target.fromSavedPosition} item_count=${items.itemCount}"
@@ -2132,7 +2330,7 @@ internal fun ChatContent(
         val pageReady =
             withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
                 snapshotFlow {
-                    items.loadState.refresh is LoadState.NotLoading &&
+                    (items.loadState.refresh is LoadState.NotLoading || presentationLease?.hasPublishedWindow(items.itemSnapshotList) == true) &&
                         initialPagingPage(items.itemCount, items.loadState.append) != InitialPagingPage.Pending &&
                         (!placingTopEntry || laidOutEntryHeaderExpansion == 0f)
                 }.first { it }
@@ -2284,11 +2482,13 @@ internal fun ChatContent(
                 }
             }
         if (terminalEmpty) {
+            admitPayload(target)
             initialPositionSettled = true
             suppressNextAutoFollow = true
             recordEntryStage("initial_position_settled", target, "terminal_empty")
             onInitialPositionHandled()
         } else if (targetRow != null && positionTargetMatches(target, targetRow)) {
+            admitPayload(target)
             AutoFollowTrace.record("initial_position_settled", traceBufferId, traceSessionId) {
                 "target_index=${target.index} index=${listState.firstVisibleItemIndex} " +
                     "offset=${listState.firstVisibleItemScrollOffset} at_bottom=$currentlyAtBottom " +
@@ -2330,7 +2530,12 @@ internal fun ChatContent(
     }
 
     fun saveCurrentScrollPosition() {
-        if (!initialPositionSettled) return
+        if (!initialPositionSettled || !entryVeilLifted || !payloadAllowed || !currentPresentationCompatible ||
+            presentationLease?.ownsSlot() == false ||
+            (presentationLease != null && measuredSnapshot?.value !== items.itemSnapshotList)
+        ) {
+            return
+        }
         val index = listState.firstVisibleItemIndex
         // Clearing the saved position ASSERTS "resume at the live bottom next time", so only a
         // provable bottom may clear it — [isAtEffectiveBottom] is that proof, and a viewport parked
@@ -2350,7 +2555,18 @@ internal fun ChatContent(
                 )
         ) {
             ScrollPositionOutcome.ParkAtBottom -> {
-                onClearScrollPosition()
+                val position =
+                    nearestAnchorRow(index, items.itemCount, items::peek, visibilityPolicy)?.let { (anchorIndex, row) ->
+                        ChatScrollPosition(
+                            index = anchorIndex,
+                            offset = listState.firstVisibleItemScrollOffset.takeIf { anchorIndex == index } ?: 0,
+                            msgid = row.msgid,
+                            serverTime = row.serverTime,
+                            rowId = row.id,
+                        )
+                    }
+                if (position != null) presentation?.confirmedViewport = position
+                onClearScrollPosition(position)
             }
 
             ScrollPositionOutcome.Forget -> {
@@ -2363,7 +2579,7 @@ internal fun ChatContent(
                         "offset=${listState.firstVisibleItemScrollOffset} " +
                         "row=${outcome.row.id} at_bottom=false following=${autoFollow.following}"
                 }
-                onScrollPositionChanged(
+                val position =
                     ChatScrollPosition(
                         index = outcome.anchorIndex,
                         offset =
@@ -2372,8 +2588,9 @@ internal fun ChatContent(
                         msgid = outcome.row.msgid,
                         serverTime = outcome.row.serverTime,
                         rowId = outcome.row.id,
-                    ),
-                )
+                    )
+                presentation?.confirmedViewport = position
+                onScrollPositionChanged(position)
             }
         }
     }
@@ -2381,13 +2598,13 @@ internal fun ChatContent(
     // The previous collector allocated and wrote to the position cache for nearly every pixel of a
     // fling. We only need the final anchor: persist when scrolling settles, plus once on disposal so
     // a back gesture during an active fling still retains the current location.
-    LaunchedEffect(initialPositionSettled, listState, visibilityPolicy, items) {
+    LaunchedEffect(initialPositionSettled, entryVeilLifted, payloadAllowed, listState, visibilityPolicy, items) {
         if (!initialPositionSettled) return@LaunchedEffect
         snapshotFlow { listState.isScrollInProgress }
             .distinctUntilChanged()
             .collect { scrolling -> if (!scrolling) saveCurrentScrollPosition() }
     }
-    DisposableEffect(initialPositionSettled, listState, visibilityPolicy, items) {
+    DisposableEffect(initialPositionSettled, entryVeilLifted, payloadAllowed, listState, visibilityPolicy, items) {
         onDispose { saveCurrentScrollPosition() }
     }
 
@@ -2406,7 +2623,7 @@ internal fun ChatContent(
     // without settling can still under-report, which degrades to the depth-only rule and never to a
     // wrong "already seen".
     fun recordFurthestDisplayed() {
-        if (!initialPositionSettled) return
+        if (!initialPositionSettled || !payloadAllowed || presentationLease?.ownsSlot() == false) return
         val layout = listState.layoutInfo
         val bottomHostHeightPx = readBottomHostHeightPx()
         val deepest =
@@ -2628,7 +2845,7 @@ internal fun ChatContent(
         items = items,
         listState = listState,
         policy = visibilityPolicy,
-        enabled = initialPositionSettled,
+        enabled = initialPositionSettled && payloadAllowed,
         scopeId = state.buffer?.id,
         followingAtBottom = autoFollow.following && atBottom,
         onAnchor = onViewportRefreshAnchor,
@@ -2677,11 +2894,30 @@ internal fun ChatContent(
             "reason=$reason animate=$animate index=${listState.firstVisibleItemIndex} " +
                 "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
         }
-        onViewportRefreshAnchor(null)
+        onViewportRefreshAnchor(if (presentationLease != null) ViewportRefreshAnchor.Newest else null)
         autoFollow.requestFollow()
         programmaticScrolls++
         try {
+            val settlingAdoption = presentationLease != null && !initialPositionSettled
+            if (settlingAdoption) {
+                // An explicit newest/send action owns this demand even while automatic hints are
+                // still gated. The old retained window may not contain index zero.
+                if (items.itemCount == 0 || items.peek(0) == null) items.refresh()
+                snapshotFlow {
+                    items.itemCount > 0 ||
+                        initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.TerminalEmpty
+                }.first { it }
+                if (items.itemCount > 0) items[0]
+            }
             if (animate) listState.animateScrollToItem(0) else listState.scrollToItem(0)
+            if (settlingAdoption && !initialPositionSettled) {
+                snapshotFlow {
+                    latestEntryState is EntryPositionState.Settled && atBottom && !listState.isScrollInProgress
+                }.first { it }
+                admitPayload()
+                initialPositionSettled = true
+                suppressNextAutoFollow = true
+            }
         } finally {
             programmaticScrolls--
             AutoFollowTrace.record("scroll_end", traceBufferId, traceSessionId) {
@@ -2938,8 +3174,9 @@ internal fun ChatContent(
         atBottom,
         initialPositionSettled,
         viewportReadEnabled,
+        payloadAllowed,
     ) {
-        if (!viewportReadEnabled) {
+        if (!viewportReadEnabled || !payloadAllowed) {
             pausedSinceLastRun.value = true
             return@LaunchedEffect
         }
@@ -2955,7 +3192,7 @@ internal fun ChatContent(
             shouldMarkReadFromViewport(
                 atBottom = atBottom,
                 initialPositionSettled = initialPositionSettled,
-                viewportReadEnabled = viewportReadEnabled,
+                viewportReadEnabled = viewportReadEnabled && payloadAllowed,
             )
         if (ackable && newest.serverTime > 0) {
             AutoFollowTrace.record("viewport_markread", traceBufferId, traceSessionId) {
@@ -3202,13 +3439,12 @@ internal fun ChatContent(
                 val expansion = headerExpansion.value
                 TopAppBar(
                     modifier =
-                        Modifier.testTag("chat_top_app_bar").then(
-                            if (placingTopEntry) {
-                                Modifier.onGloballyPositioned { laidOutEntryHeaderExpansion = expansion }
-                            } else {
-                                Modifier
-                            },
-                        ),
+                        Modifier.testTag("chat_top_app_bar").onGloballyPositioned {
+                            if (presentationLease?.ownsSlot() != false) {
+                                if (placingTopEntry) laidOutEntryHeaderExpansion = expansion
+                                if (payloadAllowed) presentation?.headerExpansion = expansion
+                            }
+                        },
                     // Material grows beyond this minimum when accessibility text needs more room.
                     expandedHeight = 36.dp + (TopAppBarDefaults.TopAppBarExpandedHeight - 36.dp) * expansion,
                     colors =
@@ -3707,11 +3943,21 @@ internal fun ChatContent(
                                         }
                                     // Keep positioning hidden, then paint and release input together on
                                     // readiness; a post-placement fade only delays already-available rows.
-                                    Box(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = if (entryVeilLifted) 1f else 0f }) {
+                                    Box(
+                                        modifier =
+                                            Modifier
+                                                .fillMaxSize()
+                                                .graphicsLayer { alpha = if (entryVeilLifted && payloadAllowed) 1f else 0f }
+                                                .then(if (entryVeilLifted && payloadAllowed) Modifier else Modifier.clearAndSetSemantics {}),
+                                    ) {
                                         MessageList(
                                             items = items,
                                             listState = listState,
-                                            pagingHintsEnabled = initialPositionSettled,
+                                            modifier =
+                                                Modifier.onGloballyPositioned {
+                                                    if (presentationLease?.ownsSlot() == true) measuredSnapshot?.value = layoutSnapshot
+                                                },
+                                            pagingHintsEnabled = initialPositionSettled && payloadAllowed && entryPreparationReady,
                                             bottomContentPadding = innerPadding,
                                             onTranslateMessage = ::openTranslationPicker,
                                             externalTranslations = externalTranslations,
@@ -3760,7 +4006,7 @@ internal fun ChatContent(
                                             onSaveDccToDownloads = onSaveDccToDownloads,
                                             loadPreview = loadPreview,
                                             // A visible fallback entry can remain unresolved indefinitely.
-                                            richContentReady = initialPositionSettled || entryVeilLifted,
+                                            richContentReady = payloadAllowed && (initialPositionSettled || entryVeilLifted),
                                             showImages = showImages,
                                             showLinkPreviews = showLinkPreviews,
                                             cachedPreview = cachedPreview,
@@ -3793,7 +4039,7 @@ internal fun ChatContent(
                                         )
                                     }
                                     // Hidden rows cannot receive input; readiness removes this immediately.
-                                    if (!entryVeilLifted) {
+                                    if (!entryVeilLifted || !payloadAllowed) {
                                         Box(
                                             modifier =
                                                 Modifier

@@ -1010,8 +1010,7 @@ class ComposerSendClearUiTest {
             )
             waitForForward(owner) {
                 owner.composerDraft.value.hydrated && owner.state.value.replyTo
-                    ?.id == parent.id &&
-                    owner.forwardTargets.value.size == 2
+                    ?.id == parent.id
             }
             val originalDraft = owner.composerDraft.value
             val sourceDraft = runBlocking { db.composerDraftDao().byRoom(buffer.id) }
@@ -1019,6 +1018,11 @@ class ComposerSendClearUiTest {
 
             holdMessageBubble(parent)
             compose.onNodeWithTag("message_action_forward").assertIsDisplayed().performClick()
+            waitForForward(owner) {
+                owner.forwardTargets.value
+                    .map { it.bufferId }
+                    .toSet() == setOf(destination.id, sameNamed.id)
+            }
             compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
             compose.onNodeWithTag("message_forward_sheet").assertIsDisplayed()
             compose.onNodeWithTag("message_forward_target_${buffer.id}").assertDoesNotExist()
@@ -1072,6 +1076,11 @@ class ComposerSendClearUiTest {
 
             holdMessageBubble(parent)
             compose.onNodeWithTag("message_action_forward").performClick()
+            waitForForward(owner) {
+                owner.forwardTargets.value
+                    .map { it.bufferId }
+                    .toSet() == setOf(destination.id, sameNamed.id)
+            }
             compose.onNodeWithTag("message_forward_search").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
             compose.onNodeWithTag("message_forward_target_${destination.id}").performClick()
             compose.onNodeWithTag("message_forward_include_sender").assertIsOn()
@@ -1125,9 +1134,14 @@ class ComposerSendClearUiTest {
                 onDraftChanged = { error("forward changed draft") },
                 onSubmit = { error("forward submitted composer") },
             )
-            waitForForward(owner) { owner.composerDraft.value.hydrated && owner.forwardTargets.value.size == 1 }
+            waitForForward(owner) { owner.composerDraft.value.hydrated }
             holdMessageBubble(parent)
             compose.onNodeWithTag("message_action_forward").performClick()
+            waitForForward(owner) {
+                owner.forwardTargets.value
+                    .singleOrNull()
+                    ?.bufferId == destination.id
+            }
             compose.onNodeWithTag("message_forward_target_${destination.id}").performClick()
             compose.onNodeWithTag("message_forward_confirm").performClick()
             waitForForward(owner) { owner.forwardState.value?.sending == true && sends.size == 1 }
@@ -1194,9 +1208,14 @@ class ComposerSendClearUiTest {
                 onDraftChanged = { error("forward changed draft") },
                 onSubmit = { error("forward submitted composer") },
             )
-            waitForForward(owner) { owner.composerDraft.value.hydrated && owner.forwardTargets.value.size == 1 }
+            waitForForward(owner) { owner.composerDraft.value.hydrated }
             holdMessageBubble(parent)
             compose.onNodeWithTag("message_action_forward").performClick()
+            waitForForward(owner) {
+                owner.forwardTargets.value
+                    .singleOrNull()
+                    ?.bufferId == destination.id
+            }
             compose.onNodeWithTag("message_forward_target_${destination.id}").performClick()
             compose.runOnIdle { runBlocking { db.messageDao().update(parent.copy(text = "Changed")) } }
             compose.onNodeWithTag("message_forward_confirm").performClick()
@@ -1240,9 +1259,14 @@ class ComposerSendClearUiTest {
                 onDraftChanged = { error("forward changed draft") },
                 onSubmit = { error("forward submitted composer") },
             )
-            waitForForward(owner) { owner.composerDraft.value.hydrated && owner.forwardTargets.value.size == 1 }
+            waitForForward(owner) { owner.composerDraft.value.hydrated }
             holdMessageBubble(parent)
             compose.onNodeWithTag("message_action_forward").performClick()
+            waitForForward(owner) {
+                owner.forwardTargets.value
+                    .singleOrNull()
+                    ?.bufferId == destination.id
+            }
             compose.onNodeWithTag("message_forward_target_${destination.id}").performClick()
             compose.runOnIdle {
                 runBlocking {
@@ -1304,9 +1328,14 @@ class ComposerSendClearUiTest {
                 onDraftChanged = { error("forward changed draft") },
                 onSubmit = { error("forward submitted composer") },
             )
-            waitForForward(owner) { owner.composerDraft.value.hydrated && owner.forwardTargets.value.size == 1 }
+            waitForForward(owner) { owner.composerDraft.value.hydrated }
             holdMessageBubble(parent)
             compose.onNodeWithTag("message_action_forward").performClick()
+            waitForForward(owner) {
+                owner.forwardTargets.value
+                    .singleOrNull()
+                    ?.bufferId == destination.id
+            }
             compose.onNodeWithTag("message_forward_target_${destination.id}").performClick()
             compose.onNodeWithTag("message_forward_confirm").performClick()
             waitForForward(owner) { owner.forwardState.value?.error == MessageForwardError.SEND_REJECTED && attempts.size == 1 }
@@ -1362,9 +1391,14 @@ class ComposerSendClearUiTest {
                 onDraftChanged = { error("forward changed draft") },
                 onSubmit = { error("forward submitted composer") },
             )
-            waitForForward(owner) { owner.composerDraft.value.hydrated && owner.forwardTargets.value.size == 1 }
+            waitForForward(owner) { owner.composerDraft.value.hydrated }
             holdMessageBubble(parent)
             compose.onNodeWithTag("message_action_forward").performClick()
+            waitForForward(owner) {
+                owner.forwardTargets.value
+                    .singleOrNull()
+                    ?.bufferId == destination.id
+            }
             compose.onNodeWithTag("message_forward_target_${destination.id}").performClick()
             compose.onNodeWithTag("message_forward_confirm").performClick()
             waitForForward(owner) { owner.forwardState.value?.error == MessageForwardError.SEND_FAILED && attempts == 1 }

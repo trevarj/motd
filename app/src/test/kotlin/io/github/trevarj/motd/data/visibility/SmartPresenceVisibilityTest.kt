@@ -94,6 +94,24 @@ class SmartPresenceVisibilityTest {
         }
 
     @Test
+    fun `smart recent boundary needs only one speech row inside the grace gate`() =
+        runTest {
+            insert(MessageKind.PRIVMSG, "alice", 0)
+            insert(MessageKind.AWAY, "alice", SMART_PRESENCE_WINDOW_MS)
+            insert(MessageKind.BACK, "alice", SMART_PRESENCE_WINDOW_MS + 1)
+
+            // The recent interval must stay inside grace, and its inclusive boundary must not
+            // require the common-chatter threshold. One millisecond later, one speech is not enough.
+            val rows = visibleRows(PresenceMode.SMART)
+            assertEquals(listOf(MessageKind.AWAY, MessageKind.PRIVMSG), rows.map { it.kind })
+            val reader = MessageVisibilityReader(db)
+            val spec = MessageVisibilitySpec(presenceMode = PresenceMode.SMART)
+            val speech = rows.last()
+            assertEquals(1, reader.countTimelineNewer(bufferId, speech.serverTime, speech.id, spec))
+            assertEquals(rows.first().id, reader.latestEffectiveAnchor(bufferId, spec)?.id)
+        }
+
+    @Test
     fun `smart drops presence rows for a user who never spoke`() =
         runTest {
             insert(MessageKind.PRIVMSG, "alice", 0)

@@ -62,6 +62,7 @@ import io.github.trevarj.motd.data.repo.BufferRepositoryImpl
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
+import io.github.trevarj.motd.data.repo.MESSAGE_PAGING_CONFIG
 import io.github.trevarj.motd.data.repo.MessageRepository
 import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
 import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
@@ -142,6 +143,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -160,6 +162,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -186,6 +189,7 @@ class ChatViewModelTest {
             sendRejection: SendRejectionReason? = null,
             settings: SettingsRepository = FakeSettingsRepository(),
             messages: MessageRepository? = null,
+            scrollPositions: ChatScrollPositionStore = ChatScrollPositionStore(),
         ): ChatViewModel {
             val foreground = FakeForegroundBufferTracker()
             val processor = EventProcessor(db, TypingTrackerImpl(), io.github.trevarj.motd.data.sync.MessageNotifier.Noop)
@@ -231,7 +235,7 @@ class ChatViewModelTest {
                 audioPlaybackController = FakeAudioPlaybackController(),
                 draftStore = ComposerDraftStore(db),
                 pendingShareStore = pendingShares,
-                scrollPositionStore = ChatScrollPositionStore(),
+                scrollPositionStore = scrollPositions,
                 historyPageLoader = HistoryPageLoader(processor),
                 settingsRepository = settings,
                 replyPrefs = FakeReplyPrefs(),
@@ -264,6 +268,9 @@ class ChatViewModelTest {
     private lateinit var query: BufferEntity
     private lateinit var processor: EventProcessor
 
+    @Volatile
+    private var beforeUnreadMetadataQuery: (() -> Unit)? = null
+
     @Before
     fun setUp() =
         runTest {
@@ -279,7 +286,14 @@ class ChatViewModelTest {
                     // catch-up bound mid-arrangement — a machine-speed race that only lost on CI runners.
                     .setQueryExecutor { it.run() }
                     .setTransactionExecutor { it.run() }
-                    .build()
+                    .setQueryCallback(
+                        { sql, _ ->
+                            beforeUnreadMetadataQuery?.let { callback ->
+                                if (sql.contains(" AS unreadCount", ignoreCase = true)) callback()
+                            }
+                        },
+                        Runnable::run,
+                    ).build()
             network =
                 NetworkEntity(
                     name = "test",
@@ -406,12 +420,12 @@ class ChatViewModelTest {
                 backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.state.collect() }
                 vm.composerDraft.first { it.hydrated }
                 vm.state.first { it.replyTo?.id == source.id }
+                vm.openForward(source)
                 val target = vm.forwardTargets.first { it.any { row -> row.bufferId == query.id } }.single { it.bufferId == query.id }
                 val composer = vm.composerDraft.value
                 val sourceDraft = drafts.loadDraft(channel.id)
                 val destinationDraft = drafts.loadDraft(query.id)
 
-                vm.openForward(source)
                 assertTrue(requireNotNull(vm.forwardState.value).includeSender)
                 vm.openForward(targetReply)
                 assertEquals(source, vm.forwardState.value?.source)
@@ -454,6 +468,79 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun forwardTargetsFollowSheetLifetimeAndReopenWithFreshDestinations() =
+        runTest {
+            val source = seedTranslationSource()
+            val rows = roomBuffers().observeChatList().first()
+            val sourceRow = rows.single { it.bufferId == channel.id }
+            val queryRow = rows.single { it.bufferId == query.id }
+            val channelTarget = sourceRow.copy(bufferId = query.id + 1, displayName = "#destination")
+            val remoteTarget = queryRow.copy(bufferId = query.id + 2, networkId = network.id + 1, displayName = "remote")
+            val archived = queryRow.copy(bufferId = query.id + 3, archived = true)
+            val server = sourceRow.copy(bufferId = query.id + 4, type = BufferType.SERVER)
+            val buffers =
+                FakeBufferRepository(channel).apply {
+                    chatList.value = listOf(sourceRow, channelTarget, archived, queryRow, remoteTarget, server)
+                }
+            val ready = IrcClientState.Ready("me", emptySet(), emptyMap())
+            val manager = FakeConnectionManager(network.id)
+            val vm = viewModel(channel, manager, buffers = buffers)
+            val observed = mutableListOf<List<ChatListRow>>()
+            try {
+                // ChatScreen collects this even while the forwarding sheet is closed.
+                val collector =
+                    backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                        vm.forwardTargets.collect { observed += it }
+                    }
+                vm.state.first { it.buffer != null }
+                runCurrent()
+                assertEquals(emptyList<ChatListRow>(), observed.last())
+                assertEquals(0, buffers.chatList.subscriptionCount.value)
+
+                vm.openForward(source)
+                runCurrent()
+                assertEquals(listOf(channelTarget, queryRow), observed.last())
+                assertEquals(1, buffers.chatList.subscriptionCount.value)
+                manager.connectionStates.value = mapOf(network.id to ready, remoteTarget.networkId to ready)
+                runCurrent()
+                assertEquals(listOf(channelTarget, queryRow, remoteTarget), observed.last())
+
+                // Queue a changed list before dismissal; no stale targets may survive closing.
+                buffers.chatList.value = listOf(queryRow.copy(displayName = "stale"))
+                vm.dismissForward()
+                runCurrent()
+                assertNull(vm.forwardState.value)
+                assertEquals(emptyList<ChatListRow>(), observed.last())
+                assertEquals(0, buffers.chatList.subscriptionCount.value)
+
+                val renamed = queryRow.copy(displayName = "renamed")
+                val freshRemote = remoteTarget.copy(displayName = "fresh remote")
+                buffers.chatList.value = listOf(renamed, channelTarget.copy(archived = true), freshRemote)
+                manager.connectionStates.value = mapOf(network.id to IrcClientState.Disconnected, remoteTarget.networkId to ready)
+                runCurrent()
+                assertEquals(emptyList<ChatListRow>(), observed.last())
+                assertEquals(0, buffers.chatList.subscriptionCount.value)
+                assertTrue(collector.isActive)
+
+                vm.openForward(source)
+                runCurrent()
+                assertEquals(listOf(freshRemote), observed.last())
+                assertEquals(1, buffers.chatList.subscriptionCount.value)
+                manager.connectionStates.value = mapOf(network.id to ready, remoteTarget.networkId to ready)
+                runCurrent()
+                assertEquals(listOf(renamed, freshRemote), observed.last())
+
+                vm.dismissForward()
+                runCurrent()
+                assertEquals(emptyList<ChatListRow>(), observed.last())
+                assertEquals(0, buffers.chatList.subscriptionCount.value)
+                assertTrue(manager.messageAttempts.isEmpty())
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
+
+    @Test
     fun forwardTargetsKeepChatOrderAndSendSameNamedCrossNetworkChatsById() =
         runTest {
             val otherNetwork = network.copy(id = 0, name = "other").let { it.copy(id = db.networkDao().insert(it)) }
@@ -488,6 +575,7 @@ class ChatViewModelTest {
             val vm = viewModel(channel, manager, messages = seamRepository(), buffers = buffers, shares = shares)
             try {
                 vm.state.first { it.buffer != null }
+                vm.openForward(source)
                 val targets = vm.forwardTargets.first { it.size == 3 }
                 val expectedIds =
                     buffers
@@ -502,15 +590,14 @@ class ChatViewModelTest {
                 // An offline source is still readable; only the destination's connection admits send.
                 manager.connectionStates.value = mapOf(network.id to IrcClientState.Disconnected, otherNetwork.id to ready)
                 vm.forwardTargets.first { it.size == 2 }
-                vm.openForward(source)
                 vm.selectForwardDestination(targets.single { it.bufferId == otherQuery.id })
                 vm.confirmForward()
                 runCurrent()
                 assertNull(vm.forwardState.value)
                 manager.connectionStates.value = mapOf(network.id to ready, otherNetwork.id to ready)
-                vm.forwardTargets.first { it.size == 3 }
                 for (id in listOf(query.id, agent.id)) {
                     vm.openForward(source)
+                    vm.forwardTargets.first { it.size == 3 }
                     vm.selectForwardDestination(targets.single { it.bufferId == id })
                     vm.confirmForward()
                     runCurrent()
@@ -535,7 +622,6 @@ class ChatViewModelTest {
             val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
             try {
                 vm.state.first { it.buffer != null }
-                val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
                 for (changed in listOf(
                     source.copy(text = "Changed text"),
                     source.copy(sender = "mallory"),
@@ -546,6 +632,7 @@ class ChatViewModelTest {
                     null,
                 )) {
                     vm.openForward(source)
+                    val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
                     vm.selectForwardDestination(target)
                     if (changed == null) db.messageDao().deleteById(source.id) else db.messageDao().update(changed)
                     vm.confirmForward()
@@ -582,8 +669,8 @@ class ChatViewModelTest {
             val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
             try {
                 vm.state.first { it.buffer?.id == channel.id }
-                val target = vm.forwardTargets.first { it.any { row -> row.bufferId == query.id } }.single { it.bufferId == query.id }
                 vm.openForward(source)
+                val target = vm.forwardTargets.first { it.any { row -> row.bufferId == query.id } }.single { it.bufferId == query.id }
                 vm.selectForwardDestination(target)
                 db.bufferDao().update(channel.copy(redirectToRoomId = winnerRoom.id))
                 db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(source.id, winner.id))
@@ -611,8 +698,8 @@ class ChatViewModelTest {
             val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
             try {
                 vm.state.first { it.buffer != null }
-                val target = vm.forwardTargets.first { it.any { row -> row.bufferId == destination.id } }.single { it.bufferId == destination.id }
                 vm.openForward(source)
+                val target = vm.forwardTargets.first { it.any { row -> row.bufferId == destination.id } }.single { it.bufferId == destination.id }
                 vm.selectForwardDestination(target)
                 vm.confirmForward()
                 runCurrent()
@@ -655,8 +742,8 @@ class ChatViewModelTest {
                     query.copy(displayName = "Renamed chat"),
                     query.copy(redirectToRoomId = channel.id),
                 )) {
-                    val target = vm.forwardTargets.first { it.any { row -> row.bufferId == query.id } }.single { it.bufferId == query.id }
                     vm.openForward(source)
+                    val target = vm.forwardTargets.first { it.any { row -> row.bufferId == query.id } }.single { it.bufferId == query.id }
                     vm.selectForwardDestination(target)
                     db.bufferDao().update(changed)
                     vm.confirmForward()
@@ -668,8 +755,8 @@ class ChatViewModelTest {
                     vm.dismissForward()
                     db.bufferDao().update(query)
                 }
-                val target = vm.forwardTargets.first { it.any { row -> row.bufferId == query.id } }.single { it.bufferId == query.id }
                 vm.openForward(source)
+                val target = vm.forwardTargets.first { it.any { row -> row.bufferId == query.id } }.single { it.bufferId == query.id }
                 vm.selectForwardDestination(target)
                 db.networkDao().update(network.copy(name = "Renamed network"))
                 vm.confirmForward()
@@ -679,11 +766,11 @@ class ChatViewModelTest {
                 assertTrue(manager.messageAttempts.isEmpty())
                 vm.dismissForward()
                 db.networkDao().update(network)
+                vm.openForward(source)
                 val restoredTarget =
                     vm.forwardTargets
                         .first { rows -> rows.any { it.bufferId == query.id && it.networkName == network.name } }
                         .single { it.bufferId == query.id }
-                vm.openForward(source)
                 vm.selectForwardDestination(restoredTarget)
                 db.bufferDao().deleteBufferRow(query.id)
                 vm.confirmForward()
@@ -726,8 +813,8 @@ class ChatViewModelTest {
             val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
             try {
                 vm.state.first { it.buffer != null }
-                val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
                 vm.openForward(source)
+                val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
                 vm.selectForwardDestination(target)
                 vm.confirmForward()
                 val admitted = requireNotNull(vm.forwardState.value)
@@ -763,8 +850,8 @@ class ChatViewModelTest {
                 val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
                 try {
                     vm.state.first { it.buffer != null }
-                    val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
                     vm.openForward(source)
+                    val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
                     vm.selectForwardDestination(target)
                     vm.setForwardIncludeSender(false)
                     vm.confirmForward()
@@ -810,8 +897,8 @@ class ChatViewModelTest {
                 val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
                 try {
                     vm.state.first { it.buffer != null }
-                    val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
                     vm.openForward(source)
+                    val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
                     vm.selectForwardDestination(target)
                     vm.confirmForward()
                     runCurrent()
@@ -854,8 +941,8 @@ class ChatViewModelTest {
                 val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
                 try {
                     vm.state.first { it.buffer != null }
-                    val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
                     vm.openForward(source)
+                    val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
                     vm.selectForwardDestination(target)
                     vm.confirmForward()
                     runCurrent()
@@ -891,8 +978,8 @@ class ChatViewModelTest {
                 val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
                 try {
                     vm.state.first { it.buffer != null }
-                    val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
                     vm.openForward(source)
+                    val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
                     vm.selectForwardDestination(target)
                     vm.confirmForward()
                     runCurrent()
@@ -934,7 +1021,6 @@ class ChatViewModelTest {
             val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers())
             try {
                 vm.state.first { it.buffer != null }
-                val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
                 for ((body, cleaned) in listOf(
                     "/me waves" to "/me waves",
                     "/raw PRIVMSG #elsewhere :not a command" to "/raw PRIVMSG #elsewhere :not a command",
@@ -945,6 +1031,7 @@ class ChatViewModelTest {
                         val source = original.copy(text = body, sender = "a\r\nb\t\u0000", kind = MessageKind.ACTION, ircFormattedText = "Must not forward rendering")
                         db.messageDao().update(source)
                         vm.openForward(source)
+                        val target = vm.forwardTargets.first { it.isNotEmpty() }.single()
                         vm.selectForwardDestination(target)
                         vm.setForwardIncludeSender(include)
                         val prefix = if (include) "> a b : " else "> "
@@ -3930,7 +4017,7 @@ class ChatViewModelTest {
                     messages = FakeMessageRepository(events = unread + checkNotNull(db.messageDao().byId(nextId)), newerCount = 1),
                 )
 
-            val target = checkNotNull(withTimeoutOrNull(1_000) { vm.initialTarget.first { it != null } })
+            val target = checkNotNull(vm.initialTarget.first { it != null })
             val snapshot = checkNotNull(vm.unreadEntrySnapshot.value)
             assertFalse(fullListEmitted)
             assertEquals(unread[1].id, target.expectedEventId)
@@ -4030,7 +4117,8 @@ class ChatViewModelTest {
             messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(caughtUpId))
             manager.finishHistoryCatchUp(network.id)
 
-            val repaired = checkNotNull(withTimeoutOrNull(1_000) { vm.initialTarget.first { it?.expectedEventId != null } })
+            // Await the real IO result; a virtual-time deadline can expire before that worker runs.
+            val repaired = checkNotNull(vm.initialTarget.first { it?.expectedEventId != null })
             assertEquals(caughtUpId, repaired.expectedEventId)
             assertEquals(101L, repaired.serverTime)
             assertTrue(repaired.placeAtTop)
@@ -4122,6 +4210,92 @@ class ChatViewModelTest {
                     ?.eventId,
             )
             assertEquals(EntryPositionState.Settled, vm.entryState.value)
+        }
+
+    @Test
+    fun `settling a shown unread entry during correction metadata IO preserves its divider and viewport`() =
+        runTest {
+            val markerId =
+                db
+                    .messageDao()
+                    .insertAll(
+                        listOf(message(channel.id, "marker", "marker", "alice").copy(serverTime = 100)),
+                    ).single()
+            val unreadId =
+                db
+                    .messageDao()
+                    .insertAll(
+                        listOf(message(channel.id, "at-rest unread", "m150", "alice").copy(serverTime = 150)),
+                    ).single()
+            val enteredRoom = channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = markerId)
+            db.bufferDao().update(enteredRoom)
+            val manager =
+                FakeConnectionManager(
+                    networkId = network.id,
+                    state = IrcClientState.Ready("me", emptySet(), emptyMap()),
+                    client = testClient(),
+                    historyPending = setOf(network.id),
+                )
+            val repository = FakeMessageRepository(events = listOf(checkNotNull(db.messageDao().byCanonicalId(unreadId))))
+            val captureCorrection =
+                java.util.concurrent.atomic
+                    .AtomicBoolean()
+            val correctionJob = CompletableDeferred<kotlinx.coroutines.Job>()
+            val messages =
+                object : MessageRepository by repository {
+                    override suspend fun countNewerThan(
+                        bufferId: Long,
+                        serverTime: Long,
+                        id: Long,
+                        visibility: MessageVisibilitySpec,
+                    ): Int {
+                        if (captureCorrection.get()) {
+                            // resolveEntryAnchors' withContext(IO) is the direct child of the repair.
+                            val resolution = checkNotNull(kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job])
+                            correctionJob.complete(checkNotNull(resolution.parent))
+                        }
+                        return repository.countNewerThan(bufferId, serverTime, id, visibility)
+                    }
+                }
+            val vm = viewModel(enteredRoom, manager, messages = messages)
+            vm.state.first { it.buffer != null }
+            val entered = checkNotNull(vm.initialTarget.first { it != null })
+            vm.entryPreparationReady.first { it }
+            val shownSnapshot = checkNotNull(vm.unreadEntrySnapshot.value)
+            assertEquals(unreadId, entered.expectedEventId)
+            val caughtUpId =
+                db
+                    .messageDao()
+                    .insertAll(
+                        listOf(message(channel.id, "caught up", "m101", "alice").copy(serverTime = 101)),
+                    ).single()
+            repository.resolvedById = checkNotNull(db.messageDao().byCanonicalId(caughtUpId))
+            val metadataEntered = CompletableDeferred<Unit>()
+            val releaseMetadata = CompletableDeferred<Unit>()
+            try {
+                captureCorrection.set(true)
+                beforeUnreadMetadataQuery = {
+                    beforeUnreadMetadataQuery = null
+                    metadataEntered.complete(Unit)
+                    runBlocking { releaseMetadata.await() }
+                }
+                manager.finishHistoryCatchUp(network.id)
+                metadataEntered.await()
+                val repairing = correctionJob.await()
+                assertSame(vm.viewModelScope.coroutineContext[kotlinx.coroutines.Job], repairing.parent)
+                assertEquals(EntryPositionState.Pending, vm.entryState.value)
+                // No new user intent: the normal placement callback settles the already-shown row.
+                vm.onInitialPositionHandled()
+                releaseMetadata.complete(Unit)
+                repairing.join()
+                assertNull(vm.initialTarget.value)
+                assertSame("late metadata must not replace the divider that was just placed", shownSnapshot, vm.unreadEntrySnapshot.value)
+                assertEquals(EntryPositionState.Settled, vm.entryState.value)
+                assertTrue(manager.readMarkers.isEmpty())
+            } finally {
+                beforeUnreadMetadataQuery = null
+                releaseMetadata.complete(Unit)
+            }
         }
 
     @Test
@@ -4951,12 +5125,14 @@ class ChatViewModelTest {
                     scrollPositions = positions,
                 )
             vm.state.first { it.buffer != null }
+            vm.onResume()
             val restored = vm.initialTarget.first { it != null }
             assertEquals(1, restored?.index)
             assertEquals(37, restored?.offset)
             assertEquals(loserId, restored?.expectedEventId)
             assertTrue(restored?.fromSavedPosition == true)
             vm.onInitialPositionHandled()
+            vm.saveScrollPosition(checkNotNull(positions.get(channel.id)))
             assertEquals(null, vm.initialTarget.value)
 
             db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(loserId, winnerId))
@@ -5008,7 +5184,11 @@ class ChatViewModelTest {
             )
             // The reader was following the conversation when they navigated away, which clears the
             // saved viewport and records the park.
-            val positions = ChatScrollPositionStore().apply { markParkedAtBottom(channel.id) }
+            val positions =
+                ChatScrollPositionStore().apply {
+                    recordFurthestDisplayed(channel.id, TimelineAnchor(100, markerId, markerId))
+                    markParkedAtBottom(channel.id)
+                }
 
             val vm =
                 viewModel(
@@ -5044,7 +5224,11 @@ class ChatViewModelTest {
             // Absence of a saved viewport cannot carry that on its own — it is also what a room nobody
             // has opened looks like, and that one falls back to the marker.
             val ids = seedFiveRows()
-            val positions = ChatScrollPositionStore().apply { markParkedAtBottom(channel.id) }
+            val positions =
+                ChatScrollPositionStore().apply {
+                    recordFurthestDisplayed(channel.id, TimelineAnchor(100, ids.first(), ids.first()))
+                    markParkedAtBottom(channel.id)
+                }
 
             val vm =
                 viewModel(
@@ -5252,7 +5436,7 @@ class ChatViewModelTest {
                 viewModel(
                     channel.copy(localReadAnchorTime = 500, localReadAnchorEventId = ids.last()),
                     FakeConnectionManager(network.id),
-                    scrollPositions = savedAt(parked, "m1", serverTime = 100, offset = 12),
+                    scrollPositions = savedAt(parked, "m1", serverTime = 100, offset = 12, displayed = parked to 100L),
                 )
             vm.state.first { it.buffer != null }
 
@@ -5380,12 +5564,10 @@ class ChatViewModelTest {
         }
 
     @Test
-    fun `the Pager is keyed at the anchor entry actually lands on`() =
+    fun `a deep forward reader materializes the exact saved viewport`() =
         runTest {
-            // The key and the target must name the same row. A forward reader's target is the park, so
-            // keying the deeper unread anchor instead would rebuild the generation around a row entry
-            // never scrolls to and push the park back out into the placeholder scroll the key exists to
-            // avoid. 700 rows, so both candidates sit beyond the newest 600-row load.
+            // A forward reader restores the park, not the deeper unread boundary. Both candidates
+            // are beyond the newest load; the chosen row and its pixel offset must survive paging.
             val ids =
                 db.messageDao().insertAll(
                     (1..700).map { ordinal ->
@@ -5406,71 +5588,150 @@ class ChatViewModelTest {
                             ids[20],
                             "m21",
                             serverTime = 21,
+                            offset = 37,
                             // Entered at the first unread row (index 698) and read forward to the park (679).
                             displayed = ids[1] to 2L,
                         ),
                 )
             backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.messageGeneration.filterNotNull().collectLatest { it.pages.collect { } } }
 
-            // entryAnchorPagingKey(679) for the park, NOT entryAnchorPagingKey(698) for the divider.
-            assertEquals(129, messages.firstInitialKey.await())
             assertEquals(ViewportRefreshAnchor.Parked(ids[20]), messages.firstViewportAnchor.await())
-            assertEquals(679, vm.initialTarget.first { it != null }?.index)
+            val target = checkNotNull(vm.initialTarget.first { it != null })
+            assertEquals(679, target.index)
+            assertEquals(ids[20], target.expectedEventId)
+            assertEquals("m21", target.expectedMsgid)
+            assertEquals(37, target.offset)
+            assertTrue(target.fromSavedPosition)
+            assertFalse(target.placeAtTop)
+            val spec = checkNotNull(vm.messageGeneration.first { it != null }).spec
+            val page =
+                db.messageDao().pagingSource(messagePagingQuery(channel.id, spec)).load(
+                    PagingSource.LoadParams.Refresh(
+                        key = messages.firstInitialKey.await(),
+                        loadSize = MESSAGE_PAGING_CONFIG.initialLoadSize,
+                        placeholdersEnabled = true,
+                    ),
+                ) as PagingSource.LoadResult.Page<Int, MessageEntity>
+            val localTargetIndex = target.index - page.itemsBefore
+            assertEquals(ids[20], page.data[localTargetIndex].id)
+            assertEquals(ids[21], page.data[localTargetIndex - 1].id)
+            assertEquals(ids[19], page.data[localTargetIndex + 1].id)
         }
 
+    @OptIn(androidx.paging.ExperimentalPagingApi::class)
     @Test
-    fun `a saved viewport beyond the newest load keys the Pager at itself`() =
+    fun `retained native pages preserve a fresh saved target and offset for each visit`() =
         runTest {
-            // Publishing the right target is only half of a restore. A viewport parked deeper than the
-            // newest load (initialLoadSize = 600) opens as an unloaded placeholder unless the
-            // Pager is keyed there, and reaching it by scrolling to that placeholder drives a boundary
-            // APPEND that churns the generation before the row can compose. The key used to be computed
-            // for the unread anchor ONLY, so a deep restore had to be probed for rather than loaded.
-            //
-            // What the key must be is pinned by RecentPagingAppendReproTest over the real PagingSource;
-            // this pins that the ViewModel asks for it at all, for a saved viewport.
             val ids =
                 db.messageDao().insertAll(
-                    (1..700).map { ordinal ->
+                    (1..900).map { ordinal ->
                         message(channel.id, "row$ordinal", "m$ordinal", "alice").copy(
                             serverTime = ordinal.toLong(),
                             dedupKey = "row$ordinal",
                         )
                     },
                 )
-            val messages = FakeMessageRepository()
-            val vm =
-                viewModel(
-                    channel.copy(localReadAnchorTime = 700, localReadAnchorEventId = ids.last()),
-                    FakeConnectionManager(network.id),
-                    messages = messages,
-                    // The oldest row: 699 newer rows sit below it.
-                    scrollPositions = savedAt(ids.first(), "m1", serverTime = 1),
+            val repository =
+                MessageRepositoryImpl(
+                    db.bufferDao(),
+                    db.networkIdentityDao(),
+                    db,
+                    db.reactionDao(),
+                    ChatHistoryMediatorFactory { _, _, _ ->
+                        object : androidx.paging.RemoteMediator<Int, MessageEntity>() {
+                            override suspend fun initialize(): InitializeAction = InitializeAction.SKIP_INITIAL_REFRESH
+
+                            override suspend fun load(
+                                loadType: androidx.paging.LoadType,
+                                state: androidx.paging.PagingState<Int, MessageEntity>,
+                            ): MediatorResult = MediatorResult.Success(true)
+                        }
+                    },
+                    db.historyGapDao(),
+                    ioDispatcher = UnconfinedTestDispatcher(testScheduler),
                 )
-            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.messageGeneration.filterNotNull().collectLatest { it.pages.collect { } } }
-
-            // entryAnchorPagingKey(699): the anchor shifted back by initialLoadSize - pageSize.
-            assertEquals(149, messages.firstInitialKey.await())
-        }
-
-    @Test
-    fun `a saved viewport inside the newest load leaves the Pager unkeyed`() =
-        runTest {
-            // The negative control for the key: a shallow restore is already inside the newest-first
-            // refresh, so keying it would rebuild the generation around a row Paging was going to load
-            // anyway — and would drop the newest rows below it out of the initial window for nothing.
-            val ids = seedFiveRows()
-            val messages = FakeMessageRepository()
-            val vm =
-                viewModel(
-                    channel.copy(localReadAnchorTime = 500, localReadAnchorEventId = ids.last()),
-                    FakeConnectionManager(network.id),
-                    messages = messages,
-                    scrollPositions = savedAt(ids.first(), "m1", serverTime = 100),
-                )
-            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.messageGeneration.filterNotNull().collectLatest { it.pages.collect { } } }
-
-            assertNull(messages.firstInitialKey.await())
+            val settings = FakeSettingsRepository()
+            val owner = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+            val cache =
+                io.github.trevarj.motd.data.repo
+                    .ChatPageCache(repository, db, UnconfinedTestDispatcher(testScheduler))
+            cache.start(
+                owner,
+                object : io.github.trevarj.motd.service.AppVisibility {
+                    override val onScreen = MutableStateFlow(true)
+                },
+                settings.settings,
+            )
+            var firstPages: Flow<PagingData<MessageEntity>>? = null
+            try {
+                for (offset in listOf(71, 93)) {
+                    val positions = savedAt(ids[713], "m714", serverTime = 714, offset = offset)
+                    val vm =
+                        viewModel(
+                            channel.copy(localReadAnchorTime = 900, localReadAnchorEventId = ids.last()),
+                            FakeConnectionManager(network.id),
+                            messages = repository,
+                            settings = settings,
+                            scrollPositions = positions,
+                        )
+                    val presenter =
+                        object : androidx.paging.PagingDataPresenter<MessageEntity>(UnconfinedTestDispatcher(testScheduler)) {
+                            override suspend fun presentPagingDataEvent(event: androidx.paging.PagingDataEvent<MessageEntity>) = Unit
+                        }
+                    var generation: ChatPagingGeneration? = null
+                    val collection =
+                        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                            vm.retainedMessageGenerations(cache).collectLatest {
+                                generation = it
+                                it.pages.collectLatest(presenter::collectFrom)
+                            }
+                        }
+                    val target = checkNotNull(vm.initialTarget.first { it != null })
+                    val idle =
+                        presenter.loadStateFlow.filterNotNull().first {
+                            it.refresh is androidx.paging.LoadState.NotLoading &&
+                                it.prepend is androidx.paging.LoadState.NotLoading &&
+                                it.append is androidx.paging.LoadState.NotLoading
+                        }
+                    val current = checkNotNull(generation)
+                    val nativeSlot = checkNotNull(current.lease).entry
+                    nativeSlot.presented(nativeSlot.attachPresenter(), presenter.snapshot(), idle)
+                    assertEquals(186, target.index)
+                    assertEquals(offset, target.offset)
+                    assertEquals(ids[713], target.expectedEventId)
+                    assertEquals("m714", target.expectedMsgid)
+                    assertTrue(target.fromSavedPosition)
+                    assertTrue(positionTargetMatches(target, checkNotNull(presenter.peek(target.index))))
+                    assertEquals(EntryPositionState.Pending, vm.entryState.value)
+                    assertNull(vm.unreadEntrySnapshot.value)
+                    if (firstPages == null) firstPages = current.pages else assertTrue(firstPages === current.pages)
+                    vm.onInitialPositionHandled()
+                    vm.saveScrollPosition(
+                        ChatScrollPosition(index = 186, offset = offset, msgid = "m714", serverTime = 714, rowId = ids[713]),
+                    )
+                    collection.cancelAndJoin()
+                    // A newer visit changed the room-wide park while this entry was covered.
+                    positions.markParkedAtBottom(channel.id)
+                    val resumed = CompletableDeferred<ChatPagingGeneration>()
+                    val resumedCollection =
+                        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                            vm.retainedMessageGenerations(cache).collect { resumed.complete(it) }
+                        }
+                    val adopted = resumed.await()
+                    val restored = checkNotNull(vm.initialTarget.first { it != null })
+                    assertEquals("covered visits restore their own row, not another visit's bottom", ids[713], restored.expectedEventId)
+                    assertEquals(186, restored.index)
+                    assertEquals(offset, restored.offset)
+                    assertTrue(adopted.pages === current.pages)
+                    assertEquals("this is the same visit, not a new frozen unread snapshot", EntryPositionState.Settled, vm.entryState.value)
+                    vm.onInitialPositionHandled()
+                    resumedCollection.cancelAndJoin()
+                    // The second visit must not depend on a coroutine or callback in the first VM.
+                    vm.viewModelScope.cancel()
+                }
+            } finally {
+                checkNotNull(owner.coroutineContext[kotlinx.coroutines.Job]).cancelAndJoin()
+            }
         }
 
     // --- the timeline's history rule: demand -> gate -> SeamLoadingRule -> HistoryGapFiller -------

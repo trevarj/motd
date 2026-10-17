@@ -1047,6 +1047,15 @@ internal fun scrollPositionOutcome(
 data class ChatPagingGeneration(
     val spec: MessageVisibilitySpec,
     val pages: Flow<PagingData<MessageEntity>>,
+    val lease: io.github.trevarj.motd.data.repo.ChatPageCache.Lease? = null,
+    val fallback: RetainedEntryFallback? = null,
+)
+
+/** A visit's timeout choice, never permission to expose or acknowledge a retained payload. */
+data class RetainedEntryFallback(
+    val intent: Long,
+    val viewport: ChatScrollPosition?,
+    val useSharedViewport: Boolean,
 )
 
 /** One exact destination model shared by deep links and saved positions. */

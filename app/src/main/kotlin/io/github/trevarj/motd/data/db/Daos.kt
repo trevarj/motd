@@ -7,6 +7,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.RawQuery
+import androidx.room.RoomRawQuery
 import androidx.room.SkipQueryVerification
 import androidx.room.Transaction
 import androidx.room.Update
@@ -1224,6 +1225,10 @@ interface MessageDao {
     /** Dynamic visibility predicates must run inside Room so placeholder counts match page rows. */
     @RawQuery(observedEntities = [MessageEntity::class])
     fun pagingSource(query: SupportSQLiteQuery): PagingSource<Int, MessageEntity>
+
+    /** Retained paging binds its ownership guard at execution, including Room's COUNT query. */
+    @RawQuery(observedEntities = [MessageEntity::class])
+    fun pagingSource(query: RoomRawQuery): PagingSource<Int, MessageEntity>
 
     /**
      * One keyset page of the global feed, same projection and joins as [search].

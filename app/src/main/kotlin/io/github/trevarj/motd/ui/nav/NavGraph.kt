@@ -29,6 +29,7 @@ import androidx.navigation.NavController
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import io.github.trevarj.motd.agentwire.AgentwireGateScreen
@@ -41,6 +42,8 @@ import io.github.trevarj.motd.ui.about.AboutScreen
 import io.github.trevarj.motd.ui.channelinfo.ChannelInfoScreen
 import io.github.trevarj.motd.ui.channellist.ChannelListScreen
 import io.github.trevarj.motd.ui.chat.ChatForegroundLifecycleGate
+import io.github.trevarj.motd.ui.chat.ChatPresentationHost
+import io.github.trevarj.motd.ui.chat.ChatPresentationRegistry
 import io.github.trevarj.motd.ui.chat.ChatScreen
 import io.github.trevarj.motd.ui.chat.ChatViewModel
 import io.github.trevarj.motd.ui.chatlist.AutoGroupScreen
@@ -143,6 +146,7 @@ fun MotdNavGraph(
         navController.navigate(JoinInviteRoute(payload)) { launchSingleTop = true }
         onPendingJoinInviteHandled()
     }
+    val presentations = remember(navController) { ChatPresentationRegistry() }
     NavHost(
         navController = navController,
         startDestination = ChatListRoute,
@@ -299,6 +303,8 @@ fun MotdNavGraph(
                                 bufferId = route.bufferId,
                                 appearance = appearance,
                                 viewModel = chatViewModel,
+                                pageCache = chatListViewModel.chatPageCache,
+                                presentations = presentations,
                                 onBack = { navController.popBackStack() },
                                 showBack = showBack,
                                 onOpenConversationList =
@@ -678,6 +684,17 @@ fun MotdNavGraph(
                 onBack = { navController.popBackStack() },
             )
         }
+    }
+    // The actual chat-list entry owns data; this root composition owns native presentation objects.
+    // Neither the host nor this stable registry belongs to a disposable ChatRoute composition.
+    val currentEntry by navController.currentBackStackEntryAsState()
+    if (currentEntry != null) {
+        val listEntry =
+            remember(navController, currentEntry) {
+                navController.getBackStackEntry(requireNotNull(ChatListRoute::class.qualifiedName))
+            }
+        val owner: ChatListViewModel = hiltViewModel(listEntry)
+        owner.chatPageCache?.let { ChatPresentationHost(it, presentations) }
     }
 }
 

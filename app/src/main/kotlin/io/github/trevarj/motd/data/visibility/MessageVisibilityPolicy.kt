@@ -273,27 +273,30 @@ internal class MessageVisibilitySql(
     private fun smartPresence(alias: String): String {
         val kind = column(alias, "kind")
         val serverTime = column(alias, "serverTime")
+        // Recent speech is a subset of the hour grace window. Gate once on that superset so
+        // hour-silent actors skip the guaranteed-failing recent seek and the common threshold.
+        // Keep CASE lazy; widening the recent window beyond grace would invalidate this factoring.
         return "($kind NOT IN ($ACTOR_PRESENCE_KIND_SQL) " +
             "OR ${column(alias, "isSelf")} = 1 " +
-            "OR EXISTS (SELECT 1 FROM messages spoke " +
+            "OR CASE WHEN EXISTS (SELECT 1 FROM messages spoke " +
             "WHERE spoke.bufferId = ${column(alias, "bufferId")} " +
             "AND spoke.normalizedActor = ${column(alias, "normalizedActor")} " +
             "AND spoke.kind IN ($CONVERSATION_KIND_SQL) " +
             "AND spoke.serverTime <= $serverTime " +
-            "AND spoke.serverTime >= $serverTime - $SMART_PRESENCE_WINDOW_MS) " +
-            "OR (EXISTS (SELECT 1 FROM messages spoke " +
+            "AND spoke.serverTime >= $serverTime - $SMART_PRESENCE_COMMON_GRACE_MS) THEN " +
+            "CASE WHEN EXISTS (SELECT 1 FROM messages spoke " +
             "WHERE spoke.bufferId = ${column(alias, "bufferId")} " +
             "AND spoke.normalizedActor = ${column(alias, "normalizedActor")} " +
             "AND spoke.kind IN ($CONVERSATION_KIND_SQL) " +
             "AND spoke.serverTime <= $serverTime " +
-            "AND spoke.serverTime >= $serverTime - $SMART_PRESENCE_COMMON_GRACE_MS) " +
-            "AND EXISTS (SELECT 1 FROM messages spoke " +
+            "AND spoke.serverTime >= $serverTime - $SMART_PRESENCE_WINDOW_MS) THEN 1 ELSE " +
+            "EXISTS (SELECT 1 FROM messages spoke " +
             "WHERE spoke.bufferId = ${column(alias, "bufferId")} " +
             "AND spoke.normalizedActor = ${column(alias, "normalizedActor")} " +
             "AND spoke.kind IN ($CONVERSATION_KIND_SQL) " +
             "AND spoke.serverTime <= $serverTime " +
             "AND spoke.serverTime >= $serverTime - $SMART_PRESENCE_COMMON_WINDOW_MS " +
-            "LIMIT 1 OFFSET ${SMART_PRESENCE_COMMON_MIN_MESSAGES - 1})) " +
+            "LIMIT 1 OFFSET ${SMART_PRESENCE_COMMON_MIN_MESSAGES - 1}) END ELSE 0 END " +
             "OR ($kind = '${MessageKind.JOIN.name}' AND EXISTS (SELECT 1 FROM messages spoke " +
             "WHERE spoke.bufferId = ${column(alias, "bufferId")} " +
             "AND spoke.normalizedActor = ${column(alias, "normalizedActor")} " +
