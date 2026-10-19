@@ -1,8 +1,10 @@
 package io.github.trevarj.motd
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -13,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
@@ -24,6 +27,7 @@ import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
@@ -489,6 +493,136 @@ class MessageTimelineUiTest {
         compose.onNodeWithText("alice joined", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("bob left", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("carol quit", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun historyReplacementEasesSurvivingRowsWithoutFadingOrMovingTheAnchor() {
+        val original =
+            (6L downTo 1L).map { id ->
+                message(id, id * 1_000, MessageKind.PRIVMSG, "row $id")
+            }
+        val pages = MutableStateFlow(PagingData.from(original))
+        render(pages)
+        compose.mainClock.autoAdvance = false
+        val anchorBefore = bounds(messageTag(6))
+        val before = bounds(messageTag(2))
+
+        fun paintedRow(
+            id: Long,
+            textOnly: Boolean = false,
+        ): Bitmap {
+            // Capture the timeline so ancestor/item alpha, not just row semantics, is exercised.
+            val timeline = compose.onNodeWithTag("chat_timeline")
+            val root = timeline.fetchSemanticsNode().boundsInRoot
+            // Moving rows can expose recovered history through their outer padding. Compare their
+            // text and opaque fill, not that transparent gutter; the anchored row keeps its full crop.
+            val row =
+                if (textOnly) {
+                    compose.onNodeWithText("row $id", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                } else {
+                    bounds(messageTag(id))
+                }
+            return Bitmap.createBitmap(
+                timeline.captureToImage().asAndroidBitmap(),
+                (row.left - root.left).toInt() + 1,
+                (row.top - root.top).toInt() + 1,
+                row.width.toInt() - 2,
+                row.height.toInt() - 2,
+            )
+        }
+
+        val anchorPaint = paintedRow(6)
+        val rowPaint = paintedRow(2, textOnly = true)
+        compose.runOnIdle {
+            pages.value =
+                PagingData.from(
+                    original.take(4) +
+                        message(25, 2_500, MessageKind.PRIVMSG, "Recovered history\none\ntwo\nthree") +
+                        original.drop(4),
+                )
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(64)
+        compose.waitForIdle()
+        val intermediate = bounds(messageTag(2))
+        compose.onAllNodesWithTag(messageTag(2), useUnmergedTree = true).assertCountEquals(1)
+        compose.onNodeWithTag(messageTag(2), useUnmergedTree = true).assertIsDisplayed()
+        val intermediatePaint = paintedRow(2, textOnly = true)
+        assertTrue("History refresh must not fade the anchored timeline", anchorPaint.sameAs(paintedRow(6)))
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.waitForIdle()
+        val settled = bounds(messageTag(2))
+        val settledPaint = paintedRow(2, textOnly = true)
+
+        assertTrue("Recovered history must displace the surviving older row", before.top - settled.top > 16f)
+        assertTrue("The intermediate frame must move toward the new placement", intermediate.top < before.top - 2f)
+        assertTrue("The intermediate frame must not jump straight to the new placement", intermediate.top > settled.top + 2f)
+        assertEquals("The newest keyed anchor must not move", anchorBefore, bounds(messageTag(6)))
+        assertTrue("A moving survivor must stay fully painted", rowPaint.sameAs(intermediatePaint))
+        assertTrue("A settled survivor must keep the same painted content", rowPaint.sameAs(settledPaint))
+        listOf(6L, 2L, 25L).forEach {
+            compose.onAllNodesWithTag(messageTag(it), useUnmergedTree = true).assertCountEquals(1)
+        }
+    }
+
+    @Test
+    fun liveEntryGapOwnsPlacementUntilItCompletesThenHistoryCanEase() {
+        val original = (6L downTo 1L).map { id -> message(id, id * 1_000, MessageKind.PRIVMSG, "row $id") }
+        val pages = MutableStateFlow(PagingData.from(original))
+        val listState = LazyListState()
+        var liveIds by mutableStateOf(emptySet<Long>())
+        render(pages, listState = listState, liveEntryIds = { liveIds })
+        val before = bounds(messageTag(6))
+        val liveRow = message(7, 7_000, MessageKind.PRIVMSG, "live row")
+        compose.mainClock.autoAdvance = false
+        compose.runOnIdle {
+            liveIds = setOf(liveRow.id)
+            pages.value = PagingData.from(listOf(liveRow) + original)
+            listState.requestScrollToItem(0)
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(64)
+        compose.waitForIdle()
+        val openingHeight =
+            compose.runOnIdle {
+                listState.layoutInfo.visibleItemsInfo
+                    .single { it.key == liveRow.id }
+                    .size
+            }
+        assertTrue("The live entrance must have begun opening its gap", openingHeight > 0)
+        assertEquals("Older rows must follow the live gap without a second spring", before.top - openingHeight, bounds(messageTag(6)).top, 1f)
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.waitForIdle()
+        val finalHeight =
+            compose.runOnIdle {
+                listState.layoutInfo.visibleItemsInfo
+                    .single { it.key == liveRow.id }
+                    .size
+            }
+        assertTrue("The sampled frame must precede completion of the live entrance", openingHeight < finalHeight)
+        assertEquals(before.top - finalHeight, bounds(messageTag(6)).top, 1f)
+
+        // The live ID deliberately remains registered, as it does until the real row is disposed.
+        val historyBefore = bounds(messageTag(2))
+        compose.runOnIdle {
+            pages.value =
+                PagingData.from(
+                    listOf(liveRow) + original.take(4) +
+                        message(25, 2_500, MessageKind.PRIVMSG, "Recovered history\none\ntwo\nthree") +
+                        original.drop(4),
+                )
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(64)
+        compose.waitForIdle()
+        val intermediate = bounds(messageTag(2))
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.waitForIdle()
+        val settled = bounds(messageTag(2))
+        assertTrue("Completed live motion must release history placement", intermediate.top > settled.top + 2f && intermediate.top < historyBefore.top - 2f)
     }
 
     @Test
@@ -1110,6 +1244,8 @@ class MessageTimelineUiTest {
         onReply: (MessageEntity) -> Unit = {},
         layoutDirection: () -> LayoutDirection = { LayoutDirection.Ltr },
         systemGestureInsetPx: Int? = null,
+        listState: LazyListState? = null,
+        liveEntryIds: () -> Set<Long> = { emptySet() },
     ) {
         compose.setContent {
             var ai by androidx.compose.runtime.remember { mutableStateOf<AiTextUiState>(AiTextUiState.Closed) }
@@ -1144,7 +1280,8 @@ class MessageTimelineUiTest {
                     MessageList(
                         modifier = paneWidth?.let { Modifier.width(it) } ?: Modifier,
                         items = pages.collectAsLazyPagingItems(context = Dispatchers.Unconfined),
-                        listState = rememberLazyListState(),
+                        listState = listState ?: rememberLazyListState(),
+                        liveEntryIds = liveEntryIds(),
                         networkId = 1,
                         bufferId = 1,
                         ebooksQuietFeed = quietFeed,

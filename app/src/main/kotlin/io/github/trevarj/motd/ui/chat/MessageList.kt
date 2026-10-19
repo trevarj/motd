@@ -419,6 +419,14 @@ fun MessageList(
     // Keep the user's expanded JOIN/PART runs above the volatile Paging rows. A history sync may
     // briefly replace or rechunk those rows, but overlapping event identities remain stable.
     var expandedSystemEventIds by remember(bufferId) { mutableStateOf(emptySet<Long>()) }
+    var runningLiveEntries by remember(bufferId) { mutableIntStateOf(0) }
+    val onLiveEntryRunningChanged =
+        remember(bufferId) {
+            { running: Boolean -> runningLiveEntries += if (running) 1 else -1 }
+        }
+    // Entry, scrolling and live/send gap motion already own placement. Settled history reflow
+    // gets placement-only motion, never a fade of the canonical rows.
+    val animatePlacement = pagingHintsEnabled && !scrolling && outgoingFlight == null && runningLiveEntries == 0
     // Scrolling postpones only cache misses. Parsed URLs and resolved previews remain renderable so
     // a recycled row does not lose rich content halfway through a fling.
     val canStartNewRichContentWork = richContentReady && !scrolling
@@ -511,6 +519,12 @@ fun MessageList(
                 MessagePlaceholderRow(placeholderHeight)
                 return@items
             }
+            val placementModifier =
+                Modifier.animateItem(
+                    fadeInSpec = null,
+                    fadeOutSpec = null,
+                    placementSpec = if (animatePlacement) MotdMotion.rowPlacement else null,
+                )
             val translation = inlineTranslationFor(msg, externalTranslations)
             val translationContent: (@Composable (Color) -> Unit)? =
                 translation?.let { result -> { color -> InlineMessageTranslation(result, color) { onDismissExternalTranslation(result.eventId) } } }
@@ -523,7 +537,7 @@ fun MessageList(
             // the seam through a wrapper rather than as a parameter. Skipping them would hide the
             // break whenever a gap happens to be bounded by an invite, a netsplit, or a transfer.
             if (msg.kind == MessageKind.INVITE) {
-                TimelineSeamAbove(rowSeam(msg, older, timelineSeams), onLoadGap) {
+                TimelineSeamAbove(rowSeam(msg, older, timelineSeams), onLoadGap, placementModifier) { seamModifier ->
                     LiveTimelineEntry(
                         liveEntryIds,
                         msg,
@@ -532,7 +546,9 @@ fun MessageList(
                         flownRowIds,
                         flightProgress,
                         onFlightRowPositioned,
-                    ) {
+                        onRunningChanged = onLiveEntryRunningChanged,
+                        modifier = seamModifier,
+                    ) { rowModifier ->
                         InvitationCard(
                             message = msg,
                             onJoin = { onAcceptInvite(msg.id) },
@@ -540,6 +556,7 @@ fun MessageList(
                             onLongPress = translationHold?.let { { it(msg) } },
                             trailingContent = translationContent,
                             modifier = translationHostModifier,
+                            rootModifier = rowModifier,
                         )
                     }
                 }
@@ -547,7 +564,7 @@ fun MessageList(
             }
 
             if (msg.kind == MessageKind.NETSPLIT || msg.kind == MessageKind.NETJOIN) {
-                TimelineSeamAbove(rowSeam(msg, older, timelineSeams), onLoadGap) {
+                TimelineSeamAbove(rowSeam(msg, older, timelineSeams), onLoadGap, placementModifier) { seamModifier ->
                     LiveTimelineEntry(
                         liveEntryIds,
                         msg,
@@ -556,12 +573,15 @@ fun MessageList(
                         flownRowIds,
                         flightProgress,
                         onFlightRowPositioned,
-                    ) {
+                        onRunningChanged = onLiveEntryRunningChanged,
+                        modifier = seamModifier,
+                    ) { rowModifier ->
                         NetworkBatchPill(
                             message = msg,
                             onLongPress = translationHold?.let { { it(msg) } },
                             trailingContent = translationContent,
                             modifier = translationHostModifier,
+                            rootModifier = rowModifier,
                         )
                     }
                 }
@@ -569,7 +589,7 @@ fun MessageList(
             }
 
             if (msg.kind == MessageKind.DCC_TRANSFER) {
-                TimelineSeamAbove(rowSeam(msg, older, timelineSeams), onLoadGap) {
+                TimelineSeamAbove(rowSeam(msg, older, timelineSeams), onLoadGap, placementModifier) { seamModifier ->
                     LiveTimelineEntry(
                         liveEntryIds,
                         msg,
@@ -578,7 +598,9 @@ fun MessageList(
                         flownRowIds,
                         flightProgress,
                         onFlightRowPositioned,
-                    ) {
+                        onRunningChanged = onLiveEntryRunningChanged,
+                        modifier = seamModifier,
+                    ) { rowModifier ->
                         val transferFlow = remember(msg.id) { dccTransfer(msg) }
                         val transfer by transferFlow.collectAsStateWithLifecycle()
                         DccTransferCard(
@@ -591,6 +613,7 @@ fun MessageList(
                             onLongPress = translationHold?.let { { it(msg) } },
                             trailingContent = translationContent,
                             modifier = translationHostModifier,
+                            rootModifier = rowModifier,
                         )
                     }
                 }
@@ -615,10 +638,13 @@ fun MessageList(
                     flownRowIds,
                     flightProgress,
                     onFlightRowPositioned,
-                ) {
+                    onRunningChanged = onLiveEntryRunningChanged,
+                    modifier = placementModifier,
+                ) { rowModifier ->
                     SystemEventRun(
                         snapshot = snapshot,
                         index = index,
+                        modifier = rowModifier,
                         newest = msg,
                         readMarkerTime = readMarkerTime,
                         readMarkerLabel = readMarkerLabel,
@@ -653,9 +679,12 @@ fun MessageList(
                     flownRowIds,
                     flightProgress,
                     onFlightRowPositioned,
-                ) {
+                    onRunningChanged = onLiveEntryRunningChanged,
+                    modifier = placementModifier,
+                ) { rowModifier ->
                     FoolPlaceholderRow(
                         msg = msg,
+                        modifier = rowModifier,
                         dickordEnabled = dickordEnabled,
                         older = older,
                         readMarkerTime = readMarkerTime,
@@ -688,8 +717,8 @@ fun MessageList(
             // bubble, retry row, and read-marker/day dividers. A Box would stack them on top of one
             // another (dividers over message text; the fool-collapse chip trapped behind the bubble).
             // A Column lays them out top-to-bottom so each affordance owns its own space and taps.
-            val rowContent: @Composable () -> Unit = {
-                Column(modifier = Modifier.fillMaxWidth().background(highlightColor)) {
+            val rowContent: @Composable (Modifier) -> Unit = { rowModifier ->
+                Column(modifier = rowModifier.fillMaxWidth().background(highlightColor)) {
                     if (
                         ebooksQuietFeed &&
                         !msg.isSelf &&
@@ -777,7 +806,9 @@ fun MessageList(
                 flownRowIds,
                 flightProgress,
                 onFlightRowPositioned,
-                rowContent,
+                onRunningChanged = onLiveEntryRunningChanged,
+                modifier = placementModifier,
+                content = rowContent,
             )
         }
 
@@ -830,6 +861,7 @@ private fun DccTransferCard(
     onSaveToDownloads: (suspend (Long) -> Unit)?,
     modifier: Modifier = Modifier,
     onLongPress: (() -> Unit)? = null,
+    rootModifier: Modifier = Modifier,
     trailingContent: (@Composable (Color) -> Unit)? = null,
 ) {
     // Latch the outgoing entity: by the time the card collapses into the compact pill the entity
@@ -837,6 +869,7 @@ private fun DccTransferCard(
     var lastTransfer by remember { mutableStateOf(transfer) }
     if (transfer != null) lastTransfer = transfer
     AnimatedContent(
+        modifier = rootModifier,
         targetState = transfer != null,
         transitionSpec = { cardPillTransform() },
         label = "dcc_render",
@@ -1099,15 +1132,16 @@ private fun TimelineSeamDivider(
 private fun TimelineSeamAbove(
     seam: RowSeam?,
     onLoadGap: (Long) -> Unit,
-    content: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable (Modifier) -> Unit,
 ) {
     if (seam == null) {
-        content()
+        content(modifier)
         return
     }
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = modifier.fillMaxWidth()) {
         TimelineSeamDivider(seam, onLoadGap)
-        content()
+        content(Modifier)
     }
 }
 
@@ -1152,28 +1186,30 @@ private fun LiveTimelineEntry(
     flownRowIds: Set<Long>,
     flightProgress: () -> Float,
     onFlightRowPositioned: (Long, Rect) -> Unit,
-    content: @Composable () -> Unit,
+    onRunningChanged: (Boolean) -> Unit,
+    modifier: Modifier,
+    content: @Composable (Modifier) -> Unit,
 ) {
     when {
         // A send flight owns this row's entrance: the bubble travelling from the composer *is* the
         // animation, so the row waits underneath it rather than revealing itself as well. Checked
         // before [flownRowIds], which this very row joins the moment it first reports its bounds.
         outgoingFlight?.matches(message) == true -> {
-            FlightLandingEntry(message.id, flightProgress, onFlightRowPositioned, content)
+            FlightLandingEntry(message.id, flightProgress, onFlightRowPositioned, modifier) { content(Modifier) }
         }
 
         // Already delivered by a ghost. Its entrance is spent, so it renders plainly forever after
         // even though the live-entrance set still names it.
         message.id in flownRowIds -> {
-            content()
+            content(modifier)
         }
 
         message.id in liveEntryIds -> {
-            LiveMessageEntry(messageId = message.id, onConsumed = onConsumed, content = content)
+            LiveMessageEntry(message.id, onConsumed, onRunningChanged, modifier) { content(Modifier) }
         }
 
         else -> {
-            content()
+            content(modifier)
         }
     }
 }
@@ -1194,12 +1230,13 @@ private fun FlightLandingEntry(
     messageId: Long,
     progress: () -> Float,
     onPositioned: (Long, Rect) -> Unit,
+    modifier: Modifier,
     content: @Composable () -> Unit,
 ) {
     val latestOnPositioned = rememberUpdatedState(onPositioned)
     Box(
         modifier =
-            Modifier
+            modifier
                 .fillMaxWidth()
                 .clipToBounds()
                 .layout { measurable, constraints ->
@@ -1229,6 +1266,8 @@ private fun FlightLandingEntry(
 private fun LiveMessageEntry(
     messageId: Long,
     onConsumed: (Long) -> Unit,
+    onRunningChanged: (Boolean) -> Unit,
+    modifier: Modifier,
     content: @Composable () -> Unit,
 ) {
     val reveal = remember(messageId) { Animatable(0f) }
@@ -1239,9 +1278,14 @@ private fun LiveMessageEntry(
         onDispose { latestOnConsumed.value(messageId) }
     }
 
-    LaunchedEffect(messageId) {
-        reveal.animateTo(1f, MotdMotion.fadeIn)
-        complete = true
+    LaunchedEffect(messageId, onRunningChanged) {
+        onRunningChanged(true)
+        try {
+            reveal.animateTo(1f, MotdMotion.fadeIn)
+            complete = true
+        } finally {
+            onRunningChanged(false)
+        }
     }
 
     val motion =
@@ -1264,7 +1308,7 @@ private fun LiveMessageEntry(
         }
     Box(
         modifier =
-            Modifier
+            modifier
                 .fillMaxWidth()
                 .clipToBounds()
                 .then(motion),
@@ -1279,6 +1323,7 @@ private fun NetworkBatchPill(
     modifier: Modifier = Modifier,
     onLongPress: (() -> Unit)? = null,
     trailingContent: (@Composable (Color) -> Unit)? = null,
+    rootModifier: Modifier = Modifier,
 ) {
     val payload = remember(message.eventPayload) { NetworkBatchPayloadV1.decode(message.eventPayload) }
     if (payload == null) {
@@ -1287,7 +1332,7 @@ private fun NetworkBatchPill(
             lineCount = 1,
             loadLines = { listOf(message.text) },
             contentKey = message.id,
-            modifier = Modifier.testTag("chat_network_batch_${message.id}"),
+            modifier = rootModifier.testTag("chat_network_batch_${message.id}"),
             onLongPress = onLongPress,
             trailingContent = trailingContent,
             containerModifier = modifier,
@@ -1303,7 +1348,7 @@ private fun NetworkBatchPill(
         lineCount = payload.nicks.size,
         loadLines = { payload.nicks },
         contentKey = message.id,
-        modifier = Modifier.testTag("chat_network_batch_${message.kind.name.lowercase()}_${message.id}"),
+        modifier = rootModifier.testTag("chat_network_batch_${message.kind.name.lowercase()}_${message.id}"),
         onLongPress = onLongPress,
         trailingContent = trailingContent,
         containerModifier = modifier,
@@ -1342,6 +1387,7 @@ private fun InvitationCard(
     modifier: Modifier = Modifier,
     onLongPress: (() -> Unit)? = null,
     trailingContent: (@Composable (Color) -> Unit)? = null,
+    rootModifier: Modifier = Modifier,
 ) {
     val payload = remember(message.eventPayload) { InvitePayloadV1.decode(message.eventPayload) }
     val state = message.inviteState
@@ -1366,6 +1412,7 @@ private fun InvitationCard(
             }
         }
     AnimatedContent(
+        modifier = rootModifier,
         targetState = render,
         transitionSpec = { cardPillTransform() },
         // Pill-to-pill changes (resolved -> historical) swap in place; only the card <-> pill
@@ -1457,6 +1504,7 @@ private fun SystemEventRun(
     snapshot: ItemSnapshotList<MessageEntity>,
     index: Int,
     newest: MessageEntity,
+    modifier: Modifier = Modifier,
     readMarkerTime: TimelineAnchor?,
     readMarkerLabel: String?,
     timelineSeams: TimelineSeamState,
@@ -1510,7 +1558,7 @@ private fun SystemEventRun(
 
     // Column so the pill and any dividers stack vertically. A bare item slot stacks siblings on top
     // of each other (its MeasurePolicy behaves like a Box), which would overlap the divider text.
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = modifier.fillMaxWidth()) {
         TimelineSeamDivider(seam, onLoadGap)
         if (showDay) DaySeparator(timeMs = oldest.serverTime)
         if (showNewDivider) {
@@ -2220,6 +2268,7 @@ private fun QuietEbooksMessageRow(
 @Composable
 private fun FoolPlaceholderRow(
     msg: MessageEntity,
+    modifier: Modifier = Modifier,
     dickordEnabled: Boolean,
     older: MessageEntity?,
     readMarkerTime: TimelineAnchor?,
@@ -2241,7 +2290,7 @@ private fun FoolPlaceholderRow(
 
     // Column so the placeholder row and any dividers stack vertically rather than overlapping (a bare
     // item slot stacks its children like a Box).
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = modifier.fillMaxWidth()) {
         TimelineSeamDivider(seam, onLoadGap)
         if (showDay) DaySeparator(timeMs = msg.serverTime)
         if (showNewDivider) {
