@@ -54,8 +54,8 @@ class ChatSubtitleTest {
         val state = channelState(memberCount = 42)
 
         assertEquals(
-            ChatSubtitleModel.Text("42 members"),
-            chatSubtitleModel(state, context),
+            "42 members",
+            (chatSubtitleModel(state, context) as? ChatSubtitleModel.Text)?.value,
         )
     }
 
@@ -91,8 +91,8 @@ class ChatSubtitleTest {
         val state = channelState(memberCount = 42, displayName = "#discord.control")
 
         assertEquals(
-            ChatSubtitleModel.Text("42 members"),
-            chatSubtitleModel(state, context, dickordEnabled = true),
+            "42 members",
+            (chatSubtitleModel(state, context, dickordEnabled = true) as? ChatSubtitleModel.Text)?.value,
         )
     }
 

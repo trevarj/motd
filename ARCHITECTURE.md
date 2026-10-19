@@ -180,6 +180,8 @@ flowchart TD
   bottom restores expanded chrome and waits for that layout before consuming the target.
   Target consumption preserves the final header, viewport and unread placement; settled
   reader scrolls still animate, and latest stays expanded.
+  Compact headers keep member counts beside the ellipsizing title with separate text semantics;
+  expanded headers stack the count below it. Typing and connection/failure subtitles stay stacked.
   Entry's frozen unread metadata reads only the resolved canonical room, reusing the
   chat-list visibility policy and entry's paging spec rather than awaiting the whole list.
   Fresh anchor reads run sequentially on IO rather than returning through Main after

@@ -3124,6 +3124,7 @@ class ComposerSendClearUiTest {
         val history = headerHistory()
         val pages = MutableStateFlow(PagingData.from(history))
         var connection by mutableStateOf<IrcClientState>(IrcClientState.Ready("me", emptySet(), emptyMap()))
+        var headerBuffer by mutableStateOf(buffer)
         var backs = 0
         var details = 0
         var searches = 0
@@ -3133,6 +3134,7 @@ class ComposerSendClearUiTest {
             draft = { ComposerDraftState(hydrated = true) },
             pages = pages,
             memberCount = 42,
+            chatBuffer = { headerBuffer },
             onBack = { backs++ },
             onOpenChannelInfo = {
                 assertEquals(buffer.id, it)
@@ -3151,6 +3153,25 @@ class ComposerSendClearUiTest {
             val bounds = bar.getUnclippedBoundsInRoot()
             return (bounds.bottom - bounds.top).value
         }
+
+        fun assertMemberLayout(inline: Boolean) {
+            val titleBounds = compose.onNodeWithText(headerBuffer.displayName, useUnmergedTree = true).assertIsDisplayed().getUnclippedBoundsInRoot()
+            val memberBounds = compose.onNodeWithText("42 members", useUnmergedTree = true).assertIsDisplayed().getUnclippedBoundsInRoot()
+            if (inline) {
+                assertEquals("Compact members must sit beside the title with a readable gap", 8f, (memberBounds.left - titleBounds.right).value, 0.5f)
+                assertEquals(
+                    "Compact title and members must share one text row",
+                    (titleBounds.top.value + titleBounds.bottom.value) / 2f,
+                    (memberBounds.top.value + memberBounds.bottom.value) / 2f,
+                    0.5f,
+                )
+            } else {
+                assertTrue("Expanded members must remain below the title", memberBounds.top >= titleBounds.bottom)
+                assertEquals("Expanded members must align with the title", titleBounds.left.value, memberBounds.left.value, 0.5f)
+            }
+            val barBounds = bar.getUnclippedBoundsInRoot()
+            assertTrue("The complete member count must stay inside the bar", memberBounds.left >= barBounds.left && memberBounds.right <= barBounds.right && memberBounds.top >= barBounds.top && memberBounds.bottom <= barBounds.bottom)
+        }
         val title = compose.onNodeWithTag("chat_title")
         val timeline = compose.onNodeWithTag("chat_timeline")
         val resources = RuntimeEnvironment.getApplication().resources
@@ -3163,8 +3184,7 @@ class ComposerSendClearUiTest {
         compose.onNodeWithTag("chat_overflow").assertHeightIsAtLeast(48.dp)
         compose.onNodeWithTag("chat_compact_actions").assertDoesNotExist()
         compose.onNodeWithTag("chat_compact_back").assertDoesNotExist()
-        compose.onNodeWithText("#kotlin", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithText("42 members", useUnmergedTree = true).assertIsDisplayed()
+        assertMemberLayout(inline = false)
         compose.mainClock.autoAdvance = false
         timeline.performScrollToIndex(50)
         compose.waitForIdle()
@@ -3182,6 +3202,31 @@ class ComposerSendClearUiTest {
         assertEquals("Header resizing moved the canonical history row", anchorBottom, anchor.getUnclippedBoundsInRoot().bottom.value, 0.5f)
         compose.mainClock.autoAdvance = true
         title.assertHeightIsEqualTo(36.dp).assertHasNoClickAction()
+        assertMemberLayout(inline = true)
+        val longTitle = "#a-long-conversation-title-that-must-ellipsize-without-hiding-the-member-count"
+        compose.runOnIdle { headerBuffer = buffer.copy(displayName = longTitle) }
+        assertMemberLayout(inline = true)
+        val titleLayouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText(longTitle, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(titleLayouts) }
+        assertTrue("A long compact title must ellipsize to leave room for members", titleLayouts.single().isLineEllipsized(0))
+        val memberLayouts = mutableListOf<TextLayoutResult>()
+        val memberText = compose.onNodeWithText("42 members", useUnmergedTree = true)
+        memberText.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(memberLayouts) }
+        val memberLayout = memberLayouts.single()
+        val memberSize = memberText.fetchSemanticsNode().size
+        val memberLine = Rect(memberLayout.getLineLeft(0), memberLayout.getLineTop(0), memberLayout.getLineRight(0), memberLayout.getLineBottom(0))
+        val memberDiagnostic =
+            "node=$memberSize, layout=${memberLayout.size}, paragraph=${memberLayout.multiParagraph.width}x${memberLayout.multiParagraph.height}, " +
+                "line=$memberLine, constraints=${memberLayout.layoutInput.constraints}"
+        // String Text semantics reconstruct a wider paragraph; test its painted line against the real node.
+        assertFalse("The member count must not omit lines: $memberDiagnostic", memberLayout.multiParagraph.didExceedMaxLines)
+        assertFalse("The member count must not ellipsize: $memberDiagnostic", memberLayout.isLineEllipsized(0))
+        assertEquals("The complete member count must be laid out: $memberDiagnostic", "42 members".length, memberLayout.getLineEnd(0, visibleEnd = true))
+        assertTrue(
+            "A long compact title must not clip any of the member count: $memberDiagnostic",
+            memberLine.left >= 0f && memberLine.top >= 0f && memberLine.right <= memberSize.width && memberLine.bottom <= memberSize.height,
+        )
+        compose.runOnIdle { headerBuffer = buffer }
         val avatarBounds = compose.onNodeWithTag("chat_header_avatar", useUnmergedTree = true).assertHeightIsEqualTo(20.dp).getUnclippedBoundsInRoot()
         assertEquals(
             "The compact avatar must be centered below the status-bar inset",
@@ -3253,6 +3298,11 @@ class ComposerSendClearUiTest {
         compose.runOnIdle { connection = IrcClientState.Failed("SASL authentication failed", fatal = true) }
         compose.onNodeWithText("SASL authentication failed", useUnmergedTree = true).assertIsDisplayed()
         assertEquals(compactHeight, headerHeight(), 0.5f)
+        val failureBounds = compose.onNodeWithText("SASL authentication failed", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val failureTitleBounds = compose.onNodeWithText("#kotlin", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("Failure subtitles must stay below the compact title", failureBounds.top >= failureTitleBounds.bottom)
+        compose.runOnIdle { connection = IrcClientState.Ready("me", emptySet(), emptyMap()) }
+        assertMemberLayout(inline = true)
 
         compose.mainClock.autoAdvance = false
         compose.onNodeWithTag("chat_scroll_to_bottom_fab").performClick()
@@ -3263,6 +3313,7 @@ class ComposerSendClearUiTest {
         compose.onNodeWithTag("chat_message_header-101", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag("chat_scroll_to_bottom_fab").assertDoesNotExist()
         assertEquals(expandedHeight, headerHeight(), 0.5f)
+        assertMemberLayout(inline = false)
         actions.assertDoesNotExist()
         compactBack.assertDoesNotExist()
         title.assertHeightIsAtLeast(48.dp)
@@ -3281,6 +3332,7 @@ class ComposerSendClearUiTest {
         compose.mainClock.advanceTimeBy(500)
         compose.waitForIdle()
         assertEquals("Manual return must restore the same expanded bar", expandedHeight, headerHeight(), 0.5f)
+        assertMemberLayout(inline = false)
     }
 
     @Test

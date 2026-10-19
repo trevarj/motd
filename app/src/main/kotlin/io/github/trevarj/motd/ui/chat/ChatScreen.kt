@@ -3493,33 +3493,52 @@ internal fun ChatContent(
                                 }
                             }
                             // The 10dp gap only separates the title from the avatar beside it.
+                            val subtitleModel = chatSubtitleModel(state, ctx, dickordEnabled)
                             Column(modifier = Modifier.padding(start = if (hideAvatar) 0.dp else 10.dp).weight(1f)) {
-                                Text(
-                                    text = conversationLabel.orEmpty(),
-                                    style = if (compactHeader) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                AnimatedContent(
-                                    targetState = chatSubtitleModel(state, ctx, dickordEnabled),
-                                    transitionSpec = {
-                                        fadeIn(MotdMotion.microFadeIn) togetherWith
-                                            fadeOut(MotdMotion.microFadeOut)
-                                    },
-                                    label = "chat_subtitle",
-                                ) { subtitle ->
-                                    when (subtitle) {
-                                        is ChatSubtitleModel.Text -> {
-                                            Text(
-                                                text = subtitle.value,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                        }
+                                if (compactHeader && subtitleModel is ChatSubtitleModel.Text && subtitleModel.isMemberCount) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(
+                                            text = conversationLabel.orEmpty(),
+                                            modifier = Modifier.weight(1f, fill = false),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            text = subtitleModel.value,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = conversationLabel.orEmpty(),
+                                        style = if (compactHeader) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    AnimatedContent(
+                                        targetState = subtitleModel,
+                                        transitionSpec = {
+                                            fadeIn(MotdMotion.microFadeIn) togetherWith
+                                                fadeOut(MotdMotion.microFadeOut)
+                                        },
+                                        label = "chat_subtitle",
+                                    ) { subtitle ->
+                                        when (subtitle) {
+                                            is ChatSubtitleModel.Text -> {
+                                                Text(
+                                                    text = subtitle.value,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
 
-                                        null -> {}
+                                            null -> {}
+                                        }
                                     }
                                 }
                             }
@@ -5141,6 +5160,7 @@ internal fun TimelineHistorySyncFailure(
 internal sealed interface ChatSubtitleModel {
     data class Text(
         val value: String,
+        val isMemberCount: Boolean = false,
     ) : ChatSubtitleModel
 }
 
@@ -5191,7 +5211,7 @@ internal fun chatSubtitleModel(
     if (buffer == null) return null
     return if (buffer.type == BufferType.CHANNEL && state.memberCount != null) {
         val n = state.memberCount
-        ChatSubtitleModel.Text(context.resources.getQuantityString(R.plurals.chat_member_count, n, n))
+        ChatSubtitleModel.Text(context.resources.getQuantityString(R.plurals.chat_member_count, n, n), isMemberCount = true)
     } else {
         null
     }
