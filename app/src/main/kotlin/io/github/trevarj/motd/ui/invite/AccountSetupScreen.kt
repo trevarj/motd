@@ -32,6 +32,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.AccountEnrollmentProvider
+import io.github.trevarj.motd.ui.settings.PasswordField
 
 @Composable
 fun AccountSetupScreen(
@@ -48,6 +49,7 @@ fun AccountSetupScreen(
         onBack = onBack,
         onAccountChange = viewModel::editAccount,
         onEmailChange = viewModel::editEmail,
+        onPasswordChange = viewModel::editPassword,
         onVerificationChange = viewModel::editVerification,
         onSubmit = viewModel::submit,
         onVerify = viewModel::verify,
@@ -63,6 +65,7 @@ fun AccountSetupContent(
     onBack: () -> Unit,
     onAccountChange: (String) -> Unit,
     onEmailChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
     onVerificationChange: (String) -> Unit,
     onSubmit: () -> Unit,
     onVerify: () -> Unit,
@@ -120,6 +123,12 @@ fun AccountSetupContent(
                             color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    PasswordField(
+                        value = state.password,
+                        onValueChange = onPasswordChange,
+                        label = stringResource(R.string.onboarding_auth_sasl_password),
+                        modifier = Modifier.fillMaxWidth().testTag("account_setup_password"),
+                    )
                     state.error?.let { Text(it, color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
                     Button(onClick = onSubmit, modifier = Modifier.fillMaxWidth().testTag("account_setup_submit")) {
                         Text(stringResource(R.string.account_setup_create))

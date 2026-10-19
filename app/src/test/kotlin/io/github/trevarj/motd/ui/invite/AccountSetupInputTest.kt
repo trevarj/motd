@@ -4,7 +4,9 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.AccountEnrollmentDraft
 import io.github.trevarj.motd.data.prefs.AccountEnrollmentProvider
+import io.github.trevarj.motd.irc.client.AccountRegistrationPolicy
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -60,6 +62,49 @@ class AccountSetupInputTest {
         assertNull(parseOftcVerificationUrl("https://oftc.net.evil.example/token"))
         assertTrue(oftcAccountVerified("Email address: a@example.org (verified)"))
         assertEquals(false, oftcAccountVerified("Email address: a@example.org (unverified)"))
+    }
+
+    @Test
+    fun `passwords are required and reject control characters for every provider`() {
+        AccountEnrollmentProvider.entries.forEach { provider ->
+            listOf("", "bad\u0000password", "bad\rpassword", "bad\npassword", "bad\tpassword", "bad\u007fpassword").forEach { password ->
+                assertNotNull(accountPasswordError(password, provider, null))
+            }
+            assertNull(accountPasswordError("Chosen-Secret-42!", provider, null))
+            assertNull(accountPasswordError("short", provider, null))
+        }
+    }
+
+    @Test
+    fun `NickServ rejects whitespace while IRCv3 preserves ordinary spaces`() {
+        listOf(AccountEnrollmentProvider.LIBERA, AccountEnrollmentProvider.OFTC).forEach { provider ->
+            listOf("two words", " leading", "trailing ", "two\twords", "two\u2003words").forEach { password ->
+                assertNotNull(accountPasswordError(password, provider, null))
+            }
+        }
+        assertNull(accountPasswordError(" chosen password ", AccountEnrollmentProvider.IRCV3, null))
+    }
+
+    @Test
+    fun `password ceiling counts UTF-8 bytes for every provider`() {
+        AccountEnrollmentProvider.entries.forEach { provider ->
+            assertNull(accountPasswordError("a".repeat(300), provider, null))
+            assertNotNull(accountPasswordError("a".repeat(301), provider, null))
+            assertNull(accountPasswordError("é".repeat(150), provider, null))
+            assertNotNull(accountPasswordError("é".repeat(150) + "a", provider, null))
+        }
+    }
+
+    @Test
+    fun `IRCv3 advertised bounds count UTF-8 bytes without a generated password minimum`() {
+        val policy = AccountRegistrationPolicy(minPasswordLength = 4, maxPasswordLength = 6)
+        assertNotNull(accountPasswordError("é", AccountEnrollmentProvider.IRCV3, policy))
+        assertNull(accountPasswordError("éé", AccountEnrollmentProvider.IRCV3, policy))
+        assertNull(accountPasswordError("ééé", AccountEnrollmentProvider.IRCV3, policy))
+        assertNotNull(accountPasswordError("éééa", AccountEnrollmentProvider.IRCV3, policy))
+        assertNull(accountPasswordError("a", AccountEnrollmentProvider.IRCV3, null))
+        assertNull(accountPasswordError("a", AccountEnrollmentProvider.LIBERA, policy))
+        assertNull(accountPasswordError("a".repeat(7), AccountEnrollmentProvider.OFTC, policy))
     }
 
     @Test

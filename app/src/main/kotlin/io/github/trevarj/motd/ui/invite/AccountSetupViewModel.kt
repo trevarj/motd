@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.prefs.AccountEnrollmentPhase
 import io.github.trevarj.motd.data.prefs.AccountEnrollmentProvider
 import io.github.trevarj.motd.data.prefs.InviteEnrollmentStore
 import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.irc.client.AccountRegistrationPolicy
 import io.github.trevarj.motd.irc.client.AccountRegistrationResult
 import io.github.trevarj.motd.irc.client.IrcCommandException
 import io.github.trevarj.motd.irc.client.NickServIdentifySyntax
@@ -37,8 +38,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.URI
-import java.security.SecureRandom
-import java.util.Base64
 import javax.inject.Inject
 
 private const val ACCOUNT_READY_TIMEOUT_MS = 30_000L
@@ -52,6 +51,7 @@ data class AccountSetupUiState(
     val provider: AccountEnrollmentProvider? = null,
     val account: String = "",
     val email: String = "",
+    val password: String = "",
     val emailRequired: Boolean = false,
     val verification: String = "",
     val serverMessage: String? = null,
@@ -116,6 +116,7 @@ class AccountSetupViewModel
                         provider = provider,
                         account = draft?.account ?: readyNick,
                         email = draft?.email.orEmpty(),
+                        password = draft?.password.orEmpty(),
                         emailRequired =
                             provider in setOf(AccountEnrollmentProvider.LIBERA, AccountEnrollmentProvider.OFTC) ||
                                 client?.accountRegistrationPolicy?.emailRequired == true,
@@ -133,6 +134,10 @@ class AccountSetupViewModel
             _state.value = _state.value.copy(email = value, error = null)
         }
 
+        fun editPassword(value: String) {
+            _state.value = _state.value.copy(password = value, error = null)
+        }
+
         fun editVerification(value: String) {
             _state.value = _state.value.copy(verification = value, error = null)
         }
@@ -141,6 +146,7 @@ class AccountSetupViewModel
             val state = _state.value
             val network = state.network ?: return
             val provider = state.provider ?: return
+            val password = state.password
             val account = sanitizeNickInput(state.account)
             if (account == null || provider == AccountEnrollmentProvider.OFTC && account.length < 2) {
                 fail("Choose a valid account nickname")
@@ -151,6 +157,11 @@ class AccountSetupViewModel
                 fail("Enter a valid recovery email")
                 return
             }
+            val policy = if (provider == AccountEnrollmentProvider.IRCV3) connections.clientFor(networkId)?.accountRegistrationPolicy else null
+            accountPasswordError(password, provider, policy)?.let {
+                fail(it)
+                return
+            }
             viewModelScope.launch {
                 var resumedDraft: AccountEnrollmentDraft? = null
                 try {
@@ -159,8 +170,9 @@ class AccountSetupViewModel
                     val existingDraft = enrollment.accountDraft(networkId)
                     val draft =
                         existingDraft?.takeIf {
-                            it.phase == AccountEnrollmentPhase.PREPARED && it.provider == provider && it.account == effectiveAccount && it.email == email
-                        } ?: AccountEnrollmentDraft(networkId, provider, effectiveAccount, email, generatePassword(provider))
+                            it.phase == AccountEnrollmentPhase.PREPARED && it.provider == provider && it.account == effectiveAccount &&
+                                it.email == email && it.password == password
+                        } ?: AccountEnrollmentDraft(networkId, provider, effectiveAccount, email, password)
                     if (draft === existingDraft) resumedDraft = draft
                     enrollment.putAccountDraft(draft)
                     _state.value = _state.value.copy(phase = AccountSetupPhase.SUBMITTING, account = effectiveAccount, error = null)
@@ -452,16 +464,6 @@ class AccountSetupViewModel
             return actualNick
         }
 
-        private fun generatePassword(provider: AccountEnrollmentProvider): String {
-            val policy = if (provider == AccountEnrollmentProvider.IRCV3) connections.clientFor(networkId)?.accountRegistrationPolicy else null
-            val max = policy?.maxPasswordLength ?: 300
-            if (max < 16) error("Server password maximum is below motd's 16-character safety minimum")
-            val min = maxOf(16, policy?.minPasswordLength ?: 0)
-            if (min > max) error("Server password bounds are inconsistent")
-            val base = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(24).also(SecureRandom()::nextBytes))
-            return if (base.length > max) base.take(max) else base.padEnd(min, 'A')
-        }
-
         private fun fail(message: String) {
             _state.value = _state.value.copy(phase = AccountSetupPhase.FAILED, error = message)
         }
@@ -494,6 +496,23 @@ internal fun activateOftcNetwork(
     )
 
 internal fun validEmail(value: String?): Boolean = value != null && value.length <= 254 && '@' in value && value.none { it.isWhitespace() || it.isISOControl() }
+
+internal fun accountPasswordError(
+    password: String,
+    provider: AccountEnrollmentProvider,
+    policy: AccountRegistrationPolicy?,
+): String? {
+    if (password.isEmpty()) return "Choose a password"
+    if (password.any(Char::isISOControl)) return "Password must not contain control characters"
+    if (provider != AccountEnrollmentProvider.IRCV3 && password.any(Char::isWhitespace)) return "NickServ passwords must not contain whitespace"
+    val bytes = password.toByteArray(Charsets.UTF_8).size
+    if (bytes > 300) return "Password must be at most 300 UTF-8 bytes"
+    if (provider == AccountEnrollmentProvider.IRCV3) {
+        if (policy?.minPasswordLength?.let { bytes < it } == true) return "Password is shorter than the server minimum"
+        if (policy?.maxPasswordLength?.let { bytes > it } == true) return "Password exceeds the server maximum"
+    }
+    return null
+}
 
 internal fun parseOftcVerificationUrl(response: String): String? =
     Regex("https://[^\\s<>\\\"']+")

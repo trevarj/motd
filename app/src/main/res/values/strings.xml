@@ -2117,7 +2117,7 @@
     <string name="invite_key_warning_message">Anyone who can see this code or link can use the password. Share it only with people you trust.</string>
     <string name="account_reminder_message">You are chatting as a guest. Protect this nickname for future visits.</string>
     <string name="account_reminder_not_now">Not now</string>
-    <string name="account_setup_help">Create an account so nobody else can use your name. motd makes and saves a strong password for you.</string>
+    <string name="account_setup_help">Create an account so nobody else can use your name. Choose a password; motd saves it for future sign-ins.</string>
     <string name="account_setup_account">Your name</string>
     <string name="account_setup_email_required">Recovery email</string>
     <string name="account_setup_email_optional">Recovery email (optional)</string>

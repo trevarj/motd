@@ -1,11 +1,25 @@
 package io.github.trevarj.motd
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import io.github.trevarj.motd.data.prefs.AccountEnrollmentProvider
 import io.github.trevarj.motd.invite.JoinInviteCodec
 import io.github.trevarj.motd.invite.JoinInviteV1
@@ -25,6 +39,7 @@ import io.github.trevarj.motd.ui.invite.QrInviteScannerScreen
 import io.github.trevarj.motd.ui.onboarding.OnboardingContent
 import io.github.trevarj.motd.ui.onboarding.OnboardingState
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -251,6 +266,66 @@ class InviteUiTest {
     }
 
     @Test
+    fun accountFormRetainsChosenPasswordAndSupportsRevealHide() {
+        var state by mutableStateOf(AccountSetupUiState(provider = AccountEnrollmentProvider.LIBERA, account = "alice", email = "a@example.org"))
+        var submittedPassword: String? = null
+        val password = "Chosen-Secret-42!"
+        compose.setContent {
+            MotdTheme {
+                AccountSetupContent(
+                    state = state,
+                    onBack = {},
+                    onAccountChange = { state = state.copy(account = it) },
+                    onEmailChange = { state = state.copy(email = it) },
+                    onPasswordChange = { state = state.copy(password = it) },
+                    onVerificationChange = {},
+                    onSubmit = { submittedPassword = state.password },
+                    onVerify = {},
+                    onRetry = {},
+                )
+            }
+        }
+
+        val field = compose.onNodeWithTag("account_setup_password")
+
+        fun assertRenderedPassword(expected: String) {
+            val layouts = mutableListOf<TextLayoutResult>()
+            field.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { action -> assertTrue(action(layouts)) }
+            assertEquals(
+                expected,
+                layouts
+                    .single()
+                    .layoutInput.text.text,
+            )
+        }
+
+        field
+            .performScrollTo()
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
+            .performTextInput(password)
+        compose.onNodeWithTag("account_setup_email").performScrollTo().performTextReplacement("recovery@example.org")
+        field
+            .performScrollTo()
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("•".repeat(password.length))))
+        assertRenderedPassword("•".repeat(password.length))
+        compose.runOnIdle { assertEquals(password, state.password) }
+
+        compose.onNodeWithContentDescription("Show password").performClick()
+        field
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(password)))
+        assertRenderedPassword(password)
+        compose.onNodeWithContentDescription("Hide password").performClick()
+        field
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("•".repeat(password.length))))
+        assertRenderedPassword("•".repeat(password.length))
+        compose.onNodeWithTag("account_setup_submit").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(password, submittedPassword) }
+    }
+
+    @Test
     fun oftcVerificationUsesCaptchaLinkInsteadOfCode() {
         compose.setContent {
             MotdTheme {
@@ -265,6 +340,7 @@ class InviteUiTest {
                     onBack = {},
                     onAccountChange = {},
                     onEmailChange = {},
+                    onPasswordChange = {},
                     onVerificationChange = {},
                     onSubmit = {},
                     onVerify = {},
@@ -276,6 +352,7 @@ class InviteUiTest {
         compose.onNodeWithTag("account_setup_open_verification").assertExists()
         compose.onNodeWithTag("account_setup_new_verification").assertExists()
         compose.onNodeWithTag("account_setup_code").assertDoesNotExist()
+        compose.onNodeWithTag("account_setup_password").assertDoesNotExist()
     }
 
     @Test
@@ -292,6 +369,7 @@ class InviteUiTest {
                     onBack = {},
                     onAccountChange = {},
                     onEmailChange = {},
+                    onPasswordChange = {},
                     onVerificationChange = {},
                     onSubmit = {},
                     onVerify = {},
@@ -302,5 +380,6 @@ class InviteUiTest {
 
         compose.onNodeWithTag("account_setup_code").assertExists()
         compose.onNodeWithTag("account_setup_verify").assertExists()
+        compose.onNodeWithTag("account_setup_password").assertDoesNotExist()
     }
 }
