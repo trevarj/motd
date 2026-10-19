@@ -162,6 +162,37 @@ class FoolCollapseUiTest {
         }
     }
 
+    @Test
+    fun show_fools_restores_mixed_defaults_after_content_remount() {
+        val fixture = FoolTimelineFixture()
+        try {
+            compose.setContent { fixture.Content() }
+            repeat(2) {
+                compose.onNodeWithText("A body").assertIsDisplayed()
+                compose.onNodeWithText("a · Show normally").assertIsDisplayed()
+                compose.onNodeWithText("B body").assertDoesNotExist()
+                compose.onNodeWithTag("chat_message_fool-b", useUnmergedTree = true).assertIsDisplayed()
+                compose.onNodeWithTag("chat_message_fool-c", useUnmergedTree = true).assertDoesNotExist()
+                toggleAll()
+                listOf("A body", "B body", "C body", "D body").forEach { compose.onNodeWithText(it).assertIsDisplayed() }
+                compose.runOnIdle { fixture.contentAvailable.value = false }
+                compose.onNodeWithTag("chat_overflow").assertDoesNotExist()
+                compose.runOnIdle { fixture.contentAvailable.value = true }
+                compose.onNodeWithTag("chat_overflow").assertIsDisplayed()
+                toggleAll()
+                compose.onNodeWithText("A body").assertIsDisplayed()
+                compose.onNodeWithText("a · Show normally").assertIsDisplayed()
+                compose.onNodeWithText("B body").assertDoesNotExist()
+                compose.onNodeWithTag("chat_message_fool-b", useUnmergedTree = true).assertIsDisplayed()
+                compose.onNodeWithTag("chat_message_fool-c", useUnmergedTree = true).assertDoesNotExist()
+                compose.onNodeWithTag("chat_message_fool-d", useUnmergedTree = true).assertDoesNotExist()
+                fixture.assertUnchanged()
+            }
+        } finally {
+            fixture.close()
+        }
+    }
+
     @Test fun hidden_absent_from_paging_waits_for_matching_generation_and_expands_only_exact_target() {
         val fixture = FoolTimelineFixture()
         try {
@@ -296,6 +327,7 @@ class FoolCollapseUiTest {
                 val initialTarget by vm.initialTarget.collectAsState()
                 val entryState by vm.entryState.collectAsState()
                 val revealed by vm.hiddenFoolsRevealed.collectAsState()
+                val expandAllFools by vm.expandAllFools.collectAsState()
                 SideEffect { items = collected }
                 MotdTheme(dynamicColor = false) {
                     ChatContent(
@@ -320,7 +352,8 @@ class FoolCollapseUiTest {
                         foolPreferences = settings.foolPreferences,
                         hiddenFoolsRevealed = revealed,
                         presentedVisibilitySpec = generation?.spec,
-                        onHiddenFoolsRevealedChange = vm::setHiddenFoolsRevealed,
+                        expandAllFools = expandAllFools,
+                        onExpandAllFoolsChange = vm::setExpandAllFools,
                         viewportReadEnabled = false,
                         initialTarget = initialTarget,
                         entryState = entryState,
@@ -467,6 +500,7 @@ class FoolCollapseUiTest {
                 val settings by vm.settings.collectAsState(initialSettings)
                 val state by vm.state.collectAsState()
                 val revealed by vm.hiddenFoolsRevealed.collectAsState()
+                val expandAllFools by vm.expandAllFools.collectAsState()
                 val entryState by vm.entryState.collectAsState()
                 val chips by vm.reactionChips.collectAsState()
                 SideEffect { items = collected }
@@ -493,7 +527,8 @@ class FoolCollapseUiTest {
                         foolPreferences = settings.foolPreferences,
                         hiddenFoolsRevealed = revealed,
                         presentedVisibilitySpec = generation?.spec,
-                        onHiddenFoolsRevealedChange = vm::setHiddenFoolsRevealed,
+                        expandAllFools = expandAllFools,
+                        onExpandAllFoolsChange = vm::setExpandAllFools,
                         viewportReadEnabled = false,
                         entryState = entryState,
                         reactionChips = { chips[it].orEmpty() },
@@ -595,7 +630,9 @@ internal class FoolTimelineFixture {
             repo.settings.first()
         }
     private val revealed = mutableStateOf(false)
+    private val expandAllFools = mutableStateOf(false)
     val holdRevealPresentation = mutableStateOf(false)
+    val contentAvailable = mutableStateOf(true)
     private val target = mutableStateOf<ChatPositionTarget?>(null)
     var items: LazyPagingItems<MessageEntity>? = null
     var settledJumps = 0
@@ -626,6 +663,8 @@ internal class FoolTimelineFixture {
             }
         val collected = key(presented) { pages.collectAsLazyPagingItems(Dispatchers.Main.immediate) }
         SideEffect { items = collected }
+        // Mirrors ChatScreen's missing-presenter early return without disposing the visit owner.
+        if (!contentAvailable.value) return
         MotdTheme(dynamicColor = false) {
             ChatContent(
                 state = ChatState(buffer = room, connState = IrcClientState.Ready("me", emptySet(), emptyMap()), conversationPresence = ConversationPresenceState(global = PresenceMode.ALL)),
@@ -649,7 +688,11 @@ internal class FoolTimelineFixture {
                 foolPreferences = settings.foolPreferences,
                 hiddenFoolsRevealed = revealed.value,
                 presentedVisibilitySpec = presented,
-                onHiddenFoolsRevealedChange = { revealed.value = it },
+                expandAllFools = expandAllFools.value,
+                onExpandAllFoolsChange = {
+                    expandAllFools.value = it
+                    revealed.value = it
+                },
                 viewportReadEnabled = false,
                 entryState = EntryPositionState.Settled,
                 jumpTarget = target.value,

@@ -410,6 +410,10 @@ class ChatViewModel
         private val _hiddenFoolsRevealed = MutableStateFlow(false)
         val hiddenFoolsRevealed: StateFlow<Boolean> = _hiddenFoolsRevealed.asStateFlow()
 
+        // Unlike exact-jump Hidden admission, Show fools expands every fool for this visit.
+        private val _expandAllFools = MutableStateFlow(false)
+        val expandAllFools: StateFlow<Boolean> = _expandAllFools.asStateFlow()
+
         // The conversation's own presence choice participates in the paging spec: it changes which rows
         // the PagingSource emits, so switching it re-queries exactly like a global settings change does.
         private val pagingSpecs =
@@ -942,8 +946,9 @@ class ChatViewModel
             settingsRepository.settings
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Settings())
 
-        fun setHiddenFoolsRevealed(revealed: Boolean) {
-            _hiddenFoolsRevealed.value = revealed
+        fun setExpandAllFools(expanded: Boolean) {
+            _expandAllFools.value = expanded
+            _hiddenFoolsRevealed.value = expanded
         }
 
         private val uiEventQueue = ChatUiEventQueue()

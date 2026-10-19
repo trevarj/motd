@@ -256,6 +256,9 @@ flowchart TD
   category permission. Previews, activity ordering and the ALL feed still exclude fools.
   Explicit jumps reveal Hidden before positional counting and wait for the matching
   paging generation. Show fools and per-row expansion are session-local, not preferences.
+  Show fools survives presenter replacement within a chat visit; toggling it off clears
+  row exceptions and restores each fool's current explicit or inherited visibility.
+  Exact jumps still expand only their target, independently of the show-all toggle.
   Automatic entry repair never reveals Hidden: it reapplies current visibility through the shared
   unread/saved-anchor resolver, preserving offsets only while their row identity remains meaningful.
   Exact jumps accept native short-chat scroll clamping only when the exact measured

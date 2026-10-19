@@ -552,6 +552,7 @@ fun ChatScreen(
     // Timeline behavioral settings collected separately from ChatState.
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val hiddenFoolsRevealed by viewModel.hiddenFoolsRevealed.collectAsStateWithLifecycle()
+    val expandAllFools by viewModel.expandAllFools.collectAsStateWithLifecycle()
     val contentPreviews by viewModel.contentPreviews.collectAsStateWithLifecycle()
     val audioPlaybackState by viewModel.audioPlaybackState.collectAsStateWithLifecycle()
     val audioWaveforms by viewModel.audioWaveforms.collectAsStateWithLifecycle()
@@ -611,7 +612,8 @@ fun ChatScreen(
         presentedVisibilitySpec = pagingGeneration?.spec,
         showRedactedMessages = settings.showRedactedMessages,
         hiddenFoolsRevealed = hiddenFoolsRevealed,
-        onHiddenFoolsRevealedChange = viewModel::setHiddenFoolsRevealed,
+        expandAllFools = expandAllFools,
+        onExpandAllFoolsChange = viewModel::setExpandAllFools,
         chatWallpaper = appearance.wallpaper,
         conversationFontScalePercent = appearance.conversationFontScalePercent,
         messageSpacing = appearance.messageSpacing,
@@ -1130,7 +1132,8 @@ internal fun ChatContent(
     presentedVisibilitySpec: MessageVisibilitySpec? = null,
     showRedactedMessages: Boolean = true,
     hiddenFoolsRevealed: Boolean = false,
-    onHiddenFoolsRevealedChange: (Boolean) -> Unit = {},
+    expandAllFools: Boolean = false,
+    onExpandAllFoolsChange: (Boolean) -> Unit = {},
     chatWallpaper: io.github.trevarj.motd.data.prefs.WallpaperSelection =
         io.github.trevarj.motd.data.prefs
             .WallpaperSelection(),
@@ -1628,10 +1631,8 @@ internal fun ChatContent(
     }
     var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
     var highlightEventId by rememberSaveable { mutableStateOf<Long?>(null) }
-    // Global fool expand/collapse toggle: when true every collapsed fool row in the
-    // buffer renders expanded; per-row toggles still override individually via [expandedFools] and
-    // [collapsedFools]. Ephemeral per composition, like expandedFools.
-    var expandAllFools by remember { mutableStateOf(false) }
+    // The visit owns expand-all; row exceptions remain local to this presentation.
+    val latestExpandAllFools by rememberUpdatedState(expandAllFools)
     // Rows the user explicitly re-collapsed while expand-all is on (so a global expand is still
     // individually reversible). Cleared whenever expand-all is toggled off.
     var collapsedFools by remember { mutableStateOf(setOf<Long>()) }
@@ -3415,9 +3416,7 @@ internal fun ChatContent(
                     },
                     onClick = {
                         overflowOpen = false
-                        val shown = !expandAllFools
-                        onHiddenFoolsRevealedChange(shown)
-                        expandAllFools = shown
+                        onExpandAllFoolsChange(!expandAllFools)
                         expandedFools = emptySet()
                         collapsedFools = emptySet()
                     },
@@ -3925,14 +3924,14 @@ internal fun ChatContent(
                                     val foolExpanded =
                                         remember {
                                             { id: Long ->
-                                                if (expandAllFools) id !in collapsedFools else id in expandedFools
+                                                if (latestExpandAllFools) id !in collapsedFools else id in expandedFools
                                             }
                                         }
                                     // Bidirectional per-row toggle, respecting the global default.
                                     val onToggleFool =
                                         remember {
                                             { id: Long ->
-                                                if (expandAllFools) {
+                                                if (latestExpandAllFools) {
                                                     collapsedFools =
                                                         if (id in collapsedFools) collapsedFools - id else collapsedFools + id
                                                 } else {
