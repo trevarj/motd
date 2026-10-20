@@ -48,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -70,6 +71,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -178,6 +181,12 @@ internal fun updateExpandedSystemEvents(
 
 /** Present a newest-first storage chunk chronologically inside its pill. */
 internal fun systemRunPresentationLines(run: List<MessageEntity>): List<String> = run.asReversed().map { it.text }
+
+/** The rendered row's blank leading gap and unclipped height, owned by its native lazy item. */
+class TimelineRowContentMetrics {
+    var leadingGapPx by mutableIntStateOf(0)
+    var fullHeightPx by mutableIntStateOf(0)
+}
 
 /** Reuse lazy compositions only across rows with the same structural layout. */
 internal enum class MessageContentType {
@@ -412,6 +421,7 @@ fun MessageList(
     onDismissExternalTranslation: (Long) -> Unit = {},
     // Reserve the overlaid bottom host without truncating the scrollable/drawn viewport.
     bottomContentPadding: PaddingValues? = null,
+    rowContentMetrics: MutableMap<Long, TimelineRowContentMetrics>? = null,
 ) {
     val dickordEnabled = LocalDickordLabsEnabled.current
     val foolPolicy =
@@ -702,13 +712,32 @@ fun MessageList(
                     Color.Transparent
                 }
 
+            val contentMetrics = if (rowContentMetrics != null) remember(msg.id) { TimelineRowContentMetrics() } else null
+            if (rowContentMetrics != null && contentMetrics != null) {
+                DisposableEffect(rowContentMetrics, msg.id, contentMetrics) {
+                    rowContentMetrics[msg.id] = contentMetrics
+                    onDispose {
+                        if (rowContentMetrics[msg.id] === contentMetrics) rowContentMetrics.remove(msg.id)
+                    }
+                }
+            }
+
             // Column (not Box): MessageRow emits several vertical siblings — the collapse chip,
             // bubble, retry row, and read-marker/day dividers. A Box would stack them on top of one
             // another (dividers over message text; the fool-collapse chip trapped behind the bubble).
             // A Column lays them out top-to-bottom so each affordance owns its own space and taps.
             val rowContent: @Composable (Modifier, Boolean) -> Unit = { rowModifier, renderExpanded ->
-                Column(modifier = rowModifier.fillMaxWidth().background(highlightColor)) {
+                // Outgoing AnimatedContent branches must not overwrite the current row's metrics.
+                val activeMetrics = contentMetrics.takeIf { !isFool || renderExpanded == expanded }
+                Column(
+                    modifier =
+                        rowModifier
+                            .fillMaxWidth()
+                            .background(highlightColor)
+                            .then(if (activeMetrics != null) Modifier.onSizeChanged { activeMetrics.fullHeightPx = it.height } else Modifier),
+                ) {
                     if (isFool && foolMode != FoolsMode.DIMMED && !renderExpanded) {
+                        activeMetrics?.let { metrics -> SideEffect { metrics.leadingGapPx = 0 } }
                         FoolPlaceholderRow(
                             msg = msg,
                             modifier = Modifier,
@@ -729,6 +758,7 @@ fun MessageList(
                     ) {
                         var expanded by rememberSaveable(msg.id) { mutableStateOf(false) }
                         if (!expanded) {
+                            activeMetrics?.let { metrics -> SideEffect { metrics.leadingGapPx = 0 } }
                             QuietEbooksMessageRow(
                                 msg = msg,
                                 older = older,
@@ -798,6 +828,7 @@ fun MessageList(
                         onReplyPreviewClick = onReplyPreviewClick,
                         translation = translation,
                         onDismissTranslation = onDismissExternalTranslation,
+                        contentMetrics = activeMetrics,
                     )
                 }
             }
@@ -1788,6 +1819,7 @@ private fun MessageRow(
     onCollapseFool: (() -> Unit)? = null,
     translation: InlineTranslation? = null,
     onDismissTranslation: (Long) -> Unit = {},
+    contentMetrics: TimelineRowContentMetrics? = null,
 ) {
     // The lazy list reverses item order, not a row's children. Render the divider before the first
     // unread bubble so the boundary is visually above that message.
@@ -1818,6 +1850,10 @@ private fun MessageRow(
     val rawSender = msg.sender.ifBlank { fallbackSender.orEmpty() }
     val displaySender = dickordNickLabel(rawSender, dickordEnabled)
     val gap = bubbleGap(showSender, older != null, spacing)
+    contentMetrics?.let { metrics ->
+        val leadingGapPx = with(LocalDensity.current) { if (seam == null && !showDay && !showNewDivider) gap.roundToPx() else 0 }
+        SideEffect { metrics.leadingGapPx = leadingGapPx }
+    }
 
     // Outermost boundary of the row: the history break comes before the read marker, because the
     // messages the marker separates all sit on this side of the gap.

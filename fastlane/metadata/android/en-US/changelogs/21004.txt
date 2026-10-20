@@ -1,6 +1,6 @@
 - Slimmed Default and Nickname chat inputs while keeping accessible touch targets.
 - Matched chat surfaces to your theme and softened two-line message backgrounds.
 - Kept Show fools consistent across reloads, with smoother reveal and restore transitions.
-- Smoothed message placement after history refreshes.
+- Smoothed history refresh placement and kept anchors clear of the chat input.
 - Added password entry when registering an account from an invitation.
 - Kept member counts beside compact chat titles.

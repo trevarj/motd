@@ -816,8 +816,7 @@ fun Composer(
                 Modifier
                     .size(48.dp)
                     .testTag("chat_composer_tools")
-                    .semantics { selected = transientToolsVisible }
-                    .padding(2.dp),
+                    .semantics { selected = transientToolsVisible },
         ) {
             Icon(
                 Icons.Filled.Add,
@@ -839,7 +838,7 @@ fun Composer(
             modifier = modifier,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Send and voice keep 48.dp targets with inset artwork in floating pills.
+            // Inset only the paint: Material semantics and pointer bounds stay 48.dp.
             Crossfade(
                 targetState = canSend || !voiceEnabled,
                 animationSpec = MotdMotion.microFadeIn,
@@ -854,18 +853,25 @@ fun Composer(
                             onSend()
                         },
                         enabled = canSend,
-                        modifier = Modifier.size(48.dp).testTag("chat_composer_send").padding(primaryVisualInset),
+                        modifier = Modifier.size(48.dp).testTag("chat_composer_send"),
                         shape = CircleShape,
                         colors =
                             IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
+                                containerColor = Color.Transparent,
                                 contentColor = MaterialTheme.colorScheme.onPrimary,
-                                disabledContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                disabledContainerColor = Color.Transparent,
                                 disabledContentColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.42f),
                             ),
                     ) {
                         Box(
-                            modifier = Modifier.fillMaxSize(),
+                            modifier =
+                                Modifier
+                                    .fillMaxSize()
+                                    .padding(primaryVisualInset)
+                                    .background(
+                                        if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
+                                        CircleShape,
+                                    ),
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
@@ -1665,6 +1671,7 @@ private fun VoiceRecordButton(
         animationSpec = MotdMotion.colorFade,
         label = "voice_record_content",
     )
+    val colors = IconButtonDefaults.filledIconButtonColors()
     FilledIconButton(
         onClick = {
             if (latestRecording) {
@@ -1760,27 +1767,32 @@ private fun VoiceRecordButton(
                             }
                         }
                     }
-                }.padding(visualInset),
+                },
         shape = CircleShape,
-        colors =
-            IconButtonDefaults.filledIconButtonColors(
-                containerColor = containerColor,
-                contentColor = contentColor,
-            ),
+        colors = colors.copy(containerColor = Color.Transparent, contentColor = contentColor, disabledContainerColor = Color.Transparent),
     ) {
-        // Cross-fade the glyph so the content description always matches the composed branch.
-        Crossfade(
-            targetState = recording,
-            animationSpec = MotdMotion.microFadeIn,
-            label = "voice_record_icon",
-        ) { isRecording ->
-            Icon(
-                if (isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
-                contentDescription =
-                    stringResource(
-                        if (isRecording) R.string.voice_stop_recording else R.string.voice_record,
-                    ),
-            )
+        Box(
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(visualInset)
+                    .background(if (enabled) containerColor else colors.disabledContainerColor, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            // Cross-fade the glyph so the content description always matches the composed branch.
+            Crossfade(
+                targetState = recording,
+                animationSpec = MotdMotion.microFadeIn,
+                label = "voice_record_icon",
+            ) { isRecording ->
+                Icon(
+                    if (isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
+                    contentDescription =
+                        stringResource(
+                            if (isRecording) R.string.voice_stop_recording else R.string.voice_record,
+                        ),
+                )
+            }
         }
     }
 }

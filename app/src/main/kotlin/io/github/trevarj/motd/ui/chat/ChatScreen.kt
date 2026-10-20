@@ -53,6 +53,8 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListItemInfo
+import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -123,6 +125,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.referentialEqualityPolicy
 import androidx.compose.runtime.remember
@@ -1331,6 +1334,7 @@ internal fun ChatContent(
         remember {
             { with(bottomHostDensity) { bottomHostPadding?.calculateBottomPadding()?.roundToPx() ?: 0 } }
         }
+    val rowContentMetrics = remember(items) { mutableStateMapOf<Long, TimelineRowContentMetrics>() }
     val autoFollow = remember { AutoFollowTracker(items.itemCount) }
     var liveEntryIds by remember(state.buffer?.id) { mutableStateOf(emptySet<Long>()) }
     val presenceMode = state.conversationPresence.effective
@@ -2704,7 +2708,7 @@ internal fun ChatContent(
         val deepest =
             layout.visibleItemsInfo
                 .lastOrNull {
-                    timelineItemIsVisible(it.offset, it.size, layout.viewportStartOffset, layout.viewportEndOffset, bottomHostHeightPx)
+                    timelineItemIsVisible(it, layout, bottomHostHeightPx, rowContentMetrics)
                 }?.index ?: return
         val anchor =
             displayedDepthAnchor(
@@ -2801,11 +2805,11 @@ internal fun ChatContent(
             val bottomHostHeightPx = readBottomHostHeightPx()
             val first =
                 layout.visibleItemsInfo.firstOrNull {
-                    timelineItemIsVisible(it.offset, it.size, layout.viewportStartOffset, layout.viewportEndOffset, bottomHostHeightPx)
+                    timelineItemIsVisible(it, layout, bottomHostHeightPx, rowContentMetrics)
                 }
             val last =
                 layout.visibleItemsInfo.lastOrNull {
-                    timelineItemIsVisible(it.offset, it.size, layout.viewportStartOffset, layout.viewportEndOffset, bottomHostHeightPx)
+                    timelineItemIsVisible(it, layout, bottomHostHeightPx, rowContentMetrics)
                 }
             if (first == null || last == null) {
                 null
@@ -2931,6 +2935,7 @@ internal fun ChatContent(
         followingAtBottom = autoFollow.following && atBottom,
         onAnchor = onViewportRefreshAnchor,
         bottomContentPadding = bottomHostPadding,
+        rowContentMetrics = rowContentMetrics,
     )
 
     // Newest row the timeline has actually placed on screen. Neither rawNewestAnchor (the room's
@@ -2946,7 +2951,7 @@ internal fun ChatContent(
             val bottomHostHeightPx = readBottomHostHeightPx()
             val laidOut =
                 layout.visibleItemsInfo.firstOrNull {
-                    timelineItemIsVisible(it.offset, it.size, layout.viewportStartOffset, layout.viewportEndOffset, bottomHostHeightPx)
+                    timelineItemIsVisible(it, layout, bottomHostHeightPx, rowContentMetrics)
                 }
             renderedBottomAnchor(
                 renderedIndex = laidOut?.index ?: -1,
@@ -4074,6 +4079,7 @@ internal fun ChatContent(
                                             hiddenFoolVisibility = hiddenFoolVisibility,
                                             preserveOutgoingHiddenBodies = preserveOutgoingHiddenBodies,
                                             bottomContentPadding = innerPadding,
+                                            rowContentMetrics = rowContentMetrics,
                                             onTranslateMessage = ::openTranslationPicker,
                                             externalTranslations = externalTranslations,
                                             onDismissExternalTranslation = onDismissExternalTranslation,
@@ -4763,13 +4769,14 @@ internal fun ReportMessageViewport(
     followingAtBottom: Boolean,
     onAnchor: (ViewportRefreshAnchor?) -> Unit,
     bottomContentPadding: PaddingValues? = null,
+    rowContentMetrics: Map<Long, TimelineRowContentMetrics> = emptyMap(),
 ) {
     val latestOnAnchor by rememberUpdatedState(onAnchor)
     var lastVisibleIndex by remember(items, listState, scopeId) { mutableStateOf<Int?>(null) }
     var lastItemCount by remember(items, listState, scopeId) { mutableIntStateOf(-1) }
     val latestBottomPadding by rememberUpdatedState(bottomContentPadding)
     val latestDensity by rememberUpdatedState(LocalDensity.current)
-    LaunchedEffect(items, listState, policy, followingAtBottom, enabled, scopeId) {
+    LaunchedEffect(items, listState, policy, followingAtBottom, enabled, scopeId, rowContentMetrics) {
         if (!enabled) return@LaunchedEffect
         snapshotFlow {
             val layout = listState.layoutInfo
@@ -4778,14 +4785,7 @@ internal fun ReportMessageViewport(
             var newestVisible = false
             var row: MessageEntity? = null
             for (visible in layout.visibleItemsInfo) {
-                if (!timelineItemIsVisible(
-                        visible.offset,
-                        visible.size,
-                        layout.viewportStartOffset,
-                        layout.viewportEndOffset,
-                        bottomOcclusionPx,
-                    )
-                ) {
+                if (!timelineItemIsVisible(visible, layout, bottomOcclusionPx, rowContentMetrics)) {
                     continue
                 }
                 if (visible.index == 0) newestVisible = true
@@ -4806,7 +4806,7 @@ internal fun ReportMessageViewport(
                 }
             val firstVisible =
                 layout.visibleItemsInfo.firstOrNull {
-                    timelineItemIsVisible(it.offset, it.size, layout.viewportStartOffset, layout.viewportEndOffset, bottomOcclusionPx)
+                    timelineItemIsVisible(it, layout, bottomOcclusionPx, rowContentMetrics)
                 }
             Triple(firstVisible?.index, anchor, items.itemCount)
         }.distinctUntilChanged().collect { (index, anchor, count) ->
@@ -4819,6 +4819,24 @@ internal fun ReportMessageViewport(
     }
 }
 
+private fun timelineItemIsVisible(
+    item: LazyListItemInfo,
+    layout: LazyListLayoutInfo,
+    bottomOcclusionPx: Int,
+    rowContentMetrics: Map<Long, TimelineRowContentMetrics>,
+): Boolean {
+    val metrics = (item.key as? Long)?.let { rowContentMetrics[it] }
+    return timelineItemIsVisible(
+        item.offset,
+        item.size,
+        layout.viewportStartOffset,
+        layout.viewportEndOffset,
+        bottomOcclusionPx,
+        leadingGapPx = metrics?.leadingGapPx ?: 0,
+        fullItemSize = metrics?.fullHeightPx ?: item.size,
+    )
+}
+
 // Reverse-layout offsets start at the padded bottom. Rows may draw under the host, not count as read there.
 internal fun timelineItemIsVisible(
     itemOffset: Int,
@@ -4826,10 +4844,15 @@ internal fun timelineItemIsVisible(
     viewportStartOffset: Int,
     viewportEndOffset: Int,
     bottomOcclusionPx: Int = 0,
-): Boolean =
-    itemSize > 0 &&
+    leadingGapPx: Int = 0,
+    fullItemSize: Int = itemSize,
+): Boolean {
+    // Native entrances reveal from the bottom: their clipped prefix no longer contains the gap.
+    val visibleLeadingGap = (leadingGapPx - (fullItemSize - itemSize).coerceAtLeast(0)).coerceAtLeast(0)
+    return itemSize > visibleLeadingGap &&
         itemOffset < viewportEndOffset &&
-        itemOffset + itemSize > viewportStartOffset + bottomOcclusionPx
+        itemOffset + itemSize - visibleLeadingGap > viewportStartOffset + bottomOcclusionPx
+}
 
 /**
  * Pixel delta for [androidx.compose.foundation.gestures.ScrollableState.scrollBy] that top-aligns

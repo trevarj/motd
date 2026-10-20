@@ -172,6 +172,9 @@ flowchart TD
   separate action. Agentwire always uses Default. Stored enum names are unchanged.
   At ordinary font scale, Default/Nickname have nominal 52dp/48dp pill minima and
   44dp floating primary artwork, retaining 48dp targets and unchanged Large geometry.
+  Artwork is inset inside each native button, never around its clickable/semantics host.
+  Read/refresh visibility excludes rendered leading grouping gaps, not real content;
+  native unclipped row heights preserve partial visibility during bottom-up entrances.
   Opening tools expands the same floating pill around one horizontally scrolling
   row. Markdown and draft upload are direct actions, not an overflow menu.
   Large keeps its separate top toolbar.

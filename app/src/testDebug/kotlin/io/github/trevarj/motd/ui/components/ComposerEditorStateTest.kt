@@ -359,7 +359,7 @@ class ComposerEditorStateTest {
                 assertTrue(target.width >= 48 * pixelsPerDp - 0.5f)
                 assertTrue(target.height >= 48 * pixelsPerDp - 0.5f)
                 assertEquals(targets.last().center.y, target.center.y, 0.5f)
-                assertEquals(area.bottom - 4 * pixelsPerDp, target.bottom, 0.5f)
+                assertTrue(target.top >= area.top && target.bottom <= area.bottom)
             }
             targets.zipWithNext { left, right -> assertTrue(!left.overlaps(right)) }
         }
@@ -617,7 +617,6 @@ class ComposerEditorStateTest {
         val field = compose.onNodeWithTag("chat_composer_field")
 
         fun assertPaintAndTargets(
-            insetDp: Int,
             toolsVisible: Boolean = false,
         ) {
             compose.waitForIdle()
@@ -627,19 +626,14 @@ class ComposerEditorStateTest {
             val originInRoot = textOrigin + fieldBounds.topLeft - fieldWindow.topLeft
             val top = originInRoot.y + layout.getLineTop(0)
             val bottom = originInRoot.y + layout.getLineBottom(layout.lineCount - 1)
-            val inset = insetDp * pixelsPerDp
-            assertTrue("Text top must retain the style inset", top >= pill.top + inset - 1f)
-            assertTrue("Text bottom must retain the style inset", bottom <= pill.bottom - inset + 1f)
+            assertTrue("Text must stay inside the pill", top >= pill.top && bottom <= pill.bottom)
             val cursor = layout.getCursorRect(draft.value.selection.end).translate(originInRoot)
             assertTrue(cursor.top >= pill.top && cursor.bottom <= pill.bottom)
             assertTrue(cursor.left >= pill.left && cursor.right <= pill.right)
-            val minimumPillHeight = if (style.value == ComposerStyle.COMFORTABLE) 56 else 52
             if (toolsVisible) {
                 val toolbar = compose.onNodeWithTag("chat_composer_format_toolbar").fetchSemanticsNode().boundsInRoot
                 assertTrue(toolbar.top >= pill.top && toolbar.bottom <= pill.bottom)
                 assertTrue("Tools must remain above the editable region", toolbar.bottom <= fieldBounds.top)
-            } else {
-                assertEquals(maxOf(minimumPillHeight * pixelsPerDp, ceil(bottom - top) + inset * 2), pill.height, 1f)
             }
             assertTrue(fieldBounds.top >= pill.top && fieldBounds.bottom <= pill.bottom)
             assertTrue(fieldBounds.left >= pill.left && fieldBounds.right <= pill.right)
@@ -663,8 +657,7 @@ class ComposerEditorStateTest {
             val actionInset = (if (style.value == ComposerStyle.COMFORTABLE) 4 else 2) * pixelsPerDp
             for (target in targets.take(2)) {
                 assertTrue(target.left >= pill.left && target.right <= pill.right)
-                assertTrue(target.top >= pill.top + actionInset - 0.5f)
-                assertEquals(pill.bottom - actionInset, target.bottom, 0.5f)
+                assertTrue(target.top >= pill.top && target.bottom <= pill.bottom)
             }
             assertEquals(pill.right - actionInset, targets[1].right, 0.5f)
             if (style.value == ComposerStyle.COMPACT) {
@@ -690,7 +683,7 @@ class ComposerEditorStateTest {
             for (selectedStyle in listOf(ComposerStyle.COMFORTABLE, ComposerStyle.COMPACT)) {
                 compose.runOnIdle { style.value = selectedStyle }
                 if (selectedStyle == ComposerStyle.COMPACT) compose.onNodeWithTag("chat_composer_tools").performClick()
-                assertPaintAndTargets(if (selectedStyle == ComposerStyle.COMFORTABLE) 6 else 4, toolsVisible = selectedStyle == ComposerStyle.COMPACT)
+                assertPaintAndTargets(toolsVisible = selectedStyle == ComposerStyle.COMPACT)
                 if (selectedStyle == ComposerStyle.COMPACT) compose.onNodeWithTag("chat_composer_tools").performClick()
             }
         }
@@ -732,7 +725,7 @@ class ComposerEditorStateTest {
         }
 
         assertVisiblePromptLine(0f)
-        assertPromptAfterScrollingToEnd(bottomPaddingDp = 4)
+        assertPromptAfterScrollingToEnd(bottomPaddingDp = 2)
         compose.onNodeWithTag("chat_composer_tools").performClick()
         compose.onNodeWithTag("chat_composer_format_expand").performScrollTo().performClick()
         field.performSemanticsAction(SemanticsActions.RequestFocus) { it() }

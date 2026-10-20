@@ -754,6 +754,12 @@ class ChatModelsTest {
         assertFalse(timelineItemIsVisible(-60, 40, -76, 524, bottomOcclusionPx = 68))
         assertFalse(timelineItemIsVisible(-48, 40, -76, 524, bottomOcclusionPx = 68))
         assertTrue(timelineItemIsVisible(-47, 40, -76, 524, bottomOcclusionPx = 68))
+        // A rendered grouping gap is not content: exclude gap-only overlap, retain one real pixel.
+        assertFalse(timelineItemIsVisible(-47, 40, -76, 524, bottomOcclusionPx = 68, leadingGapPx = 2))
+        assertFalse(timelineItemIsVisible(-46, 40, -76, 524, bottomOcclusionPx = 68, leadingGapPx = 2))
+        assertTrue(timelineItemIsVisible(-45, 40, -76, 524, bottomOcclusionPx = 68, leadingGapPx = 2))
+        // The leading gap is clipped away while a native bottom-up entrance reveals real content.
+        assertTrue(timelineItemIsVisible(-8, 1, -76, 524, bottomOcclusionPx = 68, leadingGapPx = 2, fullItemSize = 40))
         assertTrue(timelineItemIsVisible(0, 40, -76, 524, bottomOcclusionPx = 68))
         assertFalse(timelineItemIsVisible(524, 40, -76, 524, bottomOcclusionPx = 68))
         assertFalse(timelineItemIsVisible(0, 0, -76, 524, bottomOcclusionPx = 68))

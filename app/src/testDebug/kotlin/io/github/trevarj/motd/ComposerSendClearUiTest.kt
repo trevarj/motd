@@ -2623,14 +2623,14 @@ class ComposerSendClearUiTest {
             val parked = compose.runOnIdle { viewportAnchors.last() as ViewportRefreshAnchor.Parked }
             val parkedRow = compose.onNodeWithTag("chat_message_header-${parked.id}", useUnmergedTree = true).getUnclippedBoundsInRoot()
             val occupiedHost = compose.onNodeWithTag("chat_bottom_host").getUnclippedBoundsInRoot()
-            assertTrue("Refresh/read viewport must name a row visible above the host", parkedRow.top < occupiedHost.top)
+            assertTrue("Refresh/read viewport must name a row visible above the host: parked=$parked row=$parkedRow host=$occupiedHost; $geometry", parkedRow.top < occupiedHost.top)
             for (tag in listOf("chat_scroll_to_bottom_fab", "chat_compact_actions", "chat_compact_back")) {
                 val action = compose.onNodeWithTag(tag).assertIsDisplayed().getUnclippedBoundsInRoot()
                 val occupied = compose.onNodeWithTag("chat_bottom_host").getUnclippedBoundsInRoot()
                 assertTrue("$tag must clear the occupied bottom host", action.bottom < occupied.top)
             }
             // Physical hit testing, not the semantics click action: the composer wins over the row below.
-            compose.onNodeWithTag("chat_composer_send").assertIsEnabled().performTouchInput { click(center) }
+            compose.onNodeWithTag("chat_composer_send").assertIsEnabled().performTouchInput { click(Offset(1.dp.toPx(), center.y)) }
             compose.runOnIdle { assertEquals("hello", submitted.last()) }
             compose
                 .onNodeWithTag("chat_composer_field")

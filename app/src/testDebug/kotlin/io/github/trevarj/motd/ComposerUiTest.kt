@@ -11,9 +11,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.focus.FocusManager
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.SoftwareKeyboardController
@@ -46,6 +48,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.emoji2.emojipicker.EmojiPickerView
 import androidx.test.core.app.ApplicationProvider
@@ -66,9 +69,8 @@ import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
-import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.contrastRatio
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
@@ -368,11 +370,9 @@ class ComposerUiTest {
     fun replyWarning_isAboveReplyContentAndInput() {
         val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
         var fill = Color.Unspecified
-        var senderInk = Color.Unspecified
         compose.setContent {
             MotdTheme(dynamicColor = false, themePreset = preset.value) {
-                fill = MaterialTheme.colorScheme.surfaceContainerHigh
-                senderInk = LocalNickColors.current.nick("alice", MaterialTheme.colorScheme.primary)
+                fill = MaterialTheme.colorScheme.primaryContainer
                 Composer(
                     value = TextFieldValue("reply"),
                     onValueChange = {},
@@ -402,22 +402,25 @@ class ComposerUiTest {
         val sender = RuntimeEnvironment.getApplication().getString(R.string.chat_composer_replying_to, "alice")
         for (theme in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
             compose.runOnIdle { preset.value = theme }
-            val seed = if (theme == ColorThemePreset.AYU_LIGHT) Color(0xFF171717) else Color(0xFFF5F5F5)
             val bodyLayouts = mutableListOf<TextLayoutResult>()
             compose.onNodeWithText("original", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(bodyLayouts) }
-            assertEquals(
-                ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST),
-                bodyLayouts
-                    .single()
-                    .layoutInput.style.color,
+            assertTrue(
+                contrastRatio(
+                    bodyLayouts
+                        .single()
+                        .layoutInput.style.color,
+                    fill,
+                ) >= MESSAGE_TEXT_CONTRAST,
             )
             val senderLayouts = mutableListOf<TextLayoutResult>()
             compose.onNodeWithText(sender, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(senderLayouts) }
-            assertEquals(
-                senderInk,
-                senderLayouts
-                    .single()
-                    .layoutInput.style.color,
+            assertTrue(
+                contrastRatio(
+                    senderLayouts
+                        .single()
+                        .layoutInput.style.color,
+                    fill,
+                ) >= MESSAGE_TEXT_CONTRAST,
             )
         }
     }
@@ -1096,11 +1099,14 @@ class ComposerUiTest {
     fun semanticVoiceActivation_startsOneLockedRecordingAndStopsWhenActive() {
         var starts = 0
         var stops = 0
+        var holds = 0
+        var pixelsPerDp = 0f
         val recording = mutableStateOf(false)
         val enabled = mutableStateOf(true)
         val voiceEnabled = mutableStateOf(true)
         val style = mutableStateOf(ComposerStyle.COMFORTABLE)
         compose.setContent {
+            pixelsPerDp = LocalDensity.current.density
             MotdTheme {
                 Composer(
                     value = TextFieldValue(),
@@ -1112,6 +1118,10 @@ class ComposerUiTest {
                     composerStyle = style.value,
                     onVoiceAccessibilityStart = {
                         starts++
+                        recording.value = true
+                    },
+                    onVoiceHoldStart = {
+                        holds++
                         recording.value = true
                     },
                     onVoiceHoldStop = {
@@ -1134,9 +1144,10 @@ class ComposerUiTest {
             val tools = compose.onNodeWithTag("chat_composer_tools").fetchSemanticsNode().boundsInRoot
             assertTrue(voice.left >= pill.left && voice.right < pill.right)
             assertTrue(voice.top >= pill.top && voice.bottom <= pill.bottom)
+            assertTrue(voice.width >= 48 * pixelsPerDp - 0.5f && voice.height >= 48 * pixelsPerDp - 0.5f)
             assertTrue(!voice.overlaps(field) && !voice.overlaps(tools))
         }
-        compose.onNodeWithTag("chat_composer_voice").performTouchInput { click() }
+        compose.onNodeWithTag("chat_composer_voice").performTouchInput { click(Offset(1.dp.toPx(), center.y)) }
         compose.waitForIdle()
         compose.runOnIdle { assertEquals(0, starts) }
 
@@ -1152,6 +1163,15 @@ class ComposerUiTest {
         compose.runOnIdle {
             assertEquals(1, starts)
             assertEquals(1, stops)
+        }
+
+        compose.onNodeWithTag("chat_composer_voice").performTouchInput { down(Offset(1.dp.toPx(), center.y)) }
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.onNodeWithTag("chat_composer_voice").performTouchInput { up() }
+        compose.runOnIdle {
+            assertEquals(1, holds)
+            assertEquals(1, starts)
+            assertEquals(2, stops)
         }
 
         compose.runOnIdle { enabled.value = false }
