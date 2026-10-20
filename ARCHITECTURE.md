@@ -200,6 +200,9 @@ flowchart TD
   and reexpansion cannot translate builtin tiles or resize a cropped image.
   Builtin alpha masks are process-cached by preset and pixel size; a matching ready
   tile paints without dispatching another worker lookup.
+  Normal Two-line message and action fills admit subtle wallpaper while retaining their
+  speaker/mention tint. Opaque ink is contrast-normalized for wallpaper extremes;
+  Dimmed and contrast-limited fills remain opaque.
   The transparent foreground alone consumes Scaffold, navigation-bar and IME
   padding; the send-flight overlay keeps its existing foreground coordinate origin.
   Its status comes from the matching loaded canonical row, preferring accepted event IDs

@@ -106,6 +106,7 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
+import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.lottieStrokeColor
 import io.github.trevarj.motd.ui.theme.readingInk
@@ -115,6 +116,7 @@ import java.text.DateFormat as JavaDateFormat
 /** Alpha for the per-nick row background wash in TWO_LINE density: matches the COMPACT band so runs
  *  of a nick's messages are trackable, faint enough to stay readable in light and dark themes. */
 private const val TWO_LINE_ROW_TINT_ALPHA = 0.10f
+private const val TWO_LINE_FILL_ALPHA = 0.90f
 internal const val MENTION_ROW_TINT_ALPHA = 0.55f
 private const val ACTION_ROW_TINT_ALPHA = 0.22f
 
@@ -140,6 +142,20 @@ internal fun messageContentColor(
         listOf(fill),
         if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
     )
+
+/** Bound unknown wallpaper ink contrast; keep mid-tone fills opaque when neither ink can reach 7:1. */
+private fun twoLineContrastFill(fill: Color): Color {
+    val translucent = fill.copy(alpha = TWO_LINE_FILL_ALPHA)
+    val darkest = translucent.compositeOver(Color.Black)
+    val lightest = translucent.compositeOver(Color.White)
+    val darkInkContrast = contrastRatio(Color.Black, darkest)
+    val lightInkContrast = contrastRatio(Color.White, lightest)
+    return when {
+        maxOf(darkInkContrast, lightInkContrast) < MESSAGE_TEXT_CONTRAST -> fill
+        darkInkContrast >= lightInkContrast -> darkest
+        else -> lightest
+    }
+}
 
 private val COMFORTABLE_BUBBLE_ELEVATION = 2.dp
 private val COMFORTABLE_CONTENT_ELEVATION = 1.dp
@@ -1180,8 +1196,9 @@ private fun ActionMessageRow(
         }
     val normalPaintedRow = rowColor.compositeOver(MaterialTheme.colorScheme.background)
     val paintedRow = messageContainerColor(normalPaintedRow, MaterialTheme.colorScheme.background, dimmed)
+    val contrastRow = remember(paintedRow, spacing.twoLine, dimmed) { if (spacing.twoLine && !dimmed) twoLineContrastFill(paintedRow) else paintedRow }
     val bodyInk = readingInk(MaterialTheme.colorScheme)
-    val bodyColor = remember(bodyInk, paintedRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, paintedRow, dimmed, normalPaintedRow) }
+    val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
@@ -1220,7 +1237,7 @@ private fun ActionMessageRow(
             codeBackground,
             codeColor,
             senderLink,
-            paintedRow,
+            contrastRow,
             dimmed,
         ) {
             buildActionLine(
@@ -1236,7 +1253,7 @@ private fun ActionMessageRow(
                 codeBackground = codeBackground,
                 codeColor = codeColor,
                 senderLink = senderLink,
-                containerColor = paintedRow,
+                containerColor = contrastRow,
                 minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                 normalContainerColor = normalPaintedRow,
             ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
@@ -1249,7 +1266,7 @@ private fun ActionMessageRow(
             modifier =
                 Modifier
                     .fillMaxWidth()
-                    .background(paintedRow)
+                    .background(if (contrastRow == paintedRow) paintedRow else paintedRow.copy(alpha = TWO_LINE_FILL_ALPHA))
                     .actionAccentRail(accent)
                     .then(containerModifier),
             sourceModifier =
@@ -1291,7 +1308,7 @@ private fun ActionMessageRow(
                     modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
                 ) {
                     val metadataInk = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                    val metadataColor = remember(metadataInk, paintedRow, normalPaintedRow, dimmed) { messageContentColor(metadataInk, paintedRow, dimmed, normalPaintedRow) }
+                    val metadataColor = remember(metadataInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(metadataInk, contrastRow, dimmed, normalPaintedRow) }
                     MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed, contentColor = metadataColor)
                     if (LocalTimestampConfig.current.show) {
                         Text(
@@ -1536,15 +1553,16 @@ private fun TwoLineMessageRow(
         }
     val normalPaintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
     val paintedRow = messageContainerColor(normalPaintedRow, MaterialTheme.colorScheme.background, dimmed)
+    val contrastRow = remember(paintedRow, dimmed) { if (dimmed) paintedRow else twoLineContrastFill(paintedRow) }
     val bodyInk = codeColor
-    val bodyColor = remember(bodyInk, paintedRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, paintedRow, dimmed, normalPaintedRow) }
+    val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
     val nameBackground =
         if (senderIsFriend) {
             MaterialTheme.colorScheme.primary
                 .copy(alpha = 0.12f)
-                .compositeOver(paintedRow)
+                .compositeOver(contrastRow)
         } else {
-            paintedRow
+            contrastRow
         }
     val normalNameBackground =
         if (senderIsFriend) {
@@ -1560,8 +1578,8 @@ private fun TwoLineMessageRow(
         modifier =
             modifier
                 .fillMaxWidth()
-                // Flatten the speaker wash onto the canvas before the source and its inset.
-                .background(paintedRow)
+                // Only the fill admits wallpaper, with opaque fallback when contrast needs it.
+                .background(if (contrastRow == paintedRow) paintedRow else paintedRow.copy(alpha = TWO_LINE_FILL_ALPHA))
                 .then(containerModifier),
         sourceModifier =
             Modifier.messageRowClicks(
@@ -1626,7 +1644,7 @@ private fun TwoLineMessageRow(
                     modifier = Modifier.padding(start = 6.dp),
                 ) {
                     val metadataInk = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                    val metadataColor = remember(metadataInk, paintedRow, normalPaintedRow, dimmed) { messageContentColor(metadataInk, paintedRow, dimmed, normalPaintedRow) }
+                    val metadataColor = remember(metadataInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(metadataInk, contrastRow, dimmed, normalPaintedRow) }
                     MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed, contentColor = metadataColor)
                     if (LocalTimestampConfig.current.show) {
                         Text(
@@ -1679,7 +1697,7 @@ private fun TwoLineMessageRow(
                         mentionColor,
                         codeBackground,
                         codeColor,
-                        paintedRow,
+                        contrastRow,
                         bodyColor,
                         dimmed,
                     ) {
@@ -1690,7 +1708,7 @@ private fun TwoLineMessageRow(
                             mentionColor,
                             codeBackground,
                             codeColor,
-                            paintedRow,
+                            contrastRow,
                             bodyColor,
                             minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                             normalContainerColor = normalPaintedRow,
