@@ -906,7 +906,7 @@ class ComposerEditorStateTest {
         var surface = Color.Unspecified
         compose.setContent {
             MotdTheme(dynamicColor = false, themePreset = preset.value) {
-                surface = MaterialTheme.colorScheme.surfaceContainerHigh
+                surface = MaterialTheme.colorScheme.secondaryContainer
                 Composer(
                     value = draft.value,
                     onValueChange = { draft.value = it },
@@ -1180,7 +1180,7 @@ class ComposerEditorStateTest {
         compose.setContent {
             MotdTheme(dynamicColor = false, nickColorsEnabled = nickColorsEnabled.value, nickColorOverrides = overrides.value) {
                 scheme = LocalNickColors.current
-                fieldBackground = MaterialTheme.colorScheme.surfaceContainerHigh
+                fieldBackground = MaterialTheme.colorScheme.secondaryContainer
                 Composer(
                     value = draft.value,
                     onValueChange = { draft.value = it },

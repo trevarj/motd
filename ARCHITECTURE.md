@@ -175,6 +175,13 @@ flowchart TD
   Large keeps its separate top toolbar.
   Toolbar long-press shows the action name and purpose, with a Markdown example;
   normal taps perform actions. Voice recording retains its separate hold gesture.
+  All input styles use the selected palette's secondary container for the field
+  and tools, with matched content ink; selected tools and send/voice actions keep
+  primary emphasis. Editor ink preserves the theme-text preference and is fitted
+  to the same painted fill used by IRC formatting. Comfortable incoming bubbles,
+  autocomplete, day/system pills, history overlays, and voice panels share the
+  secondary container roles; reply previews use primary containers. Outgoing,
+  warning, and action/notice bubbles retain their distinct roles and contrast rules.
 - Chat's positive `placeAtTop` entry snaps compact chrome and waits for its measured
   viewport before unread-row alignment. A shallow run that clamps at the effective
   bottom restores expanded chrome and waits for that layout before consuming the target.

@@ -450,7 +450,7 @@ class MessageBubbleFooterUiTest {
                 timestampColor = ensureContrast(metadataInk, listOf(fill), MESSAGE_TEXT_CONTRAST)
                 val codeBackground = scheme.surfaceVariant.copy(alpha = if (density.value == LayoutDensity.COMPACT && kind != MessageKind.ACTION) 0.72f else 1f)
                 codeFill = codeBackground.compositeOver(fill)
-                replyFill = scheme.surfaceContainerHighest.copy(alpha = 0.6f).compositeOver(fill)
+                replyFill = scheme.primaryContainer
                 val linkInk =
                     if (density.value == LayoutDensity.COMFORTABLE && (kind == MessageKind.ACTION || kind == MessageKind.NOTICE || self || mention)) {
                         bubble.content

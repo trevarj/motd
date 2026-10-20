@@ -218,8 +218,8 @@ internal fun messageBubbleRoleColors(
             }
 
             else -> {
-                content = scheme.onSurface
-                scheme.surfaceContainerHigh
+                content = scheme.onSecondaryContainer
+                scheme.secondaryContainer
             }
         }
     val normalInk = ensureContrast(content, listOf(container), MESSAGE_TEXT_CONTRAST)
@@ -597,8 +597,8 @@ fun MessageBubble(
             scheme.onPrimaryContainer,
             scheme.tertiaryContainer,
             scheme.onTertiaryContainer,
-            scheme.surfaceContainerHigh,
-            scheme.onSurface,
+            scheme.secondaryContainer,
+            scheme.onSecondaryContainer,
             isSelf,
             dimmed,
             scheme.background,
@@ -2365,15 +2365,13 @@ internal fun ReplyMiniBubble(
     val openLabel = stringResource(R.string.chat_reply_open)
     val previewColor =
         messageContainerColor(
-            MaterialTheme.colorScheme.surfaceContainerHighest
-                .copy(alpha = 0.6f)
-                .compositeOver(parentColor),
+            MaterialTheme.colorScheme.primaryContainer,
             parentColor,
             dimmed,
         )
     val bodyInk = readingInk(MaterialTheme.colorScheme)
     val bodyColor = remember(bodyInk, previewColor, dimmed) { messageContentColor(bodyInk, previewColor, dimmed) }
-    val nameInk = nickColors.nick(reply.sender, MaterialTheme.colorScheme.onSurfaceVariant)
+    val nameInk = nickColors.nick(reply.sender, MaterialTheme.colorScheme.onPrimaryContainer)
     val accent = remember(nameInk, previewColor, dimmed) { messageContentColor(nameInk, previewColor, dimmed) }
     val formattedText = reply.ircFormattedText ?: reply.text
     val previewText =

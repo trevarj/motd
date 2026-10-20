@@ -115,7 +115,7 @@ internal fun SystemEventPill(
     // background. Cap it to a Dp radius that stays within the padding when expanded.
     val separateSource = trailingContent != null || lineTrailingContent != null
     val pillShape = if (showLines || trailingContent != null) RoundedCornerShape(14.dp) else RoundedCornerShape(50)
-    val parentColor = MaterialTheme.colorScheme.surfaceContainerHigh
+    val parentColor = MaterialTheme.colorScheme.secondaryContainer
     val sourceActions =
         Modifier
             .then(
@@ -180,7 +180,7 @@ internal fun SystemEventPill(
                                             },
                                         ),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
                                 textAlign = TextAlign.Center,
                             )
                             lineTrailingContent?.invoke(index, parentColor)
@@ -192,7 +192,7 @@ internal fun SystemEventPill(
                     text = summary,
                     modifier = if (separateSource) sourceActions else Modifier,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
                     textAlign = TextAlign.Center,
                 )
             }

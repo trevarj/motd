@@ -555,6 +555,9 @@ fun Composer(
             ComposerStyle.COMPACT -> 4.dp
         }
     val floatingPill = composerStyle != ComposerStyle.LARGE
+    val toolAccentSeed = MaterialTheme.colorScheme.primary
+    val toolBackground = MaterialTheme.colorScheme.secondaryContainer
+    val toolAccent = remember(toolAccentSeed, toolBackground) { ensureContrast(toolAccentSeed, listOf(toolBackground)) }
     val primaryInset = if (composerStyle == ComposerStyle.COMPACT) 2.dp else 4.dp
     val collapsedMinimumHeight = if (floatingPill) 48.dp + primaryInset * 2 else 48.dp
     val lineHeightPx =
@@ -821,7 +824,7 @@ fun Composer(
                     ),
                 modifier = Modifier.graphicsLayer { rotationZ = toolsRotation },
                 tint =
-                    if (transientToolsVisible) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    if (transientToolsVisible) toolAccent else MaterialTheme.colorScheme.onSecondaryContainer,
             )
         }
     }
@@ -854,8 +857,8 @@ fun Composer(
                             IconButtonDefaults.filledIconButtonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary,
-                                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f),
+                                disabledContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                disabledContentColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.42f),
                             ),
                     ) {
                         Box(
@@ -919,7 +922,8 @@ fun Composer(
     ) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = if (floatingPill) Color.Transparent else MaterialTheme.colorScheme.surfaceContainerLow,
+            color = if (floatingPill) Color.Transparent else MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
             tonalElevation = if (floatingPill) 0.dp else 3.dp,
         ) {
             Column {
@@ -942,7 +946,7 @@ fun Composer(
                                         .padding(start = 20.dp, end = 76.dp, top = 6.dp)
                                         .testTag("chat_composer_reply_warning"),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (floatingPill) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -964,7 +968,7 @@ fun Composer(
                         Surface(
                             modifier = Modifier.matchParentSize().testTag("chat_composer_pill"),
                             shape = MotdShapes.composer,
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            color = MaterialTheme.colorScheme.secondaryContainer,
                         ) {}
                     }
                     Column {
@@ -1038,7 +1042,7 @@ fun Composer(
                                                     },
                                                 ).testTag("chat_composer_pill"),
                                         shape = MotdShapes.card,
-                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        color = MaterialTheme.colorScheme.secondaryContainer,
                                     ) {}
                                 }
                                 Row(
@@ -1078,7 +1082,7 @@ fun Composer(
                                         Box(Modifier.padding(start = 8.dp, top = nickTop)) {
                                             SenderLabel(
                                                 sender = selfNick,
-                                                color = LocalNickColors.current.nick(selfNick, MaterialTheme.colorScheme.onSurfaceVariant),
+                                                color = LocalNickColors.current.nick(selfNick, MaterialTheme.colorScheme.onSecondaryContainer),
                                                 unread = false,
                                                 modifier =
                                                     Modifier
@@ -1168,7 +1172,7 @@ fun Composer(
                                                 Icon(
                                                     Icons.Filled.AutoFixHigh,
                                                     contentDescription = stringResource(R.string.ai_text_tools),
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
                                                     modifier = Modifier.padding(start = 12.dp).size(20.dp),
                                                 )
                                             }
@@ -1189,9 +1193,9 @@ fun Composer(
                                                         contentDescription = if (expanded) "Collapse rich editor" else "Expand rich editor",
                                                         tint =
                                                             if (expanded) {
-                                                                MaterialTheme.colorScheme.primary
+                                                                toolAccent
                                                             } else {
-                                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                                                MaterialTheme.colorScheme.onSecondaryContainer
                                                             },
                                                     )
                                                 }
@@ -1205,7 +1209,7 @@ fun Composer(
                                                     Icon(
                                                         Icons.Outlined.AttachFile,
                                                         contentDescription = stringResource(R.string.chat_composer_attachment),
-                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
                                                     )
                                                 }
                                             }
@@ -1343,10 +1347,13 @@ private fun ComposerToolsToolbar(
                         IconButtonDefaults.iconButtonColors(
                             containerColor =
                                 if (isSelected) {
-                                    MaterialTheme.colorScheme.secondaryContainer
+                                    MaterialTheme.colorScheme.primary
                                 } else {
                                     Color.Transparent
                                 },
+                            contentColor =
+                                if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer,
+                            disabledContentColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.38f),
                         ),
                 ) {
                     Icon(icon, contentDescription = label)
@@ -1920,8 +1927,9 @@ private fun ComposerTextField(
     val boldSelected = selection?.let { document.isStyleSelected(it.start, it.end, IrcTextStyle.BOLD) } == true
     val boldLabel = if (hasSelection && boldSelected) "Remove bold" else "Bold"
     val latestDocument = rememberUpdatedState(document)
-    val fieldBackground = MaterialTheme.colorScheme.surfaceContainerHigh
-    val fieldForeground = MaterialTheme.colorScheme.onSurface
+    val fieldBackground = MaterialTheme.colorScheme.secondaryContainer
+    val fieldInk = MaterialTheme.colorScheme.onSurface
+    val fieldForeground = remember(fieldInk, fieldBackground) { ensureContrast(fieldInk, listOf(fieldBackground), MESSAGE_TEXT_CONTRAST) }
     val commandBackground = MaterialTheme.colorScheme.primary
     val commandForeground = MaterialTheme.colorScheme.onPrimary
     val commandFontSize = MaterialTheme.typography.bodyMedium.fontSize
@@ -2065,7 +2073,7 @@ private fun ComposerTextField(
                     Text(
                         placeholder,
                         style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -2152,7 +2160,8 @@ private fun EmojiAutocompletePanel(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth().testTag("chat_composer_emoji_autocomplete"),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         shape = MotdShapes.card,
         tonalElevation = 3.dp,
     ) {
@@ -2249,14 +2258,16 @@ private fun ReplyBar(
     reply: ComposerReply,
     onCancel: () -> Unit,
 ) {
-    val accent = LocalNickColors.current.nick(reply.sender, MaterialTheme.colorScheme.primary)
-    val fill = MaterialTheme.colorScheme.surfaceContainerHigh
+    val fill = MaterialTheme.colorScheme.primaryContainer
+    val nameInk = LocalNickColors.current.nick(reply.sender, MaterialTheme.colorScheme.primary)
+    val accent = remember(nameInk, fill) { ensureContrast(nameInk, listOf(fill), MESSAGE_TEXT_CONTRAST) }
     val bodyInk = readingInk(MaterialTheme.colorScheme)
     val bodyColor = remember(bodyInk, fill) { ensureContrast(bodyInk, listOf(fill), MESSAGE_TEXT_CONTRAST) }
     Surface(
         modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 68.dp, top = 8.dp),
         shape = MotdShapes.card,
         color = fill,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
     ) {
         Row(
             modifier = Modifier.padding(start = 12.dp, end = 2.dp, top = 6.dp, bottom = 6.dp),

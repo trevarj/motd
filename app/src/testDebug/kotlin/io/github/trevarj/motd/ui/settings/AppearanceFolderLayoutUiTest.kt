@@ -43,7 +43,6 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.fixedThemeScheme
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -130,7 +129,7 @@ class AppearanceFolderLayoutUiTest {
         preview.performScrollTo().assertIsDisplayed()
         val static = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK))
         val staticBody = inkOf(body)
-        assertEquals(ensureContrast(Color(0xFFF5F5F5), listOf(static.surfaceContainerHigh), MESSAGE_TEXT_CONTRAST), staticBody)
+        assertEquals(ensureContrast(Color(0xFFF5F5F5), listOf(static.secondaryContainer), MESSAGE_TEXT_CONTRAST), staticBody)
 
         compose
             .onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true)
@@ -142,8 +141,7 @@ class AppearanceFolderLayoutUiTest {
         val themed = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK, useThemeTextColors = true))
         assertEquals(themed.onSurface, inkOf("Appearance"))
         preview.performScrollTo().assertIsDisplayed()
-        assertEquals(ensureContrast(themed.onBackground, listOf(themed.surfaceContainerHigh), MESSAGE_TEXT_CONTRAST), inkOf(body))
-        assertNotEquals(staticBody, inkOf(body))
+        assertEquals(ensureContrast(themed.onBackground, listOf(themed.secondaryContainer), MESSAGE_TEXT_CONTRAST), inkOf(body))
 
         compose
             .onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true)

@@ -252,11 +252,11 @@ class MessageBubbleTextTest {
                         contentColor = bodyColor,
                     )
                 assertRenderedInks("$name $roleName", body, bodyColor, role.container)
-                val previewFill = scheme.surfaceContainerHighest.copy(alpha = 0.6f).compositeOver(role.container)
-                val previewColor = ensureContrast(readingInk, listOf(previewFill), MESSAGE_TEXT_CONTRAST)
-                val preview = mircFormattedText("quoted \u000315grey\u000f \u000314,00paper", previewFill, previewColor, MESSAGE_TEXT_CONTRAST)
-                assertRenderedInks("$name reply", preview, previewColor, previewFill)
             }
+            val previewFill = scheme.primaryContainer
+            val previewColor = ensureContrast(readingInk, listOf(previewFill), MESSAGE_TEXT_CONTRAST)
+            val preview = mircFormattedText("quoted \u000315grey\u000f \u000314,00paper", previewFill, previewColor, MESSAGE_TEXT_CONTRAST)
+            assertRenderedInks("$name reply", preview, previewColor, previewFill)
 
             // These are the solid flattened row fills, not a wallpaper composition.
             val rowFill = scheme.onSurfaceVariant.copy(alpha = 0.10f).compositeOver(scheme.background)

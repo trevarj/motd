@@ -27,6 +27,16 @@ field labels) keep Material styling. Filled and inverse controls keep foreground
 actual backgrounds, and disabled controls keep their disabled styling; neither text-color mode
 overrides component content colors globally or changes fonts.
 
+Composer fields and toolbars, ordinary Comfortable incoming bubbles, autocomplete,
+day/system-event pills, history overlays, and voice panels use the selected palette's
+`secondaryContainer`/`onSecondaryContainer` roles in light, dark, and true-black themes.
+Reply previews use `primaryContainer` with matched ink; selected formatting tools use
+`primary`/`onPrimary` to remain distinct from the toolbar. Editor text retains the
+theme-text preference and is fitted to its actual container, also used by IRC formatting.
+Outgoing ownership, mentions, actions/notices, and recording/error cues keep their existing
+accent or semantic roles. The chat canvas, app chrome, explicit IRC swatches, and shared
+native emoji picker are unchanged.
+
 Reading text uses a stronger **7:1 reading target** against the actual painted bubble, row, card,
 topic, search highlight, reply, or inline-code fill. Links, nick mentions, and explicit IRC foreground
 colors are tone-adjusted with the same hue-preserving rule; explicit IRC backgrounds and reverse
@@ -37,9 +47,10 @@ the most readable black or white ink, with at least 4.5:1 contrast.
 Read chat-list message previews are subdued while retaining at least 4.5:1 contrast.
 Unread previews keep the stronger reading ink in both text-color modes.
 
-Compact, two-line, and full-width ACTION rows paint their existing nick/attention tint composited
-onto the theme canvas as an **opaque text backdrop**. Wallpaper remains visible outside those rows;
-its selected intensity controls builtin ink or full-color image opacity directly, including 100%.
+Flattened rows retain their nick/attention tint over the theme canvas. Normal two-line rows
+admit wallpaper through a 90%-opaque fill only when contrast is safe; Dimmed rows and
+contrast fallbacks stay opaque. Wallpaper intensity still controls builtin ink or full-color
+image opacity directly, including 100%.
 
 Two-line headers keep sender names on one ellipsized line, reserving room for the avatar, friend
 indicator, delivery status, and timestamp even in narrow panes with large system fonts.

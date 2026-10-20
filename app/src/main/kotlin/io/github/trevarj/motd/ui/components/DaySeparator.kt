@@ -66,12 +66,12 @@ fun DaySeparator(
             text = label,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
             modifier =
                 Modifier
                     .padding(horizontal = 8.dp)
                     .background(
-                        MaterialTheme.colorScheme.surfaceContainerHigh,
+                        MaterialTheme.colorScheme.secondaryContainer,
                         RoundedCornerShape(50),
                     ).padding(horizontal = 12.dp, vertical = 4.dp),
         )

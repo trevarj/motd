@@ -41,7 +41,8 @@ fun AutocompletePanel(
     if (candidates.isEmpty()) return
     Surface(
         modifier = modifier.fillMaxWidth().testTag("${tagPrefix}_panel"),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         tonalElevation = 3.dp,
         shadowElevation = 3.dp,
         shape = RoundedCornerShape(18.dp),
@@ -75,13 +76,13 @@ fun AutocompletePanel(
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurface,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
                             )
                             commandDescription(candidate)?.let { description ->
                                 Text(
                                     text = stringResource(description),
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
                                 )
                             }
                         }
@@ -90,7 +91,7 @@ fun AutocompletePanel(
                             text = candidate,
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Normal,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
                         )
                     }
                 }

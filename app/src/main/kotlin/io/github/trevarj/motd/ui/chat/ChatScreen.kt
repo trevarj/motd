@@ -271,6 +271,7 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdSizes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.spacingFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -5170,7 +5171,8 @@ internal fun TimelineHistoryStaleChip(
         val dismissLabel = stringResource(R.string.chat_history_partial_dismiss)
         Surface(
             shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
             modifier =
                 Modifier
                     .semantics { liveRegion = LiveRegionMode.Polite }
@@ -5184,13 +5186,13 @@ internal fun TimelineHistoryStaleChip(
                 Text(
                     text = stringResource(R.string.chat_history_partial_chip),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
                 )
                 Icon(
                     imageVector = Icons.Default.Close,
                     // The clickable's label already announces the action; the icon is decorative.
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier.size(14.dp),
                 )
             }
@@ -5223,7 +5225,8 @@ internal fun TimelineHistorySyncFailure(
     ) {
         Surface(
             shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
             tonalElevation = 6.dp,
             shadowElevation = 3.dp,
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
@@ -5236,7 +5239,7 @@ internal fun TimelineHistorySyncFailure(
                 Text(
                     text = stringResource(R.string.chat_history_sync_failed_inline),
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
                 )
                 Button(
                     onClick = onRetry,
@@ -5560,6 +5563,11 @@ internal fun VoiceComposerPanel(
     sendEnabled: Boolean = true,
 ) {
     var destinationSheet by remember { mutableStateOf(false) }
+    val panelColor = MaterialTheme.colorScheme.secondaryContainer
+    val recordingInkSeed = MaterialTheme.colorScheme.error
+    val recordingInk = remember(recordingInkSeed, panelColor) { ensureContrast(recordingInkSeed, listOf(panelColor)) }
+    val previewInkSeed = MaterialTheme.colorScheme.primary
+    val previewInk = remember(previewInkSeed, panelColor) { ensureContrast(previewInkSeed, listOf(panelColor)) }
     // Hold the last non-null panel models so the exit animation still has content to draw after
     // the state field clears; live fields (state.progress, playbackState) keep reading current
     // state as before.
@@ -5591,7 +5599,8 @@ internal fun VoiceComposerPanel(
                                 "Recording. Slide left to cancel or swipe up to lock."
                             }
                     },
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            color = panelColor,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
             tonalElevation = 3.dp,
         ) {
             Column {
@@ -5600,7 +5609,7 @@ internal fun VoiceComposerPanel(
                     Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Outlined.Mic, null, tint = MaterialTheme.colorScheme.error)
+                    Icon(Icons.Outlined.Mic, null, tint = recordingInk)
                     Spacer(Modifier.width(8.dp))
                     Column(Modifier.weight(1f)) {
                         Text(
@@ -5615,7 +5624,7 @@ internal fun VoiceComposerPanel(
                                 "${formatAudioDuration(recording.elapsedMs)} · Slide left to cancel"
                             },
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
                         )
                     }
                     if (recording.locked) {
@@ -5670,7 +5679,8 @@ internal fun VoiceComposerPanel(
         val previewPositionMs = playbackState.positionMs.takeIf { previewActive } ?: 0L
         Surface(
             modifier = modifier.fillMaxWidth().testTag("voice_preview_panel"),
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            color = panelColor,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
             tonalElevation = 3.dp,
         ) {
             Column {
@@ -5680,14 +5690,14 @@ internal fun VoiceComposerPanel(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.Mic, null, tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Outlined.Mic, null, tint = previewInk)
                         Spacer(Modifier.width(8.dp))
                         Column(Modifier.weight(1f)) {
                             Text("Voice message", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                             Text(
                                 "${formatAudioDuration(staged.durationMs)} · ${staged.mimeType} · ${formatBytes(staged.sizeBytes)}",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
                             )
                         }
                         IconButton(onClick = { onPreview(preview) }, enabled = progress == null, modifier = Modifier.testTag("voice_preview_play")) {
@@ -5720,7 +5730,7 @@ internal fun VoiceComposerPanel(
                                         "Standard audio link. The host and anyone with the link can play it in any client."
                                     },
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
                                 )
                             }
                             Switch(
@@ -5734,7 +5744,7 @@ internal fun VoiceComposerPanel(
                         Text(
                             "Agent voice notes are sent unencrypted so Agentwire can transcribe them on the workstation.",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
                         )
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -5748,7 +5758,7 @@ internal fun VoiceComposerPanel(
                                 destination?.let(::backendRetention)
                                     ?: "Uses the file host advertised by this IRC network",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
                             )
                         }
                         TextButton(onClick = { destinationSheet = true }, enabled = progress == null, modifier = Modifier.testTag("voice_destination")) {
