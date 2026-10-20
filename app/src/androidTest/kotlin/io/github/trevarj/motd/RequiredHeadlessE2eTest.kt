@@ -30,6 +30,9 @@ import io.github.trevarj.motd.audio.VoiceSendProgress
 import io.github.trevarj.motd.audio.VoiceSendRequest
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.FoolPreferences
+import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.e2e.BootstrappedNetwork
 import io.github.trevarj.motd.e2e.BufferProbe
 import io.github.trevarj.motd.e2e.ConnectionProbe
@@ -751,6 +754,51 @@ class RequiredHeadlessE2eTest {
     @Test
     fun bootstrappedNavigationSettingsAndBouncerSmoke() {
         val (bootstrap, network) = launchBootstrapped()
+        val roomId = runBlocking { BufferProbe(bootstrap.seams.buffers(), milestones).awaitJoinedChannel(network.childId, bootstrap.args.channel) }
+        val settings = DataStoreSettingsRepository(InstrumentationRegistry.getInstrumentation().targetContext)
+        val originalSettings = runBlocking { settings.settings.first() }
+        val token = "fools${bootstrap.args.runId.filter(Char::isLetterOrDigit).takeLast(16)}"
+        val messages = MessageLifecycleProbe(bootstrap.seams.search(), milestones)
+        FixtureIrcClient.connect(bootstrap.args).use { peer ->
+            peer.sendMessage(bootstrap.args.channel, "$token hidden")
+            peer.flushThroughServer("${token}hidden")
+            val hidden = runBlocking { messages.awaitCanonicalFromAnySender("$token hidden", roomId) }
+            runBlocking {
+                settings.setFool(hidden.sender, true)
+                settings.setFoolPreferences(hidden.sender, FoolPreferences(FoolsMode.HIDE))
+            }
+            try {
+                val configured = runBlocking { settings.settings.first() }
+                ChatListRobot(compose).open(roomId)
+                ChatRobot(compose).send("$token ordinary")
+                val ordinary = runBlocking { messages.awaitCanonical("$token ordinary", roomId) }
+                TimelineRobot(compose).assertMessageVisible(ordinary.tag())
+                compose.onNodeWithTag(hidden.tag(), useUnmergedTree = true).assertDoesNotExist()
+                repeat(2) {
+                    ChatRobot(compose).apply {
+                        click("chat_overflow")
+                        click("chat_toggle_fools_visibility")
+                    }
+                    TimelineRobot(compose).assertMessageVisible(hidden.tag())
+                    compose.onNodeWithTag(ordinary.tag(), useUnmergedTree = true).assertIsDisplayed()
+                    ChatRobot(compose).apply {
+                        click("chat_overflow")
+                        click("chat_toggle_fools_visibility")
+                    }
+                    compose.waitUntil("Restore removes the temporarily revealed fool", 10_000) {
+                        compose.onAllNodesWithTag(hidden.tag(), useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
+                    }
+                    compose.onNodeWithTag("chat_timeline").assertIsDisplayed()
+                    compose.onNodeWithTag(ordinary.tag(), useUnmergedTree = true).assertIsDisplayed()
+                }
+                assertEquals(configured, runBlocking { settings.settings.first() })
+                scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+                ChatListRobot(compose).awaitTag("chatlist_row_$roomId")
+            } finally {
+                runBlocking { settings.setFool(hidden.sender, false) }
+            }
+        }
+        assertEquals(originalSettings, runBlocking { settings.settings.first() })
         SettingsRobot(compose).apply {
             open()
             notifications()

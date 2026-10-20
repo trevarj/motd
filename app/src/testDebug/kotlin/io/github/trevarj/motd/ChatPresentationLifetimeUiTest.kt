@@ -1,6 +1,10 @@
 package io.github.trevarj.motd
 
+import android.content.Context
+import android.graphics.Bitmap
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -12,16 +16,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -39,17 +47,23 @@ import androidx.paging.LoadState
 import androidx.paging.LoadType
 import androidx.paging.PagingState
 import androidx.paging.RemoteMediator
+import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
+import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.FoolPreferences
+import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.settingsDataStore
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
 import io.github.trevarj.motd.data.repo.ChatPageCache
 import io.github.trevarj.motd.data.repo.MessageRepository
@@ -87,6 +101,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -110,6 +125,388 @@ class ChatPresentationLifetimeUiTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun temporaryFoolVisibilityKeepsAdmittedRowsPaintedAcrossHeldRefresh() =
+        withFixture(temporaryFools = true) { fixture ->
+            val room = fixture.rooms.first().id
+            fixture.open(room)
+            val visit = fixture.awaitReady()
+            val owner = checkNotNull(visit.owner)
+            val ordinary = compose.onNodeWithTag("chat_message_retained-0-900", useUnmergedTree = true)
+            ordinary.assertIsDisplayed()
+            val root = compose.onNodeWithTag("retained_surface", useUnmergedTree = true)
+            val bounds = ordinary.fetchSemanticsNode().boundsInRoot
+            val rootBounds = root.fetchSemanticsNode().boundsInRoot
+
+            fun paintedOrdinary(): Bitmap {
+                val screen = root.captureToImage().asAndroidBitmap()
+                return Bitmap.createBitmap(
+                    screen,
+                    (bounds.left - rootBounds.left).toInt(),
+                    (bounds.top - rootBounds.top).toInt(),
+                    bounds.width.toInt(),
+                    bounds.height.toInt(),
+                )
+            }
+            val painted = paintedOrdinary()
+            val initialSettings = runBlocking { fixture.foolSettings.settings.first() }
+            compose.mainClock.autoAdvance = false
+
+            fun toggleHeld() {
+                compose.runOnIdle { fixture.nativeLoads.pause() }
+                fixture.toggleFools()
+                compose.waitUntil(10_000) {
+                    compose.mainClock.advanceTimeByFrame()
+                    compose.waitForIdle()
+                    fixture.nativeLoads.blocked.isCompleted
+                }
+                val reads = fixture.readCallbacks
+                val saves = fixture.saveCallbacks
+                val depths = fixture.depthAnchors.size
+                repeat(4) {
+                    compose.mainClock.advanceTimeByFrame()
+                    compose.waitForIdle()
+                    compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertDoesNotExist()
+                    ordinary.assertIsDisplayed()
+                    assertTrue("ancestor alpha must not blank or fade ordinary rows", painted.sameAs(paintedOrdinary()))
+                    assertEquals("pending visibility cannot acknowledge stale rows", reads, fixture.readCallbacks)
+                    assertEquals("pending visibility cannot publish a stale viewport", saves, fixture.saveCallbacks)
+                    assertEquals("superseded visibility cannot publish stale displayed depth", depths, fixture.depthAnchors.size)
+                }
+            }
+
+            toggleHeld()
+            compose.runOnIdle { fixture.nativeLoads.resume() }
+            compose.waitUntil(10_000) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                compose.onAllNodesWithTag("chat_message_retained-0-899", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.mainClock.advanceTimeBy(500)
+            compose.waitForIdle()
+            compose.onNodeWithTag("chat_message_retained-0-899", useUnmergedTree = true).assertIsDisplayed()
+            assertSame(visit.presentation.items, fixture.latestVisit().presentation.items)
+            assertSame(visit.presentation.listState, fixture.latestVisit().presentation.listState)
+            fixture.assertDepthResumesAtOldest(room)
+
+            toggleHeld()
+            compose.onAllNodesWithText("hidden · hidden").assertCountEquals(0)
+            compose.runOnIdle { fixture.nativeLoads.resume() }
+            compose.waitUntil(10_000) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                compose.onAllNodesWithTag("chat_message_retained-0-899", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
+            }
+            compose.mainClock.advanceTimeBy(500)
+            compose.waitForIdle()
+            assertTrue(painted.sameAs(paintedOrdinary()))
+            fixture.assertDepthResumesAtOldest(room)
+
+            // A reversal while the native successor is held must resolve only the latest request.
+            toggleHeld()
+            compose.runOnIdle { owner.setExpandAllFools(false) }
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+            ordinary.assertIsDisplayed()
+            compose.runOnIdle { owner.setExpandAllFools(true) }
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+            compose.runOnIdle { fixture.nativeLoads.resume() }
+            compose.waitUntil(10_000) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                fixture.latestVisit().lease.isActive &&
+                    fixture
+                        .latestVisit()
+                        .lease.entry.key.spec.revealHiddenFools &&
+                    fixture
+                        .latestVisit()
+                        .presentation.items.loadState.source.refresh is LoadState.NotLoading &&
+                    compose.onAllNodesWithTag("chat_message_retained-0-899", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.mainClock.advanceTimeBy(500)
+            compose.waitForIdle()
+            compose.onNodeWithTag("chat_message_retained-0-899", useUnmergedTree = true).assertIsDisplayed()
+            assertEquals(initialSettings, runBlocking { fixture.foolSettings.settings.first() })
+
+            // Restore must not resurrect a Hidden row that the user individually re-collapsed.
+            compose.onNodeWithTag("chat_fool_collapse_retained-0-899").performClick()
+            compose.mainClock.advanceTimeBy(500)
+            compose.waitForIdle()
+            compose.onAllNodesWithText(body("retained-0-899")).assertCountEquals(0)
+            toggleHeld()
+            compose.onAllNodesWithText(body("retained-0-899")).assertCountEquals(0)
+            compose.runOnIdle { fixture.nativeLoads.resume() }
+            compose.waitUntil(10_000) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                compose.onAllNodesWithTag("chat_message_retained-0-899", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() &&
+                    fixture
+                        .latestVisit()
+                        .presentation.items.loadState.source.refresh is LoadState.NotLoading
+            }
+            compose.mainClock.advanceTimeBy(500)
+            compose.waitForIdle()
+
+            // Permanent concealment never receives the temporary outgoing-pixel allowance.
+            compose.runOnIdle { fixture.nativeLoads.pause() }
+            runBlocking { fixture.foolSettings.setFool("ordinary", true) }
+            compose.waitUntil(10_000) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                fixture.nativeLoads.blocked.isCompleted
+            }
+            compose.onAllNodesWithText(body("retained-0-900")).assertCountEquals(0)
+            compose.runOnIdle { fixture.nativeLoads.resume() }
+        }
+
+    @Test
+    fun sameOutputTemporaryRevealAndRestoreReadmitTheRetainedNativeWindow() =
+        withFixture(temporaryFools = true, temporaryFoolMode = FoolsMode.DIMMED) { fixture ->
+            val room = fixture.rooms.first().id
+            fixture.open(room)
+            fixture.awaitReady()
+            val settings = runBlocking { fixture.foolSettings.settings.first() }
+            compose.mainClock.autoAdvance = false
+            for (revealed in listOf(true, false)) {
+                compose.runOnIdle { fixture.holdNextNativeRefresh = true }
+                fixture.toggleFools()
+                compose.waitUntil(10_000) {
+                    compose.mainClock.advanceTimeByFrame()
+                    compose.waitForIdle()
+                    fixture
+                        .latestVisit()
+                        .lease.entry.key.spec.revealHiddenFools == revealed && fixture.nativeLoads.blocked.isCompleted
+                }
+                repeat(4) {
+                    compose.mainClock.advanceTimeByFrame()
+                    compose.waitForIdle()
+                }
+                val pending = fixture.latestVisit()
+                assertFalse("measuring an equal old window is not successor publication", pending.lease.hasPublishedWindow(pending.presentation.items.itemSnapshotList))
+                compose.runOnIdle { fixture.nativeLoads.resume() }
+                fixture.awaitFoolVisibility(revealed)
+                fixture.assertDepthResumesAtOldest(room)
+                compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertDoesNotExist()
+                compose.onNodeWithTag("chat_message_retained-0-900", useUnmergedTree = true).assertIsDisplayed()
+            }
+            assertEquals(settings, runBlocking { fixture.foolSettings.settings.first() })
+        }
+
+    @Test
+    fun deferredTemporaryRestoreCannotOutliveAnExactJumpOrPermanentPolicyCutover() =
+        withFixture(temporaryFools = true) { fixture ->
+            val room = fixture.rooms.first().id
+            fixture.open(room)
+            val owner = checkNotNull(fixture.awaitReady().owner)
+            compose.mainClock.autoAdvance = false
+            fixture.toggleFools()
+            fixture.awaitFoolVisibility(true)
+            fixture.toggleFools()
+            compose.mainClock.advanceTimeBy(32)
+            compose.waitForIdle()
+            assertTrue("the current SQL reveal remains authorized during the native exit", owner.hiddenFoolsRevealed.value)
+            compose.onAllNodesWithText(body("retained-0-899")).assertCountEquals(0)
+            compose.runOnIdle { owner.focusRecentMention(fixture.target(room, 0).copy(fromSavedPosition = false)) }
+            compose.mainClock.advanceTimeBy(500)
+            compose.waitForIdle()
+            assertTrue("an exact jump cancels, rather than dispatches, the deferred Restore", owner.expandAllFools.value)
+            compose.onNodeWithTag("chat_message_retained-0-899", useUnmergedTree = true).assertIsDisplayed()
+
+            fixture.toggleFools()
+            compose.mainClock.advanceTimeBy(32)
+            compose.waitForIdle()
+            runBlocking { fixture.foolSettings.setFoolPreferences("hidden", FoolPreferences(FoolsMode.COLLAPSE)) }
+            compose.waitUntil(10_000) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                fixture
+                    .latestVisit()
+                    .lease.entry.key.spec.foolPreferences["hidden"]
+                    ?.visibility == FoolsMode.COLLAPSE &&
+                    fixture.latestVisit().lease.isActive &&
+                    runCatching { compose.onNodeWithTag("chat_message_retained-0-899", useUnmergedTree = true).assertIsDisplayed() }.isSuccess
+            }
+            compose.mainClock.advanceTimeBy(500)
+            compose.waitForIdle()
+            assertTrue("a permanent cutover must not receive the old Restore completion", owner.expandAllFools.value)
+            assertTrue(owner.hiddenFoolsRevealed.value)
+        }
+
+    @Test
+    fun realRedactionDisposesRevealedHiddenPixelsWithoutAnOutgoingGracePeriod() =
+        withFixture(temporaryFools = true) { fixture ->
+            val room = fixture.rooms.first().id
+            runBlocking { fixture.foolSettings.setShowRedactedMessages(false) }
+            fixture.open(room)
+            val settled = fixture.awaitReady()
+            val ordinaryId = checkNotNull(fixture.target(room, 0).expectedEventId)
+            // This test exercises an active canonical refresh, not fresh singleton entry positioning.
+            fixture.prepareRedactionPair(room)
+            val preparedVersion = runBlocking { settled.lease.entry.readVersion() }
+            compose.waitUntil(10_000) {
+                compose.waitForIdle()
+                val window = settled.presentation.items.itemSnapshotList
+                val visible = settled.presentation.listState.layoutInfo.visibleItemsInfo
+                settled.lease.entry.presentedVersion == preparedVersion &&
+                    settled.presentation.items.loadState.source.refresh is LoadState.NotLoading &&
+                    window.size == 1 &&
+                    window.items.singleOrNull()?.let { it.id == ordinaryId && it.serverTime == 86_403_000L } == true &&
+                    visible.any { it.key == ordinaryId } && visible.none { it.key is Long && it.key != ordinaryId }
+            }
+            compose.mainClock.autoAdvance = false
+            fixture.toggleFools()
+            fixture.awaitFoolVisibility(true)
+            val root = compose.onNodeWithTag("retained_surface", useUnmergedTree = true)
+            val rootBounds = root.fetchSemanticsNode().boundsInRoot
+            val hiddenBounds = compose.onNodeWithTag("chat_message_retained-0-899", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val ordinaryBounds = compose.onNodeWithTag("chat_message_retained-0-900", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+
+            fun painted(area: androidx.compose.ui.geometry.Rect): Bitmap =
+                Bitmap.createBitmap(
+                    root.captureToImage().asAndroidBitmap(),
+                    (area.left - rootBounds.left).toInt(),
+                    (area.top - rootBounds.top).toInt(),
+                    area.width.toInt(),
+                    area.height.toInt(),
+                )
+            val shown = painted(hiddenBounds)
+            val ordinary = painted(ordinaryBounds)
+            val current = fixture.latestVisit()
+            val version = checkNotNull(current.lease.entry.presentedVersion)
+            val hiddenId = checkNotNull(fixture.target(room, 1).expectedEventId)
+            val hidden =
+                current.presentation.items.itemSnapshotList.items
+                    .first { it.id == hiddenId }
+            runBlocking { fixture.db.messageDao().update(hidden.copy(kind = MessageKind.REDACTED, text = "")) }
+            compose.waitUntil(10_000) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                current.lease.entry.presentedVersion != version &&
+                    current.presentation.items.loadState.source.refresh is LoadState.NotLoading &&
+                    current.presentation.items.itemSnapshotList.items
+                        .none { it.id == hiddenId } &&
+                    current.presentation.listState.layoutInfo.visibleItemsInfo
+                        .any { it.key == ordinaryId } &&
+                    current.presentation.listState.layoutInfo.visibleItemsInfo
+                        .none { it.key == hiddenId }
+            }
+            compose.onAllNodesWithText(body("retained-0-899")).assertCountEquals(0)
+            val firstCommittedFrame = painted(hiddenBounds)
+            compose.mainClock.advanceTimeBy(500)
+            compose.waitForIdle()
+            val concealed = painted(hiddenBounds)
+            assertFalse("the redacted fixture must previously have painted real body pixels", shown.sameAs(concealed))
+            assertTrue("redaction must not retain native outgoing pixels after publication", firstCommittedFrame.sameAs(concealed))
+            assertTrue("redaction must not fade the ordinary anchored bubble", ordinary.sameAs(painted(ordinaryBounds)))
+        }
+
+    @Test
+    fun restoringAShowBeforeCommittedAdmissionUsesTheSameHiddenBodyExit() =
+        withFixture(temporaryFools = true) { fixture ->
+            val room = fixture.rooms.first().id
+            fixture.open(room)
+            fixture.awaitReady()
+            compose.mainClock.autoAdvance = false
+            fixture.toggleFools()
+            fixture.awaitFoolVisibility(true)
+            val root = compose.onNodeWithTag("retained_surface", useUnmergedTree = true)
+            val rootBounds = root.fetchSemanticsNode().boundsInRoot
+            val area = compose.onNodeWithTag("chat_message_retained-0-899", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+
+            fun paintedBody(): Bitmap =
+                Bitmap.createBitmap(
+                    root.captureToImage().asAndroidBitmap(),
+                    (area.left - rootBounds.left).toInt(),
+                    (area.top - rootBounds.top).toInt(),
+                    area.width.toInt(),
+                    area.height.toInt(),
+                )
+            fixture.toggleFools()
+            compose.mainClock.advanceTimeBy(32)
+            compose.waitForIdle()
+            val admittedExit = paintedBody()
+            fixture.awaitFoolVisibility(false)
+
+            compose.runOnIdle { fixture.holdRevealAdmission = true }
+            fixture.toggleFools()
+            compose.waitUntil(10_000) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                fixture.cacheReads.blocked.isCompleted &&
+                    runCatching { compose.onNodeWithTag("chat_message_retained-0-899", useUnmergedTree = true).assertIsDisplayed() }.isSuccess
+            }
+            compose.mainClock.advanceTimeBy(500)
+            compose.waitForIdle()
+            fixture.toggleFools()
+            compose.mainClock.advanceTimeBy(32)
+            compose.waitForIdle()
+            assertTrue("pending admission must not substitute a Hidden-as-Collapsed exit", admittedExit.sameAs(paintedBody()))
+            compose.onAllNodesWithText("hidden · hidden").assertCountEquals(0)
+            compose.runOnIdle { fixture.cacheReads.resume() }
+            fixture.awaitFoolVisibility(false)
+            compose.onNodeWithTag("chat_message_retained-0-900", useUnmergedTree = true).assertIsDisplayed()
+        }
+
+    @Test
+    fun sameCountCollapsedRestoreRefreshesTheStationaryReactionWindow() =
+        withFixture(temporaryFools = true, temporaryFoolMode = FoolsMode.COLLAPSE) { fixture ->
+            val room = fixture.rooms.first().id
+            fixture.prepareCollapsedReactionWindow(room)
+            fixture.open(room)
+            val first = fixture.awaitReady()
+            val owner = checkNotNull(first.owner)
+            val targetMsgid = "retained-0-880"
+            compose.waitUntil(10_000) {
+                compose.waitForIdle()
+                owner.reactionChips.value[targetMsgid]
+                    ?.singleOrNull()
+                    ?.let { it.emoji == "\u2B50" && it.count == 1 } == true
+            }
+            compose.mainClock.autoAdvance = false
+            fixture.toggleFools()
+            fixture.awaitFoolVisibility(true)
+            compose.waitUntil(10_000) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                targetMsgid !in owner.reactionChips.value
+            }
+            assertEquals(
+                60,
+                fixture
+                    .latestVisit()
+                    .presentation.items.itemCount,
+            )
+            assertEquals(
+                0,
+                fixture
+                    .latestVisit()
+                    .presentation.listState.firstVisibleItemIndex,
+            )
+            fixture.toggleFools()
+            fixture.awaitFoolVisibility(false)
+            compose.waitUntil(10_000) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                owner.reactionChips.value[targetMsgid]
+                    ?.singleOrNull()
+                    ?.let { it.emoji == "\u2B50" && it.count == 1 } == true
+            }
+            assertEquals(
+                60,
+                fixture
+                    .latestVisit()
+                    .presentation.items.itemCount,
+            )
+            assertEquals(
+                0,
+                fixture
+                    .latestVisit()
+                    .presentation.listState.firstVisibleItemIndex,
+            )
+            compose.onNodeWithTag("chat_message_retained-0-900", useUnmergedTree = true).assertIsDisplayed()
+        }
 
     @Test
     fun backAndAlternatingRoomsKeepNativeItemsAndViewportWithoutAnEmptyReentry() =
@@ -379,8 +776,12 @@ class ChatPresentationLifetimeUiTest {
 
     private fun body(msgid: String): String = "$msgid\nsecond line\nthird line\nfourth line"
 
-    private fun withFixture(block: (Fixture) -> Unit) {
-        val fixture = Fixture()
+    private fun withFixture(
+        temporaryFools: Boolean = false,
+        temporaryFoolMode: FoolsMode = FoolsMode.HIDE,
+        block: (Fixture) -> Unit,
+    ) {
+        val fixture = Fixture(temporaryFools, temporaryFoolMode)
         var bodyFailure: Throwable? = null
         try {
             fixture.install()
@@ -418,6 +819,7 @@ class ChatPresentationLifetimeUiTest {
         val expectedMsgid: String?,
         val lease: ChatPageCache.Lease,
         val owner: ChatViewModel? = null,
+        val motionScope: CoroutineScope? = null,
     ) {
         val firstCount = presentation.items.itemCount
         val firstLoadedCount = presentation.items.itemSnapshotList.items.size
@@ -465,9 +867,11 @@ class ChatPresentationLifetimeUiTest {
     private class HoldingDispatcher : CoroutineDispatcher() {
         private val pending = ArrayDeque<Pair<CoroutineContext, Runnable>>()
         private var paused = false
-        val blocked = CompletableDeferred<Unit>()
+        var blocked = CompletableDeferred<Unit>()
+            private set
 
         fun pause() {
+            blocked = CompletableDeferred()
             synchronized(pending) { paused = true }
         }
 
@@ -497,7 +901,10 @@ class ChatPresentationLifetimeUiTest {
         }
     }
 
-    private inner class Fixture {
+    private inner class Fixture(
+        private val temporaryFools: Boolean,
+        private val temporaryFoolMode: FoolsMode,
+    ) {
         val db = inMemoryDb(directCommit = true)
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val rooms = ArrayList<BufferEntity>()
@@ -515,10 +922,25 @@ class ChatPresentationLifetimeUiTest {
         private var realOwners by mutableStateOf(false)
         private var holdNativeRefresh = false
         val nativeLoads = HoldingDispatcher()
+        val cacheReads = HoldingDispatcher()
+        var holdRevealAdmission = false
+        var holdNextNativeRefresh = false
         val heldMessages: HeldEntryMessages
+        val foolSettings = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())
+        var readCallbacks = 0
+        var saveCallbacks = 0
+        val depthAnchors = ArrayList<TimelineAnchor>()
 
         init {
             runBlocking {
+                ApplicationProvider.getApplicationContext<Context>().settingsDataStore.edit { it.clear() }
+                if (temporaryFools) {
+                    foolSettings.setFoolsMode(temporaryFoolMode)
+                    foolSettings.setFool("hidden", true)
+                    foolSettings.setFool("collapsed", true)
+                    foolSettings.setFoolPreferences("collapsed", FoolPreferences(FoolsMode.COLLAPSE))
+                    realOwners = true
+                }
                 val networkId = db.networkDao().insert(network())
                 repeat(2) { ordinal ->
                     val room = buffer(networkId, "#retained-$ordinal").copy(joined = true)
@@ -526,16 +948,29 @@ class ChatPresentationLifetimeUiTest {
                     rooms += room.copy(id = roomId)
                     ids[roomId] =
                         db.messageDao().insertAll(
-                            (1..900).map { index ->
+                            (if (temporaryFools) 881..900 else 1..900).map { index ->
                                 message(
                                     roomId,
                                     body("retained-$ordinal-$index"),
                                     serverTime = index.toLong(),
                                     msgid = "retained-$ordinal-$index",
                                     dedupKey = "retained-$ordinal-$index",
+                                    sender =
+                                        if (temporaryFools && index == 899) {
+                                            "hidden"
+                                        } else if (temporaryFools && index == 898) {
+                                            "collapsed"
+                                        } else {
+                                            "ordinary"
+                                        },
                                 )
                             },
                         )
+                    if (temporaryFools) {
+                        val readRoom = rooms.last().copy(localReadAnchorTime = 900, localReadAnchorEventId = ids.getValue(roomId).last())
+                        rooms[rooms.lastIndex] = readRoom
+                        db.bufferDao().update(readRoom)
+                    }
                 }
             }
             val repository =
@@ -557,16 +992,17 @@ class ChatPresentationLifetimeUiTest {
                     db.historyGapDao(),
                     ioDispatcher = nativeLoads,
                 )
-            cache = ChatPageCache(repository, db)
+            cache = ChatPageCache(repository, db, cacheReads)
             heldMessages = HeldEntryMessages(repository)
             cache.start(
                 scope,
                 object : AppVisibility {
                     override val onScreen = MutableStateFlow(true)
                 },
-                MutableStateFlow(Settings()),
+                if (temporaryFools) foolSettings.settings else MutableStateFlow(Settings()),
             )
-            plans[rooms.first().id] = target(rooms.first().id, 186).copy(offset = 71)
+            plans[rooms.first().id] =
+                if (temporaryFools) target(rooms.first().id, 0) else target(rooms.first().id, 186).copy(offset = 71)
             plans[rooms.last().id] = target(rooms.last().id, 0)
         }
 
@@ -586,6 +1022,7 @@ class ChatPresentationLifetimeUiTest {
 
         fun unmount() {
             nativeLoads.resume()
+            cacheReads.resume()
             heldMessages.release()
             mounted = false
         }
@@ -617,7 +1054,7 @@ class ChatPresentationLifetimeUiTest {
         ): ChatPositionTarget =
             ChatPositionTarget(
                 index = index,
-                expectedEventId = ids.getValue(room)[899 - index],
+                expectedEventId = ids.getValue(room)[ids.getValue(room).lastIndex - index],
                 expectedMsgid = "retained-${rooms.indexOfFirst { it.id == room }}-${900 - index}",
                 serverTime = (900 - index).toLong(),
                 fromSavedPosition = true,
@@ -635,22 +1072,24 @@ class ChatPresentationLifetimeUiTest {
                 SideEffect { nav = controller }
                 ChatPresentationHost(cache, registry)
                 MotdTheme(dynamicColor = false) {
-                    NavHost(controller, startDestination = ChatListRoute) {
-                        composable<ChatListRoute> {
-                            Column {
-                                for (room in rooms) {
-                                    Button(
-                                        onClick = { controller.openChat(ChatRoute(room.id), replaceCurrentChat = false) },
-                                        modifier = Modifier.testTag("open-${room.id}"),
-                                    ) { Text(room.displayName) }
+                    Box(Modifier.fillMaxSize().testTag("retained_surface")) {
+                        NavHost(controller, startDestination = ChatListRoute) {
+                            composable<ChatListRoute> {
+                                Column {
+                                    for (room in rooms) {
+                                        Button(
+                                            onClick = { controller.openChat(ChatRoute(room.id), replaceCurrentChat = false) },
+                                            modifier = Modifier.testTag("open-${room.id}"),
+                                        ) { Text(room.displayName) }
+                                    }
                                 }
                             }
-                        }
-                        composable<ChatRoute> { entry ->
-                            if (realOwners) {
-                                RealDestination(entry, entry.toRoute<ChatRoute>().bufferId, registry)
-                            } else {
-                                Destination(entry, entry.toRoute<ChatRoute>().bufferId, registry)
+                            composable<ChatRoute> { entry ->
+                                if (realOwners) {
+                                    RealDestination(entry, entry.toRoute<ChatRoute>().bufferId, registry)
+                                } else {
+                                    Destination(entry, entry.toRoute<ChatRoute>().bufferId, registry)
+                                }
                             }
                         }
                     }
@@ -807,6 +1246,7 @@ class ChatPresentationLifetimeUiTest {
                             connectionStates = mapOf(room.networkId to IrcClientState.Ready("me", emptySet(), emptyMap())),
                             messages = heldMessages,
                             scrollPositions = scrollPositions,
+                            settings = foolSettings,
                         ).also {
                             ownerStores += entry.viewModelStore
                             ownerJobs += checkNotNull(it.viewModelScope.coroutineContext[Job])
@@ -823,6 +1263,10 @@ class ChatPresentationLifetimeUiTest {
             val readAnchor by owner.localReadAnchor.collectAsStateWithLifecycle()
             val newestAnchor by owner.rawNewestAnchor.collectAsStateWithLifecycle()
             val identity by owner.identityRules.collectAsStateWithLifecycle()
+            val settings by owner.settings.collectAsStateWithLifecycle()
+            val revealed by owner.hiddenFoolsRevealed.collectAsStateWithLifecycle()
+            val expanded by owner.expandAllFools.collectAsStateWithLifecycle()
+            val reactionChips by owner.reactionChips.collectAsStateWithLifecycle()
             val lifecycle = LocalLifecycleOwner.current.lifecycle
             var resumed by remember(lifecycle) { mutableStateOf(false) }
             DisposableEffect(lifecycle, owner) {
@@ -846,19 +1290,27 @@ class ChatPresentationLifetimeUiTest {
                 }
             }
             val generation by produceState<ChatPagingGeneration?>(null, owner) {
-                heldMessages.entered.await()
+                if (!temporaryFools) heldMessages.entered.await()
                 owner.state.first { it.buffer?.id == roomId }
                 if (holdNativeRefresh) nativeLoads.pause()
-                owner.retainedMessageGenerations(cache).collect { value = it }
+                owner.retainedMessageGenerations(cache).collect {
+                    // The acquire handoff is synchronous after publication; hold native work before its first host frame.
+                    if (holdNextNativeRefresh) {
+                        holdNextNativeRefresh = false
+                        nativeLoads.pause()
+                    }
+                    value = it
+                }
             }
             val current = generation ?: return
             val lease = current.lease ?: return
             val revision by lease.changes.collectAsState()
             val presentation = registry.find(lease) ?: return
             val desired = plans.getValue(roomId)
+            val motionScope = rememberCoroutineScope()
             val visit =
                 remember(entry, lease) {
-                    Visit(entry.id, presentation, desired.expectedEventId, desired.expectedMsgid, lease, owner).also(visits::add)
+                    Visit(entry.id, presentation, desired.expectedEventId, desired.expectedMsgid, lease, owner, motionScope).also(visits::add)
                 }
             ChatContent(
                 state = state,
@@ -895,6 +1347,13 @@ class ChatPresentationLifetimeUiTest {
                 showImages = false,
                 showLinkPreviews = false,
                 chatWallpaper = WallpaperSelection(ChatWallpaperPreset.NONE),
+                fools = settings.fools,
+                foolsMode = settings.foolsMode,
+                foolPreferences = settings.foolPreferences,
+                showRedactedMessages = settings.showRedactedMessages,
+                hiddenFoolsRevealed = revealed,
+                expandAllFools = expanded,
+                onExpandAllFoolsChange = owner::setExpandAllFools,
                 initialTarget = initialTarget,
                 jumpTarget = jumpTarget,
                 entryState = entryState,
@@ -911,6 +1370,7 @@ class ChatPresentationLifetimeUiTest {
                     assertTrue("metadata-stalled retained fallback cannot acknowledge rows", preparationReady)
                     assertTrue("retained fallback cannot acknowledge before resume", resumed)
                     visit.reads++
+                    readCallbacks++
                     owner.markRead(it)
                 },
                 onJumpHandled = owner::onJumpHandled,
@@ -920,13 +1380,129 @@ class ChatPresentationLifetimeUiTest {
                 onReresolveJump = owner::reresolveJumpOnce,
                 onInitialPositionUnresolved = owner::onInitialPositionUnresolved,
                 onReresolveInitial = owner::reresolveInitialOnce,
-                onScrollPositionChanged = owner::saveScrollPosition,
-                onClearScrollPosition = owner::clearScrollPosition,
+                onScrollPositionChanged = {
+                    saveCallbacks++
+                    owner.saveScrollPosition(it)
+                },
+                onClearScrollPosition = {
+                    saveCallbacks++
+                    owner.clearScrollPosition(it)
+                },
                 onForgetScrollPosition = owner::forgetScrollPosition,
                 onTimelineInteraction = owner::onTimelineInteraction,
                 onViewportRefreshAnchor = owner::reportViewportRefreshAnchor,
-                onFurthestDisplayedChanged = owner::recordFurthestDisplayed,
+                onFurthestDisplayedChanged = {
+                    depthAnchors += it
+                    owner.recordFurthestDisplayed(it)
+                },
+                onVisibleMsgidsChanged = owner::setVisibleMsgids,
+                reactionChips = { reactionChips[it].orEmpty() },
             )
+            SideEffect {
+                if (holdRevealAdmission && current.spec.revealHiddenFools &&
+                    presentation.items.itemSnapshotList.items
+                        .any { it.sender == "hidden" }
+                ) {
+                    holdRevealAdmission = false
+                    cacheReads.pause()
+                }
+            }
+        }
+
+        fun latestVisit(): Visit = visits.last()
+
+        fun toggleFools() {
+            compose.onNodeWithTag("chat_overflow").performClick()
+            compose.waitUntil(10_000) {
+                if (!compose.mainClock.autoAdvance) compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                compose.onAllNodesWithTag("chat_toggle_fools_visibility").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithTag("chat_toggle_fools_visibility").performClick()
+        }
+
+        fun awaitFoolVisibility(revealed: Boolean) {
+            compose.waitUntil(10_000) {
+                if (!compose.mainClock.autoAdvance) compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                val current = latestVisit()
+                current.lease.isActive && current.lease.entry.key.spec.revealHiddenFools == revealed &&
+                    current.presentation.items.loadState.source.refresh is LoadState.NotLoading
+            }
+            compose.mainClock.advanceTimeBy(500)
+            compose.waitForIdle()
+        }
+
+        fun assertDepthResumesAtOldest(room: Long) {
+            val expected = TimelineAnchor(if (temporaryFools) 881L else 1L, ids.getValue(room).first())
+            val recordedFrom = depthAnchors.size
+            val presentation = latestVisit().presentation
+            val animationScope = checkNotNull(latestVisit().motionScope)
+            lateinit var scrolling: Job
+            compose.runOnIdle {
+                scrolling = animationScope.launch { presentation.listState.animateScrollToItem(presentation.items.itemCount - 1) }
+            }
+            compose.waitUntil("the admitted visibility records the concrete oldest ordinary event", 10_000) {
+                if (!compose.mainClock.autoAdvance) compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                scrolling.isCompleted && expected in depthAnchors.drop(recordedFrom)
+            }
+            assertEquals(expected, scrollPositions.furthestDisplayed(room))
+            compose.runOnIdle { scrolling = animationScope.launch { presentation.listState.animateScrollToItem(0) } }
+            compose.waitUntil(10_000) {
+                if (!compose.mainClock.autoAdvance) compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                scrolling.isCompleted && presentation.listState.firstVisibleItemIndex == 0
+            }
+            compose.mainClock.advanceTimeBy(500)
+            compose.waitForIdle()
+        }
+
+        fun prepareRedactionPair(room: Long) {
+            val ordinary = checkNotNull(target(room, 0).expectedEventId)
+            val current = rooms.first { it.id == room }
+            runBlocking {
+                db.openHelper.writableDatabase.execSQL("DELETE FROM messages WHERE bufferId = ? AND serverTime < 899", arrayOf(room))
+                db.openHelper.writableDatabase.execSQL("UPDATE messages SET serverTime = 86403000 WHERE id = ?", arrayOf(ordinary))
+                val newest = checkNotNull(db.messageDao().newestMessage(room))
+                val readRoom = current.copy(localReadAnchorTime = newest.serverTime, localReadAnchorEventId = newest.id)
+                rooms[rooms.indexOfFirst { it.id == room }] = readRoom
+                db.bufferDao().update(readRoom)
+                scrollPositions.markParkedAtBottom(room)
+            }
+        }
+
+        fun prepareCollapsedReactionWindow(room: Long) {
+            runBlocking {
+                db.openHelper.writableDatabase.execSQL(
+                    "UPDATE messages SET sender = 'collapsed', normalizedActor = 'collapsed' WHERE bufferId = ? AND serverTime < 900",
+                    arrayOf(room),
+                )
+                val inserted =
+                    db.messageDao().insertAll(
+                        (841..880).map { index ->
+                            message(
+                                room,
+                                body("retained-0-$index"),
+                                sender = "collapsed",
+                                serverTime = index.toLong(),
+                                msgid = "retained-0-$index",
+                                dedupKey = "retained-0-$index",
+                            )
+                        },
+                    )
+                db.reactionDao().upsert(
+                    ReactionEntity(
+                        bufferId = room,
+                        targetMsgid = "retained-0-880",
+                        actorKey = "nick:reactor",
+                        sender = "reactor",
+                        emoji = "\u2B50",
+                        serverTime = 1_000,
+                        targetEventId = inserted.last(),
+                    ),
+                )
+            }
         }
 
         fun open(room: Long) {
@@ -955,11 +1531,21 @@ class ChatPresentationLifetimeUiTest {
 
         fun awaitReady(): Visit {
             val visit = awaitVisit()
-            compose.waitUntil(10_000) {
-                if (!compose.mainClock.autoAdvance) compose.mainClock.advanceTimeByFrame()
-                compose.waitForIdle()
-                visit.ready && compose.onAllNodesWithTag(CHAT_ENTRY_VEIL_TAG).fetchSemanticsNodes().isEmpty() &&
-                    compose.onAllNodesWithTag("chat_message_${visit.expectedMsgid}", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            try {
+                compose.waitUntil(10_000) {
+                    if (!compose.mainClock.autoAdvance) compose.mainClock.advanceTimeByFrame()
+                    compose.waitForIdle()
+                    visit.ready && compose.onAllNodesWithTag(CHAT_ENTRY_VEIL_TAG).fetchSemanticsNodes().isEmpty() &&
+                        compose.onAllNodesWithTag("chat_message_${visit.expectedMsgid}", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+                }
+            } catch (failure: Throwable) {
+                throw AssertionError(
+                    "entry ready=${visit.ready}, expected=${visit.expectedMsgid}, target=${visit.owner?.initialTarget?.value}, " +
+                        "entry=${visit.owner?.entryState?.value}, metadata=${visit.owner?.entryPreparationReady?.value}, " +
+                        "index=${visit.presentation.listState.firstVisibleItemIndex}, count=${visit.presentation.items.itemCount}, " +
+                        "refresh=${visit.presentation.items.loadState.refresh}, active=${visit.lease.isActive}, visits=${visits.size}",
+                    failure,
+                )
             }
             return visit
         }

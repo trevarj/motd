@@ -54,6 +54,14 @@ data class MessageVisibilitySpec(
     /** Chat-local escape hatch: reveal HIDE-mode rows without making them meaningful activity. */
     val revealHiddenFools: Boolean = false,
 ) {
+    /** Session reveal may share a native presenter; every other visibility choice is a cutover. */
+    internal fun samePolicyExceptHiddenReveal(other: MessageVisibilitySpec): Boolean =
+        presenceMode == other.presenceMode &&
+            showRedactedMessages == other.showRedactedMessages &&
+            fools == other.fools &&
+            foolsMode == other.foolsMode &&
+            foolPreferences == other.foolPreferences
+
     companion object {
         /** [override] is the conversation's own presence choice; null inherits the global one. */
         fun from(

@@ -115,6 +115,41 @@ class FoolCollapseUiTest {
         assertTrue(collapsed)
     }
 
+    @Test
+    fun collapsedFoolContentHasIntermediateHeightInBothDirections() {
+        val fixture = FoolTimelineFixture()
+        try {
+            compose.setContent { fixture.Content() }
+            compose.mainClock.autoAdvance = false
+            val host = compose.onNodeWithTag("chat_fool_content_fool-b", useUnmergedTree = true)
+            val collapsed = host.fetchSemanticsNode().boundsInRoot.height
+            compose.onNodeWithTag("chat_message_fool-b", useUnmergedTree = true).performClick()
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+            compose.mainClock.advanceTimeBy(64)
+            compose.waitForIdle()
+            val opening = host.fetchSemanticsNode().boundsInRoot.height
+            compose.mainClock.advanceTimeBy(1_000)
+            compose.waitForIdle()
+            val expanded = host.fetchSemanticsNode().boundsInRoot.height
+            assertTrue("expanded content must be taller than its placeholder", expanded > collapsed + 4f)
+            assertTrue("Show must have a real intermediate height", opening > collapsed + 1f && opening < expanded - 1f)
+            compose.onNodeWithTag("chat_fool_collapse_fool-b").performClick()
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+            compose.mainClock.advanceTimeBy(64)
+            compose.waitForIdle()
+            val closing = host.fetchSemanticsNode().boundsInRoot.height
+            assertTrue("Restore must have a real intermediate height", closing > collapsed + 1f && closing < expanded - 1f)
+            compose.mainClock.advanceTimeBy(1_000)
+            compose.waitForIdle()
+            assertEquals(collapsed, host.fetchSemanticsNode().boundsInRoot.height, 1f)
+        } finally {
+            compose.mainClock.autoAdvance = true
+            fixture.close()
+        }
+    }
+
     @Test fun mixed_timeline_normal_restore_show_all_and_exact_collapsed_exception_are_session_local() {
         val fixture = FoolTimelineFixture()
         try {
@@ -546,11 +581,10 @@ class FoolCollapseUiTest {
             compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertDoesNotExist()
             compose.onNodeWithTag("chat_message_reaction-1", useUnmergedTree = true).assertDoesNotExist()
             assertFalse("reaction-1" in visibleMsgids)
-            val retiredItems = items
             toggleAll()
             compose.waitUntil(10_000) {
                 compose.waitForIdle()
-                items !== retiredItems && items?.itemCount == 60
+                items?.itemCount == 60
             }
             compose.onNodeWithTag("chat_timeline").performScrollToIndex(59)
             compose.waitUntil(10_000) {

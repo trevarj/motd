@@ -6,6 +6,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -64,6 +65,8 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -401,6 +404,9 @@ fun MessageList(
     highlightEventId: Long? = null,
     // Entry's exact target owns paging demand until it is positioned.
     pagingHintsEnabled: Boolean = true,
+    temporaryFoolVisibilityMotion: Boolean = false,
+    hiddenFoolVisibility: Transition<Boolean>? = null,
+    preserveOutgoingHiddenBodies: Boolean = false,
     onTranslateMessage: ((MessageEntity) -> Unit)? = null,
     externalTranslations: Map<Long, InlineTranslation> = emptyMap(),
     onDismissExternalTranslation: (Long) -> Unit = {},
@@ -424,9 +430,9 @@ fun MessageList(
         remember(bufferId) {
             { running: Boolean -> runningLiveEntries += if (running) 1 else -1 }
         }
-    // Entry, scrolling and live/send gap motion already own placement. Settled history reflow
-    // gets placement-only motion, never a fade of the canonical rows.
-    val animatePlacement = pagingHintsEnabled && !scrolling && outgoingFlight == null && runningLiveEntries == 0
+    // Hidden height exits, scrolling and live/send gaps own placement, never two overlapping springs.
+    val motionIdle = !scrolling && outgoingFlight == null && runningLiveEntries == 0 && hiddenFoolVisibility?.isRunning != true
+    val animatePlacement = (pagingHintsEnabled || temporaryFoolVisibilityMotion) && motionIdle
     // Scrolling postpones only cache misses. Parsed URLs and resolved previews remain renderable so
     // a recycled row does not lose rich content halfway through a fling.
     val canStartNewRichContentWork = richContentReady && !scrolling
@@ -519,9 +525,22 @@ fun MessageList(
                 MessagePlaceholderRow(placeholderHeight)
                 return@items
             }
+            val foolMode = foolPolicy.foolPreferences(msg)?.visibility
+            val isFool = foolMode != null
+            val requestedExpanded = foolExpanded(msg.id)
+            val expanded =
+                if (foolMode == FoolsMode.HIDE) {
+                    // Keep only this native row's rendering choice until Restore removes its key.
+                    var lastRevealedExpansion by remember { mutableStateOf(requestedExpanded) }
+                    if (!preserveOutgoingHiddenBodies) lastRevealedExpansion = requestedExpanded
+                    if (preserveOutgoingHiddenBodies) lastRevealedExpansion else requestedExpanded
+                } else {
+                    requestedExpanded
+                }
             val placementModifier =
                 Modifier.animateItem(
-                    fadeInSpec = null,
+                    fadeInSpec = MotdMotion.microFadeIn.takeIf { isFool && temporaryFoolVisibilityMotion && motionIdle },
+                    // Real deletion/redaction must dispose pixels immediately, even during Show.
                     fadeOutSpec = null,
                     placementSpec = if (animatePlacement) MotdMotion.rowPlacement else null,
                 )
@@ -667,36 +686,6 @@ fun MessageList(
                 return@items
             }
 
-            val foolMode = foolPolicy.foolPreferences(msg)?.visibility
-            val isFool = foolMode != null
-            val dimmed = foolMode == FoolsMode.DIMMED && !foolExpanded(msg.id)
-            if (isFool && foolMode != FoolsMode.DIMMED && !foolExpanded(msg.id)) {
-                LiveTimelineEntry(
-                    liveEntryIds,
-                    msg,
-                    onLiveEntryConsumed,
-                    outgoingFlight,
-                    flownRowIds,
-                    flightProgress,
-                    onFlightRowPositioned,
-                    onRunningChanged = onLiveEntryRunningChanged,
-                    modifier = placementModifier,
-                ) { rowModifier ->
-                    FoolPlaceholderRow(
-                        msg = msg,
-                        modifier = rowModifier,
-                        dickordEnabled = dickordEnabled,
-                        older = older,
-                        readMarkerTime = readMarkerTime,
-                        readMarkerLabel = readMarkerLabel,
-                        seam = rowSeam(msg, older, timelineSeams),
-                        onLoadGap = onLoadGap,
-                        onExpand = { onToggleFool(msg.id) },
-                    )
-                }
-                return@items
-            }
-
             // Deep-jump pulse: fade a highlight tint in then back out on the target row (~1.6s).
             val highlighted = messageHighlightMatches(msg, highlightMsgid, highlightEventId)
             // Deep jumps are rare. Do not install an animation state object in every ordinary row;
@@ -717,8 +706,22 @@ fun MessageList(
             // bubble, retry row, and read-marker/day dividers. A Box would stack them on top of one
             // another (dividers over message text; the fool-collapse chip trapped behind the bubble).
             // A Column lays them out top-to-bottom so each affordance owns its own space and taps.
-            val rowContent: @Composable (Modifier) -> Unit = { rowModifier ->
+            val rowContent: @Composable (Modifier, Boolean) -> Unit = { rowModifier, renderExpanded ->
                 Column(modifier = rowModifier.fillMaxWidth().background(highlightColor)) {
+                    if (isFool && foolMode != FoolsMode.DIMMED && !renderExpanded) {
+                        FoolPlaceholderRow(
+                            msg = msg,
+                            modifier = Modifier,
+                            dickordEnabled = dickordEnabled,
+                            older = older,
+                            readMarkerTime = readMarkerTime,
+                            readMarkerLabel = readMarkerLabel,
+                            seam = rowSeam(msg, older, timelineSeams),
+                            onLoadGap = onLoadGap,
+                            onExpand = { onToggleFool(msg.id) },
+                        )
+                        return@Column
+                    }
                     if (
                         ebooksQuietFeed &&
                         !msg.isSelf &&
@@ -745,7 +748,7 @@ fun MessageList(
                         conversationName = conversationName,
                         hideInlineAudioLinks = hideInlineAudioLinks,
                         directMessage = directMessage,
-                        dimmed = dimmed,
+                        dimmed = foolMode == FoolsMode.DIMMED && !renderExpanded,
                         mentionAttention = foolPolicy.mentionAttention(msg, directMessage),
                         fallbackSender = conversationName.takeUnless { collapseSystemEvents },
                         dickordEnabled = dickordEnabled,
@@ -808,7 +811,48 @@ fun MessageList(
                 onFlightRowPositioned,
                 onRunningChanged = onLiveEntryRunningChanged,
                 modifier = placementModifier,
-                content = rowContent,
+                content = { rowModifier ->
+                    if (isFool) {
+                        val foolContent: @Composable (Modifier) -> Unit = { contentModifier ->
+                            AnimatedContent(
+                                targetState = expanded,
+                                modifier = contentModifier.testTag("chat_fool_content_${msg.msgid ?: msg.id}"),
+                                transitionSpec = { cardPillTransform() },
+                                contentAlignment = Alignment.BottomStart,
+                                label = "fool_content",
+                            ) { renderExpanded -> rowContent(Modifier, renderExpanded) }
+                        }
+                        if (foolMode == FoolsMode.HIDE && hiddenFoolVisibility != null) {
+                            // AV removes its layout after exit; retain a bounded, noninteractive slot until SQL catches up.
+                            Spacer(Modifier.height(1.dp))
+                            hiddenFoolVisibility.AnimatedVisibility(
+                                visible = { it },
+                                modifier =
+                                    rowModifier.then(
+                                        if (hiddenFoolVisibility.targetState) {
+                                            Modifier
+                                        } else {
+                                            Modifier.clearAndSetSemantics {}.pointerInput(Unit) {
+                                                awaitPointerEventScope {
+                                                    while (true) {
+                                                        awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                    ),
+                                enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(tween(MotdMotion.MicroDurationMs), expandFrom = Alignment.Bottom),
+                                exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(tween(MotdMotion.MicroDurationMs), shrinkTowards = Alignment.Bottom),
+                            ) {
+                                foolContent(Modifier)
+                            }
+                        } else {
+                            foolContent(rowModifier)
+                        }
+                    } else {
+                        rowContent(rowModifier, false)
+                    }
+                },
             )
         }
 

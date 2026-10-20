@@ -1,11 +1,14 @@
 package io.github.trevarj.motd
 
 import android.graphics.Bitmap
+import androidx.compose.animation.core.Transition
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -493,6 +496,152 @@ class MessageTimelineUiTest {
         compose.onNodeWithText("alice joined", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("bob left", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("carol quit", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun temporaryFoolRevealFadesNativePixelsInAndOutWithoutFadingTheAnchor() {
+        val ordinary = message(3, 86_403_000, MessageKind.PRIVMSG, "untouched anchor").copy(sender = "ordinary", normalizedActor = "ordinary")
+        val hidden = message(2, 1_000, MessageKind.PRIVMSG, "revealed fool\nsecond line\nthird line\nfourth line")
+        val pages = MutableStateFlow(PagingData.from(listOf(ordinary)))
+        var revealed by mutableStateOf(false)
+        var motion by mutableStateOf(false)
+        var restoreRequested by mutableStateOf(false)
+        lateinit var visibility: Transition<Boolean>
+        val timelineState = LazyListState()
+        render(
+            pages,
+            fools = setOf("alice"),
+            foolsMode = FoolsMode.HIDE,
+            foolExpanded = { revealed },
+            temporaryFoolVisibilityMotion = { motion },
+            hiddenFoolVisibility = {
+                val transition = updateTransition(!restoreRequested, label = "test_hidden_fools")
+                SideEffect { visibility = transition }
+                transition
+            },
+            preserveOutgoingHiddenBodies = { restoreRequested },
+            listState = timelineState,
+        )
+        compose.mainClock.autoAdvance = false
+        val timeline = compose.onNodeWithTag("chat_timeline")
+        val rootBounds = timeline.fetchSemanticsNode().boundsInRoot
+        val anchorBounds = bounds(messageTag(3))
+
+        fun crop(
+            image: Bitmap,
+            area: Rect,
+        ): Bitmap =
+            Bitmap.createBitmap(
+                image,
+                (area.left - rootBounds.left).toInt(),
+                (area.top - rootBounds.top).toInt(),
+                area.width.toInt(),
+                area.height.toInt(),
+            )
+
+        fun screen(): Bitmap = timeline.captureToImage().asAndroidBitmap()
+
+        val before = screen()
+        val anchorPaint = crop(before, anchorBounds)
+        compose.runOnIdle {
+            revealed = true
+            motion = true
+            pages.value = PagingData.from(listOf(ordinary, hidden))
+        }
+        compose.waitUntil(10_000) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+            compose.onAllNodesWithTag(messageTag(2), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.mainClock.advanceTimeBy(48)
+        compose.waitForIdle()
+        val affected = bounds(messageTag(2))
+        val showingFrame = screen()
+        val showing = crop(showingFrame, affected)
+        assertTrue("Show must not fade the ordinary root-painted bubble", anchorPaint.sameAs(crop(showingFrame, anchorBounds)))
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        val shownFrame = screen()
+        val shown = crop(shownFrame, affected)
+        assertTrue("a fully shown fool must not displace or fade the ordinary anchor", anchorPaint.sameAs(crop(shownFrame, anchorBounds)))
+        val absent = crop(before, affected)
+        assertFalse("Show must paint an intermediate affected frame", showing.sameAs(absent))
+        assertFalse("Show must not jump directly to opaque fool content", showing.sameAs(shown))
+
+        // Native Hidden hosts exit before their owner changes exact SQL visibility.
+        compose.runOnIdle { motion = false }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.runOnIdle {
+            revealed = false
+            motion = true
+            restoreRequested = true
+        }
+        compose.waitUntil(10_000) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+            !visibility.targetState && visibility.isRunning &&
+                compose.onAllNodesWithTag(messageTag(2)).fetchSemanticsNodes().isEmpty()
+        }
+        compose.mainClock.advanceTimeBy(32)
+        compose.waitForIdle()
+        // Semantics/input are gone immediately, while the native visibility exit still paints.
+        assertTrue("the sampled Restore must still be running", visibility.isRunning)
+        val restoringFrame = screen()
+        val restoring = crop(restoringFrame, affected)
+        assertFalse("the explicit Restore must paint an intermediate native exit", restoring.sameAs(absent))
+        assertFalse("Restore must have a genuinely translucent affected frame", restoring.sameAs(shown))
+        assertTrue("Restore must not fade the ordinary root-painted bubble", anchorPaint.sameAs(crop(restoringFrame, anchorBounds)))
+        assertTrue("the native exit must still own this intermediate frame", visibility.isRunning)
+        assertTrue(visibility.currentState)
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        assertFalse(visibility.currentState)
+        assertFalse(visibility.isRunning)
+        compose.runOnIdle { pages.value = PagingData.from(listOf(ordinary)) }
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        val restoredFrame = screen()
+        assertTrue("the completed exit must not leave fool pixels", absent.sameAs(crop(restoredFrame, affected)))
+        assertEquals(anchorBounds, bounds(messageTag(3)))
+        compose.runOnIdle { restoreRequested = false }
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+
+        // Reverse an in-flight native exit; the latest Show owns the final row.
+        compose.runOnIdle {
+            revealed = true
+            pages.value = PagingData.from(listOf(ordinary, hidden))
+        }
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        compose.runOnIdle {
+            revealed = false
+            restoreRequested = true
+        }
+        compose.mainClock.advanceTimeBy(32)
+        compose.waitForIdle()
+        compose.runOnIdle {
+            revealed = true
+            restoreRequested = false
+        }
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        compose.onNodeWithTag(messageTag(2), useUnmergedTree = true).assertIsDisplayed()
+        assertTrue(anchorPaint.sameAs(crop(screen(), anchorBounds)))
+        compose.runOnIdle {
+            motion = false
+            pages.value = PagingData.from(listOf(ordinary))
+        }
+        compose.waitUntil("native provider applies the canonical row deletion", 10_000) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+            val visible = timelineState.layoutInfo.visibleItemsInfo
+            visible.any { it.key == ordinary.id } && visible.none { it.key == hidden.id }
+        }
+        compose.onNodeWithTag(messageTag(2), useUnmergedTree = true).assertDoesNotExist()
+        assertTrue("canonical removal cannot retain native exit pixels", absent.sameAs(crop(screen(), affected)))
+        compose.mainClock.autoAdvance = true
     }
 
     @Test
@@ -1226,6 +1375,10 @@ class MessageTimelineUiTest {
         directMessage: Boolean = false,
         richContentReady: Boolean = false,
         fools: Set<String> = emptySet(),
+        foolsMode: FoolsMode = FoolsMode.COLLAPSE,
+        temporaryFoolVisibilityMotion: () -> Boolean = { false },
+        hiddenFoolVisibility: (@Composable () -> Transition<Boolean>)? = null,
+        preserveOutgoingHiddenBodies: () -> Boolean = { false },
         foolExpanded: (Long) -> Boolean = { false },
         onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
         translation: Boolean = false,
@@ -1277,10 +1430,12 @@ class MessageTimelineUiTest {
                     bubbleCornerStyle = bubbleCornerStyle(),
                     messageSpacing = messageSpacing(),
                 ) {
+                    val collected = pages.collectAsLazyPagingItems(context = Dispatchers.Unconfined)
+                    val timelineState = listState ?: rememberLazyListState()
                     MessageList(
                         modifier = paneWidth?.let { Modifier.width(it) } ?: Modifier,
-                        items = pages.collectAsLazyPagingItems(context = Dispatchers.Unconfined),
-                        listState = listState ?: rememberLazyListState(),
+                        items = collected,
+                        listState = timelineState,
                         liveEntryIds = liveEntryIds(),
                         networkId = 1,
                         bufferId = 1,
@@ -1318,7 +1473,10 @@ class MessageTimelineUiTest {
                         onOpenLink = {},
                         onAudioToggle = onAudioToggle,
                         fools = fools,
-                        foolsMode = FoolsMode.COLLAPSE,
+                        foolsMode = foolsMode,
+                        temporaryFoolVisibilityMotion = temporaryFoolVisibilityMotion(),
+                        hiddenFoolVisibility = hiddenFoolVisibility?.invoke(),
+                        preserveOutgoingHiddenBodies = preserveOutgoingHiddenBodies(),
                         foolExpanded = foolExpanded,
                         onAcceptInvite = onAcceptInvite,
                         replyPreview = replyPreview,

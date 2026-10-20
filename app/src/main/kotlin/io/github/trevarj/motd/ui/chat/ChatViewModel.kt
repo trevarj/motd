@@ -628,101 +628,134 @@ class ChatViewModel
         internal fun retainedMessageGenerations(cache: ChatPageCache): Flow<ChatPagingGeneration> =
             flow {
                 var continueLocalRefresh = false
-                emitAll(
-                    pagingSpecs.transformLatest { (roomId, spec) ->
-                        var staleAnchors = false
-                        while (true) {
-                            coroutineScope {
-                                val intent = _entryPositionIntent.value
-                                val resumingVisit = _entryState.value is EntryPositionState.Settled || _entryFallbackLatched.value
-                                val ownViewport = if (resumingVisit) storedVisitViewport() else scrollPositionStore.get(roomId)
-                                if (resumingVisit) _initialTarget.value = null
-                                val retained = if (routeHasDeepJump) null else cache.acquireRetained(bufferId, spec)
-                                val entry =
-                                    retained ?: run {
-                                        entryAnchorsLock.withLock {
-                                            if (staleAnchors || resolvedEntryAnchors?.second?.room?.id != roomId) resolvedEntryAnchors = null
+                var previousLease: ChatPageCache.Lease? = null
+                try {
+                    emitAll(
+                        pagingSpecs.transformLatest { (roomId, spec) ->
+                            var staleAnchors = false
+                            while (true) {
+                                coroutineScope {
+                                    val intent = _entryPositionIntent.value
+                                    val resumingVisit = _entryState.value is EntryPositionState.Settled || _entryFallbackLatched.value
+                                    val ownViewport = if (resumingVisit) storedVisitViewport() else scrollPositionStore.get(roomId)
+                                    val handoff =
+                                        previousLease?.takeIf {
+                                            resumingVisit && _initialTarget.value == null && activeJumpRequest == null &&
+                                                spec.revealHiddenFools == _expandAllFools.value &&
+                                                it.entry.handoffPending &&
+                                                it.entry.key.spec
+                                                    .samePolicyExceptHiddenReveal(spec)
                                         }
-                                        val target =
-                                            when {
-                                                resumingVisit -> restoredVisitPosition(spec)
-                                                routeHasDeepJump -> null
-                                                else -> entryAnchors(spec).target
+                                    if (handoff == null) {
+                                        previousLease?.release()
+                                        previousLease = null
+                                    }
+                                    if (resumingVisit) _initialTarget.value = null
+                                    val retained = if (routeHasDeepJump || handoff != null) null else cache.acquireRetained(bufferId, spec)
+                                    val entry =
+                                        retained ?: run {
+                                            entryAnchorsLock.withLock {
+                                                if (staleAnchors || resolvedEntryAnchors?.second?.room?.id != roomId) resolvedEntryAnchors = null
                                             }
-                                        if (resumingVisit && intent == _entryPositionIntent.value) _initialTarget.value = target
-                                        val key = if (resumingVisit) target?.index?.let(::entryAnchorPagingKey) else entryPagingKey(spec)
-                                        if (target != null) {
-                                            viewportRefreshAnchor.value =
-                                                target.expectedEventId?.let(ViewportRefreshAnchor::Parked)
-                                                    ?: ViewportRefreshAnchor.Newest.takeIf { target.index == 0 }
+                                            val target =
+                                                when {
+                                                    resumingVisit -> restoredVisitPosition(spec)
+                                                    routeHasDeepJump -> null
+                                                    else -> entryAnchors(spec).target
+                                                }
+                                            val key = if (resumingVisit) target?.index?.let(::entryAnchorPagingKey) else entryPagingKey(spec)
+                                            if (target != null) {
+                                                viewportRefreshAnchor.value =
+                                                    target.expectedEventId?.let(ViewportRefreshAnchor::Parked)
+                                                        ?: ViewportRefreshAnchor.Newest.takeIf { target.index == 0 }
+                                            }
+                                            cache
+                                                .acquire(
+                                                    bufferId,
+                                                    spec,
+                                                    key,
+                                                    target?.index ?: 0,
+                                                    target?.expectedEventId,
+                                                    viewportRefreshAnchor.value,
+                                                    allowRetention = !routeHasDeepJump,
+                                                    continueLocalRefresh = continueLocalRefresh,
+                                                    continuePresentationFrom = handoff,
+                                                ).also { acquired ->
+                                                    if (resumingVisit && intent == _entryPositionIntent.value &&
+                                                        (
+                                                            !acquired.continuesPresentation ||
+                                                                (ownViewport != null && target?.fromSavedPosition == true && target.expectedEventId != ownViewport.rowId)
+                                                        )
+                                                    ) {
+                                                        _initialTarget.value = target
+                                                    }
+                                                }
                                         }
-                                        cache.acquire(
-                                            bufferId,
-                                            spec,
-                                            key,
-                                            target?.index ?: 0,
-                                            target?.expectedEventId,
-                                            viewportRefreshAnchor.value,
-                                            allowRetention = !routeHasDeepJump,
-                                            continueLocalRefresh = continueLocalRefresh,
-                                        )
-                                    }
-                                if (retained != null) viewportRefreshAnchor.value = retained.entry.viewport.value
-                                val viewportJob = launch { viewportRefreshAnchor.collect(entry::updateViewport) }
-                                val targetJob =
-                                    launch {
-                                        initialTarget.filterNotNull().collect { target ->
-                                            val anchor =
-                                                target.expectedEventId?.let(ViewportRefreshAnchor::Parked)
-                                                    ?: ViewportRefreshAnchor.Newest.takeIf { target.index == 0 }
-                                            entry.prepareTarget(target.index, target.expectedEventId, entryAnchorPagingKey(target.index), anchor)
-                                            viewportRefreshAnchor.value = anchor
-                                        }
-                                    }
-                                val metadataJob =
-                                    if (retained != null) {
-                                        launch { entryPreparationReady.collect(entry::allowRemoteLoads) }
-                                    } else {
-                                        null
-                                    }
-                                val restoreJob =
-                                    if (retained != null && resumingVisit) {
+                                    previousLease = entry
+                                    if (retained != null) viewportRefreshAnchor.value = retained.entry.viewport.value
+                                    val viewportJob = launch { viewportRefreshAnchor.collect(entry::updateViewport) }
+                                    val targetJob =
                                         launch {
-                                            val target = restoredVisitPosition(spec)
-                                            if (intent == _entryPositionIntent.value) _initialTarget.value = target
+                                            initialTarget.filterNotNull().collect { target ->
+                                                val anchor =
+                                                    target.expectedEventId?.let(ViewportRefreshAnchor::Parked)
+                                                        ?: ViewportRefreshAnchor.Newest.takeIf { target.index == 0 }
+                                                entry.prepareTarget(target.index, target.expectedEventId, entryAnchorPagingKey(target.index), anchor)
+                                                viewportRefreshAnchor.value = anchor
+                                            }
                                         }
-                                    } else {
-                                        null
+                                    val metadataJob =
+                                        if (retained != null) {
+                                            launch { entryPreparationReady.collect(entry::allowRemoteLoads) }
+                                        } else {
+                                            null
+                                        }
+                                    val restoreJob =
+                                        if (retained != null && resumingVisit) {
+                                            launch {
+                                                val target = restoredVisitPosition(spec)
+                                                if (intent == _entryPositionIntent.value) _initialTarget.value = target
+                                            }
+                                        } else {
+                                            null
+                                        }
+                                    try {
+                                        // This emission deliberately precedes the fresh target/unread wait.
+                                        emit(
+                                            ChatPagingGeneration(
+                                                spec,
+                                                entry.pages,
+                                                lease = entry,
+                                                fallback =
+                                                    if (entry.retained && !routeHasDeepJump) {
+                                                        RetainedEntryFallback(intent, ownViewport, useSharedViewport = !resumingVisit)
+                                                    } else {
+                                                        null
+                                                    },
+                                            ),
+                                        )
+                                        entry.awaitRetirement()
+                                    } finally {
+                                        continueLocalRefresh = entry.canContinueLocalRefresh
+                                        restoreJob?.cancel()
+                                        metadataJob?.cancel()
+                                        targetJob.cancel()
+                                        viewportJob.cancel()
+                                        val temporaryToggle =
+                                            _entryState.value is EntryPositionState.Settled && _initialTarget.value == null &&
+                                                activeJumpRequest == null &&
+                                                _hiddenFoolsRevealed.value == _expandAllFools.value &&
+                                                _hiddenFoolsRevealed.value != spec.revealHiddenFools
+                                        if (temporaryToggle) entry.preparePresentationHandoff() else entry.release()
                                     }
-                                try {
-                                    // This emission deliberately precedes the fresh target/unread wait.
-                                    emit(
-                                        ChatPagingGeneration(
-                                            spec,
-                                            entry.pages,
-                                            lease = entry,
-                                            fallback =
-                                                if (entry.retained && !routeHasDeepJump) {
-                                                    RetainedEntryFallback(intent, ownViewport, useSharedViewport = !resumingVisit)
-                                                } else {
-                                                    null
-                                                },
-                                        ),
-                                    )
-                                    entry.awaitRetirement()
-                                } finally {
-                                    continueLocalRefresh = entry.canContinueLocalRefresh
-                                    restoreJob?.cancel()
-                                    metadataJob?.cancel()
-                                    targetJob.cancel()
-                                    viewportJob.cancel()
-                                    entry.release()
                                 }
+                                staleAnchors = true
                             }
-                            staleAnchors = true
-                        }
-                    },
-                )
+                        },
+                    )
+                } finally {
+                    previousLease?.release()
+                }
             }
 
         /**

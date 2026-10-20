@@ -236,6 +236,10 @@ flowchart TD
   while remote history requires foreground. Exclusive lease tokens reject stale disposal and
   viewport callbacks. Owner destruction retires slots and awaits structured observer cleanup.
   There is no persistent schema change, reconstructed message renderer or Room-internal API dependency.
+  A settled visit may hand its native presenter and viewport to an exact-spec successor for
+  a temporary Hidden-fool reveal change. The predecessor loses query/effect authority;
+  its current native window counts toward successor residency but never grants publication
+  proof. Read, save, displayed-depth and paging effects wait for fresh successor admission.
 - Smart presence uses one shared SQL predicate for the timeline, positional counts,
   and anchors: a normalized actor must have sent a conversation message in the same
   room within the preceding five minutes, or at least five within the preceding
@@ -264,6 +268,9 @@ flowchart TD
   Show fools survives presenter replacement within a chat visit; toggling it off clears
   row exceptions and restores each fool's current explicit or inherited visibility.
   Exact jumps still expand only their target, independently of the show-all toggle.
+  Show/Restore keeps unaffected rows painted while native fool-only fades and size transitions
+  run. Hidden rows finish their visibility exit before Restore changes the SQL filter;
+  real redactions and permanent policy/new-visit cutovers have no outgoing-pixel grace.
   Automatic entry repair never reveals Hidden: it reapplies current visibility through the shared
   unread/saved-anchor resolver, preserving offsets only while their row identity remains meaningful.
   Exact jumps accept native short-chat scroll clamping only when the exact measured

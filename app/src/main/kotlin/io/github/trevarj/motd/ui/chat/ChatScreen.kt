@@ -19,6 +19,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -121,6 +122,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.referentialEqualityPolicy
 import androidx.compose.runtime.remember
@@ -1304,6 +1306,13 @@ internal fun ChatContent(
             }
         }
     val listState = presentation?.listState ?: rememberLazyListState()
+    val presentationVisit = presentationLease?.presentationVisitIdentity
+    var restoringHiddenFools by remember(presentationVisit) { mutableStateOf(false) }
+    var restoreDispatched by remember(presentationVisit) { mutableStateOf(false) }
+    var restorePolicy by remember(presentationVisit) { mutableStateOf<MessageVisibilitySpec?>(null) }
+    var restoreIntent by remember(presentationVisit) { mutableLongStateOf(entryPositionIntent) }
+    val hiddenFoolVisibility =
+        if (fools.isNotEmpty()) updateTransition(!restoringHiddenFools, label = "hidden_fools") else null
     val layoutSnapshot = if (presentationLease != null) items.itemSnapshotList else null
     val measuredSnapshot =
         if (presentationLease != null) {
@@ -1343,14 +1352,15 @@ internal fun ChatContent(
             )
         }
     val visibilityPolicy = remember(visibleSpec, identityRules) { MessageVisibilityPolicy(visibleSpec, identityRules) }
-    val presentationCompatible =
+    val presentationContextCompatible =
         presentationLease == null ||
             (
-                presentedVisibilitySpec == visibleSpec &&
-                    state.buffer?.id == presentationLease.entry.key.context.roomId &&
-                    state.buffer?.networkId == presentationLease.entry.key.context.networkId &&
+                state.buffer?.id == presentationLease.entry.key.context.roomId &&
+                    state.buffer.networkId == presentationLease.entry.key.context.networkId &&
                     identityRules == presentationLease.entry.key.context.identityRules
             )
+    val presentationCompatible =
+        presentationContextCompatible && (presentationLease == null || presentedVisibilitySpec == visibleSpec)
     val currentPresentationCompatible by rememberUpdatedState(presentationCompatible)
     val payloadAllowed = payloadAdmitted && presentationLease?.isActive != false && presentationCompatible
     // Scroll-driven paging: the footer reflects the Paging APPEND state at the older end directly.
@@ -1632,7 +1642,7 @@ internal fun ChatContent(
     var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
     var highlightEventId by rememberSaveable { mutableStateOf<Long?>(null) }
     // The visit owns expand-all; row exceptions remain local to this presentation.
-    val latestExpandAllFools by rememberUpdatedState(expandAllFools)
+    val latestExpandAllFools by rememberUpdatedState(expandAllFools && !restoringHiddenFools)
     // Rows the user explicitly re-collapsed while expand-all is on (so a global expand is still
     // individually reversible). Cleared whenever expand-all is toggled off.
     var collapsedFools by remember { mutableStateOf(setOf<Long>()) }
@@ -1655,7 +1665,7 @@ internal fun ChatContent(
     // Entry position is resolved once after refresh. Until then do not expose a transient FAB or
     // advance read state from a default index-0 layout.
     val entryInitiallySettled = entryState is EntryPositionState.Settled && initialTarget == null && presentationLease == null
-    var initialPositionSettled by remember(presentationLease, entryInitiallySettled) {
+    var initialPositionSettled by remember(presentationVisit, entryInitiallySettled) {
         mutableStateOf(entryInitiallySettled)
     }
     // The first Paging emission after entry settlement reflects data loaded for the target, not a
@@ -1678,7 +1688,7 @@ internal fun ChatContent(
     // re-engage it. A restored visit that already knows where it landed starts lifted.
     val latestEntryState by rememberUpdatedState(entryState)
     val latestUnreadEntrySnapshot by rememberUpdatedState(unreadEntrySnapshot)
-    var entryVeilLifted by remember(presentationLease) {
+    var entryVeilLifted by remember(presentationVisit) {
         mutableStateOf(
             shouldLiftEntryVeil(
                 initialPositionSettled = entryInitiallySettled,
@@ -1686,6 +1696,59 @@ internal fun ChatContent(
                 timedOut = false,
             ),
         )
+    }
+    // A temporary reveal preserves drawing, never the successor's read/position/SQL admission.
+    var admittedDrawingSpec by remember(presentationVisit) { mutableStateOf<MessageVisibilitySpec?>(null) }
+    var previousExpandAllFools by remember(presentationVisit) { mutableStateOf(expandAllFools) }
+    var temporaryFoolToggle by remember(presentationVisit) { mutableStateOf(false) }
+    if (previousExpandAllFools != expandAllFools) {
+        if (initialPositionSettled && entryVeilLifted && entryState is EntryPositionState.Settled &&
+            initialTarget == null && jumpTarget == null && admittedDrawingSpec != null
+        ) {
+            temporaryFoolToggle = true
+            suppressNextAutoFollow = true
+        }
+        previousExpandAllFools = expandAllFools
+    }
+    if (payloadAllowed) admittedDrawingSpec = visibleSpec
+    val temporaryFoolMotion =
+        temporaryFoolToggle && presentationContextCompatible &&
+            admittedDrawingSpec?.samePolicyExceptHiddenReveal(visibleSpec) == true
+    val drawingAllowed =
+        payloadAllowed ||
+            (temporaryFoolMotion && initialPositionSettled && entryVeilLifted && entryState is EntryPositionState.Settled && jumpTarget == null)
+    val preserveOutgoingHiddenBodies = restoringHiddenFools || (temporaryFoolMotion && !expandAllFools)
+    val restoreStillValid =
+        presentationContextCompatible && restorePolicy?.samePolicyExceptHiddenReveal(visibleSpec) == true &&
+            restoreIntent == entryPositionIntent && entryState is EntryPositionState.Settled && initialTarget == null && jumpTarget == null
+    val currentRestoreValid by rememberUpdatedState(restoreStillValid)
+    val latestExpandAllFoolsChange by rememberUpdatedState(onExpandAllFoolsChange)
+    LaunchedEffect(restoringHiddenFools, restoreDispatched, restoreStillValid, presentationVisit) {
+        if (!restoringHiddenFools || restoreDispatched) return@LaunchedEffect
+        if (!restoreStillValid) {
+            restoringHiddenFools = false
+            return@LaunchedEffect
+        }
+        hiddenFoolVisibility?.let { transition ->
+            snapshotFlow { !transition.currentState && !transition.targetState && !transition.isRunning }.first { it }
+        }
+        if (restoringHiddenFools && currentRestoreValid) {
+            restoreDispatched = true
+            latestExpandAllFoolsChange(false)
+        }
+    }
+    LaunchedEffect(restoringHiddenFools, payloadAllowed, expandAllFools, presentedVisibilitySpec) {
+        // Keep the old native Hidden hosts exited until the exact false-spec refresh is admitted.
+        if (restoringHiddenFools && !expandAllFools && payloadAllowed && presentedVisibilitySpec?.revealHiddenFools != true) {
+            restoreDispatched = false
+            restoringHiddenFools = false
+        }
+    }
+    LaunchedEffect(temporaryFoolToggle, payloadAllowed, visibleSpec, presentationLease, restoringHiddenFools) {
+        if (temporaryFoolToggle && payloadAllowed && !restoringHiddenFools) {
+            Animatable(0f).animateTo(1f, MotdMotion.microFadeIn)
+            temporaryFoolToggle = false
+        }
     }
     LaunchedEffect(presentationLease) {
         if (entryVeilLifted) return@LaunchedEffect
@@ -1807,6 +1870,11 @@ internal fun ChatContent(
                 currentPresentationCompatible && currentPlacementReady(target)
         }
         payloadAdmitted = true
+    }
+    LaunchedEffect(presentationLease, initialTarget, presentationRevision) {
+        if (presentationLease?.continuesPresentation == true && initialPositionSettled && initialTarget == null && !payloadAdmitted) {
+            admitPayload()
+        }
     }
 
     // Capture only entry-stage boundaries, through the already opt-in structural journal.
@@ -2532,7 +2600,7 @@ internal fun ChatContent(
 
     fun saveCurrentScrollPosition() {
         if (!initialPositionSettled || !entryVeilLifted || !payloadAllowed || !currentPresentationCompatible ||
-            presentationLease?.ownsSlot() == false ||
+            presentationLease?.isActive == false || presentationLease?.ownsSlot() == false ||
             (presentationLease != null && measuredSnapshot?.value !== items.itemSnapshotList)
         ) {
             return
@@ -2624,7 +2692,12 @@ internal fun ChatContent(
     // without settling can still under-report, which degrades to the depth-only rule and never to a
     // wrong "already seen".
     fun recordFurthestDisplayed() {
-        if (!initialPositionSettled || !payloadAllowed || presentationLease?.ownsSlot() == false) return
+        if (!initialPositionSettled || !payloadAllowed || !currentPresentationCompatible ||
+            presentationLease?.isActive == false || presentationLease?.ownsSlot() == false ||
+            (presentationLease != null && measuredSnapshot?.value !== items.itemSnapshotList)
+        ) {
+            return
+        }
         val layout = listState.layoutInfo
         val bottomHostHeightPx = readBottomHostHeightPx()
         val deepest =
@@ -2641,17 +2714,17 @@ internal fun ChatContent(
             ) ?: return
         onFurthestDisplayedChanged(anchor)
     }
-    LaunchedEffect(initialPositionSettled, listState, visibilityPolicy, items) {
+    LaunchedEffect(initialPositionSettled, listState, visibilityPolicy, items, presentationLease, payloadAllowed) {
         if (!initialPositionSettled) return@LaunchedEffect
         snapshotFlow { listState.isScrollInProgress }
             .distinctUntilChanged()
             .collect { recordFurthestDisplayed() }
     }
-    DisposableEffect(initialPositionSettled, listState, visibilityPolicy, items) {
+    DisposableEffect(initialPositionSettled, listState, visibilityPolicy, items, presentationLease, payloadAllowed) {
         onDispose { recordFurthestDisplayed() }
     }
 
-    LaunchedEffect(initialPositionSettled, listState, items) {
+    LaunchedEffect(initialPositionSettled, listState, items, presentationLease, payloadAllowed) {
         snapshotFlow {
             // While scrolling, deliberately stop observing itemCount/index. snapshotFlow then
             // unregisters those hot reads until the idle edge, preventing a DB query restart for
@@ -2659,7 +2732,13 @@ internal fun ChatContent(
             if (!initialPositionSettled || listState.isScrollInProgress) {
                 null
             } else {
-                items.itemCount to listState.firstVisibleItemIndex
+                Triple(
+                    items.itemCount,
+                    listState.firstVisibleItemIndex,
+                    listState.layoutInfo.visibleItemsInfo
+                        .lastOrNull { it.index >= 0 && it.index < items.itemCount }
+                        ?.index ?: -1,
+                )
             }
         }.distinctUntilChanged()
             .collect { idleWindow ->
@@ -2988,7 +3067,7 @@ internal fun ChatContent(
     // that animation also set isScrollInProgress, the replacement effect believed the user had
     // scrolled away and permanently stopped following a burst. Live arrivals snap to index zero;
     // animation is reserved for explicit send/FAB actions.
-    LaunchedEffect(items, initialPositionSettled, visibilityPolicy) {
+    LaunchedEffect(items, initialPositionSettled, visibilityPolicy, payloadAllowed) {
         if (!initialPositionSettled) return@LaunchedEffect
         snapshotFlow {
             items.itemCount to newestEffectiveMessageId(items.itemCount, items::peek, visibilityPolicy)
@@ -2996,10 +3075,10 @@ internal fun ChatContent(
             .collect { (newCount, newestEffectiveId) ->
                 val oldCount = autoFollow.presentedItemCount
                 val followingBefore = autoFollow.following
-                if (suppressNextAutoFollow) {
+                if (suppressNextAutoFollow || (temporaryFoolMotion && !payloadAllowed)) {
                     autoFollow.reset(newCount, atBottom, newestEffectiveId)
                     liveEntryIds = emptySet()
-                    suppressNextAutoFollow = false
+                    suppressNextAutoFollow = temporaryFoolMotion && !payloadAllowed
                     AutoFollowTrace.record("paging_initial", traceBufferId, traceSessionId) {
                         "old_count=$oldCount new_count=$newCount at_bottom=$atBottom " +
                             "following=${autoFollow.following} refresh=${loadStateName(items.loadState.refresh)} " +
@@ -3177,7 +3256,7 @@ internal fun ChatContent(
         viewportReadEnabled,
         payloadAllowed,
     ) {
-        if (!viewportReadEnabled || !payloadAllowed) {
+        if (!viewportReadEnabled || !payloadAllowed || !currentPresentationCompatible || presentationLease?.isActive == false) {
             pausedSinceLastRun.value = true
             return@LaunchedEffect
         }
@@ -3400,7 +3479,7 @@ internal fun ChatContent(
                 },
             )
             if (fools.isNotEmpty()) {
-                val foolsShown = expandAllFools
+                val foolsShown = expandAllFools && !restoringHiddenFools
                 DropdownMenuItem(
                     modifier = Modifier.testTag("chat_toggle_fools_visibility"),
                     text = {
@@ -3416,7 +3495,21 @@ internal fun ChatContent(
                     },
                     onClick = {
                         overflowOpen = false
-                        onExpandAllFoolsChange(!expandAllFools)
+                        if (!foolsShown) {
+                            restoreDispatched = false
+                            restoringHiddenFools = false
+                            onExpandAllFoolsChange(true)
+                        } else if (initialPositionSettled && entryVeilLifted && entryState is EntryPositionState.Settled &&
+                            initialTarget == null && jumpTarget == null && admittedDrawingSpec != null && presentationContextCompatible
+                        ) {
+                            restorePolicy = visibleSpec
+                            restoreIntent = entryPositionIntent
+                            temporaryFoolToggle = true
+                            restoreDispatched = false
+                            restoringHiddenFools = true
+                        } else {
+                            onExpandAllFoolsChange(false)
+                        }
                         expandedFools = emptySet()
                         collapsedFools = emptySet()
                     },
@@ -3965,8 +4058,8 @@ internal fun ChatContent(
                                         modifier =
                                             Modifier
                                                 .fillMaxSize()
-                                                .graphicsLayer { alpha = if (entryVeilLifted && payloadAllowed) 1f else 0f }
-                                                .then(if (entryVeilLifted && payloadAllowed) Modifier else Modifier.clearAndSetSemantics {}),
+                                                .graphicsLayer { alpha = if (entryVeilLifted && drawingAllowed) 1f else 0f }
+                                                .then(if (entryVeilLifted && drawingAllowed) Modifier else Modifier.clearAndSetSemantics {}),
                                     ) {
                                         MessageList(
                                             items = items,
@@ -3976,6 +4069,9 @@ internal fun ChatContent(
                                                     if (presentationLease?.ownsSlot() == true) measuredSnapshot?.value = layoutSnapshot
                                                 },
                                             pagingHintsEnabled = initialPositionSettled && payloadAllowed && entryPreparationReady,
+                                            temporaryFoolVisibilityMotion = temporaryFoolMotion,
+                                            hiddenFoolVisibility = hiddenFoolVisibility,
+                                            preserveOutgoingHiddenBodies = preserveOutgoingHiddenBodies,
                                             bottomContentPadding = innerPadding,
                                             onTranslateMessage = ::openTranslationPicker,
                                             externalTranslations = externalTranslations,
@@ -4024,7 +4120,7 @@ internal fun ChatContent(
                                             onSaveDccToDownloads = onSaveDccToDownloads,
                                             loadPreview = loadPreview,
                                             // A visible fallback entry can remain unresolved indefinitely.
-                                            richContentReady = payloadAllowed && (initialPositionSettled || entryVeilLifted),
+                                            richContentReady = drawingAllowed && (initialPositionSettled || entryVeilLifted),
                                             showImages = showImages,
                                             showLinkPreviews = showLinkPreviews,
                                             cachedPreview = cachedPreview,
@@ -4057,7 +4153,7 @@ internal fun ChatContent(
                                         )
                                     }
                                     // Hidden rows cannot receive input; readiness removes this immediately.
-                                    if (!entryVeilLifted || !payloadAllowed) {
+                                    if (!entryVeilLifted || !drawingAllowed) {
                                         Box(
                                             modifier =
                                                 Modifier

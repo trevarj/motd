@@ -102,71 +102,111 @@ class ChatPageCache
             viewport: ViewportRefreshAnchor?,
             allowRetention: Boolean = true,
             continueLocalRefresh: Boolean = false,
+            continuePresentationFrom: Lease? = null,
         ): Lease {
             val context = withContext(ioDispatcher) { db.withTransaction { repository.resolvePagingContext(bufferId) } }
             val key = Key(context, spec)
-            val retired = ArrayList<Entry>(MAX_ROOMS)
-            var reused = false
-            val lease =
-                synchronized(lock) {
-                    if (owner.coroutineContext[Job]?.isActive == false) throw CancellationException("Chat presentation owner was destroyed")
-
-                    fun remove(
-                        entry: Entry,
-                        reason: String,
-                    ) {
-                        if (retireLocked(entry, reason)) retired += entry
-                    }
-                    val existing = entries[key]
-                    val independent = !allowRetention || !onScreen.value || existing?.active == true
-                    if (!independent && existing != null && !existing.retired) {
-                        entries.remove(key)
-                        entries[key] = existing
-                        existing.leaseId++
-                        existing.active = true
-                        existing.remoteAllowed = true
-                        existing.viewport.value = viewport
-                        attached += existing
-                        reused = true
-                        Lease(existing, existing.leaseId, bufferId, retained = true)
-                    } else {
-                        entries.values.filter { it.key.context.roomId == context.roomId && !it.active }.toList().forEach {
-                            remove(it, "key_changed")
-                        }
-                        var retainable = !independent
-                        if (retainable && entries.size == MAX_ROOMS) {
-                            val oldest = entries.values.firstOrNull { !it.active }
-                            if (oldest == null) retainable = false else remove(oldest, "lru")
-                        }
-                        val entry = Entry("$ownerId:${++nextSlot}", key, initialKey, viewport, retainable, continueLocalRefresh)
-                        if (retainable) entries[key] = entry
-                        attached += entry
-                        Lease(entry, entry.leaseId, bufferId, retained = false)
-                    }
-                }
-            retired.forEach { it.scope.cancel() }
+            // A canceled reveal/reversal must leave the paused native presenter untouched.
+            val stagedIdentity = continuePresentationFrom?.let { synchronized(lock) { "$ownerId:${++nextSlot}" } }
+            var lease: Lease? = null
             try {
-                // Publish cold/independent slots first: the root host is their collector.
+                val stagedVersion =
+                    stagedIdentity?.let { identity ->
+                        withContext(ioDispatcher) {
+                            db.withTransaction { readChatPageVersion(db.openHelper.writableDatabase, identity, context.roomId) }
+                        }
+                    }
+                val retired = ArrayList<Entry>(MAX_ROOMS)
+                var reused = false
+                val acquired =
+                    synchronized(lock) {
+                        if (owner.coroutineContext[Job]?.isActive == false) throw CancellationException("Chat presentation owner was destroyed")
+
+                        fun remove(
+                            entry: Entry,
+                            reason: String,
+                        ) {
+                            if (retireLocked(entry, reason)) retired += entry
+                        }
+                        val predecessor =
+                            continuePresentationFrom?.takeIf {
+                                it.ownsSlot() && it.entry.handoffPending && onScreen.value && it.entry.eligible &&
+                                    it.entry.key.context == context &&
+                                    it.entry.key.spec
+                                        .samePolicyExceptHiddenReveal(spec) &&
+                                    it.entry.nativePresentationWindow != null
+                            }
+                        val inheritedWindow = predecessor?.entry?.nativePresentationWindow
+                        val presentationIdentity = predecessor?.entry?.presentationIdentity
+                        val visitIdentity = predecessor?.presentationVisitIdentity
+                        continuePresentationFrom?.takeIf { it.ownsSlot() && it.entry.handoffPending }?.let {
+                            remove(it.entry, if (predecessor != null) "temporary_fool_visibility" else "continuity_rejected")
+                        }
+                        val existing = entries[key]
+                        val independent = !allowRetention || !onScreen.value || existing?.active == true
+                        if (continuePresentationFrom == null && !independent && existing != null && !existing.retired) {
+                            entries.remove(key)
+                            entries[key] = existing
+                            existing.leaseId++
+                            existing.active = true
+                            existing.remoteAllowed = true
+                            existing.viewport.value = viewport
+                            attached += existing
+                            reused = true
+                            Lease(existing, existing.leaseId, bufferId, retained = true)
+                        } else {
+                            entries.values.filter { it.key.context.roomId == context.roomId && !it.active }.toList().forEach {
+                                remove(it, "key_changed")
+                            }
+                            var retainable = !independent
+                            if (retainable && entries.size == MAX_ROOMS) {
+                                val oldest = entries.values.firstOrNull { !it.active }
+                                if (oldest == null) retainable = false else remove(oldest, "lru")
+                            }
+                            val entry =
+                                Entry(
+                                    stagedIdentity ?: "$ownerId:${++nextSlot}",
+                                    key,
+                                    initialKey,
+                                    viewport,
+                                    retainable,
+                                    continueLocalRefresh,
+                                    presentationIdentity,
+                                    inheritedWindow,
+                                    stagedVersion,
+                                )
+                            if (retainable) entries[key] = entry
+                            attached += entry
+                            Lease(entry, entry.leaseId, bufferId, retained = false, presentationVisitIdentity = visitIdentity ?: "${entry.identity}:${entry.leaseId}")
+                        }
+                    }
+                lease = acquired
+                retired.forEach { it.scope.cancel() }
                 publishSlots()
-                val version = lease.entry.readVersion()
+                // Handoffs have no suspension between publication and the caller owning this lease.
+                val version = stagedVersion ?: acquired.entry.readVersion()
                 val reusable =
                     synchronized(lock) {
-                        val snapshot = lease.entry.snapshot
+                        val snapshot = acquired.entry.snapshot
                         val row = snapshot?.takeIf { targetIndex in it.indices }?.get(targetIndex)
-                        reused && lease.entry.presentedVersion == version &&
+                        reused && acquired.entry.presentedVersion == version &&
                             (
                                 (row != null && (expectedEventId == null || row.id == expectedEventId)) ||
                                     (snapshot?.size == 0 && targetIndex == 0 && expectedEventId == null)
                             )
                     }
                 trace(if (reusable) "hit" else "miss", context.roomId, if (reusable) "presentation" else "refresh_required")
-                if (reused && !reusable) lease.entry.requestRefresh(if (expectedEventId == null) initialKey ?: 0 else null)
-                lease.entry.changed()
-                lease.entry.wakeLoads()
-                return lease
+                if (reused && !reusable) acquired.entry.requestRefresh(if (expectedEventId == null) initialKey ?: 0 else null)
+                acquired.entry.changed()
+                acquired.entry.wakeLoads()
+                return acquired
             } catch (failure: Throwable) {
-                // Navigation may disappear during the writer read, before its caller gets a lease.
-                lease.release()
+                lease?.release()
+                if (lease == null && stagedIdentity != null) {
+                    withContext(ioDispatcher + NonCancellable) {
+                        db.withTransaction { releaseChatPageVersion(db.openHelper.writableDatabase, stagedIdentity) }
+                    }
+                }
                 throw failure
             }
         }
@@ -245,9 +285,12 @@ class ChatPageCache
             private val token: Long,
             private val routeBufferId: Long,
             val retained: Boolean,
+            internal val presentationVisitIdentity: String = "${entry.identity}:$token",
         ) {
             val pages: Flow<PagingData<MessageEntity>> get() = entry.pages
             val identity: String get() = entry.identity
+            internal val presentationIdentity: String get() = entry.presentationIdentity
+            internal val continuesPresentation: Boolean get() = entry.presentationIdentity != entry.identity
             val adoptionId: Long get() = token
             val changes: StateFlow<Long> get() = entry.changes
             val isActive: Boolean get() = synchronized(lock) { ownsSlot() && entry.active }
@@ -315,6 +358,9 @@ class ChatPageCache
                 changes.first { !ownsSlot() }
             }
 
+            /** Revoke all effects and SQL while the same visit acquires an exact-spec successor. */
+            internal fun preparePresentationHandoff() = entry.preparePresentationHandoff(token)
+
             fun release() = entry.release(token)
         }
 
@@ -325,8 +371,14 @@ class ChatPageCache
             initialViewport: ViewportRefreshAnchor?,
             internal val retainable: Boolean,
             private val inheritedLocalRefresh: Boolean,
+            inheritedPresentationIdentity: String? = null,
+            private var inheritedNativeWindow: ItemSnapshotList<MessageEntity>? = null,
+            initialVersion: ChatPageVersion? = null,
         ) {
             internal val scope = CoroutineScope(owner.coroutineContext + SupervisorJob(owner.coroutineContext[Job]))
+            internal val presentationIdentity = inheritedPresentationIdentity ?: identity
+            internal val nativePresentationWindow get() = snapshot ?: inheritedNativeWindow
+            internal var handoffPending = false
             internal var active = true
             internal var leaseId = 0L
             internal var retired = false
@@ -334,7 +386,7 @@ class ChatPageCache
             private var querySource: PagingSource<Int, MessageEntity>? = null
             internal var snapshot: ItemSnapshotList<MessageEntity>? = null
             internal var presentedVersion: ChatPageVersion? = null
-            private var lastVersion: ChatPageVersion? = null
+            private var lastVersion: ChatPageVersion? = initialVersion
             internal val version: ChatPageVersion get() = checkNotNull(lastVersion)
             internal val viewport = MutableStateFlow(initialViewport)
             private val loadWake = MutableStateFlow(0L)
@@ -368,6 +420,7 @@ class ChatPageCache
                     .cachedIn(scope)
 
             init {
+                accountWindows()
                 scope.launch(start = CoroutineStart.UNDISPATCHED) {
                     try {
                         awaitCancellation()
@@ -490,6 +543,7 @@ class ChatPageCache
 
             internal fun clearWindows() {
                 snapshot = null
+                inheritedNativeWindow = null
                 pendingPages.clear()
                 refreshProof = null
                 nativeWindow = null
@@ -603,11 +657,13 @@ class ChatPageCache
                         presenterNeedsBootstrap = false
                     }
                     val proof = refreshProof
+                    if (inheritedNativeWindow != null && presentedVersion == null && proof?.matches(items, states) != true) return
                     if (proof != null && proof.matches(items, states)) {
                         presentedVersion = proof.version
                         refreshProof = null
                         nativeWindow = proof
                         hasPresented = true
+                        inheritedNativeWindow = null
                     }
                     updated = snapshot !== items || presentedVersion != previousVersion
                     snapshot = items
@@ -638,7 +694,7 @@ class ChatPageCache
                         }
                     }
                     accountWindows()
-                    if (!active && (!eligible || !retainable)) close = retireLocked(this, "memory_bound")
+                    if (!active && !handoffPending && (!eligible || !retainable)) close = retireLocked(this, "memory_bound")
                 }
                 if (updated) changed()
                 if (close) {
@@ -658,18 +714,33 @@ class ChatPageCache
                     if (resident.put(row, true) == null) characters += row.retainedCharacters()
                 }
                 snapshot?.items?.forEach(::add)
+                inheritedNativeWindow?.items?.forEach(::add)
                 nativeWindow?.rows?.forEach(::add)
                 pendingPages.forEach { it.rows.forEach(::add) }
                 retainedRows = resident.size
                 retainedCharacters = characters
             }
 
+            internal fun preparePresentationHandoff(token: Long) {
+                val previous =
+                    synchronized(lock) {
+                        if (leaseId != token || !active || retired) return
+                        active = false
+                        handoffPending = true
+                        querySource = null
+                        source
+                    }
+                changed()
+                previous?.let { pending -> scope.launch(ioDispatcher) { pending.invalidate() } }
+            }
+
             internal fun release(token: Long) {
                 var pendingSource: PagingSource<Int, MessageEntity>? = null
                 val close =
                     synchronized(lock) {
-                        if (leaseId != token || !active || retired) return
+                        if (leaseId != token || (!active && !handoffPending) || retired) return
                         active = false
+                        handoffPending = false
                         attached.remove(this)
                         val reason =
                             when {

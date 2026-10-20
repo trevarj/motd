@@ -6,6 +6,7 @@ import android.os.Looper
 import androidx.paging.AsyncPagingDataDiffer
 import androidx.paging.CombinedLoadStates
 import androidx.paging.ExperimentalPagingApi
+import androidx.paging.ItemSnapshotList
 import androidx.paging.LoadState
 import androidx.paging.LoadType
 import androidx.paging.PagingData
@@ -382,6 +383,66 @@ class ChatPageCacheTest {
             val view = present(filtered)
             assertEquals(0, view.differ.itemCount)
             view.detach()
+        }
+
+    @Test
+    fun temporaryRevealHandoffChargesOldNativeWindowWithoutGrantingSuccessorProof() =
+        cacheTest { fixture ->
+            val room = fixture.seedRooms(1).single()
+            val revealed = MessageVisibilitySpec(fools = setOf("alice"), foolsMode = FoolsMode.HIDE, revealHiddenFools = true)
+            val original = fixture.acquire(room, spec = revealed)
+            present(original)
+            val oldWindow = checkNotNull(original.entry.snapshot)
+            val oldStates = checkNotNull(hosted.getValue(original.entry).states)
+            val oldSource = checkNotNull(original.entry.source)
+            original.preparePresentationHandoff()
+            assertFalse(original.isActive)
+            assertFalse(original.admit(oldWindow))
+            startHostCollections = false
+            val restored =
+                fixture.cache.acquire(
+                    room,
+                    revealed.copy(revealHiddenFools = false),
+                    null,
+                    0,
+                    null,
+                    null,
+                    continuePresentationFrom = original,
+                )
+            assertEquals(original.presentationIdentity, restored.presentationIdentity)
+            assertEquals(original.presentationVisitIdentity, restored.presentationVisitIdentity)
+            assertEquals(1, fixture.cache.slots.value.size)
+            assertTrue(original.entry.retired)
+            assertTrue(oldSource.invalid)
+            assertTrue(restored.entry.eligible)
+            assertSame(oldWindow, restored.entry.nativePresentationWindow)
+            val root = hosted.getValue(restored.entry)
+            root.report(oldWindow, oldStates)
+            assertEquals(null, restored.entry.snapshot)
+            assertEquals(null, restored.entry.presentedVersion)
+            assertFalse(restored.hasPublishedWindow(oldWindow))
+            assertFalse(restored.admit(oldWindow))
+            root.start()
+            assertEquals(0, present(restored).differ.itemCount)
+            assertTrue(restored.admit(checkNotNull(restored.entry.snapshot)))
+            assertFalse(restored.entry.nativePresentationWindow === oldWindow)
+
+            restored.preparePresentationHandoff()
+            startHostCollections = true
+            val restricted =
+                fixture.cache.acquire(
+                    room,
+                    revealed.copy(revealHiddenFools = false, showRedactedMessages = false),
+                    null,
+                    0,
+                    null,
+                    null,
+                    continuePresentationFrom = restored,
+                )
+            assertNotEquals(restored.presentationIdentity, restricted.presentationIdentity)
+            assertNotEquals(restored.presentationVisitIdentity, restricted.presentationVisitIdentity)
+            assertEquals(0, present(restricted).differ.itemCount)
+            restricted.release()
         }
 
     @Test
@@ -1038,9 +1099,86 @@ class ChatPageCacheTest {
             again.release()
         }
 
+    @Test
+    fun canceledTemporarySuccessorVersionReadLeavesThePriorNativeSlotAvailableForReversal() {
+        val entered = CompletableDeferred<Unit>()
+        val release = CountDownLatch(1)
+        val armed = AtomicBoolean(false)
+        cacheTest(
+            realCacheIo = true,
+            beforePageVersionRead = {
+                if (armed.compareAndSet(true, false)) {
+                    entered.complete(Unit)
+                    release.await()
+                }
+            },
+        ) { fixture ->
+            val room = fixture.seedRooms(1).single()
+            val spec = MessageVisibilitySpec(fools = setOf("alice"), foolsMode = FoolsMode.HIDE, revealHiddenFools = true)
+            val original = fixture.acquire(room, spec = spec)
+            present(original)
+            val window = checkNotNull(original.entry.snapshot)
+            original.preparePresentationHandoff()
+            armed.set(true)
+            val pending =
+                async {
+                    fixture.cache.acquire(
+                        room,
+                        spec.copy(revealHiddenFools = false),
+                        null,
+                        0,
+                        null,
+                        null,
+                        continuePresentationFrom = original,
+                    )
+                }
+            try {
+                entered.await()
+                assertSame(
+                    "version staging must not replace the retained native slot",
+                    original.entry,
+                    fixture.cache.slots.value
+                        .single(),
+                )
+                pending.cancel()
+            } finally {
+                release.countDown()
+                pending.cancelAndJoin()
+            }
+            assertTrue(original.ownsSlot())
+            assertSame(window, original.entry.nativePresentationWindow)
+            assertSame(
+                original.entry,
+                fixture.cache.slots.value
+                    .single(),
+            )
+            fixture.db.withTransaction {
+                fixture.db.openHelper.writableDatabase.query("SELECT COUNT(*) FROM temp.motd_chat_page_version").use {
+                    assertTrue(it.moveToFirst())
+                    assertEquals("canceled staging releases its unused TEMP registration", 1, it.getInt(0))
+                }
+            }
+            val latest =
+                fixture.cache.acquire(
+                    room,
+                    spec,
+                    null,
+                    0,
+                    null,
+                    null,
+                    continuePresentationFrom = original,
+                )
+            assertEquals(original.presentationIdentity, latest.presentationIdentity)
+            assertEquals(original.presentationVisitIdentity, latest.presentationVisitIdentity)
+            assertFalse(latest.admit(window))
+            present(latest).detach()
+        }
+    }
+
     private fun cacheTest(
         onDisk: Boolean = false,
         realCacheIo: Boolean = false,
+        beforePageVersionRead: (() -> Unit)? = null,
         block: suspend TestScope.(Fixture) -> Unit,
     ) = runTest {
         val dispatcher = UnconfinedTestDispatcher(testScheduler)
@@ -1067,6 +1205,7 @@ class ChatPageCacheTest {
                 .setTransactionExecutor(Runnable::run)
                 .setQueryCallback(
                     { sql, _ ->
+                        if (sql.startsWith("INSERT OR IGNORE INTO temp.motd_chat_page_version")) beforePageVersionRead?.invoke()
                         val count = sql.trimStart().startsWith("SELECT COUNT(", ignoreCase = true)
                         if (sql.contains("messages") && !count && sql.contains("LIMIT") && sql.contains("OFFSET")) loads.incrementAndGet()
                         if (sql.contains("messages") && count) counts.incrementAndGet()
@@ -1302,6 +1441,13 @@ class ChatPageCacheTest {
         init {
             differ.addLoadStateListener(loadListener)
             differ.addOnPagesUpdatedListener(pagesListener)
+        }
+
+        fun report(
+            window: ItemSnapshotList<MessageEntity>,
+            loadStates: CombinedLoadStates,
+        ) {
+            entry.presented(publisher, window, loadStates)
         }
 
         fun start() {
