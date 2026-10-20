@@ -1133,7 +1133,7 @@ class ComposerUiTest {
             val field = compose.onNodeWithTag("chat_composer_field").fetchSemanticsNode().boundsInRoot
             val tools = compose.onNodeWithTag("chat_composer_tools").fetchSemanticsNode().boundsInRoot
             assertTrue(voice.left >= pill.left && voice.right < pill.right)
-            assertTrue(voice.top > pill.top && voice.bottom < pill.bottom)
+            assertTrue(voice.top >= pill.top && voice.bottom <= pill.bottom)
             assertTrue(!voice.overlaps(field) && !voice.overlaps(tools))
         }
         compose.onNodeWithTag("chat_composer_voice").performTouchInput { click() }

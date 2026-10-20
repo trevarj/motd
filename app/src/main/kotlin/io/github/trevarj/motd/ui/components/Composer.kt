@@ -550,16 +550,18 @@ fun Composer(
     val editorDensity = LocalDensity.current
     val collapsedVerticalPadding =
         when (composerStyle) {
-            ComposerStyle.COMFORTABLE -> 6.dp
+            ComposerStyle.COMFORTABLE -> 4.dp
             ComposerStyle.LARGE -> 12.dp
-            ComposerStyle.COMPACT -> 4.dp
+            ComposerStyle.COMPACT -> 2.dp
         }
     val floatingPill = composerStyle != ComposerStyle.LARGE
     val toolAccentSeed = MaterialTheme.colorScheme.primary
     val toolBackground = MaterialTheme.colorScheme.secondaryContainer
     val toolAccent = remember(toolAccentSeed, toolBackground) { ensureContrast(toolAccentSeed, listOf(toolBackground)) }
     val primaryInset = if (composerStyle == ComposerStyle.COMPACT) 2.dp else 4.dp
-    val collapsedMinimumHeight = if (floatingPill) 48.dp + primaryInset * 2 else 48.dp
+    val primaryVerticalInset = if (floatingPill) primaryInset - 2.dp else primaryInset
+    val primaryVisualInset = if (floatingPill) 2.dp else 0.dp
+    val collapsedMinimumHeight = if (floatingPill) 48.dp + primaryVerticalInset * 2 else 48.dp
     val lineHeightPx =
         with(LocalDensity.current) {
             ceil(
@@ -814,7 +816,8 @@ fun Composer(
                 Modifier
                     .size(48.dp)
                     .testTag("chat_composer_tools")
-                    .semantics { selected = transientToolsVisible },
+                    .semantics { selected = transientToolsVisible }
+                    .padding(2.dp),
         ) {
             Icon(
                 Icons.Filled.Add,
@@ -822,7 +825,7 @@ fun Composer(
                     stringResource(
                         if (transientToolsVisible) R.string.chat_composer_tools_close else R.string.chat_composer_tools_open,
                     ),
-                modifier = Modifier.graphicsLayer { rotationZ = toolsRotation },
+                modifier = Modifier.size(20.dp).graphicsLayer { rotationZ = toolsRotation },
                 tint =
                     if (transientToolsVisible) toolAccent else MaterialTheme.colorScheme.onSecondaryContainer,
             )
@@ -836,7 +839,7 @@ fun Composer(
             modifier = modifier,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Send and voice remain fixed 48.dp round buttons.
+            // Send and voice keep 48.dp targets with inset artwork in floating pills.
             Crossfade(
                 targetState = canSend || !voiceEnabled,
                 animationSpec = MotdMotion.microFadeIn,
@@ -851,7 +854,7 @@ fun Composer(
                             onSend()
                         },
                         enabled = canSend,
-                        modifier = Modifier.size(48.dp).testTag("chat_composer_send"),
+                        modifier = Modifier.size(48.dp).testTag("chat_composer_send").padding(primaryVisualInset),
                         shape = CircleShape,
                         colors =
                             IconButtonDefaults.filledIconButtonColors(
@@ -876,6 +879,7 @@ fun Composer(
                     VoiceRecordButton(
                         enabled = enabled,
                         recording = voiceRecording,
+                        visualInset = primaryVisualInset,
                         onHoldStart = {
                             dismissEmojiPicker()
                             onVoiceHoldStart()
@@ -1053,7 +1057,7 @@ fun Composer(
                                         Box(
                                             Modifier
                                                 .align(Alignment.Bottom)
-                                                .padding(start = primaryInset, top = primaryInset, bottom = primaryInset),
+                                                .padding(start = primaryInset, top = primaryVerticalInset, bottom = primaryVerticalInset),
                                         ) { ToolsButton() }
                                     }
                                     if (selfNick != null) {
@@ -1162,7 +1166,7 @@ fun Composer(
                                         }
                                     }
 
-                                    val actionBand = Modifier.align(Alignment.Bottom).padding(vertical = primaryInset)
+                                    val actionBand = Modifier.align(Alignment.Bottom).padding(vertical = primaryVerticalInset)
                                     Row(actionBand) {
                                         if (!relocatedTools && onAi != null) {
                                             IconButton(
@@ -1219,7 +1223,7 @@ fun Composer(
                                         PrimaryAction(
                                             Modifier
                                                 .align(Alignment.Bottom)
-                                                .padding(end = primaryInset, top = primaryInset, bottom = primaryInset),
+                                                .padding(end = primaryInset, top = primaryVerticalInset, bottom = primaryVerticalInset),
                                         )
                                     }
                                 }
@@ -1632,6 +1636,7 @@ private fun composerPaletteColor(code: Int): Color = Color(0xFF000000 or MIRC_CO
 private fun VoiceRecordButton(
     enabled: Boolean,
     recording: Boolean,
+    visualInset: Dp,
     onHoldStart: () -> Unit,
     onAccessibilityStart: () -> Unit,
     onHoldStop: () -> Unit,
@@ -1755,7 +1760,7 @@ private fun VoiceRecordButton(
                             }
                         }
                     }
-                },
+                }.padding(visualInset),
         shape = CircleShape,
         colors =
             IconButtonDefaults.filledIconButtonColors(

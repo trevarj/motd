@@ -170,6 +170,8 @@ flowchart TD
   newest row clear, and fully covered rows do not advance read state. Default and
   Nickname keep tools/send/record inside their floating pills; Large keeps its
   separate action. Agentwire always uses Default. Stored enum names are unchanged.
+  At ordinary font scale, Default/Nickname have nominal 52dp/48dp pill minima and
+  44dp floating primary artwork, retaining 48dp targets and unchanged Large geometry.
   Opening tools expands the same floating pill around one horizontally scrolling
   row. Markdown and draft upload are direct actions, not an overflow menu.
   Large keeps its separate top toolbar.
