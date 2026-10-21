@@ -163,6 +163,13 @@ flowchart TD
   Reconcile-only publication never takes the network retirement guard; network sessions retain
   retirement-before-session locking. Syncing broadcasts snapshot their owners so synchronous
   observers can attach another owner without invalidating the current iteration.
+- Preview-bearing preference choices save immediately and stay open for comparison, with one
+  prominent selected sample; per-chat layout samples follow the same override/default/global
+  inheritance as chat. Fictional examples reuse production renderers with local data and isolated
+  avatar, action and theme environments, without remote lookup or real chat actions.
+  Native whole-row radio selection owns one selected-state target of at least 48dp; wrapping
+  labels and scrollable forms keep choices and editor actions reachable. Topic editing uses one
+  native field state for raw IRC text, reactive formatting and click-time Save.
 - Appearance's input style is an IRC-only preference shared by channel, query,
   and server buffers. Default, Large, and Nickname use one editor/draft path;
   Nickname's network-owned identity is decoration, never submitted text.
@@ -310,6 +317,11 @@ flowchart TD
   Link metadata and extensionless-audio HEAD discovery use that same owning route;
   there is no direct-preview bypass. Global avatars require an unambiguous source
   network, while imported avatar files remain local.
+  Explicit avatar URL inspection is optional: consent binds the validated URL to its saved owning
+  network/identity snapshot and routed media cache, never the active network; editing, retargeting
+  or dismissal invalidates the proposal. Local avatar and image-document proposals accept only
+  `content`, `file` and `android.resource` URIs, with avatar imports staged until Use image.
+  Inspection preserves explicit Save/Publish/Upload and reversible Cancel boundaries.
   YouTube video links use the public, bounded JSON oEmbed endpoint through that
   same unauthenticated route, preserving the original clickable URL. Missing
   videos are negative-cached; denied or transient endpoint failures remain

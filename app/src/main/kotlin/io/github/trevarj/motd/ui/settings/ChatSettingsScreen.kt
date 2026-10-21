@@ -1,21 +1,17 @@
 package io.github.trevarj.motd.ui.settings
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -56,10 +52,15 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.service.autoAwayText
 import io.github.trevarj.motd.ui.chat.presenceModeDescription
 import io.github.trevarj.motd.ui.chat.presenceModeLabel
+import io.github.trevarj.motd.ui.chatlist.ChatListSwipeExample
+import io.github.trevarj.motd.ui.chatlist.MentionsPlacementExample
+import io.github.trevarj.motd.ui.components.DeletedMessageExample
+import io.github.trevarj.motd.ui.components.FoolVisibilityExample
+import io.github.trevarj.motd.ui.components.PresenceExample
 import io.github.trevarj.motd.ui.components.ReadAloudVoiceOptions
+import io.github.trevarj.motd.ui.components.ReplyPrefixExample
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
 /** Chat category: presence-event visibility, friends/fools management, and fools' message handling. */
 @Composable
@@ -206,6 +207,7 @@ fun ChatSettingsContent(
         onBack = onBack,
         snackbarHostState = snackbarHostState,
     ) {
+        Text(stringResource(R.string.settings_device_preferences_scope), style = MaterialTheme.typography.bodySmall)
         SettingsGroup(title = stringResource(R.string.settings_conversation_section)) {
             SettingsTarget(
                 if (target == SettingsTarget.CHAT) SettingsTarget.PRESENCE.name else target?.name,
@@ -230,6 +232,7 @@ fun ChatSettingsContent(
                 requestedTarget = target?.name,
                 targetName = SettingsTarget.DELETED_MESSAGES.name,
             )
+            DeletedMessageExample(settings.showRedactedMessages, Modifier.padding(horizontal = 16.dp))
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsNavigationRow(
                 title = stringResource(R.string.settings_chat_list_swipe),
@@ -346,6 +349,7 @@ fun ChatSettingsContent(
                 requestedTarget = target?.name,
                 targetName = SettingsTarget.REPLY_PREFIX.name,
             )
+            ReplyPrefixExample(reply.visibleChannelPrefix, Modifier.padding(horizontal = 16.dp))
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
                 title = stringResource(R.string.settings_swipe_to_reply),
@@ -474,6 +478,8 @@ fun ChatSettingsContent(
             onSelect = onPresenceMode,
             onDismiss = { presenceSheetOpen = false },
             tag = "settings_presence_sheet",
+            dismissOnSelect = false,
+            preview = { PresenceExample(settings.presenceMode) },
         )
     }
     if (swipeSheetOpen) {
@@ -491,6 +497,8 @@ fun ChatSettingsContent(
             onSelect = onChatListSwipeAction,
             onDismiss = { swipeSheetOpen = false },
             tag = "settings_chat_list_swipe_sheet",
+            dismissOnSelect = false,
+            preview = { ChatListSwipeExample(settings.chatListSwipeAction) },
         )
     }
     if (mentionsPlacementSheetOpen) {
@@ -508,6 +516,8 @@ fun ChatSettingsContent(
             onSelect = onMentionsPlacement,
             onDismiss = { mentionsPlacementSheetOpen = false },
             tag = "settings_mentions_location_sheet",
+            dismissOnSelect = false,
+            preview = { MentionsPlacementExample(settings.mentionsPlacement) },
         )
     }
     if (awayDelaySheetOpen) {
@@ -540,16 +550,21 @@ fun ChatSettingsContent(
             onSelect = onFoolsMode,
             onDismiss = { foolsSheetOpen = false },
             tag = "settings_fools_mode_sheet",
+            dismissOnSelect = false,
+            preview = {
+                Text(stringResource(R.string.settings_fool_global_scope))
+                FoolVisibilityExample(settings.foolsMode)
+            },
         )
     }
     if (qualitySheetOpen) {
-        VoiceQualitySheet(
+        SingleChoiceSheet(
+            title = stringResource(R.string.settings_voice_quality),
             selected = voice.quality,
-            onSelect = {
-                onVoiceQuality(it)
-                qualitySheetOpen = false
-            },
+            options = VoiceRecordingQuality.entries.map { ChoiceOption(it, voiceQualityLabel(it), voiceQualityDescription(it), "settings_voice_quality_${it.name.lowercase()}") },
+            onSelect = onVoiceQuality,
             onDismiss = { qualitySheetOpen = false },
+            tag = "settings_voice_quality_sheet",
         )
     }
 }
@@ -576,32 +591,6 @@ private fun mentionsPlacementLabel(placement: MentionsPlacement): String =
             MentionsPlacement.FOLDER_TAB -> R.string.settings_mentions_folder_tab
         },
     )
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun VoiceQualitySheet(
-    selected: VoiceRecordingQuality,
-    onSelect: (VoiceRecordingQuality) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("settings_voice_quality_sheet")) {
-        SheetSystemBars()
-        Column(Modifier.fillMaxWidth().selectableGroup()) {
-            SubLabel(stringResource(R.string.settings_voice_quality))
-            VoiceRecordingQuality.entries.forEach { quality ->
-                RadioRow(
-                    label = voiceQualityLabel(quality),
-                    subtitle = voiceQualityDescription(quality),
-                    selected = selected == quality,
-                    enabled = true,
-                    onClick = { onSelect(quality) },
-                    modifier = Modifier.testTag("settings_voice_quality_${quality.name.lowercase()}"),
-                )
-            }
-            Spacer(Modifier.height(20.dp))
-        }
-    }
-}
 
 @Composable
 private fun voiceQualityLabel(quality: VoiceRecordingQuality): String =
@@ -636,14 +625,16 @@ private fun AutoAwayMessageDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.settings_auto_away_message_title)) },
         text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                singleLine = true,
-                placeholder = { Text(placeholder) },
-                supportingText = { Text(stringResource(R.string.settings_auto_away_message_hint)) },
-                modifier = Modifier.fillMaxWidth().testTag("settings_auto_away_message_field"),
-            )
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    singleLine = true,
+                    placeholder = { Text(placeholder) },
+                    supportingText = { Text(stringResource(R.string.settings_auto_away_message_hint)) },
+                    modifier = Modifier.fillMaxWidth().testTag("settings_auto_away_message_field"),
+                )
+            }
         },
         confirmButton = {
             TextButton(

@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.core.net.toUri
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.attachment.isLocalMediaUri
 import java.io.File
 import java.io.IOException
 import java.util.UUID
@@ -23,6 +24,7 @@ class LocalAvatarStore
         /** Copy an image into app-owned storage without buffering untrusted input in memory. */
         fun import(source: Uri): Result<String> =
             runCatching {
+                if (!source.isLocalMediaUri()) throw IOException("Avatar imports require a local content, file, or android.resource URI")
                 val temporary = File(directory, ".${UUID.randomUUID()}.tmp")
                 try {
                     resolver.openInputStream(source)?.use { input ->

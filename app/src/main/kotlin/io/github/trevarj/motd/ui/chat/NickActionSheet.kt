@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Message
 import androidx.compose.material.icons.filled.Block
@@ -100,7 +102,7 @@ fun NickActionSheet(
     // Root tag disambiguates from MessageActionSheet when both could be open.
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("nick_sheet")) {
         SheetSystemBars()
-        Column(modifier = Modifier.padding(bottom = 24.dp)) {
+        Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
             // Header: avatar + nick + whois summary (or the fallback line when whois is unavailable).
             ListItem(
                 headlineContent = { Text(dickordNickLabel(nick, relayIdentity)) },
@@ -245,7 +247,7 @@ internal fun NickKickDialog(
                 .testTag("nick_sheet_kick_dialog"),
         title = { Text(stringResource(R.string.nick_sheet_kick_title, nick)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ReasonPresetChips(
                     current = reason,
                     onSelect = { reason = it },

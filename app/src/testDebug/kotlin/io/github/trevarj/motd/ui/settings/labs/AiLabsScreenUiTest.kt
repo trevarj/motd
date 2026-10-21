@@ -15,8 +15,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -45,6 +47,8 @@ import io.github.trevarj.motd.ai.AiTranscriptionSettingsRecord
 import io.github.trevarj.motd.ai.AiTranslationTarget
 import io.github.trevarj.motd.ai.TextModelArtifact
 import io.github.trevarj.motd.ai.TranscriptionSettings
+import io.github.trevarj.motd.ai.aiTranslationTargets
+import io.github.trevarj.motd.ui.ai.AiTranslationTargetPicker
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.CoroutineScope
@@ -72,6 +76,33 @@ class AiLabsScreenUiTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun languagePickerExposesSelectedStateAndDispatchesOnlyTheChosenLanguage() {
+        val english = aiTranslationTargets.first { it.code == "en" }
+        val french = aiTranslationTargets.first { it.code == "fr" }
+        var selected by mutableStateOf(english)
+        val choices = mutableListOf<String>()
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                AiTranslationTargetPicker(selected, {
+                    selected = it
+                    choices += it.code
+                }, {})
+            }
+        }
+        compose.onNodeWithTag("ai_language_en").assertIsSelected()
+        compose
+            .onNodeWithTag("ai_language_fr")
+            .performScrollTo()
+            .performClick()
+            .assertIsSelected()
+        compose.onNodeWithTag("ai_language_en").assertIsNotSelected()
+        compose.runOnIdle {
+            assertEquals(listOf("fr"), choices)
+            assertEquals(french, selected)
+        }
+    }
 
     @Test
     fun textSetupStylesAndTargetPersistWithoutImplicitEnable() {

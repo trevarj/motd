@@ -1,12 +1,17 @@
 package io.github.trevarj.motd.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
@@ -15,6 +20,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
@@ -44,6 +50,14 @@ data class ChannelNotificationPresentation(
     val loading: Boolean = true,
     val available: Boolean = false,
 )
+
+internal fun ChannelNotificationPresentation.notificationIcon(): ImageVector =
+    when {
+        loading || !available -> Icons.Outlined.Notifications
+        watch != null -> Icons.Outlined.NotificationsActive
+        muted || mode == NotificationMode.OFF -> Icons.Outlined.NotificationsOff
+        else -> Icons.Outlined.Notifications
+    }
 
 fun deriveChannelNotificationPresentation(
     settingsState: NotificationSettingsState,
@@ -139,20 +153,20 @@ fun ChannelNotificationSheet(
     ) {
         SheetSystemBars()
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            SectionHeader(stringResource(R.string.channelinfo_notifications))
+            Box(Modifier.padding(horizontal = 12.dp)) { SectionHeader(stringResource(R.string.channelinfo_notifications)) }
             if (presentation.loading) {
-                CircularProgressIndicator(Modifier.testTag("${tagPrefix}_notify_loading"))
-                Text(stringResource(R.string.notification_settings_loading))
+                CircularProgressIndicator(Modifier.padding(horizontal = 16.dp).testTag("${tagPrefix}_notify_loading"))
+                Text(stringResource(R.string.notification_settings_loading), modifier = Modifier.padding(horizontal = 16.dp))
             } else {
                 if (presentation.available) {
-                    Text(presentation.summary())
+                    Text(presentation.summary(), modifier = Modifier.padding(horizontal = 16.dp))
                 } else {
-                    Text(stringResource(R.string.notification_channel_unavailable))
+                    Text(stringResource(R.string.notification_channel_unavailable), modifier = Modifier.padding(horizontal = 16.dp))
                 }
-                SectionHeader(stringResource(R.string.notification_channel_policy))
+                Box(Modifier.padding(horizontal = 12.dp)) { SectionHeader(stringResource(R.string.notification_channel_policy)) }
                 Column(Modifier.selectableGroup()) {
                     RadioRow(
                         label =
@@ -182,8 +196,8 @@ fun ChannelNotificationSheet(
                         )
                     }
                 }
-                SectionHeader(stringResource(R.string.notification_watch_override))
-                Text(stringResource(R.string.notification_watch_explanation))
+                Box(Modifier.padding(horizontal = 12.dp)) { SectionHeader(stringResource(R.string.notification_watch_override)) }
+                Text(stringResource(R.string.notification_watch_explanation), modifier = Modifier.padding(horizontal = 16.dp))
                 ChannelWatchDuration.entries.forEach { duration ->
                     SettingsActionRow(
                         title = duration.label(),
@@ -207,7 +221,7 @@ fun ChannelNotificationSheet(
                     )
                 }
             }
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(onClick = onDismiss, modifier = Modifier.padding(horizontal = 8.dp)) { Text(stringResource(R.string.action_cancel)) }
         }
     }
 }

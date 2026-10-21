@@ -222,6 +222,7 @@ fun ChatListRowItem(
     avatarName: String = row.displayName,
     avatarIsChannel: Boolean = row.type == BufferType.CHANNEL,
     avatarModel: String? = row.avatarOverrideModel,
+    interactionsEnabled: Boolean = true,
 ) {
     // Resolved per-nick color (also used to tint the friend star), matching sender coloring.
     val nickColor = LocalNickColors.current.nick(row.displayName, MaterialTheme.colorScheme.onSurfaceVariant)
@@ -289,7 +290,7 @@ fun ChatListRowItem(
                 // Per-buffer handle so the harness selects a specific row (display names collide).
                 .testTag("chatlist_row_${row.bufferId}")
                 .semantics { this.selected = selected || active }
-                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .then(if (interactionsEnabled) Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick) else Modifier)
                 .defaultMinSize(minHeight = 48.dp)
                 .then(
                     if (presenceDescription != null) {

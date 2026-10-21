@@ -82,6 +82,7 @@ data class GestureEditorUiState(
     val isDefault: Boolean = true,
     val chats: List<GestureChatChoice> = emptyList(),
     val networks: List<GestureNetworkChoice> = emptyList(),
+    val previewRoot: GestureNode.Submenu? = null,
 )
 
 /** Labels a freshly added node wears until the user renames it. */
@@ -158,6 +159,7 @@ class GestureMenuEditorViewModel internal constructor(
                 GestureEditorUiState(
                     loaded = true,
                     rows = gestureEditorRows(draft),
+                    previewRoot = draft.root,
                     violations = violations,
                     dirty = draft != stored,
                     // An invalid tree is never savable, however dirty it is.

@@ -12,8 +12,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Logout
@@ -93,6 +97,7 @@ import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.botDisplayName
+import io.github.trevarj.motd.ui.components.notificationIcon
 import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
 import io.github.trevarj.motd.ui.settings.foolEditorPreferences
@@ -272,6 +277,9 @@ fun ChannelInfoScreen(
         open = avatarEditorOpen,
         currentModel = state.buffer?.avatarOverrideModel,
         isChannel = true,
+        identity = "buffer:${state.buffer?.id}:${state.buffer?.displayName}",
+        name = state.buffer?.displayName.orEmpty(),
+        networkId = state.buffer?.networkId,
         onDismiss = { avatarEditorOpen = false },
         onImport = {
             viewModel.importAvatar(it)
@@ -761,6 +769,28 @@ internal fun topicEditShowsError(mutation: TopicMutationState): Boolean = mutati
 
 internal fun topicEditAccepted(mutation: TopicMutationState): Boolean = mutation is TopicMutationState.Accepted
 
+@Composable
+private fun TopicText(
+    topic: String,
+    modifier: Modifier = Modifier,
+    linksEnabled: Boolean = true,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val fill = scheme.background
+    val ink = ensureContrast(readingInk(scheme), listOf(fill), MESSAGE_TEXT_CONTRAST)
+    val formatted =
+        io.github.trevarj.motd.ui.components
+            .linkifiedBody(topic, scheme.primary, mentionsActive = false, containerColor = fill, contentColor = ink)
+    val displayed =
+        if (linksEnabled) {
+            formatted
+        } else {
+            androidx.compose.ui.text
+                .AnnotatedString(formatted.text, formatted.spanStyles, formatted.paragraphStyles)
+        }
+    Text(displayed, style = MaterialTheme.typography.bodyMedium, color = ink, modifier = modifier)
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 internal fun TopicEditDialog(
@@ -770,7 +800,7 @@ internal fun TopicEditDialog(
     onAccepted: () -> Unit,
     onSave: (String) -> Unit,
 ) {
-    var text by remember { mutableStateOf(initial) }
+    val text = rememberTextFieldState(initialText = initial)
     val submitting = !topicEditSaveEnabled(mutation)
     LaunchedEffect(mutation) {
         if (topicEditAccepted(mutation)) onAccepted()
@@ -785,16 +815,18 @@ internal fun TopicEditDialog(
                 .testTag("channelinfo_topic_edit_dialog"),
         title = { Text(stringResource(R.string.channelinfo_topic_edit_title)) },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 androidx.compose.material3.OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
+                    state = text,
                     label = { Text(stringResource(R.string.channelinfo_topic_edit_hint)) },
-                    minLines = 2,
-                    maxLines = 6,
+                    lineLimits = TextFieldLineLimits.MultiLine(minHeightInLines = 2, maxHeightInLines = 6),
                     enabled = !submitting,
                     modifier = Modifier.testTag("channelinfo_topic_edit_text"),
                 )
+                Text(stringResource(R.string.settings_topic_preview), style = MaterialTheme.typography.labelLarge)
+                androidx.compose.material3.Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    TopicText(text.text.toString(), Modifier.padding(12.dp).testTag("channelinfo_topic_preview"), linksEnabled = false)
+                }
                 if (topicEditShowsError(mutation)) {
                     Text(
                         text = stringResource(R.string.channelinfo_topic_edit_failed),
@@ -810,7 +842,7 @@ internal fun TopicEditDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(text) },
+                onClick = { onSave(text.text.toString()) },
                 enabled = !submitting,
                 modifier = Modifier.testTag("channelinfo_topic_edit_save"),
             ) {
@@ -909,22 +941,7 @@ private fun ChannelHeader(
             ) {
                 val topic = buffer.topic?.takeIf { it.isNotBlank() }
                 if (topic != null) {
-                    val scheme = MaterialTheme.colorScheme
-                    val topicFill = scheme.background
-                    val readingInk = ensureContrast(readingInk(scheme), listOf(topicFill), MESSAGE_TEXT_CONTRAST)
-                    Text(
-                        text =
-                            io.github.trevarj.motd.ui.components.linkifiedBody(
-                                text = topic,
-                                linkColor = MaterialTheme.colorScheme.primary,
-                                mentionsActive = false,
-                                containerColor = topicFill,
-                                contentColor = readingInk,
-                            ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = readingInk,
-                        modifier = Modifier.weight(1f, fill = false).testTag("channelinfo_topic"),
-                    )
+                    TopicText(topic, Modifier.weight(1f, fill = false).testTag("channelinfo_topic"))
                 }
                 IconButton(onClick = onEditTopic) {
                     Icon(
@@ -978,11 +995,7 @@ private fun NotificationSummaryRow(
         supportingContent = { Text(presentation.summary()) },
         leadingContent = {
             Icon(
-                if (presentation.available && presentation.watch == null && (presentation.muted || presentation.mode == NotificationMode.OFF)) {
-                    Icons.Outlined.NotificationsOff
-                } else {
-                    Icons.Outlined.Notifications
-                },
+                presentation.notificationIcon(),
                 contentDescription = null,
             )
         },

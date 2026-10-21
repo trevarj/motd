@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -43,7 +42,6 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
@@ -342,6 +340,17 @@ fun NetworkSettingsContent(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().testTag("network_avatar_url"),
                     )
+                    io.github.trevarj.motd.ui.components.CurrentAvatarInspection(
+                        state.entity?.nick.orEmpty(),
+                        isChannel = false,
+                        currentModel = (state.selfAvatar as? io.github.trevarj.motd.avatar.SelfAvatarSetting.Set)?.url,
+                    )
+                    io.github.trevarj.motd.ui.components.ExplicitAvatarUrlPreview(
+                        url = state.avatarInput,
+                        networkId = state.entity?.id,
+                        identity = "network:${state.entity?.id}:${state.entity?.nick}",
+                        isChannel = false,
+                    )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
                             onClick = onPublishAvatar,
@@ -368,27 +377,17 @@ fun NetworkSettingsContent(
                 modifier = targetModifier,
             ) {
                 if (state.entity?.role == NetworkRole.BOUNCER_ROOT) {
-                    ListItem(
-                        headlineContent = { Text(stringResource(R.string.network_settings_bouncer_networks)) },
-                        supportingContent = { Text(stringResource(R.string.network_settings_bouncer_networks_desc)) },
-                        modifier =
-                            Modifier
-                                .testTag("network_settings_bouncer_networks")
-                                .clickable { onOpenBouncerNetworks() },
-                        colors =
-                            androidx.compose.material3.ListItemDefaults
-                                .colors(containerColor = Color.Transparent),
+                    SettingsNavigationRow(
+                        title = stringResource(R.string.network_settings_bouncer_networks),
+                        summary = stringResource(R.string.network_settings_bouncer_networks_desc),
+                        modifier = Modifier.testTag("network_settings_bouncer_networks"),
+                        onClick = onOpenBouncerNetworks,
                     )
                 }
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.network_settings_server_messages)) },
-                    modifier =
-                        Modifier
-                            .testTag("network_settings_server_messages")
-                            .clickable { onOpenServerMessages() },
-                    colors =
-                        androidx.compose.material3.ListItemDefaults
-                            .colors(containerColor = Color.Transparent),
+                SettingsNavigationRow(
+                    title = stringResource(R.string.network_settings_server_messages),
+                    modifier = Modifier.testTag("network_settings_server_messages"),
+                    onClick = onOpenServerMessages,
                 )
                 if (state.entity?.role != NetworkRole.BOUNCER_ROOT) {
                     ListItem(
@@ -426,16 +425,11 @@ fun NetworkSettingsContent(
                                 .colors(containerColor = Color.Transparent),
                     )
                 }
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.network_settings_network_tools)) },
-                    supportingContent = { Text(stringResource(R.string.network_settings_network_tools_desc)) },
-                    modifier =
-                        Modifier
-                            .testTag("network_settings_network_tools")
-                            .clickable { onOpenNetworkTools() },
-                    colors =
-                        androidx.compose.material3.ListItemDefaults
-                            .colors(containerColor = Color.Transparent),
+                SettingsNavigationRow(
+                    title = stringResource(R.string.network_settings_network_tools),
+                    summary = stringResource(R.string.network_settings_network_tools_desc),
+                    modifier = Modifier.testTag("network_settings_network_tools"),
+                    onClick = onOpenNetworkTools,
                 )
             }
         }
@@ -979,20 +973,7 @@ private fun ObfsOption(
     label: String,
     onSelect: (ObfsMode) -> Unit,
 ) {
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .selectable(
-                    selected = mode == selected,
-                    role = androidx.compose.ui.semantics.Role.RadioButton,
-                    onClick = { onSelect(mode) },
-                ).padding(vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = mode == selected, onClick = null)
-        Text(label, modifier = Modifier.padding(start = 8.dp))
-    }
+    RadioRow(label, mode == selected, true, { onSelect(mode) })
 }
 
 @Preview

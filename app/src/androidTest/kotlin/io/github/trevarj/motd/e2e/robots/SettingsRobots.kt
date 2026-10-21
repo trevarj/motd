@@ -54,7 +54,15 @@ internal class SettingsRobot(
     fun selectIrcSprites() {
         scrollToAndClick("settings_avatar_style_picker")
         assertDisplayed("settings_avatar_style_sheet")
+        scrollContainerTo("settings_avatar_style_sheet_options", "settings_avatar_style_irc_sprite")
         click("settings_avatar_style_irc_sprite")
+        compose.onNodeWithTag("settings_avatar_style_irc_sprite").assertIsSelected()
+        assertDisplayed("settings_avatar_style_sheet")
+        scrollContainerTo("settings_avatar_style_sheet_options", "settings_avatar_preview_irc_sprite")
+        assertDisplayed("settings_avatar_preview_irc_sprite")
+        val sheet = hasTestTag("settings_avatar_style_sheet")
+        val dismiss = SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and (sheet or hasAnyAncestor(sheet))
+        compose.onAllNodes(dismiss, useUnmergedTree = true)[0].performSemanticsAction(SemanticsActions.Dismiss)
         awaitTagGone("settings_avatar_style_sheet")
     }
 
@@ -103,14 +111,17 @@ internal class SettingsRobot(
         val modes = listOf("dimmed", "collapse", "hide")
         val original =
             modes.single { mode ->
+                scrollContainerTo("settings_fools_mode_sheet_options", "settings_fools_mode_$mode")
                 compose
                     .onNodeWithTag("settings_fools_mode_$mode", useUnmergedTree = true)
                     .fetchSemanticsNode()
                     .config
                     .getOrNull(SemanticsProperties.Selected) == true
             }
+        scrollContainerTo("settings_fools_mode_sheet_options", "settings_fools_mode_dimmed")
         click("settings_fools_mode_dimmed")
-        awaitTagGone("settings_fools_mode_sheet")
+        awaitFoolSelection("settings_fools_mode_dimmed")
+        dismissChoiceSheet("settings_fools_mode_sheet")
         scrollToAndClick("settings_fools")
         replace("manage_nick_input", nick)
         click("manage_nick_add")
@@ -150,13 +161,15 @@ internal class SettingsRobot(
 
     private fun selectDefaultFoolVisibility(mode: String) {
         scrollToAndClick("settings_fools_mode_picker")
+        scrollContainerTo("settings_fools_mode_sheet_options", "settings_fools_mode_$mode")
         click("settings_fools_mode_$mode")
-        awaitTagGone("settings_fools_mode_sheet")
+        awaitFoolSelection("settings_fools_mode_$mode")
+        dismissChoiceSheet("settings_fools_mode_sheet")
         // Reopen to prove this is persisted selection, not an old picker-local value.
         scrollToAndClick("settings_fools_mode_picker")
+        scrollContainerTo("settings_fools_mode_sheet_options", "settings_fools_mode_$mode")
         compose.onNodeWithTag("settings_fools_mode_$mode", useUnmergedTree = true).assertIsSelected()
-        click("settings_fools_mode_$mode")
-        awaitTagGone("settings_fools_mode_sheet")
+        dismissChoiceSheet("settings_fools_mode_sheet")
     }
 
     private fun awaitFoolSelection(tag: String) {
@@ -175,6 +188,12 @@ internal class SettingsRobot(
                 if (enabled) node.assertIsOn() else node.assertIsOff()
             }.isSuccess
         }
+    }
+
+    private fun dismissChoiceSheet(tag: String) {
+        val sheet = hasTestTag(tag)
+        compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and (sheet or hasAnyAncestor(sheet)), useUnmergedTree = true)[0].performSemanticsAction(SemanticsActions.Dismiss)
+        awaitTagGone(tag)
     }
 
     private fun dismissFoolSettings() {

@@ -6,7 +6,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.outlined.CloudUpload
@@ -21,6 +24,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,10 +34,12 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.attachment.isLocalMediaUri
 import io.github.trevarj.motd.avatar.validateAvatarUrl
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
@@ -43,6 +49,9 @@ fun AvatarEditorSheet(
     open: Boolean,
     currentModel: String?,
     isChannel: Boolean,
+    identity: String,
+    name: String,
+    networkId: Long?,
     onDismiss: () -> Unit,
     onImport: (Uri) -> Unit,
     onUpload: () -> Unit,
@@ -52,31 +61,50 @@ fun AvatarEditorSheet(
     onClearShared: () -> Unit = {},
 ) {
     if (!open) return
-    var url by remember(currentModel) { mutableStateOf(currentModel?.takeIf { validateAvatarUrl(it) != null }.orEmpty()) }
-    var invalid by remember { mutableStateOf(false) }
-    var confirmClear by remember { mutableStateOf(false) }
+    var url by remember(identity, networkId, currentModel) { mutableStateOf(currentModel?.takeIf { validateAvatarUrl(it) != null }.orEmpty()) }
+    var invalid by remember(identity, networkId) { mutableStateOf(false) }
+    var confirmClear by remember(identity, networkId) { mutableStateOf(false) }
+    var localProposal by remember(identity, networkId, currentModel) { mutableStateOf<Uri?>(null) }
+    var localImportError by remember(identity, networkId, currentModel) { mutableStateOf(false) }
+    var importOwner by remember { mutableStateOf<Triple<String, Long?, String?>?>(null) }
     val imagePicker =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            uri?.let(onImport)
+            if (importOwner == Triple(identity, networkId, currentModel)) {
+                localImportError = uri != null && !uri.isLocalMediaUri()
+                localProposal = uri?.takeIf { it.isLocalMediaUri() }
+            }
+            importOwner = null
         }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         modifier = Modifier.testTag("avatar_editor_sheet"),
     ) {
         SheetSystemBars()
-        Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
             Text(
                 stringResource(R.string.avatar_editor_title),
                 style = androidx.compose.material3.MaterialTheme.typography.headlineSmall,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
+            CurrentAvatarInspection(name, isChannel, currentModel, Modifier.padding(horizontal = 16.dp))
+            if (localImportError) Text(stringResource(R.string.settings_local_media_required), color = androidx.compose.material3.MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp).testTag("avatar_editor_import_error"))
+            localProposal?.let { uri ->
+                LocalAvatarProposal(uri, isChannel, Modifier.padding(horizontal = 16.dp))
+                TextButton(onClick = { if (uri.isLocalMediaUri()) onImport(uri) }, enabled = uri.isLocalMediaUri(), modifier = Modifier.padding(horizontal = 8.dp).testTag("avatar_editor_use_image")) { Text(stringResource(R.string.settings_avatar_use_image)) }
+                TextButton(onClick = { localProposal = null }, modifier = Modifier.padding(horizontal = 8.dp).testTag("avatar_editor_discard_image")) { Text(stringResource(R.string.action_cancel)) }
+            }
             AvatarEditorAction(
                 icon = Icons.Outlined.Image,
                 title = stringResource(R.string.avatar_import),
                 supporting = stringResource(R.string.avatar_import_desc),
                 tag = "avatar_editor_import",
-            ) { imagePicker.launch(arrayOf("image/*")) }
+            ) {
+                localImportError = false
+                importOwner = Triple(identity, networkId, currentModel)
+                imagePicker.launch(arrayOf("image/*"))
+            }
             AvatarEditorAction(
                 icon = Icons.Outlined.CloudUpload,
                 title = stringResource(R.string.avatar_upload),
@@ -90,6 +118,9 @@ fun AvatarEditorSheet(
                 onValueChange = {
                     url = it
                     invalid = false
+                    localImportError = false
+                    localProposal = null
+                    importOwner = null
                 },
                 label = { Text(stringResource(R.string.avatar_url)) },
                 supportingText = {
@@ -107,6 +138,7 @@ fun AvatarEditorSheet(
                 },
                 modifier = Modifier.padding(horizontal = 8.dp).testTag("avatar_editor_url_save"),
             ) { Text(stringResource(R.string.avatar_url_save)) }
+            ExplicitAvatarUrlPreview(url, networkId, identity, isChannel, Modifier.padding(horizontal = 16.dp))
             AvatarEditorAction(
                 icon = Icons.Filled.Delete,
                 title = stringResource(R.string.avatar_reset_local),
@@ -127,6 +159,7 @@ fun AvatarEditorSheet(
                     tag = "avatar_editor_clear_shared",
                 ) { confirmClear = true }
             }
+            TextButton(onClick = onDismiss, modifier = Modifier.padding(horizontal = 8.dp).testTag("avatar_editor_cancel")) { Text(stringResource(R.string.action_cancel)) }
         }
     }
 
@@ -163,7 +196,12 @@ private fun AvatarEditorAction(
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = supporting?.let { value -> { Text(value) } },
-        leadingContent = { Icon(icon, contentDescription = title) },
-        modifier = Modifier.fillMaxWidth().testTag(tag).clickable(onClick = onClick),
+        leadingContent = { Icon(icon, contentDescription = null) },
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .testTag(tag)
+                .clickable(role = Role.Button, onClick = onClick),
     )
 }

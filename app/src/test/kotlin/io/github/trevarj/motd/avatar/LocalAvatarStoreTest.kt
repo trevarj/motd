@@ -44,6 +44,36 @@ class LocalAvatarStoreTest {
         assertTrue(File(checkNotNull(Uri.parse(second).path)).exists())
     }
 
+    @Test fun imports_existing_local_android_resource_images() {
+        val resource = Uri.parse("android.resource://${context.packageName}/${io.github.trevarj.motd.R.drawable.motd_logo_mark}")
+        val imported = store.import(resource).getOrThrow()
+        assertTrue(store.owns(imported))
+        assertTrue(File(checkNotNull(Uri.parse(imported).path)).exists())
+    }
+
+    @Test fun rejects_remote_picker_uris_without_replacing_the_existing_avatar() {
+        val existing = store.import(Uri.fromFile(source)).getOrThrow()
+        val before =
+            File(context.filesDir, LocalAvatarStore.DIRECTORY)
+                .listFiles()
+                .orEmpty()
+                .map(File::getName)
+                .toSet()
+        assertTrue(store.import(Uri.parse("https://avatar.invalid/image.png")).isFailure)
+        assertTrue(store.import(Uri.parse("http://avatar.invalid/image.png")).isFailure)
+        assertTrue(store.import(Uri.parse("data:image/png;base64,AAAA")).isFailure)
+        assertTrue(store.import(Uri.parse("unsupported://image")).isFailure)
+        assertTrue(File(checkNotNull(Uri.parse(existing).path)).exists())
+        org.junit.Assert.assertEquals(
+            before,
+            File(context.filesDir, LocalAvatarStore.DIRECTORY)
+                .listFiles()
+                .orEmpty()
+                .map(File::getName)
+                .toSet(),
+        )
+    }
+
     @Test fun rejects_invalid_and_oversized_files_without_leaving_partial_files() {
         val invalid = File(context.cacheDir, "not-image").apply { writeText("nope") }
         assertTrue(store.import(Uri.fromFile(invalid)).isFailure)

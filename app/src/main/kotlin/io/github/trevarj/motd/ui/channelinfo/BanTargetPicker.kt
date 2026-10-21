@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
@@ -15,7 +17,6 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -79,7 +80,7 @@ fun BanTargetPicker(
     // One place drives the address lookup, so a preselected nick and a dropdown pick behave alike.
     LaunchedEffect(state.nick) { onNickSelected(state.nick) }
 
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(modifier = modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ExposedDropdownMenuBox(
             expanded = membersExpanded && !locked,
             onExpandedChange = { if (!locked) membersExpanded = it },
@@ -199,7 +200,7 @@ fun BanTargetDialog(
                 .testTag(dialogTag),
         title = { Text(title) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 BanTargetPicker(
                     state = target,
                     members = members,
@@ -262,32 +263,12 @@ private fun ScopeOption(
     tag: String,
     enabled: Boolean = true,
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .selectable(selected = selected, enabled = enabled, onClick = onSelect)
-                .padding(vertical = 2.dp)
-                .testTag(tag),
-    ) {
-        RadioButton(selected = selected, onClick = onSelect, enabled = enabled)
-        Column(modifier = Modifier.padding(start = 4.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                color =
-                    if (enabled) {
-                        MaterialTheme.colorScheme.onSurface
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-            )
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
+    io.github.trevarj.motd.ui.settings.RadioRow(
+        label = title,
+        subtitle = description,
+        selected = selected,
+        enabled = enabled,
+        onClick = onSelect,
+        modifier = Modifier.testTag(tag),
+    )
 }

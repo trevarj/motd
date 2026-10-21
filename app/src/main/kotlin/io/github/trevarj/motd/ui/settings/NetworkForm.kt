@@ -25,7 +25,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -764,16 +763,7 @@ private fun NickServSyntaxOption(
     label: String,
     onAuthChange: (AuthForm) -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(
-            selected = syntax == auth.nickServIdentifySyntax,
-            onClick = { onAuthChange(auth.copy(nickServIdentifySyntax = syntax)) },
-        )
-        Text(label, modifier = Modifier.padding(start = 8.dp))
-    }
+    RadioRow(label, syntax == auth.nickServIdentifySyntax, true, { onAuthChange(auth.copy(nickServIdentifySyntax = syntax)) })
 }
 
 @Composable
@@ -783,13 +773,7 @@ private fun AuthOption(
     label: String,
     onSelect: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = mode == selected, onClick = onSelect)
-        Text(label, modifier = Modifier.padding(start = 8.dp))
-    }
+    RadioRow(label, mode == selected, true, onSelect)
 }
 
 // ---- Mapping helpers between form types and NetworkEntity ------------------------------------

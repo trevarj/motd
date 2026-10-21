@@ -63,6 +63,11 @@ fun presentChatFolders(
     return FolderChatListPresentation(pinned, presented, sectionChatList(remaining, friends, fools))
 }
 
+internal fun folderAllRows(
+    rows: List<ChatListRow>,
+    includeFolderChats: Boolean,
+): List<ChatListRow> = if (includeFolderChats) rows else rows.filter { it.folderId == null }
+
 /** Non-empty tabs from already-scoped active rows. Raw assignments, pins, and stored order survive. */
 fun presentFolderTabs(
     rows: List<ChatListRow>,

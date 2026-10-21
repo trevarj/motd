@@ -6,17 +6,22 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -250,13 +255,16 @@ class ChatSettingsComposerToolsTest {
         }
 
         var selected = ChatListSwipeAction.ARCHIVE
+        compose.onNodeWithTag("settings_chat_list_swipe_picker").performScrollTo().performClick()
         ChatListSwipeAction.entries.forEach { action ->
-            compose.onNodeWithTag("settings_chat_list_swipe_picker").performScrollTo().performClick()
-            compose.onNodeWithTag("settings_chat_list_swipe_sheet_options").performScrollToIndex(selected.ordinal + 1)
+            val options = compose.onNodeWithTag("settings_chat_list_swipe_sheet_options")
+            options.performScrollToNode(hasTestTag("settings_chat_list_swipe_${selected.name.lowercase()}"))
             compose.onNodeWithTag("settings_chat_list_swipe_${selected.name.lowercase()}").assertIsSelected()
-            compose.onNodeWithTag("settings_chat_list_swipe_sheet_options").performScrollToIndex(action.ordinal + 1)
-            compose.onNodeWithTag("settings_chat_list_swipe_${action.name.lowercase()}").performClick()
-            compose.onNodeWithTag("settings_chat_list_swipe_sheet").assertDoesNotExist()
+            options.performScrollToNode(hasTestTag("settings_chat_list_swipe_${action.name.lowercase()}"))
+            compose.onNodeWithTag("settings_chat_list_swipe_${action.name.lowercase()}").performClick().assertIsSelected()
+            compose.onNodeWithTag("settings_chat_list_swipe_sheet").assertIsDisplayed()
+            options.performScrollToNode(hasTestTag("swipe_example_${action.name.lowercase()}"))
+            compose.onNodeWithTag("swipe_example_${action.name.lowercase()}").assertExists()
             selected = action
         }
         compose.runOnIdle { assertEquals(ChatListSwipeAction.entries.toList(), selections) }
@@ -317,7 +325,12 @@ class ChatSettingsComposerToolsTest {
             .assertIsOff()
             .performClick()
         compose.onNodeWithTag("settings_mentions_location_picker").performScrollTo().performClick()
-        compose.onNodeWithTag("settings_mentions_location_folder_tab").performClick()
+        compose.onNodeWithTag("settings_mentions_location_sheet_options").performScrollToNode(hasTestTag("settings_mentions_location_folder_tab"))
+        compose.onNodeWithTag("settings_mentions_location_folder_tab").performClick().assertIsSelected()
+        compose.onNodeWithTag("settings_mentions_location_sheet_options").performScrollToNode(hasTestTag("mentions_example_folder_tab"))
+        compose.onNodeWithTag("mentions_example_folder_tab").assertExists()
+        val sheet = hasTestTag("settings_mentions_location_sheet")
+        compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and (sheet or hasAnyAncestor(sheet)), useUnmergedTree = true)[0].performSemanticsAction(SemanticsActions.Dismiss)
         compose.runOnIdle {
             assertEquals(true, settings.value.mentionsEnabled)
             assertEquals(MentionsPlacement.FOLDER_TAB, settings.value.mentionsPlacement)
@@ -422,6 +435,23 @@ class ChatSettingsComposerToolsTest {
             assertEquals(600, saved.gapMs)
             assertTrue(!reader.controller.state.value.enabled && reader.synth.utterances.isEmpty())
             compose.onNodeWithTag("settings_read_aloud_options").performScrollTo().performClick()
+            compose
+                .onNodeWithTag("read_aloud_rate")
+                .performScrollTo()
+                .assertContentDescriptionEquals(context.getString(io.github.trevarj.motd.R.string.read_aloud_rate_name))
+                .assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, context.getString(io.github.trevarj.motd.R.string.settings_font_size_percent, 120)))
+            compose
+                .onNodeWithTag("read_aloud_pitch")
+                .performScrollTo()
+                .assertContentDescriptionEquals(context.getString(io.github.trevarj.motd.R.string.read_aloud_pitch_name))
+                .assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, context.getString(io.github.trevarj.motd.R.string.settings_font_size_percent, 80)))
+            compose
+                .onNodeWithTag("read_aloud_gap")
+                .performScrollTo()
+                .assertContentDescriptionEquals(context.getString(io.github.trevarj.motd.R.string.read_aloud_gap_name))
+                .assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, context.getString(io.github.trevarj.motd.R.string.read_aloud_gap_value, 600)))
+            compose.onNodeWithTag("read_aloud_voice").performScrollTo().performClick()
+            compose.onNodeWithTag("read_aloud_voice_installed-en-US").assertIsSelected().performClick()
             compose.onNodeWithTag("read_aloud_preview").performScrollTo().performClick()
             compose.waitUntil(5_000) {
                 compose.waitForIdle()

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -362,12 +363,25 @@ fun AiTranslationTargetPicker(
     var other by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf(if (selected?.code == "other") selected.name else "") }
     ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("ai_translation_picker")) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp)) {
-            Text(stringResource(R.string.ai_text_translation_language), style = MaterialTheme.typography.titleLarge)
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .selectableGroup()
+                .padding(vertical = 12.dp),
+        ) {
+            Text(stringResource(R.string.ai_text_translation_language), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
             aiTranslationTargets.forEach { target ->
-                TextButton(onClick = { onSelected(target) }, modifier = Modifier.fillMaxWidth().testTag("ai_language_${target.code}")) { Text(target.name + if (target == selected) " ✓" else "") }
+                io.github.trevarj.motd.ui.settings
+                    .RadioRow(target.name, selected == target, true, { onSelected(target) }, Modifier.testTag("ai_language_${target.code}"))
             }
-            TextButton(onClick = { other = true }, modifier = Modifier.testTag("ai_language_other")) { Text(stringResource(R.string.ai_text_other)) }
+            io.github.trevarj.motd.ui.settings.RadioRow(
+                label = if (selected?.code == "other") stringResource(R.string.ai_text_other) + " · " + selected.name else stringResource(R.string.ai_text_other),
+                selected = selected?.code == "other",
+                enabled = true,
+                onClick = { other = true },
+                modifier = Modifier.testTag("ai_language_other"),
+            )
         }
     }
     if (other) {
@@ -375,7 +389,7 @@ fun AiTranslationTargetPicker(
             onDismissRequest = { other = false },
             title = { Text(stringResource(R.string.ai_text_other_language)) },
             text = {
-                Column {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
                     OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.ai_text_language_name)) }, singleLine = true, modifier = Modifier.testTag("ai_language_other_name"))
                     Text(stringResource(R.string.ai_text_other_bounds))
                 }
@@ -412,7 +426,7 @@ fun AiCustomStylesSheet(
         var instruction by remember(original.id) { mutableStateOf(original.instruction) }
         val candidate = original.copy(name = name.trim(), instruction = instruction)
         AlertDialog(onDismissRequest = { editing = null }, title = { Text(stringResource(R.string.ai_text_writing_style)) }, text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.ai_text_style_name)) }, modifier = Modifier.testTag("ai_style_name"))
                 OutlinedTextField(instruction, { instruction = it }, label = { Text(stringResource(R.string.ai_text_style_instruction)) }, modifier = Modifier.testTag("ai_style_instruction"))
             }

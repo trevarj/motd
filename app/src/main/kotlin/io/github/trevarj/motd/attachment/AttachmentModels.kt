@@ -42,6 +42,13 @@ enum class EndpointPreset(
     CUSTOM(null),
 }
 
+/** External picker results may name only local resolver/file data, never a network image. */
+internal fun Uri.isLocalMediaUri(): Boolean =
+    when (scheme) {
+        "content", "file", "android.resource" -> true
+        else -> false
+    }
+
 sealed interface AttachmentSource {
     data class Text(
         val text: String,

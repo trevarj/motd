@@ -3,10 +3,14 @@ package io.github.trevarj.motd.ui.channelinfo
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
@@ -413,7 +417,7 @@ private fun KeyDialog(
 
 internal val LIMIT_PRESETS = listOf(25, 50, 100, 500)
 
-@OptIn(ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalLayoutApi::class)
 @Composable
 private fun LimitDialog(
     onDismiss: () -> Unit,
@@ -430,7 +434,7 @@ private fun LimitDialog(
         confirmEnabled = parsed != null,
         onConfirm = { parsed?.let(onSet) },
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             LIMIT_PRESETS.forEach { preset ->
                 // A chip fills the field rather than replacing it, so the value stays editable.
                 FilterChip(
@@ -593,7 +597,7 @@ private fun ControlDialog(
                 .semantics { testTagsAsResourceId = true }
                 .testTag(tag),
         title = { Text(title) },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { body() } },
+        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) { body() } },
         confirmButton = {
             TextButton(
                 onClick = onConfirm,

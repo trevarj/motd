@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -48,7 +49,6 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -65,6 +65,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -78,6 +80,7 @@ import io.github.trevarj.motd.gesture.GestureProviderKind
 import io.github.trevarj.motd.gesture.MAX_RING_SLICES
 import io.github.trevarj.motd.gesture.defaultGestureMenu
 import io.github.trevarj.motd.gesture.vector
+import io.github.trevarj.motd.ui.settings.RadioRow
 import io.github.trevarj.motd.ui.settings.SettingsScaffold
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
@@ -156,6 +159,7 @@ fun GestureMenuEditorContent(
     var binding by remember { mutableStateOf<GestureNode.Leaf?>(null) }
     var configuring by remember { mutableStateOf<GestureNode.Provider?>(null) }
     var resetting by remember { mutableStateOf(false) }
+    var previewing by remember { mutableStateOf(false) }
 
     SettingsScaffold(
         title = stringResource(R.string.gesture_editor_title),
@@ -186,6 +190,11 @@ fun GestureMenuEditorContent(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 24.dp),
             ) {
+                item {
+                    TextButton(onClick = { previewing = true }, enabled = state.previewRoot != null, modifier = Modifier.testTag("gesture_editor_preview")) {
+                        Text(stringResource(R.string.settings_preview))
+                    }
+                }
                 items(state.rows, key = { it.node.id }) { row ->
                     GestureEditorRowItem(
                         row = row,
@@ -204,6 +213,12 @@ fun GestureMenuEditorContent(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
+        }
+    }
+    if (previewing) {
+        state.previewRoot?.let { root ->
+            io.github.trevarj.motd.gesture.radial
+                .GestureMenuPreview(root, onDismiss = { previewing = false })
         }
     }
 
@@ -715,16 +730,7 @@ private fun SheetOption(
     onClick: () -> Unit,
     supporting: String? = null,
 ) {
-    ListItem(
-        headlineContent = { Text(label) },
-        supportingContent = supporting?.let { text -> { Text(text) } },
-        trailingContent = { RadioButton(selected = selected, onClick = null) },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier =
-            Modifier
-                .testTag(tag)
-                .selectable(selected = selected, role = Role.RadioButton, onClick = onClick),
-    )
+    RadioRow(label, selected, true, onClick, Modifier.testTag(tag), subtitle = supporting)
 }
 
 @Composable
@@ -798,7 +804,7 @@ private fun TextFieldDialog(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun IconPickerDialog(
+internal fun IconPickerDialog(
     current: GestureIcon,
     onPick: (GestureIcon) -> Unit,
     onDismiss: () -> Unit,
@@ -809,10 +815,16 @@ private fun IconPickerDialog(
         text = {
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState())
+                        .selectableGroup(),
             ) {
                 // UNKNOWN is a decode fallback, never something a user should be able to choose.
                 GestureIcon.entries.filter { it != GestureIcon.UNKNOWN }.forEach { icon ->
+                    val label = stringResource(gestureIconLabel(icon))
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color =
@@ -821,10 +833,16 @@ private fun IconPickerDialog(
                             } else {
                                 Color.Transparent
                             },
-                        modifier = Modifier.testTag("gesture_editor_icon_${icon.name.lowercase()}"),
+                        modifier =
+                            Modifier
+                                .testTag("gesture_editor_icon_${icon.name.lowercase()}")
+                                .size(48.dp)
+                                .selectable(icon == current, role = Role.RadioButton, onClick = { onPick(icon) })
+                                .semantics { contentDescription = label },
                     ) {
-                        IconButton(onClick = { onPick(icon) }) {
-                            Icon(icon.vector, contentDescription = stringResource(gestureIconLabel(icon)))
+                        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                            Icon(icon.vector, contentDescription = null)
+                            if (icon == current) Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.align(Alignment.BottomEnd).size(16.dp))
                         }
                     }
                 }

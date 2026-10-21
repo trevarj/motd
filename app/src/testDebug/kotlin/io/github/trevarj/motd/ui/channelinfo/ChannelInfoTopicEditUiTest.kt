@@ -16,9 +16,11 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.TextDecoration
 import io.github.trevarj.motd.UiDispatcherResetRule
@@ -101,6 +103,42 @@ class ChannelInfoTopicEditUiTest {
                     .layoutInput.style.color,
             )
         }
+    }
+
+    @Test
+    fun proposedTopicRendersFormattingWithoutLinksOrSubmittingBeforeSave() {
+        val submitted = mutableListOf<String>()
+        var began = 0
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChannelInfoContent(
+                    state = ChannelInfoUiState(buffer = BufferEntity(1, 1, "#room", "#room", BufferType.CHANNEL, topic = ""), memberCount = 3),
+                    onBack = {},
+                    onSetPinned = {},
+                    onSetMuted = {},
+                    onLeave = {},
+                    onBeginTopicEdit = { began++ },
+                    onSetTopic = { submitted += it },
+                )
+            }
+        }
+        compose.onNodeWithContentDescription("Edit topic").performClick()
+        compose.runOnIdle {
+            assertEquals(1, began)
+            assertTrue(submitted.isEmpty())
+        }
+        val raw = "New \u0002garden\u000f https://topic.invalid\n" + List(8) { "Long topic line $it stays editable and readable." }.joinToString("\n")
+        compose.onNodeWithTag("channelinfo_topic_edit_text").performTextReplacement(raw)
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithTag("channelinfo_topic_preview").performScrollTo().performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val rendered = layouts.single().layoutInput.text
+        assertEquals(raw.replace("\u0002", "").replace("\u000f", ""), rendered.text)
+        val garden = rendered.text.indexOf("garden")
+        assertTrue(rendered.spanStyles.any { garden in it.start until it.end && it.item.fontWeight == androidx.compose.ui.text.font.FontWeight.Bold })
+        assertTrue(rendered.getLinkAnnotations(0, rendered.length).isEmpty())
+        compose.runOnIdle { assertTrue(submitted.isEmpty()) }
+        compose.onNodeWithTag("channelinfo_topic_edit_save").performClick()
+        compose.runOnIdle { assertEquals(listOf(raw), submitted) }
     }
 
     @Test

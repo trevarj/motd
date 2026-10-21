@@ -17,21 +17,29 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.TextLayoutResult
@@ -39,7 +47,13 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.MessageSpacing
+import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.ui.chat.ConversationLayoutSheet
+import io.github.trevarj.motd.ui.chat.ConversationLayoutState
 import io.github.trevarj.motd.ui.nav.NetworkSettingsTarget
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdLightScheme
@@ -240,6 +254,123 @@ class SettingsHomeAndPrimitivesUiTest {
         val toggle = compose.onNodeWithTag("narrow_switch", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         assertTrue("Label should wrap at a narrow width", label.height > toggle.height)
         assertTrue("Label should have a 16 dp gap before the switch", toggle.left - label.right >= with(compose.density) { 16.dp.toPx() } - 1f)
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h360dp", fontScale = 2f)
+    fun narrowLargeFontRadioChoicesWrapAndRemainReachableWithOneSelectionAction() {
+        var selected by mutableStateOf(0)
+        val clicks = mutableListOf<Int>()
+        val label = "Use the inherited conversation layout for all messages"
+        val summary = "The global setting applies until this conversation has its own saved choice."
+        compose.setContent {
+            MotdTheme(dynamicColor = false, uiFontScalePercent = 140) {
+                SingleChoiceSheet(
+                    title = "Conversation layout",
+                    selected = selected,
+                    options =
+                        listOf(
+                            ChoiceOption(0, label, summary, "long_radio"),
+                            ChoiceOption(1, "Compact", tag = "short_radio"),
+                            ChoiceOption(2, "Another conversation layout with a complete readable description", summary, "last_radio"),
+                        ),
+                    onSelect = {
+                        clicks += it
+                        selected = it
+                    },
+                    onDismiss = {},
+                    tag = "radio_sheet",
+                    dismissOnSelect = false,
+                    preview = { Text("A local conversation example") },
+                    footer = { Text("The policy disclosure stays after the choices.") },
+                )
+            }
+        }
+        val options = compose.onNodeWithTag("radio_sheet_options")
+        for ((tag, value) in listOf("long_radio" to 0, "short_radio" to 1, "last_radio" to 2)) {
+            options.performScrollToNode(hasTestTag(tag))
+            val row = compose.onNodeWithTag(tag).assertIsDisplayed()
+            row.assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
+            val bounds = row.getUnclippedBoundsInRoot()
+            assertTrue("Each choice retains a minimum touch host", bounds.bottom - bounds.top >= 48.dp)
+            assertEquals(
+                "The row, not its indicator, owns selection",
+                1,
+                compose.onAllNodes(hasClickAction() and (hasTestTag(tag) or hasAnyAncestor(hasTestTag(tag))), useUnmergedTree = true).fetchSemanticsNodes().size,
+            )
+            row.performClick().assertIsSelected()
+            compose.runOnIdle { assertEquals(value, selected) }
+        }
+        options.performScrollToNode(hasTestTag("long_radio"))
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose
+            .onNode(hasText(label) and hasAnyAncestor(hasTestTag("long_radio")), useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertTrue("The complete label wraps instead of shrinking", layouts.single().lineCount > 1)
+        assertTrue("The full label remains laid out", !layouts.single().hasVisualOverflow)
+        options.performScrollToNode(hasText("The policy disclosure stays after the choices."))
+        compose.onNodeWithText("The policy disclosure stays after the choices.").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(listOf(0, 1, 2), clicks) }
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land", fontScale = 2f)
+    fun layoutSheetUsesSavedInheritanceAndStaysOpenAcrossSelectionsAndRejectedWrites() {
+        var saved by mutableStateOf(ConversationLayoutState(global = LayoutDensity.COMPACT))
+        var rejectWrite = false
+        val writes = mutableListOf<LayoutDensity?>()
+        var dismissals = 0
+        compose.setContent {
+            MotdTheme(dynamicColor = false, uiFontScalePercent = 140) {
+                ConversationLayoutSheet(
+                    state = saved,
+                    onSelect = {
+                        writes += it
+                        if (!rejectWrite) saved = saved.copy(override = it)
+                    },
+                    onDismiss = { dismissals++ },
+                    wallpaper = WallpaperSelection(),
+                    conversationFontScalePercent = 140,
+                    messageSpacing = MessageSpacing.DEFAULT,
+                    bubbleCorners = BubbleCornerStyle.ROUNDED,
+                )
+            }
+        }
+        val options = compose.onNodeWithTag("chat_layout_sheet_options")
+
+        fun choice(tag: String) = options.performScrollToNode(hasTestTag(tag)).let { compose.onNodeWithTag(tag) }
+
+        fun sample(density: LayoutDensity) {
+            options.performScrollToNode(hasTestTag("chat_layout_preview_configuration"))
+            compose.onNodeWithTag("chat_layout_preview_${density.name.lowercase()}_default_rounded").assertExists()
+            assertEquals(1, compose.onAllNodesWithTag("chat_layout_preview_configuration").fetchSemanticsNodes().size)
+        }
+        sample(LayoutDensity.COMPACT)
+        choice("chat_layout_comfortable").performClick().assertIsSelected()
+        compose.runOnIdle { assertEquals(listOf(LayoutDensity.COMFORTABLE), writes) }
+        sample(LayoutDensity.COMFORTABLE)
+        compose.onNodeWithTag("chat_layout_sheet").assertIsDisplayed()
+        choice("chat_layout_global").performClick().assertIsSelected()
+        sample(LayoutDensity.COMPACT)
+
+        compose.runOnIdle { saved = saved.copy(bufferDefault = LayoutDensity.TWO_LINE) }
+        sample(LayoutDensity.TWO_LINE)
+        compose.runOnIdle { saved = saved.copy(global = LayoutDensity.COMFORTABLE) }
+        sample(LayoutDensity.TWO_LINE)
+        choice("chat_layout_compact").performClick().assertIsSelected()
+        sample(LayoutDensity.COMPACT)
+        choice("chat_layout_global").performClick().assertIsSelected()
+        sample(LayoutDensity.TWO_LINE)
+
+        compose.runOnIdle { rejectWrite = true }
+        choice("chat_layout_comfortable").performClick().assertIsNotSelected()
+        choice("chat_layout_global").assertIsSelected()
+        sample(LayoutDensity.TWO_LINE)
+        compose.runOnIdle {
+            assertEquals(listOf(LayoutDensity.COMFORTABLE, null, LayoutDensity.COMPACT, null, LayoutDensity.COMFORTABLE), writes)
+            assertEquals(0, dismissals)
+            assertEquals(null, saved.override)
+        }
     }
 
     @Test

@@ -298,8 +298,15 @@ internal fun FoolSettingsSheet(
     ) {
         SheetSystemBars()
         LazyColumn(Modifier.fillMaxWidth().testTag("fool_settings_options")) {
-            item { SectionHeader(stringResource(R.string.fool_settings_title, nick)) }
-            item { SectionHeader(stringResource(R.string.fool_visibility)) }
+            item { Box(Modifier.padding(horizontal = 12.dp)) { SectionHeader(stringResource(R.string.fool_settings_title, nick)) } }
+            item { Box(Modifier.padding(horizontal = 12.dp)) { SectionHeader(stringResource(R.string.fool_visibility)) } }
+            item {
+                Column(Modifier.padding(16.dp)) {
+                    Text(stringResource(R.string.settings_fool_person_scope))
+                    io.github.trevarj.motd.ui.components
+                        .FoolVisibilityExample(preferences.visibility ?: globalMode)
+                }
+            }
             item {
                 Column(Modifier.selectableGroup()) {
                     RadioRow(

@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
@@ -14,6 +16,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -27,6 +30,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
@@ -100,6 +107,7 @@ fun NetworkEditorDialog(
                             SOJU_NETWORK_PRESET_CHOICES.forEach { choice ->
                                 DropdownMenuItem(
                                     text = { Text(choice.displayName) },
+                                    trailingIcon = if (preset == choice) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
                                     onClick = {
                                         preset = choice
                                         val populated = applySojuNetworkPreset(choice, address, name)
@@ -108,12 +116,16 @@ fun NetworkEditorDialog(
                                         presetsExpanded = false
                                     },
                                     modifier =
-                                        Modifier.testTag(
-                                            "bouncer_network_preset_${choice.preset
-                                                ?.id
-                                                ?.name
-                                                ?.lowercase() ?: "custom"}",
-                                        ),
+                                        Modifier
+                                            .testTag(
+                                                "bouncer_network_preset_${choice.preset
+                                                    ?.id
+                                                    ?.name
+                                                    ?.lowercase() ?: "custom"}",
+                                            ).semantics {
+                                                this.selected = preset == choice
+                                                role = Role.RadioButton
+                                            },
                                 )
                             }
                         }
@@ -196,7 +208,7 @@ fun SaslPlainDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.bouncer_sasl_set_title, network)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 FormField(username, { username = it }, R.string.onboarding_auth_sasl_user)
                 OutlinedTextField(
                     value = password,
@@ -233,7 +245,7 @@ fun UserCreateDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.bouncer_user_create_title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 FormField(username, { username = it }, R.string.onboarding_field_username)
                 OutlinedTextField(
                     value = password,
@@ -364,7 +376,7 @@ fun TypedUserDeleteDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.bouncer_user_delete_title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(stringResource(R.string.bouncer_user_delete_help))
                 FormField(username, { username = it }, R.string.onboarding_field_username)
                 OutlinedTextField(
@@ -404,7 +416,7 @@ fun TextCommandDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 warning?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 OutlinedTextField(
                     value = first,
@@ -466,6 +478,12 @@ fun TriStateField(
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             listOf<Boolean?>(null, true, false).forEach { option ->
                 DropdownMenuItem(
+                    modifier =
+                        Modifier.semantics {
+                            this.selected = value == option
+                            role = Role.RadioButton
+                        },
+                    trailingIcon = if (value == option) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
                     text = {
                         Text(
                             when (option) {

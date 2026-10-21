@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,6 +22,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -124,6 +126,7 @@ fun ChatSoundSettingsContent(
             onBack()
         },
     ) {
+        Text(stringResource(R.string.settings_device_preferences_scope), style = MaterialTheme.typography.bodySmall)
         SettingsGroup(title = stringResource(R.string.settings_chat_sounds_playback)) {
             SwitchRow(
                 title = stringResource(R.string.settings_chat_sounds),
@@ -356,15 +359,20 @@ private fun SoundSlider(
     valueLabel: @Composable (Int) -> String = { item -> stringResource(R.string.settings_chat_sounds_volume_value, item) },
     onValue: (Int) -> Unit,
 ) {
+    val units = valueLabel(value)
     ListItem(
-        headlineContent = { Text("$label: ${valueLabel(value)}") },
+        headlineContent = { Text("$label: $units") },
         supportingContent = {
             Slider(
                 value = value.toFloat(),
                 onValueChange = { onValue(it.toInt()) },
                 valueRange = range.first.toFloat()..range.last.toFloat(),
                 steps = (range.last - range.first - 1).coerceAtLeast(0),
-                modifier = Modifier.testTag(tag).semantics { contentDescription = label },
+                modifier =
+                    Modifier.testTag(tag).semantics {
+                        contentDescription = label
+                        stateDescription = units
+                    },
             )
         },
     )

@@ -7,6 +7,7 @@ import io.github.trevarj.motd.service.NotificationScope
 import io.github.trevarj.motd.service.NotificationSettingsState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -106,6 +107,16 @@ class ChannelNotificationPresentationTest {
         val ready = present(NotificationConfig())
         assertFalse(ready.loading)
         assertTrue(ready.available)
+    }
+
+    @Test
+    fun `loading presentation takes precedence over stale available watch and mute state`() {
+        val watched = present(NotificationConfig(channels = mapOf(7L to NotificationMode.OFF), watches = mapOf(7L to Long.MAX_VALUE)), muted = true)
+        val neutral = deriveChannelNotificationPresentation(NotificationSettingsState.Unavailable, 1, 7, muted = false, nowMillis = 0)
+        assertNotEquals(neutral.notificationIcon(), watched.notificationIcon())
+        assertEquals(neutral.notificationIcon(), watched.copy(loading = true).notificationIcon())
+        assertEquals(neutral.notificationIcon(), watched.copy(available = false).notificationIcon())
+        assertEquals(watched.notificationIcon(), watched.copy(muted = false).notificationIcon())
     }
 
     private fun present(

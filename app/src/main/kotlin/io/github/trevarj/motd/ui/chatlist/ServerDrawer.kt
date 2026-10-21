@@ -329,7 +329,7 @@ fun ServerDrawerContent(
 }
 
 @Composable
-private fun DrawerActionTile(
+internal fun DrawerActionTile(
     icon: ImageVector,
     visibleLabel: String,
     accessibilityLabel: String,
@@ -355,7 +355,6 @@ private fun DrawerActionTile(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
-                maxLines = 2,
             )
         }
     }

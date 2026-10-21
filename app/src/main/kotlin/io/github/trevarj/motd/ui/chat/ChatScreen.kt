@@ -79,12 +79,11 @@ import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.GroupAdd
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Mic
-import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.PeopleOutline
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.ViewAgenda
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
@@ -262,7 +261,9 @@ import io.github.trevarj.motd.ui.components.ReadAloudVoiceOptions
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.components.WaveformScrubber
 import io.github.trevarj.motd.ui.components.avatarsHidden
+import io.github.trevarj.motd.ui.components.densityLabel
 import io.github.trevarj.motd.ui.components.historySyncModeLabel
+import io.github.trevarj.motd.ui.components.notificationIcon
 import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
@@ -1013,6 +1014,9 @@ fun ChatScreen(
         open = avatarEditorOpen,
         currentModel = state.buffer?.avatarOverrideModel,
         isChannel = false,
+        identity = "buffer:${state.buffer?.id}:${state.buffer?.displayName}",
+        name = state.buffer?.displayName.orEmpty(),
+        networkId = state.buffer?.networkId,
         onDismiss = { avatarEditorOpen = false },
         onImport = {
             viewModel.importAvatar(it)
@@ -3374,9 +3378,8 @@ internal fun ChatContent(
                 )
             }
             if (buffer?.type == BufferType.CHANNEL) {
-                val notificationOverride = channelNotifications.channelOverride != null || channelNotifications.watch != null
                 DropdownMenuItem(
-                    modifier = Modifier.testTag("chat_watch").semantics { selected = notificationOverride },
+                    modifier = Modifier.testTag("chat_watch").semantics { selected = !channelNotifications.loading && channelNotifications.available && channelNotifications.watch != null },
                     text = {
                         Column {
                             Text(stringResource(R.string.channelinfo_notifications))
@@ -3385,11 +3388,7 @@ internal fun ChatContent(
                     },
                     leadingIcon = {
                         Icon(
-                            if (notificationOverride) {
-                                Icons.Outlined.NotificationsActive
-                            } else {
-                                Icons.Outlined.Notifications
-                            },
+                            channelNotifications.notificationIcon(),
                             contentDescription = null,
                         )
                     },
@@ -3406,7 +3405,11 @@ internal fun ChatContent(
                         Text(stringResource(R.string.chat_layout_title))
                         Text(
                             stringResource(
-                                R.string.chat_layout_overflow_summary,
+                                when {
+                                    conversationLayout.override != null -> R.string.chat_layout_overflow_override
+                                    conversationLayout.bufferDefault != null -> R.string.chat_layout_overflow_server
+                                    else -> R.string.chat_layout_overflow_global
+                                },
                                 densityLabel(conversationLayout.effective),
                             ),
                             style = MaterialTheme.typography.bodySmall,
@@ -3422,7 +3425,12 @@ internal fun ChatContent(
             if (buffer?.type == BufferType.CHANNEL || buffer?.type == BufferType.QUERY) {
                 DropdownMenuItem(
                     modifier = Modifier.testTag("chat_read_aloud_toggle").semantics { selected = readAloudState.enabled },
-                    text = { Text(stringResource(if (readAloudState.enabled) R.string.read_aloud_stop else R.string.read_aloud_start)) },
+                    text = {
+                        Column {
+                            Text(stringResource(if (readAloudState.enabled) R.string.read_aloud_stop else R.string.read_aloud_start))
+                            Text(stringResource(R.string.settings_chat_visit_scope), style = MaterialTheme.typography.bodySmall)
+                        }
+                    },
                     leadingIcon = { Icon(Icons.Outlined.RecordVoiceOver, null) },
                     onClick = {
                         overflowOpen = false
@@ -3432,6 +3440,7 @@ internal fun ChatContent(
                 DropdownMenuItem(
                     modifier = Modifier.testTag("chat_read_aloud_options"),
                     text = { Text(stringResource(R.string.read_aloud_options)) },
+                    leadingIcon = { Icon(Icons.Outlined.Tune, contentDescription = null) },
                     onClick = {
                         overflowOpen = false
                         onReadAloudOptions()
@@ -3489,15 +3498,10 @@ internal fun ChatContent(
                 DropdownMenuItem(
                     modifier = Modifier.testTag("chat_toggle_fools_visibility"),
                     text = {
-                        Text(
-                            stringResource(
-                                if (foolsShown) {
-                                    R.string.chat_fool_collapse_all
-                                } else {
-                                    R.string.chat_fool_expand_all
-                                },
-                            ),
-                        )
+                        Column {
+                            Text(stringResource(if (foolsShown) R.string.chat_fool_collapse_all else R.string.chat_fool_expand_all))
+                            Text(stringResource(R.string.settings_chat_visit_scope), style = MaterialTheme.typography.bodySmall)
+                        }
                     },
                     onClick = {
                         overflowOpen = false
@@ -4729,21 +4733,19 @@ internal fun ChatContent(
     if (presenceModeSheetOpen) {
         PresenceModeSheet(
             state = state.conversationPresence,
-            onSelect = { override ->
-                onPresenceModeSelected(override)
-                presenceModeSheetOpen = false
-            },
+            onSelect = onPresenceModeSelected,
             onDismiss = { presenceModeSheetOpen = false },
         )
     }
     if (conversationLayoutSheetOpen) {
         ConversationLayoutSheet(
             state = conversationLayout,
-            onSelect = { override ->
-                onConversationLayoutSelected(override)
-                conversationLayoutSheetOpen = false
-            },
+            onSelect = onConversationLayoutSelected,
             onDismiss = { conversationLayoutSheetOpen = false },
+            wallpaper = chatWallpaper,
+            conversationFontScalePercent = conversationFontScalePercent,
+            messageSpacing = messageSpacing,
+            bubbleCorners = bubbleCornerStyle,
         )
     }
     if (notificationSheetOpen && buffer?.type == BufferType.CHANNEL) {

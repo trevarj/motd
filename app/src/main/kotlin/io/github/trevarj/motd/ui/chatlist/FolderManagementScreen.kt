@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -315,15 +316,18 @@ fun FolderIconPicker(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.folders_choose_icon)) },
         text = {
-            Column {
-                OutlinedTextField(query, { query = it }, label = { Text(stringResource(R.string.action_search)) })
-                LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
-                    items(folderIconChoices(query), key = { "${it.ref.kind}:${it.ref.key}" }) { choice: FolderIconChoice ->
-                        Row(modifier = Modifier.fillMaxWidth().clickable { onSelect(choice.ref) }.padding(10.dp)) {
-                            FolderIcon(choice.ref, null, Modifier.size(24.dp))
-                            Text(choice.name, modifier = Modifier.padding(start = 12.dp), fontWeight = if (choice.ref == selected) androidx.compose.ui.text.font.FontWeight.Bold else null)
-                        }
-                    }
+            LazyColumn(modifier = Modifier.heightIn(max = 420.dp).selectableGroup()) {
+                item {
+                    OutlinedTextField(query, { query = it }, label = { Text(stringResource(R.string.action_search)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                }
+                items(folderIconChoices(query), key = { "${it.ref.kind}:${it.ref.key}" }) { choice: FolderIconChoice ->
+                    io.github.trevarj.motd.ui.settings.RadioRow(
+                        label = choice.name,
+                        selected = choice.ref == selected,
+                        enabled = true,
+                        onClick = { onSelect(choice.ref) },
+                        supportingContent = { FolderIcon(choice.ref, null, Modifier.size(24.dp)) },
+                    )
                 }
             }
         },

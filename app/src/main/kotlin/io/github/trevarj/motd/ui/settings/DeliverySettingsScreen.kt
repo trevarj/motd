@@ -8,13 +8,13 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -139,48 +139,34 @@ fun DeliverySettingsContent(
                 )
             }
             SettingsTarget(target?.name, SettingsTarget.BATTERY.name) { targetModifier ->
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.settings_battery)) },
-                    supportingContent = {
-                        Text(
-                            stringResource(
-                                when {
-                                    deliveryMode != DeliveryMode.UNIFIED_PUSH -> {
-                                        R.string.settings_battery_desc
-                                    }
-
-                                    pushAvailability.protectedNetworks in 1 until pushAvailability.eligibleNetworks -> {
-                                        R.string.settings_battery_hybrid_desc
-                                    }
-
-                                    else -> {
-                                        R.string.settings_battery_push_desc
-                                    }
-                                },
-                            ),
-                        )
-                    },
-                    colors =
-                        androidx.compose.material3.ListItemDefaults
-                            .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                    modifier =
-                        targetModifier.testTag("settings_battery_optimization").clickable {
-                            val pm = context.getSystemService(PowerManager::class.java)
-                            val targetPackage =
-                                if (deliveryMode == DeliveryMode.UNIFIED_PUSH) {
-                                    pushAvailability.selectedDistributor ?: context.packageName
-                                } else {
-                                    context.packageName
-                                }
-                            if (pm?.isIgnoringBatteryOptimizations(targetPackage) == true) {
-                                context.startActivity(Intent(AndroidSettings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_battery),
+                    summary =
+                        stringResource(
+                            when {
+                                deliveryMode != DeliveryMode.UNIFIED_PUSH -> R.string.settings_battery_desc
+                                pushAvailability.protectedNetworks in 1 until pushAvailability.eligibleNetworks -> R.string.settings_battery_hybrid_desc
+                                else -> R.string.settings_battery_push_desc
+                            },
+                        ),
+                    modifier = targetModifier.testTag("settings_battery_optimization"),
+                    onClick = {
+                        val pm = context.getSystemService(PowerManager::class.java)
+                        val targetPackage =
+                            if (deliveryMode == DeliveryMode.UNIFIED_PUSH) {
+                                pushAvailability.selectedDistributor ?: context.packageName
                             } else {
-                                context.startActivity(
-                                    Intent(AndroidSettings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                                        .setData("package:$targetPackage".toUri()),
-                                )
+                                context.packageName
                             }
-                        },
+                        if (pm?.isIgnoringBatteryOptimizations(targetPackage) == true) {
+                            context.startActivity(Intent(AndroidSettings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                        } else {
+                            context.startActivity(
+                                Intent(AndroidSettings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                                    .setData("package:$targetPackage".toUri()),
+                            )
+                        }
+                    },
                 )
             }
         }
@@ -190,15 +176,18 @@ fun DeliverySettingsContent(
             onDismissRequest = { showDistributorChooser = false },
             title = { Text(stringResource(R.string.settings_delivery_push_choose)) },
             text = {
-                Column {
+                Column(Modifier.verticalScroll(rememberScrollState()).selectableGroup()) {
                     pushAvailability.distributors.forEach { distributor ->
-                        TextButton(
+                        RadioRow(
+                            label = distributor.label,
+                            selected = pushAvailability.selectedDistributor == distributor.packageName,
+                            enabled = true,
                             modifier = Modifier.testTag("settings_push_distributor_${distributor.packageName}"),
                             onClick = {
                                 showDistributorChooser = false
                                 onSelectDistributor(distributor.packageName)
                             },
-                        ) { Text(distributor.label) }
+                        )
                     }
                 }
             },

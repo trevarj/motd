@@ -1,17 +1,13 @@
 package io.github.trevarj.motd.ui.settings.labs
 
 import android.content.Intent
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -135,14 +131,11 @@ fun LabsContent(
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                 // The menu graph is authored work that survives the lab being off, so the editor stays
                 // reachable whatever the switch says.
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.labs_gestures_configure)) },
-                    supportingContent = { Text(stringResource(R.string.labs_gestures_configure_desc)) },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    modifier =
-                        Modifier
-                            .clickable(onClick = onOpenGestureMenu)
-                            .testTag("labs_gestures_configure"),
+                io.github.trevarj.motd.ui.settings.SettingsNavigationRow(
+                    title = stringResource(R.string.labs_gestures_configure),
+                    summary = stringResource(R.string.labs_gestures_configure_desc),
+                    modifier = Modifier.testTag("labs_gestures_configure"),
+                    onClick = onOpenGestureMenu,
                 )
             }
         }
@@ -156,15 +149,11 @@ fun LabsContent(
                     switchTag = "labs_agentwire_switch",
                 )
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                ListItem(
-                    headlineContent = { Text(stringResource(R.string.labs_agentwire_repo)) },
-                    supportingContent = { Text(agentwireUrl) },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    modifier =
-                        Modifier
-                            .clickable {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, agentwireUrl.toUri()))
-                            }.testTag("labs_agentwire_repo"),
+                io.github.trevarj.motd.ui.settings.SettingsNavigationRow(
+                    title = stringResource(R.string.labs_agentwire_repo),
+                    summary = agentwireUrl,
+                    modifier = Modifier.testTag("labs_agentwire_repo"),
+                    onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, agentwireUrl.toUri())) },
                 )
             }
         }

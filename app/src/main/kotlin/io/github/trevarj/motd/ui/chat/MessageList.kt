@@ -2428,11 +2428,12 @@ internal fun FoolCollapseChip(
     sender: String,
     tag: String,
     showNormally: Boolean = false,
+    modifier: Modifier = Modifier,
     onCollapse: () -> Unit,
 ) {
     Row(
         modifier =
-            Modifier
+            modifier
                 .fillMaxWidth()
                 .testTag(tag)
                 .clickable { onCollapse() }

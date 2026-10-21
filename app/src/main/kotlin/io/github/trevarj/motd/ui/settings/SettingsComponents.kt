@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -46,6 +47,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -155,18 +157,24 @@ internal fun SettingsNavigationRow(
         ListItem(
             leadingContent = icon?.let { image -> ({ Icon(image, contentDescription = null) }) },
             headlineContent = { Text(title, fontWeight = FontWeight.Medium) },
-            supportingContent = summary?.let { text -> ({ Text(text) }) },
-            trailingContent = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    value?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    Icon(Icons.Outlined.ChevronRight, contentDescription = null)
-                }
-            },
+            supportingContent =
+                if (summary != null || value != null) {
+                    {
+                        Column {
+                            summary?.let { Text(it) }
+                            value?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        }
+                    }
+                } else {
+                    null
+                },
+            trailingContent = { Icon(Icons.Outlined.ChevronRight, contentDescription = null) },
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             modifier =
                 modifier
                     .then(targetModifier)
                     .fillMaxWidth()
+                    .heightIn(min = 48.dp)
                     .clickable(enabled = enabled, onClick = onClick)
                     .semantics { role = Role.Button },
         )
@@ -217,23 +225,31 @@ internal fun RadioRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
-    trailing: (@Composable () -> Unit)? = null,
+    supportingContent: (@Composable () -> Unit)? = null,
 ) {
-    Row(
+    ListItem(
         modifier =
             modifier
                 .fillMaxWidth()
-                .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected, onClick = null, enabled = enabled)
-        Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                .heightIn(min = 48.dp)
+                .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick),
+        leadingContent = { RadioButton(selected, onClick = null, enabled = enabled) },
+        headlineContent = {
             Text(label, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f))
-            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
-        trailing?.invoke()
-    }
+        },
+        supportingContent =
+            if (subtitle != null || supportingContent != null) {
+                {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        supportingContent?.invoke()
+                    }
+                }
+            } else {
+                null
+            },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+    )
 }
 
 @Composable
@@ -256,6 +272,7 @@ internal fun SwitchRow(
                     .then(targetModifier)
                     .then(if (switchTag != null) Modifier.testTag("${switchTag}_row") else Modifier)
                     .fillMaxWidth()
+                    .heightIn(min = 48.dp)
                     .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -355,12 +372,20 @@ internal fun <T> SingleChoiceSheet(
     onDismiss: () -> Unit,
     tag: String,
     dismissOnSelect: Boolean = true,
+    preview: (@Composable () -> Unit)? = null,
     footer: @Composable () -> Unit = {},
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag(tag)) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = preview != null),
+        modifier = Modifier.testTag(tag),
+    ) {
         SheetSystemBars()
         LazyColumn(Modifier.fillMaxWidth().selectableGroup().testTag("${tag}_options")) {
-            item { SectionHeader(title) }
+            item { Box(Modifier.padding(horizontal = 12.dp)) { SectionHeader(title) } }
+            if (preview != null) {
+                item { Column(Modifier.fillMaxWidth().padding(16.dp)) { preview() } }
+            }
             items(options) { option ->
                 RadioRow(
                     label = option.label,

@@ -26,6 +26,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
@@ -197,36 +198,47 @@ class AttachmentConfirmationSheetUiTest {
 
     @Test
     fun dickordPhotoUsesLateFileHostAdvertisementAndPreservesExplicitDestination() {
-        var connection by mutableStateOf(IrcClientState.Ready("me", emptySet(), emptyMap()))
-        showConditionalAttachments(
-            sojuFileHostAvailable = { sojuFileHostAdvertised(connection.isupport) },
-            preferSojuFileHost = true,
-        )
-        compose.onNodeWithText(context.getString(R.string.upload_photo)).performScrollTo().performClick()
-        compose.onNodeWithTag("attachment_photos_browse").performClick()
-        returnFromFilePicker(Uri.parse("content://attachments/dickord-photo.jpg"))
-        compose.onNodeWithText(AttachmentBackend.CRAFTERBIN.label).assertIsDisplayed()
-
-        compose.runOnIdle {
-            connection = connection.copy(isupport = mapOf(SOJU_FILEHOST_TOKEN to "https://irc.example/uploads"))
+        val file = context.cacheDir.resolve("image-clipboard/dickord-photo.jpg")
+        file.parentFile!!.mkdirs()
+        Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).also { bitmap ->
+            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 100, it) }
+            bitmap.recycle()
         }
-        compose.onNodeWithText(AttachmentBackend.SOJU_FILEHOST.label).assertIsDisplayed()
-        compose.onNodeWithTag("attachment_upload").assertIsEnabled()
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.camera", file)
+        try {
+            var connection by mutableStateOf(IrcClientState.Ready("me", emptySet(), emptyMap()))
+            showConditionalAttachments(
+                sojuFileHostAvailable = { sojuFileHostAdvertised(connection.isupport) },
+                preferSojuFileHost = true,
+            )
+            compose.onNodeWithText(context.getString(R.string.upload_photo)).performScrollTo().performClick()
+            compose.onNodeWithTag("attachment_photos_browse").performClick()
+            returnFromFilePicker(uri)
+            compose.onNodeWithText(AttachmentBackend.CRAFTERBIN.label).assertIsDisplayed()
 
-        compose.onNodeWithText(context.getString(R.string.upload_destination_change)).performClick()
-        compose.onNodeWithText(AttachmentBackend.CRAFTERBIN.label).performScrollTo().performClick()
-        compose.runOnIdle { connection = connection.copy(isupport = emptyMap()) }
-        compose.onNodeWithText(AttachmentBackend.CRAFTERBIN.label).assertIsDisplayed()
-        compose.runOnIdle {
-            connection = connection.copy(isupport = mapOf(SOJU_FILEHOST_TOKEN to "https://irc.example/uploads"))
+            compose.runOnIdle {
+                connection = connection.copy(isupport = mapOf(SOJU_FILEHOST_TOKEN to "https://irc.example/uploads"))
+            }
+            compose.onNodeWithText(AttachmentBackend.SOJU_FILEHOST.label).assertIsDisplayed()
+            compose.onNodeWithTag("attachment_upload").assertIsEnabled()
+
+            compose.onNodeWithText(context.getString(R.string.upload_destination_change)).performClick()
+            compose.onNodeWithText(AttachmentBackend.CRAFTERBIN.label).performScrollTo().performClick()
+            compose.runOnIdle { connection = connection.copy(isupport = emptyMap()) }
+            compose.onNodeWithText(AttachmentBackend.CRAFTERBIN.label).assertIsDisplayed()
+            compose.runOnIdle {
+                connection = connection.copy(isupport = mapOf(SOJU_FILEHOST_TOKEN to "https://irc.example/uploads"))
+            }
+            compose.onNodeWithText(AttachmentBackend.CRAFTERBIN.label).assertIsDisplayed()
+
+            compose.onNodeWithText(context.getString(R.string.upload_destination_change)).performClick()
+            compose.onNodeWithText(AttachmentBackend.SOJU_FILEHOST.label).performScrollTo().performClick()
+            compose.onNodeWithText(AttachmentBackend.SOJU_FILEHOST.label).assertIsDisplayed()
+            compose.onNodeWithTag("attachment_upload").assertIsEnabled()
+            compose.onNodeWithText(AttachmentBackend.TERMBIN.label).assertDoesNotExist()
+        } finally {
+            file.delete()
         }
-        compose.onNodeWithText(AttachmentBackend.CRAFTERBIN.label).assertIsDisplayed()
-
-        compose.onNodeWithText(context.getString(R.string.upload_destination_change)).performClick()
-        compose.onNodeWithText(AttachmentBackend.SOJU_FILEHOST.label).performScrollTo().performClick()
-        compose.onNodeWithText(AttachmentBackend.SOJU_FILEHOST.label).assertIsDisplayed()
-        compose.onNodeWithTag("attachment_upload").assertIsEnabled()
-        compose.onNodeWithText(AttachmentBackend.TERMBIN.label).assertDoesNotExist()
     }
 
     @Test
@@ -330,6 +342,47 @@ class AttachmentConfirmationSheetUiTest {
         compose.onNodeWithTag("attachment_thumbnail").assertIsDisplayed()
         compose.onNodeWithTag("attachment_upload").assertIsDisplayed()
         file.delete()
+    }
+
+    @Test
+    fun imageDocumentThumbnailTracksMimeWithoutStartingUpload() {
+        val file = context.cacheDir.resolve("document-preview.png")
+        Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).also { bitmap ->
+            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            bitmap.recycle()
+        }
+        val image = AttachmentSource.Document(Uri.fromFile(file), file.name, "image/png", file.length())
+        val source = mutableStateOf<AttachmentSource>(image)
+        var uploads = 0
+        try {
+            compose.setContent {
+                MotdTheme {
+                    ConfirmationSheet(source.value, PasteBackendConfig(), false, {}, {}, { uploads++ })
+                }
+            }
+            compose.onNodeWithTag("attachment_thumbnail").assertIsDisplayed()
+            compose.runOnIdle {
+                assertEquals(0, uploads)
+                source.value = image.copy(mimeType = "text/plain")
+            }
+            compose.onNodeWithTag("attachment_thumbnail").assertDoesNotExist()
+            compose.runOnIdle { source.value = image.copy(mimeType = null) }
+            compose.onNodeWithTag("attachment_thumbnail").assertDoesNotExist()
+            compose.runOnIdle { source.value = image.copy(uri = Uri.parse("https://media.invalid/not-local.png")) }
+            compose.onNodeWithTag("attachment_thumbnail").assertDoesNotExist()
+            compose.onNodeWithTag("attachment_thumbnail_error").assertIsDisplayed()
+            compose.onNodeWithTag("attachment_upload").assertIsNotEnabled()
+            compose.runOnIdle { assertEquals(0, uploads) }
+            compose.runOnIdle {
+                assertEquals(0, uploads)
+                source.value = image
+            }
+            compose.onNodeWithTag("attachment_thumbnail").assertIsDisplayed()
+            compose.onNodeWithTag("attachment_upload").performClick()
+            compose.runOnIdle { assertEquals(1, uploads) }
+        } finally {
+            file.delete()
+        }
     }
 
     @Test

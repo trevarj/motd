@@ -40,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -254,6 +255,9 @@ internal fun Modifier.chatBubbleWidth(): Modifier =
         }
     }
 
+/** Display-only samples keep their text semantics without offering timeline actions. */
+internal val LocalMessageActionsEnabled = staticCompositionLocalOf { true }
+
 /**
  * Tap + long-press shared by every message density. A feed jump or active-reader selection ripples;
  * a row without a tap action keeps no indication.
@@ -264,8 +268,9 @@ internal fun Modifier.messageRowClicks(
     onClickLabel: String?,
     onLongPress: () -> Unit,
     onLongPressLabel: String,
-): Modifier =
-    combinedClickable(
+): Modifier {
+    if (!LocalMessageActionsEnabled.current) return this
+    return combinedClickable(
         // Null lazily avoids an interaction object until something actually needs one.
         interactionSource = null,
         indication = if (onClick != null) LocalIndication.current else null,
@@ -274,6 +279,7 @@ internal fun Modifier.messageRowClicks(
         onLongClick = onLongPress,
         onLongClickLabel = onLongPressLabel,
     )
+}
 
 /** Persistent, non-animated mention marker shared by every message density. */
 private fun Modifier.mentionHighlight(accent: Color): Modifier =

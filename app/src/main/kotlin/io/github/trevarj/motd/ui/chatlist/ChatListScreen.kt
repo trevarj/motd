@@ -448,7 +448,7 @@ fun ChatListContent(
     val visibleRows = if (archiveMode) state.archivedRows else state.rows
     val folderTabs = if (state.folderDisplayMode == FolderDisplayMode.TABS) presentFolderTabs(state.rows, state.folders) else emptyList()
     val mentionsAsTab = state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.FOLDER_TAB
-    val allTabRows = state.rows.filter { state.showFolderChatsInAll || it.folderId == null }
+    val allTabRows = folderAllRows(state.rows, state.showFolderChatsInAll)
     val showAllTab =
         state.dickordEnabled ||
             mentionsAsTab ||
@@ -1284,7 +1284,7 @@ private fun ScopeChip(
 }
 
 @Composable
-private fun FolderTabStrip(
+internal fun FolderTabStrip(
     folders: List<PresentedChatFolder>,
     allSummary: ChatFolderSummary,
     showAllTab: Boolean,
@@ -1296,6 +1296,7 @@ private fun FolderTabStrip(
     onSelect: (Long?) -> Unit,
     onOpenDickord: () -> Unit,
     onOpenMentions: () -> Unit,
+    mentionsSelected: Boolean = false,
 ) {
     Box(
         modifier =
@@ -1317,14 +1318,14 @@ private fun FolderTabStrip(
         ) {
             if (showAllTab) {
                 FolderPillTab(
-                    selected = selectedFolderId == null,
+                    selected = selectedFolderId == null && !mentionsSelected,
                     onClick = { onSelect(null) },
                     tag = "chatlist_folder_tab_all",
                 ) {
                     FolderTabLabel(
                         name = stringResource(R.string.folders_all),
                         summary = allSummary,
-                        selected = selectedFolderId == null,
+                        selected = selectedFolderId == null && !mentionsSelected,
                         pillTag = "chatlist_folder_tab_pill_all",
                         icon = { Icon(Icons.Outlined.Forum, contentDescription = null, modifier = Modifier.size(20.dp)) },
                     )
@@ -1332,7 +1333,7 @@ private fun FolderTabStrip(
             }
             if (mentionsEnabled) {
                 FolderPillTab(
-                    selected = false,
+                    selected = mentionsSelected,
                     onClick = onOpenMentions,
                     tag = "chatlist_folder_tab_mentions",
                 ) {
@@ -1341,6 +1342,7 @@ private fun FolderTabStrip(
                             Modifier
                                 .testTag("chatlist_folder_tab_pill_mentions")
                                 .heightIn(min = 40.dp)
+                                .background(if (mentionsSelected) MaterialTheme.colorScheme.primary else Color.Transparent, MotdShapes.channelAvatar)
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1400,7 +1402,7 @@ private fun FolderTabStrip(
 }
 
 @Composable
-private fun MentionsPinnedRow(
+internal fun MentionsPinnedRow(
     count: Int,
     incomplete: Boolean,
     onClick: () -> Unit,
@@ -2289,10 +2291,10 @@ private fun ChatList(
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun ChatFolderHeader(
+internal fun ChatFolderHeader(
     folder: PresentedChatFolder,
     onToggle: () -> Unit,
-    onEdit: () -> Unit,
+    onEdit: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val expandLabel = stringResource(if (folder.expanded) R.string.folders_collapse else R.string.folders_expand)
@@ -2311,9 +2313,13 @@ private fun ChatFolderHeader(
                                 onToggle()
                                 true
                             },
-                            CustomAccessibilityAction(editLabel) {
-                                onEdit()
-                                true
+                        ) +
+                        listOfNotNull(
+                            onEdit?.let { edit ->
+                                CustomAccessibilityAction(editLabel) {
+                                    edit()
+                                    true
+                                }
                             },
                         )
                 }.testTag("chatlist_folder_${folder.folder.id}")
@@ -3024,7 +3030,7 @@ private fun ChatListTopBar(
 }
 
 @Composable
-private fun ChatListSwipeBackground(
+internal fun ChatListSwipeBackground(
     row: ChatListRow,
     action: ChatListSwipeAction,
     archiveMode: Boolean,

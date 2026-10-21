@@ -17,9 +17,15 @@ import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -45,6 +51,10 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
+import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.MessageSpacing
+import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.dickord.DICKORD_PORTAL_DMS_KEY
 import io.github.trevarj.motd.dickord.DickordChannelDescriptor
 import io.github.trevarj.motd.dickord.DickordPortalContent
@@ -210,6 +220,188 @@ class AvatarRoutingTest {
         assertTrue("Glyph must fit inside the circular background", minY > pixels.height * 0.15 && maxY < pixels.height * 0.85)
         assertEquals("Horizontal ink center", pixels.width / 2.0, inkX / inkWeight + 0.5, pixels.width * 0.01)
         assertEquals("Vertical ink center", pixels.height / 2.0, inkY / inkWeight + 0.5, pixels.height * 0.01)
+    }
+
+    @Test
+    fun localAvatarProposalNeverStartsRemoteImagesAndReportsLocalDecodeFailure() {
+        Fixture().use { fixture ->
+            val uri = mutableStateOf(Uri.parse("http://media-test.invalid:${fixture.server.port}/unbound.png"))
+            val local = Uri.fromFile(temporaryFolder.newFile("proposal.png").apply { writeBytes(PNG) })
+            val broken = Uri.fromFile(temporaryFolder.newFile("broken-proposal.png").apply { writeText("not an image") })
+            compose.setContent { MotdTheme(dynamicColor = false) { LocalAvatarProposal(uri.value, isChannel = false) } }
+            for (remote in listOf("http://media-test.invalid:${fixture.server.port}/unbound.png", fixture.url("unbound"), "data:image/png;base64,AAAA", "unsupported://image")) {
+                compose.runOnIdle { uri.value = Uri.parse(remote) }
+                compose.onNodeWithTag("avatar_local_proposal").assertDoesNotExist()
+                compose.onNodeWithTag("avatar_local_proposal_error").assertIsDisplayed()
+                compose.runOnIdle { assertEquals(emptyList<String>(), fixture.started.toList()) }
+            }
+            compose.runOnIdle { uri.value = local }
+            compose.waitUntil(10_000) { compose.runOnIdle { fixture.loaded.contains(local.toString()) } }
+            compose.onNodeWithTag("avatar_local_proposal").assertIsDisplayed()
+            compose.onNodeWithTag("avatar_local_proposal_error").assertDoesNotExist()
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val resource = Uri.parse("android.resource://${context.packageName}/${io.github.trevarj.motd.R.drawable.motd_logo_mark}")
+            compose.runOnIdle { uri.value = resource }
+            compose.waitUntil(10_000) { compose.runOnIdle { fixture.loaded.contains(resource.toString()) } }
+            compose.onNodeWithTag("avatar_local_proposal").assertIsDisplayed()
+            compose.onNodeWithTag("avatar_local_proposal_error").assertDoesNotExist()
+            compose.runOnIdle { uri.value = broken }
+            compose.waitUntil(10_000) { compose.runOnIdle { fixture.errors.any { it.startsWith(broken.toString()) } } }
+            compose.onNodeWithTag("avatar_local_proposal_error").assertIsDisplayed()
+            assertEquals(0, fixture.server.requestCount)
+            assertEquals(emptyList<Long>(), fixture.selectedNetworks.toList())
+        }
+    }
+
+    @Test
+    fun documentConfirmationRejectsRemoteUriBeforeImagePipeAndLoadsLocalImage() {
+        Fixture().use { fixture ->
+            val local = Uri.fromFile(temporaryFolder.newFile("document-proposal.png").apply { writeBytes(PNG) })
+            val source =
+                mutableStateOf(
+                    io.github.trevarj.motd.attachment.AttachmentSource
+                        .Document(Uri.parse(fixture.url("unbound-document")), "image.png", "image/png", null),
+                )
+            var uploads = 0
+            compose.setContent {
+                MotdTheme(dynamicColor = false) {
+                    io.github.trevarj.motd.ui.chat
+                        .ConfirmationSheet(
+                            source.value,
+                            io.github.trevarj.motd.attachment
+                                .PasteBackendConfig(),
+                            false,
+                            {},
+                            {},
+                            { uploads++ },
+                        )
+                }
+            }
+            compose.onNodeWithTag("attachment_thumbnail").assertDoesNotExist()
+            compose.onNodeWithTag("attachment_thumbnail_error").assertIsDisplayed()
+            compose.onNodeWithTag("attachment_upload").assertIsNotEnabled()
+            compose.runOnIdle {
+                assertEquals(emptyList<String>(), fixture.started.toList())
+                assertEquals(0, uploads)
+            }
+            compose.runOnIdle { source.value = source.value.copy(uri = local) }
+            compose.waitUntil(10_000) { compose.runOnIdle { fixture.loaded.contains(local.toString()) } }
+            compose.onNodeWithTag("attachment_thumbnail").assertIsDisplayed()
+            compose.onNodeWithTag("attachment_upload").assertIsEnabled()
+            compose.runOnIdle { assertEquals(0, uploads) }
+            assertEquals(0, fixture.server.requestCount)
+            assertEquals(emptyList<Long>(), fixture.selectedNetworks.toList())
+        }
+    }
+
+    @Test
+    fun explicitAvatarPreviewBindsConsentToSavedOwnerAndTargetAndFailsClosed() {
+        Fixture().use { fixture ->
+            val release = java.util.concurrent.CountDownLatch(1)
+            val arrived = java.util.concurrent.CountDownLatch(1)
+            fixture.server.dispatcher =
+                object : okhttp3.mockwebserver.Dispatcher() {
+                    override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                        if (request.path == "/first.png") {
+                            arrived.countDown()
+                            release.await(5, TimeUnit.SECONDS)
+                        }
+                        return fixture.imageResponse()
+                    }
+                }
+            val url = mutableStateOf(fixture.url("first"))
+            val owner = mutableStateOf<Long?>(null)
+            val identity = mutableStateOf("first-person")
+            val visible = mutableStateOf(true)
+            compose.setContent {
+                MotdTheme(dynamicColor = false) {
+                    CompositionLocalProvider(LocalNetworkMediaHttp provides fixture.http) {
+                        if (visible.value) ExplicitAvatarUrlPreview(url.value, owner.value, identity.value, isChannel = false)
+                    }
+                }
+            }
+            try {
+                compose.onNodeWithTag("avatar_url_preview").assertIsNotEnabled()
+                compose.runOnIdle { owner.value = 7 }
+                compose.onNodeWithTag("avatar_url_preview").assertIsEnabled()
+                compose.runOnIdle { assertEquals(emptyList<String>(), fixture.started.toList()) }
+                compose.onNodeWithTag("avatar_url_preview").performClick()
+                compose.waitUntil(10_000) {
+                    compose.runOnIdle {}
+                    arrived.count == 0L
+                }
+
+                // Hold the old response until after a different target and URL own the editor.
+                compose.runOnIdle {
+                    url.value = fixture.url("second")
+                    owner.value = 8
+                    identity.value = "second-person"
+                }
+                compose.onNodeWithTag("avatar_url_proposal").assertDoesNotExist()
+                assertEquals(1, fixture.server.requestCount)
+                release.countDown()
+                compose.onNodeWithTag("avatar_url_preview").performClick()
+                compose.waitUntil(10_000) { compose.runOnIdle { fixture.loaded.contains(fixture.url("second")) } }
+                compose.onNodeWithTag("avatar_url_proposal").assertIsDisplayed()
+                assertEquals(setOf(7L, 8L), fixture.selectedNetworks.toSet())
+
+                compose.runOnIdle {
+                    owner.value = 9
+                    url.value = fixture.url("broken")
+                }
+                compose.onNodeWithTag("avatar_url_proposal").assertDoesNotExist()
+                compose.onNodeWithTag("avatar_url_preview").performClick()
+                compose.waitUntil(10_000) { compose.runOnIdle { fixture.errors.any { it.contains("/broken.png") } } }
+                assertEquals(2, fixture.server.requestCount)
+                assertTrue(fixture.selectedNetworks.contains(9L))
+
+                compose.runOnIdle { visible.value = false }
+                compose.onNodeWithTag("avatar_url_proposal").assertDoesNotExist()
+                compose.runOnIdle { visible.value = true }
+                compose.onNodeWithTag("avatar_url_proposal").assertDoesNotExist()
+                assertEquals(2, fixture.server.requestCount)
+            } finally {
+                release.countDown()
+            }
+        }
+    }
+
+    @Test
+    fun fictionalLayoutSamplesKeepReadableTextWithoutActionsOrRealAvatarRequests() {
+        Fixture().use { fixture ->
+            val density = mutableStateOf(LayoutDensity.COMFORTABLE)
+            val alex = fixture.avatar().copy(identity = "nick:alex", nick = "alex")
+            compose.setContent {
+                MotdTheme(dynamicColor = false) {
+                    CompositionLocalProvider(
+                        LocalAutomaticRemoteMedia provides true,
+                        LocalRemoteAvatars provides RemoteAvatarState(true, listOf(alex)),
+                    ) {
+                        ChatLayoutPreview(
+                            density = density.value,
+                            messageSpacing = MessageSpacing.DEFAULT,
+                            bubbleCorners = BubbleCornerStyle.ROUNDED,
+                            wallpaper = WallpaperSelection(),
+                            conversationFontScalePercent = 100,
+                            tagPrefix = "fictional",
+                        )
+                    }
+                }
+            }
+            for (style in LayoutDensity.entries) {
+                compose.runOnIdle { density.value = style }
+                compose.onNodeWithText("See you in the channel!", substring = true, useUnmergedTree = true).assertExists()
+                val actions =
+                    hasClickAction() or SemanticsMatcher.keyIsDefined(SemanticsActions.OnLongClick)
+                val sample = hasAnyAncestor(hasTestTag("fictional_configuration"))
+                assertEquals(0, compose.onAllNodes(actions and sample, useUnmergedTree = true).fetchSemanticsNodes().size)
+                compose.runOnIdle {
+                    assertEquals(emptyList<String>(), fixture.started.toList())
+                    assertEquals(emptyList<Long>(), fixture.selectedNetworks.toList())
+                    assertEquals(0, fixture.server.requestCount)
+                }
+            }
+        }
     }
 
     @Test
@@ -617,7 +809,8 @@ class AvatarRoutingTest {
         val selectedNetworks = ConcurrentLinkedQueue<Long>()
         val loaded = ConcurrentLinkedQueue<String>()
         val errors = ConcurrentLinkedQueue<String>()
-        private val http =
+        val started = ConcurrentLinkedQueue<String>()
+        val http =
             NetworkMediaHttp({ id ->
                 selectedNetworks += id
                 if (id !in 7L..9L) {
@@ -643,6 +836,10 @@ class AvatarRoutingTest {
                 .diskCache(null)
                 .eventListener(
                     object : EventListener {
+                        override fun onStart(request: ImageRequest) {
+                            started += request.data.toString()
+                        }
+
                         override fun onSuccess(
                             request: ImageRequest,
                             result: SuccessResult,

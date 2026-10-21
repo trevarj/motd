@@ -112,6 +112,7 @@ import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
 import io.github.trevarj.motd.attachment.forBackend
+import io.github.trevarj.motd.attachment.isLocalMediaUri
 import io.github.trevarj.motd.attachment.supports
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
@@ -254,6 +255,7 @@ fun AttachmentSheets(
             when {
                 sharedFile != null -> {
                     try {
+                        require(sharedFile.uri.isLocalMediaUri()) { "Shared files require a local content or file URI" }
                         val (mime, meta) =
                             withContext(Dispatchers.IO) {
                                 (sharedFile.mimeType ?: context.contentResolver.getType(sharedFile.uri)) to
@@ -293,6 +295,12 @@ fun AttachmentSheets(
         uri: Uri,
         photo: Boolean,
     ) {
+        if (!uri.isLocalMediaUri()) {
+            lastAttempt = null
+            flow = AttachmentFlow.Sources
+            viewModel.fail(context.getString(R.string.settings_local_media_required))
+            return
+        }
         val meta = context.contentResolver.queryMeta(uri)
         val source =
             if (photo) {
@@ -665,18 +673,18 @@ private fun GalleryActionTile(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .aspectRatio(1f)
+                .heightIn(min = 96.dp)
                 .clickable(onClick = onClick)
                 .testTag(tag),
     ) {
         Column(
-            Modifier.fillMaxSize().padding(8.dp),
+            Modifier.fillMaxWidth().padding(8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(4.dp))
-            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 2)
+            Text(label, style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -846,14 +854,14 @@ private fun SourceCard(
     Card(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.height(108.dp),
+        modifier = modifier.heightIn(min = 108.dp),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Icon(icon, null, tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -937,6 +945,14 @@ internal fun ConfirmationSheet(
     onDismiss: () -> Unit,
     onUpload: () -> Unit,
 ) {
+    val sourceUri =
+        when (source) {
+            is AttachmentSource.Photo -> source.uri
+            is AttachmentSource.Document -> source.uri
+            else -> null
+        }
+    val unsupportedUri = sourceUri != null && !sourceUri.isLocalMediaUri()
+    var previewFailed by remember(source) { mutableStateOf(false) }
     val sojuUnavailable = config.backend == AttachmentBackend.SOJU_FILEHOST && !sojuFileHostAvailable
     val customUnavailable =
         config.backend == AttachmentBackend.CUSTOM_0X0 &&
@@ -956,16 +972,20 @@ internal fun ConfirmationSheet(
             ) {
                 Text(stringResource(R.string.upload_confirm_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(12.dp))
+                if (unsupportedUri) Text(stringResource(R.string.settings_local_media_required), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("attachment_thumbnail_error"))
                 val preview =
                     when (source) {
-                        is AttachmentSource.Photo -> source.uri
+                        is AttachmentSource.Photo -> source.uri.takeIf { it.isLocalMediaUri() }
+                        is AttachmentSource.Document -> source.uri.takeIf { it.isLocalMediaUri() && source.mimeType?.startsWith("image/") == true }
                         is AttachmentSource.LocalFile -> source.file.takeIf { source.mimeType.startsWith("image/") }
                         else -> null
                     }
-                if (preview != null) {
+                if (preview != null && !previewFailed) {
                     AsyncImage(
                         model = preview,
                         contentDescription = null,
+                        onError = { previewFailed = true },
+                        onSuccess = { previewFailed = false },
                         modifier =
                             Modifier
                                 .fillMaxWidth()
@@ -976,6 +996,7 @@ internal fun ConfirmationSheet(
                     )
                     Spacer(Modifier.height(12.dp))
                 }
+                if (previewFailed) Text(stringResource(R.string.settings_local_image_preview_failed), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("attachment_thumbnail_error"))
                 AttachmentMetadata(source)
                 Spacer(Modifier.height(16.dp))
                 Text(stringResource(R.string.upload_destination), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -999,9 +1020,9 @@ internal fun ConfirmationSheet(
             }
             Column(Modifier.padding(horizontal = 16.dp)) {
                 Button(
-                    onClick = onUpload,
-                    enabled = !sojuUnavailable && !customUnavailable,
-                    modifier = Modifier.fillMaxWidth().height(52.dp).testTag("attachment_upload"),
+                    onClick = { if (!unsupportedUri) onUpload() },
+                    enabled = !sojuUnavailable && !customUnavailable && !unsupportedUri,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("attachment_upload"),
                 ) {
                     Icon(Icons.Outlined.CloudUpload, null)
                     Spacer(Modifier.width(8.dp))
@@ -1055,7 +1076,10 @@ private fun BackendPickerSheet(
 private fun AttachmentMetadata(source: AttachmentSource) {
     Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            val image = source is AttachmentSource.Photo || source is AttachmentSource.LocalFile && source.mimeType.startsWith("image/")
+            val image =
+                source is AttachmentSource.Photo ||
+                    source is AttachmentSource.Document && source.mimeType?.startsWith("image/") == true ||
+                    source is AttachmentSource.LocalFile && source.mimeType.startsWith("image/")
             Icon(if (image) Icons.Outlined.Image else Icons.Outlined.Description, null, modifier = Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {

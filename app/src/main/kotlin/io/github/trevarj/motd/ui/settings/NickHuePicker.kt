@@ -5,15 +5,16 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -41,6 +42,7 @@ private val PICKER_HUES = listOf(0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 30
  * using the active palette's saturation/lightness so the preview matches how the override will
  * actually render. [onPick] receives the chosen hue, or null for "Auto" (clear the override).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun NickHuePickerDialog(
     nick: String,
@@ -53,21 +55,20 @@ fun NickHuePickerDialog(
         onDismissRequest = onDismiss,
         title = { Text(nick) },
         text = {
-            Column {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(6),
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.selectableGroup(),
                 ) {
-                    items(PICKER_HUES, key = { it }) { hue ->
+                    PICKER_HUES.forEach { hue ->
                         val selected = hue == currentHue
                         val description = stringResource(R.string.manage_color_hue, hue)
                         // Swatch filled with the resolved palette color; selected swatch gets a border.
                         Box(
                             modifier =
                                 Modifier
-                                    .size(40.dp)
+                                    .size(48.dp)
                                     .clip(CircleShape)
                                     .background(scheme.hue(hue))
                                     .then(

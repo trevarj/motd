@@ -2,22 +2,29 @@ package io.github.trevarj.motd.gesture
 
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.down
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.up
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.gesture.radial.GESTURE_MENU_A11Y_DIALOG_TAG
 import io.github.trevarj.motd.gesture.radial.GESTURE_MENU_SCRIM_TAG
 import io.github.trevarj.motd.gesture.radial.GESTURE_ORB_TAG
+import io.github.trevarj.motd.gesture.radial.GestureMenuPreview
 import io.github.trevarj.motd.gesture.radial.GestureOrbSurface
 import io.github.trevarj.motd.gesture.radial.OrbPlacement
 import io.github.trevarj.motd.gesture.radial.RadialEntry
 import io.github.trevarj.motd.gesture.radial.gestureMenuSliceTag
+import io.github.trevarj.motd.ui.settings.labs.IconPickerDialog
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -96,6 +103,59 @@ class GestureOrbUiTest {
         setSurface()
 
         compose.onNodeWithTag(GESTURE_ORB_TAG).assertIsDisplayed()
+    }
+
+    @Test
+    fun previewInspectsEmptyDraftSubmenusAndFictionalProvidersWithoutLeaving() {
+        val root = mutableStateOf(GestureNode.Submenu("root", "Menu"))
+        var dismissals = 0
+        compose.setContent {
+            MotdTheme(dynamicColor = false) { GestureMenuPreview(root.value) { dismissals++ } }
+        }
+        compose.onNodeWithText("This draft has no entries.", substring = true).assertExists()
+        compose.runOnIdle {
+            root.value =
+                GestureNode.Submenu(
+                    "root",
+                    "Menu",
+                    children =
+                        listOf(
+                            GestureNode.Submenu("tools", "Tools", children = listOf(GestureNode.Leaf("search", "Search", action = GestureAction.OpenSearch))),
+                            GestureNode.Provider("people", "People", kind = GestureProviderKind.FRIENDS, limit = 2),
+                        ),
+                )
+        }
+        compose.onNodeWithTag("gesture_preview_inspect_tools").performScrollTo().performClick()
+        compose.onNodeWithTag("gesture_preview_inspect_search").performScrollTo().performClick()
+        compose.onNodeWithText("Inspecting: Search", substring = true).assertExists()
+        compose.onNodeWithText("Back").performScrollTo().performClick()
+        compose.onNodeWithTag("gesture_preview_inspect_people").performScrollTo().performClick()
+        compose.onNodeWithTag("gesture_preview_inspect_people-example-1").performScrollTo().performClick()
+        compose.onNodeWithText("Inspecting: Example 2", substring = true).assertExists()
+        compose.onNodeWithTag("gesture_menu_preview").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(0, dismissals) }
+    }
+
+    @Test
+    fun iconPickerUsesActualSelectedStateAndOneChoiceCallback() {
+        val selected = mutableStateOf(GestureIcon.MENU)
+        val choices = mutableListOf<GestureIcon>()
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                IconPickerDialog(selected.value, {
+                    selected.value = it
+                    choices += it
+                }, {})
+            }
+        }
+        compose.onNodeWithTag("gesture_editor_icon_menu").assertIsSelected()
+        compose
+            .onNodeWithTag("gesture_editor_icon_star")
+            .performScrollTo()
+            .performClick()
+            .assertIsSelected()
+        compose.onNodeWithTag("gesture_editor_icon_menu").assertIsNotSelected()
+        compose.runOnIdle { assertEquals(listOf(GestureIcon.STAR), choices) }
     }
 
     @Test

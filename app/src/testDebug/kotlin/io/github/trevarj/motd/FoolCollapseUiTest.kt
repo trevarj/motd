@@ -70,6 +70,7 @@ import io.github.trevarj.motd.ui.chat.ChatViewModelTest
 import io.github.trevarj.motd.ui.chat.ConversationPresenceState
 import io.github.trevarj.motd.ui.chat.EntryPositionState
 import io.github.trevarj.motd.ui.chat.FoolCollapseChip
+import io.github.trevarj.motd.ui.components.FoolVisibilityExample
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -113,6 +114,23 @@ class FoolCollapseUiTest {
             click(Offset(with(compose.density) { 240.dp.toPx() - 2f }, with(compose.density) { 12.dp.toPx() }))
         }
         assertTrue(collapsed)
+    }
+
+    @Test
+    fun settingsExampleKeepsExpansionLocalAndShowsAllThreeVisibilityOutcomes() {
+        val mode = mutableStateOf(FoolsMode.DIMMED)
+        compose.setContent { MotdTheme(dynamicColor = false) { FoolVisibilityExample(mode.value) } }
+        compose.onNodeWithText("See you in the channel!", substring = true).assertExists()
+        compose.runOnIdle { mode.value = FoolsMode.COLLAPSE }
+        compose.onNodeWithText("See you in the channel!", substring = true).assertDoesNotExist()
+        compose.onNodeWithTag("fool_example_placeholder").performClick()
+        compose.onNodeWithText("See you in the channel!", substring = true).assertExists()
+        compose.onNodeWithTag("fool_example_collapse_again").performClick()
+        compose.onNodeWithTag("fool_example_placeholder").assertExists()
+        compose.runOnIdle { mode.value = FoolsMode.HIDE }
+        compose.onNodeWithTag("fool_example_placeholder").assertDoesNotExist()
+        compose.onNodeWithText("See you in the channel!", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("The example row is hidden;", substring = true).assertExists()
     }
 
     @Test

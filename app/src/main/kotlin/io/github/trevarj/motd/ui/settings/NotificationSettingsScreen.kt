@@ -11,7 +11,6 @@ import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.NotificationsOff
-import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
@@ -38,6 +37,7 @@ import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.NotificationMode
 import io.github.trevarj.motd.ui.components.ChannelNotificationSheet
 import io.github.trevarj.motd.ui.components.label
+import io.github.trevarj.motd.ui.components.notificationIcon
 import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 
@@ -119,7 +119,7 @@ fun NotificationSettingsContent(
                     Box(targetModifier) {
                         SettingsNavigationRow(
                             title = stringResource(R.string.notification_global_default),
-                            icon = if (state.global == NotificationMode.OFF) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications,
+                            icon = if (available && state.global == NotificationMode.OFF) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications,
                             summary =
                                 when {
                                     state.loading -> stringResource(R.string.notification_settings_loading)
@@ -144,7 +144,7 @@ fun NotificationSettingsContent(
                     val expansion = stringResource(if (expanded) R.string.system_event_expanded else R.string.system_event_collapsed)
                     SettingsNavigationRow(
                         title = network.name,
-                        icon = if (network.activeWatchCount > 0) Icons.Outlined.NotificationsActive else Icons.Outlined.Dns,
+                        icon = if (available && network.activeWatchCount > 0) Icons.Outlined.NotificationsActive else Icons.Outlined.Dns,
                         summary =
                             stringResource(
                                 R.string.notification_server_summary,
@@ -161,7 +161,7 @@ fun NotificationSettingsContent(
                     item(key = "server_default_${network.networkId}") {
                         SettingsNavigationRow(
                             title = stringResource(R.string.notification_server_default),
-                            icon = if (network.effectiveMode == NotificationMode.OFF) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications,
+                            icon = if (available && network.effectiveMode == NotificationMode.OFF) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications,
                             summary = network.serverOverride?.label() ?: stringResource(R.string.notification_use_global, state.global.label()),
                             enabled = available,
                             modifier = Modifier.padding(start = 16.dp).testTag("notification_server_default_${network.networkId}"),
@@ -176,12 +176,7 @@ fun NotificationSettingsContent(
                     items(network.channels, key = { "channel_${it.bufferId}" }) { channel ->
                         SettingsNavigationRow(
                             title = channel.name,
-                            icon =
-                                when {
-                                    channel.notification.watch != null -> Icons.Outlined.NotificationsActive
-                                    channel.notification.mode == NotificationMode.OFF -> Icons.Outlined.NotificationsOff
-                                    else -> Icons.Outlined.Tag
-                                },
+                            icon = channel.notification.notificationIcon(),
                             summary = channel.notification.summary(),
                             enabled = available,
                             modifier = Modifier.padding(start = 32.dp).testTag("notification_channel_${channel.bufferId}"),

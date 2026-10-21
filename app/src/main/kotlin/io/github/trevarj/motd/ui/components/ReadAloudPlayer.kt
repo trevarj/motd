@@ -2,6 +2,8 @@ package io.github.trevarj.motd.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -11,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.LastPage
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
@@ -43,6 +46,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -137,7 +146,7 @@ fun ReadAloudPlayer(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ReadAloudVoiceOptions(
     config: ReadAloudSelection,
@@ -163,39 +172,85 @@ fun ReadAloudVoiceOptions(
                 .testTag("read_aloud_voice_options"),
         ) {
             Text(stringResource(R.string.read_aloud_options), style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.settings_voice_profile_scope), style = MaterialTheme.typography.bodySmall)
             Text(stringResource(R.string.read_aloud_voice_disclosure), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 12.dp))
             Text(stringResource(R.string.read_aloud_voice), style = MaterialTheme.typography.labelLarge)
             OutlinedButton(onClick = { voiceMenu = true }, enabled = !voices.loading && voices.voices.isNotEmpty(), modifier = Modifier.fillMaxWidth().testTag("read_aloud_voice")) {
-                val selected = voices.voices.firstOrNull { it.id == draft.voice }
+                val chosenVoice = voices.voices.firstOrNull { it.id == draft.voice }
                 Text(
-                    selected?.let { voiceLabel(it) } ?: stringResource(
+                    chosenVoice?.let { voiceLabel(it) } ?: stringResource(
                         when {
                             draft.voice != null -> R.string.read_aloud_unavailable_voice
                             else -> R.string.read_aloud_default_voice
                         },
                     ),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
                 )
                 DropdownMenu(expanded = voiceMenu, onDismissRequest = { voiceMenu = false }, modifier = Modifier.heightIn(max = 280.dp).testTag("read_aloud_voice_menu")) {
                     voices.voices.forEach { voice ->
-                        DropdownMenuItem(modifier = Modifier.testTag("read_aloud_voice_${voice.id}"), text = { Text(voiceLabel(voice)) }, onClick = {
-                            draft = draft.copy(voice = voice.id)
-                            voiceMenu = false
-                        })
+                        DropdownMenuItem(
+                            modifier =
+                                Modifier.testTag("read_aloud_voice_${voice.id}").semantics {
+                                    selected = draft.voice == voice.id
+                                    role = Role.RadioButton
+                                },
+                            text = { Text(voiceLabel(voice)) },
+                            trailingIcon = if (draft.voice == voice.id) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
+                            onClick = {
+                                draft = draft.copy(voice = voice.id)
+                                voiceMenu = false
+                            },
+                        )
                     }
                 }
             }
             Text(stringResource(R.string.read_aloud_gender_disclosure), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
-            Text(stringResource(R.string.read_aloud_rate, (draft.rate * 100).roundToInt()))
-            Slider(value = draft.rate, onValueChange = { draft = draft.copy(rate = it) }, valueRange = .7f..1.3f, modifier = Modifier.testTag("read_aloud_rate"))
-            Text(stringResource(R.string.read_aloud_pitch, (draft.pitch * 100).roundToInt()))
-            Slider(value = draft.pitch, onValueChange = { draft = draft.copy(pitch = it) }, valueRange = .7f..1.3f, modifier = Modifier.testTag("read_aloud_pitch"))
-            Text(stringResource(R.string.read_aloud_gap_option, draft.gapMs))
-            Slider(value = draft.gapMs.toFloat(), onValueChange = { draft = draft.copy(gapMs = it.roundToInt()) }, valueRange = 0f..1_000f, modifier = Modifier.testTag("read_aloud_gap"))
+            val ratePercent = (draft.rate * 100).roundToInt()
+            val rateLabel = stringResource(R.string.read_aloud_rate, ratePercent)
+            val rateName = stringResource(R.string.read_aloud_rate_name)
+            val rateValue = stringResource(R.string.settings_font_size_percent, ratePercent)
+            Text(rateLabel)
+            Slider(
+                value = draft.rate,
+                onValueChange = { draft = draft.copy(rate = it) },
+                valueRange = .7f..1.3f,
+                modifier =
+                    Modifier.testTag("read_aloud_rate").semantics {
+                        contentDescription = rateName
+                        stateDescription = rateValue
+                    },
+            )
+            val pitchPercent = (draft.pitch * 100).roundToInt()
+            val pitchLabel = stringResource(R.string.read_aloud_pitch, pitchPercent)
+            val pitchName = stringResource(R.string.read_aloud_pitch_name)
+            val pitchValue = stringResource(R.string.settings_font_size_percent, pitchPercent)
+            Text(pitchLabel)
+            Slider(
+                value = draft.pitch,
+                onValueChange = { draft = draft.copy(pitch = it) },
+                valueRange = .7f..1.3f,
+                modifier =
+                    Modifier.testTag("read_aloud_pitch").semantics {
+                        contentDescription = pitchName
+                        stateDescription = pitchValue
+                    },
+            )
+            val gapLabel = stringResource(R.string.read_aloud_gap_option, draft.gapMs)
+            val gapName = stringResource(R.string.read_aloud_gap_name)
+            val gapValue = stringResource(R.string.read_aloud_gap_value, draft.gapMs)
+            Text(gapLabel)
+            Slider(
+                value = draft.gapMs.toFloat(),
+                onValueChange = { draft = draft.copy(gapMs = it.roundToInt()) },
+                valueRange = 0f..1_000f,
+                modifier =
+                    Modifier.testTag("read_aloud_gap").semantics {
+                        contentDescription = gapName
+                        stateDescription = gapValue
+                    },
+            )
             if (voices.loading) Text(stringResource(R.string.read_aloud_preparing))
             (error ?: voices.error)?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = { if (previewing) onStopPreview() else onPreview(config.copy(options = draft)) }, enabled = previewing || !voices.loading && voices.voices.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("read_aloud_preview")) {
                     Text(stringResource(if (previewing) R.string.read_aloud_stop_preview else R.string.read_aloud_preview))
                 }

@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.settings
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -14,12 +15,12 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
@@ -48,6 +49,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -73,8 +75,12 @@ class AppearanceFolderLayoutUiTest {
 
         compose.onNodeWithTag("settings_folder_layout_picker").performScrollTo().performClick()
         compose.onNodeWithTag("settings_folder_layout_sheet").assertIsDisplayed()
-        compose.onNodeWithTag("settings_folder_layout_tabs").performClick()
-        compose.onNodeWithTag("settings_switch_show_folder_chats_in_all", useUnmergedTree = true).performScrollTo().performClick()
+        scrollToSheetNode("settings_folder_layout_sheet", "settings_folder_layout_tabs").performClick().assertIsSelected()
+        scrollToSheetNode("settings_folder_layout_sheet", "settings_folder_preview_all_switch_row").performClick()
+        scrollToSheetNode("settings_folder_layout_sheet", "settings_folder_preview").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_-1").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_folder_tab_-1").performClick()
+        compose.onNodeWithTag("chatlist_row_-1").assertExists()
 
         assertEquals(FolderDisplayMode.TABS, selected)
         assertEquals(false, showFolderChatsInAll)
@@ -96,7 +102,9 @@ class AppearanceFolderLayoutUiTest {
         setContent(onAvatarStyle = { selected = it })
 
         compose.onNodeWithTag("settings_avatar_style_picker").performScrollTo().performClick()
-        compose.onNodeWithTag("settings_avatar_style_irc_sprite").performClick()
+        scrollToSheetNode("settings_avatar_style_sheet", "settings_avatar_style_irc_sprite").performClick().assertIsSelected()
+        compose.onNodeWithTag("settings_avatar_style_sheet").assertIsDisplayed()
+        scrollToSheetNode("settings_avatar_style_sheet", "settings_avatar_preview_irc_sprite").assertExists()
 
         assertEquals(AvatarStyle.IRC_SPRITE, selected)
     }
@@ -128,7 +136,7 @@ class AppearanceFolderLayoutUiTest {
         val body = "See you in the channel!"
         preview.performScrollTo().assertIsDisplayed()
         val static = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK))
-        val staticBody = inkOf(body)
+        val staticBody = inkOf(body, "settings_chat_preview_inline_configuration")
         assertEquals(ensureContrast(Color(0xFFF5F5F5), listOf(static.secondaryContainer), MESSAGE_TEXT_CONTRAST), staticBody)
 
         compose
@@ -141,7 +149,7 @@ class AppearanceFolderLayoutUiTest {
         val themed = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK, useThemeTextColors = true))
         assertEquals(themed.onSurface, inkOf("Appearance"))
         preview.performScrollTo().assertIsDisplayed()
-        assertEquals(ensureContrast(themed.onBackground, listOf(themed.secondaryContainer), MESSAGE_TEXT_CONTRAST), inkOf(body))
+        assertEquals(ensureContrast(themed.onBackground, listOf(themed.secondaryContainer), MESSAGE_TEXT_CONTRAST), inkOf(body, "settings_chat_preview_inline_configuration"))
 
         compose
             .onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true)
@@ -150,7 +158,7 @@ class AppearanceFolderLayoutUiTest {
             .assertIsOff()
         assertEquals(false, selected)
         preview.performScrollTo().assertIsDisplayed()
-        assertEquals(staticBody, inkOf(body))
+        assertEquals(staticBody, inkOf(body, "settings_chat_preview_inline_configuration"))
     }
 
     @Test
@@ -182,26 +190,23 @@ class AppearanceFolderLayoutUiTest {
         )
 
         compose.onNodeWithTag("settings_density_picker").performScrollTo().performClick()
-        compose.onNodeWithTag("settings_density_compact").performClick()
+        scrollToSheetNode("settings_density_sheet", "settings_density_compact").performClick()
         compose.onNodeWithTag("settings_density_sheet").assertIsDisplayed()
-        compose.onNodeWithTag("settings_density_sheet_options").performScrollToIndex(4)
-        compose.onNodeWithTag("settings_chat_preview_sheet_compact_default_rounded").assertExists()
+        scrollToSheetNode("settings_density_sheet", "settings_chat_preview_sheet_compact_default_rounded").assertIsDisplayed()
         assertEquals(LayoutDensity.COMPACT, selectedDensity)
         dismissSheet("settings_density_sheet")
 
         compose.onNodeWithTag("settings_message_spacing_picker").performScrollTo().performClick()
-        compose.onNodeWithTag("settings_message_spacing_relaxed").performClick()
+        scrollToSheetNode("settings_message_spacing_sheet", "settings_message_spacing_relaxed").performClick()
         compose.onNodeWithTag("settings_message_spacing_sheet").assertIsDisplayed()
-        compose.onNodeWithTag("settings_message_spacing_sheet_options").performScrollToIndex(4)
-        compose.onNodeWithTag("settings_chat_preview_sheet_compact_relaxed_rounded").assertExists()
+        scrollToSheetNode("settings_message_spacing_sheet", "settings_chat_preview_sheet_compact_relaxed_rounded").assertIsDisplayed()
         assertEquals(MessageSpacing.RELAXED, selectedSpacing)
         dismissSheet("settings_message_spacing_sheet")
 
         compose.onNodeWithTag("settings_bubble_corner_picker").performScrollTo().performClick()
-        compose.onNodeWithTag("settings_bubble_corner_square").performClick()
+        scrollToSheetNode("settings_bubble_corner_sheet", "settings_bubble_corner_square").performClick()
         compose.onNodeWithTag("settings_bubble_corner_sheet").assertIsDisplayed()
-        compose.onNodeWithTag("settings_bubble_corner_sheet_options").performScrollToIndex(4)
-        compose.onNodeWithTag("settings_chat_preview_sheet_comfortable_relaxed_square").assertExists()
+        scrollToSheetNode("settings_bubble_corner_sheet", "settings_chat_preview_sheet_comfortable_relaxed_square").assertIsDisplayed()
         assertEquals(BubbleCornerStyle.SQUARE, selectedCorners)
     }
 
@@ -216,16 +221,9 @@ class AppearanceFolderLayoutUiTest {
         )
 
         compose.onNodeWithTag("settings_composer_style_picker").performScrollTo().performClick()
-        compose.onNodeWithTag("settings_composer_style_compact").performClick().assertIsSelected()
+        scrollToSheetNode("settings_composer_style_sheet", "settings_composer_style_compact").performClick().assertIsSelected()
         compose.onNodeWithTag("settings_composer_style_sheet").assertIsDisplayed()
-        // Expand the modal itself before scrolling its footer: lazy-list scrolling does not move
-        // the sheet's partially expanded offset, which can leave composed controls below the window.
-        val sheet = hasTestTag("settings_composer_style_sheet")
-        val expandAction = SemanticsMatcher.keyIsDefined(SemanticsActions.Expand) and (sheet or hasAnyAncestor(sheet))
-        if (compose.onAllNodes(expandAction, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()) {
-            compose.onNode(expandAction, useUnmergedTree = true).performSemanticsAction(SemanticsActions.Expand) { it() }
-        }
-        compose.onNodeWithTag("settings_composer_style_sheet_options").performScrollToIndex(4)
+        scrollToSheetNode("settings_composer_style_sheet", "settings_composer_preview_sheet")
         val preview = compose.onNodeWithTag("settings_composer_preview_sheet")
         preview.performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("chat_composer_self_nick", useUnmergedTree = true).assertIsDisplayed()
@@ -295,10 +293,9 @@ class AppearanceFolderLayoutUiTest {
             0.5f,
         )
 
-        compose.onNodeWithTag("settings_composer_style_sheet_options").performScrollToIndex(2)
-        compose.onNodeWithTag("settings_composer_style_large").performClick().assertIsSelected()
+        scrollToSheetNode("settings_composer_style_sheet", "settings_composer_style_large").performClick().assertIsSelected()
         compose.onNodeWithTag("settings_composer_style_sheet").assertIsDisplayed()
-        compose.onNodeWithTag("settings_composer_style_sheet_options").performScrollToIndex(4)
+        scrollToSheetNode("settings_composer_style_sheet", "settings_composer_preview_sheet")
         preview.performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
         compose.onNodeWithTag("chat_composer_tools").assertDoesNotExist()
@@ -312,8 +309,7 @@ class AppearanceFolderLayoutUiTest {
         compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
         compose.onNodeWithTag("chat_composer_tools").assertDoesNotExist()
         field.assertTextEquals("hello")
-        compose.onNodeWithTag("settings_composer_style_sheet_options").performScrollToIndex(2)
-        compose.onNodeWithTag("settings_composer_style_large").assertIsSelected()
+        scrollToSheetNode("settings_composer_style_sheet", "settings_composer_style_large").assertIsSelected()
         compose.onNodeWithTag("settings_composer_style_sheet").assertIsDisplayed()
         dismissSheet("settings_composer_style_sheet")
         compose.runOnIdle { assertEquals(ComposerStyle.LARGE, persistedAppearance.value.composerStyle) }
@@ -351,13 +347,17 @@ class AppearanceFolderLayoutUiTest {
         setContent()
 
         compose.onNodeWithTag("settings_avatar_style_picker").performScrollTo().performClick()
-        compose.onNodeWithTag("settings_avatar_style_none").performClick()
+        scrollToSheetNode("settings_avatar_style_sheet", "settings_avatar_style_none").performClick()
+        scrollToSheetNode("settings_avatar_style_sheet", "settings_avatar_preview_none").assertExists()
+        dismissSheet("settings_avatar_style_sheet")
         compose.onNodeWithTag("chat_sender_avatar", useUnmergedTree = true).assertDoesNotExist()
 
         compose.onNodeWithTag("settings_time_format_picker").performScrollTo().performClick()
-        compose.onNodeWithTag("settings_time_format_h24").performClick()
+        scrollToSheetNode("settings_time_format_sheet", "settings_time_format_h24").performClick().assertIsSelected()
+        scrollToSheetNode("settings_time_format_sheet", "settings_time_preview_value").assertExists()
+        dismissSheet("settings_time_format_sheet")
         compose.onNodeWithTag("settings_chat_preview_inline_timestamps_true_h24").performScrollTo().assertExists()
-        compose.onNodeWithText(expectedTime, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNode(hasText(expectedTime) and hasAnyAncestor(hasTestTag("settings_chat_preview_inline_configuration")), useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test
@@ -407,6 +407,55 @@ class AppearanceFolderLayoutUiTest {
         compose.onNodeWithTag("settings_chat_preview_inline_wallpaper_deep_space_80").performScrollTo().assertIsDisplayed()
     }
 
+    @Test
+    @Config(qualifiers = "w320dp-h360dp", fontScale = 2f)
+    fun largeFontPickerKeepsLongImportedNameAndChangeActionReachable() {
+        val filename = "My readable custom conversation and interface typeface with a long filename.ttf"
+        var selected: FontChoice? = null
+        setContent(
+            appearance = AppearanceConfig(customFontName = filename, uiFontScalePercent = 140),
+            onFontChoice = { selected = it },
+        )
+        compose.onNodeWithTag("settings_font_picker").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_font_options").performScrollToNode(hasTestTag("settings_font_custom"))
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText(filename, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertTrue("The full imported name wraps at native large fonts", layouts.single().lineCount > 1)
+        assertTrue("The imported name is not clipped or ellipsized", !layouts.single().hasVisualOverflow)
+        compose.onNodeWithText("Change").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("settings_font_custom").performClick().assertIsSelected()
+        compose.onNodeWithTag("settings_font_sheet").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(FontChoice.CUSTOM, selected) }
+    }
+
+    @Test
+    @Config(qualifiers = "fr-w411dp-h891dp")
+    fun timestampExampleUsesFixedLocalTimeAndNativeInvalidPatternFallback() {
+        val appearance = mutableStateOf(AppearanceConfig(timeFormat = TimeFormat.AUTO))
+        compose.setContent {
+            MotdTheme(dynamicColor = false) { TimestampExample(appearance.value) }
+        }
+        val system =
+            compose
+                .onNodeWithTag("settings_time_preview_value")
+                .fetchSemanticsNode()
+                .config[SemanticsProperties.Text]
+                .single()
+                .text
+        compose.runOnIdle { appearance.value = appearance.value.copy(timeFormat = TimeFormat.CUSTOM, customTimeFormatPattern = "'") }
+        compose.onNodeWithTag("settings_time_preview_value").assertTextEquals(system)
+        compose.runOnIdle { appearance.value = appearance.value.copy(customTimeFormatPattern = "yyyy-MM-dd HH:mm:ss") }
+        compose.onNodeWithTag("settings_time_preview_value").assertTextEquals("2024-01-02 15:04:05")
+    }
+
+    private fun scrollToSheetNode(
+        sheetTag: String,
+        nodeTag: String,
+    ): androidx.compose.ui.test.SemanticsNodeInteraction {
+        compose.onNodeWithTag("${sheetTag}_options").performScrollToNode(hasTestTag(nodeTag))
+        return compose.onNodeWithTag(nodeTag)
+    }
+
     private fun dismissSheet(tag: String) {
         val sheet = hasTestTag(tag)
         val dismissAction = SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and (sheet or hasAnyAncestor(sheet))
@@ -416,9 +465,13 @@ class AppearanceFolderLayoutUiTest {
 
     private fun previewTimeText(): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(PREVIEW_MESSAGE_TIME_MILLIS))
 
-    private fun inkOf(text: String): Color {
+    private fun inkOf(
+        text: String,
+        within: String? = null,
+    ): Color {
         val layouts = mutableListOf<TextLayoutResult>()
-        compose.onNodeWithText(text, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val matcher = if (within == null) hasText(text) else hasText(text) and hasAnyAncestor(hasTestTag(within))
+        compose.onNode(matcher, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
         return layouts
             .single()
             .layoutInput.style.color
@@ -433,6 +486,7 @@ class AppearanceFolderLayoutUiTest {
         onAvatarStyle: (AvatarStyle) -> Unit = {},
         onLayoutDensity: (LayoutDensity) -> Unit = {},
         onComposerStyle: (ComposerStyle) -> Unit = {},
+        onFontChoice: (FontChoice) -> Unit = {},
         onMessageSpacing: (MessageSpacing) -> Unit = {},
         onBubbleCornerStyle: (BubbleCornerStyle) -> Unit = {},
         onChatShadowsEnabled: (Boolean) -> Unit = {},
@@ -447,6 +501,7 @@ class AppearanceFolderLayoutUiTest {
                 themePreset = currentAppearance.theme,
                 trueBlack = currentAppearance.trueBlack,
                 useThemeTextColors = currentAppearance.useThemeTextColors,
+                uiFontScalePercent = currentAppearance.uiFontScalePercent,
             ) {
                 AppearanceSettingsContent(
                     settings = settings,
@@ -469,7 +524,7 @@ class AppearanceFolderLayoutUiTest {
                     importedWallpaper = importedWallpaperProvider(),
                     onUiFontScale = {},
                     onConversationFontScale = {},
-                    onFontChoice = {},
+                    onFontChoice = onFontChoice,
                     onShowTimestamps = {},
                     onTimeFormat = {},
                     onCustomTimeFormatPattern = {},

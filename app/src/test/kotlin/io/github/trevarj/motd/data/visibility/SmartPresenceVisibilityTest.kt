@@ -10,6 +10,8 @@ import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_WINDOW_MS
+import io.github.trevarj.motd.ui.components.presenceExample
+import io.github.trevarj.motd.ui.components.presenceExampleRows
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -80,6 +82,19 @@ class SmartPresenceVisibilityTest {
     }
 
     private suspend fun visibleKinds(mode: PresenceMode): List<Pair<MessageKind, String>> = visibleRows(mode).map { it.kind to it.sender }
+
+    @Test
+    fun `settings presence scenario matches the production query for every mode`() =
+        runTest {
+            db.messageDao().insertAll(presenceExample.map { it.copy(id = 0, bufferId = bufferId) })
+            for (mode in PresenceMode.entries) {
+                assertEquals(
+                    mode.name,
+                    presenceExampleRows(mode).map { it.kind to it.sender }.reversed(),
+                    visibleKinds(mode),
+                )
+            }
+        }
 
     @Test
     fun `smart keeps presence rows for a user who spoke inside the window`() =

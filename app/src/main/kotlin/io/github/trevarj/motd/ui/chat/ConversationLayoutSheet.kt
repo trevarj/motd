@@ -1,99 +1,73 @@
 package io.github.trevarj.motd.ui.chat
 
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.RadioButton
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.LayoutDensity
-import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.data.prefs.MessageSpacing
+import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.ui.components.ChatLayoutPreview
+import io.github.trevarj.motd.ui.components.densityDescription
+import io.github.trevarj.motd.ui.components.densityLabel
+import io.github.trevarj.motd.ui.settings.ChoiceOption
+import io.github.trevarj.motd.ui.settings.SingleChoiceSheet
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConversationLayoutSheet(
     state: ConversationLayoutState,
     onSelect: (LayoutDensity?) -> Unit,
     onDismiss: () -> Unit,
+    wallpaper: WallpaperSelection,
+    conversationFontScalePercent: Int,
+    messageSpacing: MessageSpacing,
+    bubbleCorners: BubbleCornerStyle,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("chat_layout_sheet")) {
-        SheetSystemBars()
-        Text(text = stringResource(R.string.chat_layout_title))
-        androidx.compose.foundation.layout.Column(Modifier.selectableGroup()) {
-            LayoutOption(
-                value = null,
-                selected = state.override == null,
-                tag = "chat_layout_global",
-                label =
+    val inherited = state.bufferDefault ?: state.global
+    SingleChoiceSheet(
+        title = stringResource(R.string.chat_layout_title),
+        selected = state.override,
+        options =
+            listOf(
+                ChoiceOption<LayoutDensity?>(
+                    null,
+                    stringResource(if (state.bufferDefault != null) R.string.chat_layout_use_server_default else R.string.chat_layout_use_global),
+                    densityDescription(inherited),
+                    "chat_layout_global",
+                ),
+            ) +
+                LayoutDensity.entries.map { density ->
+                    ChoiceOption<LayoutDensity?>(density, densityLabel(density), densityDescription(density), "chat_layout_${density.name.lowercase()}")
+                },
+        onSelect = onSelect,
+        onDismiss = onDismiss,
+        tag = "chat_layout_sheet",
+        dismissOnSelect = false,
+        preview = {
+            Column {
+                Text(
                     stringResource(
-                        if (state.bufferDefault != null) {
-                            R.string.chat_layout_use_server_default
-                        } else {
-                            R.string.chat_layout_use_global
+                        when {
+                            state.override != null -> R.string.chat_layout_source_override
+                            state.bufferDefault != null -> R.string.chat_layout_source_server
+                            else -> R.string.chat_layout_source_global
                         },
+                        densityLabel(state.effective),
                     ),
-                supporting =
-                    if (state.bufferDefault == null) {
-                        stringResource(
-                            R.string.chat_layout_global_summary,
-                            densityLabel(state.global),
-                        )
-                    } else {
-                        null
-                    },
-                onSelect = onSelect,
-            )
-            LayoutDensity.entries.forEach { density ->
-                LayoutOption(
-                    value = density,
-                    selected = state.override == density,
-                    tag = "chat_layout_${density.name.lowercase()}",
-                    label = densityLabel(density),
-                    supporting = null,
-                    onSelect = onSelect,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                ChatLayoutPreview(
+                    density = state.effective,
+                    messageSpacing = messageSpacing,
+                    bubbleCorners = bubbleCorners,
+                    wallpaper = wallpaper,
+                    conversationFontScalePercent = conversationFontScalePercent,
+                    tagPrefix = "chat_layout_preview",
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun LayoutOption(
-    value: LayoutDensity?,
-    selected: Boolean,
-    tag: String,
-    label: String,
-    supporting: String?,
-    onSelect: (LayoutDensity?) -> Unit,
-) {
-    ListItem(
-        modifier =
-            Modifier
-                .testTag(tag)
-                .selectable(
-                    selected = selected,
-                    role = Role.RadioButton,
-                    onClick = { onSelect(value) },
-                ),
-        headlineContent = { Text(label) },
-        supportingContent = supporting?.let { text -> { Text(text) } },
-        trailingContent = { RadioButton(selected = selected, onClick = null) },
-    )
-}
-
-@Composable
-internal fun densityLabel(density: LayoutDensity): String =
-    stringResource(
-        when (density) {
-            LayoutDensity.COMPACT -> R.string.settings_density_compact
-            LayoutDensity.COMFORTABLE -> R.string.settings_density_comfortable
-            LayoutDensity.TWO_LINE -> R.string.settings_density_two_line
         },
     )
+}
