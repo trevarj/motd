@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.avatar.IrcSpriteV2Renderer
 import io.github.trevarj.motd.avatar.IrcSpriteV2Theme
 import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.MotdShapes
 
 internal fun nickTokens(nick: String): List<String> {
     val stripped = nick.trim().trimStart('~', '&', '@', '%', '+')
@@ -110,7 +112,7 @@ internal fun IrcNetworkBadge(
 ) {
     val surface = MaterialTheme.colorScheme.surfaceContainerHighest
     val foreground = MaterialTheme.colorScheme.onSurfaceVariant
-    Canvas(modifier = modifier.size(size)) {
+    Canvas(modifier = modifier.size(size).clip(MotdShapes.channelAvatar).background(surface)) {
         val side = this.size.minDimension
         // Raise the topology slightly to balance the two lower nodes and bottom edge.
         val top = Offset(side * 0.5f, side * 0.30f)
@@ -118,7 +120,6 @@ internal fun IrcNetworkBadge(
         val right = Offset(side * 0.7f, side * 0.60f)
         val stroke = Stroke(width = side * 0.05f, cap = StrokeCap.Round)
         val radius = side * 0.07f
-        drawCircle(surface)
         drawLine(foreground, top, left, stroke.width, StrokeCap.Round)
         drawLine(foreground, top, right, stroke.width, StrokeCap.Round)
         drawLine(foreground, left, right, stroke.width, StrokeCap.Round)

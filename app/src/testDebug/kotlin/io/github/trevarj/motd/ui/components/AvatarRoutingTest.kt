@@ -183,7 +183,7 @@ class AvatarRoutingTest {
     }
 
     @Test
-    fun defaultNetworkGlyphIsCenteredWithinItsCircularBackground() {
+    fun defaultNetworkGlyphIsCenteredWithinItsRoundedSquareBackground() {
         compose.setContent {
             MaterialTheme(
                 colorScheme = lightColorScheme(surfaceContainerHighest = Color.White, onSurfaceVariant = Color.Black),
@@ -217,7 +217,7 @@ class AvatarRoutingTest {
         }
         assertTrue("The rendered topology glyph must be visible", maxX >= minX && maxY >= minY)
         assertEquals("Horizontal glyph center", pixels.width / 2f, (minX + maxX + 1) / 2f, 1f)
-        assertTrue("Glyph must fit inside the circular background", minY > pixels.height * 0.15 && maxY < pixels.height * 0.85)
+        assertTrue("Glyph must fit inside the rounded-square background", minY > pixels.height * 0.15 && maxY < pixels.height * 0.85)
         assertEquals("Horizontal ink center", pixels.width / 2.0, inkX / inkWeight + 0.5, pixels.width * 0.01)
         assertEquals("Vertical ink center", pixels.height / 2.0, inkY / inkWeight + 0.5, pixels.height * 0.01)
     }

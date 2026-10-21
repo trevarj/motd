@@ -14,7 +14,7 @@ object MotdShapes {
     val composer = RoundedCornerShape(28.dp)
     val pill = RoundedCornerShape(percent = 50)
 
-    // Avatar shape is semantic: channels are rounded squares, queries/people stay circles. Percent
+    // Channels and drawer networks share rounded squares; queries/people stay circles. Percent
     // radius keeps the corner proportional from the 20dp action line to the 88dp channel header.
     val channelAvatar = RoundedCornerShape(percent = 30)
 }

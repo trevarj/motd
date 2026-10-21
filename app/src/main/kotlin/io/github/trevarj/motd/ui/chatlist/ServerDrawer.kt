@@ -549,7 +549,7 @@ private fun DrawerNetworkItem(
                                     modifier =
                                         Modifier
                                             .size(40.dp)
-                                            .clip(CircleShape)
+                                            .clip(MotdShapes.channelAvatar)
                                             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                                             .padding(8.dp),
                                 )
@@ -572,7 +572,7 @@ private fun DrawerNetworkItem(
                                 onLoading = { iconLoaded = false },
                                 onSuccess = { iconLoaded = true },
                                 onError = { iconLoaded = false },
-                                modifier = Modifier.size(40.dp).clip(CircleShape),
+                                modifier = Modifier.size(40.dp).clip(MotdShapes.channelAvatar),
                             )
                         }
                         Box(
