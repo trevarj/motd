@@ -1,0 +1,3 @@
+- Added live appearance and behavior previews, with settings saved as you adjust them.
+- Made options, icons, and dialogs clearer throughout settings.
+- Made local avatar imports safer and matched drawer network icon shapes to channel avatars.
