@@ -2427,8 +2427,8 @@ internal fun FoolPlaceholder(
 internal fun FoolCollapseChip(
     sender: String,
     tag: String,
-    showNormally: Boolean = false,
     modifier: Modifier = Modifier,
+    showNormally: Boolean = false,
     onCollapse: () -> Unit,
 ) {
     Row(

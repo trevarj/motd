@@ -206,6 +206,7 @@ fun AttachmentSheets(
 ) {
     val context = LocalContext.current
     val cameraStartError = stringResource(R.string.upload_camera_failed)
+    val localMediaRequiredError = stringResource(R.string.settings_local_media_required)
     val defaultConfig by viewModel.config.collectAsStateWithLifecycle()
     val recent by viewModel.recent.collectAsStateWithLifecycle()
     val progress by viewModel.progress.collectAsStateWithLifecycle()
@@ -298,7 +299,7 @@ fun AttachmentSheets(
         if (!uri.isLocalMediaUri()) {
             lastAttempt = null
             flow = AttachmentFlow.Sources
-            viewModel.fail(context.getString(R.string.settings_local_media_required))
+            viewModel.fail(localMediaRequiredError)
             return
         }
         val meta = context.contentResolver.queryMeta(uri)
