@@ -163,7 +163,10 @@
     <string name="onboarding_auth_nickserv_recovery">Recover preferred nickname automatically</string>
     <string name="onboarding_auth_nickserv_sequence">Recovery commands</string>
     <string name="onboarding_auth_nickserv_sequence_desc">Comma-separated command names, such as REGAIN or GHOST,REGAIN.</string>
-    <string name="onboarding_auth_choose_cert">Choose certificate</string>
+    <string name="onboarding_auth_import_cert">Import certificate file</string>
+    <string name="onboarding_auth_use_installed_cert">Use installed certificate</string>
+    <string name="onboarding_auth_cert_import_guidance">Choose a PKCS#12 file (.p12 or .pfx) containing your private key and certificate. Android grants access to the selected file without a storage permission prompt, then asks you to authorize certificate use.</string>
+    <string name="onboarding_auth_cert_unavailable">Android could not open certificate setup. Check your device’s credential settings, then try Use installed certificate.</string>
     <string name="onboarding_auth_cert_selected">Certificate: %1$s</string>
     <string name="network_guidance_title">%1$s account setup</string>
     <string name="network_guidance_libera">New account: connect with Authentication set to None, register, and verify your email; then return to Network settings. Existing account: select SASL PLAIN. SASL username is your account name (main registered nick); Password is your account password.</string>

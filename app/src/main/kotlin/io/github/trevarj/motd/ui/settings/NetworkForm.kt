@@ -1,6 +1,11 @@
 package io.github.trevarj.motd.ui.settings
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.security.KeyChain
+import androidx.activity.compose.LocalActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
@@ -33,6 +38,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,6 +70,7 @@ import io.github.trevarj.motd.ui.settings.addnetwork.NetworkGuidanceKind
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPreset
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import kotlinx.coroutines.launch
 
 /**
  * Reusable server + auth edit form, shared by onboarding steps 3-4 and NetworkSettings. Stateless:
@@ -517,7 +525,65 @@ private fun AuthSection(
     auth: AuthForm,
     onAuthChange: (AuthForm) -> Unit,
 ) {
-    val context = LocalContext.current
+    val activity = LocalActivity.current
+    val scope = rememberCoroutineScope()
+    val latestAuth by rememberUpdatedState(auth)
+    val latestOnAuthChange by rememberUpdatedState(onAuthChange)
+    val certificateOwner = remember(auth.mode) { Any() }
+    val latestCertificateOwner by rememberUpdatedState(certificateOwner)
+    var installingCertificate by remember { mutableStateOf<Any?>(null) }
+    var choosingCertificate by remember { mutableStateOf(false) }
+    var certificateError by remember(auth.mode) { mutableStateOf(false) }
+
+    fun certificateUnavailable() {
+        installingCertificate = null
+        choosingCertificate = false
+        certificateError = true
+    }
+
+    fun chooseCertificate() {
+        if (installingCertificate != null || choosingCertificate || latestAuth.mode != AuthMode.EXTERNAL) return
+        if (activity == null || activity.isFinishing || activity.isDestroyed) {
+            certificateUnavailable()
+            return
+        }
+        val owner = certificateOwner
+        choosingCertificate = true
+        certificateError = false
+        try {
+            KeyChain.choosePrivateKeyAlias(
+                activity,
+                { alias ->
+                    // KeyChain may call back off-main; the entry's scope rejects callbacks after disposal.
+                    scope.launch {
+                        choosingCertificate = false
+                        if (owner === latestCertificateOwner && latestAuth.mode == AuthMode.EXTERNAL && alias != null) {
+                            latestOnAuthChange(latestAuth.copy(certAlias = alias))
+                        }
+                    }
+                },
+                null,
+                null,
+                null,
+                -1,
+                latestAuth.certAlias,
+            )
+        } catch (_: ActivityNotFoundException) {
+            certificateUnavailable()
+        } catch (_: SecurityException) {
+            certificateUnavailable()
+        }
+    }
+
+    val certificateInstaller =
+        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val owner = installingCertificate
+            installingCertificate = null
+            if (owner != null && owner === latestCertificateOwner && result.resultCode == Activity.RESULT_OK) {
+                chooseCertificate()
+            }
+        }
+    val certificateBusy = installingCertificate != null || choosingCertificate
     PasswordField(
         value = auth.serverPassword,
         onValueChange = { onAuthChange(auth.copy(serverPassword = it)) },
@@ -583,20 +649,41 @@ private fun AuthSection(
                         modifier = Modifier.padding(top = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
+                        Text(
+                            stringResource(R.string.onboarding_auth_cert_import_guidance),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         Button(
                             onClick = {
-                                // System client-cert picker; result folds back into the form.
-                                KeyChain.choosePrivateKeyAlias(
-                                    context as android.app.Activity,
-                                    { alias -> onAuthChange(auth.copy(certAlias = alias)) },
-                                    null,
-                                    null,
-                                    null,
-                                    -1,
-                                    null,
-                                )
+                                if (installingCertificate != null || choosingCertificate || latestAuth.mode != AuthMode.EXTERNAL) return@Button
+                                installingCertificate = certificateOwner
+                                certificateError = false
+                                try {
+                                    // ponytail: Android owns the file picker, password prompt, and private-key import.
+                                    certificateInstaller.launch(KeyChain.createInstallIntent())
+                                } catch (_: ActivityNotFoundException) {
+                                    certificateUnavailable()
+                                } catch (_: SecurityException) {
+                                    certificateUnavailable()
+                                }
                             },
-                        ) { Text(stringResource(R.string.onboarding_auth_choose_cert)) }
+                            enabled = !certificateBusy,
+                            modifier = Modifier.testTag("auth_import_certificate"),
+                        ) { Text(stringResource(R.string.onboarding_auth_import_cert)) }
+                        TextButton(
+                            onClick = ::chooseCertificate,
+                            enabled = !certificateBusy,
+                            modifier = Modifier.testTag("auth_use_installed_certificate"),
+                        ) { Text(stringResource(R.string.onboarding_auth_use_installed_cert)) }
+                        if (certificateError) {
+                            PersistentStatusNotice(
+                                text = stringResource(R.string.onboarding_auth_cert_unavailable),
+                                error = true,
+                                onDismiss = { certificateError = false },
+                                modifier = Modifier.testTag("auth_certificate_error"),
+                            )
+                        }
                         auth.certAlias?.let {
                             Text(stringResource(R.string.onboarding_auth_cert_selected, it))
                         }

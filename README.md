@@ -89,6 +89,13 @@ channel provenance, publication status, and the maintainer checklist.
 **Direct**: add a network with host `irc.libera.chat`, port `6697`, TLS on,
 and SASL PLAIN with your NickServ credentials (or SASL NONE).
 
+**SASL EXTERNAL**: choose **Import certificate file** to open Android's file
+picker and import a PKCS#12 (`.p12`/`.pfx`) containing your private key and
+certificate, then authorize motd to use the installed identity. Selecting the
+file grants access to that file; no storage permission prompt is needed.
+**Use installed certificate** selects an identity already in Android KeyChain.
+A certificate-only PEM file does not contain the private key required for EXTERNAL.
+
 **Through a bouncer**: point the network at your soju bouncer and authenticate
 with your bouncer account; motd negotiates capabilities and manages your
 upstream networks from a single connection. For CLoak, follow the
