@@ -98,6 +98,7 @@ class NetworkCertificatePickerUiTest {
         useInstalledCertificate()
         val chooser = nextAliasChooser()
         compose.onNodeWithTag("server_password_field").performScrollTo().performTextReplacement("updated while authorizing")
+        compose.runOnIdle { assertEquals("updated while authorizing", auth.value.serverPassword) }
         completeAlias(chooser, "selected-cert")
 
         compose.runOnIdle {
