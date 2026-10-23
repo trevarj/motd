@@ -212,6 +212,8 @@ flowchart TD
   Once placed, surviving keyed timeline rows ease history reflow with native placement-only
   motion, never a refresh fade. Entry alignment, reader scrolling and active live/send gap
   animations retain exclusive placement ownership.
+  History-gap dividers keep the same native content subtree when appearing or closing;
+  expanded network batches, invite actions and transfer rows are not remounted by seam changes.
 - Forwarding destinations observe the whole chat list only while the forwarding picker
   is open. Dismissal cancels that subscription and clears its targets; preview edits do
   not restart it. Confirmation still freshly validates the source, destination and connection.

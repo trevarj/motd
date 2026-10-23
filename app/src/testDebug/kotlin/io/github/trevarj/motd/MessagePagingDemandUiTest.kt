@@ -1,13 +1,23 @@
 package io.github.trevarj.motd
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -28,6 +38,7 @@ import androidx.paging.RemoteMediator
 import androidx.paging.cachedIn
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.room.withTransaction
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
@@ -46,9 +57,11 @@ import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.chat.ChatContent
 import io.github.trevarj.motd.ui.chat.ChatPositionTarget
+import io.github.trevarj.motd.ui.chat.ChatPresentation
 import io.github.trevarj.motd.ui.chat.ChatScrollPosition
 import io.github.trevarj.motd.ui.chat.ChatState
 import io.github.trevarj.motd.ui.chat.ConversationPresenceState
+import io.github.trevarj.motd.ui.chat.EntryPositionState
 import io.github.trevarj.motd.ui.chat.MessageList
 import io.github.trevarj.motd.ui.chat.ReportMessageViewport
 import io.github.trevarj.motd.ui.chat.isSystemRunChunkBoundary
@@ -60,6 +73,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -726,6 +740,287 @@ class MessagePagingDemandUiTest {
             )
         } finally {
             scope.cancel()
+            db.close()
+        }
+    }
+
+    @Test
+    fun stationaryGrownRoomWindowKeepsPaintedRowsAcrossHistoryTransactions() {
+        val db = inMemoryDb(directCommit = true)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val (bufferId, room) =
+            runBlocking {
+                val networkId = db.networkDao().insert(network())
+                val room = buffer(networkId, "#stationary-history").copy(joined = true)
+                db.bufferDao().insert(room) to room
+            }
+
+        fun row(ordinal: Long) =
+            MessageEntity(
+                id = ordinal * 10,
+                bufferId = bufferId,
+                msgid = "stationary-$ordinal",
+                serverTime = ordinal * 1_000,
+                sender = "alice",
+                kind = MessageKind.PRIVMSG,
+                text = "History row $ordinal",
+                dedupKey = "stationary-$ordinal",
+                timelineOrder = ordinal * 100,
+            )
+
+        val ordinary = (1L..1_400L).map(::row).associateBy { it.id }
+        // A few collapsed pills can occupy more than the 50 raw older slots left by a parked
+        // 600-row refresh. Ordinary messages on BOTH sides must remain painted, not just the pin.
+        val presence =
+            (1L..96L).map { ordinal ->
+                row(648).copy(
+                    id = 20_000 + ordinal,
+                    msgid = "stationary-presence-$ordinal",
+                    serverTime = 648_000 + ordinal * 10,
+                    sender = "peer",
+                    normalizedActor = "peer",
+                    kind = if (ordinal % 2 == 0L) MessageKind.JOIN else MessageKind.PART,
+                    text = "peer presence $ordinal",
+                    dedupKey = "stationary-presence-$ordinal",
+                    timelineOrder = 64_800 + ordinal,
+                )
+            }
+        runBlocking { db.messageDao().insertAll(ordinary.values.toList() + presence) }
+        val viewport = MutableStateFlow<ViewportRefreshAnchor?>(null)
+        val repository =
+            MessageRepositoryImpl(
+                db.bufferDao(),
+                db.networkIdentityDao(),
+                db,
+                db.reactionDao(),
+                ChatHistoryMediatorFactory { _, _, _ ->
+                    object : RemoteMediator<Int, MessageEntity>() {
+                        override suspend fun initialize() = InitializeAction.SKIP_INITIAL_REFRESH
+
+                        override suspend fun load(
+                            loadType: LoadType,
+                            state: PagingState<Int, MessageEntity>,
+                        ) = MediatorResult.Success(endOfPaginationReached = true)
+                    }
+                },
+                db.historyGapDao(),
+            )
+        val pages = repository.messages(bufferId, MessageVisibilitySpec(presenceMode = PresenceMode.ALL), null, viewport).cachedIn(scope)
+        lateinit var items: LazyPagingItems<MessageEntity>
+        lateinit var listState: LazyListState
+        var phase = "entry"
+        var watchedAnchor: Long? = null
+        var expectedOffsets = emptyMap<Long, Int>()
+        val presentations = mutableListOf<String>()
+
+        fun failedState(): String {
+            val snapshot = items.itemSnapshotList
+            return "phase=$phase count=${snapshot.size} " +
+                "loaded=${snapshot.placeholdersBefore}..${snapshot.size - snapshot.placeholdersAfter} " +
+                "entities=${snapshot.items.firstOrNull()?.id}..${snapshot.items.lastOrNull()?.id} " +
+                "first=${listState.firstVisibleItemIndex}/${listState.firstVisibleItemScrollOffset} " +
+                "visible=${listState.layoutInfo.visibleItemsInfo.map { Triple(it.key, it.index, it.offset) }} " +
+                "parked=${viewport.value} expected=$expectedOffsets loads=${items.loadState}"
+        }
+
+        fun await(
+            description: String,
+            condition: () -> Boolean,
+        ) {
+            try {
+                compose.waitUntil(10_000) {
+                    if (watchedAnchor != null) compose.mainClock.advanceTimeByFrame()
+                    // Drain Room/Main handoffs as well as Compose; a paused frame clock alone
+                    // does not publish replacement generations on Robolectric's Android looper.
+                    compose.waitForIdle()
+                    condition()
+                }
+            } catch (failure: Throwable) {
+                throw AssertionError("$description; ${failedState()}\npresentations=${presentations.joinToString("\n")}", failure)
+            }
+        }
+
+        fun bounds(id: Long): Rect = compose.onNodeWithTag("chat_message_stationary-${id / 10}", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+
+        fun paintedRow(id: Long): Bitmap {
+            val timeline = compose.onNodeWithTag("chat_timeline")
+            val root = timeline.fetchSemanticsNode().boundsInRoot
+            val row = bounds(id)
+            return Bitmap.createBitmap(
+                timeline.captureToImage().asAndroidBitmap(),
+                (row.left - root.left).toInt() + 1,
+                (row.top - root.top).toInt() + 1,
+                row.width.toInt() - 2,
+                row.height.toInt() - 2,
+            )
+        }
+
+        try {
+            compose.setContent {
+                val collected = pages.collectAsLazyPagingItems(Dispatchers.Main.immediate)
+                val timeline = rememberLazyListState()
+                val presentation = remember(collected, timeline) { ChatPresentation(collected, timeline, mutableFloatStateOf(1f)) }
+                SideEffect {
+                    items = collected
+                    listState = timeline
+                }
+                LaunchedEffect(collected) {
+                    snapshotFlow { collected.itemSnapshotList }.collect { snapshot ->
+                        watchedAnchor?.let { anchor ->
+                            presentations += failedState()
+                            assertTrue(
+                                "Canonical anchor $anchor left the native presentation; ${failedState()}",
+                                snapshot.items.any { it.id == anchor },
+                            )
+                        }
+                    }
+                }
+                MotdTheme(dynamicColor = false) {
+                    Box(
+                        Modifier.fillMaxSize().drawWithContent {
+                            drawContent()
+                            // Check the final layout reaching native paint, not a transient cached
+                            // placement earlier in the same traversal, on every drawn frame.
+                            watchedAnchor?.let { anchor ->
+                                val state = failedState()
+                                assertEquals("History changed the parked reader; $state", ViewportRefreshAnchor.Parked(anchor), viewport.value)
+                                for ((id, offset) in expectedOffsets) {
+                                    val visible =
+                                        timeline.layoutInfo.visibleItemsInfo.singleOrNull { it.key == id }
+                                            ?: throw AssertionError("Painted entity $id disappeared; $state\n$presentations")
+                                    assertTrue("Painted entity $id left the presentation; $state", visible.index in 0 until collected.itemCount)
+                                    assertEquals("Painted entity $id became a placeholder; $state", id, collected.peek(visible.index)?.id)
+                                    assertEquals("Stationary entity $id moved; $state", offset, visible.offset)
+                                }
+                            }
+                        },
+                    ) {
+                        ChatContent(
+                            state =
+                                ChatState(
+                                    buffer = room.copy(id = bufferId),
+                                    connState = IrcClientState.Ready("me", emptySet(), emptyMap()),
+                                    conversationPresence = ConversationPresenceState(global = PresenceMode.ALL),
+                                ),
+                            items = collected,
+                            presentation = presentation,
+                            composerEnabled = false,
+                            onBack = {},
+                            onOpenChannelInfo = {},
+                            onOpenSearch = {},
+                            onOpenImage = {},
+                            nickNormalizer = { it.lowercase() },
+                            onSubmit = {},
+                            onTyping = {},
+                            onSetReply = {},
+                            onReact = { _, _ -> },
+                            onRetry = {},
+                            loadPreview = { _, _ -> null },
+                            showImages = false,
+                            showLinkPreviews = false,
+                            viewportReadEnabled = false,
+                            entryState = EntryPositionState.Settled,
+                            onViewportRefreshAnchor = { viewport.value = it },
+                        )
+                    }
+                }
+            }
+            await("Newest Room window did not paint") {
+                items.itemCount > 0 &&
+                    items.peek(0)?.id == 14_000L &&
+                    items.loadState.source.refresh is LoadState.NotLoading
+            }
+            // Real LazyColumn access hints grow the native window; no test calls items[index],
+            // no deep entry key and no refresh before parking beyond initialLoadSize=600.
+            for (index in listOf(200, 400, 575, 750)) {
+                compose.onNodeWithTag("chat_timeline").performScrollToIndex(index)
+                await("History did not load at index $index") {
+                    index < items.itemCount &&
+                        items.peek(index)?.id == (1_400L - index) * 10 &&
+                        items.loadState.source.append is LoadState.NotLoading &&
+                        runCatching {
+                            compose.onNodeWithTag("chat_message_stationary-${1_400 - index}", useUnmergedTree = true).assertIsDisplayed()
+                        }.isSuccess
+                }
+            }
+            await("Reader did not park on a measured canonical history row") { viewport.value is ViewportRefreshAnchor.Parked }
+            val parkedId = compose.runOnIdle { (viewport.value as ViewportRefreshAnchor.Parked).id }
+            compose.runOnIdle {
+                assertTrue("Fixture never grew beyond the initial window; ${failedState()}", items.itemSnapshotList.items.size > MESSAGE_PAGING_CONFIG.initialLoadSize)
+            }
+            val timelineBounds = compose.onNodeWithTag("chat_timeline").fetchSemanticsNode().boundsInRoot
+            val hostTop =
+                compose
+                    .onNodeWithTag("chat_bottom_host")
+                    .fetchSemanticsNode()
+                    .boundsInRoot.top
+            val olderEdge =
+                compose
+                    .runOnIdle { listState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? Long } }
+                    .filter { id ->
+                        id in ordinary && id < 6_480 && bounds(id).let { it.top > timelineBounds.top + 1 && it.bottom < hostTop }
+                    }.minOrNull()
+                    ?: throw AssertionError("Fixture must paint ordinary history beyond the collapsed presence run; ${failedState()}")
+            val paintedIds = listOf(6_490L, olderEdge)
+            val beforeBounds = paintedIds.associateWith(::bounds)
+            compose.mainClock.autoAdvance = false
+            val beforePaint = paintedIds.associateWith(::paintedRow)
+            compose.runOnIdle {
+                expectedOffsets =
+                    (paintedIds + parkedId).associateWith { id ->
+                        listState.layoutInfo.visibleItemsInfo
+                            .single { it.key == id }
+                            .offset
+                    }
+                watchedAnchor = parkedId
+            }
+
+            fun assertPainted() {
+                for (id in paintedIds) {
+                    compose.onAllNodesWithTag("chat_message_stationary-${id / 10}", useUnmergedTree = true).assertCountEquals(1)
+                    assertEquals("Unchanged row $id moved; ${failedState()}", beforeBounds.getValue(id), bounds(id))
+                    assertTrue("Unchanged row $id lost opaque pixels; ${failedState()}", beforePaint.getValue(id).sameAs(paintedRow(id)))
+                }
+            }
+
+            for ((batch, confirmedId) in listOf(6_490L, 6_500L, olderEdge).withIndex()) {
+                phase = "history transaction ${batch + 1}"
+                // Playback can backfill above the painted edge and confirm canonical ordering of
+                // an already-visible row in one transaction. Neither changes visible text/geometry.
+                val recoveredOrdinal = olderEdge / 10 - 10
+                val recovered =
+                    row(recoveredOrdinal).copy(
+                        id = 30_000L + batch,
+                        msgid = "stationary-recovered-$batch",
+                        serverTime = recoveredOrdinal * 1_000 + (batch + 1) * 100,
+                        dedupKey = "stationary-recovered-$batch",
+                        timelineOrder = recoveredOrdinal * 100 + (batch + 1) * 10,
+                        timelineOrderConfirmed = true,
+                    )
+                runBlocking {
+                    db.withTransaction {
+                        db.messageDao().insertAll(listOf(recovered))
+                        db.messageDao().update(ordinary.getValue(confirmedId).copy(timelineOrderConfirmed = true))
+                    }
+                }
+                await("History transaction did not reach the native presenter") {
+                    assertPainted()
+                    items.itemCount == ordinary.size + presence.size + batch + 1 &&
+                        items.loadState.source.refresh is LoadState.NotLoading &&
+                        items.loadState.source.append is LoadState.NotLoading
+                }
+                compose.mainClock.advanceTimeBy(64)
+                compose.waitForIdle()
+                assertPainted()
+            }
+            compose.mainClock.advanceTimeBy(1_000)
+            compose.waitForIdle()
+            assertPainted()
+        } finally {
+            compose.runOnIdle {
+                watchedAnchor = null
+                scope.cancel()
+            }
             db.close()
         }
     }

@@ -1200,8 +1200,7 @@ private fun TimelineSeamDivider(
  * Seam wrapper for the row kinds that render a self-contained card or pill and draw no dividers of
  * their own (INVITE, NETSPLIT/NETJOIN, DCC_TRANSFER).
  *
- * The Column only appears when there IS a seam: with none, the row composes exactly as before, so
- * these kinds keep their current layout on the overwhelmingly common path.
+ * Keep the content subtree stable when sync adds or removes a seam, preserving row-local state.
  */
 @Composable
 private fun TimelineSeamAbove(
@@ -1210,10 +1209,6 @@ private fun TimelineSeamAbove(
     modifier: Modifier = Modifier,
     content: @Composable (Modifier) -> Unit,
 ) {
-    if (seam == null) {
-        content(modifier)
-        return
-    }
     Column(modifier = modifier.fillMaxWidth()) {
         TimelineSeamDivider(seam, onLoadGap)
         content(Modifier)

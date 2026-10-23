@@ -69,6 +69,7 @@ import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.FoolsMode
@@ -84,6 +85,7 @@ import io.github.trevarj.motd.ui.ai.AiTextUiState
 import io.github.trevarj.motd.ui.chat.InlineTranslation
 import io.github.trevarj.motd.ui.chat.MessageList
 import io.github.trevarj.motd.ui.chat.ReplyTarget
+import io.github.trevarj.motd.ui.chat.TimelineSeamState
 import io.github.trevarj.motd.ui.chat.isSystemRunChunkBoundary
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -273,6 +275,54 @@ class MessageTimelineUiTest {
                 scrollTo(tag)
                 compose.onAllNodesWithTag(tag, useUnmergedTree = true).assertCountEquals(1)
             }
+    }
+
+    @Test
+    fun expandedNetworkJoinSurvivesSeamRemovalAndAddition() {
+        val join =
+            message(
+                2,
+                5_000,
+                MessageKind.NETJOIN,
+                "network healed",
+                payload = NetworkBatchPayloadV1("a.example", "b.example", listOf("alice", "bob")).encode(),
+            )
+        val withSeam =
+            TimelineSeamState(
+                seams = listOf(TimelineSeam(1, TimelineAnchor(join.serverTime, join.id, join.timelineOrder), recoverable = true)),
+                historyUnavailable = false,
+            )
+        var seams by mutableStateOf(withSeam)
+        // Keep the entity, PagingData and native presenter unchanged; only gap presentation changes.
+        val pages = flowOf(PagingData.from(listOf(join, message(1, 1_010, MessageKind.PRIVMSG, "older island"))))
+        render(pages, timelineSeams = { seams })
+        val pill = hasTestTag("chat_network_batch_netjoin_2")
+        val toggle = pill and hasAnyDescendant(hasText("2 users rejoined (a.example ↔ b.example)"))
+        compose.onNodeWithTag("chat_gap_divider", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNode(toggle, useUnmergedTree = true).performClick()
+
+        fun assertExpanded() {
+            compose.onAllNodes(pill, useUnmergedTree = true).assertCountEquals(1)
+            for (nick in listOf("alice", "bob")) {
+                val line = hasText(nick) and hasAnyAncestor(pill)
+                compose.onAllNodes(line, useUnmergedTree = true).assertCountEquals(1)
+                compose.onNode(line, useUnmergedTree = true).assertIsDisplayed()
+            }
+        }
+
+        assertExpanded()
+        for (next in listOf(TimelineSeamState(), withSeam)) {
+            compose.runOnIdle { seams = next }
+            compose.onAllNodesWithTag("chat_gap_divider", useUnmergedTree = true).assertCountEquals(if (next.seams.isEmpty()) 0 else 1)
+            assertExpanded()
+            // The preserved pill must still respond, not merely leave stale expanded pixels behind.
+            compose.onNodeWithContentDescription("2 users rejoined (a.example ↔ b.example)", useUnmergedTree = true).performClick()
+            for (nick in listOf("alice", "bob")) {
+                compose.onAllNodes(hasText(nick) and hasAnyAncestor(pill), useUnmergedTree = true).assertCountEquals(0)
+            }
+            compose.onNode(toggle, useUnmergedTree = true).performClick()
+            assertExpanded()
+        }
     }
 
     @Test
@@ -1399,6 +1449,7 @@ class MessageTimelineUiTest {
         systemGestureInsetPx: Int? = null,
         listState: LazyListState? = null,
         liveEntryIds: () -> Set<Long> = { emptySet() },
+        timelineSeams: () -> TimelineSeamState = { TimelineSeamState() },
     ) {
         compose.setContent {
             var ai by androidx.compose.runtime.remember { mutableStateOf<AiTextUiState>(AiTextUiState.Closed) }
@@ -1445,6 +1496,7 @@ class MessageTimelineUiTest {
                         hideInlineAudioLinks = hideInlineAudioLinks,
                         directMessage = directMessage,
                         readMarkerTime = marker,
+                        timelineSeams = timelineSeams(),
                         onLongPress = { message ->
                             if (translation) {
                                 translatedEventId = message.id
