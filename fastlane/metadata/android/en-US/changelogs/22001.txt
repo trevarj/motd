@@ -1,0 +1,3 @@
+- Simplified first-run setup with clear choices, visible account guides, and expandable help and optional settings.
+- Added Android certificate import for SASL EXTERNAL sign-in.
+- Kept chat rows stable when history gaps change.

@@ -73,7 +73,8 @@ class NetworkGuidanceUiTest {
 
         compose.onNodeWithTag("network_guidance_card").assertExists()
         compose.onNodeWithTag("network_guidance_text").assertDoesNotExist()
-        compose.onNodeWithTag("network_guidance_help")
+        compose
+            .onNodeWithTag("network_guidance_help")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
         compose.onNodeWithTag("network_registration_guide_link").performScrollTo().performClick()
         compose.onNodeWithTag("network_login_guide_link").performScrollTo().performClick()
@@ -89,7 +90,8 @@ class NetworkGuidanceUiTest {
         }
         compose.onNodeWithTag("network_guidance_help").performScrollTo().performClick()
         compose.onNodeWithTag("network_guidance_text").assertExists()
-        compose.onNodeWithTag("network_guidance_help")
+        compose
+            .onNodeWithTag("network_guidance_help")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
             .performClick()
         compose.onNodeWithTag("network_guidance_text").assertDoesNotExist()
@@ -187,9 +189,12 @@ class NetworkGuidanceUiTest {
         )
         compose.onNodeWithText("Libera.Chat", substring = false).assertDoesNotExist()
         compose.onNodeWithTag("onboarding_network_presets").performScrollTo().performClick()
-        compose.onNode(
-            hasText("Custom") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton),
-        ).performScrollTo().performClick()
+        compose
+            .onNode(
+                hasText("Custom") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton),
+            )
+            .performScrollTo()
+            .performClick()
         COMMON_NETWORK_PRESETS.forEach { preset ->
             compose.onNodeWithText(preset.displayName, substring = false).performScrollTo().performClick()
         }
