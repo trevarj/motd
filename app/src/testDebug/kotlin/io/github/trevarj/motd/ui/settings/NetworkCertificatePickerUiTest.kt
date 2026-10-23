@@ -85,6 +85,7 @@ class NetworkCertificatePickerUiTest {
     @Test
     fun successfulImportAuthorizesIdentityAndPreservesLatestFields() {
         setContent()
+        compose.onNodeWithTag("server_password_options").performScrollTo().performClick()
         importFile()
         compose.onNodeWithTag("server_password_field").performScrollTo().performTextReplacement("updated while importing")
         completeInstall(Activity.RESULT_OK)

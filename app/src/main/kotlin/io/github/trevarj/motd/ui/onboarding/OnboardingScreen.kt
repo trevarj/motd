@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -29,11 +30,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -63,9 +65,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -85,7 +87,6 @@ import io.github.trevarj.motd.data.prefs.HistorySyncDepth
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.settings.BouncerLoginFields
 import io.github.trevarj.motd.ui.settings.NetworkForm
-import io.github.trevarj.motd.ui.settings.PasswordField
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetPicker
 import io.github.trevarj.motd.ui.settings.addnetwork.networkPreset
@@ -385,7 +386,7 @@ private fun ChoicePage(
     onSelectPreset: (NetworkPresetId) -> Unit,
 ) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()).selectableGroup(),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(
@@ -393,47 +394,6 @@ private fun ChoicePage(
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
         )
-        // Each choice card owns its expansion in one Column child so the collapsed
-        // AnimatedVisibility never leaves a zero-height slot in the spacedBy rhythm; the 16dp gap
-        // lives inside the animated content instead.
-        Column {
-            ChoiceCard(
-                title = stringResource(R.string.onboarding_choice_bouncer_title),
-                desc = stringResource(R.string.onboarding_choice_bouncer_desc),
-                selected = state.choice == ConnectionChoice.BOUNCER,
-                onClick = { onChoose(ConnectionChoice.BOUNCER) },
-                modifier = Modifier.testTag("onboarding_choice_bouncer"),
-            )
-            AnimatedVisibility(
-                visible = state.isBouncer,
-                enter =
-                    fadeIn(MotdMotion.fadeIn) +
-                        expandVertically(animationSpec = MotdMotion.contentSize),
-                exit =
-                    fadeOut(MotdMotion.microFadeOut) +
-                        shrinkVertically(animationSpec = MotdMotion.contentSize),
-            ) {
-                Row(
-                    modifier = Modifier.padding(top = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    ChoiceCard(
-                        title = stringResource(R.string.bouncer_kind_soju),
-                        desc = stringResource(R.string.bouncer_kind_soju_desc),
-                        selected = state.bouncerKind == BouncerKind.SOJU,
-                        onClick = { onChooseBouncerKind(BouncerKind.SOJU) },
-                        modifier = Modifier.weight(1f).testTag("onboarding_choice_soju"),
-                    )
-                    ChoiceCard(
-                        title = stringResource(R.string.bouncer_kind_znc),
-                        desc = stringResource(R.string.bouncer_kind_znc_desc),
-                        selected = state.bouncerKind == BouncerKind.ZNC,
-                        onClick = { onChooseBouncerKind(BouncerKind.ZNC) },
-                        modifier = Modifier.weight(1f).testTag("onboarding_choice_znc"),
-                    )
-                }
-            }
-        }
         Column {
             ChoiceCard(
                 title = stringResource(R.string.onboarding_choice_network_title),
@@ -451,10 +411,49 @@ private fun ChoicePage(
                     fadeOut(MotdMotion.microFadeOut) +
                         shrinkVertically(animationSpec = MotdMotion.contentSize),
             ) {
-                Box(Modifier.padding(top = 16.dp)) {
-                    NetworkPresetPicker(
-                        selected = state.presetId,
-                        onSelect = onSelectPreset,
+                OnboardingDisclosure(
+                    title = stringResource(R.string.add_network_preset_section),
+                    summary = networkPreset(state.presetId)?.displayName ?: stringResource(R.string.add_network_preset_custom),
+                    tag = "onboarding_network_presets",
+                ) {
+                    NetworkPresetPicker(selected = state.presetId, onSelect = onSelectPreset)
+                }
+            }
+        }
+        Column {
+            ChoiceCard(
+                title = stringResource(R.string.onboarding_choice_bouncer_title),
+                desc = stringResource(R.string.onboarding_choice_bouncer_desc),
+                selected = state.choice == ConnectionChoice.BOUNCER,
+                onClick = { onChoose(ConnectionChoice.BOUNCER) },
+                modifier = Modifier.testTag("onboarding_choice_bouncer"),
+            )
+            AnimatedVisibility(
+                visible = state.isBouncer,
+                enter =
+                    fadeIn(MotdMotion.fadeIn) +
+                        expandVertically(animationSpec = MotdMotion.contentSize),
+                exit =
+                    fadeOut(MotdMotion.microFadeOut) +
+                        shrinkVertically(animationSpec = MotdMotion.contentSize),
+            ) {
+                Column(
+                    modifier = Modifier.padding(top = 16.dp).selectableGroup(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ChoiceCard(
+                        title = stringResource(R.string.bouncer_kind_soju),
+                        desc = stringResource(R.string.bouncer_kind_soju_desc),
+                        selected = state.bouncerKind == BouncerKind.SOJU,
+                        onClick = { onChooseBouncerKind(BouncerKind.SOJU) },
+                        modifier = Modifier.testTag("onboarding_choice_soju"),
+                    )
+                    ChoiceCard(
+                        title = stringResource(R.string.bouncer_kind_znc),
+                        desc = stringResource(R.string.bouncer_kind_znc_desc),
+                        selected = state.bouncerKind == BouncerKind.ZNC,
+                        onClick = { onChooseBouncerKind(BouncerKind.ZNC) },
+                        modifier = Modifier.testTag("onboarding_choice_znc"),
                     )
                 }
             }
@@ -474,7 +473,7 @@ private fun ChoiceCard(
         modifier =
             modifier
                 .fillMaxWidth()
-                .clickable(onClick = onClick)
+                .selectable(selected = selected, onClick = onClick, role = Role.RadioButton)
                 .then(
                     if (selected) {
                         Modifier.border(
@@ -517,17 +516,23 @@ private fun ServerPage(
             stringResource(if (authOnly) R.string.onboarding_auth_title else R.string.onboarding_server_title),
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+        )
+        Text(
+            stringResource(if (authOnly) R.string.onboarding_auth_hint else R.string.onboarding_server_hint),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
         )
         NetworkForm(
+            modifier = Modifier.padding(horizontal = 8.dp),
             server = state.server,
             auth = state.auth,
             onServerChange = onServerChange,
             onAuthChange = onAuthChange,
             showServer = !authOnly,
             showAuth = authOnly,
-            // Direct path shows the full identity (nick/username/realname); the soju root shows
-            // only the nick here (its bouncer SASL user/password live on the AUTH step).
+            // Optional identity details use the same disclosure as Add Network.
             showIdentity = !state.isBouncer,
             showNick = state.isBouncer,
             preset = networkPreset(state.presetId),
@@ -587,24 +592,16 @@ private fun ConnectPage(
             fontWeight = FontWeight.Bold,
         )
         StateIndicator(state.connState)
-        state.stateLog.forEach { s ->
-            // Annotate a Failed entry with its own reason so a diagnosis is possible even mid-loop.
-            val label =
-                if (s is IrcClientState.Failed) {
-                    "Failed: ${s.reason}"
-                } else {
-                    s::class.simpleName.orEmpty()
+        if (state.stateLog.isNotEmpty()) {
+            OnboardingDisclosure(
+                title = stringResource(R.string.onboarding_connection_details),
+                tag = "onboarding_connection_details",
+            ) {
+                state.stateLog.forEach { entry ->
+                    val label = if (entry is IrcClientState.Failed) "Failed: ${entry.reason}" else entry::class.simpleName.orEmpty()
+                    Text(label, style = MaterialTheme.typography.bodySmall)
                 }
-            Text(
-                "• $label",
-                style = MaterialTheme.typography.bodySmall,
-                color =
-                    if (s is IrcClientState.Failed) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-            )
+            }
         }
         // The connection retries, so `connState` may already be back to Connecting after a failure;
         // surface the latest captured failure reason (reducer's `error`) so it stays visible (#43).
@@ -776,25 +773,6 @@ private fun BouncerNetworksSection(
         }
     }
 
-    Text(
-        stringResource(R.string.onboarding_connect_add_network),
-        style = MaterialTheme.typography.titleSmall,
-        modifier = Modifier.padding(top = 12.dp),
-    )
-    OutlinedTextField(
-        value = state.bouncerAddDraft.name,
-        onValueChange = { onDraftChange(state.bouncerAddDraft.copy(name = it)) },
-        label = { Text(stringResource(R.string.onboarding_connect_add_name)) },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth().testTag("onboarding_bouncer_add_name"),
-    )
-    OutlinedTextField(
-        value = state.bouncerAddDraft.host,
-        onValueChange = { onDraftChange(state.bouncerAddDraft.copy(host = it)) },
-        label = { Text(stringResource(R.string.onboarding_connect_add_host)) },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth().testTag("onboarding_bouncer_add_host"),
-    )
     val adding = state.bouncerAdd is BouncerAddState.Submitting
     if (state.bouncerAdd is BouncerAddState.Failed) {
         Text(
@@ -804,18 +782,40 @@ private fun BouncerNetworksSection(
             modifier = Modifier.testTag("onboarding_bouncer_add_error"),
         )
     }
-    OutlinedButton(
-        onClick = onAddBouncer,
-        enabled = state.bouncerAddDraft.isValid && !adding,
-        modifier = Modifier.testTag("onboarding_bouncer_add_submit"),
+    OnboardingDisclosure(
+        title = stringResource(R.string.onboarding_connect_add_network),
+        tag = "onboarding_bouncer_add_options",
+        initiallyExpanded =
+            state.bouncerAddDraft.name.isNotEmpty() || state.bouncerAddDraft.host.isNotEmpty() ||
+                adding || state.bouncerAdd is BouncerAddState.Failed,
     ) {
-        if (adding) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(18.dp).testTag("onboarding_bouncer_add_progress"),
-                strokeWidth = 2.dp,
-            )
-        } else {
-            Text(stringResource(R.string.onboarding_connect_add_network))
+        OutlinedTextField(
+            value = state.bouncerAddDraft.name,
+            onValueChange = { onDraftChange(state.bouncerAddDraft.copy(name = it)) },
+            label = { Text(stringResource(R.string.onboarding_connect_add_name)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("onboarding_bouncer_add_name"),
+        )
+        OutlinedTextField(
+            value = state.bouncerAddDraft.host,
+            onValueChange = { onDraftChange(state.bouncerAddDraft.copy(host = it)) },
+            label = { Text(stringResource(R.string.onboarding_connect_add_host)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("onboarding_bouncer_add_host"),
+        )
+        OutlinedButton(
+            onClick = onAddBouncer,
+            enabled = state.bouncerAddDraft.isValid && !adding,
+            modifier = Modifier.testTag("onboarding_bouncer_add_submit"),
+        ) {
+            if (adding) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp).testTag("onboarding_bouncer_add_progress"),
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                Text(stringResource(R.string.onboarding_connect_add_network))
+            }
         }
     }
 
@@ -831,33 +831,35 @@ private fun HistorySyncDepthSection(
     selected: HistorySyncDepth,
     onSelect: (HistorySyncDepth) -> Unit,
 ) {
-    Text(
-        stringResource(R.string.onboarding_history_depth_title),
-        style = MaterialTheme.typography.titleSmall,
-        modifier = Modifier.padding(top = 12.dp),
-    )
-    Text(
-        stringResource(R.string.onboarding_history_depth_hint),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Column(Modifier.selectableGroup()) {
-        HistorySyncDepth.entries.forEach { depth ->
-            Row(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .selectable(
-                            selected = depth == selected,
-                            onClick = { onSelect(depth) },
-                            role = Role.RadioButton,
-                        ).testTag("onboarding_history_depth_${depth.name.lowercase()}")
-                        .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                RadioButton(selected = depth == selected, onClick = null)
-                Text(historySyncDepthLabel(depth))
+    OnboardingDisclosure(
+        title = stringResource(R.string.onboarding_history_depth_title),
+        summary = historySyncDepthLabel(selected),
+        tag = "onboarding_history_options",
+    ) {
+        Text(
+            stringResource(R.string.onboarding_history_depth_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Column(Modifier.selectableGroup()) {
+            HistorySyncDepth.entries.forEach { depth ->
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .selectable(
+                                selected = depth == selected,
+                                onClick = { onSelect(depth) },
+                                role = Role.RadioButton,
+                            ).testTag("onboarding_history_depth_${depth.name.lowercase()}")
+                            .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    RadioButton(selected = depth == selected, onClick = null)
+                    Text(historySyncDepthLabel(depth))
+                }
             }
         }
     }
@@ -871,6 +873,46 @@ private fun historySyncDepthLabel(depth: HistorySyncDepth): String =
         HistorySyncDepth.QUARTER -> stringResource(R.string.onboarding_history_depth_quarter)
         HistorySyncDepth.EVERYTHING -> stringResource(R.string.onboarding_history_depth_everything)
     }
+
+@Composable
+private fun OnboardingDisclosure(
+    title: String,
+    tag: String,
+    summary: String? = null,
+    initiallyExpanded: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
+    LaunchedEffect(initiallyExpanded) {
+        if (initiallyExpanded) expanded = true
+    }
+    val description = stringResource(if (expanded) R.string.onboarding_disclosure_expanded else R.string.onboarding_disclosure_collapsed)
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clickable(role = Role.Button) { expanded = !expanded }
+                    .semantics { stateDescription = description }
+                    .testTag(tag)
+                    .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                summary?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null)
+        }
+        if (expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
+        }
+    }
+}
 
 @Composable
 private fun bouncerErrorMessage(error: BouncerOperationError): String =

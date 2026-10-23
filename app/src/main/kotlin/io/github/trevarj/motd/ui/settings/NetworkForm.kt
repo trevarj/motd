@@ -12,17 +12,23 @@ import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -30,16 +36,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +54,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -125,12 +135,14 @@ fun NetworkForm(
             )
         }
         if (showAuth) {
-            Text(
-                stringResource(R.string.onboarding_auth_title),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 8.dp),
-            )
+            if (showServer) {
+                Text(
+                    stringResource(R.string.onboarding_auth_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
             preset?.let { NetworkGuidanceCard(it) }
             AuthSection(auth = auth, onAuthChange = onAuthChange)
         }
@@ -158,11 +170,16 @@ fun BouncerLoginFields(
         }
         when (kind) {
             BouncerKind.SOJU -> {
-                Text(
-                    stringResource(R.string.bouncer_soju_login_guidance),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                FormDisclosure(
+                    title = stringResource(R.string.onboarding_login_help),
+                    tag = "bouncer_login_help",
+                ) {
+                    Text(
+                        stringResource(R.string.bouncer_soju_login_guidance),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 OutlinedTextField(
                     value = sojuLogin.username,
                     onValueChange = { onSojuLoginChange(sojuLogin.copy(username = it)) },
@@ -185,11 +202,16 @@ fun BouncerLoginFields(
             }
 
             BouncerKind.ZNC -> {
-                Text(
-                    stringResource(R.string.bouncer_znc_login_guidance),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                FormDisclosure(
+                    title = stringResource(R.string.onboarding_login_help),
+                    tag = "bouncer_login_help",
+                ) {
+                    Text(
+                        stringResource(R.string.bouncer_znc_login_guidance),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 OutlinedTextField(
                     value = zncLogin.username,
                     onValueChange = { onZncLoginChange(zncLogin.copy(username = it)) },
@@ -375,29 +397,35 @@ private fun ServerFields(
         )
     }
     if (showIdentity) {
-        OutlinedTextField(
-            value = server.username,
-            onValueChange = { onServerChange(server.copy(username = it)) },
-            label = { Text(stringResource(R.string.onboarding_field_username)) },
-            placeholder = { Text(stringResource(R.string.onboarding_field_username_hint)) },
-            singleLine = true,
-            keyboardOptions =
-                KeyboardOptions(
-                    capitalization = KeyboardCapitalization.None,
-                    autoCorrectEnabled = false,
-                    imeAction = ImeAction.Next,
-                ),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = server.realname,
-            onValueChange = { onServerChange(server.copy(realname = it)) },
-            label = { Text(stringResource(R.string.onboarding_field_realname)) },
-            placeholder = { Text(stringResource(R.string.onboarding_field_realname_hint)) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = lastImeAction),
-            modifier = Modifier.fillMaxWidth(),
-        )
+        FormDisclosure(
+            title = stringResource(R.string.onboarding_identity_options),
+            tag = "network_identity_options",
+            initiallyExpanded = server.username.isNotEmpty() || server.realname.isNotEmpty(),
+        ) {
+            OutlinedTextField(
+                value = server.username,
+                onValueChange = { onServerChange(server.copy(username = it)) },
+                label = { Text(stringResource(R.string.onboarding_field_username)) },
+                placeholder = { Text(stringResource(R.string.onboarding_field_username_hint)) },
+                singleLine = true,
+                keyboardOptions =
+                    KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                        imeAction = ImeAction.Next,
+                    ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = server.realname,
+                onValueChange = { onServerChange(server.copy(realname = it)) },
+                label = { Text(stringResource(R.string.onboarding_field_realname)) },
+                placeholder = { Text(stringResource(R.string.onboarding_field_realname_hint)) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = lastImeAction),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
@@ -584,17 +612,7 @@ private fun AuthSection(
             }
         }
     val certificateBusy = installingCertificate != null || choosingCertificate
-    PasswordField(
-        value = auth.serverPassword,
-        onValueChange = { onAuthChange(auth.copy(serverPassword = it)) },
-        label = stringResource(R.string.onboarding_auth_server_password),
-        modifier = Modifier.testTag("server_password_field"),
-        supportingText = stringResource(R.string.onboarding_auth_server_password_desc),
-        isError = !auth.serverPasswordValid,
-    )
-    // The radio group and the mode fields share one Column child so the caller's spacedBy never
-    // reserves a gap for the collapsed NONE state; the top padding lives inside the non-empty
-    // branches so NONE collapses to true zero height.
+    // Keep the selected mechanism's required fields visible; only optional sign-in paths collapse.
     Column {
         Column(Modifier.selectableGroup()) {
             AuthOption(AuthMode.NONE, auth.mode, stringResource(R.string.onboarding_auth_none)) {
@@ -649,11 +667,16 @@ private fun AuthSection(
                         modifier = Modifier.padding(top = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(
-                            stringResource(R.string.onboarding_auth_cert_import_guidance),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        FormDisclosure(
+                            title = stringResource(R.string.onboarding_certificate_help),
+                            tag = "auth_certificate_help",
+                        ) {
+                            Text(
+                                stringResource(R.string.onboarding_auth_cert_import_guidance),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         Button(
                             onClick = {
                                 if (installingCertificate != null || choosingCertificate || latestAuth.mode != AuthMode.EXTERNAL) return@Button
@@ -691,9 +714,13 @@ private fun AuthSection(
                 }
 
                 AuthMode.NONE -> {
-                    Column(
-                        modifier = Modifier.padding(top = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    FormDisclosure(
+                        title = stringResource(R.string.onboarding_nickserv_options),
+                        tag = "nickserv_options",
+                        initiallyExpanded =
+                            auth.nickServPassword.isNotEmpty() || !auth.nickServValid ||
+                                auth.nickServIdentifySyntax != NickServIdentifySyntax.NICK_PASSWORD ||
+                                auth.nickServRecoveryEnabled || auth.nickServRecoverySequence != "REGAIN",
                     ) {
                         Text(
                             stringResource(R.string.onboarding_auth_nickserv_desc),
@@ -780,48 +807,61 @@ private fun AuthSection(
             }
         }
     }
+    FormDisclosure(
+        title = stringResource(R.string.onboarding_auth_server_password),
+        tag = "server_password_options",
+        initiallyExpanded = auth.serverPassword.isNotEmpty() || !auth.serverPasswordValid,
+    ) {
+        PasswordField(
+            value = auth.serverPassword,
+            onValueChange = { onAuthChange(auth.copy(serverPassword = it)) },
+            label = stringResource(R.string.onboarding_auth_server_password),
+            modifier = Modifier.testTag("server_password_field"),
+            supportingText = stringResource(R.string.onboarding_auth_server_password_desc),
+            isError = !auth.serverPasswordValid,
+        )
+    }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun NetworkGuidanceCard(preset: NetworkPreset) {
     val uriHandler = LocalUriHandler.current
-    Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        shape = MaterialTheme.shapes.medium,
+    Column(
         modifier = Modifier.fillMaxWidth().testTag("network_guidance_card"),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                stringResource(R.string.network_guidance_title, preset.displayName),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
+        FormDisclosure(
+            title = stringResource(R.string.network_guidance_title, preset.displayName),
+            tag = "network_guidance_help",
+        ) {
             Text(
                 stringResource(preset.guidanceTextRes()),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.testTag("network_guidance_text"),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            TextButton(
+                onClick = { uriHandler.openUri(preset.registrationUrl) },
+                modifier = Modifier.heightIn(min = 48.dp).testTag("network_registration_guide_link"),
+            ) {
+                Text(
+                    stringResource(
+                        if (preset.guidance == NetworkGuidanceKind.NO_REGISTRATION) {
+                            R.string.network_guidance_network_link
+                        } else {
+                            R.string.network_guidance_registration_link
+                        },
+                    ),
+                )
+            }
+            preset.loginUrl?.let { url ->
                 TextButton(
-                    onClick = { uriHandler.openUri(preset.registrationUrl) },
-                    modifier = Modifier.testTag("network_registration_guide_link"),
-                ) {
-                    Text(
-                        stringResource(
-                            if (preset.guidance == NetworkGuidanceKind.NO_REGISTRATION) {
-                                R.string.network_guidance_network_link
-                            } else {
-                                R.string.network_guidance_registration_link
-                            },
-                        ),
-                    )
-                }
-                preset.loginUrl?.let { url ->
-                    TextButton(
-                        onClick = { uriHandler.openUri(url) },
-                        modifier = Modifier.testTag("network_login_guide_link"),
-                    ) { Text(stringResource(R.string.network_guidance_login_link)) }
-                }
+                    onClick = { uriHandler.openUri(url) },
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("network_login_guide_link"),
+                ) { Text(stringResource(R.string.network_guidance_login_link)) }
             }
         }
     }
@@ -842,6 +882,39 @@ private fun NetworkPreset.guidanceTextRes(): Int =
         NetworkPresetId.UNDERNET -> R.string.network_guidance_undernet
         NetworkPresetId.CUSTOM -> error("Custom networks do not have guidance")
     }
+
+@Composable
+private fun FormDisclosure(
+    title: String,
+    tag: String,
+    initiallyExpanded: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
+    LaunchedEffect(initiallyExpanded) {
+        if (initiallyExpanded) expanded = true
+    }
+    val description = stringResource(if (expanded) R.string.onboarding_disclosure_expanded else R.string.onboarding_disclosure_collapsed)
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clickable(role = Role.Button) { expanded = !expanded }
+                    .semantics { stateDescription = description }
+                    .testTag(tag)
+                    .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null)
+        }
+        if (expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
+        }
+    }
+}
 
 @Composable
 private fun NickServSyntaxOption(

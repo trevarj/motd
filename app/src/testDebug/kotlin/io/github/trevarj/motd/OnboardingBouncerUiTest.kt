@@ -12,8 +12,12 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.AnnotatedString
+import io.github.trevarj.motd.data.prefs.HistorySyncDepth
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.onboarding.BouncerAddDraft
 import io.github.trevarj.motd.ui.onboarding.BouncerAddState
@@ -61,11 +65,12 @@ class OnboardingBouncerUiTest {
                     listOf(BouncerNetworkRow("libera", "Libera", selected = true)),
                 ),
             onRetryDiscovery = { retried = true },
+            connState = IrcClientState.Connecting,
         )
 
         compose.onAllNodesWithTag("onboarding_bouncer_row_libera").assertCountEquals(1)
         compose.onAllNodesWithTag("onboarding_bouncer_discovery_error").assertCountEquals(1)
-        compose.onNodeWithTag("onboarding_bouncer_discovery_retry").performClick()
+        compose.onNodeWithTag("onboarding_bouncer_discovery_retry").performScrollTo().performClick()
         compose.runOnIdle { assertTrue(retried) }
     }
 
@@ -106,6 +111,29 @@ class OnboardingBouncerUiTest {
     }
 
     @Test
+    fun optionalAddHistoryAndDiagnosticsStartCollapsed() {
+        var selectedDepth: HistorySyncDepth? = null
+        content(
+            discovery = BouncerDiscoveryState.Loaded(emptyList()),
+            onSelectHistoryDepth = { selectedDepth = it },
+        )
+        compose.onNodeWithTag("onboarding_bouncer_add_name").assertDoesNotExist()
+        compose.onNodeWithTag("onboarding_history_depth_month").assertDoesNotExist()
+        compose.onNodeWithTag("onboarding_history_options").assertTextContains("Last 30 days", substring = true)
+        compose.onNodeWithText("Registering", substring = false).assertDoesNotExist()
+        compose.onNodeWithTag("onboarding_connection_details").performScrollTo().performClick()
+        compose.onNodeWithText("Registering", substring = false).assertExists()
+        compose.onNodeWithTag("onboarding_connection_details").performScrollTo().performClick()
+        compose.onNodeWithText("Registering", substring = false).assertDoesNotExist()
+        compose.onNodeWithTag("onboarding_bouncer_add_options").performScrollTo().performClick()
+        compose.onNodeWithTag("onboarding_bouncer_add_name").assertExists()
+        compose.onNodeWithTag("onboarding_bouncer_add_submit").assertIsNotEnabled()
+        compose.onNodeWithTag("onboarding_history_options").performScrollTo().performClick()
+        compose.onNodeWithTag("onboarding_history_depth_week").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(HistorySyncDepth.WEEK, selectedDepth) }
+    }
+
+    @Test
     fun pendingAdd_disablesDuplicateSubmissionAndRetainsDraft() {
         content(
             discovery = BouncerDiscoveryState.Loaded(emptyList()),
@@ -120,13 +148,13 @@ class OnboardingBouncerUiTest {
     }
 
     @Test
-    fun failedAdd_retainsDraftUntilSuccessClearsIt() {
+    fun failedAdd_retainsEditableDraftAndRecoveryWhileRootReconnects() {
         var state by mutableStateOf(
             baseState(
                 discovery = BouncerDiscoveryState.Loaded(emptyList()),
                 draft = BouncerAddDraft("New", "irc.new.example"),
                 add = BouncerAddState.Failed(BouncerOperationError.ServerRejected("not allowed")),
-            ),
+            ).copy(connState = IrcClientState.Connecting, error = "Root connection failed"),
         )
         compose.setContent {
             MotdTheme {
@@ -145,8 +173,8 @@ class OnboardingBouncerUiTest {
                     onRetry = {},
                     onRetryBouncerDiscovery = {},
                     onToggleBouncer = {},
-                    onBouncerAddDraftChange = {},
-                    onAddBouncer = {},
+                    onBouncerAddDraftChange = { state = state.copy(bouncerAddDraft = it) },
+                    onAddBouncer = { state = state.copy(bouncerAdd = BouncerAddState.Submitting) },
                     onSelectHistoryDepth = {},
                     onFinish = {},
                     onConfirmPlaintext = {},
@@ -157,6 +185,15 @@ class OnboardingBouncerUiTest {
 
         compose.onAllNodesWithTag("onboarding_bouncer_add_error").assertCountEquals(1)
         compose.onNodeWithTag("onboarding_bouncer_add_name").assertTextContains("New")
+        compose.onNodeWithTag("onboarding_bouncer_add_host").performScrollTo().performTextReplacement("irc.updated.example")
+        compose.onNodeWithTag("onboarding_bouncer_add_options").performScrollTo().performClick()
+        compose.onNodeWithTag("onboarding_bouncer_add_host").assertDoesNotExist()
+        compose.onNodeWithTag("onboarding_bouncer_add_error").assertExists()
+        compose.onNodeWithText("Root connection failed").assertExists()
+        compose.onNodeWithTag("onboarding_bouncer_add_options").performClick()
+        compose.onNodeWithTag("onboarding_bouncer_add_host").assertTextContains("irc.updated.example")
+        compose.onNodeWithTag("onboarding_bouncer_add_submit").performScrollTo().performClick()
+        compose.onNodeWithTag("onboarding_bouncer_add_submit").assertIsNotEnabled()
         compose.runOnIdle { state = state.copy(bouncerAdd = BouncerAddState.Success, bouncerAddDraft = BouncerAddDraft()) }
         val emptyEditableText =
             SemanticsMatcher.expectValue(
@@ -173,11 +210,13 @@ class OnboardingBouncerUiTest {
         add: BouncerAddState = BouncerAddState.Idle,
         onRetryDiscovery: () -> Unit = {},
         onToggleBouncer: (String) -> Unit = {},
+        connState: IrcClientState = IrcClientState.Ready("motd", emptySet(), emptyMap()),
+        onSelectHistoryDepth: (HistorySyncDepth) -> Unit = {},
     ) {
         compose.setContent {
             MotdTheme {
                 OnboardingContent(
-                    state = baseState(discovery, draft, add),
+                    state = baseState(discovery, draft, add).copy(connState = connState),
                     onNext = {},
                     onBack = {},
                     onSkip = {},
@@ -193,7 +232,7 @@ class OnboardingBouncerUiTest {
                     onToggleBouncer = onToggleBouncer,
                     onBouncerAddDraftChange = {},
                     onAddBouncer = {},
-                    onSelectHistoryDepth = {},
+                    onSelectHistoryDepth = onSelectHistoryDepth,
                     onFinish = {},
                     onConfirmPlaintext = {},
                     onDismissPlaintext = {},
@@ -215,5 +254,6 @@ class OnboardingBouncerUiTest {
         bouncerSessionGeneration = 1L,
         bouncerAddDraft = draft,
         bouncerAdd = add,
+        stateLog = listOf(IrcClientState.Connecting, IrcClientState.Registering),
     )
 }

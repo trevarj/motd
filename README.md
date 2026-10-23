@@ -86,6 +86,10 @@ channel provenance, publication status, and the maintainer checklist.
 
 ## Connecting
 
+First run offers direct IRC or a soju/ZNC bouncer. Optional identity, sign-in
+help, connection details, and history choices start collapsed; tap a heading
+to expand them. Official account guides stay available without opening help.
+
 **Direct**: add a network with host `irc.libera.chat`, port `6697`, TLS on,
 and SASL PLAIN with your NickServ credentials (or SASL NONE).
 

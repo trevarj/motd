@@ -115,7 +115,7 @@
 
     <!-- Onboarding (WP8) -->
     <string name="onboarding_welcome_title">Welcome to motd</string>
-    <string name="onboarding_welcome_tagline">A modern IRC client, built for the way you chat.</string>
+    <string name="onboarding_welcome_tagline">Connect to IRC, or sign in to your bouncer.</string>
     <string name="onboarding_get_started">Get started</string>
     <string name="onboarding_skip">Skip</string>
     <string name="onboarding_next">Next</string>
@@ -137,6 +137,15 @@
     <string name="onboarding_choice_network_title">Connect to an IRC network</string>
     <string name="onboarding_choice_network_desc">Connect directly to a single IRC server.</string>
     <string name="onboarding_server_title">Server</string>
+    <string name="onboarding_server_hint">Enter your server address and the nickname you want to use.</string>
+    <string name="onboarding_auth_hint">Choose how to sign in. New accounts can usually connect with None first.</string>
+    <string name="onboarding_identity_options">Optional identity details</string>
+    <string name="onboarding_login_help">Sign-in help</string>
+    <string name="onboarding_certificate_help">About certificate files</string>
+    <string name="onboarding_nickserv_options">NickServ sign-in (optional)</string>
+    <string name="onboarding_connection_details">Connection details</string>
+    <string name="onboarding_disclosure_expanded">Expanded</string>
+    <string name="onboarding_disclosure_collapsed">Collapsed</string>
     <string name="onboarding_field_host">Host</string>
     <string name="onboarding_field_port">Port</string>
     <string name="onboarding_field_tls">Use TLS</string>

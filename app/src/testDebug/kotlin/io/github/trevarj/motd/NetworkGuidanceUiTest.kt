@@ -1,16 +1,27 @@
 package io.github.trevarj.motd
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.ConnectionChoice
 import io.github.trevarj.motd.ui.onboarding.OnboardingContent
@@ -20,6 +31,7 @@ import io.github.trevarj.motd.ui.onboarding.ServerForm
 import io.github.trevarj.motd.ui.settings.NetworkForm
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkContent
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkUiState
+import io.github.trevarj.motd.ui.settings.addnetwork.COMMON_NETWORK_PRESETS
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.settings.addnetwork.networkPreset
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -60,7 +72,9 @@ class NetworkGuidanceUiTest {
         )
 
         compose.onNodeWithTag("network_guidance_card").assertExists()
-        compose.onNodeWithText("SASL username is your account name", substring = true).assertExists()
+        compose.onNodeWithTag("network_guidance_text").assertDoesNotExist()
+        compose.onNodeWithTag("network_guidance_help")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Collapsed"))
         compose.onNodeWithTag("network_registration_guide_link").performScrollTo().performClick()
         compose.onNodeWithTag("network_login_guide_link").performScrollTo().performClick()
 
@@ -73,10 +87,16 @@ class NetworkGuidanceUiTest {
                 openedUrls,
             )
         }
+        compose.onNodeWithTag("network_guidance_help").performScrollTo().performClick()
+        compose.onNodeWithTag("network_guidance_text").assertExists()
+        compose.onNodeWithTag("network_guidance_help")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"))
+            .performClick()
+        compose.onNodeWithTag("network_guidance_text").assertDoesNotExist()
     }
 
     @Test
-    fun selectedPresetGuidanceAppearsInAddNetworkAndUsesLoginIdCopy() {
+    fun selectedPresetLinksStayAvailableInAddNetworkWhileGuidanceIsCollapsed() {
         setAddNetwork(
             AddNetworkUiState(
                 presetId = NetworkPresetId.IRCNET,
@@ -85,47 +105,113 @@ class NetworkGuidanceUiTest {
         )
 
         compose.onNodeWithTag("network_guidance_card").assertExists()
-        compose.onNodeWithText("web login ID, not your nickname", substring = true).assertExists()
+        compose.onNodeWithTag("network_guidance_text").assertDoesNotExist()
         compose.onNodeWithTag("network_login_guide_link").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(listOf("https://www.ircnet.com/sasl"), openedUrls) }
     }
 
     @Test
-    fun guidanceCoversSpecialAuthModelsAndCustomHidesIt() {
+    fun optionalSignInPathsExpandAndCustomHidesNetworkGuidance() {
         var presetId by mutableStateOf(NetworkPresetId.OFTC)
         compose.setContent {
             CompositionLocalProvider(LocalUriHandler provides uriHandler) {
                 MotdTheme {
-                    NetworkForm(
-                        server = ServerForm(host = "irc.example", nick = "me"),
-                        auth = AuthForm(),
-                        onServerChange = {},
-                        onAuthChange = {},
-                        showServer = false,
-                        preset = networkPreset(presetId),
-                    )
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        NetworkForm(
+                            server = ServerForm(host = "irc.example", nick = "me"),
+                            auth = AuthForm(),
+                            onServerChange = {},
+                            onAuthChange = {},
+                            showServer = false,
+                            preset = networkPreset(presetId),
+                        )
+                    }
                 }
             }
         }
 
-        compose.onNodeWithText("OFTC does not support SASL", substring = true).assertExists()
+        compose.onNodeWithTag("network_guidance_text").assertDoesNotExist()
+        compose.onNodeWithText("NickServ password (optional)").assertDoesNotExist()
+        compose.onNodeWithTag("server_password_field").assertDoesNotExist()
+        compose.onNodeWithTag("nickserv_options").performScrollTo().performClick()
         compose.onNodeWithText("NickServ password (optional)").assertExists()
+        compose.onNodeWithTag("server_password_options").performScrollTo().performClick()
+        compose.onNodeWithTag("server_password_field").assertExists()
+        compose.onNodeWithTag("network_guidance_help").performScrollTo().performClick()
+        compose.onNodeWithTag("network_guidance_text").assertExists()
 
         compose.runOnIdle { presetId = NetworkPresetId.EFNET }
-        compose.onNodeWithText("no network account or nickname registration", substring = true).assertExists()
-
-        compose.runOnIdle { presetId = NetworkPresetId.IRCHIGHWAY }
-        compose.onNodeWithText("Password only", substring = true).assertExists()
-
-        compose.runOnIdle { presetId = NetworkPresetId.QUAKENET }
-        compose.onNodeWithText("official /auth flow", substring = true).assertExists()
-
-        compose.runOnIdle { presetId = NetworkPresetId.UNDERNET }
-        compose.onNodeWithText("Server password (optional)").assertExists()
-        compose.onNodeWithText("+x! username password", substring = true).assertExists()
-
+        compose.onNodeWithTag("network_login_guide_link").assertDoesNotExist()
+        compose.onNodeWithTag("network_registration_guide_link").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(listOf("https://www.efnet.org/"), openedUrls) }
         compose.runOnIdle { presetId = NetworkPresetId.CUSTOM }
         compose.onNodeWithTag("network_guidance_card").assertDoesNotExist()
+    }
+
+    @Test
+    fun optionalIdentityDraftSurvivesCollapseAndInvalidCredentialsRemainReachable() {
+        var server by mutableStateOf(ServerForm(host = "irc.example", nick = "me"))
+        val auth = AuthForm(serverPassword = "invalid\npass", nickServPassword = "invalid pass")
+        compose.setContent {
+            MotdTheme {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    NetworkForm(
+                        server = server,
+                        auth = auth,
+                        onServerChange = { server = it },
+                        onAuthChange = {},
+                    )
+                }
+            }
+        }
+        compose.onNodeWithTag("network_host_field").assertExists()
+        compose.onNodeWithTag("network_nick_field").assertExists()
+        compose.onNodeWithText("Real name").assertDoesNotExist()
+        compose.onNodeWithTag("network_identity_options").performScrollTo().performClick()
+        compose.onNodeWithText("Real name").performScrollTo().performTextReplacement("My name")
+        compose.onNodeWithTag("network_identity_options").performScrollTo().performClick()
+        compose.onNodeWithText("Real name").assertDoesNotExist()
+        compose.onNodeWithTag("network_identity_options").performClick()
+        compose.onNodeWithText("Real name").assertTextContains("My name")
+        compose.onNodeWithTag("server_password_field").assertExists()
+        compose.onNodeWithText("NickServ password (optional)").assertExists()
+        compose.onNodeWithText("Enter a password without whitespace and valid recovery commands.").assertExists()
+    }
+
+    @Test
+    fun onboardingPresetsStartCompactAndKeepEverySelection() {
+        val selected = mutableListOf<NetworkPresetId>()
+        setOnboarding(
+            OnboardingState(step = OnboardingStep.CHOICE, choice = ConnectionChoice.NETWORK),
+            onSelectPreset = selected::add,
+        )
+        compose.onNodeWithText("Libera.Chat", substring = false).assertDoesNotExist()
+        compose.onNodeWithTag("onboarding_network_presets").performScrollTo().performClick()
+        compose.onNode(
+            hasText("Custom") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton),
+        ).performScrollTo().performClick()
+        COMMON_NETWORK_PRESETS.forEach { preset ->
+            compose.onNodeWithText(preset.displayName, substring = false).performScrollTo().performClick()
+        }
+        compose.runOnIdle {
+            assertEquals(listOf(NetworkPresetId.CUSTOM) + COMMON_NETWORK_PRESETS.map { it.id }, selected)
+        }
+        compose.onNodeWithTag("onboarding_network_presets").performScrollTo().performClick()
+        compose.onNodeWithText("Libera.Chat", substring = false).assertDoesNotExist()
+    }
+
+    @Test
+    fun plaintextConsentRemainsVisibleWithoutOpeningPresetDetails() {
+        setOnboarding(
+            OnboardingState(
+                step = OnboardingStep.CHOICE,
+                choice = ConnectionChoice.NETWORK,
+                presetId = NetworkPresetId.UNDERNET,
+                showPlaintextWarning = true,
+            ),
+        )
+        compose.onNodeWithTag("plaintext_network_warning").assertExists()
+        compose.onNodeWithText("Libera.Chat", substring = false).assertDoesNotExist()
     }
 
     @Test
@@ -153,7 +239,10 @@ class NetworkGuidanceUiTest {
         compose.onNodeWithTag("network_guidance_card").assertDoesNotExist()
     }
 
-    private fun setOnboarding(state: OnboardingState) {
+    private fun setOnboarding(
+        state: OnboardingState,
+        onSelectPreset: (NetworkPresetId) -> Unit = {},
+    ) {
         compose.setContent {
             CompositionLocalProvider(LocalUriHandler provides uriHandler) {
                 MotdTheme {
@@ -164,7 +253,7 @@ class NetworkGuidanceUiTest {
                         onSkip = {},
                         onChoose = {},
                         onChooseBouncerKind = {},
-                        onSelectPreset = {},
+                        onSelectPreset = onSelectPreset,
                         onServerChange = {},
                         onAuthChange = {},
                         onSojuLoginChange = {},
