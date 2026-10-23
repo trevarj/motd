@@ -192,8 +192,7 @@ class NetworkGuidanceUiTest {
         compose
             .onNode(
                 hasText("Custom") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton),
-            )
-            .performScrollTo()
+            ).performScrollTo()
             .performClick()
         COMMON_NETWORK_PRESETS.forEach { preset ->
             compose.onNodeWithText(preset.displayName, substring = false).performScrollTo().performClick()
