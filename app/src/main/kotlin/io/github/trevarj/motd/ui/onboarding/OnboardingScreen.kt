@@ -386,7 +386,12 @@ private fun ChoicePage(
     onSelectPreset: (NetworkPresetId) -> Unit,
 ) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()).selectableGroup(),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .padding(24.dp)
+                .verticalScroll(rememberScrollState())
+                .selectableGroup(),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(
