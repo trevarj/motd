@@ -132,6 +132,9 @@ val LocalTimestampConfig: ProvidableCompositionLocal<TimestampConfig> =
 /** The Comfortable message renderer reads this without changing unrelated surfaces. */
 val LocalChatShadowsEnabled: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { false }
 
+/** Resolved application palette mode for content that can opt out of OS-mode following. */
+val LocalMotdDark: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { false }
+
 /**
  * Opt-in marker for activities whose system bars [MotdTheme] may restyle.
  *
@@ -285,6 +288,7 @@ fun MotdTheme(
             LocalUseThemeTextColors provides useThemeTextColors,
             LocalSpacing provides spacingFor(layoutDensity, messageSpacing, bubbleCornerStyle),
             LocalChatShadowsEnabled provides chatShadowsEnabled,
+            LocalMotdDark provides dark,
             LocalNickColors provides
                 NickColorScheme(
                     nickColorsEnabled,

@@ -1,0 +1,56 @@
+{
+  "tool": "built-in image_gen",
+  "purpose": "Alternate artwork keyframes for exported animated loops; original scenes remain immutable.",
+  "keyframes": [
+    {
+      "id": "japanese-countryside",
+      "source": "japanese-countryside-summer-v1.png",
+      "prompt": "Use case: precise-object-edit. Asset type: alternate animation keyframe for an existing paired day/night pixel-art wallpaper. Edit target is the supplied image. KEEP exact 1536x1024 dimensions, left day / right night halves, camera, perspective, architecture and all object positions. Preserve the original pixel-art style. ONLY change the moving or luminous elements described below; every static surface must remain as close to pixel-identical as possible. This is deliberately a clearly different animation phase, not a new scene. No text additions, UI, borders, labels or watermark. Animate a later moment: redraw the small flowing stream at the lower RIGHT with distinctly shifted white ripples and flowing highlights, preserving its banks and stepping stones; water flows downhill toward the viewer. In both panels make the vending-machine display illumination noticeably dimmer while keeping the red cabinet exactly unchanged. At night dim some existing house-window lights and lanterns, leaving others lit, and change brightness of the existing tiny stars without moving them or changing the moon. Keep foliage, sky, clouds, poles, street and railway fixed. Don't add a train.",
+      "file": "japanese-countryside-motion-keyframe.png",
+      "nativeDimensions": {
+        "width": 1536,
+        "height": 1024
+      }
+    },
+    {
+      "id": "rainy-cafe",
+      "source": "rainy-cafe-v1.png",
+      "prompt": "Use case: precise-object-edit. Asset type: alternate animation keyframe for an existing paired day/night pixel-art wallpaper. Edit target is the supplied image. KEEP exact 1536x1024 dimensions, left day / right night halves, camera, perspective, architecture and all object positions. Preserve the original pixel-art style. ONLY change the moving or luminous elements described below; every static surface must remain as close to pixel-identical as possible. This is deliberately a clearly different animation phase, not a new scene. No text additions, UI, borders, labels or watermark. Animate a later rainy moment: shift the puddle reflections into visibly different broken ripple shapes on the street pavement, add a few small expanding rain-impact rings only within puddles. Keep the pavement geometry, cafe, furniture, plants, awning and cables exactly unchanged. In both panels dim the cafe pendant lamps and warm windows slightly but visibly, with only one lamp briefly nearly off. At night the existing pink/teal shop-sign reflections break into shifted ripple highlights. Keep all background structures and sky stationary.",
+      "file": "rainy-cafe-motion-keyframe.png",
+      "nativeDimensions": {
+        "width": 1536,
+        "height": 1024
+      }
+    },
+    {
+      "id": "neon-arcade",
+      "source": "neon-arcade-v2.png",
+      "prompt": "Use case: precise-object-edit. Asset type: alternate animation keyframe for an existing paired day/night pixel-art wallpaper. Edit target is the supplied image. KEEP exact 1536x1024 dimensions, left day / right night halves, camera, perspective, architecture and all object positions. Preserve the original pixel-art style. ONLY change the moving or luminous elements described below; every static surface must remain as close to pixel-identical as possible. This is deliberately a clearly different animation phase, not a new scene. No text additions, UI, borders, labels or watermark. Animate the low-light phase of the neon sign: in BOTH panels dim the neon lowercase 'motd' lettering and cyan speech-bubble logo to about 25% brightness, still recognizable with same exact shape and lettering. Keep sign board and lettering geometry identical, only illumination changes. Dim some game-cabinet screen pixels but preserve all cabinets and screen geometry. Redraw the wet pavement neon reflections into visibly shifted broken ripples, preserving every paving stone. Keep the alley buildings, plants, clouds, moon and camera absolutely unchanged. Do not add or remove objects or lettering.",
+      "file": "neon-arcade-motion-keyframe.png",
+      "nativeDimensions": {
+        "width": 1536,
+        "height": 1024
+      }
+    },
+    {
+      "id": "retro-computer-room",
+      "source": "retro-computer-room-v1.png",
+      "prompt": "Use case: precise-object-edit. Asset type: alternate animation keyframe for an existing paired day/night pixel-art wallpaper. Edit target is the supplied image. KEEP exact 1536x1024 dimensions, left day / right night halves, camera, perspective, architecture and all object positions. Preserve the original pixel-art style. ONLY change the moving or luminous elements described below; every static surface must remain as close to pixel-identical as possible. This is deliberately a clearly different animation phase, not a new scene. No text additions, UI, borders, labels or watermark. Animate a later computer-terminal moment: change only the green CRT phosphor graphic into a different recognizable wireframe-globe rotation, with a short new row of green terminal pixels, still no legible text; keep the monitor screen border and room geometry fixed. Dim the desk lamp briefly to about half brightness, preserve lamp position and shape. At night change brightness of a scattered few existing city window lights and tiny stars. Outside window, shift only the water reflection ripples slightly. Keep desk objects, chair, plants, window frame, skyline, clouds and moon unchanged.",
+      "file": "retro-computer-room-motion-keyframe.png",
+      "nativeDimensions": {
+        "width": 1536,
+        "height": 1024
+      }
+    },
+    {
+      "id": "cyberpunk-canal",
+      "source": "cyberpunk-canal-v1.png",
+      "prompt": "Use case: precise-object-edit. Asset type: alternate animation keyframe for an existing paired day/night pixel-art wallpaper. Edit target is the supplied image. KEEP exact 1536x1024 dimensions, left day / right night halves, camera, perspective, architecture and all object positions. Preserve the original pixel-art style. ONLY change the moving or luminous elements described below; every static surface must remain as close to pixel-identical as possible. This is deliberately a clearly different animation phase, not a new scene. No text additions, UI, borders, labels or watermark. Animate a visibly later water phase: redraw ONLY the canal surface with clear displaced ripple crests and broken moving reflections; same water perspective and colors but reflections should move sideways by roughly 8 pixels and ripple bands by roughly 5 pixels. Keep water banks, boats, bridge and all architecture perfectly still. Dim a few individual warm window lights and neon sign segments at night. Vary existing small star brightness, never move/add stars or change the moon. Preserve trees and sky exactly. The two panels remain the same scene and same geometry.",
+      "file": "cyberpunk-canal-motion-keyframe.png",
+      "nativeDimensions": {
+        "width": 1536,
+        "height": 1024
+      }
+    }
+  ]
+}

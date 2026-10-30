@@ -186,6 +186,40 @@ class AppearancePrefsTest {
             )
         }
 
+    @Test fun scenicWallpaperControlsDefaultForLegacyStoresAndPersistTogether() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            context.appearanceDataStore.edit {
+                it.remove(booleanPreferencesKey("wallpaper_scenic_follow_system_v1"))
+                it.remove(booleanPreferencesKey("wallpaper_scenic_animation_v1"))
+            }
+            assertEquals(
+                true,
+                AppearancePrefsImpl(context)
+                    .config
+                    .first()
+                    .wallpaper.scenicFollowSystem,
+            )
+            assertEquals(
+                true,
+                AppearancePrefsImpl(context)
+                    .config
+                    .first()
+                    .wallpaper.scenicAnimationEnabled,
+            )
+            val selection =
+                WallpaperSelection(
+                    preset = ChatWallpaperPreset.JAPANESE_COUNTRYSIDE,
+                    intensity = 73,
+                    scenicFollowSystem = false,
+                    scenicAnimationEnabled = false,
+                )
+            prefs.setWallpaper(selection)
+            assertEquals(selection, AppearancePrefsImpl(context).config.first().wallpaper)
+            assertEquals(false, context.appearanceDataStore.data.first()[booleanPreferencesKey("wallpaper_scenic_follow_system_v1")])
+            assertEquals(false, context.appearanceDataStore.data.first()[booleanPreferencesKey("wallpaper_scenic_animation_v1")])
+        }
+
     @Test fun followSystem_defaultsFalseAndRoundTrips() =
         runTest {
             assertEquals(false, prefs.config.first().followSystem)
@@ -269,7 +303,7 @@ class AppearancePrefsTest {
             Json.decodeFromString<WallpaperSelection>("""{"preset":"CHATTER","intensity":73}"""),
         )
         assertEquals(
-            """{"preset":"RETRO_CHAT","intensity":73,"outlineColor":null}""",
+            """{"preset":"RETRO_CHAT","intensity":73,"outlineColor":null,"scenicFollowSystem":true,"scenicAnimationEnabled":true}""",
             jsonWithDefaults.encodeToString(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, "private-wallpaper.image")),
         )
         assertEquals(
@@ -277,7 +311,7 @@ class AppearancePrefsTest {
             Json.decodeFromString<WallpaperSelection>("""{"preset":"LINUX","intensity":73}"""),
         )
         assertEquals(
-            """{"preset":"LINUX","intensity":73,"outlineColor":null}""",
+            """{"preset":"LINUX","intensity":73,"outlineColor":null,"scenicFollowSystem":true,"scenicAnimationEnabled":true}""",
             jsonWithDefaults.encodeToString(WallpaperSelection(ChatWallpaperPreset.LINUX, 73)),
         )
         assertEquals(
@@ -285,11 +319,24 @@ class AppearancePrefsTest {
             Json.decodeFromString<WallpaperSelection>("""{"preset":"SYSTEMCRAFTERS","intensity":73}"""),
         )
         assertEquals(
-            """{"preset":"SYSTEMCRAFTERS","intensity":73,"outlineColor":null}""",
+            """{"preset":"SYSTEMCRAFTERS","intensity":73,"outlineColor":null,"scenicFollowSystem":true,"scenicAnimationEnabled":true}""",
             jsonWithDefaults.encodeToString(WallpaperSelection(ChatWallpaperPreset.SYSTEMCRAFTERS, 73)),
         )
         for (color in listOf(0xffffffff.toInt(), 0xff000000.toInt(), 0xff12ab34.toInt())) {
             val selection = WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, outlineColor = color)
+            assertEquals(selection, Json.decodeFromString<WallpaperSelection>(jsonWithDefaults.encodeToString(selection)))
+        }
+        for (
+        preset in
+        listOf(
+            ChatWallpaperPreset.JAPANESE_COUNTRYSIDE,
+            ChatWallpaperPreset.RAINY_CAFE,
+            ChatWallpaperPreset.MOTD_ARCADE,
+            ChatWallpaperPreset.MIDNIGHT_TERMINAL,
+            ChatWallpaperPreset.CYBERPUNK_CANAL,
+        )
+        ) {
+            val selection = WallpaperSelection(preset, 73, scenicFollowSystem = false, scenicAnimationEnabled = false)
             assertEquals(selection, Json.decodeFromString<WallpaperSelection>(jsonWithDefaults.encodeToString(selection)))
         }
     }

@@ -1,0 +1,350 @@
+{
+  "tool": "built-in image_gen",
+  "type": "scenic-pixel-studies",
+  "nativeDimensions": {
+    "width": 1536,
+    "height": 1024,
+    "panelWidth": 768,
+    "panelHeight": 1024
+  },
+  "scenes": [
+    {
+      "id": "japanese-countryside",
+      "title": "Japanese countryside",
+      "description": "Mountain village streets, railway, homes and a glowing vending machine across four seasons.",
+      "versions": [
+        {
+          "id": "summer-pixel-v3",
+          "label": "Fresh village · revision 03",
+          "season": "summer",
+          "motion": "pixel-events",
+          "paired": false,
+          "light": "revision-02/japanese-countryside-summer-v3-light.png",
+          "dark": "revision-02/japanese-countryside-summer-v3-dark.png",
+          "events": "revision-02/japanese-countryside-summer-v3-events.json",
+          "prompt": "Use case: stylized-concept. Fresh full-scene pixel-art chat wallpaper, portrait 256:448 aspect, intended canonical pixel grid 256x448. A beautiful Japanese mountain village in summer daylight, richly composed and atmospheric: layered forested mountains and open sky in upper third, traditional tiled-roof houses, a horizontal railway with crossing and utility poles through the middle distance, a narrow village lane following a clear shallow stream toward the foreground. Detailed plants, stone embankments, bridge and little shop. A convincing red Japanese DRINK VENDING MACHINE stands beside the shop, prominently at roughly 72% of image width and 65% of height, fully inside frame, large enough to read at phone scale (around 38 pixels wide and 66 pixels tall on the intended grid). Its front faces camera with a little visible side depth, authentic upright rectangular proportions. Clear glass product display contains THREE tidy rows of distinct cans and bottles with readable silhouettes and varied labels; little round selection buttons directly below each row. A separate narrow payment panel on right has coin slot, card reader, small price display and coin return. A separate WIDE BLACK recessed dispensing hatch sits in the lower body. Solid red metal cabinet, white display trim, modest steady cyan light inside product display. No advertising or illegible invented signage. Machine is finished environmental art, not blank panels or flat checkerboard marks. Preserve spatial separation of product display, payment controls and dispensing hatch. Crisp deliberate pixel clusters, coherent pixel scale, stepped shading, detailed but calm; no gradients, blur, painterly strokes, scanlines, motion distortion, people, watermark or UI. Stream lower center contains sparse horizontal glints with calm clear areas suitable for one tiny later authored ripple. No moving train in this still. Complete single portrait scene, no panels."
+        },
+        {
+          "id": "spring-pixel-v3",
+          "label": "Fresh village · revision 03",
+          "season": "spring",
+          "motion": "pixel-events",
+          "paired": false,
+          "light": "revision-02/japanese-countryside-spring-v3-light.png",
+          "dark": "revision-02/japanese-countryside-spring-v3-dark.png",
+          "events": "revision-02/japanese-countryside-spring-v3-events.json",
+          "prompt": "Use case: stylized-concept. Fresh full-scene pixel-art chat wallpaper, portrait 256:448 aspect, intended canonical pixel grid 256x448. A beautiful Japanese mountain village in summer daylight, richly composed and atmospheric: layered forested mountains and open sky in upper third, traditional tiled-roof houses, a horizontal railway with crossing and utility poles through the middle distance, a narrow village lane following a clear shallow stream toward the foreground. Detailed plants, stone embankments, bridge and little shop. A convincing red Japanese DRINK VENDING MACHINE stands beside the shop, prominently at roughly 72% of image width and 65% of height, fully inside frame, large enough to read at phone scale (around 38 pixels wide and 66 pixels tall on the intended grid). Its front faces camera with a little visible side depth, authentic upright rectangular proportions. Clear glass product display contains THREE tidy rows of distinct cans and bottles with readable silhouettes and varied labels; little round selection buttons directly below each row. A separate narrow payment panel on right has coin slot, card reader, small price display and coin return. A separate WIDE BLACK recessed dispensing hatch sits in the lower body. Solid red metal cabinet, white display trim, modest steady cyan light inside product display. No advertising or illegible invented signage. Machine is finished environmental art, not blank panels or flat checkerboard marks. Preserve spatial separation of product display, payment controls and dispensing hatch. Crisp deliberate pixel clusters, coherent pixel scale, stepped shading, detailed but calm; no gradients, blur, painterly strokes, scanlines, motion distortion, people, watermark or UI. Stream lower center contains sparse horizontal glints with calm clear areas suitable for one tiny later authored ripple. No moving train in this still. Complete single portrait scene, no panels."
+        },
+        {
+          "id": "autumn-pixel-v3",
+          "label": "Fresh village · revision 03",
+          "season": "autumn",
+          "motion": "pixel-events",
+          "paired": false,
+          "light": "revision-02/japanese-countryside-autumn-v3-light.png",
+          "dark": "revision-02/japanese-countryside-autumn-v3-dark.png",
+          "events": "revision-02/japanese-countryside-autumn-v3-events.json",
+          "prompt": "Use case: stylized-concept. Fresh full-scene pixel-art chat wallpaper, portrait 256:448 aspect, intended canonical pixel grid 256x448. A beautiful Japanese mountain village in summer daylight, richly composed and atmospheric: layered forested mountains and open sky in upper third, traditional tiled-roof houses, a horizontal railway with crossing and utility poles through the middle distance, a narrow village lane following a clear shallow stream toward the foreground. Detailed plants, stone embankments, bridge and little shop. A convincing red Japanese DRINK VENDING MACHINE stands beside the shop, prominently at roughly 72% of image width and 65% of height, fully inside frame, large enough to read at phone scale (around 38 pixels wide and 66 pixels tall on the intended grid). Its front faces camera with a little visible side depth, authentic upright rectangular proportions. Clear glass product display contains THREE tidy rows of distinct cans and bottles with readable silhouettes and varied labels; little round selection buttons directly below each row. A separate narrow payment panel on right has coin slot, card reader, small price display and coin return. A separate WIDE BLACK recessed dispensing hatch sits in the lower body. Solid red metal cabinet, white display trim, modest steady cyan light inside product display. No advertising or illegible invented signage. Machine is finished environmental art, not blank panels or flat checkerboard marks. Preserve spatial separation of product display, payment controls and dispensing hatch. Crisp deliberate pixel clusters, coherent pixel scale, stepped shading, detailed but calm; no gradients, blur, painterly strokes, scanlines, motion distortion, people, watermark or UI. Stream lower center contains sparse horizontal glints with calm clear areas suitable for one tiny later authored ripple. No moving train in this still. Complete single portrait scene, no panels."
+        },
+        {
+          "id": "winter-pixel-v3",
+          "label": "Fresh village · revision 03",
+          "season": "winter",
+          "motion": "pixel-events",
+          "paired": false,
+          "light": "revision-02/japanese-countryside-winter-v3-light.png",
+          "dark": "revision-02/japanese-countryside-winter-v3-dark.png",
+          "events": "revision-02/japanese-countryside-winter-v3-events.json",
+          "prompt": "Use case: stylized-concept. Fresh full-scene pixel-art chat wallpaper, portrait 256:448 aspect, intended canonical pixel grid 256x448. A beautiful Japanese mountain village in summer daylight, richly composed and atmospheric: layered forested mountains and open sky in upper third, traditional tiled-roof houses, a horizontal railway with crossing and utility poles through the middle distance, a narrow village lane following a clear shallow stream toward the foreground. Detailed plants, stone embankments, bridge and little shop. A convincing red Japanese DRINK VENDING MACHINE stands beside the shop, prominently at roughly 72% of image width and 65% of height, fully inside frame, large enough to read at phone scale (around 38 pixels wide and 66 pixels tall on the intended grid). Its front faces camera with a little visible side depth, authentic upright rectangular proportions. Clear glass product display contains THREE tidy rows of distinct cans and bottles with readable silhouettes and varied labels; little round selection buttons directly below each row. A separate narrow payment panel on right has coin slot, card reader, small price display and coin return. A separate WIDE BLACK recessed dispensing hatch sits in the lower body. Solid red metal cabinet, white display trim, modest steady cyan light inside product display. No advertising or illegible invented signage. Machine is finished environmental art, not blank panels or flat checkerboard marks. Preserve spatial separation of product display, payment controls and dispensing hatch. Crisp deliberate pixel clusters, coherent pixel scale, stepped shading, detailed but calm; no gradients, blur, painterly strokes, scanlines, motion distortion, people, watermark or UI. Stream lower center contains sparse horizontal glints with calm clear areas suitable for one tiny later authored ripple. No moving train in this still. Complete single portrait scene, no panels."
+        },
+        {
+          "id": "summer-pixel-v2",
+          "label": "Fresh pixels · revision 02",
+          "season": "summer",
+          "motion": "pixel-events",
+          "paired": false,
+          "light": "revision-02/japanese-countryside-summer-light.png",
+          "dark": "revision-02/japanese-countryside-summer-dark.png",
+          "events": "revision-02/japanese-countryside-summer-events.json",
+          "prompt": "Use case: stylized-concept.\nAsset type: static production clean plate for a full-screen pixel-art chat wallpaper with very rare subtle events.\nStyle: richly composed pixel-art game background with deliberate, consistently scaled pixel clusters, stepped material shading and crisp silhouettes. Intended production grid: 256 by 448 pixels; this is an art-direction target, not a claim that the generator will enforce an exact raster grid. Preserve cozy environmental richness through layered architecture, vegetation, furnishings and selective material detail. Use coherent color ramps, warm inhabited interiors and atmospheric depth. Avoid isolated pixel noise, photographic textures, soft antialiasing and digitally painted micro-detail. Portrait composition, fixed camera; one image only, no diptych or sprite sheet.\nComposition: full scenic portrait, important objects inside the central 72% of the width and away from header/composer occlusion. Preserve visual interest throughout the scene. Reserve only a few localized regions for rare pixel events; no dense streaks, widespread sparkles, dramatic splashes or exaggerated motion cues.\nAnimation surfaces: give water a restrained static base with subtle material facets and fixed boundaries; omit only the moving glints/reflection fragments to be authored later. Fully design lamp housings, tube shapes and screen borders. Preserve restrained fixed illumination on surrounding surfaces. This is a production clean plate: the finished resting scene will include authored lights, screen content and water highlights and must remain attractive during long periods of stillness.\nConstraints: no camera movement, motion blur, scanlines, warped surfaces, bloom, UI, captions or watermark. No text except explicitly requested scene branding.\nScene/backdrop: A fresh composition of a quiet Japanese village street, traditional houses, distant mountain silhouette, a rural railway in the middle distance, and one red vending machine. A small open drainage stream runs through the middle-lower portion, clearly visible inside the central crop rather than at the extreme edge. Summer greenery. Keep the street and mountains readable with simple shapes; railway geometry must be horizontal and unobstructed. Vending-machine glass has a dark, plain screen; stream has a dark base with subtle static material facets and fixed banks, no painted white highlights. No train in the background master. Reserve a modest open patch of sky.\nLighting: legible daytime with stepped material shading and restrained fixed light spill; future night variant shares exact geometry.\nOutput only the static background clean plate. The finished presentation will assemble authored resting states over the reserved surfaces."
+        },
+        {
+          "id": "spring-pixel-v2",
+          "label": "Fresh pixels · revision 02",
+          "season": "spring",
+          "motion": "pixel-events",
+          "paired": false,
+          "light": "revision-02/japanese-countryside-spring-light.png",
+          "dark": "revision-02/japanese-countryside-spring-dark.png",
+          "events": "revision-02/japanese-countryside-spring-events.json",
+          "prompt": "Use case: stylized-concept.\nAsset type: static production clean plate for a full-screen pixel-art chat wallpaper with very rare subtle events.\nStyle: richly composed pixel-art game background with deliberate, consistently scaled pixel clusters, stepped material shading and crisp silhouettes. Intended production grid: 256 by 448 pixels; this is an art-direction target, not a claim that the generator will enforce an exact raster grid. Preserve cozy environmental richness through layered architecture, vegetation, furnishings and selective material detail. Use coherent color ramps, warm inhabited interiors and atmospheric depth. Avoid isolated pixel noise, photographic textures, soft antialiasing and digitally painted micro-detail. Portrait composition, fixed camera; one image only, no diptych or sprite sheet.\nComposition: full scenic portrait, important objects inside the central 72% of the width and away from header/composer occlusion. Preserve visual interest throughout the scene. Reserve only a few localized regions for rare pixel events; no dense streaks, widespread sparkles, dramatic splashes or exaggerated motion cues.\nAnimation surfaces: give water a restrained static base with subtle material facets and fixed boundaries; omit only the moving glints/reflection fragments to be authored later. Fully design lamp housings, tube shapes and screen borders. Preserve restrained fixed illumination on surrounding surfaces. This is a production clean plate: the finished resting scene will include authored lights, screen content and water highlights and must remain attractive during long periods of stillness.\nConstraints: no camera movement, motion blur, scanlines, warped surfaces, bloom, UI, captions or watermark. No text except explicitly requested scene branding.\nScene/backdrop: A fresh composition of a quiet Japanese village street, traditional houses, distant mountain silhouette, a rural railway in the middle distance, and one red vending machine. A small open drainage stream runs through the middle-lower portion, clearly visible inside the central crop rather than at the extreme edge. Summer greenery. Keep the street and mountains readable with simple shapes; railway geometry must be horizontal and unobstructed. Vending-machine glass has a dark, plain screen; stream has a dark base with subtle static material facets and fixed banks, no painted white highlights. No train in the background master. Reserve a modest open patch of sky.\nLighting: legible daytime with stepped material shading and restrained fixed light spill; future night variant shares exact geometry.\nOutput only the static background clean plate. The finished presentation will assemble authored resting states over the reserved surfaces."
+        },
+        {
+          "id": "autumn-pixel-v2",
+          "label": "Fresh pixels · revision 02",
+          "season": "autumn",
+          "motion": "pixel-events",
+          "paired": false,
+          "light": "revision-02/japanese-countryside-autumn-light.png",
+          "dark": "revision-02/japanese-countryside-autumn-dark.png",
+          "events": "revision-02/japanese-countryside-autumn-events.json",
+          "prompt": "Use case: stylized-concept.\nAsset type: static production clean plate for a full-screen pixel-art chat wallpaper with very rare subtle events.\nStyle: richly composed pixel-art game background with deliberate, consistently scaled pixel clusters, stepped material shading and crisp silhouettes. Intended production grid: 256 by 448 pixels; this is an art-direction target, not a claim that the generator will enforce an exact raster grid. Preserve cozy environmental richness through layered architecture, vegetation, furnishings and selective material detail. Use coherent color ramps, warm inhabited interiors and atmospheric depth. Avoid isolated pixel noise, photographic textures, soft antialiasing and digitally painted micro-detail. Portrait composition, fixed camera; one image only, no diptych or sprite sheet.\nComposition: full scenic portrait, important objects inside the central 72% of the width and away from header/composer occlusion. Preserve visual interest throughout the scene. Reserve only a few localized regions for rare pixel events; no dense streaks, widespread sparkles, dramatic splashes or exaggerated motion cues.\nAnimation surfaces: give water a restrained static base with subtle material facets and fixed boundaries; omit only the moving glints/reflection fragments to be authored later. Fully design lamp housings, tube shapes and screen borders. Preserve restrained fixed illumination on surrounding surfaces. This is a production clean plate: the finished resting scene will include authored lights, screen content and water highlights and must remain attractive during long periods of stillness.\nConstraints: no camera movement, motion blur, scanlines, warped surfaces, bloom, UI, captions or watermark. No text except explicitly requested scene branding.\nScene/backdrop: A fresh composition of a quiet Japanese village street, traditional houses, distant mountain silhouette, a rural railway in the middle distance, and one red vending machine. A small open drainage stream runs through the middle-lower portion, clearly visible inside the central crop rather than at the extreme edge. Summer greenery. Keep the street and mountains readable with simple shapes; railway geometry must be horizontal and unobstructed. Vending-machine glass has a dark, plain screen; stream has a dark base with subtle static material facets and fixed banks, no painted white highlights. No train in the background master. Reserve a modest open patch of sky.\nLighting: legible daytime with stepped material shading and restrained fixed light spill; future night variant shares exact geometry.\nOutput only the static background clean plate. The finished presentation will assemble authored resting states over the reserved surfaces."
+        },
+        {
+          "id": "winter-pixel-v2",
+          "label": "Fresh pixels · revision 02",
+          "season": "winter",
+          "motion": "pixel-events",
+          "paired": false,
+          "light": "revision-02/japanese-countryside-winter-light.png",
+          "dark": "revision-02/japanese-countryside-winter-dark.png",
+          "events": "revision-02/japanese-countryside-winter-events.json",
+          "prompt": "Use case: stylized-concept.\nAsset type: static production clean plate for a full-screen pixel-art chat wallpaper with very rare subtle events.\nStyle: richly composed pixel-art game background with deliberate, consistently scaled pixel clusters, stepped material shading and crisp silhouettes. Intended production grid: 256 by 448 pixels; this is an art-direction target, not a claim that the generator will enforce an exact raster grid. Preserve cozy environmental richness through layered architecture, vegetation, furnishings and selective material detail. Use coherent color ramps, warm inhabited interiors and atmospheric depth. Avoid isolated pixel noise, photographic textures, soft antialiasing and digitally painted micro-detail. Portrait composition, fixed camera; one image only, no diptych or sprite sheet.\nComposition: full scenic portrait, important objects inside the central 72% of the width and away from header/composer occlusion. Preserve visual interest throughout the scene. Reserve only a few localized regions for rare pixel events; no dense streaks, widespread sparkles, dramatic splashes or exaggerated motion cues.\nAnimation surfaces: give water a restrained static base with subtle material facets and fixed boundaries; omit only the moving glints/reflection fragments to be authored later. Fully design lamp housings, tube shapes and screen borders. Preserve restrained fixed illumination on surrounding surfaces. This is a production clean plate: the finished resting scene will include authored lights, screen content and water highlights and must remain attractive during long periods of stillness.\nConstraints: no camera movement, motion blur, scanlines, warped surfaces, bloom, UI, captions or watermark. No text except explicitly requested scene branding.\nScene/backdrop: A fresh composition of a quiet Japanese village street, traditional houses, distant mountain silhouette, a rural railway in the middle distance, and one red vending machine. A small open drainage stream runs through the middle-lower portion, clearly visible inside the central crop rather than at the extreme edge. Summer greenery. Keep the street and mountains readable with simple shapes; railway geometry must be horizontal and unobstructed. Vending-machine glass has a dark, plain screen; stream has a dark base with subtle static material facets and fixed banks, no painted white highlights. No train in the background master. Reserve a modest open patch of sky.\nLighting: legible daytime with stepped material shading and restrained fixed light spill; future night variant shares exact geometry.\nOutput only the static background clean plate. The finished presentation will assemble authored resting states over the reserved surfaces."
+        },
+        {
+          "id": "summer-v1",
+          "label": "Summer · study 01",
+          "season": "summer",
+          "motion": "animated-loop",
+          "prompt": "Use case: stylized-concept. Asset type: paired full-scenic pixel-art chat wallpaper study. Output a single landscape 1536x1024 image consisting of TWO EQUAL portrait panels, exactly flush at x=50%, no gutter, divider, border, lettering or labels. LEFT is daytime, RIGHT is nighttime of the EXACT SAME scene, identical camera, geometry, buildings, objects and composition. Each half is a complete independent portrait view. Style: exquisite coherent finely detailed 16-bit pixel art, visible crisp square pixel clusters, restrained dithering, limited tasteful palette, no smooth painting, no blur, no vector art, no UI, no watermark. Fixed camera, tranquil lived-in mood, no people. Full scenery reaches every edge. Keep focal details away from extreme side edges and give the center breathing room for chat text. Night changes actual illumination, moonlight, lit windows and lamps, not merely a dark overlay. Scene: a quiet Japanese mountain village in summer. A narrow street recedes between traditional tiled-roof houses; a red vending machine with cyan and pink illuminated trim stands by a house; a small elevated rural railway crosses horizontally in the upper middle distance, with empty tracks awaiting a passing train; lush mountains rise behind it. Utility poles, tiny roadside drainage stream, potted greenery. Camera at street level looking uphill, street filling the lower half, rooftops framing the central open sky. Left: gentle warm sun, blue sky and a few clouds. Right: indigo sky, small moon, warm house windows, glowing vending machine and pools of lantern light. Architecture must be pixel-for-pixel compositionally aligned between panels.",
+          "paired": true,
+          "light": "japanese-countryside-summer-v1.png",
+          "dark": "japanese-countryside-summer-v1.png",
+          "loop": "japanese-countryside-summer-v1-loop.webp",
+          "animation": {
+            "format": "animated-webp",
+            "frames": 16,
+            "durationMs": 4000,
+            "generator": "../generate-scenic-loops.mjs"
+          }
+        },
+        {
+          "id": "spring-v1",
+          "label": "Spring · study 01",
+          "season": "spring",
+          "motion": "animated-loop",
+          "prompt": "Use case: lighting-weather. Edit target: the supplied Japanese village summer day/night diptych. Change ONLY the season to spring. Cherry blossoms, tender green leaves, spring flowers. Preserve the exact image dimensions, the two equal flush portrait halves, left daytime / right nighttime, fixed camera, every building, mountain silhouette, street, railway bridge, utility poles and red neon-trimmed vending machine. Preserve pixel-art style and matching scene geometry across both halves. Keep daytime sunlight and nighttime moonlight, warm lit windows and vending-machine glow. No text, labels, border, divider, UI or watermark. Keep both panels precisely aligned in composition, with no crop or zoom.",
+          "paired": true,
+          "light": "japanese-countryside-spring-v1.png",
+          "dark": "japanese-countryside-spring-v1.png",
+          "reference": "japanese-countryside-summer-v1.png",
+          "loop": "japanese-countryside-spring-v1-loop.webp",
+          "animation": {
+            "format": "animated-webp",
+            "frames": 16,
+            "durationMs": 4000,
+            "generator": "../generate-scenic-loops.mjs"
+          }
+        },
+        {
+          "id": "autumn-v1",
+          "label": "Autumn · study 01",
+          "season": "autumn",
+          "motion": "animated-loop",
+          "prompt": "Use case: lighting-weather. Edit target: the supplied Japanese village summer day/night diptych. Change ONLY the season to autumn. Red, amber and gold deciduous leaves, fallen leaves beside the road, evergreen mountain patches. Preserve the exact image dimensions, the two equal flush portrait halves, left daytime / right nighttime, fixed camera, every building, mountain silhouette, street, railway bridge, utility poles and red neon-trimmed vending machine. Preserve pixel-art style and matching scene geometry across both halves. Keep daytime sunlight and nighttime moonlight, warm lit windows and vending-machine glow. No text, labels, border, divider, UI or watermark. Keep both panels precisely aligned in composition, with no crop or zoom.",
+          "paired": true,
+          "light": "japanese-countryside-autumn-v1.png",
+          "dark": "japanese-countryside-autumn-v1.png",
+          "reference": "japanese-countryside-summer-v1.png",
+          "loop": "japanese-countryside-autumn-v1-loop.webp",
+          "animation": {
+            "format": "animated-webp",
+            "frames": 16,
+            "durationMs": 4000,
+            "generator": "../generate-scenic-loops.mjs"
+          }
+        },
+        {
+          "id": "winter-v1",
+          "label": "Winter · study 01",
+          "season": "winter",
+          "motion": "animated-loop",
+          "prompt": "Use case: lighting-weather. Edit target: the supplied Japanese village summer day/night diptych. Change ONLY the season to winter. Snow on roofs and mountains, bare deciduous branches, snow along the road margins with a walkable clear central path, a little ice beside the stream. Preserve the exact image dimensions, the two equal flush portrait halves, left daytime / right nighttime, fixed camera, every building, mountain silhouette, street, railway bridge, utility poles and red neon-trimmed vending machine. Preserve pixel-art style and matching scene geometry across both halves. Keep daytime sunlight and nighttime moonlight, warm lit windows and vending-machine glow. No text, labels, border, divider, UI or watermark. Keep both panels precisely aligned in composition, with no crop or zoom.",
+          "paired": true,
+          "light": "japanese-countryside-winter-v1.png",
+          "dark": "japanese-countryside-winter-v1.png",
+          "reference": "japanese-countryside-summer-v1.png",
+          "loop": "japanese-countryside-winter-v1-loop.webp",
+          "animation": {
+            "format": "animated-webp",
+            "frames": 16,
+            "durationMs": 4000,
+            "generator": "../generate-scenic-loops.mjs"
+          }
+        }
+      ]
+    },
+    {
+      "id": "rainy-cafe",
+      "title": "Rainy café",
+      "description": "A quiet corner café with warm windows, wet pavement and gentle rain.",
+      "versions": [
+        {
+          "id": "pixel-events-v2",
+          "label": "Fresh pixels · revision 02",
+          "motion": "pixel-events",
+          "paired": false,
+          "light": "revision-02/rainy-cafe-light.png",
+          "dark": "revision-02/rainy-cafe-dark.png",
+          "events": "revision-02/rainy-cafe-events.json",
+          "prompt": "Use case: stylized-concept.\nAsset type: static production clean plate for a full-screen pixel-art chat wallpaper with very rare subtle events.\nStyle: richly composed pixel-art game background with deliberate, consistently scaled pixel clusters, stepped material shading and crisp silhouettes. Intended production grid: 256 by 448 pixels; this is an art-direction target, not a claim that the generator will enforce an exact raster grid. Preserve cozy environmental richness through layered architecture, vegetation, furnishings and selective material detail. Use coherent color ramps, warm inhabited interiors and atmospheric depth. Avoid isolated pixel noise, photographic textures, soft antialiasing and digitally painted micro-detail. Portrait composition, fixed camera; one image only, no diptych or sprite sheet.\nComposition: full scenic portrait, important objects inside the central 72% of the width and away from header/composer occlusion. Preserve visual interest throughout the scene. Reserve only a few localized regions for rare pixel events; no dense streaks, widespread sparkles, dramatic splashes or exaggerated motion cues.\nAnimation surfaces: give water a restrained static base with subtle material facets and fixed boundaries; omit only the moving glints/reflection fragments to be authored later. Fully design lamp housings, tube shapes and screen borders. Preserve restrained fixed illumination on surrounding surfaces. This is a production clean plate: the finished resting scene will include authored lights, screen content and water highlights and must remain attractive during long periods of stillness.\nConstraints: no camera movement, motion blur, scanlines, warped surfaces, bloom, UI, captions or watermark. No text except explicitly requested scene branding.\nScene/backdrop: A fresh quiet corner cafe composition in a Japanese neighborhood, with a large clear window, a restrained awning, a hanging lantern and several shallow puddles on a flat street. Put one puddle near the lower-middle center and the lantern/window within the central crop. Render the puddles as calm dark shapes with subtle static material facets with crisp fixed edges, without reflections or ripples; warm cafe interior is readable but the lamp has a simple unlit glass shape. Preserve readable brick, pavement, furnishing and plant detail without noisy microtexture. No drawn rain streaks, no clouds of steam, no foreground people. No legible signage.\nLighting: legible daytime with stepped material shading and restrained fixed light spill; future night variant shares exact geometry.\nOutput only the static background clean plate. The finished presentation will assemble authored resting states over the reserved surfaces."
+        },
+        {
+          "id": "v1",
+          "label": "Study 01",
+          "motion": "animated-loop",
+          "prompt": "Use case: stylized-concept. Asset type: paired full-scenic pixel-art chat wallpaper study. Output a single landscape 1536x1024 image consisting of TWO EQUAL portrait panels, exactly flush at x=50%, no gutter, divider, border, lettering or labels. LEFT is daytime, RIGHT is nighttime of the EXACT SAME scene, identical camera, geometry, buildings, objects and composition. Each half is a complete independent portrait view. Style: exquisite coherent finely detailed 16-bit pixel art, visible crisp square pixel clusters, restrained dithering, limited tasteful palette, no smooth painting, no blur, no vector art, no UI, no watermark. Fixed camera, tranquil lived-in mood, no people. Full scenery reaches every edge. Keep focal details away from extreme side edges and give the center breathing room for chat text. Night changes actual illumination, moonlight, lit windows and lamps, not merely a dark overlay. Scene: nostalgic Japanese corner café along a quiet narrow lane, awning and large amber-glowing windows, small outdoor stools, potted plants, old brick and timber facade, wet pavement reflecting windows, overhead cables and soft distant city rooftops. No legible signage. Street-level composition leaves the lane open through the center. Left: cool rainy overcast daylight, cozy interior visible. Right: deep blue rainy night, warm golden windows, restrained rose and teal sign light reflected in puddles. Do not bake dense rain streaks into the image; rainfall will be animated later.",
+          "paired": true,
+          "light": "rainy-cafe-v1.png",
+          "dark": "rainy-cafe-v1.png",
+          "loop": "rainy-cafe-v1-loop.webp",
+          "animation": {
+            "format": "animated-webp",
+            "frames": 16,
+            "durationMs": 4000,
+            "generator": "../generate-scenic-loops.mjs"
+          }
+        }
+      ]
+    },
+    {
+      "id": "neon-arcade",
+      "title": "Neon MOTD arcade",
+      "description": "A retro arcade tucked into a neon-lit city alley.",
+      "versions": [
+        {
+          "id": "pixel-events-v3",
+          "label": "Full neon sign · revision 03",
+          "motion": "pixel-events",
+          "paired": false,
+          "light": "revision-02/neon-arcade-v3-light.png",
+          "dark": "revision-02/neon-arcade-v3-dark.png",
+          "events": "revision-02/neon-arcade-v3-events.json",
+          "prompt": "Use case: stylized-concept. Asset: fresh static clean plate for a full scenic pixel-art chat wallpaper, portrait 256:448 aspect. Rich coherent Japanese retro-cyberpunk arcade frontage in a quiet narrow wet lane. Frontal fixed camera, layered architecture, cables, a few plants, carefully drawn paving, small shallow puddle near lower-middle center. Warm cozy interior with TWO classic arcade cabinets. Crisp consistently scaled pixel clusters, stepped material shading, detailed environmental storytelling, atmospheric depth, no photographic texture. Muted overcast DAYLIGHT. Critical composition: a broad EMPTY CHARCOAL RECTANGULAR SIGNBOARD is centered above the arcade doorway in the upper-middle part of the portrait, occupying roughly the central 72 percent of the image width. The signboard face is FLAT and FRONT-FACING, exactly parallel to the image plane, horizontal top and bottom edges; ample dark interior to fit a horizontal MOTD lockup. No perspective slant on the board. No plants, cables or fixtures overlap the sign face. The signboard is plain unlit dark charcoal glass, with a narrow restrained metal frame: NO lettering, NO logos, NO neon, NO colored glow or sign reflections anywhere. This is an animation production clean plate; the exact approved MOTD speech-bubble slash and lowercase motd wordmark will be authored as a separate neon pixel layer. Shop window lamps and cabinet illumination are separate warm/soft lights, independent of the future sign. Finish cabinet screens with tiny static pixel-game graphics. Keep the foreground puddle subtle, quiet and dark with restrained neutral reflections. No other neon shapes, people, legible text, UI, scanlines, rain overlays, motion blur, bloom or watermark. Preserve a complete attractive rich resting scene around the reserved dark signboard."
+        },
+        {
+          "id": "pixel-events-v2",
+          "label": "Fresh pixels · revision 02",
+          "motion": "pixel-events",
+          "paired": false,
+          "light": "revision-02/neon-arcade-light.png",
+          "dark": "revision-02/neon-arcade-dark.png",
+          "events": "revision-02/neon-arcade-events.json",
+          "prompt": "Use case: stylized-concept.\nAsset type: static production clean plate for a full-screen pixel-art chat wallpaper with very rare subtle events.\nStyle: richly composed pixel-art game background with deliberate, consistently scaled pixel clusters, stepped material shading and crisp silhouettes. Intended production grid: 256 by 448 pixels; this is an art-direction target, not a claim that the generator will enforce an exact raster grid. Preserve cozy environmental richness through layered architecture, vegetation, furnishings and selective material detail. Use coherent color ramps, warm inhabited interiors and atmospheric depth. Avoid isolated pixel noise, photographic textures, soft antialiasing and digitally painted micro-detail. Portrait composition, fixed camera; one image only, no diptych or sprite sheet.\nComposition: full scenic portrait, important objects inside the central 72% of the width and away from header/composer occlusion. Preserve visual interest throughout the scene. Reserve only a few localized regions for rare pixel events; no dense streaks, widespread sparkles, dramatic splashes or exaggerated motion cues.\nAnimation surfaces: give water a restrained static base with subtle material facets and fixed boundaries; omit only the moving glints/reflection fragments to be authored later. Fully design lamp housings, tube shapes and screen borders. Preserve restrained fixed illumination on surrounding surfaces. This is a production clean plate: the finished resting scene will include authored lights, screen content and water highlights and must remain attractive during long periods of stillness.\nConstraints: no camera movement, motion blur, scanlines, warped surfaces, bloom, UI, captions or watermark. No text except explicitly requested scene branding.\nScene/backdrop: A fresh retro-cyberpunk arcade frontage in a narrow quiet lane. The main sign and two recognizable arcade cabinets are prominent in the central composition, with carefully balanced teal, rose and amber accents. A black signboard clearly reads lowercase 'motd' next to the MOTD speech-bubble slash symbol, using the supplied brand reference for the geometry; render the tubes unlit, no glow baked into the surrounding architecture. A small puddle below the sign has a dark base with subtle static material facets, no baked reflections. Screens inside the arcade have clean dark interiors. Do not use generic geometric neon shapes in place of the logo. The supplied MOTD reference governs symbol and wordmark geometry; no substitute logos or decorative neon shapes.\nLighting: legible daytime with stepped material shading and restrained fixed light spill; future night variant shares exact geometry.\nOutput only the static background clean plate. The finished presentation will assemble authored resting states over the reserved surfaces."
+        },
+        {
+          "id": "v2",
+          "label": "Study 02 · neon motd",
+          "motion": "animated-loop",
+          "prompt": "Use case: precise-object-edit. Image 1 is the edit target: a 1536x1024 pixel-art arcade alley day/night diptych. Image 2 is a supporting brand reference ONLY: the motd speech-bubble/slash symbol and lowercase motd wordmark. Edit ONLY the two neon sign faces in BOTH halves of Image 1. Replace the triangle-and-lines sign above the arcade entrance with a tasteful neon version of the referenced logo: a cyan rounded speech bubble containing a diagonal slash, followed by clearly spelled lowercase 'motd' in warm pink neon tubing. Replace the rectangle-and-circle hanging sign with the cyan speech-bubble/slash symbol, centered within its existing black sign housing. Keep both sign housings exactly where they are, correct existing perspective and scale. Day/night signs show the identical logo with stronger localized glow at night. Text verbatim: 'motd', m-o-t-d. Keep every other pixel-art scene element, building, doorway, game cabinet, alley, mountain/city background, moon, plants, wet pavement and composition as unchanged as possible. Do not change camera, crop, dimensions, or day/night panel boundary. Preserve crisp detailed pixel-art treatment and the existing restrained magenta/cyan palette. This is a neon-tube adaptation of the reference logo, no ceramic block, pasted white rectangle, watermark, captions, new objects or extra words. Output the full paired image with only these signs changed.",
+          "paired": true,
+          "light": "neon-arcade-v2.png",
+          "dark": "neon-arcade-v2.png",
+          "references": [
+            "neon-arcade-v1.png",
+            "../../../docs/assets/brand/motd-lockup-dark.png"
+          ],
+          "loop": "neon-arcade-v2-loop.webp",
+          "animation": {
+            "format": "animated-webp",
+            "frames": 16,
+            "durationMs": 4000,
+            "generator": "../generate-scenic-loops.mjs"
+          }
+        },
+        {
+          "id": "v1",
+          "label": "Study 01",
+          "motion": "animated-loop",
+          "prompt": "Use case: stylized-concept. Asset type: paired full-scenic pixel-art chat wallpaper study. Output a single landscape 1536x1024 image consisting of TWO EQUAL portrait panels, exactly flush at x=50%, no gutter, divider, border, lettering or labels. LEFT is daytime, RIGHT is nighttime of the EXACT SAME scene, identical camera, geometry, buildings, objects and composition. Each half is a complete independent portrait view. Style: exquisite coherent finely detailed 16-bit pixel art, visible crisp square pixel clusters, restrained dithering, limited tasteful palette, no smooth painting, no blur, no vector art, no UI, no watermark. Fixed camera, tranquil lived-in mood, no people. Full scenery reaches every edge. Keep focal details away from extreme side edges and give the center breathing room for chat text. Night changes actual illumination, moonlight, lit windows and lamps, not merely a dark overlay. Scene: narrow retro-futurist Japanese arcade alley with an open arcade entrance, a few recognizable vintage upright game cabinets visible inside, geometric neon tube signs without text, overhead cables, a shuttered neighboring shop, subtle ventilation grilles and wet stone pavement. Magenta/cyan/amber accents balanced by muted brick and indigo. Left: late afternoon daylight reaches the alley, arcade interior glows gently. Right: moonlit sky strip above, cabinets and neon emit rich localized light and reflections. Cozy cyberpunk, no dystopian violence, no excessive visual clutter. Empty central walkway. Leave a small vent low on one side for animated steam.",
+          "paired": true,
+          "light": "neon-arcade-v1.png",
+          "dark": "neon-arcade-v1.png",
+          "loop": "neon-arcade-v1-loop.webp",
+          "animation": {
+            "format": "animated-webp",
+            "frames": 16,
+            "durationMs": 4000,
+            "generator": "../generate-scenic-loops.mjs"
+          }
+        }
+      ]
+    },
+    {
+      "id": "retro-computer-room",
+      "title": "Midnight terminal",
+      "description": "A cozy retro computer room above the city.",
+      "versions": [
+        {
+          "id": "pixel-events-v3",
+          "label": "Fresh terminal · revision 03",
+          "motion": "pixel-events",
+          "paired": false,
+          "light": "revision-02/retro-computer-room-v3-light.png",
+          "dark": "revision-02/retro-computer-room-v3-dark.png",
+          "events": "revision-02/retro-computer-room-v3-events.json",
+          "prompt": "Use case: stylized-concept. Asset type: fresh full-scene pixel-art chat wallpaper production master, portrait 256:448 aspect, intended canonical pixel grid 256x448. A new richly detailed cozy retro-computer nook in a Japanese city apartment. Fixed frontal camera. Large offset window occupies the upper half with layered city rooftops and distant skyline; a few books and trailing plants frame its sides. A handsome beige CRT computer dominates the LOWER-MIDDLE of the portrait on a warm wooden desk, its broad screen facing the camera squarely. The CRT screen center sits around 68 percent of image height, safely inside the central 72 percent of image width; give its screen enough room for miniature terminal rows later. A warm steady task lamp on the left, cassette deck and small plant on the right, keyboard, mouse, a mug and a few lived-in desk objects. Keep the whole desktop and CRT unobstructed; NO large chair in the foreground. Layered furnishings, deliberate crisp pixel clusters, consistent pixel scale, stepped material shading, cozy environmental richness and atmospheric depth. DAYTIME: soft cool overcast city-window light, inviting warm steady desk-lamp pool. Render CRT glass as a clean dark green-black rectangular surface with a crisp bezel, no imagery or text: an authored miniature terminal with a very rare status update will be added later. Screen must remain flat and frontal. No generated text, UI, scanlines, CRT interference, blur, glow animation, rain streaks, motion effects, photographic texture, people or watermark. Reserve a small clear patch of sky inside the window for a later night moon and single authored star. Produce one complete portrait scene only, no diptych, no panels."
+        },
+        {
+          "id": "pixel-events-v2",
+          "label": "Fresh pixels · revision 02",
+          "motion": "pixel-events",
+          "paired": false,
+          "light": "revision-02/retro-computer-room-light.png",
+          "dark": "revision-02/retro-computer-room-dark.png",
+          "events": "revision-02/retro-computer-room-events.json",
+          "prompt": "Use case: stylized-concept.\nAsset type: static production clean plate for a full-screen pixel-art chat wallpaper with very rare subtle events.\nStyle: richly composed pixel-art game background with deliberate, consistently scaled pixel clusters, stepped material shading and crisp silhouettes. Intended production grid: 256 by 448 pixels; this is an art-direction target, not a claim that the generator will enforce an exact raster grid. Preserve cozy environmental richness through layered architecture, vegetation, furnishings and selective material detail. Use coherent color ramps, warm inhabited interiors and atmospheric depth. Avoid isolated pixel noise, photographic textures, soft antialiasing and digitally painted micro-detail. Portrait composition, fixed camera; one image only, no diptych or sprite sheet.\nComposition: full scenic portrait, important objects inside the central 72% of the width and away from header/composer occlusion. Preserve visual interest throughout the scene. Reserve only a few localized regions for rare pixel events; no dense streaks, widespread sparkles, dramatic splashes or exaggerated motion cues.\nAnimation surfaces: give water a restrained static base with subtle material facets and fixed boundaries; omit only the moving glints/reflection fragments to be authored later. Fully design lamp housings, tube shapes and screen borders. Preserve restrained fixed illumination on surrounding surfaces. This is a production clean plate: the finished resting scene will include authored lights, screen content and water highlights and must remain attractive during long periods of stillness.\nConstraints: no camera movement, motion blur, scanlines, warped surfaces, bloom, UI, captions or watermark. No text except explicitly requested scene branding.\nScene/backdrop: A fresh cozy retro-computer room overlooking a city through a large window. One beige CRT and keyboard, a desk lamp, cassette deck and small plant. Place the CRT screen and a strip of visible sky area within the central safe crop. Render the CRT glass as an empty dark green-black rectangle with a clean pixel border, no globe, no text, no static scanlines. Desk-lamp housing is a fixed shape; all objects and city architecture have crisp readable silhouettes and selective rich detail. Sky has no baked stars; these will be placed as authored sprites. Make the CRT large enough for several miniature terminal rows and a distinct block cursor to be authored into the resting screen. Preserve the lived-in desk details and warm fixed room lighting.\nLighting: legible daytime with stepped material shading and restrained fixed light spill; future night variant shares exact geometry.\nOutput only the static background clean plate. The finished presentation will assemble authored resting states over the reserved surfaces."
+        },
+        {
+          "id": "v1",
+          "label": "Study 01",
+          "motion": "animated-loop",
+          "prompt": "Use case: stylized-concept. Asset type: paired full-scenic pixel-art chat wallpaper study. Output a single landscape 1536x1024 image consisting of TWO EQUAL portrait panels, exactly flush at x=50%, no gutter, divider, border, lettering or labels. LEFT is daytime, RIGHT is nighttime of the EXACT SAME scene, identical camera, geometry, buildings, objects and composition. Each half is a complete independent portrait view. Style: exquisite coherent finely detailed 16-bit pixel art, visible crisp square pixel clusters, restrained dithering, limited tasteful palette, no smooth painting, no blur, no vector art, no UI, no watermark. Fixed camera, tranquil lived-in mood, no people. Full scenery reaches every edge. Keep focal details away from extreme side edges and give the center breathing room for chat text. Night changes actual illumination, moonlight, lit windows and lamps, not merely a dark overlay. Scene: cozy late-1980s computer hobbyist room overlooking a retro-futuristic city through a very large central window. Beige CRT computer and keyboard on a wooden desk low in the foreground, cassette deck, stacked floppy disks, houseplant, desk lamp. CRT displays abstract green pixel marks, no readable words. City outside has rooftop antennas, a distant elevated rail line and layered towers. Left: soft daytime sunlight across the desk, pale blue sky. Right: moonlight, tiny city window lights, amber desk lamp and green CRT glow. Calm composition, broad window/sky area across upper center, no people.",
+          "paired": true,
+          "light": "retro-computer-room-v1.png",
+          "dark": "retro-computer-room-v1.png",
+          "loop": "retro-computer-room-v1-loop.webp",
+          "animation": {
+            "format": "animated-webp",
+            "frames": 16,
+            "durationMs": 4000,
+            "generator": "../generate-scenic-loops.mjs"
+          }
+        }
+      ]
+    },
+    {
+      "id": "cyberpunk-canal",
+      "title": "Electric canal",
+      "description": "Old canal houses beneath a restrained retro-futurist skyline.",
+      "versions": [
+        {
+          "id": "pixel-events-v2",
+          "label": "Fresh pixels · revision 02",
+          "motion": "pixel-events",
+          "paired": false,
+          "light": "revision-02/cyberpunk-canal-light.png",
+          "dark": "revision-02/cyberpunk-canal-dark.png",
+          "events": "revision-02/cyberpunk-canal-events.json",
+          "prompt": "Use case: stylized-concept.\nAsset type: static production clean plate for a full-screen pixel-art chat wallpaper with very rare subtle events.\nStyle: richly composed pixel-art game background with deliberate, consistently scaled pixel clusters, stepped material shading and crisp silhouettes. Intended production grid: 256 by 448 pixels; this is an art-direction target, not a claim that the generator will enforce an exact raster grid. Preserve cozy environmental richness through layered architecture, vegetation, furnishings and selective material detail. Use coherent color ramps, warm inhabited interiors and atmospheric depth. Avoid isolated pixel noise, photographic textures, soft antialiasing and digitally painted micro-detail. Portrait composition, fixed camera; one image only, no diptych or sprite sheet.\nComposition: full scenic portrait, important objects inside the central 72% of the width and away from header/composer occlusion. Preserve visual interest throughout the scene. Reserve only a few localized regions for rare pixel events; no dense streaks, widespread sparkles, dramatic splashes or exaggerated motion cues.\nAnimation surfaces: give water a restrained static base with subtle material facets and fixed boundaries; omit only the moving glints/reflection fragments to be authored later. Fully design lamp housings, tube shapes and screen borders. Preserve restrained fixed illumination on surrounding surfaces. This is a production clean plate: the finished resting scene will include authored lights, screen content and water highlights and must remain attractive during long periods of stillness.\nConstraints: no camera movement, motion blur, scanlines, warped surfaces, bloom, UI, captions or watermark. No text except explicitly requested scene branding.\nScene/backdrop: A fresh calm cyberpunk canal between compact traditional houses, a low fixed bridge and a distant restrained retro-futurist skyline. The open water occupies the lower-middle center and is the clear focus. Keep canal banks, bridge, boats and buildings outlined and still. Render the water with a dark flat base and two subtle static depth bands, without textured waves, reflected windows or bright streaks; these will be added as authored pixel animation. A few clear lanterns and neon accents sit above the water. Night sky leaves room for sparse authored stars. No text or people.\nLighting: legible daytime with stepped material shading and restrained fixed light spill; future night variant shares exact geometry.\nOutput only the static background clean plate. The finished presentation will assemble authored resting states over the reserved surfaces."
+        },
+        {
+          "id": "v1",
+          "label": "Study 01",
+          "motion": "animated-loop",
+          "prompt": "Use case: stylized-concept. Asset type: paired full-scenic pixel-art chat wallpaper study. Output a single landscape 1536x1024 image consisting of TWO EQUAL portrait panels, exactly flush at x=50%, no gutter, divider, border, lettering or labels. LEFT is daytime, RIGHT is nighttime of the EXACT SAME scene, identical camera, geometry, buildings, objects and composition. Each half is a complete independent portrait view. Style: exquisite coherent finely detailed 16-bit pixel art, visible crisp square pixel clusters, restrained dithering, limited tasteful palette, no smooth painting, no blur, no vector art, no UI, no watermark. Fixed camera, tranquil lived-in mood, no people. Full scenery reaches every edge. Keep focal details away from extreme side edges and give the center breathing room for chat text. Night changes actual illumination, moonlight, lit windows and lamps, not merely a dark overlay. Scene: tranquil retro-futuristic Japanese canal district, narrow canal receding centrally from lower foreground, compact old houses and small shops on both banks, a low arched footbridge in the midground, distant cyberpunk towers with rooftop antennas and restrained cyan/magenta light accents. No text or people. Water occupies the bottom 40 percent for later subtle animated ripples. Left: soft peach morning sunlight and blue water. Right: indigo moonlit water with localized warm window reflections and neon accents, small moon above distant skyline. Rich yet calm pixel scenery.",
+          "paired": true,
+          "light": "cyberpunk-canal-v1.png",
+          "dark": "cyberpunk-canal-v1.png",
+          "loop": "cyberpunk-canal-v1-loop.webp",
+          "animation": {
+            "format": "animated-webp",
+            "frames": 16,
+            "durationMs": 4000,
+            "generator": "../generate-scenic-loops.mjs"
+          }
+        }
+      ]
+    }
+  ]
+}

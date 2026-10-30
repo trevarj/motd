@@ -143,6 +143,11 @@ enum class ChatWallpaperPreset {
     MEMES,
     LINUX,
     SYSTEMCRAFTERS,
+    JAPANESE_COUNTRYSIDE,
+    RAINY_CAFE,
+    MOTD_ARCADE,
+    MIDNIGHT_TERMINAL,
+    CYBERPUNK_CANAL,
 }
 
 /** Decode current wallpaper names plus the seven retired SVG selections from preferences and backups. */
@@ -158,6 +163,11 @@ internal fun chatWallpaperPresetFromStored(saved: String?): ChatWallpaperPreset 
         "MEMES" -> ChatWallpaperPreset.MEMES
         "LINUX" -> ChatWallpaperPreset.LINUX
         "SYSTEMCRAFTERS" -> ChatWallpaperPreset.SYSTEMCRAFTERS
+        "JAPANESE_COUNTRYSIDE" -> ChatWallpaperPreset.JAPANESE_COUNTRYSIDE
+        "RAINY_CAFE" -> ChatWallpaperPreset.RAINY_CAFE
+        "MOTD_ARCADE" -> ChatWallpaperPreset.MOTD_ARCADE
+        "MIDNIGHT_TERMINAL" -> ChatWallpaperPreset.MIDNIGHT_TERMINAL
+        "CYBERPUNK_CANAL" -> ChatWallpaperPreset.CYBERPUNK_CANAL
         null -> ChatWallpaperPreset.MOTD
         else -> ChatWallpaperPreset.MOTD
     }
@@ -197,6 +207,10 @@ data class WallpaperSelection(
     @Transient val localImageName: String? = null,
     // Opaque sRGB ARGB; null keeps the theme-adaptive ink used by existing selections.
     val outlineColor: Int? = null,
+    // Scenic artwork follows the OS palette by default, independently of the app theme.
+    val scenicFollowSystem: Boolean = true,
+    // Static scenic artwork remains available when rare authored events are disabled.
+    val scenicAnimationEnabled: Boolean = true,
 ) {
     fun normalized() = copy(intensity = intensity.coerceIn(0, 100), outlineColor = outlineColor?.or(0xff000000.toInt()))
 }

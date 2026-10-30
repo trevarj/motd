@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Scenic wallpaper studio</title>
+    <link rel="stylesheet" href="/scenic.css">
+  </head>
+  <body>
+    <main class="studio-shell">
+      <header class="studio-masthead">
+        <div>
+          <p class="eyebrow">MOTD / Visual studies · <a href="/">Pattern wallpapers</a> · <a href="/sounds">Sound studies</a></p>
+          <h1>Scenic wallpaper studio</h1>
+          <p class="lede">Review paired pixel scenes as a calm, living backdrop for chat.</p>
+        </div>
+        <button type="button" class="button" id="refresh">Refresh artwork</button>
+      </header>
+
+      <p class="notice" id="notice" hidden role="status"></p>
+      <section class="scene-collection" aria-labelledby="collection-heading">
+        <div class="section-heading"><h2 id="collection-heading">Collection</h2><p>Five scenes, matched across daylight and night.</p></div>
+        <div class="scene-grid" id="scene-grid" aria-live="polite"></div>
+      </section>
+
+      <section class="studio" aria-labelledby="studio-heading">
+        <div class="studio-title">
+          <div><p class="eyebrow">Studio</p><h2 id="studio-heading">Select a scene</h2><p id="scene-description">Artwork will appear here once a study is ready.</p></div>
+          <label class="field" for="version">Version<select id="version" disabled><option>Awaiting artwork</option></select></label>
+        </div>
+
+        <div class="control-row" aria-label="Preview controls">
+          <fieldset><legend>Appearance</legend><div class="segmented" id="appearance-controls">
+            <button type="button" data-appearance="follow" aria-pressed="true">Follow system</button>
+            <button type="button" data-appearance="light" aria-pressed="false">Light</button>
+            <button type="button" data-appearance="dark" aria-pressed="false">Dark</button>
+          </div></fieldset>
+          <fieldset><legend>Preview</legend><div class="segmented" id="display-controls">
+            <button type="button" data-display="pair" aria-pressed="true">Side-by-side</button>
+            <button type="button" data-display="single" aria-pressed="false">Single</button>
+          </div></fieldset>
+          <label class="toggle"><input id="chat-visible" type="checkbox"> Show chat</label>
+          <button type="button" class="button" id="motion-toggle">Pause animation</button>
+          <button type="button" class="text-button" id="motion-off">Show still</button>
+          <span class="motion-status" id="motion-status" role="status">Animated loop</span>
+          <label class="field event-control" id="event-control" for="event-select" hidden>Event<select id="event-select"></select></label>
+          <button type="button" class="button preview-motion" id="preview-motion" hidden>Triggered event preview</button>
+          <label class="range" for="intensity">Wallpaper intensity <output id="intensity-value" for="intensity">100%</output><input id="intensity" type="range" min="0" max="100" value="100"></label>
+        </div>
+
+        <div class="preview-labels"><span>Day</span><span>Night</span></div>
+        <div class="preview-pair" id="preview-pair">
+          <article class="phone" data-side="light" aria-label="Daylight wallpaper preview"><div class="scenic-art" id="light-art"><canvas width="256" height="448" hidden></canvas><img alt=""></div><div class="chat-content" id="light-chat"></div></article>
+          <article class="phone" data-side="dark" aria-label="Night wallpaper preview"><div class="scenic-art" id="dark-art"><canvas width="256" height="448" hidden></canvas><img alt=""></div><div class="chat-content" id="dark-chat"></div></article>
+        </div>
+        <p class="preview-note" id="preview-note">The two previews always show the paired scenes. Follow system highlights the active one.</p>
+
+        <div class="review-grid">
+          <section class="review-panel" aria-labelledby="comparison-heading">
+            <h3 id="comparison-heading">Compare versions</h3>
+            <label class="field" for="compare-version">Reference version<select id="compare-version" disabled><option>Current version</option></select></label>
+            <div class="comparison" id="comparison" hidden><div class="comparison-art" id="comparison-art"></div><div class="comparison-copy"><strong id="comparison-label"></strong><span id="comparison-season"></span></div></div>
+          </section>
+          <section class="review-panel" aria-labelledby="signoff-heading">
+            <h3 id="signoff-heading">Sign-off</h3>
+            <p class="storage-note">Saved only in this browser. Export a JSON file to share feedback.</p>
+            <a class="text-button" id="open-loop" href="#" target="_blank" rel="noopener" hidden>Open animated loop</a>
+            <div class="review-actions"><button type="button" class="button approve" id="approve">Approve</button><button type="button" class="button request" id="request-changes">Request changes</button></div>
+            <label class="field" for="feedback">Notes<textarea id="feedback" rows="3" placeholder="What should change or stay?"></textarea></label>
+            <div class="review-footer"><span id="review-status">No saved review</span><button type="button" class="text-button" id="export-feedback">Export feedback JSON</button></div>
+          </section>
+        </div>
+      </section>
+    </main>
+    <template id="chat-template"><header><span class="presence"></span><div><strong>#general</strong><small>42 people here</small></div></header><div class="message incoming"><strong>lena</strong><p>Which wallpaper should we review next?</p><time>14:07</time></div><p class="irc-line">*** sam has joined #general</p><div class="message outgoing"><strong>you</strong><p>This scene stays quiet behind the chat.</p><time>14:08</time></div><div class="message incoming"><strong>lena</strong><p>The day and night pair feels like one place.</p><time>14:08</time></div><div class="composer">Message #general</div></template>
+    <script type="module" src="/scenic.js"></script>
+  </body>
+</html>

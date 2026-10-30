@@ -21,6 +21,8 @@ private val WALLPAPER = stringPreferencesKey("wallpaper_preset_v1")
 private val WALLPAPER_INTENSITY = intPreferencesKey("wallpaper_intensity_v1")
 private val WALLPAPER_IMAGE = stringPreferencesKey("wallpaper_local_image_v1")
 private val WALLPAPER_OUTLINE_COLOR = intPreferencesKey("wallpaper_outline_color_v1")
+private val WALLPAPER_SCENIC_FOLLOW_SYSTEM = booleanPreferencesKey("wallpaper_scenic_follow_system_v1")
+private val WALLPAPER_SCENIC_ANIMATION = booleanPreferencesKey("wallpaper_scenic_animation_v1")
 private val UI_FONT_SCALE = intPreferencesKey("ui_font_scale_percent_v1")
 private val CONVERSATION_FONT_SCALE = intPreferencesKey("conversation_font_scale_percent_v1")
 private val FONT_CHOICE = stringPreferencesKey("font_choice_v1")
@@ -73,6 +75,8 @@ class AppearancePrefsImpl
                             intensity = (prefs[WALLPAPER_INTENSITY] ?: DEFAULT_WALLPAPER_INTENSITY).coerceIn(0, 100),
                             localImageName = prefs[WALLPAPER_IMAGE],
                             outlineColor = prefs[WALLPAPER_OUTLINE_COLOR]?.or(0xff000000.toInt()),
+                            scenicFollowSystem = prefs[WALLPAPER_SCENIC_FOLLOW_SYSTEM] ?: true,
+                            scenicAnimationEnabled = prefs[WALLPAPER_SCENIC_ANIMATION] ?: true,
                         ),
                     uiFontScalePercent =
                         normalizeFontScalePercent(
@@ -145,6 +149,8 @@ class AppearancePrefsImpl
                     ?: it.remove(WALLPAPER_IMAGE)
                 normalized.outlineColor?.let { color -> it[WALLPAPER_OUTLINE_COLOR] = color }
                     ?: it.remove(WALLPAPER_OUTLINE_COLOR)
+                it[WALLPAPER_SCENIC_FOLLOW_SYSTEM] = normalized.scenicFollowSystem
+                it[WALLPAPER_SCENIC_ANIMATION] = normalized.scenicAnimationEnabled
             }
         }
 

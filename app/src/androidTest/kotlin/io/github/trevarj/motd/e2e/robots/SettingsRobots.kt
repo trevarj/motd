@@ -92,6 +92,17 @@ internal class SettingsRobot(
         scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_done")
         click("settings_wallpaper_done")
         awaitTagGone("settings_wallpaper_sheet")
+        // Scenic controls are persisted separately from the existing motif outline color.
+        scrollToAndClick("settings_wallpaper_picker")
+        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_preset_japanese_countryside")
+        click("settings_wallpaper_preset_japanese_countryside")
+        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_scenic_follow_system")
+        compose.onNodeWithTag("settings_wallpaper_scenic_follow_system").assertIsOn()
+        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_scenic_animation")
+        compose.onNodeWithTag("settings_wallpaper_scenic_animation").assertIsOn()
+        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_done")
+        click("settings_wallpaper_done")
+        awaitTagGone("settings_wallpaper_sheet")
     }
 
     fun returnToRoot() {

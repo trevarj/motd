@@ -26,7 +26,7 @@ class WallpaperAssetTest {
     private val assets = ApplicationProvider.getApplicationContext<Context>().assets
 
     @Test fun everyPreset_isA2048TransparentPngWithTheApprovedAlpha() {
-        ChatWallpaperPreset.entries.filterNot { it == ChatWallpaperPreset.NONE }.forEach { preset ->
+        ChatWallpaperPreset.entries.filter { it != ChatWallpaperPreset.NONE && !it.isScenic }.forEach { preset ->
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             assets.open("chat-wallpapers/${assetName(preset)}").use {
                 BitmapFactory.decodeStream(it, null, bounds)
@@ -100,7 +100,7 @@ class WallpaperAssetTest {
     }
 
     @Test fun everyPresetRendersASampledAlphaTile() {
-        ChatWallpaperPreset.entries.filterNot { it == ChatWallpaperPreset.NONE }.forEach { preset ->
+        ChatWallpaperPreset.entries.filter { it != ChatWallpaperPreset.NONE && !it.isScenic }.forEach { preset ->
             val key = wallpaperTileKey(preset, density = 0.5f)
             val bitmap = renderWallpaperTile(assets, key)
             try {
@@ -123,7 +123,7 @@ class WallpaperAssetTest {
     }
 
     @Test fun everyPresetRepeatsWithoutRasterSeamsAtFractionalDeviceDensity() {
-        ChatWallpaperPreset.entries.filterNot { it == ChatWallpaperPreset.NONE }.forEach { preset ->
+        ChatWallpaperPreset.entries.filter { it != ChatWallpaperPreset.NONE && !it.isScenic }.forEach { preset ->
             // 2.625 is a common Android density and produces a full-size 1,344 px tile.
             val tile = renderWallpaperTile(assets, wallpaperTileKey(preset, density = 2.625f))
             try {
@@ -182,14 +182,30 @@ class WallpaperAssetTest {
     private fun approvedAlphaSha256(preset: ChatWallpaperPreset): String =
         when (preset) {
             ChatWallpaperPreset.MOTD -> "5de511565c96edaf8213d7da50f0dc4cfea1e3c87180a7719541f9fdfa98a6ad"
+
             ChatWallpaperPreset.DEEP_SPACE -> "482222a5a77d4617215d30077af3b169463dd00f50b58a12c31f52cb3d1ac2e4"
+
             ChatWallpaperPreset.RETRO_GAMING -> "69135cf871afda80d221270454a48da4e56d2dd1ae005d29a4ef4db17f56b06f"
+
             ChatWallpaperPreset.RADIO_CLUB -> "7bb066ee8e00e707b8ccb64a2ef54d54a5488e9713bb52711d42459221c40bce"
+
             ChatWallpaperPreset.INTERNET_ODDITIES -> "f6dfd2eef38f356d26bdae5d6f9dc1b35d86c34f420f6e2591e6942866171e2d"
+
             ChatWallpaperPreset.RETRO_CHAT -> "2c1da3ee36e15c9f328a1ab0ad375f79af0e2cc7da35e7cb01ebcb1986505bd3"
+
             ChatWallpaperPreset.MEMES -> "621b181952fa4c75cdcdf18458ea9246cbad829cf8f3d074f461b657027709be"
+
             ChatWallpaperPreset.LINUX -> "d8ce022c61c9078279a65297d01d437fad92e800cff6c1f822386be89963b95e"
+
             ChatWallpaperPreset.SYSTEMCRAFTERS -> "fab88902fa7323b3df7b7180d30284f8c10335799cfad265ad6ea28bce66bc50"
+
+            ChatWallpaperPreset.JAPANESE_COUNTRYSIDE,
+            ChatWallpaperPreset.RAINY_CAFE,
+            ChatWallpaperPreset.MOTD_ARCADE,
+            ChatWallpaperPreset.MIDNIGHT_TERMINAL,
+            ChatWallpaperPreset.CYBERPUNK_CANAL,
+            -> error("scenic assets are full-color, not alpha tiles")
+
             ChatWallpaperPreset.NONE -> error("NONE has no approved wallpaper alpha")
         }
 

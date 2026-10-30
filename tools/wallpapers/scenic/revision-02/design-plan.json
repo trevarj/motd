@@ -1,0 +1,218 @@
+{
+  "status": "implemented-for-studio-review",
+  "scope": "Five fresh scene families, including four countryside seasons, are generated and available in the studio. Resting artwork and authored event construction have passed designer review; perceived motion awaits user playback signoff.",
+  "diagnosis": "Prior work animated finished detailed illustrations using pixel brightness or displaced/crossfaded image patches. That did not provide convincingly authored motion. A generated alternate whole frame also risks geometry drift.",
+  "artDirection": {
+    "logicalCanvas": [
+      256,
+      448
+    ],
+    "pixelStyle": "Richly composed low-resolution pixel art with consistent pixel clusters, stepped material shading, layered architecture, foliage and furnishings. Pilot at 256x448; review detail at phone size before locking this production grid for the collection. Reject photographic microtexture and accidental pixel noise.",
+    "palette": "Coherent material ramps and separately assigned emissive indices; no hard color-count cap at the expense of atmosphere. Never infer moving regions by brightness.",
+    "composition": "Complete rich portrait resting scene. One small physical event at a time, with long intervals of stillness. Static reflections, illuminated signs and finished screen content remain visible while resting. Keep event regions inside the phone crop and assess chat occlusion.",
+    "presentation": "Integer nearest-neighbor scale for pixel-accuracy proofs; real phone crop also reviewed. No smoothing, fractional sprite coordinates or CSS filters.",
+    "dayNight": "One canonical geometry/material master, with role-indexed day/night colors, explicit static sun/moon sprites, window/tube resting states and fixed illumination regions on surrounding walls/pavement. Night imagegen study is color guidance only."
+  },
+  "assetContract": [
+    "Immutable 256x448 canonical raster with explicit material-region palette tables; lossless RGBA PNG storage preserves all authored colors.",
+    "Artist-authored semantic masks and sprite anchors with integer coordinates, assigned after inspecting the accepted still. No brightness/color heuristics.",
+    "Separate sprite frames for water highlights, reflection fragments, tube emissive states, screen pixels and night-only stars; explicit frame durations and bounding boxes.",
+    "If a background contains highlights or stars, remove them from the static master before animation to prevent duplicates.",
+    "Color indices and masks retain physical meaning across day/night and countryside seasons.",
+    "Runtime replaces sprite pixels with discrete frames; no interpolated image patches. Background is redrawn unchanged before each sprite frame.",
+    "A complete assembled resting frame, including water reflections, illuminated tubes and screen content, accompanies every clean plate. These are the frames shown during long quiet intervals."
+  ],
+  "animationRules": {
+    "allowed": [
+      "Draw/erase authored pixel clusters inside declared sprite masks.",
+      "Step small sprites by integer pixel positions when physically appropriate.",
+      "Change only explicitly assigned emissive palette indices."
+    ],
+    "forbidden": [
+      "Texture displacement, warp, roll, optical flow or mesh deformation.",
+      "Crossfading different generated full scenes or patches.",
+      "Random per-pixel brightness noise, full-frame pulsing, scanline/rain overlays.",
+      "Procedurally inferred glow/water masks from finished images.",
+      "Using altered architecture or camera drift to create apparent motion."
+    ],
+    "timing": {
+      "status": "Implemented review defaults, with an explicit immediate-event inspection control.",
+      "initialDelaySeconds": [
+        20,
+        40
+      ],
+      "quietIntervalAfterEventSeconds": [
+        45,
+        90
+      ],
+      "typicalEventDurationSeconds": [
+        0.4,
+        1.6
+      ],
+      "concurrency": "At most one physical event per scene, including any directly coupled reflection. All other pixels remain at their resting states.",
+      "scheduling": "Bounded seeded intervals. Day/night pairs share schedules for applicable events. No permanent water cycle, blinking cursor, synchronized star loop, or whole-scene reset.",
+      "lightDip": "One modest dim-and-recover; a neon segment may dip for 100–250 ms. Preserve logo readability and avoid rapid repeated flashes.",
+      "stars": "One existing star uses a few restrained palette states over 1–1.5 seconds, with no expanding cross/sparkle icon."
+    },
+    "loop": "Each event's last frame restores the exact assembled resting pixels. Runtime holds the resting frame during the quiet interval. Do not export a continuously repeating short loop as production behavior."
+  },
+  "generationWorkflow": [
+    "Generate the fresh canal clean plate first using built-in imagegen as an internal pipeline pilot. Preserve the cozy, detailed aesthetic the user liked.",
+    "Inspect composition and cluster consistency; imagegen does not guarantee an exact grid, palette or dimensions. Complete and inspect an actual canonical pixel master before authoring animation. Resizing or quantization alone is not an acceptance criterion.",
+    "Construct its authored resting reflections and lights so the resting still looks complete, alongside clearly declared material masks and integer sprite anchors.",
+    "Build one rare reflection event from deliberately drawn pixel frames; inspect the resting frame and triggered event at both logical pixels and actual phone size, with and without chat.",
+    "Designer reviews this pilot before generating the other four fresh masters, preventing another full batch built on a rejected motion method. This is an internal checkpoint; the studio will still present all five for user review.",
+    "Use a precise night edit as a lighting study; rebuild final night colors and fixed illumination regions on the same canonical geometry, preserving anchors.",
+    "Apply the reviewed event approach to the remaining scenes, then countryside spring/autumn/winter static seasonal materials at consistent architectural anchors. No summer material patches in winter artwork.",
+    "Retain prior studies in their existing namespace; new resting masters, sprite frames, material maps, timing data and prompts belong to revision-02."
+  ],
+  "acceptance": [
+    "The assembled resting composition is attractive and complete throughout long still intervals; very rare motion is intentional.",
+    "One triggered event is discernible at phone size while remaining restrained. Do not increase intensity merely because no event occurs during a short observation.",
+    "Only declared sprite-mask pixels change; architecture, object outlines, shorelines and camera remain exact. No image displacement, warping, patch crossfades or ghosting.",
+    "Event ends restore resting pixels exactly; only one physical event occurs at a time, allowing its directly coupled reflection.",
+    "Day/night share geometry and event anchors/schedules where applicable; fixed illumination, sun/moon and lighting-specific palette/sprite states are explicit differences.",
+    "Production proof: unaltered120-second playback with elapsed time outside the artwork, using actual proposed cadence.",
+    "Event inspection: a separate 'Triggered event preview' control invokes each event immediately, at its true duration/intensity/pixel content. Clearly label this as inspection, not normal cadence.",
+    "Designer reviews actual moving playback and resting stills with and without the normal chat overlay. Frame strips and pixel-difference checks support but never substitute for visual review."
+  ],
+  "prompts": {
+    "nightStudy": "Use case: lighting-weather. Input: the accepted daylight background master is the edit target. Create a NIGHT LIGHTING STUDY ONLY of exactly the same scene, in the same coarse pixel-art style. Change sky palette to deep blue, add a small moon only in the reserved sky area, make designated windows and lamp/tube surfaces warm or neon-lit. Preserve every object position, outline, camera, crop and scale. No new objects, stars, ripples, effects, blur or smoother textures. This study is a color reference, not a production animation frame. Include restrained fixed night-illumination regions on nearby walls and pavement, using stepped pixel shading; these static regions must not pulse with rare events.",
+    "spriteBrief": "Author small, rare-event sprite sequences directly on the accepted canonical pixel grid. Use assigned material/emissive palette indices, exact integer anchors and deliberately drawn replacement pixel clusters. Keep the completed resting frame as the baseline. Only pixels inside the named event mask may change; end by restoring the baseline exactly. Run only one physical event at a time with 45–90 seconds of quiet after it. No raster patch translation, warping, interpolated crossfade, random brightness noise or continuous cursor/water/star cycling. This is a pixel-animation production brief, not an imagegen full-scene animation request."
+  },
+  "scenes": [
+    {
+      "id": "japanese-countryside",
+      "title": "Japanese countryside",
+      "scene": "A fresh composition of a quiet Japanese village street, traditional houses, distant mountain silhouette, a rural railway in the middle distance, and one red vending machine. A small open drainage stream runs through the middle-lower portion, clearly visible inside the central crop rather than at the extreme edge. Summer greenery. Keep the street and mountains readable with simple shapes; railway geometry must be horizontal and unobstructed. Vending-machine glass has a dark, plain screen; stream has a dark base with subtle static material facets and fixed banks, no painted white highlights. No train in the background master. Reserve a modest open patch of sky.",
+      "hero": "One small stream-highlight group grows, breaks and reforms through authored pixel clusters over about 1 second. Use a convincing drainage channel; no uniform translation of a texture.",
+      "secondary": "A vending-display dip or single night star twinkle may replace the stream event, never run alongside it.",
+      "seasonal": "Spring blossom clusters, summer greens, autumn foliage and winter snow are separate static material/terrain variants at identical anchors. Winter retains a small open flowing channel; no animated snow or holiday additions.",
+      "extras": "Passing train is a separate later pass, using an integer-position sprite behind a railway foreground mask; no train until the water/light treatment is validated.",
+      "imagegenPrompt": "Use case: stylized-concept.\nAsset type: static production clean plate for a full-screen pixel-art chat wallpaper with very rare subtle events.\nStyle: richly composed pixel-art game background with deliberate, consistently scaled pixel clusters, stepped material shading and crisp silhouettes. Intended production grid: 256 by 448 pixels; this is an art-direction target, not a claim that the generator will enforce an exact raster grid. Preserve cozy environmental richness through layered architecture, vegetation, furnishings and selective material detail. Use coherent color ramps, warm inhabited interiors and atmospheric depth. Avoid isolated pixel noise, photographic textures, soft antialiasing and digitally painted micro-detail. Portrait composition, fixed camera; one image only, no diptych or sprite sheet.\nComposition: full scenic portrait, important objects inside the central 72% of the width and away from header/composer occlusion. Preserve visual interest throughout the scene. Reserve only a few localized regions for rare pixel events; no dense streaks, widespread sparkles, dramatic splashes or exaggerated motion cues.\nAnimation surfaces: give water a restrained static base with subtle material facets and fixed boundaries; omit only the moving glints/reflection fragments to be authored later. Fully design lamp housings, tube shapes and screen borders. Preserve restrained fixed illumination on surrounding surfaces. This is a production clean plate: the finished resting scene will include authored lights, screen content and water highlights and must remain attractive during long periods of stillness.\nConstraints: no camera movement, motion blur, scanlines, warped surfaces, bloom, UI, captions or watermark. No text except explicitly requested scene branding.\nScene/backdrop: A fresh composition of a quiet Japanese village street, traditional houses, distant mountain silhouette, a rural railway in the middle distance, and one red vending machine. A small open drainage stream runs through the middle-lower portion, clearly visible inside the central crop rather than at the extreme edge. Summer greenery. Keep the street and mountains readable with simple shapes; railway geometry must be horizontal and unobstructed. Vending-machine glass has a dark, plain screen; stream has a dark base with subtle static material facets and fixed banks, no painted white highlights. No train in the background master. Reserve a modest open patch of sky.\nLighting: legible daytime with stepped material shading and restrained fixed light spill; future night variant shares exact geometry.\nOutput only the static background clean plate. The finished presentation will assemble authored resting states over the reserved surfaces."
+    },
+    {
+      "id": "rainy-cafe",
+      "title": "Rainy café",
+      "scene": "A fresh quiet corner cafe composition in a Japanese neighborhood, with a large clear window, a restrained awning, a hanging lantern and several shallow puddles on a flat street. Put one puddle near the lower-middle center and the lantern/window within the central crop. Render the puddles as calm dark shapes with subtle static material facets with crisp fixed edges, without reflections or ripples; warm cafe interior is readable but the lamp has a simple unlit glass shape. Preserve readable brick, pavement, furnishing and plant detail without noisy microtexture. No drawn rain streaks, no clouds of steam, no foreground people. No legible signage.",
+      "hero": "One puddle splash uses3–4 flattened-perspective shapes over 0.6–1 second, then disappears. Only one of2–3 fixed splash anchors is used at a time.",
+      "secondary": "An occasional modest lantern dip can replace the splash; most puddle reflections remain unchanged.",
+      "imagegenPrompt": "Use case: stylized-concept.\nAsset type: static production clean plate for a full-screen pixel-art chat wallpaper with very rare subtle events.\nStyle: richly composed pixel-art game background with deliberate, consistently scaled pixel clusters, stepped material shading and crisp silhouettes. Intended production grid: 256 by 448 pixels; this is an art-direction target, not a claim that the generator will enforce an exact raster grid. Preserve cozy environmental richness through layered architecture, vegetation, furnishings and selective material detail. Use coherent color ramps, warm inhabited interiors and atmospheric depth. Avoid isolated pixel noise, photographic textures, soft antialiasing and digitally painted micro-detail. Portrait composition, fixed camera; one image only, no diptych or sprite sheet.\nComposition: full scenic portrait, important objects inside the central 72% of the width and away from header/composer occlusion. Preserve visual interest throughout the scene. Reserve only a few localized regions for rare pixel events; no dense streaks, widespread sparkles, dramatic splashes or exaggerated motion cues.\nAnimation surfaces: give water a restrained static base with subtle material facets and fixed boundaries; omit only the moving glints/reflection fragments to be authored later. Fully design lamp housings, tube shapes and screen borders. Preserve restrained fixed illumination on surrounding surfaces. This is a production clean plate: the finished resting scene will include authored lights, screen content and water highlights and must remain attractive during long periods of stillness.\nConstraints: no camera movement, motion blur, scanlines, warped surfaces, bloom, UI, captions or watermark. No text except explicitly requested scene branding.\nScene/backdrop: A fresh quiet corner cafe composition in a Japanese neighborhood, with a large clear window, a restrained awning, a hanging lantern and several shallow puddles on a flat street. Put one puddle near the lower-middle center and the lantern/window within the central crop. Render the puddles as calm dark shapes with subtle static material facets with crisp fixed edges, without reflections or ripples; warm cafe interior is readable but the lamp has a simple unlit glass shape. Preserve readable brick, pavement, furnishing and plant detail without noisy microtexture. No drawn rain streaks, no clouds of steam, no foreground people. No legible signage.\nLighting: legible daytime with stepped material shading and restrained fixed light spill; future night variant shares exact geometry.\nOutput only the static background clean plate. The finished presentation will assemble authored resting states over the reserved surfaces."
+    },
+    {
+      "id": "neon-arcade",
+      "title": "Neon MOTD arcade",
+      "scene": "A fresh retro-cyberpunk arcade frontage in a narrow quiet lane. The main sign and two recognizable arcade cabinets are prominent in the central composition, with carefully balanced teal, rose and amber accents. A black signboard clearly reads lowercase 'motd' next to the MOTD speech-bubble slash symbol, using the supplied brand reference for the geometry; render the tubes unlit, no glow baked into the surrounding architecture. A small puddle below the sign has a dark base with subtle static material facets, no baked reflections. Screens inside the arcade have clean dark interiors. Do not use generic geometric neon shapes in place of the logo. The supplied MOTD reference governs symbol and wordmark geometry; no substitute logos or decorative neon shapes.",
+      "hero": "One short neon tube segment dips once for 100–250 ms and recovers. Keep the MOTD lettering legible; its nearest reflection may respond as part of the same event.",
+      "secondary": "An authored miniature cabinet-screen change can replace the neon event. No continuously moving reflection cycle.",
+      "reference": "docs/assets/brand/motd-lockup-dark.png",
+      "imagegenPrompt": "Use case: stylized-concept.\nAsset type: static production clean plate for a full-screen pixel-art chat wallpaper with very rare subtle events.\nStyle: richly composed pixel-art game background with deliberate, consistently scaled pixel clusters, stepped material shading and crisp silhouettes. Intended production grid: 256 by 448 pixels; this is an art-direction target, not a claim that the generator will enforce an exact raster grid. Preserve cozy environmental richness through layered architecture, vegetation, furnishings and selective material detail. Use coherent color ramps, warm inhabited interiors and atmospheric depth. Avoid isolated pixel noise, photographic textures, soft antialiasing and digitally painted micro-detail. Portrait composition, fixed camera; one image only, no diptych or sprite sheet.\nComposition: full scenic portrait, important objects inside the central 72% of the width and away from header/composer occlusion. Preserve visual interest throughout the scene. Reserve only a few localized regions for rare pixel events; no dense streaks, widespread sparkles, dramatic splashes or exaggerated motion cues.\nAnimation surfaces: give water a restrained static base with subtle material facets and fixed boundaries; omit only the moving glints/reflection fragments to be authored later. Fully design lamp housings, tube shapes and screen borders. Preserve restrained fixed illumination on surrounding surfaces. This is a production clean plate: the finished resting scene will include authored lights, screen content and water highlights and must remain attractive during long periods of stillness.\nConstraints: no camera movement, motion blur, scanlines, warped surfaces, bloom, UI, captions or watermark. No text except explicitly requested scene branding.\nScene/backdrop: A fresh retro-cyberpunk arcade frontage in a narrow quiet lane. The main sign and two recognizable arcade cabinets are prominent in the central composition, with carefully balanced teal, rose and amber accents. A black signboard clearly reads lowercase 'motd' next to the MOTD speech-bubble slash symbol, using the supplied brand reference for the geometry; render the tubes unlit, no glow baked into the surrounding architecture. A small puddle below the sign has a dark base with subtle static material facets, no baked reflections. Screens inside the arcade have clean dark interiors. Do not use generic geometric neon shapes in place of the logo. The supplied MOTD reference governs symbol and wordmark geometry; no substitute logos or decorative neon shapes.\nLighting: legible daytime with stepped material shading and restrained fixed light spill; future night variant shares exact geometry.\nOutput only the static background clean plate. The finished presentation will assemble authored resting states over the reserved surfaces."
+    },
+    {
+      "id": "retro-computer-room",
+      "title": "Midnight terminal",
+      "scene": "A fresh cozy retro-computer room overlooking a city through a large window. One beige CRT and keyboard, a desk lamp, cassette deck and small plant. Place the CRT screen and a strip of visible sky area within the central safe crop. Render the CRT glass as an empty dark green-black rectangle with a clean pixel border, no globe, no text, no static scanlines. Desk-lamp housing is a fixed shape; all objects and city architecture have crisp readable silhouettes and selective rich detail. Sky has no baked stars; these will be placed as authored sprites. Make the CRT large enough for several miniature terminal rows and a distinct block cursor to be authored into the resting screen. Preserve the lived-in desk details and warm fixed room lighting.",
+      "hero": "One small terminal status update appears, holds, then restores the resting screen over 0.8–1.6 seconds. Screen contains finished miniature terminal imagery while still.",
+      "secondary": "A cassette indicator change or isolated night-star twinkle may replace the screen event. No continuously blinking cursor; desk lamp remains steady.",
+      "imagegenPrompt": "Use case: stylized-concept.\nAsset type: static production clean plate for a full-screen pixel-art chat wallpaper with very rare subtle events.\nStyle: richly composed pixel-art game background with deliberate, consistently scaled pixel clusters, stepped material shading and crisp silhouettes. Intended production grid: 256 by 448 pixels; this is an art-direction target, not a claim that the generator will enforce an exact raster grid. Preserve cozy environmental richness through layered architecture, vegetation, furnishings and selective material detail. Use coherent color ramps, warm inhabited interiors and atmospheric depth. Avoid isolated pixel noise, photographic textures, soft antialiasing and digitally painted micro-detail. Portrait composition, fixed camera; one image only, no diptych or sprite sheet.\nComposition: full scenic portrait, important objects inside the central 72% of the width and away from header/composer occlusion. Preserve visual interest throughout the scene. Reserve only a few localized regions for rare pixel events; no dense streaks, widespread sparkles, dramatic splashes or exaggerated motion cues.\nAnimation surfaces: give water a restrained static base with subtle material facets and fixed boundaries; omit only the moving glints/reflection fragments to be authored later. Fully design lamp housings, tube shapes and screen borders. Preserve restrained fixed illumination on surrounding surfaces. This is a production clean plate: the finished resting scene will include authored lights, screen content and water highlights and must remain attractive during long periods of stillness.\nConstraints: no camera movement, motion blur, scanlines, warped surfaces, bloom, UI, captions or watermark. No text except explicitly requested scene branding.\nScene/backdrop: A fresh cozy retro-computer room overlooking a city through a large window. One beige CRT and keyboard, a desk lamp, cassette deck and small plant. Place the CRT screen and a strip of visible sky area within the central safe crop. Render the CRT glass as an empty dark green-black rectangle with a clean pixel border, no globe, no text, no static scanlines. Desk-lamp housing is a fixed shape; all objects and city architecture have crisp readable silhouettes and selective rich detail. Sky has no baked stars; these will be placed as authored sprites. Make the CRT large enough for several miniature terminal rows and a distinct block cursor to be authored into the resting screen. Preserve the lived-in desk details and warm fixed room lighting.\nLighting: legible daytime with stepped material shading and restrained fixed light spill; future night variant shares exact geometry.\nOutput only the static background clean plate. The finished presentation will assemble authored resting states over the reserved surfaces."
+    },
+    {
+      "id": "cyberpunk-canal",
+      "title": "Electric canal",
+      "scene": "A fresh calm cyberpunk canal between compact traditional houses, a low fixed bridge and a distant restrained retro-futurist skyline. The open water occupies the lower-middle center and is the clear focus. Keep canal banks, bridge, boats and buildings outlined and still. Render the water with a dark flat base and two subtle static depth bands, without textured waves, reflected windows or bright streaks; these will be added as authored pixel animation. A few clear lanterns and neon accents sit above the water. Night sky leaves room for sparse authored stars. No text or people.",
+      "hero": "One reflection group shortens, separates and reforms over 1–1.6 seconds. Clusters stay vertically related to their parent light; reflected objects never slide across the surface.",
+      "secondary": "One restrained night-star twinkle may replace the water event. Surrounding water and all other reflection groups remain at rest.",
+      "imagegenPrompt": "Use case: stylized-concept.\nAsset type: static production clean plate for a full-screen pixel-art chat wallpaper with very rare subtle events.\nStyle: richly composed pixel-art game background with deliberate, consistently scaled pixel clusters, stepped material shading and crisp silhouettes. Intended production grid: 256 by 448 pixels; this is an art-direction target, not a claim that the generator will enforce an exact raster grid. Preserve cozy environmental richness through layered architecture, vegetation, furnishings and selective material detail. Use coherent color ramps, warm inhabited interiors and atmospheric depth. Avoid isolated pixel noise, photographic textures, soft antialiasing and digitally painted micro-detail. Portrait composition, fixed camera; one image only, no diptych or sprite sheet.\nComposition: full scenic portrait, important objects inside the central 72% of the width and away from header/composer occlusion. Preserve visual interest throughout the scene. Reserve only a few localized regions for rare pixel events; no dense streaks, widespread sparkles, dramatic splashes or exaggerated motion cues.\nAnimation surfaces: give water a restrained static base with subtle material facets and fixed boundaries; omit only the moving glints/reflection fragments to be authored later. Fully design lamp housings, tube shapes and screen borders. Preserve restrained fixed illumination on surrounding surfaces. This is a production clean plate: the finished resting scene will include authored lights, screen content and water highlights and must remain attractive during long periods of stillness.\nConstraints: no camera movement, motion blur, scanlines, warped surfaces, bloom, UI, captions or watermark. No text except explicitly requested scene branding.\nScene/backdrop: A fresh calm cyberpunk canal between compact traditional houses, a low fixed bridge and a distant restrained retro-futurist skyline. The open water occupies the lower-middle center and is the clear focus. Keep canal banks, bridge, boats and buildings outlined and still. Render the water with a dark flat base and two subtle static depth bands, without textured waves, reflected windows or bright streaks; these will be added as authored pixel animation. A few clear lanterns and neon accents sit above the water. Night sky leaves room for sparse authored stars. No text or people.\nLighting: legible daytime with stepped material shading and restrained fixed light spill; future night variant shares exact geometry.\nOutput only the static background clean plate. The finished presentation will assemble authored resting states over the reserved surfaces."
+    }
+  ],
+  "review": {
+    "verdict": "Approved with revisions incorporated; approval covers the plan and prompts, not artwork or animation.",
+    "role": "Pixel-art art director and animation designer",
+    "findingsResolved": [
+      "Preserve the environmental richness of the liked stills; do not impose chunky simplification or a hard 48-color cap.",
+      "Generate production clean plates but judge complete assembled resting scenes with authored resting sprites and fixed light spill.",
+      "Use a canal pilot as an internal production-quality check before the remaining fresh scenes; still present all five for user review.",
+      "Replace all continuous-motion and five-second visibility criteria with the user's rare, subtle-event requirement.",
+      "Provide faithful production timing and separately labeled on-demand event inspection.",
+      "Keep MOTD geometry exact and day/night architecture identical."
+    ],
+    "pending": "User review of real-time playback, perceived subtlety, and chat visibility in the studio.",
+    "collection": {
+      "verdict": "Approved for studio review",
+      "coverage": "All eight resting pairs and thirteen scene-specific event definitions",
+      "limitation": "Designer inspected stills and event definitions, not real-time video; no motion-quality signoff claimed.",
+      "productionProof": "build/scenic-revision02/browser-proofs/cyberpunk-canal-production-120s.webm"
+    }
+  },
+  "production": {
+    "generator": "build-pixels.mjs",
+    "generationLog": "generation.json",
+    "pixelGrid": [
+      256,
+      448
+    ],
+    "variants": 8,
+    "events": 13,
+    "studio": "http://127.0.0.1:4173/scenic",
+    "checks": [
+      "5 pixel production regressions passed",
+      "10 gallery server tests passed",
+      "Chromium:8 variants and13 events passed exact pixel masks, cadence policy, rest restoration and Follow System"
+    ]
+  },
+  "arcadeRevision": {
+    "id": "pixel-events-v3",
+    "request": "Regenerate the MOTD arcade; the full neon sign flickers off and back on.",
+    "artwork": "Fresh frontal arcade clean plate, exact MOTD branded tube shapes authored separately",
+    "event": "Entire speech-bubble slash symbol, all motd letters, sign-owned glow and reflection fully off for180ms, then exact lit rest",
+    "cadence": "20–40s initial;45–90s quiet after each event",
+    "review": "Designer approved plan, prompt and actual day/night ON/OFF artwork for studio review; real-time perceived motion remains for user signoff.",
+    "verification": [
+      "2 full-sign regression tests passed",
+      "Targeted Chromium check: entire declared OFF mask, unchanged outside pixels, exact restoration, rare cadence and Follow System passed",
+      "5-second actual studio playback proof recorded"
+    ],
+    "studio": "http://127.0.0.1:4173/scenic?scene=neon-arcade",
+    "assets": [
+      "neon-arcade-v3-light.png",
+      "neon-arcade-v3-dark.png",
+      "neon-arcade-v3-off-light.png",
+      "neon-arcade-v3-off-dark.png",
+      "neon-arcade-v3-events.json"
+    ]
+  },
+  "terminalRevision": {
+    "id": "pixel-events-v3",
+    "request": "Regenerate Midnight terminal",
+    "artwork": "Fresh generated computer nook, broad frontal CRT, fixed miniature terminal text, matched day/night geometry",
+    "event": "Small status dots and ok appear then clear; 1.2 seconds including restoration",
+    "cadence": "20–40s initial;45–90s quiet after each event",
+    "review": "Designer approved actual resting pairs and authored event construction; real-time perceived motion remains for user signoff.",
+    "verification": [
+      "6 production and terminal regressions passed",
+      "Targeted Chromium: authored pixels, unchanged surroundings, exact restoration, rare cadence and Follow System passed",
+      "Actual studio phone crop inspected and 5-second triggered playback recorded"
+    ],
+    "studio": "http://127.0.0.1:4173/scenic?scene=retro-computer-room"
+  },
+  "countrysideRevision": {
+    "ids": [
+      "summer-pixel-v3",
+      "spring-pixel-v3",
+      "autumn-pixel-v3",
+      "winter-pixel-v3"
+    ],
+    "request": "Regenerate Japanese countryside; correct vending machine",
+    "artwork": "Fresh generated mountain village with complete red drinks vending machine, individual bottles, selection buttons, payment panel and separate dispensing hatch; preserved generated machine detail across all four seasons",
+    "event": "One small authored stream glint separates and reforms; optional single night star, one event at a time",
+    "cadence": "20–40s initial;45–90s quiet after each event",
+    "review": "Designer approved plan, prompt, four final day/night still pairs and authored frame construction. Root inspected actual studio phone crop: machine controls and hatch visible. Perceived motion remains for user signoff.",
+    "verification": [
+      "Country regression passed: all seasonal machine pixels remain identical within each lighting mode, event bounds and restoration",
+      "Targeted Chromium: all four seasons and eight events passed exact pixels, unchanged surroundings, rest restoration, rare cadence and Follow System",
+      "Actual studio phone crop inspected and 5-second triggered playback recorded",
+      "10 gallery server regressions passed"
+    ],
+    "studio": "http://127.0.0.1:4173/scenic?scene=japanese-countryside"
+  }
+}

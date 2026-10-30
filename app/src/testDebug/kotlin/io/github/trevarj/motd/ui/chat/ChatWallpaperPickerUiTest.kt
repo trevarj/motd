@@ -29,6 +29,8 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
@@ -121,6 +123,36 @@ class ChatWallpaperPickerUiTest {
         reveal("settings_wallpaper_done")
         compose.onNodeWithTag("settings_wallpaper_done").performClick()
         compose.onNodeWithTag("settings_wallpaper_sheet").assertDoesNotExist()
+    }
+
+    @Test
+    fun scenicSelectionShowsOnlyScenicControlsAndPersistsBothChoices() {
+        var current by mutableStateOf(WallpaperSelection())
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatWallpaperPicker(current, onChange = { current = it })
+            }
+        }
+
+        compose.onNodeWithTag("settings_wallpaper_picker").performClick()
+        reveal("settings_wallpaper_preset_japanese_countryside")
+        compose.onNodeWithTag("settings_wallpaper_preset_japanese_countryside").performClick().assertIsSelected()
+        assertEquals(ChatWallpaperPreset.JAPANESE_COUNTRYSIDE, current.preset)
+        reveal("settings_wallpaper_scenic_follow_system")
+        compose
+            .onNodeWithTag("settings_wallpaper_scenic_follow_system")
+            .assertIsOn()
+            .performClick()
+            .assertIsOff()
+        assertEquals(false, current.scenicFollowSystem)
+        reveal("settings_wallpaper_scenic_animation")
+        compose
+            .onNodeWithTag("settings_wallpaper_scenic_animation")
+            .assertIsOn()
+            .performClick()
+            .assertIsOff()
+        assertEquals(false, current.scenicAnimationEnabled)
+        compose.onNodeWithTag("settings_wallpaper_outline_color").assertDoesNotExist()
     }
 
     @Test

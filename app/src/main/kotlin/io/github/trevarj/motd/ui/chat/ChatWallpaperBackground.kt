@@ -52,13 +52,14 @@ fun ChatWallpaperBackground(
     wallpaper: WallpaperSelection,
     modifier: Modifier = Modifier,
     tilePeriodDp: Float = WALLPAPER_TILE_PERIOD_DP,
+    animate: Boolean = true,
 ) {
     val context = LocalContext.current
     if (wallpaper.localImageName != null) {
         val file = remember(wallpaper.localImageName) { CustomWallpaperStore.resolve(context, wallpaper.localImageName) }
         var loaded by remember(wallpaper.localImageName) { mutableStateOf(false) }
         Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            if (!loaded) ChatWallpaperBackground(wallpaper.copy(localImageName = null), Modifier.matchParentSize(), tilePeriodDp)
+            if (!loaded) ChatWallpaperBackground(wallpaper.copy(localImageName = null), Modifier.matchParentSize(), tilePeriodDp, animate)
             if (file != null) {
                 AsyncImage(
                     model =
@@ -82,6 +83,10 @@ fun ChatWallpaperBackground(
     }
     if (wallpaper.preset == ChatWallpaperPreset.NONE) {
         Box(modifier)
+        return
+    }
+    if (wallpaper.preset.isScenic) {
+        ScenicWallpaperBackground(wallpaper, modifier, animate)
         return
     }
 
@@ -158,7 +163,7 @@ fun ChatWallpaperBackground(
 /** Warm the selected full-size motif before a chat destination needs to draw it. */
 @Composable
 internal fun PreloadChatWallpaperTile(wallpaper: WallpaperSelection) {
-    if (wallpaper.localImageName != null || wallpaper.preset == ChatWallpaperPreset.NONE) return
+    if (wallpaper.localImageName != null || wallpaper.preset == ChatWallpaperPreset.NONE || wallpaper.preset.isScenic) return
     val assets = LocalContext.current.assets
     val density = LocalDensity.current.density
     val key = remember(wallpaper.preset, density) { wallpaperTileKey(wallpaper.preset, density) }
@@ -180,15 +185,30 @@ internal fun gradientColors(
     val accents =
         when (preset) {
             ChatWallpaperPreset.MOTD -> listOf(primary, secondary, tertiary)
+
             ChatWallpaperPreset.DEEP_SPACE -> listOf(tertiary, primary, secondary)
+
             ChatWallpaperPreset.RETRO_GAMING -> listOf(primary, tertiary, secondary)
+
             ChatWallpaperPreset.RADIO_CLUB -> listOf(tertiary, primary, secondary)
+
             ChatWallpaperPreset.INTERNET_ODDITIES -> listOf(secondary, tertiary, primary)
+
             ChatWallpaperPreset.RETRO_CHAT -> listOf(primary, tertiary, secondary)
+
             ChatWallpaperPreset.MEMES -> listOf(secondary, primary, tertiary)
+
             ChatWallpaperPreset.LINUX -> listOf(primary, secondary, tertiary)
+
             ChatWallpaperPreset.SYSTEMCRAFTERS -> listOf(tertiary, secondary, primary)
-            ChatWallpaperPreset.NONE -> listOf(base, base, base)
+
+            ChatWallpaperPreset.JAPANESE_COUNTRYSIDE,
+            ChatWallpaperPreset.RAINY_CAFE,
+            ChatWallpaperPreset.MOTD_ARCADE,
+            ChatWallpaperPreset.MIDNIGHT_TERMINAL,
+            ChatWallpaperPreset.CYBERPUNK_CANAL,
+            ChatWallpaperPreset.NONE,
+            -> listOf(base, base, base)
         }
     return listOf(.06f, .04f, .05f, .03f).mapIndexed { index, alpha ->
         contrastSafeOverlay(base, accents[index % accents.size], alpha, foregrounds).compositeOver(base)
@@ -304,15 +324,31 @@ internal fun expandedWallpaperCoverage(
 internal fun assetName(preset: ChatWallpaperPreset): String =
     when (preset) {
         ChatWallpaperPreset.NONE -> error("NONE has no wallpaper asset")
+
         ChatWallpaperPreset.MOTD -> "motd.png"
+
         ChatWallpaperPreset.DEEP_SPACE -> "deep-space.png"
+
         ChatWallpaperPreset.RETRO_GAMING -> "retro-gaming.png"
+
         ChatWallpaperPreset.RADIO_CLUB -> "radio-club.png"
+
         ChatWallpaperPreset.INTERNET_ODDITIES -> "internet-oddities.png"
+
         ChatWallpaperPreset.RETRO_CHAT -> "retro-chat.png"
+
         ChatWallpaperPreset.MEMES -> "memes.png"
+
         ChatWallpaperPreset.LINUX -> "linux.png"
+
         ChatWallpaperPreset.SYSTEMCRAFTERS -> "systemcrafters.png"
+
+        ChatWallpaperPreset.JAPANESE_COUNTRYSIDE,
+        ChatWallpaperPreset.RAINY_CAFE,
+        ChatWallpaperPreset.MOTD_ARCADE,
+        ChatWallpaperPreset.MIDNIGHT_TERMINAL,
+        ChatWallpaperPreset.CYBERPUNK_CANAL,
+        -> error("scenic wallpapers use the scenic asset catalog")
     }
 
 internal const val WALLPAPER_TILE_PERIOD_DP = 512f

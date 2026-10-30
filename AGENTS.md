@@ -24,10 +24,19 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
 - Splash, README, and export branding changes must not alter themed in-app or
   launcher artwork unless explicitly requested. Preserve matte ceramic shading;
   black/white treatment is not a flat silhouette.
-- Chat wallpaper artwork must tile seamlessly across both axes and corners.
+- Patterned chat wallpaper artwork must tile seamlessly across both axes and corners.
   Wrap complete motifs and verify repeated proofs; transparent border padding
   or cropping alone does not satisfy this requirement. Preserve the approved
   dense mix of medium doodles, small motifs, and tiny accents when repairing seams.
+- Scenic wallpapers use full scenes with matching day/night geometry. Animate
+  named light, water, and star elements with authored pixel frames and palette
+  states. Do not warp, displace, roll, or crossfade raster patches to fake motion.
+  Plan animation surfaces before generating backgrounds; avoid scanlines and
+  synthetic overlays. Review triggered events at phone size: nonzero pixel differences
+  alone do not demonstrate perceptible or convincing motion.
+  Scenic animation should be subtle and very rare, with long still intervals
+  and one localized event at a time. Provide an explicitly labeled event-preview
+  trigger for review; do not accelerate normal playback to demonstrate motion.
 - `:irc` is pure JVM: no Android imports. Keep parsing, protocol state, and
   transport behavior testable with fake transports.
 - `EventProcessor` is the sole writer of IRC-derived state to Room. UI reads

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -38,6 +39,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -122,13 +124,24 @@ private fun WallpaperEditorSheet(
     var selection by rememberSaveable(
         stateSaver =
             listSaver<WallpaperSelection, Any>(
-                save = { listOf(it.preset.name, it.intensity, it.localImageName.orEmpty(), it.outlineColor?.toString().orEmpty()) },
+                save = {
+                    listOf(
+                        it.preset.name,
+                        it.intensity,
+                        it.localImageName.orEmpty(),
+                        it.outlineColor?.toString().orEmpty(),
+                        it.scenicFollowSystem,
+                        it.scenicAnimationEnabled,
+                    )
+                },
                 restore = {
                     WallpaperSelection(
                         ChatWallpaperPreset.valueOf(it[0] as String),
                         it[1] as Int,
                         (it[2] as String).ifEmpty { null },
                         (it[3] as String).toIntOrNull(),
+                        it.getOrNull(4) as? Boolean ?: true,
+                        it.getOrNull(5) as? Boolean ?: true,
                     )
                 },
             ),
@@ -171,33 +184,71 @@ private fun WallpaperEditorSheet(
                     Text(stringResource(R.string.settings_wallpaper), style = MaterialTheme.typography.titleLarge)
                 }
                 item(key = "preview", span = { GridItemSpan(maxLineSpan) }) {
-                    WallpaperPreview(selection, Modifier.fillMaxWidth().height(190.dp).testTag("settings_wallpaper_preview"))
-                }
-                item(key = "color", span = { GridItemSpan(maxLineSpan) }) {
-                    val enabled = !importing && selection.localImageName == null && selection.preset != ChatWallpaperPreset.NONE
-                    ListItem(
-                        headlineContent = { Text(stringResource(R.string.settings_wallpaper_outline_color)) },
-                        supportingContent = {
-                            Text(
-                                when {
-                                    selection.localImageName != null -> stringResource(R.string.settings_wallpaper_color_builtin_only)
-                                    selection.preset == ChatWallpaperPreset.NONE -> stringResource(R.string.settings_wallpaper_color_none)
-                                    else -> selection.outlineColor?.let(::wallpaperColorHex) ?: stringResource(R.string.settings_wallpaper_color_default)
-                                },
-                            )
-                        },
-                        leadingContent = {
-                            Box(
-                                Modifier
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(selection.outlineColor?.let(::Color) ?: MaterialTheme.colorScheme.onSurfaceVariant)
-                                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
-                            )
-                        },
-                        trailingContent = { if (enabled) Icon(Icons.Outlined.ChevronRight, contentDescription = null) },
-                        modifier = Modifier.clickable(enabled = enabled) { showColorEditor = true }.testTag("settings_wallpaper_outline_color"),
+                    WallpaperPreview(
+                        selection,
+                        Modifier
+                            .fillMaxWidth()
+                            .height(if (selection.localImageName == null && selection.preset.isScenic) 315.dp else 190.dp)
+                            .testTag("settings_wallpaper_preview"),
                     )
+                }
+                if (!selection.preset.isScenic) {
+                    item(key = "color", span = { GridItemSpan(maxLineSpan) }) {
+                        val enabled = !importing && selection.localImageName == null && selection.preset != ChatWallpaperPreset.NONE
+                        ListItem(
+                            headlineContent = { Text(stringResource(R.string.settings_wallpaper_outline_color)) },
+                            supportingContent = {
+                                Text(
+                                    when {
+                                        selection.localImageName != null -> stringResource(R.string.settings_wallpaper_color_builtin_only)
+                                        selection.preset == ChatWallpaperPreset.NONE -> stringResource(R.string.settings_wallpaper_color_none)
+                                        else -> selection.outlineColor?.let(::wallpaperColorHex) ?: stringResource(R.string.settings_wallpaper_color_default)
+                                    },
+                                )
+                            },
+                            leadingContent = {
+                                Box(
+                                    Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(selection.outlineColor?.let(::Color) ?: MaterialTheme.colorScheme.onSurfaceVariant)
+                                        .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
+                                )
+                            },
+                            trailingContent = { if (enabled) Icon(Icons.Outlined.ChevronRight, contentDescription = null) },
+                            modifier = Modifier.clickable(enabled = enabled) { showColorEditor = true }.testTag("settings_wallpaper_outline_color"),
+                        )
+                    }
+                }
+                if (selection.localImageName == null && selection.preset.isScenic) {
+                    item(key = "scenic-system", span = { GridItemSpan(maxLineSpan) }) {
+                        ListItem(
+                            headlineContent = { Text(stringResource(R.string.settings_wallpaper_scenic_follow_system)) },
+                            supportingContent = { Text(stringResource(R.string.settings_wallpaper_scenic_follow_system_desc)) },
+                            trailingContent = {
+                                Switch(
+                                    checked = selection.scenicFollowSystem,
+                                    onCheckedChange = { updateSelection(selection.copy(scenicFollowSystem = it)) },
+                                    enabled = !importing,
+                                    modifier = Modifier.testTag("settings_wallpaper_scenic_follow_system"),
+                                )
+                            },
+                        )
+                    }
+                    item(key = "scenic-animation", span = { GridItemSpan(maxLineSpan) }) {
+                        ListItem(
+                            headlineContent = { Text(stringResource(R.string.settings_wallpaper_scenic_animation)) },
+                            supportingContent = { Text(stringResource(R.string.settings_wallpaper_scenic_animation_desc)) },
+                            trailingContent = {
+                                Switch(
+                                    checked = selection.scenicAnimationEnabled,
+                                    onCheckedChange = { updateSelection(selection.copy(scenicAnimationEnabled = it)) },
+                                    enabled = !importing,
+                                    modifier = Modifier.testTag("settings_wallpaper_scenic_animation"),
+                                )
+                            },
+                        )
+                    }
                 }
                 item(key = "custom", span = { GridItemSpan(maxLineSpan) }) {
                     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -275,20 +326,32 @@ internal fun WallpaperPreview(
 ) {
     val shape = RoundedCornerShape(22.dp)
     Box(modifier.clip(shape).background(MaterialTheme.colorScheme.background)) {
-        ChatWallpaperBackground(selection, Modifier.matchParentSize())
-        Column(
-            Modifier.align(Alignment.Center).fillMaxWidth().padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-                Text(stringResource(R.string.settings_wallpaper_preview_incoming), Modifier.padding(12.dp))
+        val previewModifier =
+            if (selection.localImageName == null && selection.preset.isScenic) {
+                Modifier
+                    .align(Alignment.Center)
+                    .width(180.dp)
+                    .height(315.dp)
+                    .clip(shape)
+            } else {
+                Modifier.matchParentSize()
             }
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.align(Alignment.End),
+        Box(previewModifier) {
+            ChatWallpaperBackground(selection, Modifier.matchParentSize())
+            Column(
+                Modifier.align(Alignment.Center).fillMaxWidth().padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(stringResource(R.string.settings_wallpaper_preview_outgoing), Modifier.padding(12.dp))
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                    Text(stringResource(R.string.settings_wallpaper_preview_incoming), Modifier.padding(12.dp))
+                }
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.align(Alignment.End),
+                ) {
+                    Text(stringResource(R.string.settings_wallpaper_preview_outgoing), Modifier.padding(12.dp))
+                }
             }
         }
     }
@@ -320,6 +383,7 @@ private fun WallpaperCard(
                 wallpaper = selection.copy(preset = preset, localImageName = null),
                 modifier = Modifier.matchParentSize(),
                 tilePeriodDp = WALLPAPER_THUMBNAIL_TILE_PERIOD_DP,
+                animate = false,
             )
             if (selected) {
                 Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(bottomStart = 10.dp), modifier = Modifier.align(Alignment.TopEnd)) {
@@ -353,6 +417,11 @@ private fun wallpaperLabel(preset: ChatWallpaperPreset): String =
             ChatWallpaperPreset.MEMES -> R.string.settings_wallpaper_memes
             ChatWallpaperPreset.LINUX -> R.string.settings_wallpaper_linux
             ChatWallpaperPreset.SYSTEMCRAFTERS -> R.string.settings_wallpaper_systemcrafters
+            ChatWallpaperPreset.JAPANESE_COUNTRYSIDE -> R.string.settings_wallpaper_japanese_countryside
+            ChatWallpaperPreset.RAINY_CAFE -> R.string.settings_wallpaper_rainy_cafe
+            ChatWallpaperPreset.MOTD_ARCADE -> R.string.settings_wallpaper_motd_arcade
+            ChatWallpaperPreset.MIDNIGHT_TERMINAL -> R.string.settings_wallpaper_midnight_terminal
+            ChatWallpaperPreset.CYBERPUNK_CANAL -> R.string.settings_wallpaper_cyberpunk_canal
         },
     )
 
@@ -369,4 +438,9 @@ private fun wallpaperDescription(preset: ChatWallpaperPreset): String? =
         ChatWallpaperPreset.MEMES -> stringResource(R.string.settings_wallpaper_memes_desc)
         ChatWallpaperPreset.LINUX -> stringResource(R.string.settings_wallpaper_linux_desc)
         ChatWallpaperPreset.SYSTEMCRAFTERS -> stringResource(R.string.settings_wallpaper_systemcrafters_desc)
+        ChatWallpaperPreset.JAPANESE_COUNTRYSIDE -> stringResource(R.string.settings_wallpaper_japanese_countryside_desc)
+        ChatWallpaperPreset.RAINY_CAFE -> stringResource(R.string.settings_wallpaper_rainy_cafe_desc)
+        ChatWallpaperPreset.MOTD_ARCADE -> stringResource(R.string.settings_wallpaper_motd_arcade_desc)
+        ChatWallpaperPreset.MIDNIGHT_TERMINAL -> stringResource(R.string.settings_wallpaper_midnight_terminal_desc)
+        ChatWallpaperPreset.CYBERPUNK_CANAL -> stringResource(R.string.settings_wallpaper_cyberpunk_canal_desc)
     }

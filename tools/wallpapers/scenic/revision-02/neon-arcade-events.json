@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "scheduleSeed": "neon-arcade-r02-authored",
+  "width": 256,
+  "height": 448,
+  "initialDelayMs": [
+    20000,
+    40000
+  ],
+  "quietIntervalMs": [
+    45000,
+    90000
+  ],
+  "events": [
+    {
+      "id": "motd-neon-dip",
+      "label": "One cyan logo segment dips briefly",
+      "frames": [
+        {
+          "durationMs": 180,
+          "light": [
+            [
+              64,
+              110,
+              "#d5ccbf"
+            ],
+            [
+              64,
+              111,
+              "#d5ccbf"
+            ],
+            [
+              64,
+              112,
+              "#d5ccbf"
+            ],
+            [
+              64,
+              113,
+              "#d5ccbf"
+            ]
+          ],
+          "dark": [
+            [
+              64,
+              110,
+              "#76c3c3"
+            ],
+            [
+              64,
+              111,
+              "#76c3c3"
+            ],
+            [
+              64,
+              112,
+              "#76c3c3"
+            ],
+            [
+              64,
+              113,
+              "#76c3c3"
+            ]
+          ]
+        },
+        {
+          "durationMs": 220,
+          "light": [],
+          "dark": []
+        }
+      ]
+    }
+  ]
+}
