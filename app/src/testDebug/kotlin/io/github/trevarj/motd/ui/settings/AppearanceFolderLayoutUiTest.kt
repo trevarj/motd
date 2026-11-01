@@ -596,7 +596,12 @@ class AppearanceFolderLayoutUiTest {
     }
 
     private fun swatchPixel(tag: String): Int {
-        val image = compose.onNodeWithTag(tag, useUnmergedTree = true).performScrollTo().captureToImage().asAndroidBitmap()
+        val image =
+            compose
+                .onNodeWithTag(tag, useUnmergedTree = true)
+                .performScrollTo()
+                .captureToImage()
+                .asAndroidBitmap()
         return image.getPixel(image.width / 2, image.height / 2)
     }
 
@@ -604,7 +609,12 @@ class AppearanceFolderLayoutUiTest {
         tag: String,
         expectedFill: Int,
     ) {
-        val image = compose.onNodeWithTag(tag).performScrollTo().captureToImage().asAndroidBitmap()
+        val image =
+            compose
+                .onNodeWithTag(tag)
+                .performScrollTo()
+                .captureToImage()
+                .asAndroidBitmap()
         assertEquals(expectedFill, image.getPixel(image.width / 2, image.height / 2))
         assertTrue("$tag selected fill must leave its corner unpainted", image.getPixel(0, 0) != expectedFill)
     }
