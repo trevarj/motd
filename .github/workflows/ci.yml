@@ -206,7 +206,7 @@ jobs:
         id: avd-cache
         with:
           path: ~/.android/avd/*
-          key: avd-api34-default-x86_64-pixel6-emu-${{ steps.emulator-revision.outputs.revision }}
+          key: avd-api34-default-x86_64-pixel6-userdata3g-emu-${{ steps.emulator-revision.outputs.revision }}
       - name: Create AVD and generate snapshot for caching
         if: steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
@@ -215,6 +215,8 @@ jobs:
           target: default
           arch: x86_64
           profile: pixel_6
+          # Leave room for the APKs and native build outputs on hosted runners.
+          disk-size: 3G
           force-avd-creation: false
           disable-animations: false
           emulator-options: -no-window -noaudio -no-boot-anim -gpu swiftshader_indirect
@@ -228,6 +230,7 @@ jobs:
           target: default
           arch: x86_64
           profile: pixel_6
+          disk-size: 3G
           force-avd-creation: false
           disable-animations: true
           emulator-options: -no-window -no-snapshot-save -noaudio -no-boot-anim -gpu swiftshader_indirect
