@@ -29,6 +29,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.set
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -380,7 +381,7 @@ internal fun composeScenicFrame(
 ): Bitmap {
     if (replacements.isEmpty()) return bitmap
     return requireNotNull(bitmap.copy(Bitmap.Config.ARGB_8888, true)).also { composed ->
-        replacements.forEach { pixel -> composed.setPixel(pixel.x, pixel.y, pixel.color) }
+        replacements.forEach { pixel -> composed[pixel.x, pixel.y] = pixel.color }
     }
 }
 
