@@ -1,0 +1,3 @@
+- Added Chat colors: choose adaptive palette or custom colors for sent and received messages, with a matching composer, live samples, and rounded selectors.
+- Added customizable presence filters globally or per chat.
+- Added scenic chat wallpapers with matching day and night scenes and subtle animation.
