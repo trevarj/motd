@@ -33,6 +33,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.testTag
@@ -43,6 +45,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
@@ -54,7 +57,9 @@ import io.github.trevarj.motd.ui.chat.parseColorHex
 import io.github.trevarj.motd.ui.chat.wallpaperColorHex
 import io.github.trevarj.motd.ui.components.ChatLayoutPreview
 import io.github.trevarj.motd.ui.components.Composer
+import io.github.trevarj.motd.ui.components.messageBubbleRoleColors
 import io.github.trevarj.motd.ui.theme.ConversationTypography
+import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.resolveComfortableBubbleColor
@@ -103,34 +108,33 @@ internal fun ComfortableBubbleColorPickerSheet(
         ) {
             Text(stringResource(R.string.settings_bubble_colors), style = MaterialTheme.typography.titleLarge)
             Text(stringResource(R.string.settings_bubble_colors_desc), style = MaterialTheme.typography.bodyMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.selectableGroup()) {
-                Surface(
-                    color = if (editSent) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-                    modifier =
-                        Modifier
-                            .heightIn(min = 48.dp)
-                            .selectable(editSent, role = Role.RadioButton, onClick = { editSent = true })
-                            .testTag("settings_bubble_color_sent")
-                            .padding(horizontal = 16.dp),
+            AppearanceBubbleColorOptions(settings, appearance) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().selectableGroup(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(stringResource(R.string.settings_bubble_color_sent))
-                }
-                Surface(
-                    color = if (!editSent) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-                    modifier =
-                        Modifier
-                            .heightIn(min = 48.dp)
-                            .selectable(!editSent, role = Role.RadioButton, onClick = { editSent = false })
-                            .testTag("settings_bubble_color_received")
-                            .padding(horizontal = 16.dp),
-                ) {
-                    Text(stringResource(R.string.settings_bubble_color_received))
+                    BubbleColorTarget(
+                        label = stringResource(R.string.settings_bubble_color_sent),
+                        color = bubbleColorSample(sent, isSent = true),
+                        selected = editSent,
+                        tag = "settings_bubble_color_sent",
+                        modifier = Modifier.weight(1f),
+                        onClick = { editSent = true },
+                    )
+                    BubbleColorTarget(
+                        label = stringResource(R.string.settings_bubble_color_received),
+                        color = bubbleColorSample(received, isSent = false),
+                        selected = !editSent,
+                        tag = "settings_bubble_color_received",
+                        modifier = Modifier.weight(1f),
+                        onClick = { editSent = false },
+                    )
                 }
             }
             AppearanceBubblePreview(settings, appearance.copy(sentBubbleColor = sent, receivedBubbleColor = received), customFontFile)
             AppearanceBubbleColorOptions(settings, appearance) {
                 bubbleColorRoles.forEach { role ->
-                    BubbleColorOption(role, selected.role == role) {
+                    BubbleColorOption(role, selected.role == role, editSent) {
                         val next = ComfortableBubbleColor(role)
                         if (editSent) {
                             sentRole = next.role.name
@@ -146,7 +150,8 @@ internal fun ComfortableBubbleColorPickerSheet(
                 BubbleColorOption(
                     ComfortableBubbleColorRole.CUSTOM,
                     selected.role == ComfortableBubbleColorRole.CUSTOM,
-                    selected.customColor?.let(::Color),
+                    editSent,
+                    selected.customColor,
                 ) { showCustom = true }
             }
             TextButton(onClick = onDismiss, modifier = Modifier.testTag("settings_bubble_color_done")) {
@@ -257,20 +262,93 @@ private fun AppearanceBubblePreview(
 private fun BubbleColorOption(
     role: ComfortableBubbleColorRole,
     selected: Boolean,
-    color: Color? = null,
+    isSent: Boolean,
+    customColor: Int? = null,
     onClick: () -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
-    val fill = color ?: resolveComfortableBubbleColor(ComfortableBubbleColor(role), scheme)
+    val fill = bubbleColorSample(ComfortableBubbleColor(role, customColor), isSent)
     Row(
         Modifier.fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, onClick = onClick).padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         RadioButton(selected = selected, onClick = onClick, modifier = Modifier.testTag("settings_bubble_color_" + role.name.lowercase()))
-        Box(Modifier.size(24.dp).background(fill ?: scheme.secondaryContainer, CircleShape).border(1.dp, scheme.outline, CircleShape))
+        BubbleColorSwatch(fill, "settings_bubble_color_${role.name.lowercase()}_swatch")
         Text(stringResource(bubbleColorRoleLabel(role)))
     }
+}
+
+@Composable
+private fun BubbleColorTarget(
+    label: String,
+    color: Color?,
+    selected: Boolean,
+    tag: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Surface(
+        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+        modifier =
+            modifier
+                .heightIn(min = 48.dp)
+                .selectable(selected, role = Role.RadioButton, onClick = onClick)
+                .testTag(tag)
+                .padding(horizontal = 16.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            BubbleColorSwatch(color, "${tag}_swatch")
+            Text(label)
+        }
+    }
+}
+
+@Composable
+private fun bubbleColorSample(
+    selection: ComfortableBubbleColor,
+    isSent: Boolean,
+): Color? {
+    if (selection.role == ComfortableBubbleColorRole.CUSTOM && selection.customColor == null) return null
+    val scheme = MaterialTheme.colorScheme
+    val selected = resolveComfortableBubbleColor(selection, scheme)
+    return messageBubbleRoleColors(
+        scheme = scheme,
+        isSelf = isSent,
+        mentionHighlighted = false,
+        kind = MessageKind.PRIVMSG,
+        semantic = LocalMotdSemanticColors.current,
+        sentBubbleColor = if (isSent) selected else null,
+        receivedBubbleColor = if (isSent) null else selected,
+    ).container
+}
+
+@Composable
+private fun BubbleColorSwatch(
+    color: Color?,
+    tag: String,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val customWheel =
+        remember {
+            Brush.sweepGradient(
+                listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red),
+            )
+        }
+    Box(
+        Modifier
+            .size(32.dp)
+            .then(
+                if (color == null) {
+                    Modifier.drawBehind { drawCircle(customWheel) }
+                } else {
+                    Modifier.background(color, CircleShape)
+                },
+            ).border(1.dp, scheme.outline, CircleShape)
+            .testTag(tag),
+    )
 }
 
 @Composable

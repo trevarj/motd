@@ -2,6 +2,8 @@ package io.github.trevarj.motd.ui.settings
 
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -13,6 +15,7 @@ import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -369,6 +372,32 @@ class AppearanceFolderLayoutUiTest {
     }
 
     @Test
+    fun bubbleColorPickerShowsLiveSentReceivedAndOptionSwatches() {
+        setContent(appearance = AppearanceConfig(theme = ColorThemePreset.GRUVBOX_DARK))
+        val scheme = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK))
+
+        compose.onNodeWithTag("settings_bubble_color_picker").performScrollTo().performClick()
+        val sentDefault = swatchPixel("settings_bubble_color_sent_swatch")
+        assertEquals(scheme.secondaryContainer.toArgb(), swatchPixel("settings_bubble_color_received_swatch"))
+        assertTrue("Default sent and received fills remain distinguishable", sentDefault != swatchPixel("settings_bubble_color_received_swatch"))
+        assertEquals(scheme.primary.toArgb(), swatchPixel("settings_bubble_color_primary_swatch"))
+
+        compose.onNodeWithTag("settings_bubble_color_primary").performScrollTo().performClick()
+        assertEquals(scheme.primary.toArgb(), swatchPixel("settings_bubble_color_sent_swatch"))
+
+        compose.onNodeWithTag("settings_bubble_color_received").performScrollTo().performClick()
+        assertEquals(scheme.secondaryContainer.toArgb(), swatchPixel("settings_bubble_color_default_swatch"))
+        compose.onNodeWithTag("settings_bubble_color_custom").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_bubble_color_hex").performScrollTo().performTextReplacement("#12AB34")
+        compose.onNodeWithTag("settings_bubble_color_apply").performClick()
+
+        val custom = Color(0xFF12AB34).toArgb()
+        assertEquals(custom, swatchPixel("settings_bubble_color_received_swatch"))
+        assertEquals(custom, swatchPixel("settings_bubble_color_custom_swatch"))
+        assertEquals(scheme.primary.toArgb(), swatchPixel("settings_bubble_color_sent_swatch"))
+    }
+
+    @Test
     fun avatarAndTimeSelectionsUpdateInlinePreviewBeforeSettingsEmit() {
         val expectedTime = previewTimeText()
         setContent()
@@ -562,6 +591,11 @@ class AppearanceFolderLayoutUiTest {
                 )
             }
         }
+    }
+
+    private fun swatchPixel(tag: String): Int {
+        val image = compose.onNodeWithTag(tag, useUnmergedTree = true).performScrollTo().captureToImage().asAndroidBitmap()
+        return image.getPixel(image.width / 2, image.height / 2)
     }
 }
 
