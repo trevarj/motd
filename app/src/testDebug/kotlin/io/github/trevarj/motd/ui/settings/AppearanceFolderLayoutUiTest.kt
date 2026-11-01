@@ -377,6 +377,7 @@ class AppearanceFolderLayoutUiTest {
         val scheme = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK))
 
         compose.onNodeWithTag("settings_bubble_color_picker").performScrollTo().performClick()
+        assertRoundedSelectedTarget("settings_bubble_color_sent", scheme.secondaryContainer.toArgb())
         val sentDefault = swatchPixel("settings_bubble_color_sent_swatch")
         assertEquals(scheme.secondaryContainer.toArgb(), swatchPixel("settings_bubble_color_received_swatch"))
         assertTrue("Default sent and received fills remain distinguishable", sentDefault != swatchPixel("settings_bubble_color_received_swatch"))
@@ -386,6 +387,7 @@ class AppearanceFolderLayoutUiTest {
         assertEquals(scheme.primary.toArgb(), swatchPixel("settings_bubble_color_sent_swatch"))
 
         compose.onNodeWithTag("settings_bubble_color_received").performScrollTo().performClick()
+        assertRoundedSelectedTarget("settings_bubble_color_received", scheme.secondaryContainer.toArgb())
         assertEquals(scheme.secondaryContainer.toArgb(), swatchPixel("settings_bubble_color_default_swatch"))
         compose.onNodeWithTag("settings_bubble_color_custom").performScrollTo().performClick()
         compose.onNodeWithTag("settings_bubble_color_hex").performScrollTo().performTextReplacement("#12AB34")
@@ -596,6 +598,15 @@ class AppearanceFolderLayoutUiTest {
     private fun swatchPixel(tag: String): Int {
         val image = compose.onNodeWithTag(tag, useUnmergedTree = true).performScrollTo().captureToImage().asAndroidBitmap()
         return image.getPixel(image.width / 2, image.height / 2)
+    }
+
+    private fun assertRoundedSelectedTarget(
+        tag: String,
+        expectedFill: Int,
+    ) {
+        val image = compose.onNodeWithTag(tag).performScrollTo().captureToImage().asAndroidBitmap()
+        assertEquals(expectedFill, image.getPixel(image.width / 2, image.height / 2))
+        assertTrue("$tag selected fill must leave its corner unpainted", image.getPixel(0, 0) != expectedFill)
     }
 }
 

@@ -33,6 +33,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -61,6 +62,7 @@ import io.github.trevarj.motd.ui.components.messageBubbleRoleColors
 import io.github.trevarj.motd.ui.theme.ConversationTypography
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.resolveComfortableBubbleColor
 import java.io.File
@@ -289,14 +291,17 @@ private fun BubbleColorTarget(
 ) {
     Surface(
         color = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+        contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
+        shape = MotdShapes.pill,
         modifier =
             modifier
                 .heightIn(min = 48.dp)
+                .clip(MotdShapes.pill)
                 .selectable(selected, role = Role.RadioButton, onClick = onClick)
-                .testTag(tag)
-                .padding(horizontal = 16.dp),
+                .testTag(tag),
     ) {
         Row(
+            modifier = Modifier.padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
