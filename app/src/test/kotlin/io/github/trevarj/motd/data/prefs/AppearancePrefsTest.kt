@@ -110,6 +110,39 @@ class AppearancePrefsTest {
             assertEquals(false, prefs.config.first().chatShadowsEnabled)
         }
 
+    @Test fun comfortableBubbleColors_roundTripWithCustomOpaqueColorAndDefaultFallback() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val sentRole = stringPreferencesKey("sent_bubble_color_role_v1")
+            val receivedRole = stringPreferencesKey("received_bubble_color_role_v1")
+            val sentCustom = intPreferencesKey("sent_bubble_color_custom_v1")
+            val receivedCustom = intPreferencesKey("received_bubble_color_custom_v1")
+            context.appearanceDataStore.edit {
+                it.remove(sentRole)
+                it.remove(receivedRole)
+                it.remove(sentCustom)
+                it.remove(receivedCustom)
+            }
+            try {
+                assertEquals(ComfortableBubbleColor(), prefs.config.first().sentBubbleColor)
+                assertEquals(ComfortableBubbleColor(), prefs.config.first().receivedBubbleColor)
+                prefs.setSentBubbleColor(ComfortableBubbleColor(ComfortableBubbleColorRole.TERTIARY_CONTAINER))
+                prefs.setReceivedBubbleColor(ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, 0x0012ab34))
+                val config = AppearancePrefsImpl(context).config.first()
+                assertEquals(ComfortableBubbleColor(ComfortableBubbleColorRole.TERTIARY_CONTAINER), config.sentBubbleColor)
+                assertEquals(ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, 0xff12ab34.toInt()), config.receivedBubbleColor)
+                context.appearanceDataStore.edit { it[receivedRole] = "bad-role" }
+                assertEquals(ComfortableBubbleColor(), AppearancePrefsImpl(context).config.first().receivedBubbleColor)
+            } finally {
+                context.appearanceDataStore.edit {
+                    it.remove(sentRole)
+                    it.remove(receivedRole)
+                    it.remove(sentCustom)
+                    it.remove(receivedCustom)
+                }
+            }
+        }
+
     @Test fun appearanceJsonPreservesExplicitShadowPreference() {
         assertEquals(false, Json.decodeFromString<AppearanceConfig>("""{}""").chatShadowsEnabled)
         assertEquals(true, Json.decodeFromString<AppearanceConfig>("""{"chatShadowsEnabled":true}""").chatShadowsEnabled)

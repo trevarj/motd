@@ -197,6 +197,34 @@ enum class ComposerStyle { COMFORTABLE, LARGE, COMPACT }
 
 enum class BubbleCornerStyle { ROUNDED, SUBTLE, SQUARE }
 
+/** A theme role stays adaptive; CUSTOM retains the user-picked opaque sRGB color. */
+enum class ComfortableBubbleColorRole {
+    DEFAULT,
+    SURFACE_CONTAINER,
+    SURFACE_CONTAINER_HIGH,
+    PRIMARY,
+    SECONDARY,
+    TERTIARY,
+    PRIMARY_CONTAINER,
+    SECONDARY_CONTAINER,
+    TERTIARY_CONTAINER,
+    CUSTOM,
+}
+
+@Serializable
+data class ComfortableBubbleColor(
+    val role: ComfortableBubbleColorRole = ComfortableBubbleColorRole.DEFAULT,
+    // Opaque sRGB ARGB when role is CUSTOM. Kept nullable so old backups use the default.
+    val customColor: Int? = null,
+) {
+    fun normalized(): ComfortableBubbleColor =
+        if (role == ComfortableBubbleColorRole.CUSTOM && customColor != null) {
+            copy(customColor = customColor.or(0xff000000.toInt()))
+        } else {
+            copy(role = if (role == ComfortableBubbleColorRole.CUSTOM) ComfortableBubbleColorRole.DEFAULT else role, customColor = null)
+        }
+}
+
 enum class LauncherIcon { DEFAULT, MONO, TERMINAL, GRUVBOX, CATPPUCCIN, NORD, LIGHT }
 
 @Serializable
@@ -231,6 +259,8 @@ data class AppearanceConfig(
     val messageSpacing: MessageSpacing = MessageSpacing.DEFAULT,
     val bubbleCornerStyle: BubbleCornerStyle = BubbleCornerStyle.ROUNDED,
     val chatShadowsEnabled: Boolean = false,
+    val sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
+    val receivedBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     val launcherIcon: LauncherIcon = LauncherIcon.DEFAULT,
     // Display name of a user-imported custom font file; empty means nothing imported. The font
     // binary itself lives in CustomFontStore, not DataStore or backups.
@@ -271,6 +301,10 @@ interface AppearancePrefs {
     suspend fun setBubbleCornerStyle(style: BubbleCornerStyle)
 
     suspend fun setChatShadowsEnabled(enabled: Boolean)
+
+    suspend fun setSentBubbleColor(color: ComfortableBubbleColor)
+
+    suspend fun setReceivedBubbleColor(color: ComfortableBubbleColor)
 
     suspend fun setLauncherIcon(icon: LauncherIcon)
 

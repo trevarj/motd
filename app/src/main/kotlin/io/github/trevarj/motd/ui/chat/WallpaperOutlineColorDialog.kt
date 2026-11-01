@@ -62,7 +62,7 @@ import android.graphics.Color as AndroidColor
 
 internal fun wallpaperColorHex(color: Int): String = String.format(Locale.ROOT, "#%06X", color and 0xffffff)
 
-private fun parseWallpaperColorHex(value: String): Int? {
+internal fun parseColorHex(value: String): Int? {
     val digits = value.trim().removePrefix("#")
     return digits
         .takeIf { it.length == 6 && it.all { digit -> digit in '0'..'9' || digit in 'a'..'f' || digit in 'A'..'F' } }
@@ -84,7 +84,7 @@ internal fun WallpaperOutlineColorDialog(
     var brightness by rememberSaveable { mutableStateOf(initial[2]) }
     var useDefault by rememberSaveable { mutableStateOf(selection.outlineColor == null) }
     var hex by rememberSaveable { mutableStateOf(wallpaperColorHex(selection.outlineColor ?: themeColor)) }
-    val parsed = parseWallpaperColorHex(hex)
+    val parsed = parseColorHex(hex)
     val color = remember(hue, saturation, brightness) { AndroidColor.HSVToColor(floatArrayOf(hue, saturation, brightness)) }
     val draft = if (useDefault) null else parsed ?: color
 
@@ -117,11 +117,11 @@ internal fun WallpaperOutlineColorDialog(
                         contentDescription = previewLabel
                     },
                 )
-                OutlineColorWheel(hue, saturation) { nextHue, nextSaturation ->
+                ColorWheel(hue, saturation, onChange = { nextHue, nextSaturation ->
                     hue = nextHue
                     saturation = nextSaturation
                     updateHex()
-                }
+                })
                 ColorComponentSlider(
                     label = stringResource(R.string.settings_wallpaper_color_hue),
                     value = hue,
@@ -157,7 +157,7 @@ internal fun WallpaperOutlineColorDialog(
                     onValueChange = { value ->
                         hex = value
                         useDefault = false
-                        parseWallpaperColorHex(value)?.let { parsedColor ->
+                        parseColorHex(value)?.let { parsedColor ->
                             val hsv = FloatArray(3)
                             AndroidColor.colorToHSV(parsedColor, hsv)
                             hue = hsv[0]
@@ -200,7 +200,7 @@ internal fun WallpaperOutlineColorDialog(
 }
 
 @Composable
-private fun ColorComponentSlider(
+internal fun ColorComponentSlider(
     label: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
@@ -224,13 +224,15 @@ private fun ColorComponentSlider(
 }
 
 @Composable
-private fun OutlineColorWheel(
+internal fun ColorWheel(
     hue: Float,
     saturation: Float,
     onChange: (Float, Float) -> Unit,
+    tag: String = "settings_wallpaper_color_wheel",
+    label: String? = null,
 ) {
     val change by rememberUpdatedState(onChange)
-    val wheelLabel = stringResource(R.string.settings_wallpaper_color_wheel)
+    val wheelLabel = label ?: stringResource(R.string.settings_wallpaper_color_wheel)
     val hueState = pluralStringResource(R.plurals.settings_wallpaper_color_degrees, hue.roundToInt(), hue.roundToInt())
     val saturationState = stringResource(R.string.settings_wallpaper_color_percent, (saturation * 100).roundToInt())
     val rainbow = remember { Brush.sweepGradient(listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta, Color.Red)) }
@@ -240,7 +242,7 @@ private fun OutlineColorWheel(
             .fillMaxWidth()
             .height(200.dp)
             .padding(8.dp)
-            .testTag("settings_wallpaper_color_wheel")
+            .testTag(tag)
             .semantics {
                 contentDescription = wheelLabel
                 stateDescription = "$hueState, $saturationState"

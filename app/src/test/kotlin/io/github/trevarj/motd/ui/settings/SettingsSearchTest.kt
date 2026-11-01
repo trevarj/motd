@@ -36,6 +36,7 @@ class SettingsSearchTest {
             "bold" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.COMPOSER_FORMATTING),
             "encrypted" to SettingsSearchDestination.Page(SettingsSearchPage.BACKUP, SettingsTarget.EXPORT_BACKUP),
             "tabs" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.FOLDER_LAYOUT),
+            "bubble background" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.BUBBLE_COLORS),
             "unassigned" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.SHOW_FOLDER_CHATS_IN_ALL),
             "dickord" to SettingsSearchDestination.Page(SettingsSearchPage.LABS, SettingsTarget.DICKORD),
             "aggressive lazy" to SettingsSearchDestination.Page(SettingsSearchPage.HISTORY, SettingsTarget.HISTORY_SYNC_MODE),

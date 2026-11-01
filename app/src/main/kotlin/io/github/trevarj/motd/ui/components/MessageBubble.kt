@@ -97,6 +97,7 @@ import io.github.trevarj.motd.ui.chat.InlineTextSegment
 import io.github.trevarj.motd.ui.chat.extractUrls
 import io.github.trevarj.motd.ui.chat.parseInlineCode
 import io.github.trevarj.motd.ui.theme.LocalChatShadowsEnabled
+import io.github.trevarj.motd.ui.theme.LocalComfortableBubbleColors
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
@@ -198,6 +199,8 @@ internal fun messageBubbleRoleColors(
     kind: MessageKind,
     semantic: MotdSemanticColors,
     dimmed: Boolean = false,
+    sentBubbleColor: Color? = null,
+    receivedBubbleColor: Color? = null,
 ): MessageBubbleRoleColors {
     val content: Color
     val container =
@@ -215,12 +218,16 @@ internal fun messageBubbleRoleColors(
 
             isSelf -> {
                 content = scheme.onPrimaryContainer
-                lerp(scheme.primaryContainer, scheme.primary, SELF_BUBBLE_ACCENT_BLEND)
+                if (kind == MessageKind.PRIVMSG) {
+                    sentBubbleColor ?: lerp(scheme.primaryContainer, scheme.primary, SELF_BUBBLE_ACCENT_BLEND)
+                } else {
+                    lerp(scheme.primaryContainer, scheme.primary, SELF_BUBBLE_ACCENT_BLEND)
+                }
             }
 
             else -> {
                 content = scheme.onSecondaryContainer
-                scheme.secondaryContainer
+                if (kind == MessageKind.PRIVMSG) receivedBubbleColor ?: scheme.secondaryContainer else scheme.secondaryContainer
             }
         }
     val normalInk = ensureContrast(content, listOf(container), MESSAGE_TEXT_CONTRAST)
@@ -595,6 +602,7 @@ fun MessageBubble(
 
     val scheme = MaterialTheme.colorScheme
     val semantic = LocalMotdSemanticColors.current
+    val comfortableBubbleColors = LocalComfortableBubbleColors.current
     // Keyed by color value, not scheme identity: Material3 mutates its retained ColorScheme in place.
     val bubbleRoles =
         remember(
@@ -612,7 +620,19 @@ fun MessageBubble(
             kind,
             semantic.warningContainer,
             semantic.onWarningContainer,
-        ) { messageBubbleRoleColors(scheme, isSelf, mentionHighlighted, kind, semantic, dimmed) }
+            comfortableBubbleColors,
+        ) {
+            messageBubbleRoleColors(
+                scheme,
+                isSelf,
+                mentionHighlighted,
+                kind,
+                semantic,
+                dimmed,
+                comfortableBubbleColors.sent,
+                comfortableBubbleColors.received,
+            )
+        }
     val bubbleColor = bubbleRoles.container
     val textColor = bubbleRoles.content
     val bodyInk = readingInk(scheme)
@@ -1881,7 +1901,7 @@ internal fun MessageStatusIcon(
         // every row scrolled in, and would keep a LottieDrawable alive per row. Only the row that
         // actually morphs pays for one.
         when {
-            showFailure -> FailedIcon()
+            showFailure -> FailedIcon(contentColor)
             status == MsgStatus.SENT -> SentIcon(contentColor)
             else -> PendingIcon(contentColor)
         }
@@ -1933,7 +1953,7 @@ private fun StatusMorphIcon(
     val glyphColor =
         when (morph) {
             StatusMorph.DELIVERED -> contentColor
-            StatusMorph.FAILED -> MaterialTheme.colorScheme.error
+            StatusMorph.FAILED -> contentColor
         }.toArgb()
     val dynamicProperties =
         remember(morph, clockColor, glyphColor) {
@@ -2007,11 +2027,11 @@ internal fun PendingIcon(contentColor: Color = MaterialTheme.colorScheme.onSurfa
  * show the mark it morphed into, not a differently shaped badge in a wider slot.
  */
 @Composable
-internal fun FailedIcon() {
+internal fun FailedIcon(contentColor: Color = MaterialTheme.colorScheme.error) {
     Icon(
         Icons.Filled.Close,
         contentDescription = stringResource(R.string.chat_failed),
-        tint = MaterialTheme.colorScheme.error,
+        tint = contentColor,
         modifier =
             Modifier
                 .padding(end = 4.dp)

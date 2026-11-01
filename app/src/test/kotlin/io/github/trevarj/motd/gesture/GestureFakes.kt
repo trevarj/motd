@@ -15,6 +15,7 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaper
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.FoolsMode
@@ -269,6 +270,14 @@ internal class FakeAppearance(
 
     override suspend fun setChatShadowsEnabled(enabled: Boolean) {
         state.value = state.value.copy(chatShadowsEnabled = enabled)
+    }
+
+    override suspend fun setSentBubbleColor(color: ComfortableBubbleColor) {
+        state.value = state.value.copy(sentBubbleColor = color)
+    }
+
+    override suspend fun setReceivedBubbleColor(color: ComfortableBubbleColor) {
+        state.value = state.value.copy(receivedBubbleColor = color)
     }
 
     override suspend fun setBubbleCornerStyle(style: BubbleCornerStyle) = Unit

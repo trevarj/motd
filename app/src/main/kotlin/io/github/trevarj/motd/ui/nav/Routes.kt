@@ -83,6 +83,7 @@ enum class SettingsTarget {
     TIME_FORMAT,
     MESSAGE_SPACING,
     BUBBLE_CORNERS,
+    BUBBLE_COLORS,
     WALLPAPER,
     LAUNCHER_ICON,
     PRESENCE,

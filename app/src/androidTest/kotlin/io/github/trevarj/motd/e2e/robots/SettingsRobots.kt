@@ -13,6 +13,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.AnnotatedString
@@ -103,6 +104,31 @@ internal class SettingsRobot(
         scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_done")
         click("settings_wallpaper_done")
         awaitTagGone("settings_wallpaper_sheet")
+    }
+
+    fun selectComfortableBubbleColors() {
+        scrollToAndClick("settings_bubble_color_picker")
+        assertDisplayed("settings_bubble_color_sheet")
+        compose.onNodeWithTag("settings_bubble_color_primary").performScrollTo().performClick()
+        compose
+            .onNodeWithTag("settings_bubble_color_received")
+            .performScrollTo()
+            .performClick()
+            .assertIsSelected()
+        compose.onNodeWithTag("settings_bubble_color_tertiary_container").performScrollTo().performClick()
+        scrollToAndClick("settings_bubble_color_done")
+        awaitTagGone("settings_bubble_color_sheet")
+        // The persisted Appearance state must restore when the editor is reopened.
+        scrollToAndClick("settings_bubble_color_picker")
+        compose.onNodeWithTag("settings_bubble_color_primary").performScrollTo().assertIsSelected()
+        compose
+            .onNodeWithTag("settings_bubble_color_received")
+            .performScrollTo()
+            .performClick()
+            .assertIsSelected()
+        compose.onNodeWithTag("settings_bubble_color_tertiary_container").performScrollTo().assertIsSelected()
+        scrollToAndClick("settings_bubble_color_done")
+        awaitTagGone("settings_bubble_color_sheet")
     }
 
     fun returnToRoot() {

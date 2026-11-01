@@ -17,6 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -28,6 +29,8 @@ import androidx.core.view.WindowCompat
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.DEFAULT_CUSTOM_TIME_FORMAT
 import io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.data.prefs.FontChoice
@@ -132,6 +135,32 @@ val LocalTimestampConfig: ProvidableCompositionLocal<TimestampConfig> =
 /** The Comfortable message renderer reads this without changing unrelated surfaces. */
 val LocalChatShadowsEnabled: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { false }
 
+/** Resolved fills for ordinary Comfortable PRIVMSG bubbles; null preserves the theme default. */
+data class ComfortableBubbleColors(
+    val sent: Color? = null,
+    val received: Color? = null,
+)
+
+val LocalComfortableBubbleColors: ProvidableCompositionLocal<ComfortableBubbleColors> =
+    staticCompositionLocalOf { ComfortableBubbleColors() }
+
+internal fun resolveComfortableBubbleColor(
+    selection: ComfortableBubbleColor,
+    scheme: androidx.compose.material3.ColorScheme,
+): Color? =
+    when (selection.role) {
+        ComfortableBubbleColorRole.DEFAULT -> null
+        ComfortableBubbleColorRole.SURFACE_CONTAINER -> scheme.surfaceContainer
+        ComfortableBubbleColorRole.SURFACE_CONTAINER_HIGH -> scheme.surfaceContainerHigh
+        ComfortableBubbleColorRole.PRIMARY -> scheme.primary
+        ComfortableBubbleColorRole.SECONDARY -> scheme.secondary
+        ComfortableBubbleColorRole.TERTIARY -> scheme.tertiary
+        ComfortableBubbleColorRole.PRIMARY_CONTAINER -> scheme.primaryContainer
+        ComfortableBubbleColorRole.SECONDARY_CONTAINER -> scheme.secondaryContainer
+        ComfortableBubbleColorRole.TERTIARY_CONTAINER -> scheme.tertiaryContainer
+        ComfortableBubbleColorRole.CUSTOM -> selection.customColor?.let(::Color)
+    }
+
 /** Resolved application palette mode for content that can opt out of OS-mode following. */
 val LocalMotdDark: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { false }
 
@@ -198,6 +227,8 @@ fun MotdTheme(
     messageSpacing: MessageSpacing = MessageSpacing.DEFAULT,
     bubbleCornerStyle: BubbleCornerStyle = BubbleCornerStyle.ROUNDED,
     chatShadowsEnabled: Boolean = false,
+    sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
+    receivedBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     // Nested previews can render a different palette from the app shell without restyling its bars.
     syncSystemBars: Boolean = true,
     content: @Composable () -> Unit,
@@ -231,6 +262,13 @@ fun MotdTheme(
         }
     val useTrueBlack = dark && (trueBlack || themePreset == ColorThemePreset.AMOLED)
     val colorScheme = if (useTrueBlack) resolvedScheme.withTrueBlackSurfaces() else resolvedScheme
+    val comfortableBubbleColors =
+        remember(colorScheme, sentBubbleColor, receivedBubbleColor) {
+            ComfortableBubbleColors(
+                sent = resolveComfortableBubbleColor(sentBubbleColor, colorScheme),
+                received = resolveComfortableBubbleColor(receivedBubbleColor, colorScheme),
+            )
+        }
     // System bars must follow the resolved palette, not the OS night mode: the bare
     // enableEdgeToEdge() in onCreate keys off uiMode, which disagrees with any fixed palette
     // opposing it (light nav scrim and invisible status icons over a dark theme, and vice versa).
@@ -288,6 +326,7 @@ fun MotdTheme(
             LocalUseThemeTextColors provides useThemeTextColors,
             LocalSpacing provides spacingFor(layoutDensity, messageSpacing, bubbleCornerStyle),
             LocalChatShadowsEnabled provides chatShadowsEnabled,
+            LocalComfortableBubbleColors provides comfortableBubbleColors,
             LocalMotdDark provides dark,
             LocalNickColors provides
                 NickColorScheme(

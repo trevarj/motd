@@ -815,6 +815,7 @@ class RequiredHeadlessE2eTest {
         SettingsRobot(compose).selectThemeTextColors()
         SettingsRobot(compose).selectIrcSprites()
         SettingsRobot(compose).selectWallpaperAndIntensity()
+        SettingsRobot(compose).selectComfortableBubbleColors()
         // Return from Appearance to Settings, then exercise the category and bouncer routes.
         SettingsRobot(compose).apply {
             returnToRoot()

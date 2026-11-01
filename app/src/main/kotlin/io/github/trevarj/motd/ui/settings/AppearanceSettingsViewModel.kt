@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
@@ -165,6 +166,10 @@ class AppearanceSettingsViewModel
         fun setBubbleCornerStyle(value: BubbleCornerStyle) = launch { appearancePrefs.setBubbleCornerStyle(value) }
 
         fun setChatShadowsEnabled(value: Boolean) = launch { appearancePrefs.setChatShadowsEnabled(value) }
+
+        fun setSentBubbleColor(value: ComfortableBubbleColor) = launch { appearancePrefs.setSentBubbleColor(value) }
+
+        fun setReceivedBubbleColor(value: ComfortableBubbleColor) = launch { appearancePrefs.setReceivedBubbleColor(value) }
 
         fun setLauncherIcon(value: LauncherIcon) = launch { appearancePrefs.setLauncherIcon(value) }
 

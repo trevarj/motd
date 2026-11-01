@@ -127,6 +127,23 @@ class MessageBubbleLayoutTest {
         assertTrue(contrastRatio(role.content, fill) >= 4.5)
         assertEquals(Color.Black, ensureContrast(readingInk(scheme, useThemeTextColors = false), listOf(fill), MESSAGE_TEXT_CONTRAST))
     }
+
+    @Test fun comfortablePrivmsgUsesIndependentColorsAndKeepsSemanticRoles() {
+        val scheme = MotdLightScheme
+        val semantic = semanticColors(scheme, false)
+        val sent = Color(0xFF777777)
+        val received = Color(0xFF123ABC)
+        val own = messageBubbleRoleColors(scheme, true, false, MessageKind.PRIVMSG, semantic, sentBubbleColor = sent, receivedBubbleColor = received)
+        val incoming = messageBubbleRoleColors(scheme, false, false, MessageKind.PRIVMSG, semantic, sentBubbleColor = sent, receivedBubbleColor = received)
+        val mention = messageBubbleRoleColors(scheme, false, true, MessageKind.PRIVMSG, semantic, sentBubbleColor = sent, receivedBubbleColor = received)
+        val notice = messageBubbleRoleColors(scheme, true, false, MessageKind.NOTICE, semantic, sentBubbleColor = sent, receivedBubbleColor = received)
+        assertEquals(sent, own.container)
+        assertEquals(received, incoming.container)
+        assertEquals(semantic.warningContainer, mention.container)
+        assertEquals(messageBubbleRoleColors(scheme, true, false, MessageKind.NOTICE, semantic).container, notice.container)
+        assertTrue(contrastRatio(own.content, sent) >= 4.5)
+        assertTrue(contrastRatio(incoming.content, received) >= 4.5)
+    }
 }
 
 internal fun messageContrastSchemes(useThemeTextColors: Boolean = false): List<Triple<String, ColorScheme, Boolean>> {

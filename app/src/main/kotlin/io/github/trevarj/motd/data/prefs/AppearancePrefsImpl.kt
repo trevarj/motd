@@ -33,6 +33,10 @@ private val MESSAGE_SPACING = stringPreferencesKey("message_spacing_v1")
 private val COMPOSER_STYLE = stringPreferencesKey("composer_style_v1")
 private val BUBBLE_CORNER_STYLE = stringPreferencesKey("bubble_corner_style_v1")
 private val CHAT_SHADOWS_ENABLED = booleanPreferencesKey("chat_shadows_enabled_v1")
+private val SENT_BUBBLE_COLOR_ROLE = stringPreferencesKey("sent_bubble_color_role_v1")
+private val SENT_BUBBLE_COLOR_CUSTOM = intPreferencesKey("sent_bubble_color_custom_v1")
+private val RECEIVED_BUBBLE_COLOR_ROLE = stringPreferencesKey("received_bubble_color_role_v1")
+private val RECEIVED_BUBBLE_COLOR_CUSTOM = intPreferencesKey("received_bubble_color_custom_v1")
 private val LAUNCHER_ICON = stringPreferencesKey("launcher_icon_v1")
 private val CUSTOM_FONT_NAME = stringPreferencesKey("custom_font_name_v1")
 
@@ -110,6 +114,8 @@ class AppearancePrefsImpl
                             ?.let { runCatching { BubbleCornerStyle.valueOf(it) }.getOrNull() }
                             ?: BubbleCornerStyle.ROUNDED,
                     chatShadowsEnabled = prefs[CHAT_SHADOWS_ENABLED] ?: false,
+                    sentBubbleColor = storedComfortableBubbleColor(prefs[SENT_BUBBLE_COLOR_ROLE], prefs[SENT_BUBBLE_COLOR_CUSTOM]),
+                    receivedBubbleColor = storedComfortableBubbleColor(prefs[RECEIVED_BUBBLE_COLOR_ROLE], prefs[RECEIVED_BUBBLE_COLOR_CUSTOM]),
                     launcherIcon =
                         prefs[LAUNCHER_ICON]?.let { runCatching { LauncherIcon.valueOf(it) }.getOrNull() }
                             ?: LauncherIcon.DEFAULT,
@@ -194,6 +200,14 @@ class AppearancePrefsImpl
             store.edit { it[CHAT_SHADOWS_ENABLED] = enabled }
         }
 
+        override suspend fun setSentBubbleColor(color: ComfortableBubbleColor) {
+            store.edit { it.storeComfortableBubbleColor(SENT_BUBBLE_COLOR_ROLE, SENT_BUBBLE_COLOR_CUSTOM, color) }
+        }
+
+        override suspend fun setReceivedBubbleColor(color: ComfortableBubbleColor) {
+            store.edit { it.storeComfortableBubbleColor(RECEIVED_BUBBLE_COLOR_ROLE, RECEIVED_BUBBLE_COLOR_CUSTOM, color) }
+        }
+
         override suspend fun setLauncherIcon(icon: LauncherIcon) {
             store.edit { it[LAUNCHER_ICON] = icon.name }
         }
@@ -202,3 +216,22 @@ class AppearancePrefsImpl
             store.edit { it[CUSTOM_FONT_NAME] = name }
         }
     }
+
+private fun storedComfortableBubbleColor(
+    role: String?,
+    custom: Int?,
+): ComfortableBubbleColor =
+    ComfortableBubbleColor(
+        role = role?.let { runCatching { ComfortableBubbleColorRole.valueOf(it) }.getOrNull() } ?: ComfortableBubbleColorRole.DEFAULT,
+        customColor = custom,
+    ).normalized()
+
+private fun androidx.datastore.preferences.core.MutablePreferences.storeComfortableBubbleColor(
+    roleKey: androidx.datastore.preferences.core.Preferences.Key<String>,
+    customKey: androidx.datastore.preferences.core.Preferences.Key<Int>,
+    color: ComfortableBubbleColor,
+) {
+    val normalized = color.normalized()
+    this[roleKey] = normalized.role.name
+    normalized.customColor?.let { this[customKey] = it } ?: remove(customKey)
+}

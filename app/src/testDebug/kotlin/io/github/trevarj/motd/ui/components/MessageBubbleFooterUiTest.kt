@@ -58,6 +58,8 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
@@ -90,6 +92,29 @@ class MessageBubbleFooterUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun customComfortableFillKeepsBodyAndFailedFooterReadable() {
+        val fill = Color(0xFF777777)
+        compose.setContent {
+            Sample(
+                failed = true,
+                sentBubbleColor = ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, fill.toArgb()),
+            )
+        }
+
+        val body = compose.onNodeWithText(BODY, useUnmergedTree = true).textLayout().inkAt(BODY)
+        val time =
+            compose
+                .onNodeWithText(TIME, useUnmergedTree = true)
+                .textLayout()
+                .layoutInput
+                .style
+                .color
+        assertTrue(contrastRatio(body, fill) >= 4.5)
+        assertTrue(contrastRatio(time, fill) >= 4.5)
+        compose.onNodeWithContentDescription(RuntimeEnvironment.getApplication().getString(R.string.chat_failed), useUnmergedTree = true).assertIsDisplayed()
+    }
 
     @Test
     fun storedOwnNickAppearsOnceBelowBodyBesideStatusAndTime() {
@@ -900,6 +925,9 @@ class MessageBubbleFooterUiTest {
         onSenderClick: (() -> Unit)? = null,
         senderIsFriend: Boolean = false,
         avatarStyle: AvatarStyle = AvatarStyle.IRC_SPRITE,
+        failed: Boolean = false,
+        sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
+        receivedBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     ) {
         MotdTheme(
             dynamicColor = false,
@@ -907,6 +935,8 @@ class MessageBubbleFooterUiTest {
             layoutDensity = density,
             avatarStyle = avatarStyle,
             chatShadowsEnabled = shadows,
+            sentBubbleColor = sentBubbleColor,
+            receivedBubbleColor = receivedBubbleColor,
             timestampConfig = TimestampConfig(show = showTime),
         ) {
             Surface(Modifier.width(width).testTag("sample")) {
@@ -921,6 +951,7 @@ class MessageBubbleFooterUiTest {
                     reactions = reactions,
                     onSenderClick = onSenderClick,
                     senderIsFriend = senderIsFriend,
+                    failed = failed,
                 )
             }
         }

@@ -204,6 +204,8 @@ class MainActivity :
                 messageSpacing = appearance.messageSpacing,
                 bubbleCornerStyle = appearance.bubbleCornerStyle,
                 chatShadowsEnabled = appearance.chatShadowsEnabled,
+                sentBubbleColor = appearance.sentBubbleColor,
+                receivedBubbleColor = appearance.receivedBubbleColor,
             ) {
                 CompositionLocalProvider(
                     LocalDickordLabsEnabled provides dickordEnabled,

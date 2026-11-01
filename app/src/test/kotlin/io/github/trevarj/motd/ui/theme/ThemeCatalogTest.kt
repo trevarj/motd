@@ -5,6 +5,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.isFixedPalette
@@ -20,6 +22,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ThemeCatalogTest {
+    @Test fun comfortableBubbleThemeRolesFollowTheResolvedColorSchemeWhileCustomIsFixed() {
+        val primary = ComfortableBubbleColor(ComfortableBubbleColorRole.PRIMARY)
+        val custom = ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, 0xff12ab34.toInt())
+        val gruvbox = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK))
+        val nord = requireNotNull(fixedThemeScheme(ColorThemePreset.NORD))
+        assertEquals(gruvbox.primary, resolveComfortableBubbleColor(primary, gruvbox))
+        assertEquals(nord.primary, resolveComfortableBubbleColor(primary, nord))
+        assertNotEquals(resolveComfortableBubbleColor(primary, gruvbox), resolveComfortableBubbleColor(primary, nord))
+        assertEquals(Color(0xff12ab34.toInt()), resolveComfortableBubbleColor(custom, gruvbox))
+        assertEquals(Color(0xff12ab34.toInt()), resolveComfortableBubbleColor(custom, nord))
+        assertNull(resolveComfortableBubbleColor(ComfortableBubbleColor(), gruvbox))
+    }
+
     @Test fun motdBrandSeeds_useTheApprovedRoleCodedTrio() {
         assertEquals(0xFF006C70.toInt(), MotdTeal.toArgb())
         assertEquals(0xFF8B4FA5.toInt(), MotdOrchid.toArgb())

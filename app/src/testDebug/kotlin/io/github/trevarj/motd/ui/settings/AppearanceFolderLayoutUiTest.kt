@@ -342,6 +342,32 @@ class AppearanceFolderLayoutUiTest {
     }
 
     @Test
+    fun bubbleColorPickerUpdatesSentAndReceivedColorsAndKeepsCustomDraftUntilApply() {
+        setContent()
+
+        compose.onNodeWithTag("settings_bubble_color_picker").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_bubble_color_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("settings_bubble_color_primary").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_bubble_color_primary").assertIsSelected()
+        compose
+            .onNodeWithTag("settings_bubble_color_received")
+            .performScrollTo()
+            .performClick()
+            .assertIsSelected()
+        compose.onNodeWithTag("settings_bubble_color_tertiary_container").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_bubble_color_tertiary_container").assertIsSelected()
+        compose.onNodeWithTag("settings_bubble_color_custom").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_bubble_color_hex").performScrollTo().performTextReplacement("#bad")
+        compose.onNodeWithTag("settings_bubble_color_apply").assertIsNotEnabled()
+        compose.onNodeWithTag("settings_bubble_color_cancel").performClick()
+        compose.onNodeWithTag("settings_bubble_color_custom").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_bubble_color_hex").performScrollTo().performTextReplacement("#12AB34")
+        compose.onNodeWithTag("settings_bubble_color_tertiary_container").assertIsSelected()
+        compose.onNodeWithTag("settings_bubble_color_apply").performClick()
+        compose.onNodeWithTag("settings_bubble_color_custom").performScrollTo().assertIsSelected()
+    }
+
+    @Test
     fun avatarAndTimeSelectionsUpdateInlinePreviewBeforeSettingsEmit() {
         val expectedTime = previewTimeText()
         setContent()

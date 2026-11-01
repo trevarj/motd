@@ -24,6 +24,8 @@ import io.github.trevarj.motd.data.prefs.ChatSoundPrefs
 import io.github.trevarj.motd.data.prefs.ChatSoundTone
 import io.github.trevarj.motd.data.prefs.ChatSoundVoice
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
@@ -507,6 +509,8 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setComposerStyle(ComposerStyle.COMPACT)
             appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.SQUARE)
             appearancePrefs.setChatShadowsEnabled(false)
+            appearancePrefs.setSentBubbleColor(ComfortableBubbleColor(ComfortableBubbleColorRole.PRIMARY))
+            appearancePrefs.setReceivedBubbleColor(ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, 0xff12ab34.toInt()))
             appearancePrefs.setUseThemeTextColors(true)
             appearancePrefs.setLauncherIcon(LauncherIcon.GRUVBOX)
             appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, "12345678-1234-1234-1234-123456789abc.image", 0xff12ab34.toInt()))
@@ -528,6 +532,8 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setComposerStyle(ComposerStyle.COMFORTABLE)
             appearancePrefs.setBubbleCornerStyle(BubbleCornerStyle.ROUNDED)
             appearancePrefs.setChatShadowsEnabled(true)
+            appearancePrefs.setSentBubbleColor(ComfortableBubbleColor())
+            appearancePrefs.setReceivedBubbleColor(ComfortableBubbleColor())
             appearancePrefs.setUseThemeTextColors(false)
             appearancePrefs.setLauncherIcon(LauncherIcon.DEFAULT)
             appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.MEMES, 20))
@@ -544,6 +550,8 @@ class ConfigurationBackupRepositoryTest {
             assertEquals(ComposerStyle.COMPACT, config.composerStyle)
             assertEquals(BubbleCornerStyle.SQUARE, config.bubbleCornerStyle)
             assertEquals(false, config.chatShadowsEnabled)
+            assertEquals(ComfortableBubbleColor(ComfortableBubbleColorRole.PRIMARY), config.sentBubbleColor)
+            assertEquals(ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, 0xff12ab34.toInt()), config.receivedBubbleColor)
             assertEquals(true, config.useThemeTextColors)
             assertEquals(LauncherIcon.GRUVBOX, config.launcherIcon)
             assertEquals("Iosevka Term.ttf", config.customFontName)

@@ -73,6 +73,7 @@ import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.data.prefs.FONT_SCALE_STEP_PERCENT
@@ -173,6 +174,8 @@ fun AppearanceSettingsScreen(
         onMessageSpacing = viewModel::setMessageSpacing,
         onBubbleCornerStyle = viewModel::setBubbleCornerStyle,
         onChatShadowsEnabled = viewModel::setChatShadowsEnabled,
+        onSentBubbleColor = viewModel::setSentBubbleColor,
+        onReceivedBubbleColor = viewModel::setReceivedBubbleColor,
         onLauncherIcon = viewModel::setLauncherIcon,
         target = target,
         snackbarHostState = snackbarHostState,
@@ -207,6 +210,8 @@ fun AppearanceSettingsContent(
     onMessageSpacing: (io.github.trevarj.motd.data.prefs.MessageSpacing) -> Unit,
     onBubbleCornerStyle: (io.github.trevarj.motd.data.prefs.BubbleCornerStyle) -> Unit,
     onChatShadowsEnabled: (Boolean) -> Unit = {},
+    onSentBubbleColor: (ComfortableBubbleColor) -> Unit = {},
+    onReceivedBubbleColor: (ComfortableBubbleColor) -> Unit = {},
     onLauncherIcon: (LauncherIcon) -> Unit,
     customFontFile: File? = null,
     onImportCustomFont: (Uri) -> Unit = {},
@@ -218,6 +223,7 @@ fun AppearanceSettingsContent(
 ) {
     var showThemeSheet by rememberSaveable { mutableStateOf(false) }
     var showFontSheet by rememberSaveable { mutableStateOf(false) }
+    var showBubbleColorSheet by rememberSaveable { mutableStateOf(false) }
     var choiceSheet by rememberSaveable { mutableStateOf<AppearanceChoice?>(null) }
     // Update the sample on tap, before the persisted settings flow emits its new value.
     var previewDensity by rememberSaveable { mutableStateOf(settings.layoutDensity) }
@@ -550,6 +556,15 @@ fun AppearanceSettingsContent(
                 )
             }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.BUBBLE_COLORS.name) { targetModifier ->
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_bubble_colors),
+                    summary = stringResource(R.string.settings_bubble_colors_desc),
+                    modifier = targetModifier.testTag("settings_bubble_color_picker"),
+                    onClick = { showBubbleColorSheet = true },
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
                 title = stringResource(R.string.settings_chat_shadows),
                 subtitle = stringResource(R.string.settings_chat_shadows_desc),
@@ -680,6 +695,22 @@ fun AppearanceSettingsContent(
             onDismiss = { showFontSheet = false },
         )
     }
+    if (showBubbleColorSheet) {
+        ComfortableBubbleColorPickerSheet(
+            settings = previewSettings,
+            appearance = previewAppearance,
+            customFontFile = customFontFile,
+            onSentColor = {
+                previewAppearance = previewAppearance.copy(sentBubbleColor = it)
+                onSentBubbleColor(it)
+            },
+            onReceivedColor = {
+                previewAppearance = previewAppearance.copy(receivedBubbleColor = it)
+                onReceivedBubbleColor(it)
+            },
+            onDismiss = { showBubbleColorSheet = false },
+        )
+    }
 }
 
 private enum class AppearanceChoice { PALETTE, FOLDER_LAYOUT, DENSITY, COMPOSER_STYLE, AVATAR, TIME, SPACING, BUBBLES, LAUNCHER }
@@ -719,6 +750,8 @@ private fun AppearanceChatLayoutPreview(
         messageSpacing = messageSpacing,
         bubbleCornerStyle = bubbleCorners,
         chatShadowsEnabled = chatShadowsEnabled,
+        sentBubbleColor = appearance.sentBubbleColor,
+        receivedBubbleColor = appearance.receivedBubbleColor,
         syncSystemBars = false,
     ) {
         ChatLayoutPreview(
