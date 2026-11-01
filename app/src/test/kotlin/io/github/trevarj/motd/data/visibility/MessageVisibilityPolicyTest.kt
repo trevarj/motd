@@ -14,6 +14,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MessageVisibilityPolicyTest {
+    @Test fun `custom presence shows exactly selected types`() {
+        val policy = MessageVisibilityPolicy(MessageVisibilitySpec(presenceMode = PresenceMode.CUSTOM, customPresenceKinds = setOf(MessageKind.JOIN)))
+        assertTrue(policy.timeline(message(kind = MessageKind.JOIN)))
+        assertFalse(policy.timeline(message(kind = MessageKind.QUIT)))
+        assertTrue(policy.timeline(message(kind = MessageKind.PRIVMSG)))
+    }
+
     @Test
     fun `presence events follow timeline setting but never preview or activity`() {
         for (kind in PRESENCE_KINDS) {

@@ -69,10 +69,13 @@ class SmartPresenceVisibilityTest {
         )
     }
 
-    private suspend fun visibleRows(mode: PresenceMode): List<MessageEntity> {
+    private suspend fun visibleRows(
+        mode: PresenceMode,
+        customKinds: Set<MessageKind> = io.github.trevarj.motd.data.prefs.DEFAULT_CUSTOM_PRESENCE_KINDS,
+    ): List<MessageEntity> {
         val source =
             db.messageDao().pagingSource(
-                messagePagingQuery(bufferId, MessageVisibilitySpec(presenceMode = mode)),
+                messagePagingQuery(bufferId, MessageVisibilitySpec(presenceMode = mode, customPresenceKinds = customKinds)),
             )
         val page =
             source.load(
@@ -92,6 +95,18 @@ class SmartPresenceVisibilityTest {
                     mode.name,
                     presenceExampleRows(mode).map { it.kind to it.sender }.reversed(),
                     visibleKinds(mode),
+                )
+            }
+        }
+
+    @Test
+    fun `custom production query admits only selected presence types`() =
+        runTest {
+            db.messageDao().insertAll(presenceExample.map { it.copy(id = 0, bufferId = bufferId) })
+            for (selected in listOf(emptySet<MessageKind>(), setOf(MessageKind.JOIN), PRESENCE_KINDS)) {
+                assertEquals(
+                    presenceExampleRows(PresenceMode.CUSTOM, selected).map { it.kind to it.sender }.reversed(),
+                    visibleRows(PresenceMode.CUSTOM, selected).map { it.kind to it.sender },
                 )
             }
         }

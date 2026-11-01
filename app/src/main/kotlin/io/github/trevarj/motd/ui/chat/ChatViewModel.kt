@@ -421,11 +421,13 @@ class ChatViewModel
                 settingsRepository.settings,
                 _hiddenFoolsRevealed,
                 bufferRepository.observeBuffer(bufferId).distinctUntilChanged { previous, next ->
-                    previous?.id == next?.id && previous?.presenceModeOverride == next?.presenceModeOverride
+                    previous?.id == next?.id &&
+                        previous?.presenceModeOverride == next?.presenceModeOverride &&
+                        previous?.presenceCustomKindsOverride == next?.presenceCustomKindsOverride
                 },
             ) { settings, revealHiddenFools, room ->
                 (room?.id ?: bufferId) to
-                    MessageVisibilitySpec.from(settings, room?.presenceModeOverride).copy(revealHiddenFools = revealHiddenFools)
+                    MessageVisibilitySpec.from(settings, room?.presenceModeOverride, room?.presenceCustomKindsOverride).copy(revealHiddenFools = revealHiddenFools)
             }.distinctUntilChanged()
         private val filterSpecs = pagingSpecs.map { it.second }.distinctUntilChanged()
         private val filterSpec =
@@ -1056,6 +1058,8 @@ class ChatViewModel
                 ConversationPresenceState(
                     global = settings.presenceMode,
                     override = room?.presenceModeOverride,
+                    globalCustomKinds = settings.customPresenceKinds,
+                    overrideCustomKinds = room?.presenceCustomKindsOverride,
                 )
             }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ConversationPresenceState())
 
@@ -1763,7 +1767,24 @@ class ChatViewModel
                 val requestedId = operationalBufferId.value
                 val written =
                     try {
-                        bufferRepository.setPresenceModeOverride(requestedId, override)
+                        bufferRepository.setPresenceFilterOverride(
+                            requestedId,
+                            override,
+                            conversationPresence.value.globalCustomKinds,
+                        )
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        false
+                    }
+                if (!written) uiEventQueue.enqueue(ChatUiEvent.PresenceModeWriteFailed)
+            }
+
+        fun togglePresenceCustomKind(kind: io.github.trevarj.motd.data.db.MessageKind) =
+            viewModelScope.launch {
+                val written =
+                    try {
+                        bufferRepository.togglePresenceCustomKind(operationalBufferId.value, kind, conversationPresence.value.globalCustomKinds)
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: Exception) {
@@ -3310,6 +3331,7 @@ class ChatViewModel
                     MessageVisibilitySpec.from(
                         settingsRepository.settings.first(),
                         initialEntryBuffer?.presenceModeOverride,
+                        initialEntryBuffer?.presenceCustomKindsOverride,
                     )
                 AutoFollowTrace.record("entry_init_inputs", bufferId) {
                     "canonical=${initialEntryBuffer?.id} presence=${entrySpec.presenceMode} " +

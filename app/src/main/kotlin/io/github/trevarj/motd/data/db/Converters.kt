@@ -4,6 +4,7 @@ import androidx.room.TypeConverter
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.visibility.PRESENCE_KINDS
 
 // Enum <-> String converters so enum columns store their stable `name` (matching the string
 // literals used in raw @Query predicates like kind IN ('PRIVMSG', ...)).
@@ -99,6 +100,12 @@ internal class Converters {
 
     @TypeConverter
     fun stringToPresenceMode(v: String?): PresenceMode? = v?.let { runCatching { PresenceMode.valueOf(it) }.getOrNull() }
+
+    @TypeConverter
+    fun presenceKindsToString(v: Set<MessageKind>?): String? = v?.filter { it in PRESENCE_KINDS }?.sortedBy(MessageKind::name)?.joinToString(",") { it.name }
+
+    @TypeConverter
+    fun stringToPresenceKinds(v: String?): Set<MessageKind>? = v?.split(',')?.mapNotNull { runCatching { MessageKind.valueOf(it) }.getOrNull() }?.filterTo(linkedSetOf()) { it in PRESENCE_KINDS }
 
     @TypeConverter
     fun historySyncModeToString(v: HistorySyncMode?): String? = v?.name

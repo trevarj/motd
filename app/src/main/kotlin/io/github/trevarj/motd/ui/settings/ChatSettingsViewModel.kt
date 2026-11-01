@@ -91,6 +91,8 @@ class ChatSettingsViewModel
 
         fun setPresenceMode(value: PresenceMode) = launch { settingsRepository.setPresenceMode(value) }
 
+        fun toggleCustomPresenceKind(value: io.github.trevarj.motd.data.db.MessageKind) = launch { settingsRepository.toggleCustomPresenceKind(value) }
+
         fun setChatListSwipeAction(value: ChatListSwipeAction) = launch { settingsRepository.setChatListSwipeAction(value) }
 
         fun setMentionsEnabled(enabled: Boolean) = launch { settingsRepository.setMentionsEnabled(enabled) }

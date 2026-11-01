@@ -822,6 +822,16 @@ class RequiredHeadlessE2eTest {
             assertThemeTextColorsEnabled()
             returnToRoot()
             searchPresence()
+            // Exercise the production picker without changing the user's saved filter.
+            val savedPresence = runBlocking { settings.settings.first() }
+            try {
+                exerciseCustomPresence()
+            } finally {
+                runBlocking {
+                    settings.setCustomPresenceKinds(savedPresence.customPresenceKinds)
+                    settings.setPresenceMode(savedPresence.presenceMode)
+                }
+            }
             returnToPresenceSearch()
             returnToRoot()
             exerciseFoolSettings("motd-fool-settings-e2e")

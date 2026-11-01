@@ -813,6 +813,7 @@ fun ChatScreen(
         conversationLayout = state.conversationLayout,
         onConversationLayoutSelected = viewModel::setConversationLayoutOverride,
         onPresenceModeSelected = viewModel::setPresenceModeOverride,
+        onPresenceCustomKindSelected = viewModel::togglePresenceCustomKind,
         onHistorySyncModeSelected = viewModel::setHistorySyncModeOverride,
         diagnostics = viewModel.diagnostics,
         avatarEvents = viewModel.avatarEvents,
@@ -1253,6 +1254,7 @@ internal fun ChatContent(
     conversationLayout: ConversationLayoutState = ConversationLayoutState(),
     onConversationLayoutSelected: (io.github.trevarj.motd.data.prefs.LayoutDensity?) -> Unit = {},
     onPresenceModeSelected: (io.github.trevarj.motd.data.prefs.PresenceMode?) -> Unit = {},
+    onPresenceCustomKindSelected: (io.github.trevarj.motd.data.db.MessageKind) -> Unit = {},
     onHistorySyncModeSelected: (io.github.trevarj.motd.data.prefs.HistorySyncMode?) -> Unit = {},
     // Opt-in journal for the timeline's own Paging generations. Noop by default so previews and
     // hand-built call sites need nothing; the required E2E gate arms the real one for the journey.
@@ -1353,6 +1355,7 @@ internal fun ChatContent(
         ) {
             MessageVisibilitySpec(
                 presenceMode = presenceMode,
+                customPresenceKinds = state.conversationPresence.effectiveCustomKinds,
                 showRedactedMessages = showRedactedMessages,
                 fools = fools,
                 foolsMode = foolsMode,
@@ -4734,6 +4737,7 @@ internal fun ChatContent(
         PresenceModeSheet(
             state = state.conversationPresence,
             onSelect = onPresenceModeSelected,
+            onCustomKindSelected = onPresenceCustomKindSelected,
             onDismiss = { presenceModeSheetOpen = false },
         )
     }

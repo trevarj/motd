@@ -36,15 +36,24 @@ internal val presenceExample =
         MessageEntity(id = 3, bufferId = -1, serverTime = 1_704_110_160_000, sender = "Alex", normalizedActor = "alex", kind = MessageKind.QUIT, text = "Alex left", dedupKey = "example-recent"),
         MessageEntity(id = 4, bufferId = -1, serverTime = 1_704_110_220_000, sender = "You", normalizedActor = "you", kind = MessageKind.JOIN, text = "You joined", isSelf = true, dedupKey = "example-own"),
         MessageEntity(id = 5, bufferId = -1, serverTime = 1_704_110_280_000, sender = "", kind = MessageKind.NETSPLIT, text = "A network split occurred", dedupKey = "example-aggregate"),
+        MessageEntity(id = 6, bufferId = -1, serverTime = 1_704_110_340_000, sender = "Alex", normalizedActor = "alex", kind = MessageKind.PART, text = "Alex left", dedupKey = "example-part"),
+        MessageEntity(id = 7, bufferId = -1, serverTime = 1_704_110_400_000, sender = "Alex", normalizedActor = "alex", kind = MessageKind.NICK, text = "Alex is now Alex_", dedupKey = "example-nick"),
+        MessageEntity(id = 8, bufferId = -1, serverTime = 1_704_110_460_000, sender = "Alex", normalizedActor = "alex", kind = MessageKind.AWAY, text = "Alex is away", dedupKey = "example-away"),
+        MessageEntity(id = 9, bufferId = -1, serverTime = 1_704_110_520_000, sender = "Alex", normalizedActor = "alex", kind = MessageKind.BACK, text = "Alex is back", dedupKey = "example-back"),
+        MessageEntity(id = 10, bufferId = -1, serverTime = 1_704_110_580_000, sender = "", kind = MessageKind.NETJOIN, text = "A network rejoined", dedupKey = "example-netjoin"),
     )
 
-private val smartPresenceExample = listOf(presenceExample[0], presenceExample[2], presenceExample[3], presenceExample[4])
+private val smartPresenceExample = listOf(presenceExample[0], presenceExample[2], presenceExample[3], presenceExample[4], presenceExample[5], presenceExample[9])
 private val hiddenPresenceExample = listOf(presenceExample[0])
 
-internal fun presenceExampleRows(mode: PresenceMode): List<MessageEntity> =
+internal fun presenceExampleRows(
+    mode: PresenceMode,
+    customKinds: Set<MessageKind> = io.github.trevarj.motd.data.prefs.DEFAULT_CUSTOM_PRESENCE_KINDS,
+): List<MessageEntity> =
     when (mode) {
         PresenceMode.ALL -> presenceExample
         PresenceMode.SMART -> smartPresenceExample
+        PresenceMode.CUSTOM -> presenceExample.filter { it.kind !in io.github.trevarj.motd.data.visibility.PRESENCE_KINDS || it.kind in customKinds }
         PresenceMode.HIDDEN -> hiddenPresenceExample
     }
 
@@ -63,10 +72,13 @@ internal fun LocalBehaviorExample(
 }
 
 @Composable
-internal fun PresenceExample(mode: PresenceMode) {
+internal fun PresenceExample(
+    mode: PresenceMode,
+    customKinds: Set<MessageKind> = io.github.trevarj.motd.data.prefs.DEFAULT_CUSTOM_PRESENCE_KINDS,
+) {
     LocalBehaviorExample("presence_example_${mode.name.lowercase()}") {
         Text(stringResource(R.string.settings_presence_example_context), style = MaterialTheme.typography.bodySmall)
-        for (row in presenceExampleRows(mode)) {
+        for (row in presenceExampleRows(mode, customKinds)) {
             if (row.kind == MessageKind.PRIVMSG) {
                 MessageBubble(row.sender, row.text, row.serverTime, false, row.kind, true)
             } else {

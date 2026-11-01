@@ -37,7 +37,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 46,
+    version = 47,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -1105,6 +1105,14 @@ val MIGRATION_45_46 =
         }
     }
 
+/** v46 -> v47 adds independent Custom presence selections to durable chats. */
+val MIGRATION_46_47 =
+    object : Migration(46, 47) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE buffers ADD COLUMN presenceCustomKindsOverride TEXT")
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1163,6 +1171,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_43_44,
         MIGRATION_44_45,
         MIGRATION_45_46,
+        MIGRATION_46_47,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"

@@ -323,6 +323,8 @@ data class RoomEntity(
     val layoutDensityOverride: LayoutDensity? = null,
     /** Null inherits the global presence-event preference for this durable conversation. */
     val presenceModeOverride: PresenceMode? = null,
+    /** Null inherits global Custom kinds; an empty set is an explicit local hide. */
+    val presenceCustomKindsOverride: Set<MessageKind>? = null,
     /** Null inherits the global history-sync policy; explicit BALANCED remains an override. */
     val historySyncModeOverride: HistorySyncMode? = null,
     /** User-selected HTTPS URL or app-owned file URI. SERVER rooms always leave this null. */

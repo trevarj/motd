@@ -4,6 +4,7 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.DEFAULT_CUSTOM_PRESENCE_KINDS
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.PresenceMode
@@ -34,7 +35,7 @@ val ACTOR_PRESENCE_KINDS: Set<MessageKind> =
 /**
  * Netsplit/netjoin rows aggregate many users into a single condensed row and carry no single actor
  * (`normalizedActor` is empty), so the smart test cannot apply to them. They are already low-noise
- * by construction and only [PresenceMode.HIDDEN] removes them.
+ * by construction. [PresenceMode.HIDDEN] and unselected Custom types remove them.
  */
 val AGGREGATE_PRESENCE_KINDS: Set<MessageKind> = setOf(MessageKind.NETSPLIT, MessageKind.NETJOIN)
 
@@ -46,6 +47,7 @@ val CONVERSATION_KINDS: Set<MessageKind> =
 
 data class MessageVisibilitySpec(
     val presenceMode: PresenceMode = PresenceMode.SMART,
+    val customPresenceKinds: Set<MessageKind> = DEFAULT_CUSTOM_PRESENCE_KINDS,
     val showRedactedMessages: Boolean = true,
     /** Stored configured nicks; consumers normalize them with the room's IRC identity rules. */
     val fools: Set<String> = emptySet(),
@@ -57,6 +59,7 @@ data class MessageVisibilitySpec(
     /** Session reveal may share a native presenter; every other visibility choice is a cutover. */
     internal fun samePolicyExceptHiddenReveal(other: MessageVisibilitySpec): Boolean =
         presenceMode == other.presenceMode &&
+            customPresenceKinds == other.customPresenceKinds &&
             showRedactedMessages == other.showRedactedMessages &&
             fools == other.fools &&
             foolsMode == other.foolsMode &&
@@ -67,9 +70,11 @@ data class MessageVisibilitySpec(
         fun from(
             settings: Settings,
             override: PresenceMode? = null,
+            customOverride: Set<MessageKind>? = null,
         ): MessageVisibilitySpec =
             MessageVisibilitySpec(
                 presenceMode = override ?: settings.presenceMode,
+                customPresenceKinds = if (override == PresenceMode.CUSTOM) customOverride ?: settings.customPresenceKinds else settings.customPresenceKinds,
                 showRedactedMessages = settings.showRedactedMessages,
                 fools = settings.fools,
                 foolsMode = settings.foolsMode,
@@ -155,6 +160,7 @@ class MessageVisibilityPolicy(
      */
     fun timeline(message: MessageEntity): Boolean =
         (spec.presenceMode != PresenceMode.HIDDEN || message.kind !in PRESENCE_KINDS) &&
+            (spec.presenceMode != PresenceMode.CUSTOM || message.kind !in PRESENCE_KINDS || message.kind in spec.customPresenceKinds) &&
             (spec.showRedactedMessages || message.kind != MessageKind.REDACTED) &&
             (spec.revealHiddenFools || foolPreferences(message)?.visibility != FoolsMode.HIDE)
 
@@ -222,6 +228,7 @@ internal class MessageVisibilitySql(
             when (spec.presenceMode) {
                 PresenceMode.ALL -> TRUE
                 PresenceMode.HIDDEN -> notPresence(alias)
+                PresenceMode.CUSTOM -> customPresence(alias)
                 PresenceMode.SMART -> smartPresence(alias)
             },
             redactionVisibility(alias),
@@ -259,6 +266,15 @@ internal class MessageVisibilitySql(
     private fun notHidden(alias: String): String = buildNotFoolPredicate(hiddenIdentities, alias)
 
     private fun notPresence(alias: String): String = "${column(alias, "kind")} NOT IN ($PRESENCE_KIND_SQL)"
+
+    private fun customPresence(alias: String): String {
+        val hidden = PRESENCE_KINDS - spec.customPresenceKinds
+        return if (hidden.isEmpty()) {
+            TRUE
+        } else {
+            "${column(alias, "kind")} NOT IN (${hidden.sortedBy(MessageKind::name).joinToString(",") { "'${it.name}'" }})"
+        }
+    }
 
     private fun redactionVisibility(alias: String): String = if (spec.showRedactedMessages) TRUE else "${column(alias, "kind")} != '${MessageKind.REDACTED.name}'"
 

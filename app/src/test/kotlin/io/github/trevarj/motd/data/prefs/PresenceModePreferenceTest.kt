@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.data.prefs
 
+import io.github.trevarj.motd.data.db.MessageKind
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -49,5 +50,13 @@ class PresenceModePreferenceTest {
             PresenceMode.SMART,
             presenceModeFromPreference(saved = "NONSENSE", legacyShowJoinPartQuit = null),
         )
+    }
+
+    @Test fun `custom kinds retain only known presence events`() {
+        assertEquals(
+            setOf(MessageKind.JOIN, MessageKind.NETJOIN),
+            customPresenceKindsFromPreference("JOIN,PRIVMSG,UNKNOWN,NETJOIN"),
+        )
+        assertEquals("JOIN,NETJOIN", encodeCustomPresenceKinds(setOf(MessageKind.NETJOIN, MessageKind.JOIN, MessageKind.PRIVMSG)))
     }
 }

@@ -1549,8 +1549,11 @@ data class ConversationLayoutState(
 data class ConversationPresenceState(
     val global: PresenceMode = PresenceMode.SMART,
     val override: PresenceMode? = null,
+    val globalCustomKinds: Set<io.github.trevarj.motd.data.db.MessageKind> = io.github.trevarj.motd.data.prefs.DEFAULT_CUSTOM_PRESENCE_KINDS,
+    val overrideCustomKinds: Set<io.github.trevarj.motd.data.db.MessageKind>? = null,
 ) {
     val effective: PresenceMode get() = override ?: global
+    val effectiveCustomKinds get() = if (override == PresenceMode.CUSTOM) overrideCustomKinds ?: globalCustomKinds else globalCustomKinds
 }
 
 data class ConversationHistorySyncState(

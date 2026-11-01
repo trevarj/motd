@@ -50,6 +50,7 @@ import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.service.autoAwayText
+import io.github.trevarj.motd.ui.chat.PresenceKindChoices
 import io.github.trevarj.motd.ui.chat.presenceModeDescription
 import io.github.trevarj.motd.ui.chat.presenceModeLabel
 import io.github.trevarj.motd.ui.chatlist.ChatListSwipeExample
@@ -102,6 +103,7 @@ fun ChatSettingsScreen(
         onOpenDirectConnections = onOpenDirectConnections,
         onOpenChatSounds = onOpenChatSounds,
         onPresenceMode = viewModel::setPresenceMode,
+        onCustomPresenceKind = viewModel::toggleCustomPresenceKind,
         onShowRedactedMessages = viewModel::setShowRedactedMessages,
         onChatListSwipeAction = viewModel::setChatListSwipeAction,
         onMentionsEnabled = viewModel::setMentionsEnabled,
@@ -149,6 +151,7 @@ fun ChatSettingsContent(
     onOpenDirectConnections: () -> Unit,
     onOpenChatSounds: () -> Unit = {},
     onPresenceMode: (PresenceMode) -> Unit,
+    onCustomPresenceKind: (io.github.trevarj.motd.data.db.MessageKind) -> Unit = {},
     onShowRedactedMessages: (Boolean) -> Unit,
     onChatListSwipeAction: (ChatListSwipeAction) -> Unit,
     onMentionsEnabled: (Boolean) -> Unit = {},
@@ -479,7 +482,12 @@ fun ChatSettingsContent(
             onDismiss = { presenceSheetOpen = false },
             tag = "settings_presence_sheet",
             dismissOnSelect = false,
-            preview = { PresenceExample(settings.presenceMode) },
+            preview = { PresenceExample(settings.presenceMode, settings.customPresenceKinds) },
+            footer = {
+                if (settings.presenceMode == PresenceMode.CUSTOM) {
+                    PresenceKindChoices(settings.customPresenceKinds, onCustomPresenceKind, "settings_presence_custom")
+                }
+            },
         )
     }
     if (swipeSheetOpen) {

@@ -8,6 +8,7 @@ import io.github.trevarj.motd.data.db.InvitationEventRow
 import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MonitorQueryRow
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkBufferToolRow
@@ -190,6 +191,19 @@ interface BufferRepository {
         id: Long,
         mode: PresenceMode?,
     ): Boolean
+
+    /** Atomically updates the override and optional saved Custom selection. */
+    suspend fun setPresenceFilterOverride(
+        id: Long,
+        mode: PresenceMode?,
+        customKinds: Set<MessageKind>?,
+    ): Boolean = setPresenceModeOverride(id, mode)
+
+    suspend fun togglePresenceCustomKind(
+        id: Long,
+        kind: MessageKind,
+        globalKinds: Set<MessageKind>,
+    ): Boolean = false
 
     /** Persists a nullable CHANNEL/QUERY override; false means the room is missing or a SERVER. */
     suspend fun setHistorySyncModeOverride(

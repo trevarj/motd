@@ -674,16 +674,51 @@ interface BufferDao {
 
     /** Write via a stale redirect shell to its current canonical conversation. */
     @Query(
-        """UPDATE buffers SET presenceModeOverride = :mode
+        """UPDATE buffers SET presenceModeOverride = :mode,
+               presenceCustomKindsOverride = CASE
+                   WHEN :mode = 'CUSTOM' THEN COALESCE(presenceCustomKindsOverride, :initialCustomKinds)
+                   ELSE presenceCustomKindsOverride
+               END
            WHERE id = (
                SELECT COALESCE(redirectToRoomId, id)
                FROM buffers
                WHERE id = :requestedId
            )""",
     )
+    suspend fun setPresenceModeOverrideEncoded(
+        requestedId: RoomId,
+        mode: PresenceMode?,
+        initialCustomKinds: String?,
+    ): Int
+
+    // Query collection parameters expand to SQL placeholders; encode this single TEXT value explicitly.
     suspend fun setPresenceModeOverride(
         requestedId: RoomId,
         mode: PresenceMode?,
+        initialCustomKinds: Set<MessageKind>?,
+    ): Int = setPresenceModeOverrideEncoded(requestedId, mode, Converters().presenceKindsToString(initialCustomKinds))
+
+    /** Read-modify-write in one Room transaction so rapid checkbox taps retain every toggle. */
+    @androidx.room.Transaction
+    suspend fun togglePresenceCustomKind(
+        requestedId: RoomId,
+        kind: MessageKind,
+        globalKinds: Set<MessageKind>,
+    ): Int {
+        val room = observeById(requestedId) ?: return 0
+        val current = room.presenceCustomKindsOverride ?: globalKinds
+        val next = if (kind in current) current - kind else current + kind
+        return setPresenceCustomKindsEncoded(requestedId, PresenceMode.CUSTOM, requireNotNull(Converters().presenceKindsToString(next)))
+    }
+
+    @Query(
+        """UPDATE buffers SET presenceModeOverride = :mode, presenceCustomKindsOverride = :customKinds
+           WHERE id = (SELECT COALESCE(redirectToRoomId, id) FROM buffers WHERE id = :requestedId)""",
+    )
+    suspend fun setPresenceCustomKindsEncoded(
+        requestedId: RoomId,
+        mode: PresenceMode,
+        customKinds: String,
     ): Int
 
     /** Write through durable redirects; SERVER rows reject conversation history-sync overrides. */

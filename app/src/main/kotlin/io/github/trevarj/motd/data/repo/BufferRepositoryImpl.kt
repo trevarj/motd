@@ -8,6 +8,7 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MemberDao
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageDao
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MonitorQueryRow
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
@@ -135,7 +136,19 @@ class BufferRepositoryImpl
         override suspend fun setPresenceModeOverride(
             id: Long,
             mode: PresenceMode?,
-        ): Boolean = bufferDao.setPresenceModeOverride(id, mode) == 1
+        ): Boolean = bufferDao.setPresenceModeOverride(id, mode, null) == 1
+
+        override suspend fun setPresenceFilterOverride(
+            id: Long,
+            mode: PresenceMode?,
+            customKinds: Set<MessageKind>?,
+        ): Boolean = bufferDao.setPresenceModeOverride(id, mode, customKinds) == 1
+
+        override suspend fun togglePresenceCustomKind(
+            id: Long,
+            kind: MessageKind,
+            globalKinds: Set<MessageKind>,
+        ): Boolean = bufferDao.togglePresenceCustomKind(id, kind, globalKinds) == 1
 
         override suspend fun setHistorySyncModeOverride(
             id: Long,

@@ -2412,6 +2412,53 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun `custom presence snapshots global kinds then keeps an independent chat selection`() =
+        runTest {
+            val settings =
+                FakeSettingsRepository().apply {
+                    this.settings.value = Settings(presenceMode = PresenceMode.CUSTOM, customPresenceKinds = setOf(MessageKind.JOIN, MessageKind.QUIT))
+                }
+            val buffers = FakeBufferRepository(channel)
+            val vm = viewModel(channel, FakeConnectionManager(network.id), buffers = buffers, settings = settings)
+            vm.state.first { it.buffer != null }
+
+            vm.setPresenceModeOverride(PresenceMode.CUSTOM)
+            advanceUntilIdle()
+            assertEquals(setOf(MessageKind.JOIN, MessageKind.QUIT), vm.state.value.conversationPresence.overrideCustomKinds)
+
+            vm.togglePresenceCustomKind(MessageKind.QUIT)
+            advanceUntilIdle()
+            assertEquals(
+                setOf(MessageKind.JOIN),
+                vm.state
+                    .first { it.conversationPresence.overrideCustomKinds == setOf(MessageKind.JOIN) }
+                    .conversationPresence.effectiveCustomKinds,
+            )
+
+            settings.settings.value = Settings(presenceMode = PresenceMode.CUSTOM, customPresenceKinds = setOf(MessageKind.PART))
+            assertEquals(
+                setOf(MessageKind.JOIN),
+                vm.state
+                    .first { it.conversationPresence.globalCustomKinds == setOf(MessageKind.PART) }
+                    .conversationPresence.effectiveCustomKinds,
+            )
+            vm.setPresenceModeOverride(null)
+            assertEquals(
+                setOf(MessageKind.PART),
+                vm.state
+                    .first { it.conversationPresence.override == null }
+                    .conversationPresence.effectiveCustomKinds,
+            )
+            vm.setPresenceModeOverride(PresenceMode.CUSTOM)
+            assertEquals(
+                setOf(MessageKind.JOIN),
+                vm.state
+                    .first { it.conversationPresence.override == PresenceMode.CUSTOM }
+                    .conversationPresence.effectiveCustomKinds,
+            )
+        }
+
+    @Test
     fun `history sync inherits global then persists and clears an explicit override`() =
         runTest {
             val settings = FakeSettingsRepository()
@@ -6899,6 +6946,27 @@ class ChatViewModelTest {
             presenceWrites += id to mode
             if (presenceWriteResult) buffer.value = buffer.value.copy(presenceModeOverride = mode)
             return presenceWriteResult
+        }
+
+        override suspend fun setPresenceFilterOverride(
+            id: Long,
+            mode: PresenceMode?,
+            customKinds: Set<MessageKind>?,
+        ): Boolean {
+            presenceWrites += id to mode
+            if (presenceWriteResult) buffer.value = buffer.value.copy(presenceModeOverride = mode, presenceCustomKindsOverride = if (mode == PresenceMode.CUSTOM) buffer.value.presenceCustomKindsOverride ?: customKinds else buffer.value.presenceCustomKindsOverride)
+            return presenceWriteResult
+        }
+
+        override suspend fun togglePresenceCustomKind(
+            id: Long,
+            kind: MessageKind,
+            globalKinds: Set<MessageKind>,
+        ): Boolean {
+            if (!presenceWriteResult) return false
+            val currentKinds = buffer.value.presenceCustomKindsOverride ?: globalKinds
+            buffer.value = buffer.value.copy(presenceModeOverride = PresenceMode.CUSTOM, presenceCustomKindsOverride = if (kind in currentKinds) currentKinds - kind else currentKinds + kind)
+            return true
         }
 
         override suspend fun setHistorySyncModeOverride(

@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.DeliveryMode
 import kotlinx.coroutines.flow.Flow
@@ -57,6 +58,7 @@ internal object PrefKeys {
     /** Superseded by [PRESENCE_MODE]; still read so an existing hide/show choice is honored. */
     val SHOW_JOIN_PART_QUIT = stringPreferencesKey("show_join_part_quit")
     val PRESENCE_MODE = stringPreferencesKey("presence_mode")
+    val CUSTOM_PRESENCE_KINDS = stringPreferencesKey("custom_presence_kinds")
     val SHOW_REDACTED_MESSAGES = stringPreferencesKey("show_redacted_messages")
     val SEND_TYPING_INDICATORS = stringPreferencesKey("send_typing_indicators")
     val SHOW_TYPING_INDICATORS = stringPreferencesKey("show_typing_indicators")
@@ -195,6 +197,7 @@ class DataStoreSettingsRepository
                             prefs[PrefKeys.PRESENCE_MODE],
                             prefs[PrefKeys.SHOW_JOIN_PART_QUIT],
                         ),
+                    customPresenceKinds = customPresenceKindsFromPreference(prefs[PrefKeys.CUSTOM_PRESENCE_KINDS]),
                     showRedactedMessages = prefs[PrefKeys.SHOW_REDACTED_MESSAGES]?.toBooleanStrictOrNull() ?: true,
                     sendTypingIndicators = prefs[PrefKeys.SEND_TYPING_INDICATORS]?.toBooleanStrictOrNull() ?: true,
                     showTypingIndicators = prefs[PrefKeys.SHOW_TYPING_INDICATORS]?.toBooleanStrictOrNull() ?: true,
@@ -430,6 +433,17 @@ class DataStoreSettingsRepository
             store.edit {
                 it[PrefKeys.PRESENCE_MODE] = m.name
                 it.remove(PrefKeys.SHOW_JOIN_PART_QUIT)
+            }
+        }
+
+        override suspend fun setCustomPresenceKinds(kinds: Set<MessageKind>) {
+            store.edit { it[PrefKeys.CUSTOM_PRESENCE_KINDS] = encodeCustomPresenceKinds(kinds) }
+        }
+
+        override suspend fun toggleCustomPresenceKind(kind: MessageKind) {
+            store.edit { prefs ->
+                val current = customPresenceKindsFromPreference(prefs[PrefKeys.CUSTOM_PRESENCE_KINDS])
+                prefs[PrefKeys.CUSTOM_PRESENCE_KINDS] = encodeCustomPresenceKinds(if (kind in current) current - kind else current + kind)
             }
         }
 

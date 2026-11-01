@@ -532,6 +532,7 @@ class ConfigurationBackupRepositoryImpl
                 }
                 settingsRepository.setFoolsMode(it.foolsMode)
                 settingsRepository.setPresenceMode(it.restoredPresenceMode())
+                settingsRepository.setCustomPresenceKinds(it.customPresenceKinds)
                 settingsRepository.setShowRedactedMessages(it.showRedactedMessages)
                 settingsRepository.setSendTypingIndicators(it.sendTypingIndicators)
                 settingsRepository.setShowTypingIndicators(it.showTypingIndicators)

@@ -239,6 +239,23 @@ internal class SettingsRobot(
         assertDisplayed("settings_search_result_page_CHAT_PRESENCE")
     }
 
+    fun exerciseCustomPresence() {
+        scrollToAndClick("settings_presence_picker")
+        scrollContainerTo("settings_presence_sheet_options", "settings_presence_mode_custom")
+        click("settings_presence_mode_custom")
+        scrollContainerTo("settings_presence_sheet_options", "settings_presence_custom_join")
+        val join = compose.onNodeWithTag("settings_presence_custom_join", useUnmergedTree = true)
+        val wasOn = runCatching { join.assertIsOn() }.isSuccess
+        click("settings_presence_custom_join")
+        compose.waitUntil(10_000) {
+            runCatching { if (wasOn) join.assertIsOff() else join.assertIsOn() }.isSuccess
+        }
+        val sheet = hasTestTag("settings_presence_sheet")
+        val dismiss = SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and (sheet or hasAnyAncestor(sheet))
+        compose.onAllNodes(dismiss, useUnmergedTree = true)[0].performSemanticsAction(SemanticsActions.Dismiss)
+        awaitTagGone("settings_presence_sheet")
+    }
+
     fun networks() = scrollToAndClick("settings_category_networks")
 }
 

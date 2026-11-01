@@ -8,6 +8,7 @@ import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.audio.VoicePrefs
 import io.github.trevarj.motd.avatar.AvatarPrefsImpl
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
@@ -35,6 +36,7 @@ import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.prefs.MessageSpacing
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
 import io.github.trevarj.motd.data.prefs.TimeFormat
@@ -62,6 +64,32 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class ConfigurationBackupRepositoryTest {
+    @Test
+    fun customPresenceSelectionsRoundTripIncludingEmpty() =
+        runTest {
+            val settings = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())
+            val original = settings.settings.first()
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                for (selected in listOf(setOf(MessageKind.JOIN, MessageKind.NETJOIN), emptySet())) {
+                    settings.setPresenceMode(PresenceMode.CUSTOM)
+                    settings.setCustomPresenceKinds(selected)
+                    val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                    settings.setPresenceMode(PresenceMode.HIDDEN)
+                    settings.setCustomPresenceKinds(setOf(MessageKind.QUIT))
+                    backup.import(raw, importMode = BackupImportMode.MERGE)
+                    val restored = settings.settings.first()
+                    assertEquals(PresenceMode.CUSTOM, restored.presenceMode)
+                    assertEquals(selected, restored.customPresenceKinds)
+                }
+            } finally {
+                settings.setPresenceMode(original.presenceMode)
+                settings.setCustomPresenceKinds(original.customPresenceKinds)
+                db.close()
+            }
+        }
+
     @Test
     fun mixedFoolPreferencesRoundTripAndLegacyImportClearsDestinationOptIns() =
         runTest {

@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.data.prefs
 
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.DeliveryMode
 import kotlinx.coroutines.flow.Flow
@@ -97,9 +98,22 @@ internal fun chatListSwipeActionFromPreference(saved: String?): ChatListSwipeAct
  * always survive, so "you joined" still anchors a fresh buffer.
  *
  * Netsplit/netjoin rows are aggregates covering many users at once, so they are already condensed to
- * a single row and are not subject to the smart test; only [HIDDEN] removes them.
+ * a single row and are not subject to the smart test; [HIDDEN] or a Custom selection can hide them.
  */
-enum class PresenceMode { ALL, SMART, HIDDEN }
+enum class PresenceMode { ALL, SMART, CUSTOM, HIDDEN }
+
+/** The stable set of timeline kinds governed by the Custom presence filter. */
+val DEFAULT_CUSTOM_PRESENCE_KINDS: Set<MessageKind> =
+    setOf(MessageKind.JOIN, MessageKind.PART, MessageKind.QUIT, MessageKind.NICK, MessageKind.AWAY, MessageKind.BACK, MessageKind.NETSPLIT, MessageKind.NETJOIN)
+
+internal fun customPresenceKindsFromPreference(saved: String?): Set<MessageKind> =
+    saved
+        ?.split(',')
+        ?.mapNotNull { name -> runCatching { MessageKind.valueOf(name) }.getOrNull() }
+        ?.filterTo(linkedSetOf()) { it in DEFAULT_CUSTOM_PRESENCE_KINDS }
+        ?: DEFAULT_CUSTOM_PRESENCE_KINDS
+
+internal fun encodeCustomPresenceKinds(kinds: Set<MessageKind>): String = kinds.filter { it in DEFAULT_CUSTOM_PRESENCE_KINDS }.sortedBy(MessageKind::name).joinToString(",") { it.name }
 
 /** Recent speech window for presence, also the following-speech window for JOIN under SMART. */
 const val SMART_PRESENCE_WINDOW_MS: Long = 5 * 60 * 1000
@@ -281,6 +295,8 @@ data class Settings(
     val foolsMode: FoolsMode = FoolsMode.DIMMED,
     /** Global presence-event presentation; a conversation may override it (RoomEntity). */
     val presenceMode: PresenceMode = PresenceMode.SMART,
+    /** Types shown when [presenceMode] is [PresenceMode.CUSTOM]. */
+    val customPresenceKinds: Set<MessageKind> = DEFAULT_CUSTOM_PRESENCE_KINDS,
     /** Keep visible accountability tombstones for messages deleted through IRCv3 redaction. */
     val showRedactedMessages: Boolean = true,
     /** Send IRCv3 +typing state to peers while composing. */
@@ -415,6 +431,10 @@ interface SettingsRepository {
     suspend fun setFoolsMode(m: FoolsMode)
 
     suspend fun setPresenceMode(m: PresenceMode)
+
+    suspend fun setCustomPresenceKinds(kinds: Set<MessageKind>) {}
+
+    suspend fun toggleCustomPresenceKind(kind: MessageKind) {}
 
     suspend fun setShowRedactedMessages(show: Boolean) {}
 
