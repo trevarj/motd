@@ -1363,8 +1363,9 @@
     <string name="settings_bubble_corner_subtle">Subtle</string>
     <string name="settings_bubble_corner_square">Square</string>
     <string name="settings_bubble_corners_desc">Applies to the Comfortable layout</string>
-    <string name="settings_bubble_colors">Bubble colors</string>
-    <string name="settings_bubble_colors_desc">Choose Comfortable chat backgrounds for sent and received messages</string>
+    <string name="settings_bubble_colors">Chat colors</string>
+    <string name="settings_bubble_colors_desc">Choose sent and received backgrounds in Comfortable chat. The input bar uses the received color in every layout.</string>
+    <string name="settings_bubble_color_composer_preview">Type a message</string>
     <string name="settings_bubble_color_sent">Sent messages</string>
     <string name="settings_bubble_color_received">Received messages</string>
     <string name="settings_bubble_color_default">Default</string>

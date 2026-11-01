@@ -53,7 +53,10 @@ import androidx.core.content.FileProvider
 import androidx.emoji2.emojipicker.EmojiPickerView
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.ComposerStyle
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.IrcTextStyle
@@ -69,9 +72,11 @@ import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
+import io.github.trevarj.motd.ui.components.composerContainerColor
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -103,6 +108,103 @@ class ComposerUiTest {
         // Real attachment refreshes FileProvider's static roots for Robolectric's per-test cache.
         val provider = FileProvider().apply { attachInfo(context, info) }
         ShadowContentResolver.registerProviderInternal(authority, provider)
+    }
+
+    @Test
+    fun receivedChatColorPaintsTheComposerAcrossLayoutsAndStyles() {
+        val selected = Color(0xFF123ABC)
+        val density = mutableStateOf(LayoutDensity.COMFORTABLE)
+        val style = mutableStateOf(ComposerStyle.COMFORTABLE)
+        val received =
+            mutableStateOf(
+                ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, selected.toArgb()),
+            )
+        var defaultFill = Color.Unspecified
+        compose.setContent {
+            MotdTheme(
+                layoutDensity = density.value,
+                receivedBubbleColor = received.value,
+            ) {
+                defaultFill = MaterialTheme.colorScheme.secondaryContainer
+                Composer(
+                    value = TextFieldValue(),
+                    onValueChange = {},
+                    onSend = {},
+                    enabled = true,
+                    sendEnabled = false,
+                    placeholder = "",
+                    composerStyle = style.value,
+                )
+            }
+        }
+
+        LayoutDensity.entries.forEach { selectedDensity ->
+            ComposerStyle.entries.forEach { selectedStyle ->
+                compose.runOnIdle {
+                    density.value = selectedDensity
+                    style.value = selectedStyle
+                }
+                val image = compose.onNodeWithTag("chat_composer_pill").captureToImage().asAndroidBitmap()
+                assertEquals(
+                    "$selectedDensity $selectedStyle",
+                    selected.toArgb(),
+                    image.getPixel(image.width / 2, image.height / 2),
+                )
+            }
+        }
+
+        compose.runOnIdle { received.value = ComfortableBubbleColor() }
+        val image = compose.onNodeWithTag("chat_composer_pill").captureToImage().asAndroidBitmap()
+        assertEquals(defaultFill.toArgb(), image.getPixel(image.width / 2, image.height / 2))
+        assertEquals(selected, composerContainerColor(selected, defaultFill))
+        assertEquals(defaultFill, composerContainerColor(null, defaultFill))
+    }
+
+    @Test
+    fun receivedChatColorsKeepComposerTextReadableAndFollowPalette() {
+        val received = mutableStateOf(ComfortableBubbleColor())
+        val theme = mutableStateOf(ColorThemePreset.LIGHT)
+        var paletteColor = Color.Unspecified
+        compose.setContent {
+            MotdTheme(
+                dynamicColor = false,
+                themePreset = theme.value,
+                receivedBubbleColor = received.value,
+            ) {
+                paletteColor = MaterialTheme.colorScheme.primary
+                Composer(
+                    value = TextFieldValue("Draft"),
+                    onValueChange = {},
+                    onSend = {},
+                    enabled = true,
+                    sendEnabled = false,
+                )
+            }
+        }
+
+        listOf(Color(0xFFFFF5D7), Color(0xFF7E5CAE)).forEach { color ->
+            compose.runOnIdle {
+                received.value = ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, color.toArgb())
+            }
+            compose.waitForIdle()
+            val text = composerTextLayout()
+            val strongestInk = maxOf(contrastRatio(Color.Black, color), contrastRatio(Color.White, color))
+            assertTrue(
+                "$color editor ink",
+                contrastRatio(text.layoutInput.style.color, color) >= minOf(MESSAGE_TEXT_CONTRAST, strongestInk),
+            )
+        }
+
+        compose.runOnIdle { received.value = ComfortableBubbleColor(ComfortableBubbleColorRole.PRIMARY) }
+        compose.waitForIdle()
+        val lightPrimary = paletteColor
+        assertComposerFill(lightPrimary, "light primary")
+
+        compose.runOnIdle { theme.value = ColorThemePreset.GRUVBOX_DARK }
+        compose.waitForIdle()
+        val darkPrimary = paletteColor
+        assertNotEquals(lightPrimary, darkPrimary)
+        assertComposerFill(darkPrimary, "dark primary")
     }
 
     @Test
@@ -1185,5 +1287,21 @@ class ComposerUiTest {
         }
         compose.onAllNodesWithTag("chat_composer_voice").assertCountEquals(0)
         compose.runOnIdle { assertEquals(1, starts) }
+    }
+
+    private fun assertComposerFill(
+        expected: Color,
+        label: String,
+    ) {
+        val image = compose.onNodeWithTag("chat_composer_pill").captureToImage().asAndroidBitmap()
+        assertEquals(label, expected.toArgb(), image.getPixel(image.width / 2, image.height / 2))
+    }
+
+    private fun composerTextLayout(): TextLayoutResult {
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose
+            .onNodeWithTag("chat_composer_field", useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        return layouts.single()
     }
 }

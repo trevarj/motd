@@ -800,6 +800,8 @@ private fun ComposerStylePreview(
         messageSpacing = appearance.messageSpacing,
         bubbleCornerStyle = appearance.bubbleCornerStyle,
         chatShadowsEnabled = appearance.chatShadowsEnabled,
+        sentBubbleColor = appearance.sentBubbleColor,
+        receivedBubbleColor = appearance.receivedBubbleColor,
         syncSystemBars = false,
     ) {
         ConversationTypography(appearance.conversationFontScalePercent) {

@@ -347,6 +347,7 @@ class AppearanceFolderLayoutUiTest {
 
         compose.onNodeWithTag("settings_bubble_color_picker").performScrollTo().performClick()
         compose.onNodeWithTag("settings_bubble_color_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("settings_bubble_color_composer_preview").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("settings_bubble_color_primary").performScrollTo().performClick()
         compose.onNodeWithTag("settings_bubble_color_primary").assertIsSelected()
         compose

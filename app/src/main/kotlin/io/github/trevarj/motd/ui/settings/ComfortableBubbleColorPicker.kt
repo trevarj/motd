@@ -40,6 +40,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
@@ -52,6 +53,8 @@ import io.github.trevarj.motd.ui.chat.ColorWheel
 import io.github.trevarj.motd.ui.chat.parseColorHex
 import io.github.trevarj.motd.ui.chat.wallpaperColorHex
 import io.github.trevarj.motd.ui.components.ChatLayoutPreview
+import io.github.trevarj.motd.ui.components.Composer
+import io.github.trevarj.motd.ui.theme.ConversationTypography
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.resolveComfortableBubbleColor
@@ -235,6 +238,18 @@ private fun AppearanceBubblePreview(
             conversationFontScalePercent = appearance.conversationFontScalePercent,
             tagPrefix = "settings_bubble_color_preview",
         )
+        ConversationTypography(appearance.conversationFontScalePercent) {
+            Composer(
+                value = TextFieldValue(),
+                onValueChange = {},
+                onSend = {},
+                enabled = true,
+                sendEnabled = false,
+                placeholder = stringResource(R.string.settings_bubble_color_composer_preview),
+                composerStyle = appearance.composerStyle,
+                modifier = Modifier.testTag("settings_bubble_color_composer_preview"),
+            )
+        }
     }
 }
 

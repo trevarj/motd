@@ -60,6 +60,8 @@ import androidx.compose.foundation.text.input.OutputTransformation
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.TextSnippet
@@ -95,6 +97,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -120,6 +123,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -178,10 +182,12 @@ import io.github.trevarj.motd.ui.chat.EmojiSearchEntry
 import io.github.trevarj.motd.ui.chat.messageFormattingRange
 import io.github.trevarj.motd.ui.chat.searchSystemEmojis
 import io.github.trevarj.motd.ui.chat.systemEmojiSearchEntries
+import io.github.trevarj.motd.ui.theme.LocalComfortableBubbleColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.readingInk
 import kotlinx.coroutines.coroutineScope
@@ -216,6 +222,29 @@ internal fun composerToolsAvailable(
 ): Boolean = showEmojiTool || (showFormattingTools && ircFormattingEnabled)
 
 internal fun composerToolsRotation(open: Boolean): Float = if (open) 45f else 0f
+
+/** The received-message choice also paints the chat composer; Default remains the secondary role. */
+internal fun composerContainerColor(
+    receivedBubbleColor: Color?,
+    defaultColor: Color,
+): Color = receivedBubbleColor ?: defaultColor
+
+private fun composerSelectionBackground(
+    foreground: Color,
+    background: Color,
+    accent: Color,
+): Color {
+    val oppositeInk = if (foreground.luminance() < 0.5f) Color.White else Color.Black
+    for (alpha in listOf(0.4f, 0.32f, 0.24f, 0.16f)) {
+        val candidates =
+            listOf(accent, oppositeInk)
+                .distinct()
+                .map { it.copy(alpha = alpha) }
+                .filter { tint -> contrastRatio(foreground, tint.compositeOver(background)) >= 4.5 }
+        candidates.maxByOrNull { tint -> contrastRatio(tint.compositeOver(background), background) }?.let { return it }
+    }
+    return Color.Transparent
+}
 
 internal fun autocompletePopupPosition(
     anchorBounds: IntRect,
@@ -555,8 +584,25 @@ fun Composer(
             ComposerStyle.COMPACT -> 2.dp
         }
     val floatingPill = composerStyle != ComposerStyle.LARGE
+    val receivedBubbleColor = LocalComfortableBubbleColors.current.received
+    val composerFill =
+        composerContainerColor(
+            receivedBubbleColor,
+            MaterialTheme.colorScheme.secondaryContainer,
+        )
+    val composerInkSeed = readingInk(MaterialTheme.colorScheme)
+    val composerInk =
+        remember(composerInkSeed, composerFill) {
+            ensureContrast(composerInkSeed, listOf(composerFill), MESSAGE_TEXT_CONTRAST)
+        }
+    val composerCursorSeed = MaterialTheme.colorScheme.primary
+    val composerCursor =
+        remember(composerCursorSeed, composerFill) {
+            ensureContrast(composerCursorSeed, listOf(composerFill), MESSAGE_TEXT_CONTRAST)
+        }
+    val nickColors = LocalNickColors.current
     val toolAccentSeed = MaterialTheme.colorScheme.primary
-    val toolBackground = MaterialTheme.colorScheme.secondaryContainer
+    val toolBackground = composerFill
     val toolAccent = remember(toolAccentSeed, toolBackground) { ensureContrast(toolAccentSeed, listOf(toolBackground)) }
     val primaryInset = if (composerStyle == ComposerStyle.COMPACT) 2.dp else 4.dp
     val primaryVerticalInset = if (floatingPill) primaryInset - 2.dp else primaryInset
@@ -826,7 +872,7 @@ fun Composer(
                     ),
                 modifier = Modifier.size(20.dp).graphicsLayer { rotationZ = toolsRotation },
                 tint =
-                    if (transientToolsVisible) toolAccent else MaterialTheme.colorScheme.onSecondaryContainer,
+                    if (transientToolsVisible) toolAccent else composerInk,
             )
         }
     }
@@ -860,7 +906,7 @@ fun Composer(
                                 containerColor = Color.Transparent,
                                 contentColor = MaterialTheme.colorScheme.onPrimary,
                                 disabledContainerColor = Color.Transparent,
-                                disabledContentColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.42f),
+                                disabledContentColor = composerInk.copy(alpha = 0.42f),
                             ),
                     ) {
                         Box(
@@ -869,7 +915,7 @@ fun Composer(
                                     .fillMaxSize()
                                     .padding(primaryVisualInset)
                                     .background(
-                                        if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
+                                        if (canSend) MaterialTheme.colorScheme.primary else composerFill,
                                         CircleShape,
                                     ),
                             contentAlignment = Alignment.Center,
@@ -922,6 +968,9 @@ fun Composer(
                             onPick = { suggestion ->
                                 applyEditorValue(replaceEmojiQuery(editorValue, emojiQuery, suggestion.emoji))
                             },
+                            color = composerFill,
+                            contentColor = composerInk,
+                            tonalElevation = if (receivedBubbleColor == null) 3.dp else 0.dp,
                         )
                     } else {
                         autocomplete?.invoke()
@@ -932,9 +981,9 @@ fun Composer(
     ) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = if (floatingPill) Color.Transparent else MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            tonalElevation = if (floatingPill) 0.dp else 3.dp,
+            color = if (floatingPill) Color.Transparent else composerFill,
+            contentColor = composerInk,
+            tonalElevation = if (floatingPill || receivedBubbleColor != null) 0.dp else 3.dp,
         ) {
             Column {
                 if (!floatingPill) {
@@ -956,7 +1005,7 @@ fun Composer(
                                         .padding(start = 20.dp, end = 76.dp, top = 6.dp)
                                         .testTag("chat_composer_reply_warning"),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (floatingPill) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSecondaryContainer,
+                                color = if (floatingPill) MaterialTheme.colorScheme.onSurfaceVariant else composerInk,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -978,7 +1027,7 @@ fun Composer(
                         Surface(
                             modifier = Modifier.matchParentSize().testTag("chat_composer_pill"),
                             shape = MotdShapes.composer,
-                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            color = composerFill,
                         ) {}
                     }
                     Column {
@@ -1021,6 +1070,7 @@ fun Composer(
                                 onAi = if (relocatedTools) onAi else null,
                                 onToggleExpanded = if (relocatedTools) toggleExpandedAction else null,
                                 expanded = expanded,
+                                contentColor = composerInk,
                             )
                         }
 
@@ -1052,7 +1102,7 @@ fun Composer(
                                                     },
                                                 ).testTag("chat_composer_pill"),
                                         shape = MotdShapes.card,
-                                        color = MaterialTheme.colorScheme.secondaryContainer,
+                                        color = composerFill,
                                     ) {}
                                 }
                                 Row(
@@ -1092,7 +1142,14 @@ fun Composer(
                                         Box(Modifier.padding(start = 8.dp, top = nickTop)) {
                                             SenderLabel(
                                                 sender = selfNick,
-                                                color = LocalNickColors.current.nick(selfNick, MaterialTheme.colorScheme.onSecondaryContainer),
+                                                color =
+                                                    remember(selfNick, composerFill, composerInk, nickColors) {
+                                                        ensureContrast(
+                                                            nickColors.nick(selfNick, composerInk),
+                                                            listOf(composerFill),
+                                                            MESSAGE_TEXT_CONTRAST,
+                                                        )
+                                                    },
                                                 unread = false,
                                                 modifier =
                                                     Modifier
@@ -1144,6 +1201,9 @@ fun Composer(
                                             ircFormattingEnabled = ircFormattingEnabled,
                                             expanded = expanded,
                                             expandedHeight = expandedHeight,
+                                            backgroundColor = composerFill,
+                                            contentColor = composerInk,
+                                            cursorColor = composerCursor,
                                             onColor = {
                                                 selectedRange()?.let { openColorSheet(editorDocument, it) }
                                             },
@@ -1182,7 +1242,7 @@ fun Composer(
                                                 Icon(
                                                     Icons.Filled.AutoFixHigh,
                                                     contentDescription = stringResource(R.string.ai_text_tools),
-                                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                    tint = composerInk,
                                                     modifier = Modifier.padding(start = 12.dp).size(20.dp),
                                                 )
                                             }
@@ -1205,7 +1265,7 @@ fun Composer(
                                                             if (expanded) {
                                                                 toolAccent
                                                             } else {
-                                                                MaterialTheme.colorScheme.onSecondaryContainer
+                                                                composerInk
                                                             },
                                                     )
                                                 }
@@ -1219,7 +1279,7 @@ fun Composer(
                                                     Icon(
                                                         Icons.Outlined.AttachFile,
                                                         contentDescription = stringResource(R.string.chat_composer_attachment),
-                                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                        tint = composerInk,
                                                     )
                                                 }
                                             }
@@ -1299,6 +1359,7 @@ private fun ComposerToolsToolbar(
     onAi: (() -> Unit)?,
     onToggleExpanded: (() -> Unit)?,
     expanded: Boolean,
+    contentColor: Color,
 ) {
     val allowed = messageFormattingRange(value.text)
     val allowedEnd = allowed?.last?.plus(1)
@@ -1362,8 +1423,8 @@ private fun ComposerToolsToolbar(
                                     Color.Transparent
                                 },
                             contentColor =
-                                if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer,
-                            disabledContentColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.38f),
+                                if (isSelected) MaterialTheme.colorScheme.onPrimary else contentColor,
+                            disabledContentColor = contentColor.copy(alpha = 0.38f),
                         ),
                 ) {
                     Icon(icon, contentDescription = label)
@@ -1928,6 +1989,9 @@ private fun ComposerTextField(
     onColor: () -> Unit = {},
     onToggleStyle: (IrcTextStyle, Int, Int) -> Unit = { _, _, _ -> },
     onClearFormatting: (Int, Int) -> Unit = { _, _ -> },
+    backgroundColor: Color,
+    contentColor: Color,
+    cursorColor: Color,
 ) {
     fun allowedSelection(): TextRange? {
         val text = state.text.toString()
@@ -1944,9 +2008,15 @@ private fun ComposerTextField(
     val boldSelected = selection?.let { document.isStyleSelected(it.start, it.end, IrcTextStyle.BOLD) } == true
     val boldLabel = if (hasSelection && boldSelected) "Remove bold" else "Bold"
     val latestDocument = rememberUpdatedState(document)
-    val fieldBackground = MaterialTheme.colorScheme.secondaryContainer
-    val fieldInk = MaterialTheme.colorScheme.onSurface
-    val fieldForeground = remember(fieldInk, fieldBackground) { ensureContrast(fieldInk, listOf(fieldBackground), MESSAGE_TEXT_CONTRAST) }
+    val fieldBackground = backgroundColor
+    val fieldForeground = contentColor
+    val selectionColors =
+        remember(cursorColor, fieldBackground, fieldForeground) {
+            TextSelectionColors(
+                handleColor = cursorColor,
+                backgroundColor = composerSelectionBackground(fieldForeground, fieldBackground, cursorColor),
+            )
+        }
     val commandBackground = MaterialTheme.colorScheme.primary
     val commandForeground = MaterialTheme.colorScheme.onPrimary
     val commandFontSize = MaterialTheme.typography.bodyMedium.fontSize
@@ -2042,95 +2112,97 @@ private fun ComposerTextField(
             }
         }
 
-    BasicTextField(
-        state = state,
-        modifier =
-            modifier
-                .then(contextMenuModifier)
-                .heightIn(
-                    min = if (expanded) expandedHeight else 48.dp,
-                    max = if (expanded) expandedHeight else 148.dp,
-                ).onFocusChanged {
-                    onFocusChanged(it.isFocused)
-                    if (it.isFocused) onFocused()
-                }.testTag("chat_composer_field"),
-        textStyle = MaterialTheme.typography.bodyLarge.copy(color = fieldForeground),
-        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-        keyboardOptions =
-            KeyboardOptions(
-                capitalization = KeyboardCapitalization.Sentences,
-                imeAction = ImeAction.Default,
-            ),
-        lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = if (expanded) Int.MAX_VALUE else 6),
-        outputTransformation = outputTransformation,
-        scrollState = scrollState,
-        onTextLayout = { getResult ->
-            textLayout = getResult()
-            textLayout?.let { layout ->
-                if (layout.lineCount > 0) {
-                    onTextContentHeight(ceil(layout.getLineBottom(layout.lineCount - 1) - layout.getLineTop(0)).toInt())
-                    onTextLayout(layout)
+    CompositionLocalProvider(LocalTextSelectionColors provides selectionColors) {
+        BasicTextField(
+            state = state,
+            modifier =
+                modifier
+                    .then(contextMenuModifier)
+                    .heightIn(
+                        min = if (expanded) expandedHeight else 48.dp,
+                        max = if (expanded) expandedHeight else 148.dp,
+                    ).onFocusChanged {
+                        onFocusChanged(it.isFocused)
+                        if (it.isFocused) onFocused()
+                    }.testTag("chat_composer_field"),
+            textStyle = MaterialTheme.typography.bodyLarge.copy(color = fieldForeground),
+            cursorBrush = SolidColor(cursorColor),
+            keyboardOptions =
+                KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    imeAction = ImeAction.Default,
+                ),
+            lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = if (expanded) Int.MAX_VALUE else 6),
+            outputTransformation = outputTransformation,
+            scrollState = scrollState,
+            onTextLayout = { getResult ->
+                textLayout = getResult()
+                textLayout?.let { layout ->
+                    if (layout.lineCount > 0) {
+                        onTextContentHeight(ceil(layout.getLineBottom(layout.lineCount - 1) - layout.getLineTop(0)).toInt())
+                        onTextLayout(layout)
+                    }
                 }
-            }
-        },
-        decorator = { inner ->
-            Box(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(
-                            start = contentStartPadding,
-                            end = contentEndPadding,
-                            top = if (expanded) 8.dp else collapsedVerticalPadding,
-                            bottom = if (expanded) 4.dp else collapsedVerticalPadding,
-                        ),
-                contentAlignment = if (expanded) Alignment.TopStart else Alignment.CenterStart,
-            ) {
-                if (state.text.isEmpty()) {
-                    Text(
-                        placeholder,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+            },
+            decorator = { inner ->
                 Box(
                     modifier =
                         Modifier
-                            .then(if (commandEnd != null) Modifier.testTag("chat_composer_command_chip") else Modifier)
-                            .then(if (prefixChip != null) Modifier.testTag("chat_composer_nick_chip") else Modifier)
-                            .drawBehind {
-                                val end = commandEnd ?: prefixChip?.first ?: return@drawBehind
-                                val color = if (commandEnd != null) commandBackground else prefixChip!!.second.copy(alpha = 0.16f)
-                                val layout = textLayout?.takeIf { it.layoutInput.text.text == text } ?: return@drawBehind
-                                val horizontalPadding = 3.dp.toPx()
-                                val verticalPadding = 1.dp.toPx()
-                                // ponytail: paint behind the same editor glyphs; no second field or draft state.
-                                for (line in 0..layout.getLineForOffset(end - 1)) {
-                                    val start = layout.getLineStart(line)
-                                    val lineEnd = minOf(end, layout.getLineEnd(line, visibleEnd = true))
-                                    if (lineEnd <= start) continue
-                                    val first = layout.getBoundingBox(start)
-                                    val last = layout.getBoundingBox(lineEnd - 1)
-                                    drawRoundRect(
-                                        color = color,
-                                        topLeft = Offset(first.left - horizontalPadding, first.top - verticalPadding),
-                                        size =
-                                            Size(
-                                                last.right - first.left + horizontalPadding * 2,
-                                                first.height + verticalPadding * 2,
-                                            ),
-                                        cornerRadius = CornerRadius(6.dp.toPx()),
-                                    )
-                                }
-                            }.onGloballyPositioned { onTextPositioned(it.positionInWindow()) },
+                            .fillMaxWidth()
+                            .padding(
+                                start = contentStartPadding,
+                                end = contentEndPadding,
+                                top = if (expanded) 8.dp else collapsedVerticalPadding,
+                                bottom = if (expanded) 4.dp else collapsedVerticalPadding,
+                            ),
+                    contentAlignment = if (expanded) Alignment.TopStart else Alignment.CenterStart,
                 ) {
-                    inner()
+                    if (state.text.isEmpty()) {
+                        Text(
+                            placeholder,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = fieldForeground,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Box(
+                        modifier =
+                            Modifier
+                                .then(if (commandEnd != null) Modifier.testTag("chat_composer_command_chip") else Modifier)
+                                .then(if (prefixChip != null) Modifier.testTag("chat_composer_nick_chip") else Modifier)
+                                .drawBehind {
+                                    val end = commandEnd ?: prefixChip?.first ?: return@drawBehind
+                                    val color = if (commandEnd != null) commandBackground else prefixChip!!.second.copy(alpha = 0.16f)
+                                    val layout = textLayout?.takeIf { it.layoutInput.text.text == text } ?: return@drawBehind
+                                    val horizontalPadding = 3.dp.toPx()
+                                    val verticalPadding = 1.dp.toPx()
+                                    // ponytail: paint behind the same editor glyphs; no second field or draft state.
+                                    for (line in 0..layout.getLineForOffset(end - 1)) {
+                                        val start = layout.getLineStart(line)
+                                        val lineEnd = minOf(end, layout.getLineEnd(line, visibleEnd = true))
+                                        if (lineEnd <= start) continue
+                                        val first = layout.getBoundingBox(start)
+                                        val last = layout.getBoundingBox(lineEnd - 1)
+                                        drawRoundRect(
+                                            color = color,
+                                            topLeft = Offset(first.left - horizontalPadding, first.top - verticalPadding),
+                                            size =
+                                                Size(
+                                                    last.right - first.left + horizontalPadding * 2,
+                                                    first.height + verticalPadding * 2,
+                                                ),
+                                            cornerRadius = CornerRadius(6.dp.toPx()),
+                                        )
+                                    }
+                                }.onGloballyPositioned { onTextPositioned(it.positionInWindow()) },
+                    ) {
+                        inner()
+                    }
                 }
-            }
-        },
-    )
+            },
+        )
+    }
 }
 
 fun insertAtCursor(
@@ -2174,13 +2246,16 @@ internal fun replaceEmojiQuery(
 private fun EmojiAutocompletePanel(
     suggestions: List<EmojiSearchEntry>,
     onPick: (EmojiSearchEntry) -> Unit,
+    color: Color,
+    contentColor: Color,
+    tonalElevation: Dp,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth().testTag("chat_composer_emoji_autocomplete"),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        color = color,
+        contentColor = contentColor,
         shape = MotdShapes.card,
-        tonalElevation = 3.dp,
+        tonalElevation = tonalElevation,
     ) {
         LazyColumn(Modifier.heightIn(max = 240.dp)) {
             lazyItems(suggestions, key = { it.emoji }) { suggestion ->
