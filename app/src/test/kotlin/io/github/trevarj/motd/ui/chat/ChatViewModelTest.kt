@@ -5740,15 +5740,33 @@ class ChatViewModelTest {
                                 it.prepend is androidx.paging.LoadState.NotLoading &&
                                 it.append is androidx.paging.LoadState.NotLoading
                         }
+
+                    fun targetSnapshot(): Pair<androidx.paging.ItemSnapshotList<MessageEntity>, MessageEntity>? {
+                        val snapshot = presenter.snapshot()
+                        return snapshot.getOrNull(target.index)?.let { snapshot to it }
+                    }
+
+                    val materializedTarget = CompletableDeferred<Pair<androidx.paging.ItemSnapshotList<MessageEntity>, MessageEntity>>()
+                    val targetListener: () -> Unit = {
+                        val targetSnapshot = targetSnapshot()
+                        if (targetSnapshot != null) materializedTarget.complete(targetSnapshot)
+                    }
+                    presenter.addOnPagesUpdatedListener(targetListener)
+                    val (snapshot, targetMessage) =
+                        try {
+                            targetSnapshot() ?: materializedTarget.await()
+                        } finally {
+                            presenter.removeOnPagesUpdatedListener(targetListener)
+                        }
                     val current = checkNotNull(generation)
                     val nativeSlot = checkNotNull(current.lease).entry
-                    nativeSlot.presented(nativeSlot.attachPresenter(), presenter.snapshot(), idle)
+                    nativeSlot.presented(nativeSlot.attachPresenter(), snapshot, idle)
                     assertEquals(186, target.index)
                     assertEquals(offset, target.offset)
                     assertEquals(ids[713], target.expectedEventId)
                     assertEquals("m714", target.expectedMsgid)
                     assertTrue(target.fromSavedPosition)
-                    assertTrue(positionTargetMatches(target, checkNotNull(presenter.peek(target.index))))
+                    assertTrue(positionTargetMatches(target, targetMessage))
                     assertEquals(EntryPositionState.Pending, vm.entryState.value)
                     assertNull(vm.unreadEntrySnapshot.value)
                     if (firstPages == null) firstPages = current.pages else assertTrue(firstPages === current.pages)

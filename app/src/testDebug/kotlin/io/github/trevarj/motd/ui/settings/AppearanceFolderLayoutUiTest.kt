@@ -386,16 +386,22 @@ class AppearanceFolderLayoutUiTest {
         compose.onNodeWithTag("settings_bubble_color_primary").performScrollTo().performClick()
         assertEquals(scheme.primary.toArgb(), swatchPixel("settings_bubble_color_sent_swatch"))
 
-        compose.onNodeWithTag("settings_bubble_color_received").performScrollTo().performClick()
+        compose
+            .onNodeWithTag("settings_bubble_color_received")
+            .performScrollTo()
+            .performSemanticsAction(SemanticsActions.OnClick) { it() }
         assertRoundedSelectedTarget("settings_bubble_color_received", scheme.secondaryContainer.toArgb())
         assertEquals(scheme.secondaryContainer.toArgb(), swatchPixel("settings_bubble_color_default_swatch"))
-        compose.onNodeWithTag("settings_bubble_color_custom").performScrollTo().performClick()
+        compose
+            .onNodeWithTag("settings_bubble_color_custom")
+            .performScrollTo()
+            .performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.onNodeWithTag("settings_bubble_color_hex").performScrollTo().performTextReplacement("#12AB34")
         compose.onNodeWithTag("settings_bubble_color_apply").performClick()
 
         val custom = Color(0xFF12AB34).toArgb()
-        awaitSwatchPixel("settings_bubble_color_received_swatch", custom)
-        awaitSwatchPixel("settings_bubble_color_custom_swatch", custom)
+        assertEquals(custom, swatchPixel("settings_bubble_color_received_swatch"))
+        assertEquals(custom, swatchPixel("settings_bubble_color_custom_swatch"))
         assertEquals(scheme.primary.toArgb(), swatchPixel("settings_bubble_color_sent_swatch"))
     }
 
@@ -617,20 +623,6 @@ class AppearanceFolderLayoutUiTest {
                 .asAndroidBitmap()
         assertEquals(expectedFill, image.getPixel(image.width / 2, image.height / 2))
         assertTrue("$tag selected fill must leave its corner unpainted", image.getPixel(0, 0) != expectedFill)
-    }
-
-    private fun awaitSwatchPixel(
-        tag: String,
-        expected: Int,
-    ) {
-        val deadline = compose.mainClock.currentTime + 1_000
-        // The target's press indication outlives the dialog that triggered this update. Wait for
-        // the actual swatch to settle rather than sampling its transient state layer.
-        while (swatchPixel(tag) != expected && compose.mainClock.currentTime < deadline) {
-            compose.mainClock.advanceTimeByFrame()
-            compose.waitForIdle()
-        }
-        assertEquals("$tag must settle to the selected color", expected, swatchPixel(tag))
     }
 }
 
