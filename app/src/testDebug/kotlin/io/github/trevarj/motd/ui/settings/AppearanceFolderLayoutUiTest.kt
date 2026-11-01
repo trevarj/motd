@@ -394,8 +394,8 @@ class AppearanceFolderLayoutUiTest {
         compose.onNodeWithTag("settings_bubble_color_apply").performClick()
 
         val custom = Color(0xFF12AB34).toArgb()
-        assertEquals(custom, swatchPixel("settings_bubble_color_received_swatch"))
-        assertEquals(custom, swatchPixel("settings_bubble_color_custom_swatch"))
+        awaitSwatchPixel("settings_bubble_color_received_swatch", custom)
+        awaitSwatchPixel("settings_bubble_color_custom_swatch", custom)
         assertEquals(scheme.primary.toArgb(), swatchPixel("settings_bubble_color_sent_swatch"))
     }
 
@@ -617,6 +617,20 @@ class AppearanceFolderLayoutUiTest {
                 .asAndroidBitmap()
         assertEquals(expectedFill, image.getPixel(image.width / 2, image.height / 2))
         assertTrue("$tag selected fill must leave its corner unpainted", image.getPixel(0, 0) != expectedFill)
+    }
+
+    private fun awaitSwatchPixel(
+        tag: String,
+        expected: Int,
+    ) {
+        val deadline = compose.mainClock.currentTime + 1_000
+        // The target's press indication outlives the dialog that triggered this update. Wait for
+        // the actual swatch to settle rather than sampling its transient state layer.
+        while (swatchPixel(tag) != expected && compose.mainClock.currentTime < deadline) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+        }
+        assertEquals("$tag must settle to the selected color", expected, swatchPixel(tag))
     }
 }
 
