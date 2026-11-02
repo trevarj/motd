@@ -774,6 +774,44 @@ class IrcClientTest {
         }
 
     @Test
+    fun `minimal multiline capabilities send an unlabeled batch`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = IrcClient(config(), ft.factory(), clientScope())
+            client.start()
+            runCurrent()
+
+            ft.feed(":srv CAP * LS :batch draft/multiline=max-bytes=4096")
+            runCurrent()
+            val requested = ft.sent.single { it.startsWith("CAP REQ :") }
+            assertEquals(
+                setOf("batch", "draft/multiline"),
+                requested.substringAfter("CAP REQ :").split(' ').toSet(),
+            )
+
+            ft.feed(":srv CAP motd ACK :batch draft/multiline=max-bytes=4096")
+            ft.feed(":srv 001 motd :Welcome")
+            ft.feed(":srv 005 motd CHATHISTORY=100 :are supported")
+            runCurrent()
+
+            assertTrue(client.canSendMultilineMessage("alpha\nbeta"))
+            assertTrue(client.sendMessage("#chan", "alpha\nbeta", null, "motd-minimal"))
+            runCurrent()
+
+            val sent = ft.sent.takeLast(4).map(IrcMessage::parse)
+            val ref = sent[0].params.first().removePrefix("+")
+            assertEquals(emptyMap<String, String>(), sent[0].tags)
+            assertEquals("BATCH", sent[0].command)
+            assertEquals(listOf("draft/multiline", "#chan"), sent[0].params.drop(1))
+            assertEquals(mapOf("batch" to ref), sent[1].tags)
+            assertEquals(listOf("#chan", "alpha"), sent[1].params)
+            assertEquals(mapOf("batch" to ref), sent[2].tags)
+            assertEquals(listOf("#chan", "beta"), sent[2].params)
+            assertEquals("BATCH", sent[3].command)
+            assertEquals(listOf("-$ref"), sent[3].params)
+        }
+
+    @Test
     fun `long logical line uses multiline concat fragments`() =
         runTest {
             val ft = FakeTransport()

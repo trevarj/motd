@@ -1,3 +1,4 @@
 - Added Chat colors: choose adaptive palette or custom colors for sent and received messages, with a matching composer, live samples, and rounded selectors.
+- Improved IRCv3 multiline compatibility and message-size limit handling.
 - Added customizable presence filters globally or per chat.
 - Added scenic chat wallpapers with matching day and night scenes and subtle animation.

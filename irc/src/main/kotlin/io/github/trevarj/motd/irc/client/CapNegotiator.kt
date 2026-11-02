@@ -81,9 +81,7 @@ internal object CapNegotiator {
         if ("draft/metadata-2" in req && "batch" !in advertised) {
             req.remove("draft/metadata-2")
         }
-        if (MULTILINE_CAP in req &&
-            listOf("batch", "message-tags", "standard-replies").any { it !in advertised }
-        ) {
+        if (MULTILINE_CAP in req && "batch" !in advertised) {
             req.remove(MULTILINE_CAP)
         }
         if (MESSAGE_REDACTION_CAP in req && "message-tags" !in advertised) {

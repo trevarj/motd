@@ -1992,8 +1992,6 @@ class IrcClient(
     private fun hasMultilineWireSupport(): Boolean =
         hasCap(MULTILINE_CAP) &&
             hasCap("batch") &&
-            hasCap("labeled-response") &&
-            hasCap("echo-message") &&
             multilineLimits != null
 
     /** Live ISUPPORT state (normalize(), prefixModes, ...); empty until Ready. */

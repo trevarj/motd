@@ -50,4 +50,102 @@ class MultilineTest {
             ),
         )
     }
+
+    @Test
+    fun `multiline byte limit includes logical line separator`() {
+        val text = "a\nb"
+        assertTrue(
+            planChatMessage(
+                target = "#test",
+                text = text,
+                replyToMsgid = null,
+                label = "motd-test",
+                multilineLimits = MultilineLimits(maxBytes = 3, maxLines = null),
+            ) is MultilineSendPlan.Batch,
+        )
+        assertEquals(
+            null,
+            planChatMessage(
+                target = "#test",
+                text = text,
+                replyToMsgid = null,
+                label = "motd-test",
+                multilineLimits = MultilineLimits(maxBytes = 2, maxLines = null),
+            ),
+        )
+    }
+
+    @Test
+    fun `multiline byte limit counts UTF-8 and line separators`() {
+        val text = "é\nx"
+        assertTrue(
+            planChatMessage(
+                target = "#test",
+                text = text,
+                replyToMsgid = null,
+                label = "motd-test",
+                multilineLimits = MultilineLimits(maxBytes = 4, maxLines = null),
+            ) is MultilineSendPlan.Batch,
+        )
+        assertEquals(
+            null,
+            planChatMessage(
+                target = "#test",
+                text = text,
+                replyToMsgid = null,
+                label = "motd-test",
+                multilineLimits = MultilineLimits(maxBytes = 3, maxLines = null),
+            ),
+        )
+    }
+
+    @Test
+    fun `multiline byte limit counts blank line separators`() {
+        val text = "a\n\nb"
+        assertTrue(
+            planChatMessage(
+                target = "#test",
+                text = text,
+                replyToMsgid = null,
+                label = "motd-test",
+                multilineLimits = MultilineLimits(maxBytes = 4, maxLines = null),
+            ) is MultilineSendPlan.Batch,
+        )
+        assertEquals(
+            null,
+            planChatMessage(
+                target = "#test",
+                text = text,
+                replyToMsgid = null,
+                label = "motd-test",
+                multilineLimits = MultilineLimits(maxBytes = 3, maxLines = null),
+            ),
+        )
+    }
+
+    @Test
+    fun `multiline byte limit excludes separators before concat fragments`() {
+        val text = "abcd"
+        assertTrue(
+            planChatMessage(
+                target = "#test",
+                text = text,
+                replyToMsgid = null,
+                label = "motd-test",
+                multilineLimits = MultilineLimits(maxBytes = 4, maxLines = null),
+                maxComponentBytes = 2,
+            ) is MultilineSendPlan.Batch,
+        )
+        assertEquals(
+            null,
+            planChatMessage(
+                target = "#test",
+                text = text,
+                replyToMsgid = null,
+                label = "motd-test",
+                multilineLimits = MultilineLimits(maxBytes = 3, maxLines = null),
+                maxComponentBytes = 2,
+            ),
+        )
+    }
 }

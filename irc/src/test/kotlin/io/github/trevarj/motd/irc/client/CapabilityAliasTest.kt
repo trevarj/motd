@@ -124,17 +124,17 @@ class CapabilityAliasTest {
         )
     }
 
-    @Test fun `multiline is requested only when its dependencies are advertised`() {
+    @Test fun `multiline is requested with batch and rejected without it`() {
         assertEquals(
-            setOf("batch", "message-tags", "standard-replies", "draft/multiline"),
+            setOf("batch", "draft/multiline"),
             CapNegotiator.requestSet(
-                setOf("batch", "message-tags", "standard-replies", "draft/multiline"),
+                setOf("batch", "draft/multiline"),
                 emptySet(),
             ),
         )
         assertEquals(
-            setOf("batch", "message-tags"),
-            CapNegotiator.requestSet(setOf("batch", "message-tags", "draft/multiline"), emptySet()),
+            emptySet<String>(),
+            CapNegotiator.requestSet(setOf("draft/multiline"), emptySet()),
         )
     }
 }

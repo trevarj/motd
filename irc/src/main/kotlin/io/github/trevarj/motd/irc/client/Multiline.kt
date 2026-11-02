@@ -76,7 +76,12 @@ internal fun planChatMessage(
             line.mapIndexed { index, fragment -> LineFragment(text = fragment, concat = index > 0) }
         }
     if (components.isEmpty() || components.all { it.text.isEmpty() }) return null
-    if (components.sumOf { it.text.toByteArray(Charsets.UTF_8).size } > multilineLimits.maxBytes) return null
+    val combinedBytes =
+        components.foldIndexed(0) { index, bytes, fragment ->
+            bytes + fragment.text.toByteArray(Charsets.UTF_8).size +
+                if (index > 0 && !fragment.concat) 1 else 0
+        }
+    if (combinedBytes > multilineLimits.maxBytes) return null
     multilineLimits.maxLines?.let { limit ->
         if (components.size > limit) return null
     }
