@@ -229,30 +229,33 @@
     <string name="settings_true_black_system_desc">Applied whenever your device uses dark theme.</string>
     <string name="settings_true_black_saved_desc">Saved; applies when you return to a dark theme.</string>
     <string name="settings_true_black_unavailable_desc">Available with dark themes.</string>
-    <string name="settings_follow_system">Follow system light/dark</string>
+    <string name="settings_follow_system">Match device light/dark mode</string>
     <string name="settings_follow_system_desc">Switch between this theme\'s light and dark variants with your device.</string>
     <string name="settings_follow_system_system_desc">System default already follows your device.</string>
     <string name="settings_follow_system_unavailable_desc">This theme does not have both light and dark variants.</string>
-    <string name="settings_dynamic_color">Dynamic color</string>
-    <string name="settings_dynamic_color_desc">Use colors from your wallpaper (Android 12+).</string>
-    <string name="settings_dynamic_color_unavailable">Dynamic color is unavailable for named themes.</string>
-    <string name="settings_theme_text_colors">Use theme text colors</string>
-    <string name="settings_theme_text_colors_desc">Use your theme\'s text colors instead of static near-black or near-white ink.</string>
+    <string name="settings_dynamic_color">Use wallpaper colors</string>
+    <string name="settings_dynamic_color_desc">Use colors from your phone wallpaper, not your chat wallpaper (Android 12+).</string>
+    <string name="settings_dynamic_color_unavailable">Choose System default for Theme to use phone wallpaper colors (Android 12+).</string>
+    <string name="settings_theme_text_colors">Match text to theme</string>
+    <string name="settings_theme_text_colors_desc">Use the theme\'s text colors across the app and chats instead of near-black or near-white text.</string>
     <string name="settings_theme">Theme</string>
-    <string name="settings_theme_section">Color theme</string>
+    <string name="settings_theme_section">Theme</string>
     <string name="settings_theme_system_group">System</string>
     <string name="settings_theme_light_group">Light</string>
     <string name="settings_theme_dark_group">Dark</string>
-    <string name="settings_layout_section">Chat layout</string>
-    <string name="settings_folder_layout">Folder layout</string>
+    <string name="settings_appearance_text_section">Text &amp; font</string>
+    <string name="settings_appearance_chat_list_section">Chat list</string>
+    <string name="settings_appearance_nicknames_section">Nicknames &amp; avatars</string>
+    <string name="settings_appearance_bubbles_section">Message bubbles</string>
+    <string name="settings_folder_layout">Chat list folders</string>
     <string name="settings_folder_layout_desc">Choose how folders appear in the chat list.</string>
     <string name="settings_folder_layout_inline">Inline</string>
     <string name="settings_folder_layout_inline_desc">Show folders as expandable sections.</string>
     <string name="settings_folder_layout_tabs">Tabs</string>
     <string name="settings_folder_layout_tabs_desc">Show folders in a tab strip.</string>
-    <string name="settings_show_folder_chats_in_all">Show folder chats in All</string>
+    <string name="settings_show_folder_chats_in_all">Include folder chats in All</string>
     <string name="settings_show_folder_chats_in_all_desc">Include chats assigned to folders in the All tab.</string>
-    <string name="settings_show_folder_chats_in_all_disabled_explanation">Choose Tabs for folder layout to configure this.</string>
+    <string name="settings_show_folder_chats_in_all_disabled_explanation">Choose Tabs in Chat list folders to change this setting.</string>
     <string name="settings_delivery">Message delivery</string>
     <string name="settings_notifications">Notifications</string>
     <string name="settings_notifications_summary">Global, server, and channel alerts and watches</string>
@@ -976,21 +979,21 @@
     <!-- Round 4: customizable UI settings. Consumers land in WP-U1/U2/U3; each entry is
          tagged so lint (warningsAsErrors) stays green mid-wave.
          WP-U4 strips the markers once the usages exist. -->
-    <string name="settings_density">Message style</string>
+    <string name="settings_density">Message layout</string>
     <string name="settings_nickname_backgrounds">Nickname backgrounds</string>
-    <string name="settings_nickname_backgrounds_desc">Tint Compact and Two-line rows by sender. Nickname colors and mention highlights stay on.</string>
-    <string name="settings_composer_style">Input style</string>
-    <string name="settings_composer_style_desc">Choose the input layout for IRC chats.</string>
+    <string name="settings_nickname_backgrounds_desc">Tint Compact and Two-line message backgrounds by sender. Nickname colors and mention highlights are unchanged.</string>
+    <string name="settings_composer_style">Message input layout</string>
+    <string name="settings_composer_style_desc">Choose how the message input and its tools appear in chats.</string>
     <string name="settings_composer_style_comfortable">Default</string>
     <string name="settings_composer_style_comfortable_desc">Floating pill with familiar controls.</string>
     <string name="settings_composer_style_large">Large</string>
     <string name="settings_composer_style_large_desc">Roomy input with tools always visible above.</string>
     <string name="settings_composer_style_compact">Nickname</string>
     <string name="settings_composer_style_compact_desc">Small floating pill with your nickname and tools tucked away.</string>
-    <string name="settings_ui_font_size">Interface text</string>
+    <string name="settings_ui_font_size">App text size</string>
     <string name="settings_ui_font_size_desc">Menus, settings, navigation, and app controls</string>
-    <string name="settings_conversation_font_size">Conversation text</string>
-    <string name="settings_conversation_font_size_desc">Messages, composer, replies, and suggestions</string>
+    <string name="settings_conversation_font_size">Chat text size</string>
+    <string name="settings_conversation_font_size_desc">Messages, message input, replies, and suggestions</string>
     <string name="settings_font_size_percent">%1$d%%</string>
     <string name="settings_font_size_reset">Reset to 100%</string>
     <string name="settings_density_compact">Compact</string>
@@ -1021,7 +1024,8 @@
     <string name="settings_palette_theme">Theme palette</string>
     <string name="settings_palette_classic">Classic palette</string>
     <string name="settings_palette_vivid">Vivid palette</string>
-    <string name="settings_nick_color_overrides">Nick color overrides</string>
+    <string name="settings_nick_color_overrides">Custom nickname colors</string>
+    <string name="settings_nick_color_overrides_desc">Choose colors for individual nicknames and their avatars.</string>
     <string name="settings_presence_title">Presence changes</string>
     <string name="settings_show_redacted_messages">Show deleted messages</string>
     <string name="settings_show_redacted_messages_desc">Keep accountability placeholders when messages are deleted</string>
@@ -1339,7 +1343,7 @@
     <string name="settings_compact_database_search_desc">Rewrite the database file to return free space to the device.</string>
     <string name="settings_database_compacted">Freed %1$s</string>
     <string name="settings_database_compact_failed">Couldn\'t compact the database</string>
-    <string name="settings_appearance_messages_section">Messages</string>
+    <string name="settings_appearance_messages_section">Messages &amp; input</string>
     <string name="settings_chat_preview">%1$s chat preview</string>
     <string name="settings_chat_preview_sender">Alex</string>
     <string name="settings_chat_preview_self">You</string>
@@ -1347,7 +1351,7 @@
     <string name="settings_chat_preview_followup">I found the answer. Let’s compare a longer message that wraps onto another line.</string>
     <string name="settings_chat_preview_reply">Thanks, Alex!</string>
     <string name="settings_chat_preview_action">waves hello</string>
-    <string name="settings_show_timestamps">Show timestamps</string>
+    <string name="settings_show_timestamps">Show message times</string>
     <string name="settings_show_timestamps_desc">Show the time next to each message</string>
     <string name="settings_time_format">Time format</string>
     <string name="settings_time_format_auto">System default</string>
@@ -1360,13 +1364,13 @@
     <string name="settings_message_spacing_compact">Compact</string>
     <string name="settings_message_spacing_default">Default</string>
     <string name="settings_message_spacing_relaxed">Relaxed</string>
-    <string name="settings_bubble_corners">Bubble corners</string>
+    <string name="settings_bubble_corners">Bubble shape</string>
     <string name="settings_bubble_corner_rounded">Rounded</string>
     <string name="settings_bubble_corner_subtle">Subtle</string>
     <string name="settings_bubble_corner_square">Square</string>
     <string name="settings_bubble_corners_desc">Applies to the Comfortable layout</string>
-    <string name="settings_bubble_colors">Chat colors</string>
-    <string name="settings_bubble_colors_desc">Choose sent and received backgrounds in Comfortable chat. The input bar uses the received color in every layout.</string>
+    <string name="settings_bubble_colors">Message and input colors</string>
+    <string name="settings_bubble_colors_desc">Choose sent and received message backgrounds for the Comfortable message layout. The message input uses the received color in every layout.</string>
     <string name="settings_bubble_color_composer_preview">Type a message</string>
     <string name="settings_bubble_color_sent">Sent messages</string>
     <string name="settings_bubble_color_received">Received messages</string>
@@ -2089,7 +2093,7 @@
     <string name="chat_workspace_empty_message">Messages will appear here without hiding your chat list.</string>
 
     <!-- App font picker -->
-    <string name="settings_app_font">App font</string>
+    <string name="settings_app_font">Font</string>
     <string name="settings_font_system">System default</string>
     <string name="settings_font_sans">Sans serif</string>
     <string name="settings_font_serif">Serif</string>
@@ -2193,7 +2197,8 @@
     <string name="account_setup_success">Account ready</string>
 
     <!-- Settings deep cleanup -->
-    <string name="settings_nick_palette">Nickname palette</string>
+    <string name="settings_nick_palette">Nickname color palette</string>
+    <string name="settings_nick_palette_desc">Choose the set of colors used for nicknames and avatars.</string>
     <string name="settings_nick_palette_disabled">Turn on Colored nicknames to choose a palette.</string>
     <string name="settings_group_connections">Connections</string>
     <string name="settings_group_experience">Experience</string>

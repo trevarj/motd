@@ -355,51 +355,8 @@ fun AppearanceSettingsContent(
                     modifier = targetModifier,
                 )
             }
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            SettingsTarget(target?.name, SettingsTarget.NICK_COLORS.name) { targetModifier ->
-                SwitchRow(
-                    title = stringResource(R.string.settings_nick_colors),
-                    subtitle = stringResource(R.string.settings_nick_colors_desc),
-                    checked = settings.nickColorsEnabled,
-                    onCheckedChange = {
-                        previewSettings = previewSettings.copy(nickColorsEnabled = it)
-                        onNickColorsEnabled(it)
-                    },
-                    switchTag = "settings_switch_nick_colors",
-                    modifier = targetModifier,
-                )
-            }
-            SettingsTarget(target?.name, SettingsTarget.NICK_PALETTE.name) { targetModifier ->
-                SettingsNavigationRow(
-                    title = stringResource(R.string.settings_nick_palette),
-                    value = nickPaletteLabel(settings.nickColorPalette),
-                    summary =
-                        if (settings.nickColorsEnabled) {
-                            null
-                        } else {
-                            stringResource(R.string.settings_nick_palette_disabled)
-                        },
-                    enabled = settings.nickColorsEnabled,
-                    modifier = targetModifier.testTag("settings_palette_picker"),
-                    onClick = { choiceSheet = AppearanceChoice.PALETTE },
-                )
-            }
-            SettingsTarget(target?.name, SettingsTarget.NICK_OVERRIDES.name) { targetModifier ->
-                SettingsNavigationRow(
-                    icon = Icons.Outlined.ColorLens,
-                    title = stringResource(R.string.settings_nick_color_overrides),
-                    value =
-                        pluralStringResource(
-                            R.plurals.settings_nick_count,
-                            settings.nickColorOverrides.size,
-                            settings.nickColorOverrides.size,
-                        ),
-                    modifier = targetModifier.testTag("settings_nick_color_overrides"),
-                    onClick = onOpenNickColors,
-                )
-            }
         }
-        SettingsGroup(title = stringResource(R.string.settings_layout_section)) {
+        SettingsGroup(title = stringResource(R.string.settings_appearance_text_section)) {
             SettingsTarget(target?.name, SettingsTarget.APP_FONT.name) { targetModifier ->
                 SettingsNavigationRow(
                     icon = Icons.Outlined.TextFields,
@@ -437,7 +394,8 @@ fun AppearanceSettingsContent(
                     modifier = targetModifier,
                 )
             }
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+        }
+        SettingsGroup(title = stringResource(R.string.settings_appearance_chat_list_section)) {
             SettingsTarget(target?.name, SettingsTarget.FOLDER_LAYOUT.name) { targetModifier ->
                 SettingsNavigationRow(
                     title = stringResource(R.string.settings_folder_layout),
@@ -459,7 +417,8 @@ fun AppearanceSettingsContent(
                     modifier = targetModifier,
                 )
             }
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+        }
+        SettingsGroup(title = stringResource(R.string.settings_appearance_messages_section)) {
             SettingsTarget(target?.name, SettingsTarget.MESSAGE_STYLE.name) { targetModifier ->
                 SettingsNavigationRow(
                     title = stringResource(R.string.settings_density),
@@ -476,42 +435,6 @@ fun AppearanceSettingsContent(
                     summary = stringResource(R.string.settings_composer_style_desc),
                     modifier = targetModifier.testTag("settings_composer_style_picker"),
                     onClick = { choiceSheet = AppearanceChoice.COMPOSER_STYLE },
-                )
-            }
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            AppearanceChatLayoutPreview(
-                settings = previewSettings,
-                appearance = previewAppearance,
-                customFontFile = customFontFile,
-                density = previewDensity,
-                messageSpacing = previewSpacing,
-                bubbleCorners = previewCorners,
-                chatShadowsEnabled = previewShadows,
-                tagPrefix = "settings_chat_preview_inline",
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            SettingsTarget(target?.name, SettingsTarget.AVATAR_STYLE.name) { targetModifier ->
-                SettingsNavigationRow(
-                    title = stringResource(R.string.settings_avatar_style),
-                    value = avatarStyleLabel(settings.avatarStyle),
-                    modifier = targetModifier.testTag("settings_avatar_style_picker"),
-                    onClick = { choiceSheet = AppearanceChoice.AVATAR },
-                )
-            }
-        }
-        SettingsGroup(title = stringResource(R.string.settings_appearance_messages_section)) {
-            SettingsTarget(target?.name, SettingsTarget.NICKNAME_BACKGROUNDS.name) { targetModifier ->
-                SwitchRow(
-                    title = stringResource(R.string.settings_nickname_backgrounds),
-                    subtitle = stringResource(R.string.settings_nickname_backgrounds_desc),
-                    checked = previewAppearance.nicknameBackgroundsEnabled,
-                    onCheckedChange = {
-                        previewAppearance = previewAppearance.copy(nicknameBackgroundsEnabled = it)
-                        onNicknameBackgroundsEnabled(it)
-                    },
-                    switchTag = "settings_switch_nickname_backgrounds",
-                    modifier = targetModifier,
                 )
             }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -562,6 +485,89 @@ fun AppearanceSettingsContent(
                 )
             }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            AppearanceChatLayoutPreview(
+                settings = previewSettings,
+                appearance = previewAppearance,
+                customFontFile = customFontFile,
+                density = previewDensity,
+                messageSpacing = previewSpacing,
+                bubbleCorners = previewCorners,
+                chatShadowsEnabled = previewShadows,
+                tagPrefix = "settings_chat_preview_inline",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+        }
+        SettingsGroup(title = stringResource(R.string.settings_appearance_nicknames_section)) {
+            SettingsTarget(target?.name, SettingsTarget.NICK_COLORS.name) { targetModifier ->
+                SwitchRow(
+                    title = stringResource(R.string.settings_nick_colors),
+                    subtitle = stringResource(R.string.settings_nick_colors_desc),
+                    checked = settings.nickColorsEnabled,
+                    onCheckedChange = {
+                        previewSettings = previewSettings.copy(nickColorsEnabled = it)
+                        onNickColorsEnabled(it)
+                    },
+                    switchTag = "settings_switch_nick_colors",
+                    modifier = targetModifier,
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.NICK_PALETTE.name) { targetModifier ->
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_nick_palette),
+                    value = nickPaletteLabel(settings.nickColorPalette),
+                    summary =
+                        if (settings.nickColorsEnabled) {
+                            stringResource(R.string.settings_nick_palette_desc)
+                        } else {
+                            stringResource(R.string.settings_nick_palette_disabled)
+                        },
+                    enabled = settings.nickColorsEnabled,
+                    modifier = targetModifier.testTag("settings_palette_picker"),
+                    onClick = { choiceSheet = AppearanceChoice.PALETTE },
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.NICK_OVERRIDES.name) { targetModifier ->
+                SettingsNavigationRow(
+                    icon = Icons.Outlined.ColorLens,
+                    title = stringResource(R.string.settings_nick_color_overrides),
+                    summary = stringResource(R.string.settings_nick_color_overrides_desc),
+                    value =
+                        pluralStringResource(
+                            R.plurals.settings_nick_count,
+                            settings.nickColorOverrides.size,
+                            settings.nickColorOverrides.size,
+                        ),
+                    modifier = targetModifier.testTag("settings_nick_color_overrides"),
+                    onClick = onOpenNickColors,
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.NICKNAME_BACKGROUNDS.name) { targetModifier ->
+                SwitchRow(
+                    title = stringResource(R.string.settings_nickname_backgrounds),
+                    subtitle = stringResource(R.string.settings_nickname_backgrounds_desc),
+                    checked = previewAppearance.nicknameBackgroundsEnabled,
+                    onCheckedChange = {
+                        previewAppearance = previewAppearance.copy(nicknameBackgroundsEnabled = it)
+                        onNicknameBackgroundsEnabled(it)
+                    },
+                    switchTag = "settings_switch_nickname_backgrounds",
+                    modifier = targetModifier,
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.AVATAR_STYLE.name) { targetModifier ->
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_avatar_style),
+                    value = avatarStyleLabel(settings.avatarStyle),
+                    modifier = targetModifier.testTag("settings_avatar_style_picker"),
+                    onClick = { choiceSheet = AppearanceChoice.AVATAR },
+                )
+            }
+        }
+        SettingsGroup(title = stringResource(R.string.settings_appearance_bubbles_section)) {
             SettingsTarget(target?.name, SettingsTarget.BUBBLE_CORNERS.name) { targetModifier ->
                 SettingsNavigationRow(
                     title = stringResource(R.string.settings_bubble_corners),

@@ -43,6 +43,7 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
+import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.fixedThemeScheme
@@ -52,6 +53,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.text.SimpleDateFormat
@@ -90,13 +92,48 @@ class AppearanceFolderLayoutUiTest {
     }
 
     @Test
-    fun inlineLayoutExplainsDisabledFolderChatsToggle() {
+    fun inlineLayoutDisablesFolderChatsToggle() {
         setContent(settings = Settings(folderDisplayMode = FolderDisplayMode.INLINE))
 
         compose
-            .onNodeWithText("Choose Tabs for folder layout to configure this.")
+            .onNodeWithTag("settings_switch_show_folder_chats_in_all_row", useUnmergedTree = true)
             .performScrollTo()
+            .assertIsNotEnabled()
+    }
+
+    @Test
+    fun searchTargetsScrollToReorganizedControlsAndKeepBothPreviewsLive() {
+        val context = RuntimeEnvironment.getApplication()
+        val entries = buildSettingsSearchEntries(emptyList(), { context.getString(it) }, { network, section -> "$network · $section" })
+        val nicknameTarget = (searchSettings("sender tint", entries).single().destination as SettingsSearchDestination.Page).target
+        val bubbleTarget = (searchSettings("rounded square", entries).single().destination as SettingsSearchDestination.Page).target
+        val target = mutableStateOf(nicknameTarget)
+        var backgrounds: Boolean? = null
+        var corners: BubbleCornerStyle? = null
+        setContent(
+            targetProvider = { target.value },
+            onNicknameBackgroundsEnabled = { backgrounds = it },
+            onBubbleCornerStyle = { corners = it },
+        )
+
+        val toggle = compose.onNodeWithTag("settings_target_highlight_NICKNAME_BACKGROUNDS", useUnmergedTree = true)
+        toggle
             .assertIsDisplayed()
+            .assertIsOn()
+            .performClick()
+            .assertIsOff()
+        assertEquals(false, backgrounds)
+
+        compose.runOnIdle { target.value = bubbleTarget }
+        compose.onNodeWithTag("settings_target_highlight_BUBBLE_CORNERS").assertIsDisplayed().performClick()
+        scrollToSheetNode("settings_bubble_corner_sheet", "settings_bubble_corner_square").performClick().assertIsSelected()
+        assertEquals(BubbleCornerStyle.SQUARE, corners)
+        dismissSheet("settings_bubble_corner_sheet")
+        compose.onNodeWithTag("settings_shadow_preview_comfortable_default_square").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("settings_chat_preview_inline_comfortable_default_square").performScrollTo().assertIsDisplayed()
+
+        compose.runOnIdle { target.value = nicknameTarget }
+        toggle.assertIsDisplayed().assertIsOff()
     }
 
     @Test
@@ -596,6 +633,7 @@ class AppearanceFolderLayoutUiTest {
         onUseThemeTextColors: (Boolean) -> Unit = {},
         onWallpaper: (WallpaperSelection) -> Unit = {},
         importedWallpaperProvider: () -> WallpaperSelection? = { null },
+        targetProvider: () -> SettingsTarget? = { null },
     ) {
         compose.setContent {
             val currentAppearance = appearanceProvider()
@@ -636,6 +674,7 @@ class AppearanceFolderLayoutUiTest {
                     onChatShadowsEnabled = onChatShadowsEnabled,
                     onNicknameBackgroundsEnabled = onNicknameBackgroundsEnabled,
                     onLauncherIcon = {},
+                    target = targetProvider(),
                 )
             }
         }
