@@ -160,6 +160,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_composer_style, R.string.settings_composer_style_desc, "input composer default large nickname nick compact pill floating", SettingsSearchPage.APPEARANCE, SettingsTarget.COMPOSER_STYLE),
         spec(R.string.settings_avatar_style, R.string.settings_avatar_irc_sprite_desc, "monogram initials sprite", SettingsSearchPage.APPEARANCE, SettingsTarget.AVATAR_STYLE),
         spec(R.string.settings_show_timestamps, R.string.settings_show_timestamps_desc, "time", SettingsSearchPage.APPEARANCE, SettingsTarget.TIMESTAMPS),
+        spec(R.string.settings_nickname_backgrounds, R.string.settings_nickname_backgrounds_desc, "nickname background sender tint compact two line", SettingsSearchPage.APPEARANCE, SettingsTarget.NICKNAME_BACKGROUNDS),
         spec(R.string.settings_time_format, R.string.settings_time_format_custom_help, "12 24 clock", SettingsSearchPage.APPEARANCE, SettingsTarget.TIME_FORMAT),
         spec(R.string.settings_message_spacing, R.string.settings_appearance_messages_section, "compact relaxed", SettingsSearchPage.APPEARANCE, SettingsTarget.MESSAGE_SPACING),
         spec(R.string.settings_bubble_corners, R.string.settings_bubble_corners_desc, "rounded square", SettingsSearchPage.APPEARANCE, SettingsTarget.BUBBLE_CORNERS),

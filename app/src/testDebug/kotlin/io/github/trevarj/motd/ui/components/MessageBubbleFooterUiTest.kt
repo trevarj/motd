@@ -38,6 +38,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -70,6 +71,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.TimestampConfig
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.fixedThemeScheme
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -592,7 +594,129 @@ class MessageBubbleFooterUiTest {
     }
 
     @Test
-    fun rowsPreserveInkWhileOnlyNormalTwoLineFillLetsWallpaperThrough() {
+    fun nicknameBackgroundToggleChangesOnlyOrdinaryDenseRowPixels() {
+        data class Row(
+            val self: Boolean = false,
+            val sender: Boolean = true,
+            val mention: Boolean = false,
+            val kind: MessageKind = MessageKind.PRIVMSG,
+            val friend: Boolean = false,
+            val dimmed: Boolean = false,
+        )
+        val density = mutableStateOf(LayoutDensity.COMPACT)
+        val row = mutableStateOf(Row())
+        val enabled = mutableStateOf(true)
+        val coloredNicks = mutableStateOf(true)
+        val coloredNicknameInk = mutableMapOf<LayoutDensity, Color>()
+
+        // Native rendering can round a composited channel one step differently from Color.toArgb().
+        fun matchesPixel(
+            actual: Int,
+            expected: Int,
+        ): Boolean =
+            (0..3).all { channel ->
+                val shift = channel * 8
+                kotlin.math.abs((actual ushr shift and 255) - (expected ushr shift and 255)) <= 1
+            }
+        compose.setContent {
+            ContrastSample(
+                density = density.value,
+                isSelf = row.value.self,
+                showSender = row.value.sender,
+                hasMention = row.value.mention,
+                kind = row.value.kind,
+                senderIsFriend = row.value.friend,
+                dimmed = row.value.dimmed,
+                nicknameBackgroundsEnabled = enabled.value,
+                nickColorsEnabled = coloredNicks.value,
+                avatarStyle = AvatarStyle.IRC_SPRITE,
+            )
+        }
+        val scheme = requireNotNull(fixedThemeScheme(ColorThemePreset.AYU_LIGHT))
+        for (layout in LayoutDensity.entries) {
+            for (nickColors in listOf(true, false)) {
+                for (
+                sample in
+                listOf(
+                    Row(),
+                    Row(self = true),
+                    Row(sender = false),
+                    Row(self = true, sender = false),
+                    Row(mention = true),
+                    Row(self = true, mention = true),
+                    Row(kind = MessageKind.ACTION),
+                    Row(mention = true, kind = MessageKind.ACTION),
+                    Row(friend = true),
+                    Row(dimmed = true),
+                )
+                ) {
+                    val label = "$layout coloredNicks=$nickColors $sample"
+                    compose.runOnIdle {
+                        density.value = layout
+                        coloredNicks.value = nickColors
+                        row.value = sample
+                        enabled.value = true
+                    }
+                    val canvas = compose.onNodeWithTag("contrast_sample")
+                    val tinted = canvas.captureToImage().asAndroidBitmap()
+                    val avatar = compose.onAllNodesWithTag("chat_sender_avatar", useUnmergedTree = true).fetchSemanticsNodes().singleOrNull()
+                    val identity = avatar?.let { compose.onNodeWithTag("chat_sender_avatar", useUnmergedTree = true).captureToImage().asAndroidBitmap() }
+                    compose.runOnIdle { enabled.value = false }
+                    val plain = canvas.captureToImage().asAndroidBitmap()
+                    if (identity != null) {
+                        assertTrue("$label must preserve avatar identity pixels", identity.sameAs(compose.onNodeWithTag("chat_sender_avatar", useUnmergedTree = true).captureToImage().asAndroidBitmap()))
+                    }
+                    val ordinaryDense = layout != LayoutDensity.COMFORTABLE && !(sample.mention && !sample.self) && sample.kind == MessageKind.PRIVMSG
+                    if (ordinaryDense) {
+                        val canvasBounds = canvas.fetchSemanticsNode().boundsInRoot
+                        val bounds = compose.onNodeWithTag("contrast_message", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                        val y = (bounds.top - canvasBounds.top).toInt() + 2
+                        val expected = messageContainerColor(scheme.background, scheme.background, sample.dimmed).toArgb()
+                        assertTrue("$label OFF must paint the normal chat backing", matchesPixel(plain.getPixel(8, y), expected))
+                        assertTrue("$label ON must have a sender wash", tinted.getPixel(8, y) != plain.getPixel(8, y))
+                        if (sample == Row()) {
+                            val ink = compose.onNodeWithText("alice", substring = true, useUnmergedTree = true).textLayout().inkAt("alice")
+                            if (nickColors) {
+                                coloredNicknameInk[layout] = ink
+                            } else {
+                                assertTrue("$label OFF must not disable nickname colors", coloredNicknameInk.getValue(layout) != ink)
+                            }
+                        }
+                        if (sample.friend) {
+                            val friendFill =
+                                scheme.primary
+                                    .copy(alpha = 0.12f)
+                                    .compositeOver(scheme.background)
+                                    .toArgb()
+                            val nick = compose.onNodeWithText("alice", substring = true, useUnmergedTree = true)
+                            val nickBounds = nick.fetchSemanticsNode().boundsInRoot
+                            val left = (nickBounds.left - canvasBounds.left).toInt()
+                            val right = (nickBounds.right - canvasBounds.left).toInt()
+                            val top = (nickBounds.top - canvasBounds.top).toInt()
+                            val bottom = (nickBounds.bottom - canvasBounds.top).toInt()
+                            assertTrue(
+                                "$label OFF must preserve the painted friend nickname highlight",
+                                (left until right).any { x -> (top until bottom).any { py -> matchesPixel(plain.getPixel(x, py), friendFill) } },
+                            )
+                        }
+                        assertPaintedTextContrast("$label OFF", compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true), if (sample.dimmed) 4.5 else 7.0)
+                    } else {
+                        assertTrue("$label mentions, ACTION, and Comfortable must be unchanged", tinted.sameAs(plain))
+                    }
+                    compose.runOnIdle { enabled.value = true }
+                    assertTrue("$label must restore its original rendered pixels", tinted.sameAs(canvas.captureToImage().asAndroidBitmap()))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun rowsPreserveInkWhileOnlyNormalTwoLineFillLetsWallpaperThrough() = assertRowsPreserveInkAndWallpaper(true)
+
+    @Test
+    fun nicknameBackgroundsOffPreservesInkAndWallpaperContrast() = assertRowsPreserveInkAndWallpaper(false)
+
+    private fun assertRowsPreserveInkAndWallpaper(nicknameBackgroundsEnabled: Boolean) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val store = CustomWallpaperStore(context)
         val source = File.createTempFile("wallpaper-contrast", ".png", context.cacheDir)
@@ -617,6 +741,7 @@ class MessageBubbleFooterUiTest {
                 showTimestamp = true,
                 wallpaperIntensity = intensity.value,
                 wallpaperImage = localImage.value,
+                nicknameBackgroundsEnabled = nicknameBackgroundsEnabled,
             )
         }
         try {
@@ -816,13 +941,19 @@ class MessageBubbleFooterUiTest {
         showTimestamp: Boolean = false,
         audio: Boolean = false,
         background: Color? = null,
+        nicknameBackgroundsEnabled: Boolean = true,
+        nickColorsEnabled: Boolean = true,
+        senderIsFriend: Boolean = false,
+        avatarStyle: AvatarStyle = AvatarStyle.NONE,
     ) {
         MotdTheme(
             dynamicColor = false,
             themePreset = ColorThemePreset.AYU_LIGHT,
             layoutDensity = density,
-            avatarStyle = AvatarStyle.NONE,
+            avatarStyle = avatarStyle,
             timestampConfig = TimestampConfig(show = showTimestamp),
+            nicknameBackgroundsEnabled = nicknameBackgroundsEnabled,
+            nickColorsEnabled = nickColorsEnabled,
         ) {
             val scheme = MaterialTheme.colorScheme
             MaterialTheme(colorScheme = if (background == null) scheme else scheme.copy(background = background)) {
@@ -857,6 +988,7 @@ class MessageBubbleFooterUiTest {
                                 showSender = showSender,
                                 hasMention = hasMention,
                                 dimmed = dimmed,
+                                senderIsFriend = senderIsFriend,
                                 knownNicks = setOf("bob"),
                                 reply = reply,
                                 modifier = Modifier.testTag("contrast_message"),

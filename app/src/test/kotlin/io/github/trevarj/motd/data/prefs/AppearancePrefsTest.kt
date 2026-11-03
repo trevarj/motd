@@ -110,6 +110,26 @@ class AppearancePrefsTest {
             assertEquals(false, prefs.config.first().chatShadowsEnabled)
         }
 
+    @Test fun nicknameBackgroundsRoundTripAndDefaultOnForMissingPreferences() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val key = booleanPreferencesKey("nickname_backgrounds_enabled_v1")
+            context.appearanceDataStore.edit { it.remove(key) }
+            try {
+                assertEquals(true, prefs.config.first().nicknameBackgroundsEnabled)
+                assertEquals(true, Json.decodeFromString<AppearanceConfig>("{}").nicknameBackgroundsEnabled)
+                prefs.setNicknameBackgroundsEnabled(false)
+                assertEquals(false, AppearancePrefsImpl(context).config.first().nicknameBackgroundsEnabled)
+                assertEquals(false, context.appearanceDataStore.data.first()[key])
+                val encoded = jsonWithDefaults.encodeToString(prefs.config.first())
+                assertEquals(false, Json.decodeFromString<AppearanceConfig>(encoded).nicknameBackgroundsEnabled)
+                prefs.setNicknameBackgroundsEnabled(true)
+                assertEquals(true, AppearancePrefsImpl(context).config.first().nicknameBackgroundsEnabled)
+            } finally {
+                context.appearanceDataStore.edit { it.remove(key) }
+            }
+        }
+
     @Test fun comfortableBubbleColors_roundTripWithCustomOpaqueColorAndDefaultFallback() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()

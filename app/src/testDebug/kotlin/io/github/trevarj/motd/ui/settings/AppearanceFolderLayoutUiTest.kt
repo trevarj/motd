@@ -125,6 +125,44 @@ class AppearanceFolderLayoutUiTest {
     }
 
     @Test
+    fun nicknameBackgroundSwitchChangesDensePreviewBeforePersistenceEmits() {
+        val persisted = AppearanceConfig(theme = ColorThemePreset.AYU_LIGHT, wallpaper = WallpaperSelection(ChatWallpaperPreset.NONE))
+        var selected: Boolean? = null
+        setContent(
+            settings = Settings(layoutDensity = LayoutDensity.COMPACT, dynamicColor = false),
+            appearance = persisted,
+            onNicknameBackgroundsEnabled = { selected = it },
+        )
+        for (density in listOf("compact", "two_line")) {
+            if (density == "two_line") {
+                compose.onNodeWithTag("settings_density_picker").performScrollTo().performClick()
+                scrollToSheetNode("settings_density_sheet", "settings_density_two_line").performClick()
+                dismissSheet("settings_density_sheet")
+            }
+            val preview = compose.onNodeWithTag("settings_chat_preview_inline_${density}_default_rounded")
+            val toggle = compose.onNodeWithTag("settings_switch_nickname_backgrounds_row", useUnmergedTree = true)
+            // Approach every capture from below so scrolling gives the preview the same viewport.
+            toggle.performScrollTo().assertIsOn()
+            preview.performScrollTo().assertIsDisplayed()
+            val tinted = preview.captureToImage().asAndroidBitmap()
+            toggle
+                .performScrollTo()
+                .assertIsOn()
+                .performClick()
+                .assertIsOff()
+            assertEquals(false, selected)
+            assertEquals(true, persisted.nicknameBackgroundsEnabled)
+            preview.performScrollTo().assertIsDisplayed()
+            val plain = preview.captureToImage().asAndroidBitmap()
+            assertTrue("$density live preview must lose its sender wash", !tinted.sameAs(plain))
+            toggle.performScrollTo().performClick().assertIsOn()
+            assertEquals(true, selected)
+            preview.performScrollTo().assertIsDisplayed()
+            assertTrue("$density live preview must restore its sender wash", tinted.sameAs(preview.captureToImage().asAndroidBitmap()))
+        }
+    }
+
+    @Test
     fun themeTextColorSwitchUpdatesOrdinaryTextAndMessagePreviewLive() {
         val appearance = mutableStateOf(AppearanceConfig(theme = ColorThemePreset.GRUVBOX_DARK))
         var selected: Boolean? = null
@@ -554,6 +592,7 @@ class AppearanceFolderLayoutUiTest {
         onMessageSpacing: (MessageSpacing) -> Unit = {},
         onBubbleCornerStyle: (BubbleCornerStyle) -> Unit = {},
         onChatShadowsEnabled: (Boolean) -> Unit = {},
+        onNicknameBackgroundsEnabled: (Boolean) -> Unit = {},
         onUseThemeTextColors: (Boolean) -> Unit = {},
         onWallpaper: (WallpaperSelection) -> Unit = {},
         importedWallpaperProvider: () -> WallpaperSelection? = { null },
@@ -595,6 +634,7 @@ class AppearanceFolderLayoutUiTest {
                     onMessageSpacing = onMessageSpacing,
                     onBubbleCornerStyle = onBubbleCornerStyle,
                     onChatShadowsEnabled = onChatShadowsEnabled,
+                    onNicknameBackgroundsEnabled = onNicknameBackgroundsEnabled,
                     onLauncherIcon = {},
                 )
             }

@@ -977,6 +977,8 @@
          tagged so lint (warningsAsErrors) stays green mid-wave.
          WP-U4 strips the markers once the usages exist. -->
     <string name="settings_density">Message style</string>
+    <string name="settings_nickname_backgrounds">Nickname backgrounds</string>
+    <string name="settings_nickname_backgrounds_desc">Tint Compact and Two-line rows by sender. Nickname colors and mention highlights stay on.</string>
     <string name="settings_composer_style">Input style</string>
     <string name="settings_composer_style_desc">Choose the input layout for IRC chats.</string>
     <string name="settings_composer_style_comfortable">Default</string>

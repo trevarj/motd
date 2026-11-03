@@ -167,6 +167,8 @@ class AppearanceSettingsViewModel
 
         fun setChatShadowsEnabled(value: Boolean) = launch { appearancePrefs.setChatShadowsEnabled(value) }
 
+        fun setNicknameBackgroundsEnabled(value: Boolean) = launch { appearancePrefs.setNicknameBackgroundsEnabled(value) }
+
         fun setSentBubbleColor(value: ComfortableBubbleColor) = launch { appearancePrefs.setSentBubbleColor(value) }
 
         fun setReceivedBubbleColor(value: ComfortableBubbleColor) = launch { appearancePrefs.setReceivedBubbleColor(value) }

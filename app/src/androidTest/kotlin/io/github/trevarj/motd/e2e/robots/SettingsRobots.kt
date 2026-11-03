@@ -52,6 +52,26 @@ internal class SettingsRobot(
         compose.onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true).performScrollTo().assertIsOn()
     }
 
+    fun disableNicknameBackgrounds() {
+        awaitTag("settings_switch_nickname_backgrounds_row")
+        compose
+            .onNodeWithTag("settings_switch_nickname_backgrounds_row", useUnmergedTree = true)
+            .performScrollTo()
+            .assertIsOn()
+            .performClick()
+            .assertIsOff()
+    }
+
+    fun restoreNicknameBackgrounds() {
+        awaitTag("settings_switch_nickname_backgrounds_row")
+        compose
+            .onNodeWithTag("settings_switch_nickname_backgrounds_row", useUnmergedTree = true)
+            .performScrollTo()
+            .assertIsOff()
+            .performClick()
+            .assertIsOn()
+    }
+
     fun selectIrcSprites() {
         scrollToAndClick("settings_avatar_style_picker")
         assertDisplayed("settings_avatar_style_sheet")

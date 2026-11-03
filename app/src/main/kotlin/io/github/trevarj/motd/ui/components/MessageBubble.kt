@@ -101,6 +101,7 @@ import io.github.trevarj.motd.ui.theme.LocalComfortableBubbleColors
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.LocalNicknameBackgroundsEnabled
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdLottieMotion
@@ -1574,8 +1575,10 @@ private fun TwoLineMessageRow(
     val rowTint =
         if (hasMention) {
             LocalMotdSemanticColors.current.warningContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
-        } else {
+        } else if (LocalNicknameBackgroundsEnabled.current) {
             nameInk.copy(alpha = TWO_LINE_ROW_TINT_ALPHA)
+        } else {
+            Color.Transparent
         }
     val normalPaintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
     val paintedRow = messageContainerColor(normalPaintedRow, MaterialTheme.colorScheme.background, dimmed)

@@ -135,6 +135,9 @@ val LocalTimestampConfig: ProvidableCompositionLocal<TimestampConfig> =
 /** The Comfortable message renderer reads this without changing unrelated surfaces. */
 val LocalChatShadowsEnabled: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { false }
 
+/** Controls only the ordinary sender wash in Compact and Two-line message rows. */
+val LocalNicknameBackgroundsEnabled: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { true }
+
 /** Resolved fills for ordinary Comfortable PRIVMSG bubbles; null preserves the theme default. */
 data class ComfortableBubbleColors(
     val sent: Color? = null,
@@ -227,6 +230,7 @@ fun MotdTheme(
     messageSpacing: MessageSpacing = MessageSpacing.DEFAULT,
     bubbleCornerStyle: BubbleCornerStyle = BubbleCornerStyle.ROUNDED,
     chatShadowsEnabled: Boolean = false,
+    nicknameBackgroundsEnabled: Boolean = true,
     sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     receivedBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     // Nested previews can render a different palette from the app shell without restyling its bars.
@@ -326,6 +330,7 @@ fun MotdTheme(
             LocalUseThemeTextColors provides useThemeTextColors,
             LocalSpacing provides spacingFor(layoutDensity, messageSpacing, bubbleCornerStyle),
             LocalChatShadowsEnabled provides chatShadowsEnabled,
+            LocalNicknameBackgroundsEnabled provides nicknameBackgroundsEnabled,
             LocalComfortableBubbleColors provides comfortableBubbleColors,
             LocalMotdDark provides dark,
             LocalNickColors provides

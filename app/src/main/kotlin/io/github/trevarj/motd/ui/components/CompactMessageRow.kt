@@ -37,6 +37,7 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.LocalNicknameBackgroundsEnabled
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -116,8 +117,10 @@ internal fun CompactMessageRow(
     val rowTint =
         if (hasMention) {
             MaterialTheme.colorScheme.secondaryContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
-        } else {
+        } else if (LocalNicknameBackgroundsEnabled.current) {
             nameColor.copy(alpha = COMPACT_ROW_TINT_ALPHA)
+        } else {
+            Color.Transparent
         }
     val normalPaintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
     val paintedRow = messageContainerColor(normalPaintedRow, MaterialTheme.colorScheme.background, dimmed)

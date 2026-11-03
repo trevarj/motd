@@ -204,6 +204,7 @@ class MainActivity :
                 messageSpacing = appearance.messageSpacing,
                 bubbleCornerStyle = appearance.bubbleCornerStyle,
                 chatShadowsEnabled = appearance.chatShadowsEnabled,
+                nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
                 sentBubbleColor = appearance.sentBubbleColor,
                 receivedBubbleColor = appearance.receivedBubbleColor,
             ) {

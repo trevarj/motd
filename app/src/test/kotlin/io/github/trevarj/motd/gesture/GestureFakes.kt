@@ -272,6 +272,10 @@ internal class FakeAppearance(
         state.value = state.value.copy(chatShadowsEnabled = enabled)
     }
 
+    override suspend fun setNicknameBackgroundsEnabled(enabled: Boolean) {
+        state.value = state.value.copy(nicknameBackgroundsEnabled = enabled)
+    }
+
     override suspend fun setSentBubbleColor(color: ComfortableBubbleColor) {
         state.value = state.value.copy(sentBubbleColor = color)
     }

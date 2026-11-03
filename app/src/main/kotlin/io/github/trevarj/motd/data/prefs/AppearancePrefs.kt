@@ -259,6 +259,7 @@ data class AppearanceConfig(
     val messageSpacing: MessageSpacing = MessageSpacing.DEFAULT,
     val bubbleCornerStyle: BubbleCornerStyle = BubbleCornerStyle.ROUNDED,
     val chatShadowsEnabled: Boolean = false,
+    val nicknameBackgroundsEnabled: Boolean = true,
     val sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     val receivedBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     val launcherIcon: LauncherIcon = LauncherIcon.DEFAULT,
@@ -301,6 +302,8 @@ interface AppearancePrefs {
     suspend fun setBubbleCornerStyle(style: BubbleCornerStyle)
 
     suspend fun setChatShadowsEnabled(enabled: Boolean)
+
+    suspend fun setNicknameBackgroundsEnabled(enabled: Boolean)
 
     suspend fun setSentBubbleColor(color: ComfortableBubbleColor)
 

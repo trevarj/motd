@@ -174,6 +174,7 @@ fun AppearanceSettingsScreen(
         onMessageSpacing = viewModel::setMessageSpacing,
         onBubbleCornerStyle = viewModel::setBubbleCornerStyle,
         onChatShadowsEnabled = viewModel::setChatShadowsEnabled,
+        onNicknameBackgroundsEnabled = viewModel::setNicknameBackgroundsEnabled,
         onSentBubbleColor = viewModel::setSentBubbleColor,
         onReceivedBubbleColor = viewModel::setReceivedBubbleColor,
         onLauncherIcon = viewModel::setLauncherIcon,
@@ -210,6 +211,7 @@ fun AppearanceSettingsContent(
     onMessageSpacing: (io.github.trevarj.motd.data.prefs.MessageSpacing) -> Unit,
     onBubbleCornerStyle: (io.github.trevarj.motd.data.prefs.BubbleCornerStyle) -> Unit,
     onChatShadowsEnabled: (Boolean) -> Unit = {},
+    onNicknameBackgroundsEnabled: (Boolean) -> Unit = {},
     onSentBubbleColor: (ComfortableBubbleColor) -> Unit = {},
     onReceivedBubbleColor: (ComfortableBubbleColor) -> Unit = {},
     onLauncherIcon: (LauncherIcon) -> Unit,
@@ -499,6 +501,20 @@ fun AppearanceSettingsContent(
             }
         }
         SettingsGroup(title = stringResource(R.string.settings_appearance_messages_section)) {
+            SettingsTarget(target?.name, SettingsTarget.NICKNAME_BACKGROUNDS.name) { targetModifier ->
+                SwitchRow(
+                    title = stringResource(R.string.settings_nickname_backgrounds),
+                    subtitle = stringResource(R.string.settings_nickname_backgrounds_desc),
+                    checked = previewAppearance.nicknameBackgroundsEnabled,
+                    onCheckedChange = {
+                        previewAppearance = previewAppearance.copy(nicknameBackgroundsEnabled = it)
+                        onNicknameBackgroundsEnabled(it)
+                    },
+                    switchTag = "settings_switch_nickname_backgrounds",
+                    modifier = targetModifier,
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsTarget(target?.name, SettingsTarget.TIMESTAMPS.name) { targetModifier ->
                 SwitchRow(
                     title = stringResource(R.string.settings_show_timestamps),
@@ -750,6 +766,7 @@ private fun AppearanceChatLayoutPreview(
         messageSpacing = messageSpacing,
         bubbleCornerStyle = bubbleCorners,
         chatShadowsEnabled = chatShadowsEnabled,
+        nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
         sentBubbleColor = appearance.sentBubbleColor,
         receivedBubbleColor = appearance.receivedBubbleColor,
         syncSystemBars = false,
