@@ -74,6 +74,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -802,6 +803,56 @@ class MessageBubbleFooterUiTest {
         compose.onNodeWithContentDescription("Download and play audio").assertIsDisplayed().performClick()
     }
 
+    @Test
+    fun nicknameRowWashCanBeDisabledForCompactAndTwoLineWhileMentionsStayHighlighted() {
+        val density = mutableStateOf(LayoutDensity.COMPACT)
+        val sender = mutableStateOf("alice")
+        val tinted = mutableStateOf(true)
+        val mention = mutableStateOf(false)
+        compose.setContent {
+            Sample(
+                sender = sender.value,
+                isSelf = false,
+                density = density.value,
+                hasMention = mention.value,
+                nickTintedRowsEnabled = tinted.value,
+                nickColorOverrides = mapOf("alice" to 0, "bob" to 180),
+            )
+        }
+
+        fun rowPixel(): Color = compose.onNodeWithTag("message_row", useUnmergedTree = true).captureToImage().toPixelMap()[8, 8]
+
+        for (layout in listOf(LayoutDensity.COMPACT, LayoutDensity.TWO_LINE)) {
+            compose.runOnIdle {
+                density.value = layout
+                sender.value = "alice"
+                tinted.value = true
+                mention.value = false
+            }
+            val aliceTinted = rowPixel()
+            compose.runOnIdle { sender.value = "bob" }
+            val bobTinted = rowPixel()
+            assertNotEquals("$layout rows must tint by sender", aliceTinted, bobTinted)
+
+            compose.runOnIdle {
+                sender.value = "alice"
+                tinted.value = false
+            }
+            val alicePlain = rowPixel()
+            compose.runOnIdle { sender.value = "bob" }
+            val bobPlain = rowPixel()
+            assertEquals("$layout plain rows must share the canvas", alicePlain, bobPlain)
+            assertNotEquals("$layout tint must paint a different fill", aliceTinted, alicePlain)
+
+            compose.runOnIdle {
+                sender.value = "alice"
+                mention.value = true
+            }
+            val mentionPlain = rowPixel()
+            assertNotEquals("$layout mention highlight must survive", alicePlain, mentionPlain)
+        }
+    }
+
     @Composable
     private fun ContrastSample(
         isSelf: Boolean = false,
@@ -924,6 +975,9 @@ class MessageBubbleFooterUiTest {
         reactions: List<ReactionChip> = emptyList(),
         onSenderClick: (() -> Unit)? = null,
         senderIsFriend: Boolean = false,
+        hasMention: Boolean = false,
+        nickTintedRowsEnabled: Boolean = true,
+        nickColorOverrides: Map<String, Int> = emptyMap(),
         avatarStyle: AvatarStyle = AvatarStyle.IRC_SPRITE,
         failed: Boolean = false,
         sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
@@ -934,6 +988,8 @@ class MessageBubbleFooterUiTest {
             themePreset = ColorThemePreset.LIGHT,
             layoutDensity = density,
             avatarStyle = avatarStyle,
+            nickColorOverrides = nickColorOverrides,
+            nickTintedRowsEnabled = nickTintedRowsEnabled,
             chatShadowsEnabled = shadows,
             sentBubbleColor = sentBubbleColor,
             receivedBubbleColor = receivedBubbleColor,
@@ -948,10 +1004,12 @@ class MessageBubbleFooterUiTest {
                     isSelf = isSelf,
                     kind = kind,
                     showSender = showSender,
+                    hasMention = hasMention,
                     reactions = reactions,
                     onSenderClick = onSenderClick,
                     senderIsFriend = senderIsFriend,
                     failed = failed,
+                    modifier = Modifier.testTag("message_row"),
                 )
             }
         }

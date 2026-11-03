@@ -135,6 +135,9 @@ val LocalTimestampConfig: ProvidableCompositionLocal<TimestampConfig> =
 /** The Comfortable message renderer reads this without changing unrelated surfaces. */
 val LocalChatShadowsEnabled: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { false }
 
+/** Whether Compact and Two-line sender rows carry the per-nick background wash. */
+val LocalNickTintedRowsEnabled: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { true }
+
 /** Resolved fills for ordinary Comfortable PRIVMSG bubbles; null preserves the theme default. */
 data class ComfortableBubbleColors(
     val sent: Color? = null,
@@ -217,6 +220,7 @@ fun MotdTheme(
     nickColorsEnabled: Boolean = true,
     nickColorPalette: NickColorPalette = NickColorPalette.THEME,
     nickColorOverrides: Map<String, Int> = emptyMap(),
+    nickTintedRowsEnabled: Boolean = true,
     avatarStyle: AvatarStyle = AvatarStyle.IRC_SPRITE,
     uiFontScalePercent: Int = DEFAULT_FONT_SCALE_PERCENT,
     fontChoice: FontChoice = FontChoice.SYSTEM,
@@ -326,6 +330,7 @@ fun MotdTheme(
             LocalUseThemeTextColors provides useThemeTextColors,
             LocalSpacing provides spacingFor(layoutDensity, messageSpacing, bubbleCornerStyle),
             LocalChatShadowsEnabled provides chatShadowsEnabled,
+            LocalNickTintedRowsEnabled provides nickTintedRowsEnabled,
             LocalComfortableBubbleColors provides comfortableBubbleColors,
             LocalMotdDark provides dark,
             LocalNickColors provides

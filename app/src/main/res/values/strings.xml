@@ -1016,6 +1016,8 @@
     <string name="settings_chat">Chat</string>
     <string name="settings_nick_colors">Colored nicknames</string>
     <string name="settings_nick_colors_desc">Color sender names in chats.</string>
+    <string name="settings_nick_tinted_rows">Nickname-tinted message rows</string>
+    <string name="settings_nick_tinted_rows_desc">Tint Compact and Two-line message rows with the sender\'s nickname color. Turn off for the plain chat background; mention and action highlights stay.</string>
     <string name="settings_palette_theme">Theme palette</string>
     <string name="settings_palette_classic">Classic palette</string>
     <string name="settings_palette_vivid">Vivid palette</string>

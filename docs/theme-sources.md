@@ -47,10 +47,11 @@ the most readable black or white ink, with at least 4.5:1 contrast.
 Read chat-list message previews are subdued while retaining at least 4.5:1 contrast.
 Unread previews keep the stronger reading ink in both text-color modes.
 
-Flattened rows retain their nick/attention tint over the theme canvas. Normal two-line rows
-admit wallpaper through a 90%-opaque fill only when contrast is safe; Dimmed rows and
-contrast fallbacks stay opaque. Wallpaper intensity still controls builtin ink or full-color
-image opacity directly, including 100%.
+Flattened rows retain their attention tint. The per-sender nickname wash in Compact and
+Two-line rows can be turned off in Appearance, leaving the plain chat background. Normal
+two-line rows admit wallpaper through a 90%-opaque fill only when contrast is safe; Dimmed
+rows and contrast fallbacks stay opaque. Wallpaper intensity still controls builtin ink or
+full-color image opacity directly, including 100%.
 
 Two-line headers keep sender names on one ellipsized line, reserving room for the avatar, friend
 indicator, delivery status, and timestamp even in narrow panes with large system fonts.

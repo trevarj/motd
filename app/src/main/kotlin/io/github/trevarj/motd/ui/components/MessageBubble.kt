@@ -101,6 +101,7 @@ import io.github.trevarj.motd.ui.theme.LocalComfortableBubbleColors
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.LocalNickTintedRowsEnabled
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdLottieMotion
@@ -1566,16 +1567,17 @@ private fun TwoLineMessageRow(
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val hideAvatar = avatarsHidden()
+    val nickTintedRowsEnabled = LocalNickTintedRowsEnabled.current
     val nameInk = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
     val codeColor = readingInk(MaterialTheme.colorScheme)
     // Per-nick row wash (same treatment as COMPACT): a faint tint of the sender's own nick color
     // behind the whole row so runs of a nick's messages are trackable by speaker.
     val rowTint =
-        if (hasMention) {
-            LocalMotdSemanticColors.current.warningContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
-        } else {
-            nameInk.copy(alpha = TWO_LINE_ROW_TINT_ALPHA)
+        when {
+            hasMention -> LocalMotdSemanticColors.current.warningContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
+            nickTintedRowsEnabled -> nameInk.copy(alpha = TWO_LINE_ROW_TINT_ALPHA)
+            else -> Color.Transparent
         }
     val normalPaintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
     val paintedRow = messageContainerColor(normalPaintedRow, MaterialTheme.colorScheme.background, dimmed)

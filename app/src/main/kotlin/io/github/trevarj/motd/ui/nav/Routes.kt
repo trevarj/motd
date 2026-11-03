@@ -69,6 +69,7 @@ enum class SettingsTarget {
     DYNAMIC_COLOR,
     THEME_TEXT_COLORS,
     NICK_COLORS,
+    NICK_TINTED_ROWS,
     NICK_PALETTE,
     NICK_OVERRIDES,
     APP_FONT,

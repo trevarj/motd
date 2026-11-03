@@ -159,6 +159,7 @@ fun AppearanceSettingsScreen(
         onShowFolderChatsInAll = viewModel::setShowFolderChatsInAll,
         onAvatarStyle = viewModel::setAvatarStyle,
         onNickColorsEnabled = viewModel::setNickColorsEnabled,
+        onNickTintedRowsEnabled = viewModel::setNickTintedRowsEnabled,
         onNickColorPalette = viewModel::setNickColorPalette,
         onWallpaper = viewModel::setWallpaper,
         onImportWallpaper = viewModel::importWallpaper,
@@ -199,6 +200,7 @@ fun AppearanceSettingsContent(
     onShowFolderChatsInAll: (Boolean) -> Unit = {},
     onAvatarStyle: (AvatarStyle) -> Unit,
     onNickColorsEnabled: (Boolean) -> Unit,
+    onNickTintedRowsEnabled: (Boolean) -> Unit = {},
     onNickColorPalette: (NickColorPalette) -> Unit,
     onWallpaper: (io.github.trevarj.motd.data.prefs.WallpaperSelection) -> Unit,
     onUiFontScale: (Int) -> Unit,
@@ -394,6 +396,20 @@ fun AppearanceSettingsContent(
                         ),
                     modifier = targetModifier.testTag("settings_nick_color_overrides"),
                     onClick = onOpenNickColors,
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.NICK_TINTED_ROWS.name) { targetModifier ->
+                SwitchRow(
+                    title = stringResource(R.string.settings_nick_tinted_rows),
+                    subtitle = stringResource(R.string.settings_nick_tinted_rows_desc),
+                    checked = previewAppearance.nickTintedRowsEnabled,
+                    onCheckedChange = {
+                        previewAppearance = previewAppearance.copy(nickTintedRowsEnabled = it)
+                        onNickTintedRowsEnabled(it)
+                    },
+                    switchTag = "settings_switch_nick_tinted_rows",
+                    modifier = targetModifier,
                 )
             }
         }
@@ -737,6 +753,7 @@ private fun AppearanceChatLayoutPreview(
         nickColorsEnabled = settings.nickColorsEnabled,
         nickColorPalette = settings.nickColorPalette,
         nickColorOverrides = settings.nickColorOverrides,
+        nickTintedRowsEnabled = appearance.nickTintedRowsEnabled,
         avatarStyle = settings.avatarStyle,
         uiFontScalePercent = appearance.uiFontScalePercent,
         fontChoice = appearance.fontChoice,
@@ -787,6 +804,7 @@ private fun ComposerStylePreview(
         nickColorsEnabled = settings.nickColorsEnabled,
         nickColorPalette = settings.nickColorPalette,
         nickColorOverrides = settings.nickColorOverrides,
+        nickTintedRowsEnabled = appearance.nickTintedRowsEnabled,
         avatarStyle = settings.avatarStyle,
         uiFontScalePercent = appearance.uiFontScalePercent,
         fontChoice = appearance.fontChoice,

@@ -39,6 +39,7 @@ class AppearancePrefsTest {
         assertEquals(MessageSpacing.DEFAULT, AppearanceConfig().messageSpacing)
         assertEquals(BubbleCornerStyle.ROUNDED, AppearanceConfig().bubbleCornerStyle)
         assertEquals(false, AppearanceConfig().chatShadowsEnabled)
+        assertEquals(true, AppearanceConfig().nickTintedRowsEnabled)
         assertEquals(false, AppearanceConfig().useThemeTextColors)
         assertEquals(LauncherIcon.DEFAULT, AppearanceConfig().launcherIcon)
         assertEquals("", AppearanceConfig().customFontName)
@@ -108,6 +109,24 @@ class AppearancePrefsTest {
             assertEquals(true, prefs.config.first().chatShadowsEnabled)
             prefs.setChatShadowsEnabled(false)
             assertEquals(false, prefs.config.first().chatShadowsEnabled)
+        }
+
+    @Test fun nickTintedRows_roundTripsAndDefaultsOnWhenMissing() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val key = booleanPreferencesKey("nick_tinted_rows_enabled_v1")
+            context.appearanceDataStore.edit { it.remove(key) }
+            assertEquals(true, prefs.config.first().nickTintedRowsEnabled)
+
+            try {
+                prefs.setNickTintedRowsEnabled(false)
+                assertEquals(false, prefs.config.first().nickTintedRowsEnabled)
+                assertEquals(false, context.appearanceDataStore.data.first()[key])
+                prefs.setNickTintedRowsEnabled(true)
+                assertEquals(true, prefs.config.first().nickTintedRowsEnabled)
+            } finally {
+                context.appearanceDataStore.edit { it.remove(key) }
+            }
         }
 
     @Test fun comfortableBubbleColors_roundTripWithCustomOpaqueColorAndDefaultFallback() =

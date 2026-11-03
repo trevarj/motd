@@ -267,6 +267,8 @@ data class AppearanceConfig(
     val customFontName: String = "",
     val composerStyle: ComposerStyle = ComposerStyle.COMFORTABLE,
     val useThemeTextColors: Boolean = false,
+    // Sender-colored wash behind Compact and Two-line rows; Comfortable is unaffected.
+    val nickTintedRowsEnabled: Boolean = true,
 )
 
 interface AppearancePrefs {
@@ -301,6 +303,8 @@ interface AppearancePrefs {
     suspend fun setBubbleCornerStyle(style: BubbleCornerStyle)
 
     suspend fun setChatShadowsEnabled(enabled: Boolean)
+
+    suspend fun setNickTintedRowsEnabled(enabled: Boolean)
 
     suspend fun setSentBubbleColor(color: ComfortableBubbleColor)
 

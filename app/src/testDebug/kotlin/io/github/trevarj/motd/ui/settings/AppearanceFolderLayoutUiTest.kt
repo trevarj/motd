@@ -125,6 +125,29 @@ class AppearanceFolderLayoutUiTest {
     }
 
     @Test
+    fun nickTintedRowsSwitchInvokesCallbackAndUpdatesState() {
+        var enabled: Boolean? = null
+        val appearance = mutableStateOf(AppearanceConfig())
+        setContent(
+            appearanceProvider = { appearance.value },
+            onNickTintedRowsEnabled = {
+                enabled = it
+                appearance.value = appearance.value.copy(nickTintedRowsEnabled = it)
+            },
+        )
+
+        compose
+            .onNodeWithTag("settings_switch_nick_tinted_rows_row", useUnmergedTree = true)
+            .performScrollTo()
+            .assertIsOn()
+            .performClick()
+        assertEquals(false, enabled)
+        compose
+            .onNodeWithTag("settings_switch_nick_tinted_rows_row", useUnmergedTree = true)
+            .assertIsOff()
+    }
+
+    @Test
     fun themeTextColorSwitchUpdatesOrdinaryTextAndMessagePreviewLive() {
         val appearance = mutableStateOf(AppearanceConfig(theme = ColorThemePreset.GRUVBOX_DARK))
         var selected: Boolean? = null
@@ -554,6 +577,7 @@ class AppearanceFolderLayoutUiTest {
         onMessageSpacing: (MessageSpacing) -> Unit = {},
         onBubbleCornerStyle: (BubbleCornerStyle) -> Unit = {},
         onChatShadowsEnabled: (Boolean) -> Unit = {},
+        onNickTintedRowsEnabled: (Boolean) -> Unit = {},
         onUseThemeTextColors: (Boolean) -> Unit = {},
         onWallpaper: (WallpaperSelection) -> Unit = {},
         importedWallpaperProvider: () -> WallpaperSelection? = { null },
@@ -583,6 +607,7 @@ class AppearanceFolderLayoutUiTest {
                     onShowFolderChatsInAll = onShowFolderChatsInAll,
                     onAvatarStyle = onAvatarStyle,
                     onNickColorsEnabled = {},
+                    onNickTintedRowsEnabled = onNickTintedRowsEnabled,
                     onNickColorPalette = {},
                     onWallpaper = onWallpaper,
                     importedWallpaper = importedWallpaperProvider(),

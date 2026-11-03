@@ -149,6 +149,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_dynamic_color, R.string.settings_dynamic_color_desc, "wallpaper material you", SettingsSearchPage.APPEARANCE, SettingsTarget.DYNAMIC_COLOR),
         spec(R.string.settings_theme_text_colors, R.string.settings_theme_text_colors_desc, "static neutral font ink text palette", SettingsSearchPage.APPEARANCE, SettingsTarget.THEME_TEXT_COLORS),
         spec(R.string.settings_nick_colors, R.string.settings_nick_colors_desc, "nickname sender", SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_COLORS),
+        spec(R.string.settings_nick_tinted_rows, R.string.settings_nick_tinted_rows_desc, "background row tint band stripe nickname sender compact two line", SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_TINTED_ROWS),
         spec(R.string.settings_nick_palette, R.string.settings_nick_palette_disabled, "nickname colors classic vivid", SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_PALETTE),
         spec(R.string.settings_nick_color_overrides, R.string.settings_nick_colors_desc, "nickname hue", SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_OVERRIDES),
         spec(R.string.settings_app_font, R.string.settings_layout_section, "typeface text", SettingsSearchPage.APPEARANCE, SettingsTarget.APP_FONT),

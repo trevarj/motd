@@ -191,6 +191,7 @@ class MainActivity :
                 nickColorsEnabled = settings.nickColorsEnabled,
                 nickColorPalette = settings.nickColorPalette,
                 nickColorOverrides = settings.nickColorOverrides,
+                nickTintedRowsEnabled = appearance.nickTintedRowsEnabled,
                 avatarStyle = settings.avatarStyle,
                 uiFontScalePercent = appearance.uiFontScalePercent,
                 fontChoice = appearance.fontChoice,

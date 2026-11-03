@@ -37,6 +37,7 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.LocalNickTintedRowsEnabled
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -103,6 +104,7 @@ internal fun CompactMessageRow(
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val spacing = LocalSpacing.current
+    val nickTintedRowsEnabled = LocalNickTintedRowsEnabled.current
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
     // Self text stays on the default body color; others too (IRC is uniform). The nick carries color.
     val linkColor = MaterialTheme.colorScheme.primary
@@ -114,10 +116,10 @@ internal fun CompactMessageRow(
     // Per-nick row wash: a faint tint of the sender's own nick color behind the whole row so runs of
     // messages are visually trackable by speaker (stable per nick — no fragile list-wide parity).
     val rowTint =
-        if (hasMention) {
-            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
-        } else {
-            nameColor.copy(alpha = COMPACT_ROW_TINT_ALPHA)
+        when {
+            hasMention -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = MENTION_ROW_TINT_ALPHA)
+            nickTintedRowsEnabled -> nameColor.copy(alpha = COMPACT_ROW_TINT_ALPHA)
+            else -> Color.Transparent
         }
     val normalPaintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
     val paintedRow = messageContainerColor(normalPaintedRow, MaterialTheme.colorScheme.background, dimmed)
