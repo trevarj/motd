@@ -31,10 +31,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.theme.LocalAvatarShape
 import io.github.trevarj.motd.ui.theme.LocalNickColors
-import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.ceramicLogoColorMatrix
 import io.github.trevarj.motd.ui.theme.identityRamp
+import io.github.trevarj.motd.ui.theme.shape
 import kotlin.math.min
 
 private const val DEVICON_VIEWPORT = 600f
@@ -243,9 +244,8 @@ private fun channelTokens(channelName: String): List<String> {
 
 /**
  * Contextual channel badge: #motd uses the bundled logo, named technical channels get a
- * Devicons mark, and ordinary channels keep a quiet IRC sigil. Channels are rounded-square tiles
- * ([MotdShapes.channelAvatar]) filled with the vivid mid tone of the deterministic channel hue,
- * so they read as places while people stay circular sprites.
+ * Devicons mark, and ordinary channels keep a quiet IRC sigil. The selected channel shape is
+ * filled with the vivid mid tone of the deterministic channel hue.
  */
 @Composable
 internal fun IrcChannelBadge(
@@ -260,14 +260,15 @@ internal fun IrcChannelBadge(
     // whichever of black/white reads on the tile.
     val border = remember(background) { identityRamp(background).highlight }
     val mark = onColorFor(background)
+    val shape = LocalAvatarShape.current.shape(isChannel = true)
 
     Box(
         modifier =
             modifier
                 .size(size)
-                .clip(MotdShapes.channelAvatar)
+                .clip(shape)
                 .background(background)
-                .border(1.dp, border.copy(alpha = 0.90f), MotdShapes.channelAvatar),
+                .border(1.dp, border.copy(alpha = 0.90f), shape),
         contentAlignment = Alignment.Center,
     ) {
         if (isMotd) {

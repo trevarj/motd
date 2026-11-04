@@ -57,6 +57,10 @@ Importing general settings replaces per-fool overrides, including for retained f
 without per-fool preferences reset them to inherited visibility with both notification permissions
 off; saved `COLLAPSE` and `HIDE` default visibility values remain compatible.
 
+Appearance includes independent input, avatar, chat-card, and media corner presets.
+Older appearance objects without these fields restore all four to `DEFAULT`;
+backups without an appearance object leave local appearance settings untouched.
+
 Credentials-excluded imports keep already stored local credentials on matching
 networks. New networks that require omitted SASL passwords, server passwords,
 VLESS links, or client certificates are imported with `autoConnect = false` and

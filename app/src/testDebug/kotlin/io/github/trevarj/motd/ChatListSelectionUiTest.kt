@@ -1,6 +1,8 @@
 package io.github.trevarj.motd
 
+import android.graphics.Bitmap
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -49,6 +51,7 @@ import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.ui.chatlist.ArchiveAccessibilityAnnouncement
 import io.github.trevarj.motd.ui.chatlist.ArchiveFolderPull
 import io.github.trevarj.motd.ui.chatlist.ChatListContent
@@ -76,6 +79,9 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowSystemClock
 import java.time.Duration
+import kotlin.math.abs
+import kotlin.math.hypot
+import kotlin.math.roundToInt
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -427,6 +433,119 @@ class ChatListSelectionUiTest {
         assertEquals(revealed, compose.onNodeWithTag("chatlist_archived_folder").assertIsDisplayed().getUnclippedBoundsInRoot())
         assertEquals(shiftedRow, compose.onNodeWithTag("chatlist_row_1").getUnclippedBoundsInRoot())
         compose.mainClock.autoAdvance = true
+        compose.onNodeWithTag("chatlist_archived_folder").performTouchInput { click() }
+        compose.onNodeWithText("Archived Chats").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_99").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_1").assertDoesNotExist()
+    }
+
+    @Test fun chatCardCornerPresetsClipRowsAndRevealedArchiveAndRestoreDefault() {
+        val density = mutableStateOf(LayoutDensity.COMFORTABLE)
+        val corners = mutableStateOf(UiCornerStyle.DEFAULT)
+        val opened = mutableListOf<Long>()
+        val markedRead = mutableListOf<Long>()
+        lateinit var colors: ColorScheme
+        var pixelsPerDp = 1f
+        compose.setContent {
+            pixelsPerDp = LocalDensity.current.density
+            MotdTheme(dynamicColor = false, layoutDensity = density.value, chatCardCornerStyle = corners.value) {
+                colors = MaterialTheme.colorScheme
+                // Keep real touch gestures, but isolate the card mask from native ripple animation.
+                CompositionLocalProvider(LocalRippleConfiguration provides null) {
+                    ChatListContent(
+                        state =
+                            ChatListState(
+                                rows = listOf(row()),
+                                archivedRows = listOf(row().copy(bufferId = 99, displayName = "archived", archived = true)),
+                                chatListSwipeAction = ChatListSwipeAction.MARK_READ,
+                                loading = false,
+                            ),
+                        selectedBufferId = 1,
+                        onOpenBuffer = { opened += it },
+                        onOpenSettings = {},
+                        onOpenSearch = {},
+                        onSetPinned = { _, _ -> },
+                        onSetMuted = { _, _ -> },
+                        onMarkSelectedRead = { markedRead += it },
+                        onJoinChannel = { _, _, _ -> },
+                        onMessageUser = { _, _ -> },
+                    )
+                }
+            }
+        }
+        val reveal =
+            compose
+                .onNodeWithTag("chatlist_archive_pull_target")
+                .fetchSemanticsNode()
+                .config[SemanticsActions.CustomActions]
+                .single { it.label == "Reveal archived chats" }
+        compose.runOnIdle { assertTrue(reveal.action()) }
+
+        for (mode in LayoutDensity.entries) {
+            compose.runOnIdle {
+                density.value = mode
+                corners.value = UiCornerStyle.DEFAULT
+            }
+            val row = compose.onNodeWithTag("chatlist_row_1")
+            val archive = compose.onNodeWithTag("chatlist_archived_folder").assertIsDisplayed()
+            val rowBounds = row.getUnclippedBoundsInRoot()
+            val archiveBounds = archive.getUnclippedBoundsInRoot()
+            val viewport = compose.onNodeWithTag("chatlist_archive_pull_target").getUnclippedBoundsInRoot()
+            val rowBaseline = row.captureToImage().asAndroidBitmap()
+            val archiveBaseline = archive.captureToImage().asAndroidBitmap()
+            assertEquals("$mode left gutter", viewport.left + 8.dp, rowBounds.left)
+            assertEquals("$mode right gutter", viewport.right - 8.dp, rowBounds.right)
+            assertEquals("$mode archive left gutter", rowBounds.left, archiveBounds.left)
+            assertEquals("$mode archive right gutter", rowBounds.right, archiveBounds.right)
+            assertEquals("$mode card gap", archiveBounds.bottom + 4.dp, rowBounds.top)
+            // Compact's two text lines exceed its 40dp avatar; the archive has only one title line.
+            assertEquals("$mode row height", if (mode == LayoutDensity.COMPACT) 58.dp else 68.dp, rowBounds.bottom - rowBounds.top)
+            assertEquals("$mode archive height", if (mode == LayoutDensity.COMPACT) 52.dp else 68.dp, archiveBounds.bottom - archiveBounds.top)
+            for (preset in UiCornerStyle.entries + UiCornerStyle.DEFAULT) {
+                compose.runOnIdle { corners.value = preset }
+                val label = "$mode $preset"
+                val radius =
+                    when (preset) {
+                        UiCornerStyle.DEFAULT -> 16
+                        UiCornerStyle.SQUARE -> 0
+                        UiCornerStyle.SOFT -> 8
+                        UiCornerStyle.ROUNDED -> 24
+                    }
+                val rowPixels = row.captureToImage().asAndroidBitmap()
+                val archivePixels = archive.captureToImage().asAndroidBitmap()
+                assertChatCardCornerPixels(rowPixels, radius * pixelsPerDp, colors.primaryContainer, colors.surface, pixelsPerDp, "$label active row")
+                assertChatCardCornerPixels(
+                    archivePixels,
+                    radius * pixelsPerDp,
+                    lerp(colors.surface, colors.primaryContainer, .20f),
+                    colors.surface,
+                    pixelsPerDp,
+                    "$label archive",
+                )
+                assertEquals("$label row bounds", rowBounds, row.getUnclippedBoundsInRoot())
+                assertEquals("$label archive bounds", archiveBounds, archive.getUnclippedBoundsInRoot())
+                row.assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
+                assertEquals("$label active rail", colors.primary.toArgb(), rowPixels.getPixel(1, rowPixels.height / 2))
+                assertEquals("$label row fill", colors.primaryContainer.toArgb(), rowPixels.getPixel(rowPixels.width / 2, rowPixels.height - 2))
+                if (preset == UiCornerStyle.DEFAULT) {
+                    assertTrue("$label row restores baseline pixels", rowBaseline.sameAs(rowPixels))
+                    assertTrue("$label archive restores baseline pixels", archiveBaseline.sameAs(archivePixels))
+                }
+                row.performTouchInput { click() }
+                row.performTouchInput { longClick() }
+                val selectedPixels = row.captureToImage().asAndroidBitmap()
+                assertChatCardCornerPixels(selectedPixels, radius * pixelsPerDp, colors.secondaryContainer, colors.surface, pixelsPerDp, "$label selected row")
+                assertEquals("$label selected rail", colors.primary.toArgb(), selectedPixels.getPixel(1, selectedPixels.height / 2))
+                row.assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
+                compose.onNodeWithTag("chatlist_selection_close").performClick()
+            }
+        }
+        compose.runOnIdle {
+            assertEquals(List(LayoutDensity.entries.size * (UiCornerStyle.entries.size + 1)) { 1L }, opened)
+            corners.value = UiCornerStyle.SQUARE
+        }
+        compose.onNodeWithTag("chatlist_row_surface_1").performTouchInput { swipeLeft() }
+        compose.runOnIdle { assertEquals(listOf(1L), markedRead) }
         compose.onNodeWithTag("chatlist_archived_folder").performTouchInput { click() }
         compose.onNodeWithText("Archived Chats").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_row_99").assertIsDisplayed()
@@ -952,6 +1071,27 @@ class ChatListSelectionUiTest {
         compose
             .onNodeWithTag("chatlist_archive_announcement")
             .assertTextEquals("Archived chats hidden")
+    }
+
+    private fun assertChatCardCornerPixels(
+        image: Bitmap,
+        requestedRadius: Float,
+        fill: Color,
+        backing: Color,
+        pixelsPerDp: Float,
+        label: String,
+    ) {
+        val radius = minOf(requestedRadius, image.width / 2f, image.height / 2f)
+        val sampleSize = (10 * pixelsPerDp).roundToInt()
+        val step = (2 * pixelsPerDp).roundToInt().coerceAtLeast(1)
+        for (y in 0 until sampleSize step step) {
+            for (x in 0 until sampleSize step step) {
+                val distance = hypot((radius - x - 0.5f).coerceAtLeast(0f), (radius - y - 0.5f).coerceAtLeast(0f))
+                if (radius > 0 && abs(distance - radius) < 1.5f) continue
+                val expected = if (radius == 0f || distance < radius) fill.toArgb() else backing.toArgb()
+                assertEquals("$label corner ($x, $y)", expected, image.getPixel(image.width - 1 - x, y))
+            }
+        }
     }
 
     private fun row() =

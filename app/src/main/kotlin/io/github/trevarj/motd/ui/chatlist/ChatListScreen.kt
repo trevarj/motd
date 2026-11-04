@@ -57,6 +57,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -200,11 +201,13 @@ import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.SenderLabel
 import io.github.trevarj.motd.ui.components.UnreadBadge
+import io.github.trevarj.motd.ui.theme.LocalChatCardCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.cornerRadius
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -2492,7 +2495,7 @@ private fun ArchiveFolderCard(
             modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 2.dp)
-                .clip(MotdShapes.card)
+                .clip(RoundedCornerShape(LocalChatCardCornerStyle.current.cornerRadius(16.dp)))
                 .background(backgroundColor)
                 .then(
                     if (committed) {

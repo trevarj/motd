@@ -7,6 +7,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.fonts.CustomFontStore
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
+import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
@@ -22,6 +23,7 @@ import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -86,6 +88,14 @@ class AppearanceSettingsViewModel
         fun setLayoutDensity(value: LayoutDensity) = launch { settingsRepository.setLayoutDensity(value) }
 
         fun setComposerStyle(value: ComposerStyle) = launch { appearancePrefs.setComposerStyle(value) }
+
+        fun setInputCornerStyle(value: UiCornerStyle) = launch { appearancePrefs.setInputCornerStyle(value) }
+
+        fun setAvatarShape(value: AvatarShape) = launch { appearancePrefs.setAvatarShape(value) }
+
+        fun setChatCardCornerStyle(value: UiCornerStyle) = launch { appearancePrefs.setChatCardCornerStyle(value) }
+
+        fun setMediaCornerStyle(value: UiCornerStyle) = launch { appearancePrefs.setMediaCornerStyle(value) }
 
         fun setFolderDisplayMode(value: FolderDisplayMode) = launch { settingsRepository.setFolderDisplayMode(value) }
 

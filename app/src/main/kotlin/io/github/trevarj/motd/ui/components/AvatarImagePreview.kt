@@ -28,9 +28,11 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.attachment.isLocalMediaUri
 import io.github.trevarj.motd.avatar.expandAvatarUrl
 import io.github.trevarj.motd.avatar.validateAvatarUrl
+import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.ui.theme.LocalAvatarShape
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
-import io.github.trevarj.motd.ui.theme.MotdShapes
+import io.github.trevarj.motd.ui.theme.shape
 
 private data class AvatarPreviewSnapshot(
     val identity: String,
@@ -66,6 +68,8 @@ internal fun LocalAvatarProposal(
 ) {
     val local = uri.isLocalMediaUri()
     var failed by remember(uri) { mutableStateOf(false) }
+    val avatarShape = LocalAvatarShape.current
+    val shape = if (!isChannel && avatarShape == AvatarShape.DEFAULT) CircleShape else avatarShape.shape(isChannel)
     Column(modifier) {
         Text(stringResource(R.string.settings_avatar_proposed))
         if (local && !failed) {
@@ -75,7 +79,7 @@ internal fun LocalAvatarProposal(
                 contentScale = ContentScale.Crop,
                 onError = { failed = true },
                 onSuccess = { failed = false },
-                modifier = Modifier.size(88.dp).clip(if (isChannel) MotdShapes.channelAvatar else CircleShape).testTag("avatar_local_proposal"),
+                modifier = Modifier.size(88.dp).clip(shape).testTag("avatar_local_proposal"),
             )
         }
         if (!local || failed) {
@@ -98,6 +102,8 @@ internal fun ExplicitAvatarUrlPreview(
     val validated = remember(url) { validateAvatarUrl(url) }
     var proposal by remember(url, networkId, identity, isChannel, http) { mutableStateOf<AvatarPreviewSnapshot?>(null) }
     val owner = networkId?.takeIf { it > 0 }
+    val avatarShape = LocalAvatarShape.current
+    val shape = if (!isChannel && avatarShape == AvatarShape.DEFAULT) CircleShape else avatarShape.shape(isChannel)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         TextButton(
             onClick = {
@@ -130,7 +136,7 @@ internal fun ExplicitAvatarUrlPreview(
                         loading = false
                         failed = true
                     },
-                    modifier = Modifier.size(88.dp).clip(if (isChannel) MotdShapes.channelAvatar else CircleShape).testTag("avatar_url_proposal"),
+                    modifier = Modifier.size(88.dp).clip(shape).testTag("avatar_url_proposal"),
                 )
                 if (loading) Text(stringResource(R.string.settings_avatar_preview_loading))
                 if (failed) Text(stringResource(R.string.settings_avatar_preview_failed), color = MaterialTheme.colorScheme.error)

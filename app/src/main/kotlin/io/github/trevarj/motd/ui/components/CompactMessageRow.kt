@@ -36,12 +36,14 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.ui.theme.LocalMediaCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalNicknameBackgroundsEnabled
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
+import io.github.trevarj.motd.ui.theme.cornerRadius
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.readingInk
 
@@ -236,7 +238,7 @@ internal fun CompactMessageRow(
                             .widthIn(max = 280.dp)
                             .heightIn(max = 200.dp)
                             .aspectRatio(4f / 3f)
-                            .clip(RoundedCornerShape(8.dp)),
+                            .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(8.dp))),
                 )
                 MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
             }

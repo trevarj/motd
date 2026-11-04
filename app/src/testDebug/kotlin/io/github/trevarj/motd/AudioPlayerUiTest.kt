@@ -1,14 +1,24 @@
 package io.github.trevarj.motd
 
 import android.os.Looper
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalRippleConfiguration
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -24,6 +34,7 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -47,10 +58,13 @@ import io.github.trevarj.motd.audio.AudioPlaybackRequest
 import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.audio.projectAudioPlaybackState
+import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.ui.chat.VoiceTranscriptFailureKind
 import io.github.trevarj.motd.ui.chat.VoiceTranscriptState
 import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
+import io.github.trevarj.motd.ui.components.assertMediaCornerPixels
+import io.github.trevarj.motd.ui.settings.MediaShapePreview
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -71,6 +85,129 @@ class AudioPlayerUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun mediaShapeSampleDisablesDetailsWhileProductionOverflowAndLongPressStillOpenThem() {
+        var sample by mutableStateOf(true)
+        val attachment = voiceAudio()
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                if (sample) {
+                    MediaShapePreview()
+                } else {
+                    AudioAttachmentPlayers(
+                        attachments = listOf(attachment),
+                        playbackState = AudioPlaybackState(),
+                        networkId = null,
+                        isSelf = false,
+                        onToggle = { _, _ -> },
+                        onSeek = { _, _ -> },
+                    )
+                }
+            }
+        }
+
+        compose.onNodeWithTag("audio_player_details").assertIsNotEnabled().performTouchInput { click() }
+        compose
+            .onNodeWithTag("audio_player", useUnmergedTree = true)
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsActions.OnLongClick))
+            .performTouchInput { longClick(Offset(center.x, 2f)) }
+        compose.onNodeWithText("Open").assertDoesNotExist()
+        compose.onNodeWithText("Save").assertDoesNotExist()
+        compose.onNodeWithTag("settings_media_shape_preview").assertIsDisplayed()
+
+        compose.runOnIdle { sample = false }
+        compose.onNodeWithTag("audio_player_details").assertIsEnabled().performClick()
+        compose.onNodeWithText("Open").assertIsDisplayed()
+        compose.onNodeWithText("Save").assertIsDisplayed()
+        compose
+            .onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss), useUnmergedTree = true)[0]
+            .performSemanticsAction(SemanticsActions.Dismiss)
+        compose.onNodeWithText("Open").assertDoesNotExist()
+        compose
+            .onNodeWithTag("audio_player", useUnmergedTree = true)
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsActions.OnLongClick))
+            .performTouchInput { longClick(Offset(center.x, 2f)) }
+        compose.onNodeWithText("Open").assertIsDisplayed()
+        compose.onNodeWithText("Save").assertIsDisplayed()
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Test
+    fun mediaCornerPresetsClipOrdinarySourceWrapperAndTrailingContentAndRestoreDefault() {
+        val attachment = voiceAudio().copy(durationMs = 42_000, waveform = AudioWaveform(listOf(3, 12, 25, 31, 18, 8, 21, 5)))
+        val corners = mutableStateOf(UiCornerStyle.DEFAULT)
+        val branch = mutableStateOf(0)
+        val fill = Color(0xFFCCDDEE)
+        var pixelsPerDp = 1f
+        var plays = 0
+        compose.setContent {
+            pixelsPerDp = LocalDensity.current.density
+            MotdTheme(dynamicColor = false, mediaCornerStyle = corners.value) {
+                MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(surfaceContainer = fill)) {
+                    CompositionLocalProvider(LocalRippleConfiguration provides null) {
+                        Box(Modifier.width(380.dp).background(Color.Cyan)) {
+                            AudioAttachmentPlayers(
+                                attachments = listOf(attachment),
+                                playbackState = AudioPlaybackState(),
+                                networkId = null,
+                                isSelf = false,
+                                cacheStatuses = mapOf(attachment.playbackId to AudioCacheStatus.CACHED),
+                                onToggle = { _, _ -> plays++ },
+                                onSeek = { _, _ -> },
+                                sourceWrapper =
+                                    if (branch.value == 1 || branch.value == 3) {
+                                        { _, content -> Box(Modifier.testTag("media_source")) { content() } }
+                                    } else {
+                                        null
+                                    },
+                                trailingContent =
+                                    if (branch.value >= 2) {
+                                        { Text("Translation", color = MaterialTheme.colorScheme.onSurface) }
+                                    } else {
+                                        null
+                                    },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        for (surfaceBranch in 0..3) {
+            compose.runOnIdle {
+                branch.value = surfaceBranch
+                corners.value = UiCornerStyle.DEFAULT
+            }
+            val player = compose.onNodeWithTag("audio_player", useUnmergedTree = true)
+            val baseline = player.captureToImage().asAndroidBitmap()
+            val bounds = player.fetchSemanticsNode().boundsInRoot
+            val toggle = compose.onNodeWithTag("audio_player_toggle", useUnmergedTree = true)
+            val toggleBounds = toggle.fetchSemanticsNode().boundsInRoot
+            for (preset in UiCornerStyle.entries + UiCornerStyle.DEFAULT) {
+                compose.runOnIdle { corners.value = preset }
+                val radius =
+                    when (preset) {
+                        UiCornerStyle.DEFAULT -> 16
+                        UiCornerStyle.SQUARE -> 0
+                        UiCornerStyle.SOFT -> 8
+                        UiCornerStyle.ROUNDED -> 24
+                    }
+                val label = "branch=$surfaceBranch $preset"
+                val pixels = player.captureToImage().asAndroidBitmap()
+                assertMediaCornerPixels(pixels, radius * pixelsPerDp, fill, pixelsPerDp, label)
+                assertEquals("$label unchanged player bounds", bounds, player.fetchSemanticsNode().boundsInRoot)
+                assertEquals("$label unchanged control bounds", toggleBounds, toggle.fetchSemanticsNode().boundsInRoot)
+                toggle
+                    .assertIsDisplayed()
+                    .assertIsEnabled()
+                    .assertTouchWidthIsEqualTo(48.dp)
+                    .assertTouchHeightIsEqualTo(48.dp)
+                if (preset == UiCornerStyle.DEFAULT) assertTrue("$label restores baseline pixels", baseline.sameAs(pixels))
+            }
+            toggle.performClick()
+        }
+        assertEquals("every Surface branch keeps playback", 4, plays)
+    }
 
     @Test fun uncached_primary_downloads_and_plays_the_requested_attachment() {
         val attachment = audio()

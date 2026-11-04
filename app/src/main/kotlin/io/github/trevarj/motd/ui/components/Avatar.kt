@@ -38,12 +38,14 @@ import io.github.trevarj.motd.avatar.avatarIdentity
 import io.github.trevarj.motd.avatar.canonicalAvatarNick
 import io.github.trevarj.motd.avatar.conversationAvatarModel
 import io.github.trevarj.motd.avatar.expandAvatarUrl
+import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.ui.theme.LocalAvatarShape
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
-import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.bestOnColor
+import io.github.trevarj.motd.ui.theme.shape
 
 data class RemoteAvatarState(
     val enabled: Boolean = false,
@@ -111,9 +113,9 @@ internal fun onColorFor(bg: Color): Color = bestOnColor(bg)
 fun avatarsHidden(): Boolean = LocalAvatarStyle.current == AvatarStyle.NONE
 
 /**
- * Nick avatar with semantic shape: channels render as rounded squares ([MotdShapes.channelAvatar])
- * and queries/people as circles, across every style. [AvatarStyle.MONOGRAM] is a quiet
- * theme-tinted disc with a single initial; [AvatarStyle.INITIALS] is the bolder solid nick-color
+ * Nick avatar with the selected people/channel shape across every style. Default keeps channels
+ * rounded-square and people circular. [AvatarStyle.MONOGRAM] is a quiet theme-tinted disc with a
+ * single initial; [AvatarStyle.INITIALS] is the bolder solid nick-color
  * chip with two initials; and [AvatarStyle.IRC_SPRITE] (default) renders deterministic IRC robot
  * sprites for people. #motd uses the bundled logo, other project-named channels use matched
  * Devicons marks, and unmatched channels keep a neutral IRC fallback. [AvatarStyle.NONE] renders
@@ -139,7 +141,8 @@ fun Avatar(
     // and so no remote override sneaks an image back in.
     if (style == AvatarStyle.NONE) return
     val nick = LocalNickColors.current.avatar(name)
-    val shape: Shape = if (isChannel) MotdShapes.channelAvatar else CircleShape
+    val avatarShape = LocalAvatarShape.current
+    val shape: Shape = if (!isChannel && avatarShape == AvatarShape.DEFAULT) CircleShape else avatarShape.shape(isChannel)
     val override = conversationAvatarModel(conversationModel, null, size.value.toInt())
     val record = if (override == null) LocalRemoteAvatars.current.record(networkId, name, account) else null
     val owner = if (override != null) networkId else record?.networkId

@@ -177,6 +177,9 @@ flowchart TD
   newest row clear, and fully covered rows do not advance read state. Default and
   Nickname keep tools/send/record inside their floating pills; Large keeps its
   separate action. Agentwire always uses Default. Stored enum names are unchanged.
+  Independent named presets control input corners, in-app avatar shape, chat-list
+  card corners, and media-preview corners; Default preserves each surface/layout's
+  existing heterogeneous geometry. Notification avatars remain circular.
   At ordinary font scale, Default/Nickname have nominal 52dp/48dp pill minima and
   44dp floating primary artwork, retaining 48dp targets and unchanged Large geometry.
   Artwork is inset inside each native button, never around its clickable/semantics host.

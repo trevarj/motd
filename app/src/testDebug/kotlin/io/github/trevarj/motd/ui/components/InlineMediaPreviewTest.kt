@@ -1,9 +1,12 @@
 package io.github.trevarj.motd.ui.components
 
 import android.content.Context
+import android.graphics.Bitmap
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -13,6 +16,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import coil.Coil
@@ -29,15 +33,21 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.ByteArrayOutputStream
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
+import kotlin.math.abs
+import kotlin.math.hypot
+import kotlin.math.roundToInt
 
 @RunWith(RobolectricTestRunner::class)
 class InlineMediaPreviewTest {
@@ -253,5 +263,44 @@ internal class RoutedInlineMediaFixture : AutoCloseable {
         Coil.setImageLoader(previousImageLoader)
         imageLoader.shutdown()
         server.shutdown()
+    }
+}
+
+internal fun solidMediaResponse(): MockResponse {
+    val bitmap = Bitmap.createBitmap(80, 60, Bitmap.Config.ARGB_8888)
+    bitmap.eraseColor(Color.Magenta.toArgb())
+    val bytes =
+        ByteArrayOutputStream().use {
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+            it.toByteArray()
+        }
+    bitmap.recycle()
+    return MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(bytes))
+}
+
+/** Compare native paint with literal circle geometry, away from antialiased boundary pixels. */
+internal fun assertMediaCornerPixels(
+    image: Bitmap,
+    radiusPx: Float,
+    fill: Color,
+    pixelsPerDp: Float,
+    label: String,
+    bounds: IntRect = IntRect(0, 0, image.width, image.height),
+) {
+    val radius = minOf(radiusPx, bounds.width / 2f, bounds.height / 2f)
+    val sampleSize = (10 * pixelsPerDp).roundToInt()
+    val step = (2 * pixelsPerDp).roundToInt().coerceAtLeast(1)
+    for (y in 0 until sampleSize step step) {
+        for (x in 0 until sampleSize step step) {
+            val distance = hypot((radius - x - .5f).coerceAtLeast(0f), (radius - y - .5f).coerceAtLeast(0f))
+            if (radius > 0 && abs(distance - radius) < 2f) continue
+            val actual = image.getPixel(bounds.right - 1 - x, bounds.top + y)
+            val painted = listOf(24, 16, 8, 0).all { abs(((actual ushr it) and 255) - ((fill.toArgb() ushr it) and 255)) <= 2 }
+            if (radius == 0f || distance < radius) {
+                assertTrue("$label must paint ($x,$y), radius=$radius actual=${actual.toUInt().toString(16)}", painted)
+            } else {
+                assertFalse("$label must clip ($x,$y), radius=$radius", painted)
+            }
+        }
     }
 }

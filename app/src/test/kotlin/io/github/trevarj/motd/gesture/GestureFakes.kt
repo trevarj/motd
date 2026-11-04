@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
+import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaper
@@ -30,6 +31,7 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
@@ -266,6 +268,22 @@ internal class FakeAppearance(
 
     override suspend fun setComposerStyle(style: ComposerStyle) {
         state.value = state.value.copy(composerStyle = style)
+    }
+
+    override suspend fun setInputCornerStyle(style: UiCornerStyle) {
+        state.value = state.value.copy(inputCornerStyle = style)
+    }
+
+    override suspend fun setAvatarShape(shape: AvatarShape) {
+        state.value = state.value.copy(avatarShape = shape)
+    }
+
+    override suspend fun setChatCardCornerStyle(style: UiCornerStyle) {
+        state.value = state.value.copy(chatCardCornerStyle = style)
+    }
+
+    override suspend fun setMediaCornerStyle(style: UiCornerStyle) {
+        state.value = state.value.copy(mediaCornerStyle = style)
     }
 
     override suspend fun setChatShadowsEnabled(enabled: Boolean) {

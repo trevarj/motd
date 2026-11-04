@@ -50,8 +50,10 @@ import coil.request.ImageRequest
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewKind
+import io.github.trevarj.motd.ui.theme.LocalMediaCornerStyle
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.cornerRadius
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.readingInk
 
@@ -171,7 +173,7 @@ private fun LinkPreviewContent(
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(12.dp)))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 .clickable { onClick() }
                 .padding(8.dp),
@@ -252,7 +254,7 @@ private fun LinkPreviewLeading(
                 modifier =
                     Modifier
                         .size(56.dp)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(8.dp)))
                         .testTag(if (preview.kind == LinkPreviewKind.VIDEO) "link_preview_video_thumbnail" else "link_preview_thumbnail"),
             ) {
                 AsyncImage(
@@ -293,7 +295,7 @@ private fun LinkPreviewAwaiting(onClick: () -> Unit) {
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(12.dp)))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 .clickable(onClickLabel = description, onClick = onClick)
                 .semantics { contentDescription = description }
@@ -317,14 +319,14 @@ private fun LinkPreviewSkeleton() {
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(12.dp)))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 .semantics { contentDescription = description }
                 .testTag("link_preview_loading")
                 .padding(8.dp),
     ) {
         androidx.compose.foundation.layout.Box(
-            modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).background(block),
+            modifier = Modifier.size(56.dp).clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(8.dp))).background(block),
         )
         Spacer(Modifier.width(10.dp))
         Column {
@@ -345,7 +347,7 @@ private fun LinkPreviewFailed(onClick: () -> Unit) {
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(12.dp)))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 .clickable(onClickLabel = description, onClick = onClick)
                 .semantics { contentDescription = description }
@@ -366,7 +368,7 @@ private fun LinkPreviewUnavailable(onClick: () -> Unit) {
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(12.dp)))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 .clickable(onClickLabel = description, onClick = onClick)
                 .semantics { contentDescription = description }

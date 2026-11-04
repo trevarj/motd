@@ -89,6 +89,7 @@ import com.airbnb.lottie.compose.rememberLottieComposition
 import com.airbnb.lottie.model.KeyPath
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
@@ -96,9 +97,11 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.InlineTextSegment
 import io.github.trevarj.motd.ui.chat.extractUrls
 import io.github.trevarj.motd.ui.chat.parseInlineCode
+import io.github.trevarj.motd.ui.theme.LocalAvatarShape
 import io.github.trevarj.motd.ui.theme.LocalChatShadowsEnabled
 import io.github.trevarj.motd.ui.theme.LocalComfortableBubbleColors
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
+import io.github.trevarj.motd.ui.theme.LocalMediaCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalNicknameBackgroundsEnabled
@@ -110,9 +113,11 @@ import io.github.trevarj.motd.ui.theme.MotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
 import io.github.trevarj.motd.ui.theme.contrastRatio
+import io.github.trevarj.motd.ui.theme.cornerRadius
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.lottieStrokeColor
 import io.github.trevarj.motd.ui.theme.readingInk
+import io.github.trevarj.motd.ui.theme.shape
 import kotlin.math.roundToInt
 import java.text.DateFormat as JavaDateFormat
 
@@ -685,10 +690,11 @@ fun MessageBubble(
         // whole column goes, spacer included, so bubbles use the full row width.
         if (!isSelf && !avatarsHidden()) {
             if (showSender) {
+                val avatarShape = LocalAvatarShape.current.let { if (it == AvatarShape.DEFAULT) CircleShape else it.shape(isChannel = false) }
                 val avatarMod =
                     Modifier
                         .padding(end = 8.dp, top = 2.dp)
-                        .shadow(comfortableElevation(COMFORTABLE_BUBBLE_ELEVATION), CircleShape)
+                        .shadow(comfortableElevation(COMFORTABLE_BUBBLE_ELEVATION), avatarShape)
                         .testTag("chat_sender_avatar")
                         .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
                 Avatar(
@@ -834,7 +840,7 @@ fun MessageBubble(
                                 .padding(vertical = 2.dp)
                                 .heightIn(max = 280.dp)
                                 .aspectRatio(4f / 3f)
-                                .clip(RoundedCornerShape(12.dp)),
+                                .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(12.dp))),
                     )
                     MediaOriginCaption(
                         url,
@@ -1074,11 +1080,12 @@ private fun ComfortableActionBubble(
 
             Row(verticalAlignment = Alignment.Top) {
                 if (!hideAvatar) {
+                    val avatarShape = LocalAvatarShape.current.let { if (it == AvatarShape.DEFAULT) CircleShape else it.shape(isChannel = false) }
                     val avatarMod =
                         Modifier
                             .padding(end = 6.dp, top = 2.dp)
                             .size(20.dp)
-                            .shadow(comfortableElevation(COMFORTABLE_CONTENT_ELEVATION), CircleShape)
+                            .shadow(comfortableElevation(COMFORTABLE_CONTENT_ELEVATION), avatarShape)
                             .testTag("chat_sender_avatar")
                             .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
                     Avatar(
@@ -1139,7 +1146,7 @@ private fun ComfortableActionBubble(
                                 .widthIn(max = 280.dp)
                                 .heightIn(max = 240.dp)
                                 .aspectRatio(4f / 3f)
-                                .clip(RoundedCornerShape(10.dp)),
+                                .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(10.dp))),
                     )
                     MediaOriginCaption(url, color = roles.content, modifier = Modifier.widthIn(max = 280.dp))
                 }
@@ -1360,7 +1367,7 @@ private fun ActionMessageRow(
                                 .widthIn(max = 280.dp)
                                 .heightIn(max = 240.dp)
                                 .aspectRatio(4f / 3f)
-                                .clip(RoundedCornerShape(10.dp)),
+                                .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(10.dp))),
                     )
                     MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
                 }
@@ -1764,7 +1771,7 @@ private fun TwoLineMessageRow(
                                 .widthIn(max = 280.dp)
                                 .heightIn(max = 240.dp)
                                 .aspectRatio(4f / 3f)
-                                .clip(RoundedCornerShape(10.dp)),
+                                .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(10.dp))),
                     )
                     MediaOriginCaption(url, color = bodyColor, modifier = Modifier.widthIn(max = 280.dp))
                 }

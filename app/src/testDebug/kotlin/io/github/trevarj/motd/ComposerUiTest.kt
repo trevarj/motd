@@ -4,16 +4,24 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -57,6 +65,7 @@ import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.IrcTextStyle
@@ -89,6 +98,9 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowContentResolver
+import kotlin.math.abs
+import kotlin.math.hypot
+import kotlin.math.roundToInt
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -108,6 +120,110 @@ class ComposerUiTest {
         // Real attachment refreshes FileProvider's static roots for Robolectric's per-test cache.
         val provider = FileProvider().apply { attachInfo(context, info) }
         ShadowContentResolver.registerProviderInternal(authority, provider)
+    }
+
+    @Test
+    fun inputCornerPresetsClipEveryLayoutAndRestoreDefault() {
+        val layout = mutableStateOf(LayoutDensity.COMFORTABLE)
+        val composerStyle = mutableStateOf(ComposerStyle.COMFORTABLE)
+        val corners = mutableStateOf(UiCornerStyle.DEFAULT)
+        // Translucent fill exposes the Large field's mask over its unchanged, same-color host.
+        val fill = Color(0x800000FF)
+        val backing = Color.White
+        var pixelsPerDp = 1f
+        var sends = 0
+        compose.setContent {
+            pixelsPerDp = LocalDensity.current.density
+            MotdTheme(
+                dynamicColor = false,
+                layoutDensity = layout.value,
+                inputCornerStyle = corners.value,
+                receivedBubbleColor = ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, fill.toArgb()),
+            ) {
+                // Shape snapshots must not include transient interaction ink.
+                CompositionLocalProvider(LocalRippleConfiguration provides null) {
+                    Box(Modifier.fillMaxSize().background(backing)) {
+                        key(layout.value, composerStyle.value) {
+                            Composer(
+                                value = TextFieldValue("Draft"),
+                                onValueChange = {},
+                                onSend = { sends++ },
+                                enabled = true,
+                                composerStyle = composerStyle.value,
+                                ircFormattingEnabled = true,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        for (density in LayoutDensity.entries) {
+            for (style in ComposerStyle.entries) {
+                compose.runOnIdle {
+                    layout.value = density
+                    composerStyle.value = style
+                    corners.value = UiCornerStyle.DEFAULT
+                }
+                for (expanded in listOf(false, true)) {
+                    if (expanded) {
+                        if (style == ComposerStyle.COMPACT) compose.onNodeWithTag("chat_composer_tools").performClick()
+                        val expand = compose.onNodeWithTag("chat_composer_format_expand")
+                        // Comfortable keeps this action in the input row; only relocated tools scroll.
+                        if (style != ComposerStyle.COMFORTABLE) expand.performScrollTo()
+                        expand.assertIsDisplayed().performClick()
+                        compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
+                    }
+                    val pill = compose.onNodeWithTag("chat_composer_pill")
+                    val field = compose.onNodeWithTag("chat_composer_field")
+                    val send = compose.onNodeWithTag("chat_composer_send")
+                    val pillBounds = pill.fetchSemanticsNode().boundsInRoot
+                    val fieldBounds = field.fetchSemanticsNode().boundsInRoot
+                    val sendBounds = send.fetchSemanticsNode().boundsInRoot
+                    val baseline = pill.captureToImage().asAndroidBitmap()
+                    val host = if (style == ComposerStyle.LARGE) fill.compositeOver(backing) else backing
+                    val painted = fill.compositeOver(host)
+                    for (preset in UiCornerStyle.entries + UiCornerStyle.DEFAULT) {
+                        compose.runOnIdle { corners.value = preset }
+                        val label = "$density $style expanded=$expanded $preset"
+                        val image = pill.captureToImage().asAndroidBitmap()
+                        val radius =
+                            when (preset) {
+                                UiCornerStyle.DEFAULT -> if (style == ComposerStyle.LARGE) 16 else 28
+                                UiCornerStyle.SQUARE -> 0
+                                UiCornerStyle.SOFT -> 8
+                                UiCornerStyle.ROUNDED -> 28
+                            }
+                        assertInputCornerPixels(image, radius * pixelsPerDp, painted, host, pixelsPerDp, label)
+                        assertEquals("$label pill bounds", pillBounds, pill.fetchSemanticsNode().boundsInRoot)
+                        assertEquals("$label editor bounds", fieldBounds, field.fetchSemanticsNode().boundsInRoot)
+                        assertEquals("$label send bounds", sendBounds, send.fetchSemanticsNode().boundsInRoot)
+                        field.assertTextEquals("Draft")
+                        send.assertIsDisplayed().assertIsEnabled().assertHasClickAction()
+                        assertTrue("$label send touch target", sendBounds.width >= 48 * pixelsPerDp - 0.5f && sendBounds.height >= 48 * pixelsPerDp - 0.5f)
+                        assertTrue("$label editor does not overlap send", !fieldBounds.overlaps(sendBounds))
+                        if (style != ComposerStyle.LARGE) {
+                            val tools =
+                                compose
+                                    .onNodeWithTag("chat_composer_tools")
+                                    .assertHasClickAction()
+                                    .fetchSemanticsNode()
+                                    .boundsInRoot
+                            assertTrue("$label tools touch target", tools.width >= 48 * pixelsPerDp - 0.5f && tools.height >= 48 * pixelsPerDp - 0.5f)
+                            assertTrue("$label tools do not overlap editor", !tools.overlaps(fieldBounds))
+                            if (expanded) {
+                                val toolbar = compose.onNodeWithTag("chat_composer_format_toolbar").fetchSemanticsNode().boundsInRoot
+                                assertTrue("$label toolbar remains inside input surface", toolbar.top >= pillBounds.top && toolbar.bottom <= pillBounds.bottom)
+                                assertTrue("$label expanded surface exposes the full 28dp radius", pillBounds.height >= 56 * pixelsPerDp)
+                            }
+                        }
+                        if (preset == UiCornerStyle.DEFAULT) assertTrue("$label restores baseline pixels", baseline.sameAs(image))
+                    }
+                }
+                compose.onNodeWithTag("chat_composer_send").performClick()
+            }
+        }
+        compose.runOnIdle { assertEquals(LayoutDensity.entries.size * ComposerStyle.entries.size, sends) }
     }
 
     @Test
@@ -1287,6 +1403,35 @@ class ComposerUiTest {
         }
         compose.onAllNodesWithTag("chat_composer_voice").assertCountEquals(0)
         compose.runOnIdle { assertEquals(1, starts) }
+    }
+
+    private fun assertInputCornerPixels(
+        image: Bitmap,
+        requestedRadius: Float,
+        fill: Color,
+        backing: Color,
+        pixelsPerDp: Float,
+        label: String,
+    ) {
+        val radius = minOf(requestedRadius, image.width / 2f, image.height / 2f)
+        val sampleSize = (10 * pixelsPerDp).roundToInt()
+        val step = (2 * pixelsPerDp).roundToInt().coerceAtLeast(1)
+        for (y in 0 until sampleSize step step) {
+            for (x in 0 until sampleSize step step) {
+                val distance = hypot((radius - x - 0.5f).coerceAtLeast(0f), (radius - y - 0.5f).coerceAtLeast(0f))
+                if (radius > 0 && abs(distance - radius) < 1.5f) continue
+                val expected = if (radius == 0f || distance < radius) fill.toArgb() else backing.toArgb()
+                val actual = image.getPixel(image.width - 1 - x, y)
+                for (shift in listOf(24, 16, 8, 0)) {
+                    assertEquals(
+                        "$label corner ($x, $y) channel $shift",
+                        ((expected ushr shift) and 255).toDouble(),
+                        ((actual ushr shift) and 255).toDouble(),
+                        1.0,
+                    )
+                }
+            }
+        }
     }
 
     private fun assertComposerFill(

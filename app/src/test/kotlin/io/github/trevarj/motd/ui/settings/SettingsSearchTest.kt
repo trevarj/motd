@@ -61,6 +61,22 @@ class SettingsSearchTest {
     }
 
     @Test
+    fun surfaceShapeQueriesOpenTheirTypedAppearanceTargets() {
+        val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
+        listOf(
+            SettingsTarget.INPUT_SHAPE to listOf("input corners", "composer roundness"),
+            SettingsTarget.AVATAR_SHAPE to listOf("avatar shape", "profile image shape", "channel corners", "network roundness"),
+            SettingsTarget.CHAT_CARD_SHAPE to listOf("chat card corners", "list roundness", "archive shape"),
+            SettingsTarget.MEDIA_SHAPE to listOf("media corners", "image corners", "video shape", "link roundness", "audio corners"),
+        ).forEach { (target, queries) ->
+            val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, target)
+            queries.forEach { query ->
+                assertEquals("$query must expose $target", destination, searchSettings(query, entries).single { it.destination == destination }.destination)
+            }
+        }
+    }
+
+    @Test
     fun `sound controls search opens the dedicated sound page`() {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
         val destination = SettingsSearchDestination.Page(SettingsSearchPage.CHAT_SOUNDS, SettingsTarget.CHAT_SOUNDS)

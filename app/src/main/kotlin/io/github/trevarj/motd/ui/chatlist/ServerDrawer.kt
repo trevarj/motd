@@ -98,11 +98,13 @@ import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.components.routedRemoteMediaData
+import io.github.trevarj.motd.ui.theme.LocalAvatarShape
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ceramicLogoColorMatrix
+import io.github.trevarj.motd.ui.theme.shape
 
 /**
  * Server-drawer content. Takes the built [DrawerRow]s + rollups and emits selection /
@@ -520,6 +522,7 @@ private fun DrawerNetworkItem(
             ) {
                 if (LocalAvatarStyle.current == AvatarStyle.IRC_SPRITE) {
                     val connected = row.state is IrcClientState.Ready
+                    val avatarShape = LocalAvatarShape.current.shape(isChannel = true)
                     val statusDescription =
                         stringResource(
                             if (connected) {
@@ -549,7 +552,7 @@ private fun DrawerNetworkItem(
                                     modifier =
                                         Modifier
                                             .size(40.dp)
-                                            .clip(MotdShapes.channelAvatar)
+                                            .clip(avatarShape)
                                             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                                             .padding(8.dp),
                                 )
@@ -572,7 +575,7 @@ private fun DrawerNetworkItem(
                                 onLoading = { iconLoaded = false },
                                 onSuccess = { iconLoaded = true },
                                 onError = { iconLoaded = false },
-                                modifier = Modifier.size(40.dp).clip(MotdShapes.channelAvatar),
+                                modifier = Modifier.size(40.dp).clip(avatarShape),
                             )
                         }
                         Box(

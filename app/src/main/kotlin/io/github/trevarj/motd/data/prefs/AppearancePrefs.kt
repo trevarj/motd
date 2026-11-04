@@ -197,6 +197,10 @@ enum class ComposerStyle { COMFORTABLE, LARGE, COMPACT }
 
 enum class BubbleCornerStyle { ROUNDED, SUBTLE, SQUARE }
 
+enum class UiCornerStyle { DEFAULT, SQUARE, SOFT, ROUNDED }
+
+enum class AvatarShape { DEFAULT, SQUARE, SOFT, ROUNDED, CIRCLE }
+
 /** A theme role stays adaptive; CUSTOM retains the user-picked opaque sRGB color. */
 enum class ComfortableBubbleColorRole {
     DEFAULT,
@@ -268,6 +272,10 @@ data class AppearanceConfig(
     val customFontName: String = "",
     val composerStyle: ComposerStyle = ComposerStyle.COMFORTABLE,
     val useThemeTextColors: Boolean = false,
+    val inputCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
+    val avatarShape: AvatarShape = AvatarShape.DEFAULT,
+    val chatCardCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
+    val mediaCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
 )
 
 interface AppearancePrefs {
@@ -298,6 +306,14 @@ interface AppearancePrefs {
     suspend fun setMessageSpacing(spacing: MessageSpacing)
 
     suspend fun setComposerStyle(style: ComposerStyle)
+
+    suspend fun setInputCornerStyle(style: UiCornerStyle)
+
+    suspend fun setAvatarShape(shape: AvatarShape)
+
+    suspend fun setChatCardCornerStyle(style: UiCornerStyle)
+
+    suspend fun setMediaCornerStyle(style: UiCornerStyle)
 
     suspend fun setBubbleCornerStyle(style: BubbleCornerStyle)
 

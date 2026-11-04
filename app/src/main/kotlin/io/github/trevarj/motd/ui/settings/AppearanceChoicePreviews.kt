@@ -24,12 +24,19 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.appearance.launcherAliasFqcn
+import io.github.trevarj.motd.audio.AudioAttachment
+import io.github.trevarj.motd.audio.AudioCacheStatus
+import io.github.trevarj.motd.audio.AudioPlaybackState
+import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.repo.LinkPreview
+import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
 import io.github.trevarj.motd.ui.components.Avatar
+import io.github.trevarj.motd.ui.components.LinkPreviewCard
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
 import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
@@ -60,6 +67,10 @@ internal fun AppearanceSampleTheme(
         nickColorPalette = settings.nickColorPalette,
         nickColorOverrides = emptyMap(),
         avatarStyle = settings.avatarStyle,
+        inputCornerStyle = appearance.inputCornerStyle,
+        avatarShape = appearance.avatarShape,
+        chatCardCornerStyle = appearance.chatCardCornerStyle,
+        mediaCornerStyle = appearance.mediaCornerStyle,
         uiFontScalePercent = appearance.uiFontScalePercent,
         fontChoice = appearance.fontChoice,
         customFontFile = font,
@@ -94,16 +105,50 @@ internal fun AvatarStylePreview(style: AvatarStyle) {
         } else {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column {
-                    Avatar("Alex", size = 64.dp)
+                    Avatar("Alex", size = 64.dp, modifier = Modifier.testTag("settings_avatar_preview_person"))
                     Text("Alex")
                 }
                 Column {
-                    Avatar("#garden", size = 64.dp, isChannel = true)
+                    Avatar("#garden", size = 64.dp, isChannel = true, modifier = Modifier.testTag("settings_avatar_preview_channel"))
                     Text("#garden")
                 }
             }
         }
         Text(stringResource(R.string.settings_avatar_preview_scope), style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+internal fun MediaShapePreview() {
+    val title = stringResource(R.string.settings_media_shape_preview_title)
+    val description = stringResource(R.string.settings_media_shape_preview_desc)
+    val link = remember(title, description) { LinkPreview("https://shape-preview.invalid/link", title, description, imageUrl = null, siteName = "shape-preview.invalid") }
+    val audio =
+        remember {
+            AudioAttachment(
+                url = "https://shape-preview.invalid/voice.ogg",
+                mimeType = "audio/ogg",
+                durationMs = 42000,
+                voice = true,
+                waveform = AudioWaveform(listOf(3, 12, 25, 31, 18, 8, 21, 5)),
+            )
+        }
+    val attachments = remember(audio) { listOf(audio) }
+    val cached = remember(audio) { mapOf(audio.playbackId to AudioCacheStatus.CACHED) }
+    val playback = remember { AudioPlaybackState() }
+    Column(Modifier.testTag("settings_media_shape_preview"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(stringResource(R.string.settings_preview), style = MaterialTheme.typography.labelLarge)
+        LinkPreviewCard(link, loading = false, onClick = {}, modifier = Modifier.testTag("settings_media_shape_link"))
+        AudioAttachmentPlayers(
+            attachments,
+            playback,
+            networkId = null,
+            isSelf = false,
+            onToggle = { _, _ -> },
+            onSeek = { _, _ -> },
+            cacheStatuses = cached,
+            detailsEnabled = false,
+        )
     }
 }
 

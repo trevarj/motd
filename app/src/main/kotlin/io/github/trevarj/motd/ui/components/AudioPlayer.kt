@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -82,10 +83,11 @@ import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.ui.chat.VoiceTranscriptFailureKind
 import io.github.trevarj.motd.ui.chat.VoiceTranscriptState
 import io.github.trevarj.motd.ui.chat.formatBytes
+import io.github.trevarj.motd.ui.theme.LocalMediaCornerStyle
 import io.github.trevarj.motd.ui.theme.MotdMotion
-import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdSizes
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.cornerRadius
 
 private const val MAX_COLLAPSED_AUDIO_PLAYERS = 3
 
@@ -121,6 +123,7 @@ fun AudioAttachmentPlayers(
     onCancelTranscription: (String) -> Unit = {},
     sourceWrapper: (@Composable (index: Int, content: @Composable () -> Unit) -> Unit)? = null,
     trailingContent: (@Composable (Color) -> Unit)? = null,
+    detailsEnabled: Boolean = true,
 ) {
     var expanded by remember(attachments) { mutableStateOf(false) }
     val visible = if (expanded) attachments else attachments.take(MAX_COLLAPSED_AUDIO_PLAYERS)
@@ -160,6 +163,7 @@ fun AudioAttachmentPlayers(
                         onInspectCache = onInspectCache,
                         onToggle = onToggle,
                         onSeek = onSeek,
+                        detailsEnabled = detailsEnabled,
                         onLongPress = onLongPress,
                         onClick = onClick,
                         onClickLabel = onClickLabel,
@@ -204,6 +208,7 @@ private fun AudioAttachmentPlayer(
     onInspectCache: (AudioAttachment) -> Unit,
     onToggle: (AudioAttachment, Long?) -> Unit,
     onSeek: (AudioAttachment, Long) -> Unit,
+    detailsEnabled: Boolean,
     onLongPress: (() -> Unit)?,
     onClick: (() -> Unit)?,
     onClickLabel: String?,
@@ -259,7 +264,7 @@ private fun AudioAttachmentPlayer(
             Modifier.combinedClickable(
                 onClick = onClick ?: {},
                 onClickLabel = onClickLabel,
-                onLongClick = onLongPress ?: { showDetails = true },
+                onLongClick = (onLongPress ?: { showDetails = true }).takeIf { detailsEnabled },
             ),
         sourceWrapper = sourceWrapper,
         trailingContent = trailingContent,
@@ -406,6 +411,7 @@ private fun AudioAttachmentPlayer(
                     }
                     IconButton(
                         onClick = { showDetails = true },
+                        enabled = detailsEnabled,
                         modifier = Modifier.size(28.dp).testTag("audio_player_details"),
                     ) {
                         Icon(
@@ -440,7 +446,7 @@ private fun AudioAttachmentPlayer(
         )
     }
 
-    if (showDetails) {
+    if (detailsEnabled && showDetails) {
         ModalBottomSheet(
             onDismissRequest = { showDetails = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -480,19 +486,20 @@ private fun AudioPlayerSurface(
     trailingContent: (@Composable (Color) -> Unit)?,
     content: @Composable () -> Unit,
 ) {
+    val shape = RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(16.dp))
     if (trailingContent == null) {
         if (sourceWrapper == null) {
-            Surface(modifier = modifier.then(sourceModifier), shape = MotdShapes.card, color = color, content = content)
+            Surface(modifier = modifier.then(sourceModifier), shape = shape, color = color, content = content)
         } else {
             // Constrain and align the player before the full-width source gesture wrapper.
             Box(modifier = modifier, propagateMinConstraints = true) {
                 sourceWrapper {
-                    Surface(modifier = Modifier.fillMaxWidth().then(sourceModifier), shape = MotdShapes.card, color = color, content = content)
+                    Surface(modifier = Modifier.fillMaxWidth().then(sourceModifier), shape = shape, color = color, content = content)
                 }
             }
         }
     } else {
-        Surface(modifier = modifier, shape = MotdShapes.card, color = color) {
+        Surface(modifier = modifier, shape = shape, color = color) {
             Column {
                 val source: @Composable () -> Unit = { Box(sourceModifier) { content() } }
                 if (sourceWrapper != null) sourceWrapper(source) else source()

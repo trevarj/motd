@@ -1,9 +1,19 @@
 package io.github.trevarj.motd
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -11,6 +21,7 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -19,20 +30,31 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewKind
 import io.github.trevarj.motd.ui.components.LinkPreviewCard
+import io.github.trevarj.motd.ui.components.LinkPreviewTransitionKey
+import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
+import io.github.trevarj.motd.ui.components.LocalNetworkMediaHttp
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
+import io.github.trevarj.motd.ui.components.RoutedInlineMediaFixture
+import io.github.trevarj.motd.ui.components.assertMediaCornerPixels
+import io.github.trevarj.motd.ui.components.solidMediaResponse
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import kotlin.math.roundToInt
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -42,6 +64,117 @@ class LinkPreviewCardUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test fun mediaCornerPresetsClipEveryStateAndLoadedAndSkeletonThumbnailsAndRestoreDefault() {
+        RoutedInlineMediaFixture().use { fixture ->
+            fixture.server.enqueue(solidMediaResponse())
+            val state = mutableStateOf(LinkPreviewTransitionKey.AVAILABLE)
+            val kind = mutableStateOf(LinkPreviewKind.WEB)
+            val corners = mutableStateOf(UiCornerStyle.DEFAULT)
+            val fill = Color(0xFFCCDDEE)
+            var skeletonFill = Color.Unspecified
+            var pixelsPerDp = 1f
+            compose.setContent {
+                pixelsPerDp = LocalDensity.current.density
+                MotdTheme(dynamicColor = false, mediaCornerStyle = corners.value) {
+                    val scheme = MaterialTheme.colorScheme
+                    skeletonFill = scheme.onSurfaceVariant.copy(alpha = .18f).compositeOver(fill)
+                    MaterialTheme(colorScheme = scheme.copy(surfaceContainerHighest = fill)) {
+                        CompositionLocalProvider(
+                            LocalAutomaticRemoteMedia provides true,
+                            LocalNetworkMediaHttp provides fixture.http,
+                        ) {
+                            Box(Modifier.width(340.dp).background(Color.Cyan).padding(16.dp)) {
+                                LinkPreviewCard(
+                                    preview =
+                                        if (state.value == LinkPreviewTransitionKey.AVAILABLE) {
+                                            LinkPreview(
+                                                "https://media.invalid/article",
+                                                "Title",
+                                                "Description",
+                                                "http://media.invalid/link-mask.png",
+                                                "media.invalid",
+                                                kind.value,
+                                            )
+                                        } else {
+                                            null
+                                        },
+                                    loading = state.value == LinkPreviewTransitionKey.LOADING,
+                                    awaiting = state.value == LinkPreviewTransitionKey.AWAITING,
+                                    failed = state.value == LinkPreviewTransitionKey.FAILED,
+                                    networkId = fixture.networkId,
+                                    onClick = {},
+                                    modifier = Modifier.testTag("shape_card"),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            for (
+            (renderState, previewKind) in
+            LinkPreviewTransitionKey.entries.map { it to LinkPreviewKind.WEB } +
+                (LinkPreviewTransitionKey.AVAILABLE to LinkPreviewKind.VIDEO)
+            ) {
+                compose.runOnIdle {
+                    state.value = renderState
+                    kind.value = previewKind
+                    corners.value = UiCornerStyle.DEFAULT
+                }
+                val thumbnail =
+                    if (renderState == LinkPreviewTransitionKey.AVAILABLE) {
+                        compose.onNodeWithTag(if (previewKind == LinkPreviewKind.VIDEO) "link_preview_video_thumbnail" else "link_preview_thumbnail", useUnmergedTree = true)
+                    } else {
+                        null
+                    }
+                if (thumbnail != null) {
+                    compose.waitUntil(10_000) {
+                        val pixels = thumbnail.captureToImage().asAndroidBitmap()
+                        pixels.getPixel(pixels.width / 2, (2 * pixelsPerDp).roundToInt()) == Color.Magenta.toArgb()
+                    }
+                }
+                val card = compose.onNodeWithTag("shape_card", useUnmergedTree = true)
+                val baseline = card.captureToImage().asAndroidBitmap()
+                val bounds = card.fetchSemanticsNode().boundsInRoot
+                for (preset in UiCornerStyle.entries + UiCornerStyle.DEFAULT) {
+                    compose.runOnIdle { corners.value = preset }
+                    val label = "$renderState $previewKind $preset"
+                    val radius =
+                        when (preset) {
+                            UiCornerStyle.DEFAULT -> 12
+                            UiCornerStyle.SQUARE -> 0
+                            UiCornerStyle.SOFT -> 8
+                            UiCornerStyle.ROUNDED -> 24
+                        }
+                    val thumbnailRadius = if (preset == UiCornerStyle.DEFAULT) 8 else radius
+                    val pixels = card.captureToImage().asAndroidBitmap()
+                    assertMediaCornerPixels(pixels, radius * pixelsPerDp, fill, pixelsPerDp, "$label card")
+                    if (thumbnail != null) {
+                        assertMediaCornerPixels(thumbnail.captureToImage().asAndroidBitmap(), thumbnailRadius * pixelsPerDp, Color.Magenta, pixelsPerDp, "$label loaded thumbnail")
+                    }
+                    if (renderState == LinkPreviewTransitionKey.LOADING) {
+                        assertMediaCornerPixels(
+                            pixels,
+                            thumbnailRadius * pixelsPerDp,
+                            skeletonFill,
+                            pixelsPerDp,
+                            "$label skeleton thumbnail",
+                            IntRect(
+                                (8 * pixelsPerDp).roundToInt(),
+                                (8 * pixelsPerDp).roundToInt(),
+                                (64 * pixelsPerDp).roundToInt(),
+                                (64 * pixelsPerDp).roundToInt(),
+                            ),
+                        )
+                    }
+                    assertEquals("$label unchanged bounds", bounds, card.fetchSemanticsNode().boundsInRoot)
+                    if (preset == UiCornerStyle.DEFAULT) assertTrue("$label restored pixels", baseline.sameAs(pixels))
+                }
+            }
+            assertTrue("thumbnail must really load through the controlled route", fixture.server.requestCount > 0)
+            assertTrue(fixture.selectedNetworks.all { it == fixture.networkId })
+        }
+    }
 
     @Test fun titlesDescriptionsAndTextExcerptsFollowTextColorChoiceWhileSiteAndFailureStaySemantic() {
         val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)

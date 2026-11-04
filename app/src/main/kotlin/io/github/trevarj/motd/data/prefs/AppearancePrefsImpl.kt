@@ -31,6 +31,10 @@ private val TIME_FORMAT = stringPreferencesKey("time_format_v1")
 private val CUSTOM_TIME_FORMAT_PATTERN = stringPreferencesKey("custom_time_format_pattern_v1")
 private val MESSAGE_SPACING = stringPreferencesKey("message_spacing_v1")
 private val COMPOSER_STYLE = stringPreferencesKey("composer_style_v1")
+private val INPUT_CORNER_STYLE = stringPreferencesKey("input_corner_style_v1")
+private val AVATAR_SHAPE = stringPreferencesKey("avatar_shape_v1")
+private val CHAT_CARD_CORNER_STYLE = stringPreferencesKey("chat_card_corner_style_v1")
+private val MEDIA_CORNER_STYLE = stringPreferencesKey("media_corner_style_v1")
 private val BUBBLE_CORNER_STYLE = stringPreferencesKey("bubble_corner_style_v1")
 private val CHAT_SHADOWS_ENABLED = booleanPreferencesKey("chat_shadows_enabled_v1")
 private val NICKNAME_BACKGROUNDS_ENABLED = booleanPreferencesKey("nickname_backgrounds_enabled_v1")
@@ -110,6 +114,18 @@ class AppearancePrefsImpl
                     composerStyle =
                         prefs[COMPOSER_STYLE]?.let { runCatching { ComposerStyle.valueOf(it) }.getOrNull() }
                             ?: ComposerStyle.COMFORTABLE,
+                    inputCornerStyle =
+                        prefs[INPUT_CORNER_STYLE]?.let { runCatching { UiCornerStyle.valueOf(it) }.getOrNull() }
+                            ?: UiCornerStyle.DEFAULT,
+                    avatarShape =
+                        prefs[AVATAR_SHAPE]?.let { runCatching { AvatarShape.valueOf(it) }.getOrNull() }
+                            ?: AvatarShape.DEFAULT,
+                    chatCardCornerStyle =
+                        prefs[CHAT_CARD_CORNER_STYLE]?.let { runCatching { UiCornerStyle.valueOf(it) }.getOrNull() }
+                            ?: UiCornerStyle.DEFAULT,
+                    mediaCornerStyle =
+                        prefs[MEDIA_CORNER_STYLE]?.let { runCatching { UiCornerStyle.valueOf(it) }.getOrNull() }
+                            ?: UiCornerStyle.DEFAULT,
                     bubbleCornerStyle =
                         prefs[BUBBLE_CORNER_STYLE]
                             ?.let { runCatching { BubbleCornerStyle.valueOf(it) }.getOrNull() }
@@ -192,6 +208,22 @@ class AppearancePrefsImpl
 
         override suspend fun setComposerStyle(style: ComposerStyle) {
             store.edit { it[COMPOSER_STYLE] = style.name }
+        }
+
+        override suspend fun setInputCornerStyle(style: UiCornerStyle) {
+            store.edit { it[INPUT_CORNER_STYLE] = style.name }
+        }
+
+        override suspend fun setAvatarShape(shape: AvatarShape) {
+            store.edit { it[AVATAR_SHAPE] = shape.name }
+        }
+
+        override suspend fun setChatCardCornerStyle(style: UiCornerStyle) {
+            store.edit { it[CHAT_CARD_CORNER_STYLE] = style.name }
+        }
+
+        override suspend fun setMediaCornerStyle(style: UiCornerStyle) {
+            store.edit { it[MEDIA_CORNER_STYLE] = style.name }
         }
 
         override suspend fun setBubbleCornerStyle(style: BubbleCornerStyle) {

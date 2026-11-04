@@ -1,5 +1,8 @@
 package io.github.trevarj.motd.ui.settings
 
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalRippleConfiguration
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -30,6 +33,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.TextLayoutResult
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
+import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
@@ -41,6 +45,7 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.nav.SettingsTarget
@@ -106,7 +111,13 @@ class AppearanceFolderLayoutUiTest {
         val context = RuntimeEnvironment.getApplication()
         val entries = buildSettingsSearchEntries(emptyList(), { context.getString(it) }, { network, section -> "$network · $section" })
         val nicknameTarget = (searchSettings("sender tint", entries).single().destination as SettingsSearchDestination.Page).target
-        val bubbleTarget = (searchSettings("rounded square", entries).single().destination as SettingsSearchDestination.Page).target
+        val bubbleTarget =
+            (
+                searchSettings("rounded square", entries)
+                    .single {
+                        it.destination == SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.BUBBLE_CORNERS)
+                    }.destination as SettingsSearchDestination.Page
+            ).target
         val target = mutableStateOf(nicknameTarget)
         var backgrounds: Boolean? = null
         var corners: BubbleCornerStyle? = null
@@ -587,6 +598,153 @@ class AppearanceFolderLayoutUiTest {
         compose.onNodeWithTag("settings_time_preview_value").assertTextEquals("2024-01-02 15:04:05")
     }
 
+    @Test
+    fun shapeSheetsUpdateRealCornersImmediatelyIndependentlyAndRestoreDefaults() {
+        val persisted = AppearanceConfig(theme = ColorThemePreset.AYU_LIGHT)
+        val calls = listOf("input", "avatar", "chat_card", "media").associateWith { mutableListOf<String>() }
+        setContent(
+            settings = Settings(dynamicColor = false, avatarStyle = AvatarStyle.INITIALS, folderDisplayMode = FolderDisplayMode.INLINE),
+            appearance = persisted,
+            onInputCornerStyle = { calls.getValue("input").add(it.name) },
+            onAvatarShape = { calls.getValue("avatar").add(it.name) },
+            onChatCardCornerStyle = { calls.getValue("chat_card").add(it.name) },
+            onMediaCornerStyle = { calls.getValue("media").add(it.name) },
+        )
+        val samples =
+            linkedMapOf(
+                "input" to listOf("chat_composer_pill"),
+                "avatar" to listOf("settings_avatar_preview_person", "settings_avatar_preview_channel"),
+                "chat_card" to listOf("chatlist_row_-1"),
+                "media" to listOf("settings_media_shape_link", "audio_player"),
+            )
+        val expected = mutableMapOf<String, List<List<Int>>>()
+        val selected = samples.keys.associateWith { "default" }.toMutableMap()
+        for ((surface, tags) in samples) {
+            openShapeSheet(surface)
+            expected[surface] = shapeCorners(surface, tags)
+            dismissSheet("settings_${surface}_shape_sheet")
+        }
+        val baseline = expected.toMap()
+        for (preset in listOf("square", "default")) {
+            for ((surface, tags) in samples) {
+                val sheet = "settings_${surface}_shape_sheet"
+                openShapeSheet(surface)
+                scrollToSheetNode(sheet, "settings_${surface}_shape_default").assertIsSelectedIf(selected.getValue(surface) == "default")
+                compose.onNodeWithText("Keep the current shape").assertExists()
+                for (label in listOf("Square", "Soft", "Rounded") + if (surface == "avatar") listOf("Circle") else emptyList()) {
+                    scrollToSheetNode(sheet, "settings_${surface}_shape_${label.lowercase()}")
+                    compose.onNode(hasTestTag("settings_${surface}_shape_${label.lowercase()}") and hasText(label)).assertExists()
+                }
+                scrollToSheetNode(sheet, "settings_${surface}_shape_$preset").performClick().assertIsSelected()
+                compose.onNodeWithTag(sheet).assertIsDisplayed()
+                selected[surface] = preset
+                assertEquals(preset.uppercase(), calls.getValue(surface).last())
+                assertEquals(UiCornerStyle.DEFAULT, persisted.inputCornerStyle)
+                assertEquals(AvatarShape.DEFAULT, persisted.avatarShape)
+                assertEquals(UiCornerStyle.DEFAULT, persisted.chatCardCornerStyle)
+                assertEquals(UiCornerStyle.DEFAULT, persisted.mediaCornerStyle)
+                val corners = shapeCorners(surface, tags)
+                if (preset == "square") {
+                    corners.zip(baseline.getValue(surface)).forEachIndexed { index, (actual, original) ->
+                        assertTrue("$surface ${tags[index]} must paint a formerly clipped native corner", actual != original)
+                    }
+                } else {
+                    assertEquals("$surface Default restores its own exact baseline", baseline.getValue(surface), corners)
+                }
+                expected[surface] = corners
+                dismissSheet(sheet)
+                for ((other, otherTags) in samples.filterKeys { it != surface }) {
+                    openShapeSheet(other)
+                    scrollToSheetNode("settings_${other}_shape_sheet", "settings_${other}_shape_${selected.getValue(other)}").assertIsSelected()
+                    assertEquals("$surface must not alter $other geometry", expected.getValue(other), shapeCorners(other, otherTags))
+                    dismissSheet("settings_${other}_shape_sheet")
+                }
+                for (other in samples.keys) {
+                    assertEquals(
+                        "$surface must invoke only its own persistence callback",
+                        if (selected.getValue(other) == "square") {
+                            listOf("SQUARE")
+                        } else if (calls.getValue(other).isEmpty()) {
+                            emptyList()
+                        } else {
+                            listOf("SQUARE", "DEFAULT")
+                        },
+                        calls.getValue(other),
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun avatarShapeRemainsEnabledWithLabeledInitialsIllustrationWhenAvatarsAreHidden() {
+        val settings = Settings(avatarStyle = AvatarStyle.NONE, dynamicColor = false)
+        var selected: AvatarShape? = null
+        var artChanges = 0
+        setContent(settings = settings, onAvatarShape = { selected = it }, onAvatarStyle = { artChanges++ })
+        compose
+            .onNodeWithTag("settings_avatar_shape_picker")
+            .performScrollTo()
+            .assertIsEnabled()
+            .performClick()
+        compose.onNodeWithText("Illustrative initials only: avatars remain hidden in chats.").assertExists()
+        scrollToSheetNode("settings_avatar_shape_sheet", "settings_avatar_preview_initials").assertExists()
+        val baseline = shapeCorners("avatar", listOf("settings_avatar_preview_person", "settings_avatar_preview_channel"))
+        scrollToSheetNode("settings_avatar_shape_sheet", "settings_avatar_shape_square").performClick().assertIsSelected()
+        assertEquals(AvatarShape.SQUARE, selected)
+        assertTrue(baseline != shapeCorners("avatar", listOf("settings_avatar_preview_person", "settings_avatar_preview_channel")))
+        scrollToSheetNode("settings_avatar_shape_sheet", "settings_avatar_shape_circle").performClick().assertIsSelected()
+        assertEquals(AvatarShape.CIRCLE, selected)
+        compose.onNodeWithTag("settings_avatar_shape_sheet").assertIsDisplayed()
+        assertEquals(AvatarStyle.NONE, settings.avatarStyle)
+        assertEquals(0, artChanges)
+    }
+
+    @Test
+    fun shapeSearchTargetsBringEachHighlightedControlIntoViewAndOpenItsSheet() {
+        val context = RuntimeEnvironment.getApplication()
+        val entries = buildSettingsSearchEntries(emptyList(), { context.getString(it) }, { network, section -> "$network · $section" })
+        val target = mutableStateOf<SettingsTarget?>(null)
+        setContent(targetProvider = { target.value })
+        for ((query, surface, expected) in listOf(
+            Triple("composer roundness", "input", SettingsTarget.INPUT_SHAPE),
+            Triple("profile image shape", "avatar", SettingsTarget.AVATAR_SHAPE),
+            Triple("archive card corners", "chat_card", SettingsTarget.CHAT_CARD_SHAPE),
+            Triple("audio corners", "media", SettingsTarget.MEDIA_SHAPE),
+        )) {
+            val destination = searchSettings(query, entries).single { it.destination == SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, expected) }.destination as SettingsSearchDestination.Page
+            compose.runOnIdle { target.value = destination.target }
+            compose.onNodeWithTag("settings_target_highlight_${expected.name}").assertIsDisplayed().performClick()
+            compose.onNodeWithTag("settings_${surface}_shape_sheet").assertIsDisplayed()
+            scrollToSheetNode("settings_${surface}_shape_sheet", "settings_${surface}_shape_default").assertIsSelected()
+            dismissSheet("settings_${surface}_shape_sheet")
+        }
+    }
+
+    private fun androidx.compose.ui.test.SemanticsNodeInteraction.assertIsSelectedIf(selected: Boolean) {
+        if (selected) assertIsSelected() else assertIsNotSelected()
+    }
+
+    private fun openShapeSheet(surface: String) {
+        compose.onNodeWithTag("settings_${surface}_shape_picker").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_${surface}_shape_sheet").assertIsDisplayed()
+    }
+
+    private fun shapeCorners(
+        surface: String,
+        tags: List<String>,
+    ): List<List<Int>> =
+        tags.map { tag ->
+            val sheet = "settings_${surface}_shape_sheet"
+            compose.onNodeWithTag("${sheet}_options").performScrollToNode(hasTestTag(tag))
+            val image = compose.onNodeWithTag(tag, useUnmergedTree = true).captureToImage().asAndroidBitmap()
+            // Only production corner pixels: text, avatar artwork inside a chat card, and the
+            // voice waveform cannot make an unrelated shape look changed.
+            (0 until minOf(8, image.height)).flatMap { y ->
+                (0 until minOf(8, image.width)).map { x -> image.getPixel(x, y) }
+            }
+        }
+
     private fun scrollToSheetNode(
         sheetTag: String,
         nodeTag: String,
@@ -616,6 +774,7 @@ class AppearanceFolderLayoutUiTest {
             .layoutInput.style.color
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     private fun setContent(
         settings: Settings = Settings(),
         appearance: AppearanceConfig = AppearanceConfig(),
@@ -625,6 +784,10 @@ class AppearanceFolderLayoutUiTest {
         onAvatarStyle: (AvatarStyle) -> Unit = {},
         onLayoutDensity: (LayoutDensity) -> Unit = {},
         onComposerStyle: (ComposerStyle) -> Unit = {},
+        onInputCornerStyle: (UiCornerStyle) -> Unit = {},
+        onAvatarShape: (AvatarShape) -> Unit = {},
+        onChatCardCornerStyle: (UiCornerStyle) -> Unit = {},
+        onMediaCornerStyle: (UiCornerStyle) -> Unit = {},
         onFontChoice: (FontChoice) -> Unit = {},
         onMessageSpacing: (MessageSpacing) -> Unit = {},
         onBubbleCornerStyle: (BubbleCornerStyle) -> Unit = {},
@@ -644,38 +807,44 @@ class AppearanceFolderLayoutUiTest {
                 useThemeTextColors = currentAppearance.useThemeTextColors,
                 uiFontScalePercent = currentAppearance.uiFontScalePercent,
             ) {
-                AppearanceSettingsContent(
-                    settings = settings,
-                    appearance = currentAppearance,
-                    onBack = {},
-                    onOpenNickColors = {},
-                    onThemePreset = {},
-                    onTrueBlack = {},
-                    onFollowSystem = {},
-                    onDynamicColor = {},
-                    onUseThemeTextColors = onUseThemeTextColors,
-                    onLayoutDensity = onLayoutDensity,
-                    onComposerStyle = onComposerStyle,
-                    onFolderDisplayMode = onFolderDisplayMode,
-                    onShowFolderChatsInAll = onShowFolderChatsInAll,
-                    onAvatarStyle = onAvatarStyle,
-                    onNickColorsEnabled = {},
-                    onNickColorPalette = {},
-                    onWallpaper = onWallpaper,
-                    importedWallpaper = importedWallpaperProvider(),
-                    onUiFontScale = {},
-                    onConversationFontScale = {},
-                    onFontChoice = onFontChoice,
-                    onShowTimestamps = {},
-                    onTimeFormat = {},
-                    onCustomTimeFormatPattern = {},
-                    onMessageSpacing = onMessageSpacing,
-                    onBubbleCornerStyle = onBubbleCornerStyle,
-                    onChatShadowsEnabled = onChatShadowsEnabled,
-                    onNicknameBackgroundsEnabled = onNicknameBackgroundsEnabled,
-                    onLauncherIcon = {},
-                    target = targetProvider(),
-                )
+                CompositionLocalProvider(LocalRippleConfiguration provides null) {
+                    AppearanceSettingsContent(
+                        settings = settings,
+                        appearance = currentAppearance,
+                        onBack = {},
+                        onOpenNickColors = {},
+                        onThemePreset = {},
+                        onTrueBlack = {},
+                        onFollowSystem = {},
+                        onDynamicColor = {},
+                        onUseThemeTextColors = onUseThemeTextColors,
+                        onLayoutDensity = onLayoutDensity,
+                        onComposerStyle = onComposerStyle,
+                        onInputCornerStyle = onInputCornerStyle,
+                        onAvatarShape = onAvatarShape,
+                        onChatCardCornerStyle = onChatCardCornerStyle,
+                        onMediaCornerStyle = onMediaCornerStyle,
+                        onFolderDisplayMode = onFolderDisplayMode,
+                        onShowFolderChatsInAll = onShowFolderChatsInAll,
+                        onAvatarStyle = onAvatarStyle,
+                        onNickColorsEnabled = {},
+                        onNickColorPalette = {},
+                        onWallpaper = onWallpaper,
+                        importedWallpaper = importedWallpaperProvider(),
+                        onUiFontScale = {},
+                        onConversationFontScale = {},
+                        onFontChoice = onFontChoice,
+                        onShowTimestamps = {},
+                        onTimeFormat = {},
+                        onCustomTimeFormatPattern = {},
+                        onMessageSpacing = onMessageSpacing,
+                        onBubbleCornerStyle = onBubbleCornerStyle,
+                        onChatShadowsEnabled = onChatShadowsEnabled,
+                        onNicknameBackgroundsEnabled = onNicknameBackgroundsEnabled,
+                        onLauncherIcon = {},
+                        target = targetProvider(),
+                    )
+                }
             }
         }
     }

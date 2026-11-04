@@ -70,6 +70,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
+import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
@@ -87,6 +88,7 @@ import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.systemPartner
@@ -155,6 +157,10 @@ fun AppearanceSettingsScreen(
         onUseThemeTextColors = viewModel::setUseThemeTextColors,
         onLayoutDensity = viewModel::setLayoutDensity,
         onComposerStyle = viewModel::setComposerStyle,
+        onInputCornerStyle = viewModel::setInputCornerStyle,
+        onAvatarShape = viewModel::setAvatarShape,
+        onChatCardCornerStyle = viewModel::setChatCardCornerStyle,
+        onMediaCornerStyle = viewModel::setMediaCornerStyle,
         onFolderDisplayMode = viewModel::setFolderDisplayMode,
         onShowFolderChatsInAll = viewModel::setShowFolderChatsInAll,
         onAvatarStyle = viewModel::setAvatarStyle,
@@ -196,6 +202,10 @@ fun AppearanceSettingsContent(
     onUseThemeTextColors: (Boolean) -> Unit,
     onLayoutDensity: (LayoutDensity) -> Unit,
     onComposerStyle: (ComposerStyle) -> Unit,
+    onInputCornerStyle: (UiCornerStyle) -> Unit = {},
+    onAvatarShape: (AvatarShape) -> Unit = {},
+    onChatCardCornerStyle: (UiCornerStyle) -> Unit = {},
+    onMediaCornerStyle: (UiCornerStyle) -> Unit = {},
     onFolderDisplayMode: (FolderDisplayMode) -> Unit,
     onShowFolderChatsInAll: (Boolean) -> Unit = {},
     onAvatarStyle: (AvatarStyle) -> Unit,
@@ -417,6 +427,16 @@ fun AppearanceSettingsContent(
                     modifier = targetModifier,
                 )
             }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.CHAT_CARD_SHAPE.name) { targetModifier ->
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_chat_card_shape),
+                    value = uiCornerStyleLabel(previewAppearance.chatCardCornerStyle),
+                    summary = stringResource(R.string.settings_chat_card_shape_desc),
+                    modifier = targetModifier.testTag("settings_chat_card_shape_picker"),
+                    onClick = { choiceSheet = AppearanceChoice.CHAT_CARD_SHAPE },
+                )
+            }
         }
         SettingsGroup(title = stringResource(R.string.settings_appearance_messages_section)) {
             SettingsTarget(target?.name, SettingsTarget.MESSAGE_STYLE.name) { targetModifier ->
@@ -435,6 +455,26 @@ fun AppearanceSettingsContent(
                     summary = stringResource(R.string.settings_composer_style_desc),
                     modifier = targetModifier.testTag("settings_composer_style_picker"),
                     onClick = { choiceSheet = AppearanceChoice.COMPOSER_STYLE },
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.INPUT_SHAPE.name) { targetModifier ->
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_input_shape),
+                    value = uiCornerStyleLabel(previewAppearance.inputCornerStyle),
+                    summary = stringResource(R.string.settings_input_shape_desc),
+                    modifier = targetModifier.testTag("settings_input_shape_picker"),
+                    onClick = { choiceSheet = AppearanceChoice.INPUT_SHAPE },
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.MEDIA_SHAPE.name) { targetModifier ->
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_media_shape),
+                    value = uiCornerStyleLabel(previewAppearance.mediaCornerStyle),
+                    summary = stringResource(R.string.settings_media_shape_desc),
+                    modifier = targetModifier.testTag("settings_media_shape_picker"),
+                    onClick = { choiceSheet = AppearanceChoice.MEDIA_SHAPE },
                 )
             }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -566,6 +606,16 @@ fun AppearanceSettingsContent(
                     onClick = { choiceSheet = AppearanceChoice.AVATAR },
                 )
             }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.AVATAR_SHAPE.name) { targetModifier ->
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_avatar_shape),
+                    value = avatarShapeLabel(previewAppearance.avatarShape),
+                    summary = stringResource(R.string.settings_avatar_shape_desc),
+                    modifier = targetModifier.testTag("settings_avatar_shape_picker"),
+                    onClick = { choiceSheet = AppearanceChoice.AVATAR_SHAPE },
+                )
+            }
         }
         SettingsGroup(title = stringResource(R.string.settings_appearance_bubbles_section)) {
             SettingsTarget(target?.name, SettingsTarget.BUBBLE_CORNERS.name) { targetModifier ->
@@ -671,6 +721,22 @@ fun AppearanceSettingsContent(
                 previewAppearance = previewAppearance.copy(composerStyle = it)
                 onComposerStyle(it)
             },
+            onInputCornerStyle = {
+                previewAppearance = previewAppearance.copy(inputCornerStyle = it)
+                onInputCornerStyle(it)
+            },
+            onAvatarShape = {
+                previewAppearance = previewAppearance.copy(avatarShape = it)
+                onAvatarShape(it)
+            },
+            onChatCardCornerStyle = {
+                previewAppearance = previewAppearance.copy(chatCardCornerStyle = it)
+                onChatCardCornerStyle(it)
+            },
+            onMediaCornerStyle = {
+                previewAppearance = previewAppearance.copy(mediaCornerStyle = it)
+                onMediaCornerStyle(it)
+            },
             onFolderDisplayMode = {
                 previewSettings = previewSettings.copy(folderDisplayMode = it)
                 onFolderDisplayMode(it)
@@ -735,7 +801,7 @@ fun AppearanceSettingsContent(
     }
 }
 
-private enum class AppearanceChoice { PALETTE, FOLDER_LAYOUT, DENSITY, COMPOSER_STYLE, AVATAR, TIME, SPACING, BUBBLES, LAUNCHER }
+private enum class AppearanceChoice { PALETTE, FOLDER_LAYOUT, CHAT_CARD_SHAPE, DENSITY, COMPOSER_STYLE, INPUT_SHAPE, MEDIA_SHAPE, AVATAR, AVATAR_SHAPE, TIME, SPACING, BUBBLES, LAUNCHER }
 
 @Composable
 private fun AppearanceChatLayoutPreview(
@@ -771,6 +837,10 @@ private fun AppearanceChatLayoutPreview(
             ),
         messageSpacing = messageSpacing,
         bubbleCornerStyle = bubbleCorners,
+        inputCornerStyle = appearance.inputCornerStyle,
+        avatarShape = appearance.avatarShape,
+        chatCardCornerStyle = appearance.chatCardCornerStyle,
+        mediaCornerStyle = appearance.mediaCornerStyle,
         chatShadowsEnabled = chatShadowsEnabled,
         nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
         sentBubbleColor = appearance.sentBubbleColor,
@@ -822,6 +892,10 @@ private fun ComposerStylePreview(
             ),
         messageSpacing = appearance.messageSpacing,
         bubbleCornerStyle = appearance.bubbleCornerStyle,
+        inputCornerStyle = appearance.inputCornerStyle,
+        avatarShape = appearance.avatarShape,
+        chatCardCornerStyle = appearance.chatCardCornerStyle,
+        mediaCornerStyle = appearance.mediaCornerStyle,
         chatShadowsEnabled = appearance.chatShadowsEnabled,
         sentBubbleColor = appearance.sentBubbleColor,
         receivedBubbleColor = appearance.receivedBubbleColor,
@@ -858,6 +932,10 @@ private fun AppearanceChoiceSheet(
     onPalette: (NickColorPalette) -> Unit,
     onDensity: (LayoutDensity) -> Unit,
     onComposerStyle: (ComposerStyle) -> Unit,
+    onInputCornerStyle: (UiCornerStyle) -> Unit,
+    onAvatarShape: (AvatarShape) -> Unit,
+    onChatCardCornerStyle: (UiCornerStyle) -> Unit,
+    onMediaCornerStyle: (UiCornerStyle) -> Unit,
     onFolderDisplayMode: (FolderDisplayMode) -> Unit,
     onShowFolderChatsInAll: (Boolean) -> Unit,
     onAvatar: (AvatarStyle) -> Unit,
@@ -868,6 +946,81 @@ private fun AppearanceChoiceSheet(
     onDismiss: () -> Unit,
 ) {
     when (choice) {
+        AppearanceChoice.INPUT_SHAPE, AppearanceChoice.CHAT_CARD_SHAPE, AppearanceChoice.MEDIA_SHAPE -> {
+            val title =
+                when (choice) {
+                    AppearanceChoice.INPUT_SHAPE -> R.string.settings_input_shape
+                    AppearanceChoice.CHAT_CARD_SHAPE -> R.string.settings_chat_card_shape
+                    else -> R.string.settings_media_shape
+                }
+            val prefix =
+                when (choice) {
+                    AppearanceChoice.INPUT_SHAPE -> "settings_input_shape"
+                    AppearanceChoice.CHAT_CARD_SHAPE -> "settings_chat_card_shape"
+                    else -> "settings_media_shape"
+                }
+            val selected =
+                when (choice) {
+                    AppearanceChoice.INPUT_SHAPE -> appearance.inputCornerStyle
+                    AppearanceChoice.CHAT_CARD_SHAPE -> appearance.chatCardCornerStyle
+                    else -> appearance.mediaCornerStyle
+                }
+            SingleChoiceSheet(
+                title = stringResource(title),
+                selected = selected,
+                options =
+                    UiCornerStyle.entries.map {
+                        ChoiceOption(it, uiCornerStyleLabel(it), if (it == UiCornerStyle.DEFAULT) stringResource(R.string.settings_shape_default_desc) else null, "${prefix}_${it.name.lowercase()}")
+                    },
+                onSelect =
+                    when (choice) {
+                        AppearanceChoice.INPUT_SHAPE -> onInputCornerStyle
+                        AppearanceChoice.CHAT_CARD_SHAPE -> onChatCardCornerStyle
+                        else -> onMediaCornerStyle
+                    },
+                onDismiss = onDismiss,
+                tag = "${prefix}_sheet",
+                dismissOnSelect = false,
+                preview = {
+                    if (choice == AppearanceChoice.INPUT_SHAPE) {
+                        ComposerStylePreview(settings, appearance, customFontFile, "settings_input_shape_preview")
+                    } else {
+                        AppearanceSampleTheme(settings, appearance, customFontFile) {
+                            if (choice == AppearanceChoice.CHAT_CARD_SHAPE) {
+                                FolderLayoutPreview(settings.folderDisplayMode, settings.showFolderChatsInAll)
+                            } else {
+                                MediaShapePreview()
+                            }
+                        }
+                    }
+                },
+            )
+        }
+
+        AppearanceChoice.AVATAR_SHAPE -> {
+            val sampleSettings = if (settings.avatarStyle == AvatarStyle.NONE) settings.copy(avatarStyle = AvatarStyle.INITIALS) else settings
+            SingleChoiceSheet(
+                title = stringResource(R.string.settings_avatar_shape),
+                selected = appearance.avatarShape,
+                options =
+                    AvatarShape.entries.map {
+                        ChoiceOption(it, avatarShapeLabel(it), if (it == AvatarShape.DEFAULT) stringResource(R.string.settings_shape_default_desc) else null, "settings_avatar_shape_${it.name.lowercase()}")
+                    },
+                onSelect = onAvatarShape,
+                onDismiss = onDismiss,
+                tag = "settings_avatar_shape_sheet",
+                dismissOnSelect = false,
+                preview = {
+                    AppearanceSampleTheme(sampleSettings, appearance, customFontFile) {
+                        if (settings.avatarStyle == AvatarStyle.NONE) {
+                            Text(stringResource(R.string.settings_avatar_shape_illustration))
+                        }
+                        AvatarStylePreview(sampleSettings.avatarStyle)
+                    }
+                },
+            )
+        }
+
         AppearanceChoice.PALETTE -> {
             SingleChoiceSheet(
                 title = stringResource(R.string.settings_nick_palette),
@@ -1080,6 +1233,29 @@ private fun folderDisplayModeDescription(value: FolderDisplayMode): String =
         when (value) {
             FolderDisplayMode.INLINE -> R.string.settings_folder_layout_inline_desc
             FolderDisplayMode.TABS -> R.string.settings_folder_layout_tabs_desc
+        },
+    )
+
+@Composable
+private fun uiCornerStyleLabel(value: UiCornerStyle): String =
+    stringResource(
+        when (value) {
+            UiCornerStyle.DEFAULT -> R.string.settings_shape_default
+            UiCornerStyle.SQUARE -> R.string.settings_shape_square
+            UiCornerStyle.SOFT -> R.string.settings_shape_soft
+            UiCornerStyle.ROUNDED -> R.string.settings_shape_rounded
+        },
+    )
+
+@Composable
+private fun avatarShapeLabel(value: AvatarShape): String =
+    stringResource(
+        when (value) {
+            AvatarShape.DEFAULT -> R.string.settings_shape_default
+            AvatarShape.SQUARE -> R.string.settings_shape_square
+            AvatarShape.SOFT -> R.string.settings_shape_soft
+            AvatarShape.ROUNDED -> R.string.settings_shape_rounded
+            AvatarShape.CIRCLE -> R.string.settings_shape_circle
         },
     )
 

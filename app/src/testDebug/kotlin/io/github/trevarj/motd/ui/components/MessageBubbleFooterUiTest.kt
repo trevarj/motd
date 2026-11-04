@@ -63,6 +63,7 @@ import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
@@ -94,6 +95,102 @@ class MessageBubbleFooterUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun loadedImageAndVideoCornerPresetsCoverEveryDensityAndActionAndRestoreDefault() {
+        RoutedInlineMediaFixture().use { fixture ->
+            fixture.server.enqueue(solidMediaResponse())
+            fixture.server.enqueue(solidMediaResponse())
+            val density = mutableStateOf(LayoutDensity.COMFORTABLE)
+            val kind = mutableStateOf(MessageKind.PRIVMSG)
+            val corners = mutableStateOf(UiCornerStyle.DEFAULT)
+            val video = mutableStateOf(false)
+            val imageUrl = "http://media.invalid/corner-mask.png"
+            val videoUrl = "http://media.invalid/corner-mask.mp4"
+            var pixelsPerDp = 1f
+            compose.setContent {
+                pixelsPerDp = LocalDensity.current.density
+                MotdTheme(
+                    dynamicColor = false,
+                    layoutDensity = density.value,
+                    avatarStyle = AvatarStyle.NONE,
+                    mediaCornerStyle = corners.value,
+                    chatShadowsEnabled = false,
+                ) {
+                    CompositionLocalProvider(
+                        LocalAutomaticRemoteMedia provides true,
+                        LocalNetworkMediaHttp provides fixture.http,
+                    ) {
+                        Box(Modifier.width(380.dp).background(Color.Cyan)) {
+                            MessageBubble(
+                                sender = "alice",
+                                text = "Media",
+                                timeMs = 0,
+                                formattedTime = TIME,
+                                isSelf = false,
+                                kind = kind.value,
+                                showSender = true,
+                                networkId = fixture.networkId,
+                                mediaUrls = listOf(if (video.value) videoUrl else imageUrl),
+                            )
+                        }
+                    }
+                }
+            }
+            for (isVideo in listOf(false, true)) {
+                for (layout in LayoutDensity.entries) {
+                    for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.ACTION)) {
+                        compose.runOnIdle {
+                            video.value = isVideo
+                            density.value = layout
+                            kind.value = messageKind
+                            corners.value = UiCornerStyle.DEFAULT
+                        }
+                        compose.waitUntil(10_000) {
+                            compose.onAllNodesWithTag("inline_media_loaded", useUnmergedTree = true).fetchSemanticsNodes().size == 1
+                        }
+                        val media = compose.onNodeWithTag(if (isVideo) "inline_video_preview" else "inline_media_loaded", useUnmergedTree = true)
+                        val baseline = media.captureToImage().asAndroidBitmap()
+                        val bounds = media.fetchSemanticsNode().boundsInRoot
+                        for (preset in UiCornerStyle.entries + UiCornerStyle.DEFAULT) {
+                            compose.runOnIdle { corners.value = preset }
+                            val image = media.captureToImage().asAndroidBitmap()
+                            val radius =
+                                when (preset) {
+                                    UiCornerStyle.DEFAULT -> {
+                                        when {
+                                            messageKind == MessageKind.ACTION -> 10
+                                            layout == LayoutDensity.COMFORTABLE -> 12
+                                            layout == LayoutDensity.COMPACT -> 8
+                                            else -> 10
+                                        }
+                                    }
+
+                                    UiCornerStyle.SQUARE -> {
+                                        0
+                                    }
+
+                                    UiCornerStyle.SOFT -> {
+                                        8
+                                    }
+
+                                    UiCornerStyle.ROUNDED -> {
+                                        24
+                                    }
+                                }
+                            val label = "$layout $messageKind video=$isVideo $preset"
+                            assertMediaCornerPixels(image, radius * pixelsPerDp, Color.Magenta, pixelsPerDp, label)
+                            assertEquals("$label unchanged bounds", bounds, media.fetchSemanticsNode().boundsInRoot)
+                            if (preset == UiCornerStyle.DEFAULT) assertTrue("$label restored loaded pixels", baseline.sameAs(image))
+                        }
+                    }
+                }
+            }
+            assertTrue("media must really load through the controlled network", fixture.server.requestCount >= 2)
+            assertTrue(fixture.selectedNetworks.isNotEmpty())
+            assertTrue(fixture.selectedNetworks.all { it == fixture.networkId })
+        }
+    }
 
     @Test
     fun customComfortableFillKeepsBodyAndFailedFooterReadable() {

@@ -1,13 +1,20 @@
 package io.github.trevarj.motd.avatar
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
+import androidx.core.graphics.withClip
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -238,6 +245,93 @@ class IrcSpriteV2Test {
 
         assertFalse(darkBefore.sameAs(light))
         assertTrue(darkBefore.sameAs(darkAfter))
+    }
+
+    @Test fun renderer_shapes_match_literal_masks_and_inset_rings() {
+        for ((percent, radius) in listOf(0 to 0f, 10 to 12.8f, 30 to 38.4f, 49 to 62.72f, 50 to 64f)) {
+            val actual =
+                requireNotNull(
+                    IrcSpriteV2Renderer.render(
+                        context,
+                        "shape-mask",
+                        Color.BLUE,
+                        128,
+                        Color.WHITE,
+                        Color.MAGENTA,
+                        cornerPercent = percent,
+                    ),
+                )
+            val expected = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(expected)
+            val clip =
+                Path().apply {
+                    if (percent == 50) {
+                        addCircle(64f, 64f, 64f, Path.Direction.CW)
+                    } else {
+                        addRoundRect(0f, 0f, 128f, 128f, radius, radius, Path.Direction.CW)
+                    }
+                }
+            canvas.withClip(clip) { canvas.drawColor(Color.WHITE) }
+            val ring =
+                Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.MAGENTA
+                    style = Paint.Style.STROKE
+                    strokeWidth = 4f
+                }
+            if (percent == 50) {
+                canvas.drawCircle(64f, 64f, 62f, ring)
+            } else {
+                canvas.drawRoundRect(2f, 2f, 126f, 126f, (radius - 2f).coerceAtLeast(0f), (radius - 2f).coerceAtLeast(0f), ring)
+            }
+            var ringPixels = 0
+            for (y in 0 until 128) {
+                for (x in 0 until 128) {
+                    // Layered sprite edges accumulate clip coverage; test the exact mask interior/exterior.
+                    val alpha = Color.alpha(expected.getPixel(x, y))
+                    if (alpha == 0 || alpha == 255) {
+                        assertEquals("$percent% mask at $x,$y", alpha, Color.alpha(actual.getPixel(x, y)))
+                    }
+                    if (expected.getPixel(x, y) == Color.MAGENTA) {
+                        assertEquals("$percent% ring at $x,$y", Color.MAGENTA, actual.getPixel(x, y))
+                        ringPixels++
+                    }
+                }
+            }
+            assertTrue("$percent% must paint its ring", ringPixels > 250)
+            assertEquals("$percent% corner", if (percent == 0) 255 else 0, Color.alpha(actual.getPixel(2, 2)))
+        }
+    }
+
+    @Test fun renderer_normalizes_shape_cache_keys_and_restores_default_after_square() {
+        fun render(percent: Int = 50) =
+            requireNotNull(
+                IrcSpriteV2Renderer.render(context, "shape-cache", Color.BLUE, 128, Color.WHITE, Color.MAGENTA, cornerPercent = percent),
+            )
+        val default =
+            requireNotNull(
+                IrcSpriteV2Renderer.render(context, "shape-cache", Color.BLUE, 128, Color.WHITE, Color.MAGENTA),
+            )
+        val square = render(0)
+        val soft = render(10)
+        val rounded = render(30)
+        assertEquals(0, Color.alpha(default.getPixel(2, 2)))
+        assertEquals(255, Color.alpha(square.getPixel(2, 2)))
+        assertNotSame(default, square)
+        assertNotSame(square, soft)
+        assertNotSame(soft, rounded)
+        assertFalse(default.sameAs(square))
+        assertFalse(soft.sameAs(rounded))
+        assertSame(square, render(0))
+        assertSame(soft, render(10))
+        assertSame(rounded, render(30))
+        assertSame(square, render(-100))
+        assertSame(default, render(100))
+        val restored =
+            requireNotNull(
+                IrcSpriteV2Renderer.render(context, "shape-cache", Color.BLUE, 128, Color.WHITE, Color.MAGENTA),
+            )
+        assertSame(default, restored)
+        assertTrue(default.sameAs(restored))
     }
 
     private fun centerX(rect: IrcSpriteV2Rect): Float = rect.x + rect.width / 2f

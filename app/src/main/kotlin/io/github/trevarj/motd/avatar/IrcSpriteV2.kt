@@ -171,12 +171,14 @@ internal object IrcSpriteV2Renderer {
         ringColor: Int,
         includeAccessory: Boolean = true,
         theme: IrcSpriteV2Theme = IrcSpriteV2Theme.DARK,
+        cornerPercent: Int = 50,
     ): Bitmap? {
+        val corners = cornerPercent.coerceIn(0, 50)
         val parsed = catalog(context) ?: return null
         val traits = ircSpriteV2Traits(name, parsed.bodies.size, parsed.heads.size, parsed.faces.size, parsed.accessories.size)
-        val key = "$name:${accent and 0x00ffffff}:$sizePx:$baseColor:$ringColor:$includeAccessory:$theme:${traits.body}:${traits.head}:${traits.face}:${traits.accessory}"
+        val key = "$name:${accent and 0x00ffffff}:$sizePx:$baseColor:$ringColor:$includeAccessory:$theme:$corners:${traits.body}:${traits.head}:${traits.face}:${traits.accessory}"
         synchronized(compositeCache) { compositeCache.get(key)?.let { return it } }
-        val result = compose(context, parsed, traits, accent, sizePx.coerceAtLeast(1), baseColor, ringColor, includeAccessory, theme)
+        val result = compose(context, parsed, traits, accent, sizePx.coerceAtLeast(1), baseColor, ringColor, includeAccessory, theme, corners)
         synchronized(compositeCache) { compositeCache.put(key, result) }
         return result
     }
@@ -191,11 +193,20 @@ internal object IrcSpriteV2Renderer {
         ringColor: Int,
         includeAccessory: Boolean,
         theme: IrcSpriteV2Theme,
+        cornerPercent: Int,
     ): Bitmap {
         val output = createBitmap(sizePx, sizePx)
         val canvas = Canvas(output)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = false }
-        val clip = Path().apply { addCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f, Path.Direction.CW) }
+        val radius = sizePx * cornerPercent / 100f
+        val clip =
+            Path().apply {
+                if (cornerPercent == 50) {
+                    addCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f, Path.Direction.CW)
+                } else {
+                    addRoundRect(0f, 0f, sizePx.toFloat(), sizePx.toFloat(), radius, radius, Path.Direction.CW)
+                }
+            }
         canvas.withClip(clip) {
             canvas.drawColor(baseColor)
 
@@ -225,7 +236,13 @@ internal object IrcSpriteV2Renderer {
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = (sizePx / 32f).coerceAtLeast(1f)
         paint.color = ringColor
-        canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - paint.strokeWidth / 2f, paint)
+        if (cornerPercent == 50) {
+            canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - paint.strokeWidth / 2f, paint)
+        } else {
+            val inset = paint.strokeWidth / 2f
+            val ringRadius = (radius - inset).coerceAtLeast(0f)
+            canvas.drawRoundRect(inset, inset, sizePx - inset, sizePx - inset, ringRadius, ringRadius, paint)
+        }
         return output
     }
 

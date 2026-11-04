@@ -14,6 +14,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
+import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefsImpl
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
@@ -42,6 +43,7 @@ import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.ChatFolderRepository
 import io.github.trevarj.motd.data.sync.BufferStore
@@ -614,6 +616,68 @@ class ConfigurationBackupRepositoryTest {
                 appearancePrefs.setUseThemeTextColors(false)
                 appearancePrefs.setNicknameBackgroundsEnabled(true)
                 appearancePrefs.setWallpaper(WallpaperSelection())
+                db.close()
+            }
+        }
+
+    @Test
+    fun surfaceShapesRoundTripAndRespectLegacyAndAbsentAppearance() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val prefs = AppearancePrefsImpl(context)
+            val original = prefs.config.first()
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                prefs.setInputCornerStyle(UiCornerStyle.SQUARE)
+                prefs.setAvatarShape(AvatarShape.CIRCLE)
+                prefs.setChatCardCornerStyle(UiCornerStyle.SOFT)
+                prefs.setMediaCornerStyle(UiCornerStyle.ROUNDED)
+                val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                prefs.setInputCornerStyle(UiCornerStyle.ROUNDED)
+                prefs.setAvatarShape(AvatarShape.SOFT)
+                prefs.setChatCardCornerStyle(UiCornerStyle.SQUARE)
+                prefs.setMediaCornerStyle(UiCornerStyle.SOFT)
+                backup.import(raw, importMode = BackupImportMode.MERGE)
+                val restored = AppearancePrefsImpl(context).config.first()
+                assertEquals(UiCornerStyle.SQUARE, restored.inputCornerStyle)
+                assertEquals(AvatarShape.CIRCLE, restored.avatarShape)
+                assertEquals(UiCornerStyle.SOFT, restored.chatCardCornerStyle)
+                assertEquals(UiCornerStyle.ROUNDED, restored.mediaCornerStyle)
+
+                val oldRaw =
+                    raw.replace(
+                        Regex(""",\s*"(inputCornerStyle|avatarShape|chatCardCornerStyle|mediaCornerStyle)"\s*:\s*"[^"]*""""),
+                        "",
+                    )
+                for (field in listOf("inputCornerStyle", "avatarShape", "chatCardCornerStyle", "mediaCornerStyle")) {
+                    assertFalse(oldRaw.contains("\"$field\""))
+                }
+                backup.import(oldRaw, importMode = BackupImportMode.MERGE)
+                val legacy = AppearancePrefsImpl(context).config.first()
+                assertEquals(UiCornerStyle.DEFAULT, legacy.inputCornerStyle)
+                assertEquals(AvatarShape.DEFAULT, legacy.avatarShape)
+                assertEquals(UiCornerStyle.DEFAULT, legacy.chatCardCornerStyle)
+                assertEquals(UiCornerStyle.DEFAULT, legacy.mediaCornerStyle)
+
+                val withoutAppearance =
+                    raw.replace(
+                        Regex(""",?\s*"appearance"\s*:\s*\{.*?\}(?=,\s*"contentPreviews")""", RegexOption.DOT_MATCHES_ALL),
+                        "",
+                    )
+                assertFalse(withoutAppearance.contains("\"appearance\""))
+                prefs.setInputCornerStyle(UiCornerStyle.SOFT)
+                prefs.setAvatarShape(AvatarShape.SQUARE)
+                prefs.setChatCardCornerStyle(UiCornerStyle.ROUNDED)
+                prefs.setMediaCornerStyle(UiCornerStyle.SQUARE)
+                val local = prefs.config.first()
+                backup.import(withoutAppearance, importMode = BackupImportMode.MERGE)
+                assertEquals(local, AppearancePrefsImpl(context).config.first())
+            } finally {
+                prefs.setInputCornerStyle(original.inputCornerStyle)
+                prefs.setAvatarShape(original.avatarShape)
+                prefs.setChatCardCornerStyle(original.chatCardCornerStyle)
+                prefs.setMediaCornerStyle(original.mediaCornerStyle)
                 db.close()
             }
         }

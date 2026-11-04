@@ -87,6 +87,41 @@ internal class SettingsRobot(
         awaitTagGone("settings_avatar_style_sheet")
     }
 
+    fun selectSurfaceShapes() {
+        for ((surface, preset) in surfaceShapeChoices) {
+            scrollToAndClick("settings_${surface}_shape_picker")
+            val sheet = "settings_${surface}_shape_sheet"
+            assertDisplayed(sheet)
+            val option = "settings_${surface}_shape_$preset"
+            scrollContainerTo("${sheet}_options", option)
+            click(option)
+            compose.onNodeWithTag(option).assertIsSelected()
+            assertDisplayed(sheet)
+            dismissChoiceSheet(sheet)
+        }
+    }
+
+    fun assertSurfaceShapesPersistedAndRestoreDefaults() {
+        for ((surface, preset) in surfaceShapeChoices) {
+            scrollToAndClick("settings_${surface}_shape_picker")
+            val sheet = "settings_${surface}_shape_sheet"
+            scrollContainerTo("${sheet}_options", "settings_${surface}_shape_$preset")
+            compose.onNodeWithTag("settings_${surface}_shape_$preset").assertIsSelected()
+            val default = "settings_${surface}_shape_default"
+            scrollContainerTo("${sheet}_options", default)
+            click(default)
+            compose.onNodeWithTag(default).assertIsSelected()
+            assertDisplayed(sheet)
+            dismissChoiceSheet(sheet)
+            scrollToAndClick("settings_${surface}_shape_picker")
+            scrollContainerTo("${sheet}_options", default)
+            compose.onNodeWithTag(default).assertIsSelected()
+            dismissChoiceSheet(sheet)
+        }
+    }
+
+    private val surfaceShapeChoices = listOf("input" to "square", "avatar" to "circle", "chat_card" to "soft", "media" to "rounded")
+
     fun selectWallpaperAndIntensity() {
         scrollToAndClick("settings_wallpaper_picker")
         assertDisplayed("settings_wallpaper_sheet")

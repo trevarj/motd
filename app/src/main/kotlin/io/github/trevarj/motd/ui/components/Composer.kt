@@ -51,6 +51,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.contextmenu.builder.item
@@ -183,11 +184,13 @@ import io.github.trevarj.motd.ui.chat.messageFormattingRange
 import io.github.trevarj.motd.ui.chat.searchSystemEmojis
 import io.github.trevarj.motd.ui.chat.systemEmojiSearchEntries
 import io.github.trevarj.motd.ui.theme.LocalComfortableBubbleColors
+import io.github.trevarj.motd.ui.theme.LocalInputCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.contrastRatio
+import io.github.trevarj.motd.ui.theme.cornerRadius
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.readingInk
 import kotlinx.coroutines.coroutineScope
@@ -1026,7 +1029,7 @@ fun Composer(
                     if (floatingPill) {
                         Surface(
                             modifier = Modifier.matchParentSize().testTag("chat_composer_pill"),
-                            shape = MotdShapes.composer,
+                            shape = RoundedCornerShape(LocalInputCornerStyle.current.cornerRadius(28.dp, roundedRadius = 28.dp)),
                             color = composerFill,
                         ) {}
                     }
@@ -1101,7 +1104,7 @@ fun Composer(
                                                         )
                                                     },
                                                 ).testTag("chat_composer_pill"),
-                                        shape = MotdShapes.card,
+                                        shape = RoundedCornerShape(LocalInputCornerStyle.current.cornerRadius(16.dp, roundedRadius = 28.dp)),
                                         color = composerFill,
                                     ) {}
                                 }

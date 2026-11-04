@@ -21,8 +21,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.avatar.IrcSpriteV2Renderer
 import io.github.trevarj.motd.avatar.IrcSpriteV2Theme
+import io.github.trevarj.motd.data.prefs.AvatarShape
+import io.github.trevarj.motd.ui.theme.LocalAvatarShape
 import io.github.trevarj.motd.ui.theme.LocalNickColors
-import io.github.trevarj.motd.ui.theme.MotdShapes
+import io.github.trevarj.motd.ui.theme.cornerPercent
+import io.github.trevarj.motd.ui.theme.shape
 
 internal fun nickTokens(nick: String): List<String> {
     val stripped = nick.trim().trimStart('~', '&', '@', '%', '+')
@@ -79,8 +82,11 @@ internal fun IrcSpriteV2Avatar(
     val base = if (dark) scheme.surfaceContainerHighest else scheme.surfaceContainerHigh
     val sizePx = with(density) { size.roundToPx() }
     val includeAccessory = size >= 24.dp
+    val avatarShape = LocalAvatarShape.current
+    val shape = if (avatarShape == AvatarShape.DEFAULT) CircleShape else avatarShape.shape(isChannel = false)
+    val cornerPercent = avatarShape.cornerPercent(isChannel = false)
     val bitmap =
-        remember(context, name, accent, base, sizePx, includeAccessory, dark) {
+        remember(context, name, accent, base, sizePx, includeAccessory, dark, cornerPercent) {
             IrcSpriteV2Renderer.render(
                 context = context,
                 name = name,
@@ -90,16 +96,17 @@ internal fun IrcSpriteV2Avatar(
                 ringColor = accent.copy(alpha = 0.52f).toArgb(),
                 includeAccessory = includeAccessory,
                 theme = if (dark) IrcSpriteV2Theme.DARK else IrcSpriteV2Theme.LIGHT,
+                cornerPercent = cornerPercent,
             )
         }
     if (bitmap == null) {
         // A missing/corrupt optional catalog must not turn a contact list into blank space.
-        InitialsAvatar(name, accent, size, isChannel = false, shape = CircleShape, modifier = modifier)
+        InitialsAvatar(name, accent, size, isChannel = false, shape = shape, modifier = modifier)
     } else {
         Image(
             bitmap = bitmap.asImageBitmap(),
             contentDescription = null,
-            modifier = modifier.size(size).clip(CircleShape),
+            modifier = modifier.size(size).clip(shape),
         )
     }
 }
@@ -112,7 +119,8 @@ internal fun IrcNetworkBadge(
 ) {
     val surface = MaterialTheme.colorScheme.surfaceContainerHighest
     val foreground = MaterialTheme.colorScheme.onSurfaceVariant
-    Canvas(modifier = modifier.size(size).clip(MotdShapes.channelAvatar).background(surface)) {
+    val shape = LocalAvatarShape.current.shape(isChannel = true)
+    Canvas(modifier = modifier.size(size).clip(shape).background(surface)) {
         val side = this.size.minDimension
         // Raise the topology slightly to balance the two lower nodes and bottom edge.
         val top = Offset(side * 0.5f, side * 0.30f)

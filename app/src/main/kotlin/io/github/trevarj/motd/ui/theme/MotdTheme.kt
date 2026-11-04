@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
+import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
@@ -38,6 +39,7 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.normalizeFontScalePercent
 import io.github.trevarj.motd.data.prefs.resolveAutoPalette
@@ -116,6 +118,18 @@ fun ConversationTypography(
  */
 val LocalAvatarStyle: ProvidableCompositionLocal<AvatarStyle> =
     staticCompositionLocalOf { AvatarStyle.IRC_SPRITE }
+
+val LocalInputCornerStyle: ProvidableCompositionLocal<UiCornerStyle> =
+    staticCompositionLocalOf { UiCornerStyle.DEFAULT }
+
+val LocalAvatarShape: ProvidableCompositionLocal<AvatarShape> =
+    staticCompositionLocalOf { AvatarShape.DEFAULT }
+
+val LocalChatCardCornerStyle: ProvidableCompositionLocal<UiCornerStyle> =
+    staticCompositionLocalOf { UiCornerStyle.DEFAULT }
+
+val LocalMediaCornerStyle: ProvidableCompositionLocal<UiCornerStyle> =
+    staticCompositionLocalOf { UiCornerStyle.DEFAULT }
 
 /** CompositionLocal carrying the active app-wide font family; null means the platform default. */
 val LocalAppFontFamily: ProvidableCompositionLocal<FontFamily?> = staticCompositionLocalOf { null }
@@ -229,6 +243,10 @@ fun MotdTheme(
     timestampConfig: TimestampConfig = TimestampConfig(),
     messageSpacing: MessageSpacing = MessageSpacing.DEFAULT,
     bubbleCornerStyle: BubbleCornerStyle = BubbleCornerStyle.ROUNDED,
+    inputCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
+    avatarShape: AvatarShape = AvatarShape.DEFAULT,
+    chatCardCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
+    mediaCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
     chatShadowsEnabled: Boolean = false,
     nicknameBackgroundsEnabled: Boolean = true,
     sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
@@ -329,6 +347,10 @@ fun MotdTheme(
         CompositionLocalProvider(
             LocalUseThemeTextColors provides useThemeTextColors,
             LocalSpacing provides spacingFor(layoutDensity, messageSpacing, bubbleCornerStyle),
+            LocalInputCornerStyle provides inputCornerStyle,
+            LocalAvatarShape provides avatarShape,
+            LocalChatCardCornerStyle provides chatCardCornerStyle,
+            LocalMediaCornerStyle provides mediaCornerStyle,
             LocalChatShadowsEnabled provides chatShadowsEnabled,
             LocalNicknameBackgroundsEnabled provides nicknameBackgroundsEnabled,
             LocalComfortableBubbleColors provides comfortableBubbleColors,

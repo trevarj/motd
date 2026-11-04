@@ -2,7 +2,32 @@ package io.github.trevarj.motd.ui.theme
 
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Shapes
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import io.github.trevarj.motd.data.prefs.AvatarShape
+import io.github.trevarj.motd.data.prefs.UiCornerStyle
+
+internal fun UiCornerStyle.cornerRadius(
+    defaultRadius: Dp,
+    roundedRadius: Dp = 24.dp,
+): Dp =
+    when (this) {
+        UiCornerStyle.DEFAULT -> defaultRadius
+        UiCornerStyle.SQUARE -> 0.dp
+        UiCornerStyle.SOFT -> 8.dp
+        UiCornerStyle.ROUNDED -> roundedRadius
+    }
+
+internal fun AvatarShape.cornerPercent(isChannel: Boolean): Int =
+    when (this) {
+        AvatarShape.DEFAULT -> if (isChannel) 30 else 50
+        AvatarShape.SQUARE -> 0
+        AvatarShape.SOFT -> 10
+        AvatarShape.ROUNDED -> 30
+        AvatarShape.CIRCLE -> 50
+    }
+
+internal fun AvatarShape.shape(isChannel: Boolean): RoundedCornerShape = RoundedCornerShape(percent = cornerPercent(isChannel))
 
 /** Shared geometry keeps tags compact, content soft, and capsules intentional. */
 object MotdShapes {

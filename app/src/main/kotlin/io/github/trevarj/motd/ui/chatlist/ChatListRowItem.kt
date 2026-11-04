@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PlayArrow
@@ -78,13 +79,14 @@ import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.components.resolveIs24Hour
+import io.github.trevarj.motd.ui.theme.LocalChatCardCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdMotion
-import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.cornerRadius
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.readingInk
 
@@ -273,7 +275,7 @@ fun ChatListRowItem(
             modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 2.dp)
-                .clip(MotdShapes.card)
+                .clip(RoundedCornerShape(LocalChatCardCornerStyle.current.cornerRadius(16.dp)))
                 .background(rowContainer)
                 .drawBehind {
                     if (active) {

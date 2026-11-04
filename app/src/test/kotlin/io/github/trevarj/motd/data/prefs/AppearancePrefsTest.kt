@@ -84,6 +84,67 @@ class AppearancePrefsTest {
             }
         }
 
+    @Test fun surfaceShapesRoundTripEveryValueIndependentlyAndFallBackToDefault() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val inputKey = stringPreferencesKey("input_corner_style_v1")
+            val avatarKey = stringPreferencesKey("avatar_shape_v1")
+            val chatCardKey = stringPreferencesKey("chat_card_corner_style_v1")
+            val mediaKey = stringPreferencesKey("media_corner_style_v1")
+            val keys = listOf(inputKey, avatarKey, chatCardKey, mediaKey)
+            context.appearanceDataStore.edit { stored -> keys.forEach { stored.remove(it) } }
+            try {
+                val baseline = AppearancePrefsImpl(context).config.first()
+                assertEquals(UiCornerStyle.DEFAULT, baseline.inputCornerStyle)
+                assertEquals(AvatarShape.DEFAULT, baseline.avatarShape)
+                assertEquals(UiCornerStyle.DEFAULT, baseline.chatCardCornerStyle)
+                assertEquals(UiCornerStyle.DEFAULT, baseline.mediaCornerStyle)
+                var expected = baseline
+                for (style in UiCornerStyle.entries) {
+                    prefs.setInputCornerStyle(style)
+                    expected = expected.copy(inputCornerStyle = style)
+                    assertEquals(expected, AppearancePrefsImpl(context).config.first())
+                    assertEquals(style.name, context.appearanceDataStore.data.first()[inputKey])
+                    prefs.setChatCardCornerStyle(style)
+                    expected = expected.copy(chatCardCornerStyle = style)
+                    assertEquals(expected, AppearancePrefsImpl(context).config.first())
+                    assertEquals(style.name, context.appearanceDataStore.data.first()[chatCardKey])
+                    prefs.setMediaCornerStyle(style)
+                    expected = expected.copy(mediaCornerStyle = style)
+                    assertEquals(expected, AppearancePrefsImpl(context).config.first())
+                    assertEquals(style.name, context.appearanceDataStore.data.first()[mediaKey])
+                }
+                for (shape in AvatarShape.entries) {
+                    prefs.setAvatarShape(shape)
+                    expected = expected.copy(avatarShape = shape)
+                    assertEquals(expected, AppearancePrefsImpl(context).config.first())
+                    assertEquals(shape.name, context.appearanceDataStore.data.first()[avatarKey])
+                }
+                context.appearanceDataStore.edit { stored -> keys.forEach { stored[it] = "not-a-shape" } }
+                assertEquals(baseline, AppearancePrefsImpl(context).config.first())
+            } finally {
+                context.appearanceDataStore.edit { stored -> keys.forEach { stored.remove(it) } }
+            }
+        }
+
+    @Test fun surfaceShapeJsonDefaultsForOldAppearanceAndPreservesExplicitChoices() {
+        val old = Json.decodeFromString<AppearanceConfig>("""{"composerStyle":"LARGE","bubbleCornerStyle":"SQUARE"}""")
+        assertEquals(ComposerStyle.LARGE, old.composerStyle)
+        assertEquals(BubbleCornerStyle.SQUARE, old.bubbleCornerStyle)
+        assertEquals(UiCornerStyle.DEFAULT, old.inputCornerStyle)
+        assertEquals(AvatarShape.DEFAULT, old.avatarShape)
+        assertEquals(UiCornerStyle.DEFAULT, old.chatCardCornerStyle)
+        assertEquals(UiCornerStyle.DEFAULT, old.mediaCornerStyle)
+        val selected =
+            old.copy(
+                inputCornerStyle = UiCornerStyle.SQUARE,
+                avatarShape = AvatarShape.CIRCLE,
+                chatCardCornerStyle = UiCornerStyle.SOFT,
+                mediaCornerStyle = UiCornerStyle.ROUNDED,
+            )
+        assertEquals(selected, Json.decodeFromString<AppearanceConfig>(jsonWithDefaults.encodeToString(selected)))
+    }
+
     @Test fun customFontName_roundTrips() =
         runTest {
             // The data-class default (empty) is covered by defaults_areSystemAndMotdAtFifty; this
