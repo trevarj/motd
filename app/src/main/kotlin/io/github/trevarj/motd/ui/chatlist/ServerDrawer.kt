@@ -1,5 +1,8 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.Typeface
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -64,8 +67,11 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -79,6 +85,8 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -104,6 +112,7 @@ import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ceramicLogoColorMatrix
 import io.github.trevarj.motd.ui.theme.shape
+import kotlin.math.roundToInt
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /**
@@ -177,8 +186,27 @@ fun ServerDrawerContent(
     ModalDrawerSheet {
         Column(modifier = Modifier.fillMaxHeight()) {
             // Compact brand header, kept smaller than a navigation row.
+            val wordmarkStyle = MaterialTheme.typography.titleLarge
+            val density = LocalDensity.current
+            val typeface =
+                LocalFontFamilyResolver.current
+                    .resolve(
+                        wordmarkStyle.fontFamily,
+                        FontWeight.Bold,
+                        wordmarkStyle.fontStyle ?: FontStyle.Normal,
+                        wordmarkStyle.fontSynthesis ?: FontSynthesis.All,
+                    ).value as Typeface
+            val letteringCenter =
+                remember(typeface, wordmarkStyle.fontSize, density) {
+                    val bounds = Rect()
+                    Paint()
+                        .apply {
+                            this.typeface = typeface
+                            textSize = with(density) { wordmarkStyle.fontSize.toPx() }
+                        }.getTextBounds("motd", 0, 4, bounds)
+                    bounds.exactCenterY()
+                }
             Row(
-                verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
             ) {
@@ -190,12 +218,19 @@ fun ServerDrawerContent(
                             ColorMatrix(ceramicLogoColorMatrix(MaterialTheme.colorScheme.onSurface.toArgb())),
                         ),
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.size(26.dp).testTag("drawer_logo_mark"),
+                    // The 26dp artwork's rounded body is centered 2dp above its speech-tail box.
+                    modifier =
+                        Modifier
+                            .size(26.dp)
+                            .alignBy { it.measuredHeight / 2 - with(density) { 2.dp.roundToPx() } }
+                            .testTag("drawer_logo_mark"),
                 )
                 Text(
                     text = stringResource(R.string.app_name),
-                    style = MaterialTheme.typography.titleLarge,
+                    style = wordmarkStyle,
                     fontWeight = FontWeight.Bold,
+                    // Use the resolved native font's ink, including imported fonts, not line leading.
+                    modifier = Modifier.alignBy { (it[FirstBaseline] + letteringCenter).roundToInt() },
                 )
             }
 

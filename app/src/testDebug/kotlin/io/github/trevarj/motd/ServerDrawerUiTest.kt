@@ -4,12 +4,15 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -32,11 +35,15 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.chatlist.DrawerRow
 import io.github.trevarj.motd.ui.chatlist.ServerDrawerContent
@@ -50,6 +57,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.io.File
+import kotlin.math.abs
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -647,6 +656,112 @@ class ServerDrawerUiTest {
         }
 
         compose.onNodeWithTag("drawer_open_feed").assertDoesNotExist()
+    }
+
+    @Test
+    fun wordmark_visibleLetteringIsCenteredOnLogoBodyAtNormalAndLargeFontSizes() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val fontScale = mutableStateOf(1f)
+        val uiFontScalePercent = mutableStateOf(100)
+        val fontChoice = mutableStateOf(FontChoice.SYSTEM)
+        val customFont = File.createTempFile("drawer-wordmark", ".ttf", context.cacheDir)
+        context.resources.openRawResource(R.font.jetbrains_mono_wght).use { input ->
+            customFont.outputStream().use { output -> input.copyTo(output) }
+        }
+        var pixelsPerDp = 1f
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale.value)) {
+                pixelsPerDp = LocalDensity.current.density
+                MotdTheme(
+                    themePreset = ColorThemePreset.LIGHT,
+                    dynamicColor = false,
+                    uiFontScalePercent = uiFontScalePercent.value,
+                    fontChoice = fontChoice.value,
+                    customFontFile = customFont,
+                ) {
+                    ServerDrawerContent(
+                        drawerRows = emptyList(),
+                        selectedNetworkId = null,
+                        allMentions = 0,
+                        scopedUnreadCount = 0,
+                        allOffline = false,
+                        onSelectNetwork = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        onServerMessages = {},
+                        onOpenNetworkSettings = {},
+                        onAddNetwork = {},
+                        onToggleOffline = {},
+                        onOpenSettings = {},
+                        onMarkAllRead = {},
+                    )
+                }
+            }
+        }
+
+        val offsets =
+            try {
+                listOf(
+                    Triple(FontChoice.SYSTEM, 1f, 100),
+                    Triple(FontChoice.SYSTEM, 1f, 150),
+                    Triple(FontChoice.SYSTEM, 2f, 100),
+                    Triple(FontChoice.SERIF, 1f, 100),
+                    Triple(FontChoice.SERIF, 1f, 150),
+                    Triple(FontChoice.CUSTOM, 1f, 100),
+                    Triple(FontChoice.CUSTOM, 1f, 150),
+                    Triple(FontChoice.CUSTOM, 2f, 100),
+                    Triple(FontChoice.SYSTEM, 1f, 100),
+                ).map { (choice, scale, percent) ->
+                    compose.runOnIdle {
+                        fontScale.value = scale
+                        uiFontScalePercent.value = percent
+                        fontChoice.value = choice
+                    }
+                    val wordmark = compose.onNodeWithText(context.getString(R.string.app_name)).assertIsDisplayed().assertHasNoClickAction()
+                    val logo = compose.onNodeWithTag("drawer_logo_mark")
+
+                    fun paintedCenter(
+                        bitmap: Bitmap,
+                        width: Int = bitmap.width,
+                        startX: Int = 0,
+                    ): Float {
+                        val background = luminance(bitmap.getPixel(0, 0))
+                        val paintedRows =
+                            (0 until bitmap.height).filter { y ->
+                                (startX until width).any { x -> abs(luminance(bitmap.getPixel(x, y)) - background) > 32 }
+                            }
+                        assertTrue("Native capture must contain visible ink", paintedRows.isNotEmpty())
+                        return (paintedRows.first() + paintedRows.last() + 1) / 2f
+                    }
+                    val layouts = mutableListOf<TextLayoutResult>()
+                    wordmark.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                    // Debug builds append "(debug)"; measure the brand, not the suffix's descenders.
+                    val brandWidth =
+                        layouts
+                            .single()
+                            .getBoundingBox("motd".lastIndex)
+                            .right
+                            .toInt()
+                    val textCenter =
+                        wordmark.fetchSemanticsNode().boundsInRoot.top +
+                            paintedCenter(wordmark.captureToImage().asAndroidBitmap(), brandWidth)
+                    // The right half contains the rounded body but none of the lower-left speech tail.
+                    val logoBitmap = logo.captureToImage().asAndroidBitmap()
+                    val logoCenter =
+                        logo.fetchSemanticsNode().boundsInRoot.top +
+                            paintedCenter(logoBitmap, startX = logoBitmap.width / 2)
+                    val offsetDp = (textCenter - logoCenter) / pixelsPerDp
+                    val sizes = "font=$choice fontScale=$scale uiFontScalePercent=$percent"
+                    println("drawer wordmark $sizes painted text-minus-logo-body center=${offsetDp}dp")
+                    sizes to offsetDp
+                }
+            } finally {
+                customFont.delete()
+            }
+        for ((sizes, offsetDp) in offsets) {
+            assertTrue("$sizes: painted text-minus-logo-body center is ${offsetDp}dp", abs(offsetDp) <= 1f)
+        }
+        assertEquals("Restoring the font size restores alignment", offsets.first().second, offsets.last().second, 0f)
     }
 
     @Test

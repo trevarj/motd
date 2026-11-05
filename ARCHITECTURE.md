@@ -71,6 +71,9 @@ flowchart TD
   stays 1:1 through one row, then uses 0.2x resistance with a row-scaled 16dp cap. Settling reuses
   `MotdMotion`'s distance-scaled 200–300ms quintic ease-out. Eligibility loss or pointer-lifecycle
   cancellation resets an unfinished pull; card remeasurement does not.
+- The drawer keeps native `titleLarge` text and unchanged ceramic artwork. A local
+  alignment line centers the resolved font's `motd` ink bounds on the logo's rounded
+  body, excluding its speech tail; system/UI font scaling and imported fonts retain it.
 - Network/history status lives directly under the contextual title inside the existing chat-list
   TopAppBar, never in a card, extra full-width stripe or the list's flow. The actual `motd`
   wordmark uses original `titleLarge`, vertically centered on the native navigation/actions
