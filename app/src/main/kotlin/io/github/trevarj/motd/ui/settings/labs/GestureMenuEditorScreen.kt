@@ -42,7 +42,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -83,6 +82,7 @@ import io.github.trevarj.motd.gesture.vector
 import io.github.trevarj.motd.ui.settings.RadioRow
 import io.github.trevarj.motd.ui.settings.SettingsScaffold
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 const val GESTURE_EDITOR_SCREEN_TAG = "screen_gesture_editor"
 const val GESTURE_EDITOR_SAVE_TAG = "gesture_editor_save"

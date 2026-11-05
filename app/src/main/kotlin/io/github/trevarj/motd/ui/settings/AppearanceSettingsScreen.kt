@@ -33,7 +33,6 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -89,6 +88,7 @@ import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
+import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.systemPartner
@@ -109,6 +109,7 @@ import io.github.trevarj.motd.ui.theme.fontFamily
 import io.github.trevarj.motd.ui.theme.rememberAppFontFamily
 import java.io.File
 import kotlin.math.roundToInt
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Appearance category: theme, dynamic color, layout density, avatar style, nick colors, wallpaper. */
 @Composable
@@ -161,6 +162,7 @@ fun AppearanceSettingsScreen(
         onAvatarShape = viewModel::setAvatarShape,
         onChatCardCornerStyle = viewModel::setChatCardCornerStyle,
         onMediaCornerStyle = viewModel::setMediaCornerStyle,
+        onUiIconSet = viewModel::setUiIconSet,
         onFolderDisplayMode = viewModel::setFolderDisplayMode,
         onShowFolderChatsInAll = viewModel::setShowFolderChatsInAll,
         onAvatarStyle = viewModel::setAvatarStyle,
@@ -206,6 +208,7 @@ fun AppearanceSettingsContent(
     onAvatarShape: (AvatarShape) -> Unit = {},
     onChatCardCornerStyle: (UiCornerStyle) -> Unit = {},
     onMediaCornerStyle: (UiCornerStyle) -> Unit = {},
+    onUiIconSet: (UiIconSet) -> Unit = {},
     onFolderDisplayMode: (FolderDisplayMode) -> Unit,
     onShowFolderChatsInAll: (Boolean) -> Unit = {},
     onAvatarStyle: (AvatarStyle) -> Unit,
@@ -363,6 +366,16 @@ fun AppearanceSettingsContent(
                     },
                     switchTag = "settings_switch_theme_text_colors",
                     modifier = targetModifier,
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.UI_ICON_SET.name) { targetModifier ->
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_icon_set),
+                    value = uiIconSetLabel(previewAppearance.uiIconSet),
+                    summary = stringResource(R.string.settings_icon_set_desc),
+                    modifier = targetModifier.testTag("settings_icon_set_picker"),
+                    onClick = { choiceSheet = AppearanceChoice.ICONS },
                 )
             }
         }
@@ -737,6 +750,10 @@ fun AppearanceSettingsContent(
                 previewAppearance = previewAppearance.copy(mediaCornerStyle = it)
                 onMediaCornerStyle(it)
             },
+            onUiIconSet = {
+                previewAppearance = previewAppearance.copy(uiIconSet = it)
+                onUiIconSet(it)
+            },
             onFolderDisplayMode = {
                 previewSettings = previewSettings.copy(folderDisplayMode = it)
                 onFolderDisplayMode(it)
@@ -801,7 +818,7 @@ fun AppearanceSettingsContent(
     }
 }
 
-private enum class AppearanceChoice { PALETTE, FOLDER_LAYOUT, CHAT_CARD_SHAPE, DENSITY, COMPOSER_STYLE, INPUT_SHAPE, MEDIA_SHAPE, AVATAR, AVATAR_SHAPE, TIME, SPACING, BUBBLES, LAUNCHER }
+private enum class AppearanceChoice { PALETTE, ICONS, FOLDER_LAYOUT, CHAT_CARD_SHAPE, DENSITY, COMPOSER_STYLE, INPUT_SHAPE, MEDIA_SHAPE, AVATAR, AVATAR_SHAPE, TIME, SPACING, BUBBLES, LAUNCHER }
 
 @Composable
 private fun AppearanceChatLayoutPreview(
@@ -841,6 +858,7 @@ private fun AppearanceChatLayoutPreview(
         avatarShape = appearance.avatarShape,
         chatCardCornerStyle = appearance.chatCardCornerStyle,
         mediaCornerStyle = appearance.mediaCornerStyle,
+        uiIconSet = appearance.uiIconSet,
         chatShadowsEnabled = chatShadowsEnabled,
         nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
         sentBubbleColor = appearance.sentBubbleColor,
@@ -896,6 +914,7 @@ private fun ComposerStylePreview(
         avatarShape = appearance.avatarShape,
         chatCardCornerStyle = appearance.chatCardCornerStyle,
         mediaCornerStyle = appearance.mediaCornerStyle,
+        uiIconSet = appearance.uiIconSet,
         chatShadowsEnabled = appearance.chatShadowsEnabled,
         sentBubbleColor = appearance.sentBubbleColor,
         receivedBubbleColor = appearance.receivedBubbleColor,
@@ -936,6 +955,7 @@ private fun AppearanceChoiceSheet(
     onAvatarShape: (AvatarShape) -> Unit,
     onChatCardCornerStyle: (UiCornerStyle) -> Unit,
     onMediaCornerStyle: (UiCornerStyle) -> Unit,
+    onUiIconSet: (UiIconSet) -> Unit,
     onFolderDisplayMode: (FolderDisplayMode) -> Unit,
     onShowFolderChatsInAll: (Boolean) -> Unit,
     onAvatar: (AvatarStyle) -> Unit,
@@ -946,6 +966,26 @@ private fun AppearanceChoiceSheet(
     onDismiss: () -> Unit,
 ) {
     when (choice) {
+        AppearanceChoice.ICONS -> {
+            SingleChoiceSheet(
+                title = stringResource(R.string.settings_icon_set),
+                selected = appearance.uiIconSet,
+                options =
+                    UiIconSet.entries.map {
+                        ChoiceOption(it, uiIconSetLabel(it), null, "settings_icon_set_${it.name.lowercase()}")
+                    },
+                onSelect = onUiIconSet,
+                onDismiss = onDismiss,
+                tag = "settings_icon_set_sheet",
+                dismissOnSelect = false,
+                preview = {
+                    AppearanceSampleTheme(settings, appearance, customFontFile) {
+                        IconSetPreview()
+                    }
+                },
+            )
+        }
+
         AppearanceChoice.INPUT_SHAPE, AppearanceChoice.CHAT_CARD_SHAPE, AppearanceChoice.MEDIA_SHAPE -> {
             val title =
                 when (choice) {
@@ -1207,6 +1247,15 @@ private fun AppearanceChoiceSheet(
         }
     }
 }
+
+@Composable
+private fun uiIconSetLabel(iconSet: UiIconSet): String =
+    stringResource(
+        when (iconSet) {
+            UiIconSet.MATERIAL -> R.string.settings_icon_set_material
+            UiIconSet.LUCIDE -> R.string.settings_icon_set_lucide
+        },
+    )
 
 @Composable
 private fun nickPaletteLabel(value: NickColorPalette): String =

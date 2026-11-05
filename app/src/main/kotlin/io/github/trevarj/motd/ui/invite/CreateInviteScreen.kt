@@ -18,7 +18,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -51,6 +50,7 @@ import io.github.trevarj.motd.invite.brandedInviteQrBitmap
 import io.github.trevarj.motd.ui.settings.PasswordField
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 @Composable
 fun CreateInviteScreen(

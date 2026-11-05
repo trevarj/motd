@@ -60,6 +60,10 @@ off; saved `COLLAPSE` and `HIDE` default visibility values remain compatible.
 Appearance includes independent input, avatar, chat-card, and media corner presets.
 Older appearance objects without these fields restore all four to `DEFAULT`;
 backups without an appearance object leave local appearance settings untouched.
+The appearance `uiIconSet` enum (`MATERIAL` or `LUCIDE`) is exported and explicitly
+restored too. Older appearance objects without it restore `MATERIAL`; missing
+appearance objects still leave the local icon set untouched. No format-version
+change is required for these defaulted additive fields.
 
 Credentials-excluded imports keep already stored local credentials on matching
 networks. New networks that require omitted SASL passwords, server passwords,

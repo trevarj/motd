@@ -14,7 +14,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -36,6 +35,7 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
 
 /**
  * Selection behind a ban or exception dialog. The dialog owns one of these; [BanTargetPicker]
@@ -92,7 +92,7 @@ fun BanTargetPicker(
                 enabled = !locked,
                 label = { Text(stringResource(R.string.channelinfo_ban_who)) },
                 trailingIcon = {
-                    if (!locked) ExposedDropdownMenuDefaults.TrailingIcon(membersExpanded)
+                    if (!locked) UiDropdownTrailingIcon(membersExpanded)
                 },
                 modifier =
                     Modifier

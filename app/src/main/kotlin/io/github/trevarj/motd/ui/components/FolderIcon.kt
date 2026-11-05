@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import io.github.trevarj.motd.data.db.FolderIconKind
 import io.github.trevarj.motd.data.repo.FolderIconRef
+import io.github.trevarj.motd.ui.theme.uiIcon
 
 data class FolderIconChoice(
     val ref: FolderIconRef,
@@ -119,7 +120,7 @@ fun FolderIcon(
         }
 
         else -> {
-            Icon(Icons.Outlined.Folder, contentDescription, modifier = modifier, tint = tint)
+            Icon(uiIcon(Icons.Outlined.Folder), contentDescription, modifier = modifier, tint = tint)
         }
     }
 }

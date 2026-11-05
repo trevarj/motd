@@ -35,6 +35,7 @@ private val INPUT_CORNER_STYLE = stringPreferencesKey("input_corner_style_v1")
 private val AVATAR_SHAPE = stringPreferencesKey("avatar_shape_v1")
 private val CHAT_CARD_CORNER_STYLE = stringPreferencesKey("chat_card_corner_style_v1")
 private val MEDIA_CORNER_STYLE = stringPreferencesKey("media_corner_style_v1")
+private val UI_ICON_SET = stringPreferencesKey("ui_icon_set_v1")
 private val BUBBLE_CORNER_STYLE = stringPreferencesKey("bubble_corner_style_v1")
 private val CHAT_SHADOWS_ENABLED = booleanPreferencesKey("chat_shadows_enabled_v1")
 private val NICKNAME_BACKGROUNDS_ENABLED = booleanPreferencesKey("nickname_backgrounds_enabled_v1")
@@ -126,6 +127,9 @@ class AppearancePrefsImpl
                     mediaCornerStyle =
                         prefs[MEDIA_CORNER_STYLE]?.let { runCatching { UiCornerStyle.valueOf(it) }.getOrNull() }
                             ?: UiCornerStyle.DEFAULT,
+                    uiIconSet =
+                        prefs[UI_ICON_SET]?.let { runCatching { UiIconSet.valueOf(it) }.getOrNull() }
+                            ?: UiIconSet.MATERIAL,
                     bubbleCornerStyle =
                         prefs[BUBBLE_CORNER_STYLE]
                             ?.let { runCatching { BubbleCornerStyle.valueOf(it) }.getOrNull() }
@@ -224,6 +228,10 @@ class AppearancePrefsImpl
 
         override suspend fun setMediaCornerStyle(style: UiCornerStyle) {
             store.edit { it[MEDIA_CORNER_STYLE] = style.name }
+        }
+
+        override suspend fun setUiIconSet(iconSet: UiIconSet) {
+            store.edit { it[UI_ICON_SET] = iconSet.name }
         }
 
         override suspend fun setBubbleCornerStyle(style: BubbleCornerStyle) {

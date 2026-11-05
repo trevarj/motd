@@ -236,6 +236,7 @@ private fun AppearanceBubblePreview(
         avatarShape = appearance.avatarShape,
         chatCardCornerStyle = appearance.chatCardCornerStyle,
         mediaCornerStyle = appearance.mediaCornerStyle,
+        uiIconSet = appearance.uiIconSet,
         chatShadowsEnabled = appearance.chatShadowsEnabled,
         sentBubbleColor = appearance.sentBubbleColor,
         receivedBubbleColor = appearance.receivedBubbleColor,

@@ -84,6 +84,31 @@ class AppearancePrefsTest {
             }
         }
 
+    @Test fun uiIconSetRoundTripsReloadsAndDefaultsForMissingInvalidAndOldJson() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val key = stringPreferencesKey("ui_icon_set_v1")
+            val original = context.appearanceDataStore.data.first()[key]
+            try {
+                context.appearanceDataStore.edit { it.remove(key) }
+                assertEquals(UiIconSet.MATERIAL, AppearancePrefsImpl(context).config.first().uiIconSet)
+                assertEquals(UiIconSet.MATERIAL, Json.decodeFromString<AppearanceConfig>("""{"composerStyle":"LARGE"}""").uiIconSet)
+                for (iconSet in listOf(UiIconSet.MATERIAL, UiIconSet.LUCIDE, UiIconSet.MATERIAL)) {
+                    prefs.setUiIconSet(iconSet)
+                    val reloaded = AppearancePrefsImpl(context).config.first()
+                    assertEquals(iconSet, reloaded.uiIconSet)
+                    assertEquals(iconSet.name, context.appearanceDataStore.data.first()[key])
+                    assertEquals(reloaded, Json.decodeFromString<AppearanceConfig>(jsonWithDefaults.encodeToString(reloaded)))
+                }
+                context.appearanceDataStore.edit { it[key] = "unknown-icon-set" }
+                assertEquals(UiIconSet.MATERIAL, AppearancePrefsImpl(context).config.first().uiIconSet)
+            } finally {
+                context.appearanceDataStore.edit {
+                    if (original == null) it.remove(key) else it[key] = original
+                }
+            }
+        }
+
     @Test fun surfaceShapesRoundTripEveryValueIndependentlyAndFallBackToDefault() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()

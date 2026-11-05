@@ -21,8 +21,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -55,10 +53,12 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.invite.brandedInviteQrBitmap
+import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 @Composable
 fun CreateContactInviteScreen(
@@ -254,7 +254,7 @@ private fun ContactInviteNetworkSelector(
             singleLine = true,
             label = { Text(stringResource(R.string.contact_invite_network_label)) },
             leadingIcon = { Icon(Icons.Outlined.Public, contentDescription = null) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            trailingIcon = { UiDropdownTrailingIcon(expanded) },
             modifier =
                 Modifier
                     .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)

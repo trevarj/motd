@@ -9,7 +9,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -29,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.gesture.GestureAction
 import io.github.trevarj.motd.gesture.vector
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Test tag for the list form of the gesture menu. */
 const val GESTURE_MENU_A11Y_DIALOG_TAG = "gesture_menu_a11y_dialog"

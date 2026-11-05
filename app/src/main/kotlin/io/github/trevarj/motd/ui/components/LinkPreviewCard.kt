@@ -24,7 +24,6 @@ import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Link
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,6 +55,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.cornerRadius
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.readingInk
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 internal val LocalLinkPreviewAwaiting = staticCompositionLocalOf { false }
 internal val LocalLinkPreviewFailed = staticCompositionLocalOf { false }

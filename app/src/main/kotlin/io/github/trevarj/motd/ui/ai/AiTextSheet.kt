@@ -26,7 +26,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -68,6 +67,7 @@ import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.UUID
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 fun defaultTranslationTarget(locale: Locale): AiTranslationTarget {
     val code =

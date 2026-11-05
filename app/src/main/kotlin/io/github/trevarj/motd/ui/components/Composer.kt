@@ -86,7 +86,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -200,6 +199,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.ceil
 import androidx.compose.foundation.lazy.items as lazyItems
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 data class ComposerReply(
     val sender: String,

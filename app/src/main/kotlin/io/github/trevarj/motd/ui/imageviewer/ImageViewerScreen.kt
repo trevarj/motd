@@ -17,7 +17,6 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -68,6 +67,7 @@ import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.rememberZoomableState
 import me.saket.telephoto.zoomable.spatial.CoordinateSpace
 import okhttp3.Call
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Ceiling for pinch/double-tap zoom, as a factor of the image's original size. */
 internal const val MAX_IMAGE_SCALE = 5f

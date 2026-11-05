@@ -26,9 +26,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -68,6 +66,8 @@ import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.ReasonPresetChips
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 @Composable
 fun NetworkToolsScreen(
@@ -326,7 +326,7 @@ private fun OperatorSection(
                         onValueChange = { modeTarget = it },
                         label = { Text(stringResource(R.string.network_tools_target)) },
                         singleLine = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(modeTargetExpanded) },
+                        trailingIcon = { UiDropdownTrailingIcon(modeTargetExpanded) },
                         modifier =
                             Modifier
                                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable)

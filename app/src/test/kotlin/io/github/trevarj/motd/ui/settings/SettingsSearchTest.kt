@@ -77,6 +77,15 @@ class SettingsSearchTest {
     }
 
     @Test
+    fun iconSetQueriesOpenTheTypedAppearanceControl() {
+        val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
+        val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.UI_ICON_SET)
+        for (query in listOf("icon set", "lucide", "material", "ui icons", "glyphs")) {
+            assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
+        }
+    }
+
+    @Test
     fun `sound controls search opens the dedicated sound page`() {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
         val destination = SettingsSearchDestination.Page(SettingsSearchPage.CHAT_SOUNDS, SettingsTarget.CHAT_SOUNDS)

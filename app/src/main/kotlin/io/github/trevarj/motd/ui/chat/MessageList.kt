@@ -38,7 +38,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -153,6 +152,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.semantics.testTag as semanticsTestTag
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /**
  * Target collapsed system-event count per pill, and the modulus of the identity hash that places
@@ -2652,7 +2652,7 @@ private fun RetryRowAction(
                 .padding(horizontal = 8.dp),
         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
     ) {
-        androidx.compose.material3.Icon(
+        Icon(
             icon,
             contentDescription = null,
             tint = androidx.compose.material3.MaterialTheme.colorScheme.error,

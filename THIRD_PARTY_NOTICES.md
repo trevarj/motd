@@ -146,3 +146,20 @@ The [license](third_party/material-icons/LICENSE) and
 [source attribution and file digests](third_party/material-icons/provenance.json)
 are included in the source tree. The app depends on `material-icons-core`,
 not the extended catalog.
+
+## Lucide interface icons
+
+The optional Lucide UI icon set bundles 118 icons from
+[`lucide-static` 1.69.0](https://www.npmjs.com/package/lucide-static/v/1.69.0),
+from [lucide-icons/lucide](https://github.com/lucide-icons/lucide).
+Only this used subset is converted to cached native Compose `ImageVector`
+geometry; no SVG parser, font, runtime download, or full catalog is shipped.
+The 24-unit viewport, 2-unit round strokes/caps/joins and applicable RTL behavior
+are retained. The palette icon retains its upstream filled dots.
+
+- Pinned package: `https://registry.npmjs.org/lucide-static/-/lucide-static-1.69.0.tgz`
+- Archive SHA-256: `fc9981e0cac51a0baeaaacf669b6faaa0fbd2427df1b46609a858b6a75df6617`
+- [Original SVG subset, source digests and conversion provenance](third_party/lucide-static/provenance.json)
+- [Complete upstream ISC and Feather-derived MIT notices](app/src/main/assets/lucide-static-LICENSE.txt),
+  retained verbatim and included in the APK assets. Copyright (c) 2026 Lucide
+  Icons and Contributors; Feather-derived icons copyright (c) 2013-present Cole Bemis.

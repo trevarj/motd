@@ -20,7 +20,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -42,6 +41,7 @@ import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.audio.contextLabel
 import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

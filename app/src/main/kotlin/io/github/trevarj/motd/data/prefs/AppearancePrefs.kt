@@ -201,6 +201,8 @@ enum class UiCornerStyle { DEFAULT, SQUARE, SOFT, ROUNDED }
 
 enum class AvatarShape { DEFAULT, SQUARE, SOFT, ROUNDED, CIRCLE }
 
+enum class UiIconSet { MATERIAL, LUCIDE }
+
 /** A theme role stays adaptive; CUSTOM retains the user-picked opaque sRGB color. */
 enum class ComfortableBubbleColorRole {
     DEFAULT,
@@ -276,6 +278,7 @@ data class AppearanceConfig(
     val avatarShape: AvatarShape = AvatarShape.DEFAULT,
     val chatCardCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
     val mediaCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
+    val uiIconSet: UiIconSet = UiIconSet.MATERIAL,
 )
 
 interface AppearancePrefs {
@@ -314,6 +317,8 @@ interface AppearancePrefs {
     suspend fun setChatCardCornerStyle(style: UiCornerStyle)
 
     suspend fun setMediaCornerStyle(style: UiCornerStyle)
+
+    suspend fun setUiIconSet(iconSet: UiIconSet)
 
     suspend fun setBubbleCornerStyle(style: BubbleCornerStyle)
 

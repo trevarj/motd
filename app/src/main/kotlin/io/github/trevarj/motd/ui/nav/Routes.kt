@@ -68,6 +68,7 @@ enum class SettingsTarget {
     TRUE_BLACK,
     DYNAMIC_COLOR,
     THEME_TEXT_COLORS,
+    UI_ICON_SET,
     NICK_COLORS,
     NICK_PALETTE,
     NICK_OVERRIDES,

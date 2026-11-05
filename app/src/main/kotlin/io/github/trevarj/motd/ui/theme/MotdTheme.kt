@@ -40,6 +40,7 @@ import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
+import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.normalizeFontScalePercent
 import io.github.trevarj.motd.data.prefs.resolveAutoPalette
@@ -130,6 +131,9 @@ val LocalChatCardCornerStyle: ProvidableCompositionLocal<UiCornerStyle> =
 
 val LocalMediaCornerStyle: ProvidableCompositionLocal<UiCornerStyle> =
     staticCompositionLocalOf { UiCornerStyle.DEFAULT }
+
+val LocalUiIconSet: ProvidableCompositionLocal<UiIconSet> =
+    staticCompositionLocalOf { UiIconSet.MATERIAL }
 
 /** CompositionLocal carrying the active app-wide font family; null means the platform default. */
 val LocalAppFontFamily: ProvidableCompositionLocal<FontFamily?> = staticCompositionLocalOf { null }
@@ -247,6 +251,7 @@ fun MotdTheme(
     avatarShape: AvatarShape = AvatarShape.DEFAULT,
     chatCardCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
     mediaCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
+    uiIconSet: UiIconSet = LocalUiIconSet.current,
     chatShadowsEnabled: Boolean = false,
     nicknameBackgroundsEnabled: Boolean = true,
     sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
@@ -351,6 +356,7 @@ fun MotdTheme(
             LocalAvatarShape provides avatarShape,
             LocalChatCardCornerStyle provides chatCardCornerStyle,
             LocalMediaCornerStyle provides mediaCornerStyle,
+            LocalUiIconSet provides uiIconSet,
             LocalChatShadowsEnabled provides chatShadowsEnabled,
             LocalNicknameBackgroundsEnabled provides nicknameBackgroundsEnabled,
             LocalComfortableBubbleColors provides comfortableBubbleColors,

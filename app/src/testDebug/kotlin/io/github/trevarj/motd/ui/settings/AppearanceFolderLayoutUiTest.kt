@@ -1,12 +1,22 @@
 package io.github.trevarj.motd.ui.settings
 
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -31,7 +41,10 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.UiDispatcherResetRule
+import io.github.trevarj.motd.data.db.FolderIconKind
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
@@ -46,10 +59,14 @@ import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
+import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.repo.FolderIconRef
+import io.github.trevarj.motd.ui.components.FolderIcon
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.UiIcon
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.fixedThemeScheme
 import org.junit.Assert.assertEquals
@@ -72,6 +89,124 @@ class AppearanceFolderLayoutUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun iconSetPickerChangesNativeArtworkBeforePersistenceAndRestoresMaterial() {
+        val persisted = AppearanceConfig(theme = ColorThemePreset.AYU_LIGHT)
+        val selected = mutableListOf<UiIconSet>()
+        setContent(
+            appearance = persisted,
+            onUiIconSet = { selected.add(it) },
+            targetProvider = { SettingsTarget.UI_ICON_SET },
+        )
+        compose.onNodeWithTag("settings_target_highlight_UI_ICON_SET").assertIsDisplayed().performClick()
+        val sheet = "settings_icon_set_sheet"
+        val tags = listOf("menu", "search", "send", "settings", "play", "dropdown").map { "settings_icon_set_preview_$it" }
+
+        fun capture() =
+            tags.map { tag ->
+                compose.onNodeWithTag("${sheet}_options").performScrollToNode(hasTestTag(tag))
+                compose.onNodeWithTag(tag, useUnmergedTree = true).captureToImage().asAndroidBitmap()
+            }
+        scrollToSheetNode(sheet, "settings_icon_set_material").assertIsSelected()
+        val material = capture()
+        scrollToSheetNode(sheet, "settings_icon_set_lucide").performClick().assertIsSelected()
+        compose.onNodeWithTag(sheet).assertIsDisplayed()
+        val lucide = capture()
+        material.zip(lucide).forEachIndexed { index, (before, after) ->
+            assertEquals(before.width, after.width)
+            assertEquals(before.height, after.height)
+            assertTrue("${tags[index]} must paint different real geometry", !before.sameAs(after))
+        }
+        assertEquals(UiIconSet.MATERIAL, persisted.uiIconSet)
+        scrollToSheetNode(sheet, "settings_icon_set_material").performClick().assertIsSelected()
+        material.zip(capture()).forEach { (before, restored) ->
+            assertTrue("Material must restore its exact native pixels", before.sameAs(restored))
+        }
+        assertEquals(listOf(UiIconSet.LUCIDE, UiIconSet.MATERIAL), selected)
+        dismissSheet(sheet)
+        compose.onNodeWithTag("settings_target_highlight_UI_ICON_SET").performClick()
+        scrollToSheetNode(sheet, "settings_icon_set_material").assertIsSelected()
+    }
+
+    @Test
+    fun iconPreviewMirrorsDirectionalGlyphsInRtlForBothSetsAndRestoresDefault() {
+        val iconSet = mutableStateOf(UiIconSet.MATERIAL)
+        val direction = mutableStateOf(LayoutDirection.Ltr)
+        val forceReflection = mutableStateOf(false)
+        compose.setContent {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                MotdTheme(dynamicColor = false, uiIconSet = iconSet.value) {
+                    // Keep placement fixed while changing only the painters' layout direction.
+                    Row {
+                        CompositionLocalProvider(LocalLayoutDirection provides direction.value) {
+                            UiIcon(
+                                Icons.AutoMirrored.Filled.Send,
+                                null,
+                                Modifier
+                                    .size(32.dp)
+                                    .drawWithContent {
+                                        if (forceReflection.value) {
+                                            scale(-1f, 1f) { this@drawWithContent.drawContent() }
+                                        } else {
+                                            drawContent()
+                                        }
+                                    }.testTag("settings_icon_set_preview_send"),
+                            )
+                            UiIcon(Icons.Filled.Menu, null, Modifier.size(32.dp).testTag("settings_icon_set_preview_menu"))
+                        }
+                    }
+                }
+            }
+        }
+
+        fun capture(name: String) = compose.onNodeWithTag("settings_icon_set_preview_$name", useUnmergedTree = true).captureToImage().asAndroidBitmap()
+        val original = capture("send")
+        for (set in listOf(UiIconSet.MATERIAL, UiIconSet.LUCIDE, UiIconSet.MATERIAL)) {
+            compose.runOnIdle {
+                direction.value = LayoutDirection.Ltr
+                iconSet.value = set
+            }
+            val send = capture("send")
+            val menu = capture("menu")
+            // Use a native reflection of the LTR painter, not byte-reversal of a tinted capture.
+            compose.runOnIdle { forceReflection.value = true }
+            val expected = capture("send")
+            compose.runOnIdle {
+                forceReflection.value = false
+                direction.value = LayoutDirection.Rtl
+            }
+            val mirrored = capture("send")
+            assertTrue("$set directional artwork must change in RTL", !send.sameAs(mirrored))
+            assertTrue("$set must match the native reflection of the LTR vector exactly", expected.sameAs(mirrored))
+            assertTrue("$set non-directional artwork must not mirror", menu.sameAs(capture("menu")))
+        }
+        compose.runOnIdle { direction.value = LayoutDirection.Ltr }
+        assertTrue("Returning to Material must not retain Lucide geometry", original.sameAs(capture("send")))
+    }
+
+    @Test
+    fun genericFolderAffordanceFollowsSetButExplicitSavedMaterialArtworkDoesNot() {
+        val iconSet = mutableStateOf(UiIconSet.MATERIAL)
+        compose.setContent {
+            MotdTheme(dynamicColor = false, uiIconSet = iconSet.value) {
+                Row {
+                    FolderIcon(FolderIconRef(), null, Modifier.size(48.dp).testTag("generic_folder"))
+                    FolderIcon(FolderIconRef(FolderIconKind.MATERIAL, "folder"), null, Modifier.size(48.dp).testTag("explicit_folder"))
+                }
+            }
+        }
+
+        fun capture(tag: String) = compose.onNodeWithTag(tag, useUnmergedTree = true).captureToImage().asAndroidBitmap()
+        val generic = capture("generic_folder")
+        val explicit = capture("explicit_folder")
+        compose.runOnIdle { iconSet.value = UiIconSet.LUCIDE }
+        assertTrue(!generic.sameAs(capture("generic_folder")))
+        assertTrue("Saved Material choices retain their exact pixels", explicit.sameAs(capture("explicit_folder")))
+        compose.runOnIdle { iconSet.value = UiIconSet.MATERIAL }
+        assertTrue(generic.sameAs(capture("generic_folder")))
+        assertTrue(explicit.sameAs(capture("explicit_folder")))
+    }
 
     @Test
     fun folderLayoutControlsInvokeCallbacks() {
@@ -788,6 +923,7 @@ class AppearanceFolderLayoutUiTest {
         onAvatarShape: (AvatarShape) -> Unit = {},
         onChatCardCornerStyle: (UiCornerStyle) -> Unit = {},
         onMediaCornerStyle: (UiCornerStyle) -> Unit = {},
+        onUiIconSet: (UiIconSet) -> Unit = {},
         onFontChoice: (FontChoice) -> Unit = {},
         onMessageSpacing: (MessageSpacing) -> Unit = {},
         onBubbleCornerStyle: (BubbleCornerStyle) -> Unit = {},
@@ -806,6 +942,7 @@ class AppearanceFolderLayoutUiTest {
                 trueBlack = currentAppearance.trueBlack,
                 useThemeTextColors = currentAppearance.useThemeTextColors,
                 uiFontScalePercent = currentAppearance.uiFontScalePercent,
+                uiIconSet = currentAppearance.uiIconSet,
             ) {
                 CompositionLocalProvider(LocalRippleConfiguration provides null) {
                     AppearanceSettingsContent(
@@ -824,6 +961,7 @@ class AppearanceFolderLayoutUiTest {
                         onAvatarShape = onAvatarShape,
                         onChatCardCornerStyle = onChatCardCornerStyle,
                         onMediaCornerStyle = onMediaCornerStyle,
+                        onUiIconSet = onUiIconSet,
                         onFolderDisplayMode = onFolderDisplayMode,
                         onShowFolderChatsInAll = onShowFolderChatsInAll,
                         onAvatarStyle = onAvatarStyle,

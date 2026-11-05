@@ -24,6 +24,7 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
+import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -96,6 +97,8 @@ class AppearanceSettingsViewModel
         fun setChatCardCornerStyle(value: UiCornerStyle) = launch { appearancePrefs.setChatCardCornerStyle(value) }
 
         fun setMediaCornerStyle(value: UiCornerStyle) = launch { appearancePrefs.setMediaCornerStyle(value) }
+
+        fun setUiIconSet(value: UiIconSet) = launch { appearancePrefs.setUiIconSet(value) }
 
         fun setFolderDisplayMode(value: FolderDisplayMode) = launch { settingsRepository.setFolderDisplayMode(value) }
 

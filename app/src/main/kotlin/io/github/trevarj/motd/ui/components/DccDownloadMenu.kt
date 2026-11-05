@@ -11,7 +11,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,6 +30,7 @@ import io.github.trevarj.motd.data.db.DccTransferEntity
 import io.github.trevarj.motd.dcc.canSaveToDownloads
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 @Composable
 internal fun DccDownloadMenu(

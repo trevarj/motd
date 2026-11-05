@@ -818,6 +818,7 @@ class RequiredHeadlessE2eTest {
         SettingsRobot(compose).selectComfortableBubbleColors()
         SettingsRobot(compose).disableNicknameBackgrounds()
         SettingsRobot(compose).selectSurfaceShapes()
+        SettingsRobot(compose).selectLucideIcons()
         // Return from Appearance to Settings, then exercise the category and bouncer routes.
         SettingsRobot(compose).apply {
             returnToRoot()
@@ -825,6 +826,7 @@ class RequiredHeadlessE2eTest {
             assertThemeTextColorsEnabled()
             restoreNicknameBackgrounds()
             assertSurfaceShapesPersistedAndRestoreDefaults()
+            assertLucideIconsPersistedAndRestoreMaterial()
             returnToRoot()
             searchPresence()
             // Exercise the production picker without changing the user's saved filter.

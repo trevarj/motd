@@ -33,7 +33,6 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -119,6 +118,7 @@ import io.github.trevarj.motd.ui.theme.lottieStrokeColor
 import io.github.trevarj.motd.ui.theme.readingInk
 import io.github.trevarj.motd.ui.theme.shape
 import kotlin.math.roundToInt
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 import java.text.DateFormat as JavaDateFormat
 
 /** Alpha for the per-nick row background wash in TWO_LINE density: matches the COMPACT band so runs

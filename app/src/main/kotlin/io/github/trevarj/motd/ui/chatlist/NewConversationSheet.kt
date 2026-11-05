@@ -29,8 +29,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -75,6 +73,8 @@ import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.settings.PasswordField
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Local-only entry sheet; callbacks keep connection/protocol ownership outside UI. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -445,7 +445,7 @@ private fun NetworkSelector(
             singleLine = true,
             label = { Text(label) },
             leadingIcon = { Icon(Icons.Outlined.Public, contentDescription = null) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            trailingIcon = { UiDropdownTrailingIcon(expanded) },
             modifier =
                 Modifier
                     .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)

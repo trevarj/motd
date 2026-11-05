@@ -32,7 +32,6 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -81,6 +80,7 @@ import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPreset
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import kotlinx.coroutines.launch
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /**
  * Reusable server + auth edit form, shared by onboarding steps 3-4 and NetworkSettings. Stateless:

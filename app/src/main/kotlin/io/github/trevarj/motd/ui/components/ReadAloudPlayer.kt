@@ -25,7 +25,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -63,6 +62,7 @@ import io.github.trevarj.motd.audio.ReadAloudVoices
 import io.github.trevarj.motd.audio.readAloudBody
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import kotlin.math.roundToInt
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 @Composable
 fun ReadAloudPlayer(

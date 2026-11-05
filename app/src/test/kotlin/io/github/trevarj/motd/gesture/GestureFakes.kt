@@ -32,6 +32,7 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
+import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
@@ -284,6 +285,10 @@ internal class FakeAppearance(
 
     override suspend fun setMediaCornerStyle(style: UiCornerStyle) {
         state.value = state.value.copy(mediaCornerStyle = style)
+    }
+
+    override suspend fun setUiIconSet(iconSet: UiIconSet) {
+        state.value = state.value.copy(uiIconSet = iconSet)
     }
 
     override suspend fun setChatShadowsEnabled(enabled: Boolean) {

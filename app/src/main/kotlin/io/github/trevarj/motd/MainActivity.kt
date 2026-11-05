@@ -207,6 +207,7 @@ class MainActivity :
                 avatarShape = appearance.avatarShape,
                 chatCardCornerStyle = appearance.chatCardCornerStyle,
                 mediaCornerStyle = appearance.mediaCornerStyle,
+                uiIconSet = appearance.uiIconSet,
                 chatShadowsEnabled = appearance.chatShadowsEnabled,
                 nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
                 sentBubbleColor = appearance.sentBubbleColor,

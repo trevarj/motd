@@ -7,7 +7,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,6 +52,8 @@ import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.TimestampConfig
+import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
+import io.github.trevarj.motd.ui.theme.UiIcon
 import java.io.File
 import java.util.Calendar
 
@@ -71,6 +80,7 @@ internal fun AppearanceSampleTheme(
         avatarShape = appearance.avatarShape,
         chatCardCornerStyle = appearance.chatCardCornerStyle,
         mediaCornerStyle = appearance.mediaCornerStyle,
+        uiIconSet = appearance.uiIconSet,
         uiFontScalePercent = appearance.uiFontScalePercent,
         fontChoice = appearance.fontChoice,
         customFontFile = font,
@@ -78,6 +88,22 @@ internal fun AppearanceSampleTheme(
         syncSystemBars = false,
     ) {
         CompositionLocalProvider(LocalRemoteAvatars provides avatars, LocalAutomaticRemoteMedia provides false, content = content)
+    }
+}
+
+@Composable
+internal fun IconSetPreview() {
+    Column(Modifier.testTag("settings_icon_set_preview"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(stringResource(R.string.settings_preview), style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            UiIcon(Icons.Filled.Menu, null, Modifier.size(32.dp).testTag("settings_icon_set_preview_menu"))
+            UiIcon(Icons.Outlined.Search, null, Modifier.size(32.dp).testTag("settings_icon_set_preview_search"))
+            UiIcon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(32.dp).testTag("settings_icon_set_preview_send"))
+            UiIcon(Icons.Outlined.Settings, null, Modifier.size(32.dp).testTag("settings_icon_set_preview_settings"))
+            UiIcon(Icons.Filled.PlayArrow, null, Modifier.size(32.dp).testTag("settings_icon_set_preview_play"))
+            UiDropdownTrailingIcon(false, Modifier.size(32.dp).testTag("settings_icon_set_preview_dropdown"))
+        }
+        Text(stringResource(R.string.settings_icon_set_scope), style = MaterialTheme.typography.bodySmall)
     }
 }
 

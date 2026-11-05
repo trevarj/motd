@@ -15,8 +15,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -41,6 +39,8 @@ import io.github.trevarj.motd.bouncer.NetworkCommandFields
 import io.github.trevarj.motd.bouncer.UserCommandFields
 import io.github.trevarj.motd.ui.settings.addnetwork.SOJU_NETWORK_PRESET_CHOICES
 import io.github.trevarj.motd.ui.settings.addnetwork.applySojuNetworkPreset
+import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -97,7 +97,7 @@ fun NetworkEditorDialog(
                             onValueChange = {},
                             readOnly = true,
                             label = { Text(stringResource(R.string.bouncer_network_preset)) },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = presetsExpanded) },
+                            trailingIcon = { UiDropdownTrailingIcon(expanded = presetsExpanded) },
                             modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
                         )
                         ExposedDropdownMenu(
@@ -469,7 +469,7 @@ fun TriStateField(
             onValueChange = {},
             readOnly = true,
             label = { Text(label) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            trailingIcon = { UiDropdownTrailingIcon(expanded) },
             modifier =
                 Modifier
                     .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)

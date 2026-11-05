@@ -61,7 +61,7 @@ them in motion on the [landing page](https://trevs.site/motd/).
 - **Read incoming chats aloud** — opt-in Android TTS with installed voice choices, speed, pitch, and message gap in Settings → Chat → Voice and audio → TTS Reader; previous, pause/resume, skip, latest, and stop controls; previews never enable chat reading
 - **CTCP VERSION** — identifies motd and the running app version when a request reaches the client
 - **Full-text search** — across all history or one buffer, with jump-to-message
-- **Theming** — Material You dynamic color plus curated editor/terminal palettes (Ayu, Gruvbox, Catppuccin, Modus, and more); independent input, avatar, chat-card, and media shape presets with live previews
+- **Theming** — Material You dynamic color plus curated editor/terminal palettes (Ayu, Gruvbox, Catppuccin, Modus, and more); independent input, avatar, chat-card, and media shape presets with live previews; selectable Material (default) or Lucide interface icons
 - **Hardened transport** — TLS with SASL PLAIN/EXTERNAL, client certificates, IRCv3 STS pinning, and optional SOCKS5/Tor/VLESS obfuscation
 
 ## Install

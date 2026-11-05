@@ -66,6 +66,7 @@ import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
+import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.IrcTextStyle
@@ -120,6 +121,42 @@ class ComposerUiTest {
         // Real attachment refreshes FileProvider's static roots for Robolectric's per-test cache.
         val provider = FileProvider().apply { attachInfo(context, info) }
         ShadowContentResolver.registerProviderInternal(authority, provider)
+    }
+
+    @Test
+    fun iconSetChangesComposerArtworkWithoutChangingTargetsOrActions() {
+        val iconSet = mutableStateOf(UiIconSet.MATERIAL)
+        var sends = 0
+        compose.setContent {
+            MotdTheme(dynamicColor = false, uiIconSet = iconSet.value) {
+                CompositionLocalProvider(LocalRippleConfiguration provides null) {
+                    Composer(
+                        value = TextFieldValue("Draft"),
+                        onValueChange = {},
+                        onSend = { sends++ },
+                        enabled = true,
+                    )
+                }
+            }
+        }
+        val send = compose.onNodeWithTag("chat_composer_send").assertHasClickAction().assertIsEnabled()
+        val tools = compose.onNodeWithTag("chat_composer_tools").assertHasClickAction()
+        val sendBounds = send.fetchSemanticsNode().boundsInRoot
+        val toolsBounds = tools.fetchSemanticsNode().boundsInRoot
+        val materialSend = send.captureToImage().asAndroidBitmap()
+        val materialTools = tools.captureToImage().asAndroidBitmap()
+        compose.runOnIdle { iconSet.value = UiIconSet.LUCIDE }
+        assertEquals(sendBounds, send.fetchSemanticsNode().boundsInRoot)
+        assertEquals(toolsBounds, tools.fetchSemanticsNode().boundsInRoot)
+        assertTrue("The production send button must use Lucide geometry", !materialSend.sameAs(send.captureToImage().asAndroidBitmap()))
+        assertTrue("The production tool button must use Lucide geometry", !materialTools.sameAs(tools.captureToImage().asAndroidBitmap()))
+        send.performClick()
+        compose.runOnIdle {
+            assertEquals(1, sends)
+            iconSet.value = UiIconSet.MATERIAL
+        }
+        assertTrue(materialSend.sameAs(send.captureToImage().asAndroidBitmap()))
+        assertTrue(materialTools.sameAs(tools.captureToImage().asAndroidBitmap()))
     }
 
     @Test

@@ -122,6 +122,32 @@ internal class SettingsRobot(
 
     private val surfaceShapeChoices = listOf("input" to "square", "avatar" to "circle", "chat_card" to "soft", "media" to "rounded")
 
+    fun selectLucideIcons() {
+        scrollToAndClick("settings_icon_set_picker")
+        val sheet = "settings_icon_set_sheet"
+        scrollContainerTo("${sheet}_options", "settings_icon_set_lucide")
+        click("settings_icon_set_lucide")
+        compose.onNodeWithTag("settings_icon_set_lucide").assertIsSelected()
+        assertDisplayed(sheet)
+        dismissChoiceSheet(sheet)
+    }
+
+    fun assertLucideIconsPersistedAndRestoreMaterial() {
+        scrollToAndClick("settings_icon_set_picker")
+        val sheet = "settings_icon_set_sheet"
+        scrollContainerTo("${sheet}_options", "settings_icon_set_lucide")
+        compose.onNodeWithTag("settings_icon_set_lucide").assertIsSelected()
+        scrollContainerTo("${sheet}_options", "settings_icon_set_material")
+        click("settings_icon_set_material")
+        compose.onNodeWithTag("settings_icon_set_material").assertIsSelected()
+        assertDisplayed(sheet)
+        dismissChoiceSheet(sheet)
+        scrollToAndClick("settings_icon_set_picker")
+        scrollContainerTo("${sheet}_options", "settings_icon_set_material")
+        compose.onNodeWithTag("settings_icon_set_material").assertIsSelected()
+        dismissChoiceSheet(sheet)
+    }
+
     fun selectWallpaperAndIntensity() {
         scrollToAndClick("settings_wallpaper_picker")
         assertDisplayed("settings_wallpaper_sheet")

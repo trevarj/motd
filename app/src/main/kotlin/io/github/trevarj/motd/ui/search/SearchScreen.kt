@@ -30,7 +30,6 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.outlined.SearchOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -102,6 +101,7 @@ import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.readingInk
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 internal fun SearchUiState.serverTranslationBody(key: String): String? {
     val results = server as? ServerSearchState.Results ?: return null

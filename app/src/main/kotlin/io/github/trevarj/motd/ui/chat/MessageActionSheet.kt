@@ -27,7 +27,6 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PrimaryTabRow
@@ -65,6 +64,7 @@ import io.github.trevarj.motd.ui.components.EmojiPickerPanel
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import androidx.compose.foundation.lazy.items as lazyItems
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Quick-reaction row shown at the top of the action sheet. */
 val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢")

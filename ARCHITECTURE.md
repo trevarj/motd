@@ -180,6 +180,16 @@ flowchart TD
   Independent named presets control input corners, in-app avatar shape, chat-list
   card corners, and media-preview corners; Default preserves each surface/layout's
   existing heterogeneous geometry. Notification avatars remain circular.
+  Appearance also selects Material (the exact existing Filled/Outlined/AutoMirrored
+  variants) or Lucide UI icons. The shared native `UiIcon` leaf resolves cached vectors
+  at composition time, so remembered action descriptors and persisted gesture icon
+  identities remain independent of the selection. Nested samples inherit the set
+  and appearance samples explicitly forward the live draft. Only the used
+  `lucide-static` 1.69.0 SVG subset is converted ahead of time to 24-unit native
+  geometry with round strokes; there is no runtime SVG/font loader or download.
+  Avatars, launcher/brand/notification artwork and saved `MATERIAL` folder icons
+  remain explicit. Static message-status glyphs follow the set; custom Lottie
+  clock/check/cross morphs remain set-independent artwork.
   At ordinary font scale, Default/Nickname have nominal 52dp/48dp pill minima and
   44dp floating primary artwork, retaining 48dp targets and unchanged Large geometry.
   Artwork is inset inside each native button, never around its clickable/semantics host.

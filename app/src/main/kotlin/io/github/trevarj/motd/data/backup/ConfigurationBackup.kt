@@ -568,6 +568,7 @@ class ConfigurationBackupRepositoryImpl
                 appearancePrefs.setAvatarShape(it.avatarShape)
                 appearancePrefs.setChatCardCornerStyle(it.chatCardCornerStyle)
                 appearancePrefs.setMediaCornerStyle(it.mediaCornerStyle)
+                appearancePrefs.setUiIconSet(it.uiIconSet)
                 appearancePrefs.setBubbleCornerStyle(it.bubbleCornerStyle)
                 appearancePrefs.setChatShadowsEnabled(it.chatShadowsEnabled)
                 appearancePrefs.setNicknameBackgroundsEnabled(it.nicknameBackgroundsEnabled)

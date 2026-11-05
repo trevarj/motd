@@ -44,6 +44,7 @@ import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
+import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.ChatFolderRepository
 import io.github.trevarj.motd.data.sync.BufferStore
@@ -678,6 +679,41 @@ class ConfigurationBackupRepositoryTest {
                 prefs.setAvatarShape(original.avatarShape)
                 prefs.setChatCardCornerStyle(original.chatCardCornerStyle)
                 prefs.setMediaCornerStyle(original.mediaCornerStyle)
+                db.close()
+            }
+        }
+
+    @Test
+    fun uiIconSetRestoresExplicitLegacyAndAbsentAppearance() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val prefs = AppearancePrefsImpl(context)
+            val original = prefs.config.first().uiIconSet
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                prefs.setUiIconSet(UiIconSet.LUCIDE)
+                val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                prefs.setUiIconSet(UiIconSet.MATERIAL)
+                backup.import(raw, importMode = BackupImportMode.MERGE)
+                assertEquals(UiIconSet.LUCIDE, AppearancePrefsImpl(context).config.first().uiIconSet)
+
+                val legacy = raw.replace(Regex(""",\s*"uiIconSet"\s*:\s*"LUCIDE""""), "")
+                assertFalse(legacy.contains("\"uiIconSet\""))
+                backup.import(legacy, importMode = BackupImportMode.MERGE)
+                assertEquals(UiIconSet.MATERIAL, AppearancePrefsImpl(context).config.first().uiIconSet)
+
+                val absent =
+                    raw.replace(
+                        Regex(""",?\s*"appearance"\s*:\s*\{.*?\}(?=,\s*"contentPreviews")""", RegexOption.DOT_MATCHES_ALL),
+                        "",
+                    )
+                assertFalse(absent.contains("\"appearance\""))
+                prefs.setUiIconSet(UiIconSet.LUCIDE)
+                backup.import(absent, importMode = BackupImportMode.MERGE)
+                assertEquals(UiIconSet.LUCIDE, AppearancePrefsImpl(context).config.first().uiIconSet)
+            } finally {
+                prefs.setUiIconSet(original)
                 db.close()
             }
         }
