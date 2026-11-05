@@ -10,6 +10,14 @@ const res = path.join(root, "app/src/main/res");
 function magick(args) {
   return execFileSync("magick", args, { maxBuffer: 64 * 1024 * 1024 });
 }
+function assertFractionalAlpha(file, minimumValues) {
+  const alpha = magick([file, "-alpha", "extract", "-depth", "8", "gray:-"]);
+  const values = new Set();
+  for (const value of alpha) {
+    if (value > 0 && value < 255) values.add(value);
+  }
+  assert.ok(values.size >= minimumValues, `${file}: contour lacks fractional-alpha antialiasing`);
+}
 function inspect(file, width, height, radius = null, holeY = .5) {
   assert.equal(magick([file, "-format", "%wx%h", "info:"]).toString(), `${width}x${height}`, file);
   const pixels = magick([file, "-depth", "8", "rgba:-"]);
@@ -42,23 +50,38 @@ function inspect(file, width, height, radius = null, holeY = .5) {
   return { min: opaqueMin, max: opaqueMax };
 }
 
+const ceramicMaster = path.join(brand, "motd-ceramic-master.png");
 const splashMaster = path.join(brand, "motd-splash-master.png");
-const [splashWidth, splashHeight] = magick([splashMaster, "-format", "%w %h", "info:"]).toString().split(" ").map(Number);
-assert.ok(Math.min(splashWidth, splashHeight) >= 1024, "Splash master must support downsampling at every Android density");
-inspect(splashMaster, splashWidth, splashHeight);
-const [visibleWidth, visibleHeight, visibleX, visibleY] = magick([splashMaster, "-alpha", "extract", "-threshold", "50%", "-format", "%@", "info:"]).toString().match(/\d+/g).map(Number);
-const padding = Math.max(2, Math.round(Math.max(splashWidth, splashHeight) / 512));
-const splashBounds = `${visibleWidth + 2 * padding}x${visibleHeight + 2 * padding}+${visibleX - padding}+${visibleY - padding}`;
+const symbolMask = path.join(brand, "motd-symbol-mask.png");
+const [masterWidth, masterHeight] = magick([ceramicMaster, "-format", "%w %h", "info:"]).toString().split(" ").map(Number);
+assert.ok(Math.min(masterWidth, masterHeight) >= 1024, "Ceramic master must support downsampling at every Android density");
+inspect(ceramicMaster, masterWidth, masterHeight);
+assertFractionalAlpha(ceramicMaster, 32);
+// Splash and mask are compatibility exports. They must remain exact derivatives
+// of the one canonical ceramic master so no consumer regresses to a second,
+// rougher silhouette.
+assert.deepEqual(readFileSync(splashMaster), readFileSync(ceramicMaster), "Splash master drifted from the ceramic master");
+const masterAlpha = magick([ceramicMaster, "-alpha", "extract", "-depth", "8", "gray:-"]);
+assert.deepEqual(magick([symbolMask, "-alpha", "extract", "-depth", "8", "gray:-"]), masterAlpha, "Symbol mask drifted from the ceramic master alpha");
+const [visibleWidth, visibleHeight, visibleX, visibleY] = magick([ceramicMaster, "-alpha", "extract", "-threshold", "50%", "-format", "%@", "info:"]).toString().match(/\d+/g).map(Number);
+const padding = Math.max(2, Math.round(Math.max(masterWidth, masterHeight) / 512));
+const masterBounds = `${visibleWidth + 2 * padding}x${visibleHeight + 2 * padding}+${visibleX - padding}+${visibleY - padding}`;
 
 let checked = 0;
 for (const [density, factor] of [["mdpi", 1], ["hdpi", 1.5], ["xhdpi", 2], ["xxhdpi", 3], ["xxxhdpi", 4]]) {
   const folder = path.join(res, `drawable-${density}`);
   const mark = inspect(path.join(folder, "motd_logo_mark.png"), Math.round(96 * factor), Math.round(92 * factor), null, .43);
   assert.ok(mark.max - mark.min > 15, "Ceramic shading was flattened");
+  const markFile = path.join(folder, "motd_logo_mark.png");
+  assertFractionalAlpha(markFile, 8);
+  const expectedMarkAlpha = magick([ceramicMaster, "-crop", masterBounds, "+repage", "-filter", "Lanczos", "-resize", `${Math.round(96 * factor)}x${Math.round(92 * factor)}!`, "-alpha", "extract", "-depth", "8", "gray:-"]);
+  assert.deepEqual(magick([markFile, "-alpha", "extract", "-depth", "8", "gray:-"]), expectedMarkAlpha, `${markFile}: runtime contour changed`);
   checked++;
   for (const name of ["ic_launcher_foreground", "ic_launcher_foreground_light", "ic_launcher_foreground_terminal", "ic_launcher_monochrome"]) {
-    inspect(path.join(folder, `${name}.png`), Math.round(108 * factor), Math.round(108 * factor), 33 * factor);
-    const alpha = magick([path.join(folder, `${name}.png`), "-alpha", "extract", "-depth", "8", "gray:-"]);
+    const file = path.join(folder, `${name}.png`);
+    inspect(file, Math.round(108 * factor), Math.round(108 * factor), 33 * factor);
+    assertFractionalAlpha(file, 8);
+    const alpha = magick([file, "-alpha", "extract", "-depth", "8", "gray:-"]);
     const silhouette = magick([path.join(folder, "ic_launcher_monochrome.png"), "-alpha", "extract", "-depth", "8", "gray:-"]);
     assert.deepEqual(alpha, silhouette, `${name} must retain the authoritative silhouette`);
     checked++;
@@ -66,6 +89,7 @@ for (const [density, factor] of [["mdpi", 1], ["hdpi", 1.5], ["xhdpi", 2], ["xxh
   const splashFile = path.join(folder, "ic_splash_logo.png");
   const splashSize = Math.round(200 * factor);
   const splash = inspect(splashFile, splashSize, splashSize, 76 * factor);
+  assertFractionalAlpha(splashFile, 8);
   assert.ok(splash.max - splash.min > 15, "Splash ceramic shading was flattened");
   assert.ok(splash.min >= 128, "Splash ceramic mark must remain light on black");
   const splashPixels = magick([splashFile, "-depth", "8", "rgba:-"]);
@@ -79,9 +103,9 @@ for (const [density, factor] of [["mdpi", 1], ["hdpi", 1.5], ["xhdpi", 2], ["xxh
   const height = Math.round(158 * unit * .66);
   const x = Math.round((96 + (16 - 96) * .66) * unit);
   const y = Math.round((96 + (24 - 96) * .66) * unit);
-  // Compare the exported contour to direct master downsampling. Reapplying the
-  // old raster mask or thresholding alpha must fail even if safe zones pass.
-  const expectedAlpha = magick([splashMaster, "-crop", splashBounds, "+repage", "-filter", "Lanczos", "-resize", `${width}x${height}!`, "-alpha", "extract", "-depth", "8", "gray:-"]);
+  // Compare the exported contour to direct master downsampling. Reapplying a
+  // second mask or thresholding alpha must fail even if safe zones pass.
+  const expectedAlpha = magick([ceramicMaster, "-crop", masterBounds, "+repage", "-filter", "Lanczos", "-resize", `${width}x${height}!`, "-alpha", "extract", "-depth", "8", "gray:-"]);
   const actualAlpha = magick([splashFile, "-crop", `${width}x${height}+${x}+${y}`, "+repage", "-alpha", "extract", "-depth", "8", "gray:-"]);
   assert.deepEqual(actualAlpha, expectedAlpha, `${splashFile}: regenerated splash contour changed`);
   checked++;
@@ -108,7 +132,7 @@ const markHeight = Math.round(158 * markSize / 192);
 const markX = Math.round(23.7 * 3) + Math.round(16 * markSize / 192);
 const markY = 3 + Math.round(24 * markSize / 192);
 const markBounds = `${markWidth}x${markHeight}+${markX}+${markY}`;
-const expectedAlpha = magick([splashMaster, "-crop", splashBounds, "+repage", "-filter", "Lanczos", "-resize", `${markWidth}x${markHeight}!`, "-alpha", "extract", "-depth", "8", "gray:-"]);
+const expectedAlpha = magick([ceramicMaster, "-crop", masterBounds, "+repage", "-filter", "Lanczos", "-resize", `${markWidth}x${markHeight}!`, "-alpha", "extract", "-depth", "8", "gray:-"]);
 for (const [name, inverse] of [["light", false], ["dark", true]]) {
   const file = path.join(brand, `motd-lockup-${name}.png`);
   assert.equal(magick([file, "-format", "%wx%h", "info:"]).toString(), "1470x540", file);

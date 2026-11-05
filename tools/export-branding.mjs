@@ -39,20 +39,26 @@ function solid(width, height, color) {
   return png(["-size", `${width}x${height}`, `xc:${color}`]);
 }
 function cropVisible(data) {
-  // Ignore nearly transparent generator residue when measuring optical bounds.
-  const bounds = convert(["png:-", "-alpha", "extract", "-threshold", "50%", "-format", "%@", "info:"], data).toString();
-  return png(["png:-", "-crop", bounds, "+repage"], data);
+  // Measure the visible outline while retaining its surrounding fractional-alpha
+  // pixels. The padding keeps anti-aliased curves intact when the result is
+  // subsequently downsampled for the Android density buckets.
+  const [sourceWidth, sourceHeight] = convert(["png:-", "-format", "%w %h", "info:"], data).toString().split(" ").map(Number);
+  const [width, height, x, y] = convert(["png:-", "-alpha", "extract", "-threshold", "50%", "-format", "%@", "info:"], data).toString().match(/\d+/g).map(Number);
+  const padding = Math.max(2, Math.round(Math.max(sourceWidth, sourceHeight) / 512));
+  return png(["png:-", "-crop", `${width + 2 * padding}x${height + 2 * padding}+${x - padding}+${y - padding}`, "+repage"], data);
 }
 
 const source = readFileSync(path.join(brand, "motd-ceramic-master.png"));
-const mask = readFileSync(path.join(brand, "motd-symbol-mask.png"));
-const croppedMask = cropVisible(mask);
-const [maskWidth, maskHeight] = convert(["png:-", "-format", "%w %h", "info:"], croppedMask).toString().split(" ").map(Number);
+const [sourceWidth, sourceHeight] = convert(["png:-", "-format", "%w %h", "info:"], source).toString().split(" ").map(Number);
+// The source alpha is the sole geometry authority. Derive the compatibility
+// mask from it so launcher, notification, splash, and runtime assets cannot
+// drift onto a second, rougher raster contour.
+const mask = over(solid(sourceWidth, sourceHeight, "white"), source, "CopyOpacity");
 const canonicalCache = new WeakMap();
 function canonicalCrop(data) {
-  // Keep only the generated material: the original raster mask owns all geometry.
+  // Keep the material and its own fractional-alpha contour together.
   if (!canonicalCache.has(data)) {
-    canonicalCache.set(data, over(resize(cropVisible(data), maskWidth, maskHeight), croppedMask, "CopyOpacity"));
+    canonicalCache.set(data, cropVisible(data));
   }
   return canonicalCache.get(data);
 }
@@ -84,14 +90,7 @@ function normalized(data, size, scale = 1) {
 }
 
 const densities = [["mdpi", 1], ["hdpi", 1.5], ["xhdpi", 2], ["xxhdpi", 3], ["xxxhdpi", 4]];
-const splashMaster = readFileSync(path.join(brand, "motd-splash-master.png"));
-const [splashWidth, splashHeight] = convert(["png:-", "-format", "%w %h", "info:"], splashMaster).toString().split(" ").map(Number);
-const [visibleWidth, visibleHeight, visibleX, visibleY] = convert(["png:-", "-alpha", "extract", "-threshold", "50%", "-format", "%@", "info:"], splashMaster).toString().match(/\d+/g).map(Number);
-// Keep the generated contour's soft alpha; the older symbol mask has rough edges.
-// Pad the optical bounds so trimming does not clip antialiasing at the extrema.
-const padding = Math.max(2, Math.round(Math.max(splashWidth, splashHeight) / 512));
-const splashBounds = `${visibleWidth + 2 * padding}x${visibleHeight + 2 * padding}+${visibleX - padding}+${visibleY - padding}`;
-const splashCrop = png(["png:-", "-crop", splashBounds, "+repage"], shade([255, 255, 255], splashMaster));
+const splashCrop = canonicalCrop(shade([255, 255, 255]));
 const readmeOnly = process.argv.includes("--readme-only");
 const storeOnly = process.argv.includes("--store-only");
 if (!readmeOnly && !storeOnly) {
@@ -100,21 +99,27 @@ if (!readmeOnly && !storeOnly) {
   }
 }
 if (process.argv.includes("--splash-only")) {
-  console.log(`Exported ${outputs.length} splash PNGs from the dedicated raster master.`);
+  console.log(`Exported ${outputs.length} splash PNGs from the canonical ceramic master.`);
   process.exit(0);
+}
+
+if (!readmeOnly && !storeOnly) {
+  // Kept as stable public artifacts for existing documentation and tooling.
+  save(path.join(brand, "motd-splash-master.png"), source);
+  save(path.join(brand, "motd-symbol-mask.png"), mask);
 }
 
 const lettering = readFileSync(path.join(brand, "motd-lettering-master.png"));
 if (!storeOnly) {
   for (const [name, inverse] of [["light", false], ["dark", true]]) {
     const text = inverse ? png(["png:-", "-channel", "RGB", "-negate", "+channel"], lettering) : lettering;
-    const ink = inverse ? splashCrop : png(["png:-", "-crop", splashBounds, "+repage"], shade([0, 0, 0], splashMaster));
+    const ink = inverse ? splashCrop : canonicalCrop(shade([0, 0, 0]));
     const mark = layer(aligned(ink, Math.round(192 * .92 * 3)), 1470, 540, Math.round(23.7 * 3), 3);
     save(path.join(brand, `motd-lockup-${name}.png`), over(mark, resize(text, 1470, 540)));
   }
 }
 if (readmeOnly) {
-  console.log(`Exported ${outputs.length} README lockups from the smoothed raster master.`);
+  console.log(`Exported ${outputs.length} README lockups from the canonical ceramic master.`);
   process.exit(0);
 }
 
