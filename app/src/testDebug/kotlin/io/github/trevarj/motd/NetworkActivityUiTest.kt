@@ -344,8 +344,9 @@ class NetworkActivityUiTest {
         }
     }
 
-    @Test fun scopedAndSelectionMenusKeepInspectorAcrossArchiveAndInvitations() {
+    @Test fun scopedAndSelectionMenusKeepInspectorExceptInArchive() {
         val calls = mutableListOf<NetworkActivityAction>()
+        val archiveCalls = mutableListOf<Pair<List<Long>, Boolean>>()
         var seenCalls = 0
         val invitation = ChatListInvitation(11, 111, 1, "Libera", "alice", "#other", "invite", InviteState.PENDING, 1)
         setList(
@@ -354,12 +355,19 @@ class NetworkActivityUiTest {
             listState = ChatListState(rows = listOf(row()), archivedRows = listOf(row(true).copy(bufferId = 8)), invitations = listOf(invitation), networks = listOf(network), selectedNetworkId = 1, loading = false),
             onAction = { _, action -> calls += action },
             onSeen = { seenCalls++ },
+            onArchive = { ids, archived -> archiveCalls += ids.toList() to archived },
+            unseen = true,
         )
+        compose.onNodeWithTag("chatlist_more_network_activity_new_dot", true).assertIsDisplayed()
         compose.onNodeWithTag("chatlist_more").performClick()
         compose.onNodeWithTag("chatlist_network_activity_icon", true).assertIsDisplayed()
         compose.onNodeWithTag("chatlist_network_activity").performClick()
         compose.onNodeWithTag("network_activity_close").performClick()
         compose.onNodeWithTag("chatlist_row_7").performTouchInput { longClick() }
+        compose.onNodeWithTag("chatlist_selection_network_activity_new_dot", true).assertIsDisplayed()
+        compose
+            .onNodeWithTag("chatlist_selection_more")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "New network activity"))
         compose.onNodeWithTag("chatlist_selection_more").performClick()
         compose.onNodeWithTag("chatlist_network_activity_icon", true).assertIsDisplayed()
         compose.onNodeWithTag("chatlist_network_activity").performClick()
@@ -378,21 +386,35 @@ class NetworkActivityUiTest {
         compose.runOnIdle { check(reveal.action()) }
         compose.onNodeWithTag("chatlist_archived_folder").performClick()
         compose.onNodeWithTag("chatlist_more").assertDoesNotExist()
-        val beforeArchiveInspection = seenCalls
-        compose.onNodeWithTag("chatlist_network_activity").performClick()
-        compose.runOnIdle { assertEquals(beforeArchiveInspection + 1, seenCalls) }
-        compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_issue_2_reason"))
-        compose.onNodeWithTag("network_activity_issue_2_reason", true).assertTextEquals("Full history reason in every mode")
-        compose.onNodeWithTag("network_activity_close").performClick()
+        val beforeArchiveVisit = seenCalls
+        compose.onNodeWithTag("chatlist_network_activity").assertDoesNotExist()
+        compose.onNodeWithTag("network_activity_sheet").assertDoesNotExist()
         compose.onNodeWithText("Archived Chats").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_row_8").performTouchInput { longClick() }
+        compose.onNodeWithTag("chatlist_selection_network_activity_new_dot", true).assertDoesNotExist()
+        assertFalse(
+            compose
+                .onNodeWithTag("chatlist_selection_more")
+                .fetchSemanticsNode()
+                .config
+                .contains(SemanticsProperties.StateDescription),
+        )
+        compose.onNodeWithTag("chatlist_selection_mark_read").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_selection_mute").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_selection_remove").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_selection_more").performClick()
-        compose.onNodeWithTag("chatlist_network_activity_icon", true).assertIsDisplayed()
-        compose.onNodeWithTag("chatlist_network_activity").performClick()
-        compose.onNodeWithTag("network_activity_close").performClick()
-        compose.onNodeWithTag("chatlist_selection_top_app_bar").assertIsDisplayed()
-        compose.onNodeWithTag("chatlist_selection_close").performClick()
+        compose.onNodeWithTag("chatlist_network_activity_icon", true).assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_network_activity").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_selection_add_folder").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_selection_pin").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_selection_archive").performClick()
+        compose.onNodeWithTag("network_activity_sheet").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_selection_top_app_bar").assertDoesNotExist()
         compose.onNodeWithText("Archived Chats").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(listOf(listOf(8L) to false), archiveCalls)
+            assertEquals(beforeArchiveVisit, seenCalls)
+        }
         compose.onNodeWithTag("chatlist_selection_close").performClick()
         compose.onNodeWithTag("chatlist_invitations_folder").performClick()
         compose.onNodeWithTag("chatlist_more").assertDoesNotExist()
@@ -604,7 +626,7 @@ class NetworkActivityUiTest {
         compose.runOnIdle { assertEquals(listOf(NetworkActivityAction.OPEN_CHAT), calls) }
     }
 
-    @Test fun archiveAndInvitationsOmitTitleHistoryButInspectorStaysGlobal() {
+    @Test fun archiveAndInvitationsOmitTitleHistoryButOnlyInvitationsExposeInspector() {
         val state = mutableStateOf(activity(listOf(issue("history reason", 7, false, 2))).copy(networks = listOf(NetworkActivityNetwork(1, "Libera", ready), NetworkActivityNetwork(2, "OFTC", ready))))
         val invitation = ChatListInvitation(11, 111, 1, "Libera", "alice", "#other", "invite", InviteState.PENDING, 1)
         setList(activity = { state.value }, chrome = { ChatListSyncChrome.Syncing(1, 3) }, listState = ChatListState(rows = listOf(row()), archivedRows = listOf(row(true).copy(bufferId = 8)), invitations = listOf(invitation), networks = listOf(network), loading = false))
@@ -634,20 +656,30 @@ class NetworkActivityUiTest {
         compose.onNodeWithTag("chatlist_title_attention", true).assertIsDisplayed().assertContentDescriptionEquals(oneIssue)
         compose.onNodeWithTag("chatlist_title_progress", true).assertDoesNotExist()
         assertEquals(archiveBounds, compose.onNodeWithTag("chatlist_top_app_bar").fetchSemanticsNode().boundsInRoot)
-        compose.onNodeWithTag("chatlist_network_activity").performClick()
+        compose.onNodeWithTag("chatlist_network_activity").assertDoesNotExist()
+        compose.onNodeWithTag("network_activity_sheet").assertDoesNotExist()
+        compose.onNodeWithText("Archived Chats").assertIsDisplayed()
+        compose.runOnIdle { state.value = state.value.copy(active = state.value.active.filter { it.bufferId != null }) }
+        assertFalse(
+            compose
+                .onNodeWithTag("chatlist_title_activity", true)
+                .fetchSemanticsNode()
+                .config
+                .contains(SemanticsProperties.ContentDescription),
+        )
+        compose.onNodeWithTag("chatlist_title_progress", true).assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_network_activity").assertDoesNotExist()
+        compose.onNodeWithTag("network_activity_sheet").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_selection_close").performClick()
+        openInspector()
         compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_history_progress"))
         compose.onNodeWithTag("network_activity_history_progress", true).assertIsDisplayed()
         compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_network_2"))
         compose.onNodeWithTag("network_activity_network_2").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Close sheet").performClick()
-        compose.onNodeWithText("Archived Chats").assertIsDisplayed()
-        compose.runOnIdle { state.value = state.value.copy(active = state.value.active.filter { it.bufferId != null }) }
-        compose.onNodeWithTag("chatlist_network_activity").performClick()
         compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_issue_2_reason"))
         compose.onNodeWithTag("network_activity_issue_2_reason", true).assertTextEquals("history reason")
         compose.runOnIdle { ShadowDialog.getLatestDialog().onBackPressed() }
-        compose.onNodeWithText("Archived Chats").assertIsDisplayed()
-        compose.onNodeWithTag("chatlist_selection_close").performClick()
+        compose.onNodeWithTag("chatlist_more").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_invitations_folder").performClick()
         assertFalse(
             compose
@@ -666,6 +698,10 @@ class NetworkActivityUiTest {
         compose.onNodeWithTag("chatlist_network_activity").performClick()
         compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_history_progress"))
         compose.onNodeWithTag("network_activity_history_progress", true).assertIsDisplayed()
+        compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_network_2"))
+        compose.onNodeWithTag("network_activity_network_2").assertIsDisplayed()
+        compose.onNodeWithTag("network_activity_list").performScrollToNode(hasTestTag("network_activity_issue_2_reason"))
+        compose.onNodeWithTag("network_activity_issue_2_reason", true).assertTextEquals("history reason")
         compose.onNodeWithTag("network_activity_close").performClick()
         compose.onNodeWithText("Invitations").assertIsDisplayed()
     }
@@ -828,10 +864,11 @@ class NetworkActivityUiTest {
         onClearRecent: () -> Unit = {},
         onNetworkAction: (Long, NetworkActivityAction) -> Unit = { _, _ -> },
         unseen: Boolean = false,
+        onArchive: (Collection<Long>, Boolean) -> Unit = { _, _ -> },
     ) {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
-                ChatListContent(state = listState, networkActivity = activity(), hasUnseenNetworkActivity = unseen, syncChrome = chrome(), onActivityAction = onAction, onActivityNetworkAction = onNetworkAction, onClearNetworkActivityHistory = onClearRecent, onNetworkActivitySeen = onSeen, onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {}, onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> }, onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> })
+                ChatListContent(state = listState, networkActivity = activity(), hasUnseenNetworkActivity = unseen, syncChrome = chrome(), onActivityAction = onAction, onActivityNetworkAction = onNetworkAction, onClearNetworkActivityHistory = onClearRecent, onNetworkActivitySeen = onSeen, onOpenBuffer = {}, onOpenSettings = {}, onOpenSearch = {}, onSetPinned = { _, _ -> }, onSetMuted = { _, _ -> }, onSetArchived = onArchive, onJoinChannel = { _, _, _ -> }, onMessageUser = { _, _ -> })
             }
         }
     }

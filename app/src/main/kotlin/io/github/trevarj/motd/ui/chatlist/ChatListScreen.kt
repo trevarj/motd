@@ -774,11 +774,11 @@ fun ChatListContent(
                                                 onClick = { overflowOpen = true },
                                                 modifier =
                                                     Modifier.testTag("chatlist_selection_more").semantics {
-                                                        if (showNewNetworkActivity) stateDescription = newNetworkActivityDescription
+                                                        if (!archiveMode && showNewNetworkActivity) stateDescription = newNetworkActivityDescription
                                                     },
                                             ) {
                                                 BadgedBox(badge = {
-                                                    if (showNewNetworkActivity) {
+                                                    if (!archiveMode && showNewNetworkActivity) {
                                                         Badge(
                                                             containerColor = MaterialTheme.colorScheme.primary,
                                                             modifier = Modifier.testTag("chatlist_selection_network_activity_new_dot"),
@@ -789,15 +789,17 @@ fun ChatListContent(
                                                 }
                                             }
                                             DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
-                                                DropdownMenuItem(
-                                                    text = { Text(networkActivityMenuTitle) },
-                                                    leadingIcon = { Icon(Icons.Outlined.Lan, contentDescription = null, modifier = Modifier.testTag("chatlist_network_activity_icon")) },
-                                                    modifier = Modifier.testTag("chatlist_network_activity"),
-                                                    onClick = {
-                                                        overflowOpen = false
-                                                        inspectNetworkActivity()
-                                                    },
-                                                )
+                                                if (!archiveMode) {
+                                                    DropdownMenuItem(
+                                                        text = { Text(networkActivityMenuTitle) },
+                                                        leadingIcon = { Icon(Icons.Outlined.Lan, contentDescription = null, modifier = Modifier.testTag("chatlist_network_activity_icon")) },
+                                                        modifier = Modifier.testTag("chatlist_network_activity"),
+                                                        onClick = {
+                                                            overflowOpen = false
+                                                            inspectNetworkActivity()
+                                                        },
+                                                    )
+                                                }
                                                 if (dottedSelectedRows.isNotEmpty()) {
                                                     DropdownMenuItem(
                                                         text = {
@@ -928,7 +930,9 @@ fun ChatListContent(
                                         }
                                     }
 
-                                    ChatListTopBarMode.INVITATIONS, ChatListTopBarMode.ARCHIVE -> {
+                                    ChatListTopBarMode.ARCHIVE -> {}
+
+                                    ChatListTopBarMode.INVITATIONS -> {
                                         TextButton(
                                             onClick = ::inspectNetworkActivity,
                                             modifier = Modifier.heightIn(min = 48.dp).testTag("chatlist_network_activity"),

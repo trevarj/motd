@@ -119,15 +119,16 @@ flowchart TD
   with no idle/completion announcement, completion message, snackbar, separate numeric badge
   or resurrected swipe-hide latch. After exit fades, healthy idle has no text/ring/warning.
   Details, recovery actions and independently updating aggregate history progress remain
-  in the existing global Material inspector, available in every mode without replacing it.
+  in the existing global Material inspector, available outside Archived Chats without replacing it.
   The localized `History sync progress` track keeps native range semantics, clamps engine
   progress to 0–1 and retains zero for unknown totals; no invented total text is shown.
   Waiting/queued work remains in per-network summaries without changing per-row waiting cues.
-  Both overflow buttons show a static theme-accent dot for unseen active unacknowledged issues,
-  and their inspector entries pair a decorative network icon with `Network activity · New`.
-  Archive/invitations keep the same always-available inspector action. Every inspector entry
-  baselines the navigation-entry VM-owned seen watermark, without acknowledging or resolving
-  issues. All-active-clear removes attention even with recent records. There is no hide latch.
+  Outside Archived Chats, both overflow buttons show a static theme-accent dot for unseen active
+  unacknowledged issues, and their inspector entries pair a decorative network icon with
+  `Network activity · New`. Invitations keeps its always-available inspector action; Archived Chats
+  has no inspector action or inspector-specific overflow attention, including during selection.
+  Every inspector entry baselines the navigation-entry VM-owned seen watermark, without acknowledging
+  or resolving issues. All-active-clear removes attention even with recent records. There is no hide latch.
 - `ChatListViewModel` eagerly captures observed connection/history failures even without screen
   subscribers. Its issue queue and seen watermark belong to the retained chat-list navigation entry.
   A new entry gets a fresh queue/watermark; no process-wide presentation state is shared.
@@ -149,7 +150,7 @@ flowchart TD
   recent navigation, preserving active suppression, source state, attention and the seen watermark.
   Closing the inspector acknowledges nothing; recovery/navigation actions hide it before dispatch.
   Recent records retain their honest disposition and usable navigation; later target deletion disables
-  their actions without rewriting the earlier recovery outcome. The inspector is available in every mode.
+  their actions without rewriting the earlier recovery outcome. The inspector remains global outside Archived Chats.
   Ready proves Connected; deliberate offline and deletion mean Stopped/Removed. History disappearance
   means No longer reported, not repaired; Unavailable and unknown connection absence are not recovery.
   History Retry requires the exact current episode and source kind/reason, canonical buffers and the
