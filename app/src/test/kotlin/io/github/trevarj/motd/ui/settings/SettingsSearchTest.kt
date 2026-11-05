@@ -64,10 +64,10 @@ class SettingsSearchTest {
     fun surfaceShapeQueriesOpenTheirTypedAppearanceTargets() {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
         listOf(
-            SettingsTarget.INPUT_SHAPE to listOf("input corners", "composer roundness"),
-            SettingsTarget.AVATAR_SHAPE to listOf("avatar shape", "profile image shape", "channel corners", "network roundness"),
-            SettingsTarget.CHAT_CARD_SHAPE to listOf("chat card corners", "list roundness", "archive shape"),
-            SettingsTarget.MEDIA_SHAPE to listOf("media corners", "image corners", "video shape", "link roundness", "audio corners"),
+            SettingsTarget.INPUT_SHAPE to listOf("input corners", "composer roundness", "input 28"),
+            SettingsTarget.AVATAR_SHAPE to listOf("avatar shape", "profile image shape", "channel corners", "network roundness", "people circles"),
+            SettingsTarget.CHAT_CARD_SHAPE to listOf("chat card corners", "list roundness", "archive shape", "chat card 16"),
+            SettingsTarget.MEDIA_SHAPE to listOf("media corners", "image corners", "video shape", "link roundness", "audio corners", "mixed corners"),
         ).forEach { (target, queries) ->
             val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, target)
             queries.forEach { query ->

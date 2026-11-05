@@ -94,7 +94,7 @@ internal fun AppearanceSampleTheme(
 @Composable
 internal fun IconSetPreview() {
     Column(Modifier.testTag("settings_icon_set_preview"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(stringResource(R.string.settings_preview), style = MaterialTheme.typography.labelLarge)
+        Text(stringResource(R.string.settings_preview), style = MaterialTheme.typography.bodyMedium, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             UiIcon(Icons.Filled.Menu, null, Modifier.size(32.dp).testTag("settings_icon_set_preview_menu"))
             UiIcon(Icons.Outlined.Search, null, Modifier.size(32.dp).testTag("settings_icon_set_preview_search"))
@@ -163,7 +163,7 @@ internal fun MediaShapePreview() {
     val cached = remember(audio) { mapOf(audio.playbackId to AudioCacheStatus.CACHED) }
     val playback = remember { AudioPlaybackState() }
     Column(Modifier.testTag("settings_media_shape_preview"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(stringResource(R.string.settings_preview), style = MaterialTheme.typography.labelLarge)
+        Text(stringResource(R.string.settings_preview), style = MaterialTheme.typography.bodyMedium, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
         LinkPreviewCard(link, loading = false, onClick = {}, modifier = Modifier.testTag("settings_media_shape_link"))
         AudioAttachmentPlayers(
             attachments,

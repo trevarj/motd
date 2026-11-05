@@ -14,6 +14,7 @@ import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.FolderOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -48,9 +49,9 @@ fun FolderAssignmentSheet(
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
     val visible = folders.filter { query.isBlank() || it.displayName.contains(query, ignoreCase = true) }
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("folder_assignment_sheet")) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag("folder_assignment_sheet")) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Text(stringResource(R.string.folders_add_to))
+            Text(stringResource(R.string.folders_add_to), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             OutlinedTextField(query, { query = it }, label = { Text(stringResource(R.string.action_search)) }, modifier = Modifier.fillMaxWidth())
             LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
                 item {
@@ -108,7 +109,7 @@ fun FolderAssignmentSheet(
                     modifier = Modifier.fillMaxWidth().testTag("folder_create_assign"),
                 ) { Text(stringResource(R.string.folders_create)) }
             }
-            if (error) Text(stringResource(R.string.folders_operation_failed))
+            if (error) Text(stringResource(R.string.folders_operation_failed), color = MaterialTheme.colorScheme.error)
         }
     }
     if (pickingIcon) {

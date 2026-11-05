@@ -167,6 +167,8 @@ internal fun MessageTranslationPicker(
         }
     }
     ModalBottomSheet(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         modifier = Modifier.testTag("message_translation_picker"),
@@ -175,7 +177,7 @@ internal fun MessageTranslationPicker(
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            Text(stringResource(R.string.chat_translation_picker_title), style = MaterialTheme.typography.headlineSmall)
+            Text(stringResource(R.string.chat_translation_picker_title), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
             Text(
                 stringResource(R.string.chat_translation_disclosure),
                 style = MaterialTheme.typography.bodyMedium,

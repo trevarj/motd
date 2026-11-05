@@ -448,6 +448,8 @@ private fun AudioAttachmentPlayer(
 
     if (detailsEnabled && showDetails) {
         ModalBottomSheet(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             onDismissRequest = { showDetails = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         ) {
@@ -543,16 +545,16 @@ fun AudioDetailsSheet(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        Text("Audio", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        Text("Audio", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(8.dp))
         DetailRow("Link", attachment.displayUrl)
         origin?.let {
             DetailRow("From", if (it.isSelf) "You" else it.sender)
             DetailRow("Conversation", it.conversation)
         }
-        DetailRow("Type", attachment.mimeType ?: "Unknown")
-        DetailRow("Duration", formatAudioDuration(attachment.durationMs))
-        DetailRow("Size", attachment.sizeBytes?.let(::formatBytes) ?: "Unknown")
+        DetailRow("Type", attachment.mimeType ?: "Unknown", compact = true)
+        DetailRow("Duration", formatAudioDuration(attachment.durationMs), compact = true)
+        DetailRow("Size", attachment.sizeBytes?.let(::formatBytes) ?: "Unknown", compact = true)
         DetailRow("Expires", attachment.expiry ?: "Unknown")
         DetailRow("Encryption", if (attachment.encrypted) "Host-blind key in URL fragment" else "Off")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -887,10 +889,14 @@ private fun VoiceTranscriptFailureKind.messageResource(): Int =
 private fun DetailRow(
     label: String,
     value: String,
+    compact: Boolean = false,
 ) {
     ListItem(
+        colors =
+            androidx.compose.material3.ListItemDefaults
+                .colors(containerColor = Color.Transparent),
         headlineContent = { Text(label, fontWeight = FontWeight.Medium) },
-        supportingContent = { Text(value, maxLines = 3, overflow = TextOverflow.Ellipsis) },
+        supportingContent = { if (compact) MetadataPill(value) else Text(value) },
     )
 }
 

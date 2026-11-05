@@ -40,7 +40,11 @@ fun PresenceModeSheet(
         tag = "chat_presence_sheet",
         dismissOnSelect = false,
         preview = {
-            Text(stringResource(if (state.override == null) R.string.settings_presence_inherited_scope else R.string.settings_presence_chat_scope))
+            Text(
+                stringResource(if (state.override == null) R.string.settings_presence_inherited_scope else R.string.settings_presence_chat_scope),
+                style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                fontStyle = if (state.override == null) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+            )
             PresenceExample(state.effective, state.effectiveCustomKinds)
         },
         footer = {

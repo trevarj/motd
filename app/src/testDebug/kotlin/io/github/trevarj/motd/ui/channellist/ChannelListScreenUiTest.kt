@@ -1,12 +1,10 @@
 package io.github.trevarj.motd.ui.channellist
 
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -59,10 +57,10 @@ class ChannelListScreenUiTest {
                     if (contrastingFill.value) {
                         if (preset.value == ColorThemePreset.AYU_LIGHT) Color(0xFF182836) else Color(0xFFF4E3D1)
                     } else {
-                        scheme.surface
+                        scheme.surfaceContainerLow
                     }
-                MaterialTheme(colorScheme = scheme.copy(surface = rowColor)) {
-                    fill = ListItemDefaults.colors().containerColor.compositeOver(scheme.background)
+                MaterialTheme(colorScheme = scheme.copy(surfaceContainerLow = rowColor)) {
+                    fill = rowColor
                     linkInk = ensureContrast(scheme.primary, listOf(fill), MESSAGE_TEXT_CONTRAST)
                     metadataInk = scheme.onSurfaceVariant
                     ChannelListContent(

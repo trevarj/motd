@@ -76,6 +76,8 @@ fun InviteUserSheet(
     onInvite: (channel: JoinedChannelRow, nick: String) -> Unit,
 ) {
     ModalBottomSheet(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         onDismissRequest = onDismiss,
         modifier = Modifier.testTag("invite_user_sheet"),
     ) {
@@ -245,6 +247,7 @@ private fun NickDestinationPicker(
         Text(
             stringResource(R.string.irc_invite_friends),
             style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.SemiBold,
         )
     }

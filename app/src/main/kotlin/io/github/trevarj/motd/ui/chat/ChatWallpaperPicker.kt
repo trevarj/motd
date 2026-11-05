@@ -54,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -162,6 +163,8 @@ private fun WallpaperEditorSheet(
 
     if (!showColorEditor) {
         ModalBottomSheet(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             onDismissRequest = onDismiss,
             sheetState = sheetState,
             modifier = Modifier.testTag("settings_wallpaper_sheet"),
@@ -181,7 +184,7 @@ private fun WallpaperEditorSheet(
                         .testTag("settings_wallpaper_list"),
             ) {
                 item(key = "title", span = { GridItemSpan(maxLineSpan) }) {
-                    Text(stringResource(R.string.settings_wallpaper), style = MaterialTheme.typography.titleLarge)
+                    Text(stringResource(R.string.settings_wallpaper), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
                 }
                 item(key = "preview", span = { GridItemSpan(maxLineSpan) }) {
                     WallpaperPreview(
@@ -196,13 +199,16 @@ private fun WallpaperEditorSheet(
                     item(key = "color", span = { GridItemSpan(maxLineSpan) }) {
                         val enabled = !importing && selection.localImageName == null && selection.preset != ChatWallpaperPreset.NONE
                         ListItem(
+                            colors =
+                                androidx.compose.material3.ListItemDefaults
+                                    .colors(containerColor = Color.Transparent),
                             headlineContent = { Text(stringResource(R.string.settings_wallpaper_outline_color)) },
                             supportingContent = {
                                 Text(
                                     when {
                                         selection.localImageName != null -> stringResource(R.string.settings_wallpaper_color_builtin_only)
                                         selection.preset == ChatWallpaperPreset.NONE -> stringResource(R.string.settings_wallpaper_color_none)
-                                        else -> selection.outlineColor?.let(::wallpaperColorHex) ?: stringResource(R.string.settings_wallpaper_color_default)
+                                        else -> selection.outlineColor?.let(::wallpaperColorHex) ?: stringResource(R.string.settings_wallpaper_color_default, wallpaperColorHex(MaterialTheme.colorScheme.onSurfaceVariant.toArgb()))
                                     },
                                 )
                             },
@@ -366,7 +372,7 @@ private fun WallpaperCard(
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(16.dp)
-    val border = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+    val border = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.outlineVariant
     Column(
         Modifier.selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick).testTag("settings_wallpaper_preset_${preset.name.lowercase()}"),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -386,8 +392,8 @@ private fun WallpaperCard(
                 animate = false,
             )
             if (selected) {
-                Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(bottomStart = 10.dp), modifier = Modifier.align(Alignment.TopEnd)) {
-                    Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp).padding(2.dp))
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer, shape = RoundedCornerShape(bottomStart = 10.dp), modifier = Modifier.align(Alignment.TopEnd)) {
+                    Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(20.dp).padding(2.dp))
                 }
             }
         }

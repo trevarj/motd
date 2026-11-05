@@ -40,6 +40,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.History
@@ -541,11 +542,15 @@ private fun AgentwireScreen(
         },
     ) {
         Scaffold(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
             topBar = {
                 Column {
                     TopAppBar(
+                        colors =
+                            androidx.compose.material3.TopAppBarDefaults
+                                .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                         title = {
                             Column {
                                 Text(state.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -574,7 +579,7 @@ private fun AgentwireScreen(
                             IconButton(onClick = { overflow = true }) {
                                 Icon(Icons.Default.MoreVert, contentDescription = "More")
                             }
-                            DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
+                            DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                                 DropdownMenuItem(
                                     text = { Text("Session log") },
                                     leadingIcon = { Icon(Icons.Outlined.History, contentDescription = null) },
@@ -876,6 +881,7 @@ internal fun AgentwireSessionDrawer(
                 "Sessions",
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
             )
             LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
                 if (rows.isEmpty()) {
@@ -899,7 +905,7 @@ internal fun AgentwireSessionDrawer(
                             },
                             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.SemiBold,
                         )
                     }
@@ -936,6 +942,7 @@ private fun AgentwireDrawerRowItem(
     onSelect: (AgentwireDrawerRow) -> Unit,
 ) {
     Surface(
+        contentColor = if (row.attached) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
         color =
             if (row.attached) {
                 MaterialTheme.colorScheme.secondaryContainer
@@ -959,7 +966,7 @@ private fun AgentwireDrawerRowItem(
                 Text(
                     listOfNotNull(row.backend, row.directory).joinToString("  •  "),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (row.attached) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -968,7 +975,7 @@ private fun AgentwireDrawerRowItem(
                         it,
                         style = MaterialTheme.typography.labelSmall,
                         fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (row.attached) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -989,7 +996,7 @@ private fun AgentwireDrawerRowItem(
                         Text(
                             "${row.activeSubagents} agent${if (row.activeSubagents == 1) "" else "s"}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (row.attached) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.testTag("agentwire_drawer_subagents_${row.sid}"),
                         )
                     }
@@ -1005,7 +1012,7 @@ private fun AgentwireDrawerRowItem(
 @Composable
 private fun AgentwireSubagentsCard(subagents: List<AgentwireSubagent>) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth().testTag("agentwire_subagents"),
     ) {
         Column(
@@ -1093,7 +1100,7 @@ private fun AgentwireStatusStrip(
             }
         }
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).testTag("agentwire_status_strip"),
     ) {
         Row(
@@ -2014,11 +2021,11 @@ private fun AgentwireQueueSheet(
     viewModel: AgentwireViewModel,
     dismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = dismiss) {
+    ModalBottomSheet(onDismissRequest = dismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface) {
         SheetSystemBars()
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Queue", style = MaterialTheme.typography.titleLarge)
+                Text("Queue", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = viewModel::clearQueue) { Text("Clear") }
             }
@@ -2070,6 +2077,8 @@ private fun AgentwireLogSheet(
             agentwireLogQuery(entries, appliedSearch, filter.kinds)
         }
     ModalBottomSheet(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         onDismissRequest = dismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         modifier = Modifier.fillMaxHeight().testTag("agentwire_log_sheet"),
@@ -2079,7 +2088,7 @@ private fun AgentwireLogSheet(
             Modifier.fillMaxWidth().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            item { Text("Session log", style = MaterialTheme.typography.titleLarge) }
+            item { Text("Session log", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary) }
             item {
                 OutlinedTextField(
                     value = search,
@@ -2099,6 +2108,7 @@ private fun AgentwireLogSheet(
                             selected = filter == option,
                             onClick = { filter = option },
                             label = { Text(option.label) },
+                            leadingIcon = if (filter == option) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
                         )
                     }
                 }
@@ -2206,13 +2216,13 @@ private fun AgentwireQuestionSheet(
     val answers = remember(request.rid) { mutableStateMapOf<String, Set<String>>() }
     val customAnswers = remember(request.rid) { mutableStateMapOf<String, String>() }
     val submission = agentwireQuestionAnswers(request.questions, answers, customAnswers)
-    ModalBottomSheet(onDismissRequest = dismiss) {
+    ModalBottomSheet(onDismissRequest = dismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface) {
         SheetSystemBars()
         Column(
             Modifier.fillMaxWidth().padding(16.dp).testTag("agentwire_question_sheet"),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Questions", style = MaterialTheme.typography.titleLarge)
+            Text("Questions", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
             request.questions.forEach { question ->
                 Text(question.header ?: question.prompt, fontWeight = FontWeight.SemiBold)
                 if (question.header != null) Text(question.prompt)
@@ -2234,16 +2244,17 @@ private fun AgentwireQuestionSheet(
                             selected = selected,
                             onClick = choose,
                             label = { Text(option) },
+                            leadingIcon = if (selected) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
                             modifier = Modifier.testTag(tag),
                         )
                     } else {
-                        Row(
-                            Modifier.fillMaxWidth().clickable(onClick = choose),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(selected = selected, onClick = choose, modifier = Modifier.testTag(tag))
-                            Text(option)
-                        }
+                        io.github.trevarj.motd.ui.settings.RadioRow(
+                            label = option,
+                            selected = selected,
+                            enabled = true,
+                            onClick = choose,
+                            modifier = Modifier.testTag(tag),
+                        )
                     }
                 }
                 if (question.custom || question.options.isEmpty()) {
@@ -2379,31 +2390,35 @@ private fun AgentwireStatusSheet(
             loadedSessionDirectories = state.loadedSessionDirectories,
             query = appliedSearch,
         )
-    ModalBottomSheet(onDismissRequest = dismiss, sheetState = sheetState, modifier = Modifier.fillMaxHeight()) {
+    ModalBottomSheet(onDismissRequest = dismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, sheetState = sheetState, modifier = Modifier.fillMaxHeight()) {
         SheetSystemBars()
         LazyColumn(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item { Text("Agent session", style = MaterialTheme.typography.titleLarge) }
+            item { Text("Agent session", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary) }
             item {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = tab == AgentwireStatusTab.BROWSE,
                         onClick = { tab = AgentwireStatusTab.BROWSE },
                         label = { Text("Browse") },
+                        leadingIcon = if (tab == AgentwireStatusTab.BROWSE) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
                     )
                     FilterChip(
                         selected = tab == AgentwireStatusTab.ACTIONS,
                         onClick = { tab = AgentwireStatusTab.ACTIONS },
                         label = { Text("Actions") },
+                        leadingIcon = if (tab == AgentwireStatusTab.ACTIONS) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
                     )
                     FilterChip(
                         selected = tab == AgentwireStatusTab.DIAGNOSTICS,
                         onClick = { tab = AgentwireStatusTab.DIAGNOSTICS },
                         label = { Text("Diagnostics") },
+                        leadingIcon = if (tab == AgentwireStatusTab.DIAGNOSTICS) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
                     )
                     FilterChip(
                         selected = tab == AgentwireStatusTab.SETTINGS,
                         onClick = { tab = AgentwireStatusTab.SETTINGS },
                         label = { Text("Settings") },
+                        leadingIcon = if (tab == AgentwireStatusTab.SETTINGS) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
                     )
                 }
             }
@@ -2470,7 +2485,8 @@ private fun AgentwireStatusSheet(
                     val expanded = row.expanded
                     item(key = "directory:${row.treeKey}") {
                         Surface(
-                            color = if (directory.id == state.cwd) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                            color = if (directory.id == state.cwd) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                            contentColor = if (directory.id == state.cwd) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
                             modifier =
                                 Modifier
                                     .fillMaxWidth()
@@ -2499,7 +2515,7 @@ private fun AgentwireStatusSheet(
                                     Text(
                                         if (row.sessionCount == 1) "1 session" else "${row.sessionCount} sessions",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        color = if (directory.id == state.cwd) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier =
                                             Modifier
                                                 .padding(horizontal = 4.dp)
@@ -2508,6 +2524,9 @@ private fun AgentwireStatusSheet(
                                 }
                                 if ("session.create" in state.actions) {
                                     TextButton(
+                                        colors =
+                                            androidx.compose.material3.ButtonDefaults
+                                                .textButtonColors(contentColor = if (directory.id == state.cwd) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary),
                                         onClick = {
                                             viewModel.createSession(directory.id)
                                             dismiss()
@@ -2569,7 +2588,7 @@ private fun AgentwireStatusSheet(
             } else if (tab == AgentwireStatusTab.DIAGNOSTICS) {
                 item { AgentwireDiagnosticsPanel(state, viewModel::refreshDiagnostics) }
             } else {
-                item { Text("Safe settings", style = MaterialTheme.typography.titleMedium) }
+                item { Text("Safe settings", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary) }
                 val supportsModels = "model" in state.supportedSettings || state.backend == "codex"
                 if (supportsModels && state.modelOptions.isEmpty()) {
                     item {
@@ -2590,7 +2609,7 @@ private fun AgentwireStatusSheet(
                                 }
                                 Text("▾", fontFamily = FontFamily.Monospace)
                             }
-                            DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
+                            DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                                 state.modelOptions.forEach { option ->
                                     DropdownMenuItem(
                                         text = {
@@ -2613,10 +2632,13 @@ private fun AgentwireStatusSheet(
                     item { Text("Reasoning effort", fontWeight = FontWeight.SemiBold) }
                     selectedOption?.efforts.orEmpty().forEach { optionEffort ->
                         item(key = "effort:$model:$optionEffort") {
-                            Row(Modifier.fillMaxWidth().clickable { effort = optionEffort }, verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(selected = effort == optionEffort, onClick = { effort = optionEffort }, modifier = Modifier.testTag("agentwire_effort_$optionEffort"))
-                                Text(optionEffort.replaceFirstChar(Char::uppercase))
-                            }
+                            io.github.trevarj.motd.ui.settings.RadioRow(
+                                label = optionEffort.replaceFirstChar(Char::uppercase),
+                                selected = effort == optionEffort,
+                                enabled = true,
+                                onClick = { effort = optionEffort },
+                                modifier = Modifier.testTag("agentwire_effort_$optionEffort"),
+                            )
                         }
                     }
                 }
@@ -2624,17 +2646,13 @@ private fun AgentwireStatusSheet(
                     item { Text("Delivery while running", fontWeight = FontWeight.SemiBold) }
                     listOf("queue", "steer").forEach { option ->
                         item(key = "delivery:$option") {
-                            Row(Modifier.fillMaxWidth().clickable { delivery = option }, verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(selected = delivery == option, onClick = { delivery = option })
-                                Column {
-                                    Text(option.replaceFirstChar(Char::uppercase))
-                                    Text(
-                                        if (option == "queue") "Run after the current turn" else "Guide the current turn",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
+                            io.github.trevarj.motd.ui.settings.RadioRow(
+                                label = option.replaceFirstChar(Char::uppercase),
+                                subtitle = if (option == "queue") "Run after the current turn" else "Guide the current turn",
+                                selected = delivery == option,
+                                enabled = true,
+                                onClick = { delivery = option },
+                            )
                         }
                     }
                 }
@@ -2642,10 +2660,12 @@ private fun AgentwireStatusSheet(
                     item { Text("Collaboration mode", fontWeight = FontWeight.SemiBold) }
                     listOf("default", "plan").forEach { option ->
                         item(key = "collaboration:$option") {
-                            Row(Modifier.fillMaxWidth().clickable { collaboration = option }, verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(selected = collaboration == option, onClick = { collaboration = option })
-                                Text(option.replaceFirstChar(Char::uppercase))
-                            }
+                            io.github.trevarj.motd.ui.settings.RadioRow(
+                                label = if (option == "default") stringResource(R.string.agentwire_collaboration_standard) else option.replaceFirstChar(Char::uppercase),
+                                selected = collaboration == option,
+                                enabled = true,
+                                onClick = { collaboration = option },
+                            )
                         }
                     }
                 }
@@ -2714,7 +2734,7 @@ internal fun AgentwireLiveSessions(
         Modifier.fillMaxWidth().testTag("agentwire_live_sessions"),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text("Live sessions", style = MaterialTheme.typography.titleMedium)
+        Text("Live sessions", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
         if (sessions.isEmpty()) {
             Text(
                 "No desktop sessions detected",
@@ -2762,6 +2782,7 @@ private fun AgentwireSessionRow(
                 .testTag("agentwire_session_${session.id}"),
         colors =
             CardDefaults.cardColors(
+                contentColor = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
                 containerColor =
                     if (active) {
                         MaterialTheme.colorScheme.secondaryContainer
@@ -2797,15 +2818,18 @@ private fun AgentwireSessionRow(
                     if ("session.rename" in actions) {
                         OutlinedTextField(title, { title = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Session title") })
                     }
+                    val actionColors =
+                        androidx.compose.material3.ButtonDefaults
+                            .textButtonColors(contentColor = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary)
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         if ("session.rename" in actions) {
-                            TextButton(onClick = { onRename(session.id, title) }, enabled = title.isNotBlank() && title != session.title) { Text("Rename") }
+                            TextButton(onClick = { onRename(session.id, title) }, colors = actionColors, enabled = title.isNotBlank() && title != session.title) { Text("Rename") }
                         }
-                        if ("session.fork" in actions) TextButton(onClick = { onFork(session.id) }) { Text("Fork") }
+                        if ("session.fork" in actions) TextButton(onClick = { onFork(session.id) }, colors = actionColors) { Text("Fork") }
                         if (archived && "session.unarchive" in actions) {
-                            TextButton(onClick = { onArchive(session.id, false) }) { Text("Unarchive") }
+                            TextButton(onClick = { onArchive(session.id, false) }, colors = actionColors) { Text("Unarchive") }
                         } else if (!archived && "session.archive" in actions) {
-                            TextButton(onClick = { onArchive(session.id, true) }) { Text("Archive") }
+                            TextButton(onClick = { onArchive(session.id, true) }, colors = actionColors) { Text("Archive") }
                         }
                     }
                 }
@@ -2821,7 +2845,7 @@ internal fun AgentwireDiagnosticsPanel(
     onRefresh: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Local connection", style = MaterialTheme.typography.titleMedium)
+        Text("Local connection", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
         Text("Connection: ${if (state.connected) "Connected" else "Disconnected"}")
         val topic =
             when (state.gate) {
@@ -2848,7 +2872,7 @@ internal fun AgentwireDiagnosticsPanel(
                 is AgentwireSyncState.Failed -> "Failed"
             }
         Text("Sync: $sync")
-        Text("Bridge report", style = MaterialTheme.typography.titleMedium)
+        Text("Bridge report", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
         state.diagnosticReport?.let { report ->
             val generated =
                 remember(report.generatedAt) {

@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -22,10 +23,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.outlined.SearchOff
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -247,8 +250,12 @@ fun SearchContent(
         }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {
             TopAppBar(
+                colors =
+                    androidx.compose.material3.TopAppBarDefaults
+                        .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.onboarding_back))
@@ -315,6 +322,7 @@ fun SearchContent(
                     modifier =
                         Modifier
                             .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
                             .padding(horizontal = 16.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -322,17 +330,20 @@ fun SearchContent(
                         selected = visibleState.scope == SearchScope.ALL,
                         onClick = { onScopeChange(SearchScope.ALL) },
                         label = { Text(stringResource(R.string.search_chip_all)) },
+                        leadingIcon = if (visibleState.scope == SearchScope.ALL) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
                     )
                     FilterChip(
                         selected = visibleState.scope == SearchScope.CURRENT,
                         onClick = { onScopeChange(SearchScope.CURRENT) },
                         label = { Text(stringResource(R.string.search_chip_current)) },
+                        leadingIcon = if (visibleState.scope == SearchScope.CURRENT) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
                     )
                     if (visibleState.serverSearchAvailable) {
                         FilterChip(
                             selected = visibleState.scope == SearchScope.SERVER,
                             onClick = { onScopeChange(SearchScope.SERVER) },
                             label = { Text(stringResource(R.string.search_chip_server)) },
+                            leadingIcon = if (visibleState.scope == SearchScope.SERVER) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
                             modifier = Modifier.testTag("search_scope_server"),
                         )
                     }
@@ -481,7 +492,7 @@ private fun SearchResults(
                 Text(
                     text = stringResource(R.string.search_section_buffers),
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
                 )
@@ -505,7 +516,7 @@ private fun SearchResults(
                     modifier =
                         Modifier
                             .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surface)
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
                             .padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
                 ) {
                     Avatar(
@@ -519,7 +530,7 @@ private fun SearchResults(
                     Text(
                         text = dickordChannelLabel(group.bufferDisplayName, dickordEnabled),
                         style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

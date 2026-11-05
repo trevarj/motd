@@ -292,7 +292,12 @@ fun ChatSoundCueEditorContent(
         }
         if (cueKind == ChatSoundCue.RECEIVE) {
             SettingsGroup(title = stringResource(R.string.settings_chat_sounds_receive_phrase)) {
-                ListItem(headlineContent = { Text(stringResource(R.string.settings_chat_sounds_burst_hint)) })
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.settings_chat_sounds_burst_hint)) },
+                    colors =
+                        androidx.compose.material3.ListItemDefaults
+                            .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                )
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsNavigationRow(
                     title = stringResource(R.string.settings_chat_sounds_melody),
@@ -361,7 +366,14 @@ private fun SoundSlider(
 ) {
     val units = valueLabel(value)
     ListItem(
-        headlineContent = { Text("$label: $units") },
+        colors =
+            androidx.compose.material3.ListItemDefaults
+                .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+        headlineContent = { Text(label) },
+        trailingContent = {
+            io.github.trevarj.motd.ui.components
+                .MetadataPill(units)
+        },
         supportingContent = {
             Slider(
                 value = value.toFloat(),

@@ -208,7 +208,7 @@ fun AudioMiniPlayer(
     }
 
     if (showDetails) {
-        ModalBottomSheet(onDismissRequest = { showDetails = false }) {
+        ModalBottomSheet(onDismissRequest = { showDetails = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface) {
             SheetSystemBars()
             AudioDetailsSheet(
                 attachment = attachment,

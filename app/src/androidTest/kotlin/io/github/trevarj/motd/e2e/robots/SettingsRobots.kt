@@ -111,13 +111,39 @@ internal class SettingsRobot(
             scrollContainerTo("${sheet}_options", default)
             click(default)
             compose.onNodeWithTag(default).assertIsSelected()
+            assertResolvedShapeBaseline(surface, default)
             assertDisplayed(sheet)
             dismissChoiceSheet(sheet)
             scrollToAndClick("settings_${surface}_shape_picker")
             scrollContainerTo("${sheet}_options", default)
             compose.onNodeWithTag(default).assertIsSelected()
+            assertResolvedShapeBaseline(surface, default)
             dismissChoiceSheet(sheet)
         }
+    }
+
+    private fun assertResolvedShapeBaseline(
+        surface: String,
+        tag: String,
+    ) {
+        val resources =
+            androidx.test.platform.app.InstrumentationRegistry
+                .getInstrumentation()
+                .targetContext.resources
+        val expected =
+            when (surface) {
+                "input" -> listOf(16, 28).map { resources.getString(io.github.trevarj.motd.R.string.settings_shape_radius, it) }
+                "chat_card" -> listOf(resources.getString(io.github.trevarj.motd.R.string.settings_shape_radius, 16))
+                "avatar" -> listOf(resources.getString(io.github.trevarj.motd.R.string.settings_avatar_shape_baseline))
+                else -> listOf(resources.getString(io.github.trevarj.motd.R.string.settings_media_shape_baseline))
+            }
+        val text =
+            compose
+                .onNodeWithTag(tag)
+                .fetchSemanticsNode()
+                .config[SemanticsProperties.Text]
+                .map { it.text }
+        org.junit.Assert.assertTrue("The persisted baseline exposes its actual rendered geometry", expected.any { it in text })
     }
 
     private val surfaceShapeChoices = listOf("input" to "square", "avatar" to "circle", "chat_card" to "soft", "media" to "rounded")

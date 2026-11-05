@@ -86,6 +86,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -602,6 +603,8 @@ internal fun PhotoPickerSheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         modifier = Modifier.testTag("attachment_photo_sheet"),
@@ -611,6 +614,7 @@ internal fun PhotoPickerSheet(
             Text(
                 stringResource(R.string.upload_photos_title),
                 style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(12.dp))
@@ -670,7 +674,7 @@ private fun GalleryActionTile(
 ) {
     Surface(
         shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier =
             Modifier
                 .fillMaxWidth()
@@ -790,10 +794,10 @@ private fun SourceSheet(
     onCopyRecent: (UploadRecord) -> Unit,
     onDeleteRecent: (UploadRecord) -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("attachment_source_sheet")) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag("attachment_source_sheet")) {
         SheetSystemBars()
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(stringResource(R.string.upload_add_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.upload_add_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
             Text(stringResource(R.string.upload_add_subtitle), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -857,7 +861,7 @@ private fun SourceCard(
         enabled = enabled,
         modifier = modifier.heightIn(min = 108.dp),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Icon(icon, null, tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -876,15 +880,19 @@ private fun RecentUploadRow(
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     ListItem(
+        colors =
+            androidx.compose.material3.ListItemDefaults
+                .colors(containerColor = Color.Transparent),
         headlineContent = { Text(record.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
-            Text("${record.backend.label} • ${record.sizeBytes?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown)}", maxLines = 1)
+            io.github.trevarj.motd.ui.components
+                .MetadataPill("${record.backend.label} • ${record.sizeBytes?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown)}")
         },
         leadingContent = { Icon(if (record.mimeType?.startsWith("image/") == true) Icons.Outlined.Image else Icons.Outlined.Description, null) },
         trailingContent = {
             Box {
                 IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, stringResource(R.string.action_more)) }
-                DropdownMenu(menuOpen, { menuOpen = false }) {
+                DropdownMenu(menuOpen, { menuOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                     DropdownMenuItem({ Text(stringResource(R.string.upload_insert_link)) }, {
                         menuOpen = false
                         onInsert(record)
@@ -914,10 +922,10 @@ private fun TextPasteSheet(
     onDismiss: () -> Unit,
     onContinue: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface) {
         SheetSystemBars()
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(stringResource(R.string.upload_text_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.upload_text_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 value = text,
@@ -960,6 +968,8 @@ internal fun ConfirmationSheet(
             io.github.trevarj.motd.attachment
                 .validateEndpoint(config.endpoint) == null
     ModalBottomSheet(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
@@ -971,7 +981,7 @@ internal fun ConfirmationSheet(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
-                Text(stringResource(R.string.upload_confirm_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.upload_confirm_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(12.dp))
                 if (unsupportedUri) Text(stringResource(R.string.settings_local_media_required), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("attachment_thumbnail_error"))
                 val preview =
@@ -1045,7 +1055,7 @@ private fun BackendPickerSheet(
     onSelect: (PasteBackendConfig) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface) {
         SheetSystemBars()
         Column(
             Modifier
@@ -1053,19 +1063,16 @@ private fun BackendPickerSheet(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            Text(stringResource(R.string.upload_destination), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.upload_destination), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(8.dp))
             uploadDestinations(source, config, sojuFileHostAvailable).forEach { destination ->
-                ListItem(
-                    headlineContent = { Text(destination.label, fontWeight = FontWeight.SemiBold) },
-                    supportingContent = { Text(backendRetention(destination.config)) },
-                    trailingContent =
-                        if (sameDestination(config, destination.config)) {
-                            { Text("Selected", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        } else {
-                            null
-                        },
-                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onSelect(destination.config) },
+                io.github.trevarj.motd.ui.settings.RadioRow(
+                    label = destination.label,
+                    subtitle = backendRetention(destination.config),
+                    selected = sameDestination(config, destination.config),
+                    enabled = true,
+                    onClick = { onSelect(destination.config) },
+                    modifier = Modifier.clip(RoundedCornerShape(16.dp)),
                 )
             }
             Spacer(Modifier.height(20.dp))
@@ -1075,7 +1082,7 @@ private fun BackendPickerSheet(
 
 @Composable
 private fun AttachmentMetadata(source: AttachmentSource) {
-    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             val image =
                 source is AttachmentSource.Photo ||
@@ -1084,16 +1091,14 @@ private fun AttachmentMetadata(source: AttachmentSource) {
             Icon(if (image) Icons.Outlined.Image else Icons.Outlined.Description, null, modifier = Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(source.displayName(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
+                Text(source.displayName(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                io.github.trevarj.motd.ui.components.MetadataPill(
                     when (source) {
                         is AttachmentSource.Text -> pluralStringResource(R.plurals.upload_character_count, source.text.length, source.text.length)
                         is AttachmentSource.Document -> stringResource(R.string.upload_metadata, source.mimeType ?: stringResource(R.string.upload_type_unknown), source.size?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown))
                         is AttachmentSource.Photo -> stringResource(R.string.upload_metadata, source.mimeType ?: stringResource(R.string.upload_type_photo), source.size?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown))
                         is AttachmentSource.LocalFile -> stringResource(R.string.upload_metadata, source.mimeType, source.size?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown))
                     },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -1152,7 +1157,7 @@ private fun UploadProgressSheet(
     progress: UploadProgress,
     onCancel: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onCancel, dragHandle = null) {
+    ModalBottomSheet(onDismissRequest = onCancel, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, dragHandle = null) {
         SheetSystemBars()
         Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Outlined.CloudUpload, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)

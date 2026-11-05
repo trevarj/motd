@@ -106,8 +106,12 @@ fun CreateContactInviteContent(
     val scope = rememberCoroutineScope()
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {
             TopAppBar(
+                colors =
+                    androidx.compose.material3.TopAppBarDefaults
+                        .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                 title = { Text(stringResource(R.string.contact_invite_create_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -264,7 +268,7 @@ private fun ContactInviteNetworkSelector(
                         stateDescription = selected.name
                     }.testTag("contact_invite_network_selector"),
         )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
             networks.forEach { network ->
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.contact_invite_network_option, network.name, network.nick)) },

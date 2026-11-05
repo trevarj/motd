@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -136,6 +137,7 @@ fun ManageFoldersScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         modifier = Modifier.testTag("screen_manage_folders"),
         topBar = {
             FolderManagementTopBar(
@@ -205,6 +207,9 @@ internal fun FolderManagementTopBar(
     onCreate: () -> Unit,
 ) {
     TopAppBar(
+        colors =
+            androidx.compose.material3.TopAppBarDefaults
+                .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
         title = { Text(stringResource(R.string.folders_manage)) },
         navigationIcon = {
             IconButton(onClick = onBack) {
@@ -247,9 +252,13 @@ fun FolderEditorScreen(
     }
     val visible = state.chats.filter { query.isBlank() || it.displayName.contains(query, ignoreCase = true) || it.networkName.contains(query, ignoreCase = true) }
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         modifier = Modifier.testTag("screen_folder_editor"),
         topBar = {
             TopAppBar(
+                colors =
+                    androidx.compose.material3.TopAppBarDefaults
+                        .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                 title = { Text(stringResource(if (folderId == 0L) R.string.folders_create else R.string.folders_edit)) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back)) } },
                 actions = {
@@ -272,12 +281,23 @@ fun FolderEditorScreen(
             LazyColumn(modifier = Modifier.weight(1f)) {
                 items(visible, key = ChatListRow::bufferId) { chat ->
                     Row(
-                        modifier = Modifier.fillMaxWidth().clickable { selected = if (chat.bufferId in selected) selected - chat.bufferId else selected + chat.bufferId }.padding(vertical = 8.dp),
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .background(if (chat.bufferId in selected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent)
+                                .clickable { selected = if (chat.bufferId in selected) selected - chat.bufferId else selected + chat.bufferId }
+                                .padding(vertical = 8.dp),
                     ) {
-                        Checkbox(chat.bufferId in selected, { checked -> selected = if (checked) selected + chat.bufferId else selected - chat.bufferId })
+                        Checkbox(
+                            chat.bufferId in selected,
+                            { checked -> selected = if (checked) selected + chat.bufferId else selected - chat.bufferId },
+                            colors =
+                                androidx.compose.material3.CheckboxDefaults
+                                    .colors(checkedColor = MaterialTheme.colorScheme.onSecondaryContainer, checkmarkColor = MaterialTheme.colorScheme.secondaryContainer),
+                        )
                         Column {
-                            Text(chat.displayName)
-                            Text(chat.networkName, style = MaterialTheme.typography.bodySmall)
+                            Text(chat.displayName, color = if (chat.bufferId in selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface)
+                            Text(chat.networkName, style = MaterialTheme.typography.bodySmall, color = if (chat.bufferId in selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }

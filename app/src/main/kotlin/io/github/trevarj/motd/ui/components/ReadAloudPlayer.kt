@@ -162,7 +162,7 @@ fun ReadAloudVoiceOptions(
     var draft by remember(config) { mutableStateOf(config.options) }
     var voiceMenu by remember { mutableStateOf(false) }
     LaunchedEffect(config) { onReloadVoices() }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         SheetSystemBars()
         Column(
             Modifier
@@ -171,8 +171,8 @@ fun ReadAloudVoiceOptions(
                 .padding(horizontal = 24.dp, vertical = 12.dp)
                 .testTag("read_aloud_voice_options"),
         ) {
-            Text(stringResource(R.string.read_aloud_options), style = MaterialTheme.typography.titleLarge)
-            Text(stringResource(R.string.settings_voice_profile_scope), style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.read_aloud_options), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.settings_voice_profile_scope), style = MaterialTheme.typography.bodyMedium, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
             Text(stringResource(R.string.read_aloud_voice_disclosure), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 12.dp))
             Text(stringResource(R.string.read_aloud_voice), style = MaterialTheme.typography.labelLarge)
             OutlinedButton(onClick = { voiceMenu = true }, enabled = !voices.loading && voices.voices.isNotEmpty(), modifier = Modifier.fillMaxWidth().testTag("read_aloud_voice")) {
@@ -185,7 +185,7 @@ fun ReadAloudVoiceOptions(
                         },
                     ),
                 )
-                DropdownMenu(expanded = voiceMenu, onDismissRequest = { voiceMenu = false }, modifier = Modifier.heightIn(max = 280.dp).testTag("read_aloud_voice_menu")) {
+                DropdownMenu(expanded = voiceMenu, onDismissRequest = { voiceMenu = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.heightIn(max = 280.dp).testTag("read_aloud_voice_menu")) {
                     voices.voices.forEach { voice ->
                         DropdownMenuItem(
                             modifier =

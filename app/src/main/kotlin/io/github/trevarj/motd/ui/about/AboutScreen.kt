@@ -104,12 +104,10 @@ internal fun AboutContent(
             )
             Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         }
-        Text(
-            aboutBuildLabel(appVersion(context), BuildConfig.MOTD_SOURCE_COMMIT),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Center,
-        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            io.github.trevarj.motd.ui.components
+                .MetadataPill(aboutBuildLabel(appVersion(context), BuildConfig.MOTD_SOURCE_COMMIT))
+        }
         Text(
             stringResource(R.string.about_blurb),
             color = MaterialTheme.colorScheme.onSurfaceVariant,

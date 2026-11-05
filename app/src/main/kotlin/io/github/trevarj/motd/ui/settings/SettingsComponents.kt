@@ -38,6 +38,7 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -46,9 +47,12 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
@@ -72,7 +77,9 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.ui.components.MetadataPill
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.ensureContrast
 import kotlinx.coroutines.delay
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
@@ -103,6 +110,11 @@ internal fun SettingsScaffold(
                     }
                 },
                 actions = topActions,
+                colors =
+                    TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                        scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ),
             )
         },
     ) { padding ->
@@ -155,14 +167,14 @@ internal fun SettingsNavigationRow(
 ) {
     val row: @Composable (Modifier) -> Unit = { targetModifier ->
         ListItem(
-            leadingContent = icon?.let { image -> ({ Icon(image, contentDescription = null) }) },
+            leadingContent = icon?.let { image -> ({ Icon(image, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }) },
             headlineContent = { Text(title, fontWeight = FontWeight.Medium) },
             supportingContent =
                 if (summary != null || value != null) {
                     {
-                        Column {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             summary?.let { Text(it) }
-                            value?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            value?.let { MetadataPill(it) }
                         }
                     }
                 } else {
@@ -188,11 +200,16 @@ internal fun SettingsValueRow(
     value: String,
     modifier: Modifier = Modifier,
     summary: String? = null,
+    compactValue: Boolean = true,
 ) {
     ListItem(
         headlineContent = { Text(title) },
-        supportingContent = summary?.let { text -> ({ Text(text) }) },
-        trailingContent = { Text(value, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+        supportingContent = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                summary?.let { Text(it) }
+                if (compactValue) MetadataPill(value) else Text(value)
+            }
+        },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = modifier.fillMaxWidth(),
     )
@@ -227,28 +244,58 @@ internal fun RadioRow(
     subtitle: String? = null,
     supportingContent: (@Composable () -> Unit)? = null,
 ) {
+    val scheme = MaterialTheme.colorScheme
+    val targetColor = LocalSettingsTargetColor.current
+    val contentColor =
+        if (selected && targetColor.alpha > 0f) {
+            val fill = targetColor.compositeOver(scheme.secondaryContainer)
+            remember(scheme.onSecondaryContainer, fill) { ensureContrast(scheme.onSecondaryContainer, listOf(fill)) }
+        } else if (selected) {
+            scheme.onSecondaryContainer
+        } else {
+            scheme.onSurface
+        }
     ListItem(
         modifier =
-            modifier
+            Modifier
+                .background(if (selected) scheme.secondaryContainer else Color.Transparent)
+                .then(modifier)
                 .fillMaxWidth()
                 .heightIn(min = 48.dp)
                 .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick),
-        leadingContent = { RadioButton(selected, onClick = null, enabled = enabled) },
+        leadingContent = {
+            RadioButton(
+                selected,
+                onClick = null,
+                enabled = enabled,
+                colors = RadioButtonDefaults.colors(selectedColor = contentColor),
+            )
+        },
         headlineContent = {
-            Text(label, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f))
+            Text(label, color = contentColor.copy(alpha = if (enabled) 1f else 0.38f))
         },
         supportingContent =
             if (subtitle != null || supportingContent != null) {
                 {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        subtitle?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (selected) contentColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         supportingContent?.invoke()
                     }
                 }
             } else {
                 null
             },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        colors =
+            ListItemDefaults.colors(
+                containerColor = Color.Transparent,
+                supportingColor = if (selected) contentColor else scheme.onSurfaceVariant,
+            ),
     )
 }
 
@@ -307,7 +354,7 @@ internal fun SectionHeader(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp).semantics { heading() },
     )
@@ -318,7 +365,7 @@ internal fun SubLabel(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 2.dp).semantics { heading() },
     )
 }
@@ -379,6 +426,8 @@ internal fun <T> SingleChoiceSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = preview != null),
         modifier = Modifier.testTag(tag),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         SheetSystemBars()
         LazyColumn(Modifier.fillMaxWidth().selectableGroup().testTag("${tag}_options")) {
@@ -405,6 +454,8 @@ internal fun <T> SingleChoiceSheet(
     }
 }
 
+private val LocalSettingsTargetColor = compositionLocalOf { Color.Transparent }
+
 /** Brings matching control into view and briefly highlights it. */
 @Composable
 internal fun SettingsTarget(
@@ -426,12 +477,14 @@ internal fun SettingsTarget(
             highlighted = false
         }
     }
-    content(
-        Modifier
-            .bringIntoViewRequester(requester)
-            .background(color)
-            .then(if (requested == target) Modifier.testTag("settings_target_highlight_$target") else Modifier),
-    )
+    CompositionLocalProvider(LocalSettingsTargetColor provides color) {
+        content(
+            Modifier
+                .bringIntoViewRequester(requester)
+                .background(color)
+                .then(if (requested == target) Modifier.testTag("settings_target_highlight_$target") else Modifier),
+        )
+    }
 }
 
 /** "host:port" plus bouncer role context. */

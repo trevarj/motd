@@ -59,7 +59,7 @@ class ChannelInfoTopicEditUiTest {
         compose.setContent {
             MotdTheme(dynamicColor = false, themePreset = preset.value) {
                 val scheme = MaterialTheme.colorScheme
-                fill = scheme.background
+                fill = scheme.surfaceContainerLowest
                 linkInk = ensureContrast(scheme.primary, listOf(fill), MESSAGE_TEXT_CONTRAST)
                 rosterInk = scheme.onSurfaceVariant
                 ChannelInfoContent(

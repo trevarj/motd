@@ -190,8 +190,12 @@ fun SharePickerScreen(
     val scope = rememberCoroutineScope()
     val contextShare = viewModel.contextShare
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {
             TopAppBar(
+                colors =
+                    androidx.compose.material3.TopAppBarDefaults
+                        .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                 title = {
                     Text(stringResource(if (contextShare == null) R.string.share_picker_title else R.string.agent_context_picker_title))
                 },
@@ -212,7 +216,7 @@ fun SharePickerScreen(
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (contextShare != null) {
                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                    Text(contextShare.sourceLabel, style = MaterialTheme.typography.titleMedium)
+                    Text(contextShare.sourceLabel, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                     Text(stringResource(R.string.agent_context_warning), modifier = Modifier.testTag("agent_context_warning"))
                     Text(contextShare.coverage, modifier = Modifier.testTag("agent_context_coverage"))
                     TextButton(

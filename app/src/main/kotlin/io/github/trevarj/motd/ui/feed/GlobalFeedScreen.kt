@@ -125,8 +125,12 @@ fun GlobalFeedScreen(
         onOpenAiSetup,
     )
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {
             TopAppBar(
+                colors =
+                    androidx.compose.material3.TopAppBarDefaults
+                        .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -194,8 +198,12 @@ fun MentionsScreen(
         onAtNewestChanged = viewModel::reportViewportAtNewest,
     )
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {
             TopAppBar(
+                colors =
+                    androidx.compose.material3.TopAppBarDefaults
+                        .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))

@@ -139,6 +139,7 @@ fun NetworkForm(
                 Text(
                     stringResource(R.string.onboarding_auth_title),
                     style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(top = 8.dp),
                 )
@@ -326,6 +327,7 @@ internal fun NetworkIdentityFields(
             Text(
                 stringResource(R.string.onboarding_auth_title),
                 style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(top = 4.dp),
             )
@@ -743,6 +745,7 @@ private fun AuthSection(
                             Text(
                                 stringResource(R.string.onboarding_auth_nickserv_syntax),
                                 style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
                             )
                             Column(Modifier.selectableGroup()) {
                                 NickServSyntaxOption(
@@ -907,7 +910,7 @@ private fun FormDisclosure(
                     .padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null)
         }
         if (expanded) {

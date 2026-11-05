@@ -296,6 +296,9 @@ private fun PushStatusCard(
             },
         )
     Card(
+        colors =
+            androidx.compose.material3.CardDefaults
+                .cardColors(containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerLow),
         modifier =
             Modifier
                 .padding(horizontal = 16.dp, vertical = 8.dp)
@@ -325,7 +328,7 @@ private fun PushStatusCard(
                 )
             }
             availability.errorCode?.let {
-                Text(stringResource(R.string.settings_delivery_push_error, it.replace('_', ' ').lowercase()))
+                Text(stringResource(R.string.settings_delivery_push_error, it.replace('_', ' ').lowercase()), color = androidx.compose.material3.MaterialTheme.colorScheme.error)
             }
             Text(stringResource(R.string.settings_delivery_push_scope))
             androidx.compose.foundation.layout.Row {
@@ -357,6 +360,11 @@ private fun PushStatusCard(
 @Composable
 private fun NotificationPermissionWarning(onFixNotifications: () -> Unit) {
     Card(
+        colors =
+            androidx.compose.material3.CardDefaults.cardColors(
+                containerColor = io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors.current.warningContainer,
+                contentColor = io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors.current.onWarningContainer,
+            ),
         modifier =
             Modifier
                 .padding(horizontal = 16.dp, vertical = 8.dp)
@@ -370,6 +378,9 @@ private fun NotificationPermissionWarning(onFixNotifications: () -> Unit) {
             Text(stringResource(R.string.settings_delivery_notifications_blocked_desc))
             TextButton(
                 onClick = onFixNotifications,
+                colors =
+                    androidx.compose.material3.ButtonDefaults
+                        .textButtonColors(contentColor = io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors.current.onWarningContainer),
                 modifier = Modifier.testTag("settings_fix_notifications"),
             ) { Text(stringResource(R.string.settings_delivery_push_fix_notifications)) }
         }

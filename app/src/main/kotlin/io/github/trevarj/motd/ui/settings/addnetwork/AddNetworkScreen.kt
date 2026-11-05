@@ -359,6 +359,9 @@ private fun BouncerKindSelector(
 @Composable
 private fun TestingRow(connState: IrcClientState?) {
     ListItem(
+        colors =
+            androidx.compose.material3.ListItemDefaults
+                .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
         headlineContent = { Text(stringResource(R.string.add_network_testing)) },
         supportingContent = { Text(connStateLabel(connState)) },
         leadingContent = { CircularProgressIndicator(modifier = Modifier.size(24.dp)) },

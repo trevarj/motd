@@ -206,6 +206,7 @@ internal fun BackupRestoreContent(
                         SettingsValueRow(
                             title = stringResource(R.string.backup_selected_file),
                             value = filename,
+                            compactValue = false,
                             summary =
                                 stringResource(
                                     if (completedImport?.encrypted ?: state.importEncrypted) {
@@ -357,8 +358,8 @@ internal fun ImportModeRow(
 @Composable
 private fun ImportPreview(preview: ConfigurationImportPreview) {
     Column(Modifier.fillMaxWidth().testTag("backup_import_preview"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(stringResource(R.string.backup_preview_title), fontWeight = FontWeight.SemiBold)
-        Text(stringResource(R.string.backup_preview_source, preview.appVersion, DateFormat.getDateTimeInstance().format(Date(preview.exportedAtEpochMillis))))
+        SectionHeader(stringResource(R.string.backup_preview_title))
+        Text(stringResource(R.string.backup_preview_source, preview.appVersion, DateFormat.getDateTimeInstance().format(Date(preview.exportedAtEpochMillis))), fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
         Text(pluralStringResource(R.plurals.backup_preview_networks, preview.networkCount, preview.networkCount))
         Text(stringResource(R.string.backup_preview_changes, preview.addedNetworks, preview.updatedNetworks, preview.removedNetworks))
         Text(stringResource(R.string.backup_preview_folders, preview.folderCount, preview.folderAssignmentCount))

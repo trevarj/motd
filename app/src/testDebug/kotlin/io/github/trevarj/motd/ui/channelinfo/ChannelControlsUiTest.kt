@@ -138,6 +138,10 @@ class ChannelControlsUiTest {
     @Test
     @Config(qualifiers = "w640dp-h360dp-land")
     fun notificationPolicyAndWatchActionsRemainReachableInShortWindows() {
+        val serverSource =
+            org.robolectric.RuntimeEnvironment
+                .getApplication()
+                .getString(io.github.trevarj.motd.R.string.notification_source_server)
         val ownerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val initial =
             NotificationConfig(
@@ -180,7 +184,7 @@ class ChannelControlsUiTest {
                     }
                 compose
                     .onNodeWithTag("channelinfo_notify_level")
-                    .assertTextContains("$policy · ${if (mode == null) "Server default" else "Channel override"}", substring = true)
+                    .assertTextContains("$policy · ${if (mode == null) serverSource else "Channel override"}", substring = true)
                     .assertTextContains("Chat muted", substring = true)
                     .assertTextContains("Notify on all: Forever", substring = true)
             }
@@ -197,7 +201,7 @@ class ChannelControlsUiTest {
                 compose
                     .onNodeWithTag("channelinfo_notify_level")
                     .assertTextContains("Notify on all: $remaining", substring = true)
-                    .assertTextContains("All messages · Server default", substring = true)
+                    .assertTextContains("All messages · $serverSource", substring = true)
                     .assertTextContains("Chat muted", substring = true)
                 compose.runOnIdle {
                     val config = (notificationSettings.state.value as NotificationSettingsState.Ready).config
@@ -212,7 +216,7 @@ class ChannelControlsUiTest {
                 .assertIsDisplayed()
                 .performClick()
             compose.onNodeWithTag("channelinfo_notify_dialog").assertDoesNotExist()
-            compose.onNodeWithTag("channelinfo_notify_level").assertTextContains("All messages · Server default\nChat muted")
+            compose.onNodeWithTag("channelinfo_notify_level").assertTextContains("All messages · $serverSource\nChat muted")
             compose.runOnIdle {
                 val config = (notificationSettings.state.value as NotificationSettingsState.Ready).config
                 assertEquals(mapOf(2L to Long.MAX_VALUE), config.watches)

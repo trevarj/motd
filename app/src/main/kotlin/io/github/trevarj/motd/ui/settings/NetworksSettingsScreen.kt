@@ -80,6 +80,9 @@ fun NetworksSettingsContent(
         if (networks.isEmpty()) {
             SettingsGroup {
                 ListItem(
+                    colors =
+                        androidx.compose.material3.ListItemDefaults
+                            .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
                     headlineContent = { Text(stringResource(R.string.settings_networks_empty_title)) },
                     supportingContent = { Text(stringResource(R.string.settings_networks_empty_message)) },
                     modifier = Modifier.testTag("settings_networks_empty"),

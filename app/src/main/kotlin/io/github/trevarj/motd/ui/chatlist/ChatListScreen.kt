@@ -624,7 +624,7 @@ fun ChatListContent(
     ) {
         Scaffold(
             modifier = Modifier.testTag("screen_chat_list"),
-            containerColor = MaterialTheme.colorScheme.surface,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 ChatListTopBar(
@@ -788,7 +788,7 @@ fun ChatListContent(
                                                     Icon(Icons.Filled.MoreVert, stringResource(R.string.chatlist_more_actions))
                                                 }
                                             }
-                                            DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                                            DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                                                 if (!archiveMode) {
                                                     DropdownMenuItem(
                                                         text = { Text(networkActivityMenuTitle) },
@@ -887,7 +887,7 @@ fun ChatListContent(
                                                     Icon(Icons.Filled.MoreVert, stringResource(R.string.chatlist_more_actions))
                                                 }
                                             }
-                                            DropdownMenu(moreOpen, { moreOpen = false }, modifier = Modifier.testTag("chatlist_more_menu")) {
+                                            DropdownMenu(moreOpen, { moreOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.testTag("chatlist_more_menu")) {
                                                 DropdownMenuItem(
                                                     text = { Text(networkActivityMenuTitle) },
                                                     leadingIcon = { Icon(Icons.Outlined.Lan, contentDescription = null, modifier = Modifier.testTag("chatlist_network_activity_icon")) },
@@ -1349,7 +1349,7 @@ internal fun FolderTabStrip(
                             Modifier
                                 .testTag("chatlist_folder_tab_pill_mentions")
                                 .heightIn(min = 40.dp)
-                                .background(if (mentionsSelected) MaterialTheme.colorScheme.primary else Color.Transparent, MotdShapes.channelAvatar)
+                                .background(if (mentionsSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent, MotdShapes.channelAvatar)
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1397,7 +1397,7 @@ internal fun FolderTabStrip(
                             FolderIcon(
                                 FolderIconRef(folder.folder.iconKind, folder.folder.iconKey),
                                 contentDescription = null,
-                                tint = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp).testTag("chatlist_folder_tab_icon_${folder.folder.id}"),
                             )
                         },
@@ -1439,7 +1439,7 @@ private fun FolderPillTab(
     content: @Composable () -> Unit,
 ) {
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
-    val contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+    val contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
     LaunchedEffect(selected) {
         if (selected) bringIntoViewRequester.bringIntoView()
     }
@@ -1472,7 +1472,7 @@ private fun FolderTabLabel(
             Modifier
                 .testTag(pillTag)
                 .heightIn(min = 40.dp)
-                .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent, MotdShapes.channelAvatar)
+                .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent, MotdShapes.channelAvatar)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1497,9 +1497,9 @@ private fun FolderActivityBadge(
 ) {
     when {
         summary.mentionCount > 0 -> MentionBadge(count = summary.mentionCount, lowerBound = summary.mentionIncomplete)
-        summary.unreadCount > 0 -> UnreadBadge(count = summary.unreadCount, lowerBound = summary.unreadIncomplete, inverted = selected)
-        summary.advertisedActivity -> AdvertisedActivityDot(color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary)
-        summary.unreadIncomplete || summary.mentionIncomplete -> HistoryIncompleteBadge(color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+        summary.unreadCount > 0 -> UnreadBadge(count = summary.unreadCount, lowerBound = summary.unreadIncomplete)
+        summary.advertisedActivity -> AdvertisedActivityDot(color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary)
+        summary.unreadIncomplete || summary.mentionIncomplete -> HistoryIncompleteBadge(color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -2423,6 +2423,9 @@ private fun InvitationListItem(
             else -> stringResource(R.string.chatlist_invitation_pending)
         }
     Card(
+        colors =
+            androidx.compose.material3.CardDefaults
+                .cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         modifier =
             modifier
                 .fillMaxWidth()
@@ -2435,6 +2438,7 @@ private fun InvitationListItem(
             Text(
                 text = stringResource(R.string.chatlist_invitation_title, invitation.channel),
                 style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
             )
             Text(
                 text = stringResource(R.string.chatlist_invitation_from, invitation.inviter, invitation.networkName),
@@ -2490,8 +2494,8 @@ private fun ArchiveFolderCard(
     val spacing = LocalSpacing.current
     val committed = phase == ArchiveFolderPullPhase.REVEALED
     val pullBackground = chatListRowContainer(ChatListRowVisualState.UNREAD, MaterialTheme.colorScheme)
-    val backgroundColor = lerp(pullBackground, MaterialTheme.colorScheme.primaryContainer, activeProgress)
-    val contentColor = lerp(MaterialTheme.colorScheme.onSurface, MaterialTheme.colorScheme.onPrimaryContainer, activeProgress)
+    val backgroundColor = lerp(pullBackground, MaterialTheme.colorScheme.secondaryContainer, activeProgress)
+    val contentColor = lerp(MaterialTheme.colorScheme.onSurface, MaterialTheme.colorScheme.onSecondaryContainer, activeProgress)
     val hint = stringResource(R.string.chatlist_archived_pull_hint)
     val armedPrompt = stringResource(R.string.chatlist_archived_pull_armed)
     Row(
@@ -2719,7 +2723,7 @@ private fun FoolsSectionHeader(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface)
+                .background(MaterialTheme.colorScheme.surfaceContainerLowest)
                 .clickable(onClick = onToggle)
                 .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -3015,7 +3019,7 @@ private fun ChatListTopBar(
 ) {
     val colors =
         TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
             scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         )
     var titleHeightPx by remember { mutableIntStateOf(0) }
@@ -3237,13 +3241,13 @@ private fun SectionHeader(text: String) {
     Text(
         text = text.uppercase(),
         style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.SemiBold,
         // Same container as the row wrappers so the list reads as one continuous surface.
         modifier =
             Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface)
+                .background(MaterialTheme.colorScheme.surfaceContainerLowest)
                 .padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
     )
 }

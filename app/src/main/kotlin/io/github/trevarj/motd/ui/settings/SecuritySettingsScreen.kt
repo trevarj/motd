@@ -271,6 +271,7 @@ internal fun UploadPrivacyControls(
             Text(
                 text = stringResource(R.string.settings_upload_privacy),
                 style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
             when (config.backend) {

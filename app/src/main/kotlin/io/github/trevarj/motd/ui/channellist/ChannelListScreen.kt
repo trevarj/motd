@@ -39,7 +39,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -103,8 +102,12 @@ internal fun ChannelListContent(
         mutableStateOf(TextFieldValue(state.query))
     }
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {
             TopAppBar(
+                colors =
+                    androidx.compose.material3.TopAppBarDefaults
+                        .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                 title = {
                     Column {
                         Text(stringResource(R.string.channel_list_title))
@@ -309,7 +312,7 @@ private fun ChannelList(
     onJoin: (String) -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val topicFill = ListItemDefaults.colors().containerColor.compositeOver(scheme.background)
+    val topicFill = scheme.surfaceContainerLow
     val readingInk = ensureContrast(readingInk(scheme), listOf(topicFill), MESSAGE_TEXT_CONTRAST)
     LazyColumn(Modifier.fillMaxSize()) {
         // Keyed by channel name for stable recomposition over large lists (cap 2000).
@@ -322,6 +325,7 @@ private fun ChannelList(
                     identityRules,
                 )
             ListItem(
+                colors = ListItemDefaults.colors(containerColor = topicFill),
                 headlineContent = { Text(listing.name) },
                 supportingContent = {
                     if (listing.topic.isNotBlank()) {

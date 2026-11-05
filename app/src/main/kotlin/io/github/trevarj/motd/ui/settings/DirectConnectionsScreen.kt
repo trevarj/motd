@@ -57,6 +57,9 @@ fun DirectConnectionsContent(
     SettingsScaffold(title = stringResource(R.string.settings_direct_connections), onBack = onBack) {
         Column(Modifier.fillMaxWidth()) {
             ListItem(
+                colors =
+                    androidx.compose.material3.ListItemDefaults
+                        .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
                 headlineContent = { Text(stringResource(R.string.settings_direct_connections_disclosure)) },
                 supportingContent = {
                     Text(stringResource(R.string.settings_direct_connections_disclosure_desc))
@@ -65,6 +68,9 @@ fun DirectConnectionsContent(
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             ListItem(
+                colors =
+                    androidx.compose.material3.ListItemDefaults
+                        .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
                 headlineContent = { Text(stringResource(R.string.settings_direct_connections_mode)) },
                 supportingContent = { Text(stringResource(R.string.settings_direct_connections_mode_desc)) },
             )
@@ -72,10 +78,14 @@ fun DirectConnectionsContent(
             Text(
                 text = stringResource(R.string.settings_direct_connections_recent),
                 style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
             if (transfers.isEmpty()) {
                 ListItem(
+                    colors =
+                        androidx.compose.material3.ListItemDefaults
+                            .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
                     headlineContent = { Text(stringResource(R.string.settings_direct_connections_empty)) },
                     supportingContent = { Text(stringResource(R.string.settings_direct_connections_empty_desc)) },
                 )
@@ -120,6 +130,9 @@ private fun DirectConnectionTransferRow(
             },
         )
     ListItem(
+        colors =
+            androidx.compose.material3.ListItemDefaults
+                .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
         headlineContent = { Text(transfer.displayFilename) },
         supportingContent = {
             Text(stringResource(R.string.settings_direct_transfer_summary, direction, protocol, state))

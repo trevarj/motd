@@ -4,6 +4,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -12,6 +14,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** A canned moderation reason. [key] only names the test tag; [label] is the text that is sent. */
 enum class ReasonPreset(
@@ -50,6 +53,7 @@ fun ReasonPresetChips(
                 selected = current == label,
                 onClick = { onSelect(label) },
                 label = { Text(label) },
+                leadingIcon = if (current == label) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
                 modifier = Modifier.testTag("${tagPrefix}_${preset.key}"),
             )
         }

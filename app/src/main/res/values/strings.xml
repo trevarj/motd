@@ -220,7 +220,7 @@
     <!-- Settings (WP8) -->
     <string name="settings_title">Settings</string>
     <string name="settings_appearance">Appearance</string>
-    <string name="settings_theme_system">System default</string>
+    <string name="settings_theme_system">Device appearance · %1$s</string>
     <string name="settings_theme_light">Light</string>
     <string name="settings_theme_dark">Dark</string>
     <string name="settings_theme_amoled">AMOLED (true black)</string>
@@ -231,11 +231,11 @@
     <string name="settings_true_black_unavailable_desc">Available with dark themes.</string>
     <string name="settings_follow_system">Match device light/dark mode</string>
     <string name="settings_follow_system_desc">Switch between this theme\'s light and dark variants with your device.</string>
-    <string name="settings_follow_system_system_desc">System default already follows your device.</string>
+    <string name="settings_follow_system_system_desc">Device appearance already follows your device\'s light or dark mode.</string>
     <string name="settings_follow_system_unavailable_desc">This theme does not have both light and dark variants.</string>
     <string name="settings_dynamic_color">Use wallpaper colors</string>
     <string name="settings_dynamic_color_desc">Use colors from your phone wallpaper, not your chat wallpaper (Android 12+).</string>
-    <string name="settings_dynamic_color_unavailable">Choose System default for Theme to use phone wallpaper colors (Android 12+).</string>
+    <string name="settings_dynamic_color_unavailable">Choose Device appearance for Theme to use phone wallpaper colors (Android 12+).</string>
     <string name="settings_theme_text_colors">Match text to theme</string>
     <string name="settings_theme_text_colors_desc">Use the theme\'s text colors across the app and chats instead of near-black or near-white text.</string>
     <string name="settings_theme">Theme</string>
@@ -259,16 +259,16 @@
     <string name="settings_delivery">Message delivery</string>
     <string name="settings_notifications">Notifications</string>
     <string name="settings_notifications_summary">Global, server, and channel alerts and watches</string>
-    <string name="notification_global_default">Default notifications</string>
-    <string name="notification_server_default">Server default</string>
+    <string name="notification_global_default">Global notifications</string>
+    <string name="notification_server_default">Server notifications</string>
     <string name="notification_mode_all">All messages</string>
     <string name="notification_mode_mentions">Mentions and direct messages</string>
     <string name="notification_mode_off">Off</string>
-    <string name="notification_use_global">Use global default (%1$s)</string>
-    <string name="notification_use_server">Use server default (%1$s)</string>
-    <string name="notification_use_server_unavailable">Use server default</string>
-    <string name="notification_source_global">Global default</string>
-    <string name="notification_source_server">Server default</string>
+    <string name="notification_use_global">Follow global setting (%1$s)</string>
+    <string name="notification_use_server">Follow server setting (%1$s)</string>
+    <string name="notification_use_server_unavailable">Follow server setting</string>
+    <string name="notification_source_global">Global setting</string>
+    <string name="notification_source_server">Server setting</string>
     <string name="notification_source_channel">Channel override</string>
     <string name="notification_policy_summary">%1$s · %2$s</string>
     <string name="notification_server_summary">%1$s · %2$s · %3$s</string>
@@ -984,8 +984,8 @@
     <string name="settings_nickname_backgrounds_desc">Tint Compact and Two-line message backgrounds by sender. Nickname colors and mention highlights are unchanged.</string>
     <string name="settings_composer_style">Message input layout</string>
     <string name="settings_composer_style_desc">Choose how the message input and its tools appear in chats.</string>
-    <string name="settings_composer_style_comfortable">Default</string>
-    <string name="settings_composer_style_comfortable_desc">Floating pill with familiar controls.</string>
+    <string name="settings_composer_style_comfortable">Floating</string>
+    <string name="settings_composer_style_comfortable_desc">Floating input with familiar controls.</string>
     <string name="settings_composer_style_large">Large</string>
     <string name="settings_composer_style_large_desc">Roomy input with tools always visible above.</string>
     <string name="settings_composer_style_compact">Nickname</string>
@@ -998,8 +998,13 @@
     <string name="settings_chat_card_shape_desc">Corners for chats and the archive card.</string>
     <string name="settings_media_shape">Media preview shape</string>
     <string name="settings_media_shape_desc">Corners for images, videos, links, and audio messages.</string>
-    <string name="settings_shape_default">Default</string>
-    <string name="settings_shape_default_desc">Keep the current shape</string>
+    <string name="settings_shape_radius">Rounded · %1$d dp</string>
+    <string name="settings_input_shape_baseline_desc">Follows the input layout: 28 dp in Floating and Nickname; 16 dp in Large.</string>
+    <string name="settings_avatar_shape_baseline">People: circles · Channels: rounded squares</string>
+    <string name="settings_avatar_shape_baseline_desc">Circles for people; 30 percent rounding for channels and networks.</string>
+    <string name="settings_chat_card_shape_baseline_desc">16 dp corners for chats and the archive card.</string>
+    <string name="settings_media_shape_baseline">Mixed corners · 8–16 dp</string>
+    <string name="settings_media_shape_baseline_desc">Images and videos: %1$d dp in this layout (actions: 10 dp). Links: 12 dp cards and 8 dp thumbnails. Audio: 16 dp.</string>
     <string name="settings_icon_set">Icon set</string>
     <string name="settings_icon_set_desc">Choose Material or Lucide for interface icons.</string>
     <string name="settings_icon_set_material">Material</string>
@@ -1032,13 +1037,13 @@
     <string name="channelinfo_notify_mentions">Mentions only</string>
     <string name="chat_layout_title">Conversation layout</string>
     <string name="chat_layout_use_global">Use global setting</string>
-    <string name="chat_layout_use_server_default">Server default (Two-line)</string>
-    <string name="chat_layout_source_global">Global default: %1$s. Changes here are saved for this chat.</string>
-    <string name="chat_layout_overflow_global">Global default: %1$s</string>
-    <string name="chat_layout_overflow_server">Server default: %1$s</string>
+    <string name="chat_layout_use_server_default">Server layout (Two-line)</string>
+    <string name="chat_layout_source_global">Global setting: %1$s. Changes here are saved for this chat.</string>
+    <string name="chat_layout_overflow_global">Global setting: %1$s</string>
+    <string name="chat_layout_overflow_server">Server layout: %1$s</string>
     <string name="chat_layout_overflow_override">This chat: %1$s</string>
     <string name="chat_layout_write_failed">Couldn\'t save conversation layout</string>
-    <string name="chat_layout_source_server">Server default: %1$s. Changes here are saved for this chat.</string>
+    <string name="chat_layout_source_server">Server layout: %1$s. Changes here are saved for this chat.</string>
     <string name="chat_layout_source_override">This chat: %1$s. Changes are saved immediately.</string>
     <string name="settings_chat">Chat</string>
     <string name="settings_nick_colors">Colored nicknames</string>
@@ -1376,7 +1381,7 @@
     <string name="settings_show_timestamps">Show message times</string>
     <string name="settings_show_timestamps_desc">Show the time next to each message</string>
     <string name="settings_time_format">Time format</string>
-    <string name="settings_time_format_auto">System default</string>
+    <string name="settings_time_format_auto">Device · %1$s</string>
     <string name="settings_time_format_h12">12-hour</string>
     <string name="settings_time_format_h24">24-hour</string>
     <string name="settings_time_format_custom">Custom</string>
@@ -1384,7 +1389,7 @@
     <string name="settings_time_format_custom_help">SimpleDateFormat pattern — dd/MM/yyyy is day/month/year, HH:mm:ss is 24-hour time with seconds</string>
     <string name="settings_message_spacing">Message spacing</string>
     <string name="settings_message_spacing_compact">Compact</string>
-    <string name="settings_message_spacing_default">Default</string>
+    <string name="settings_message_spacing_default">1× spacing</string>
     <string name="settings_message_spacing_relaxed">Relaxed</string>
     <string name="settings_bubble_corners">Bubble shape</string>
     <string name="settings_bubble_corner_rounded">Rounded</string>
@@ -1396,7 +1401,10 @@
     <string name="settings_bubble_color_composer_preview">Type a message</string>
     <string name="settings_bubble_color_sent">Sent messages</string>
     <string name="settings_bubble_color_received">Received messages</string>
-    <string name="settings_bubble_color_default">Default</string>
+    <string name="settings_bubble_color_baseline_sent">Accent blend</string>
+    <string name="settings_bubble_color_baseline_received">Secondary surface</string>
+    <string name="settings_bubble_color_baseline_sent_desc">28 percent theme accent blend over the primary container for sent messages.</string>
+    <string name="settings_bubble_color_baseline_received_desc">Theme secondary surface for received messages and the input.</string>
     <string name="settings_bubble_color_surface_container">Surface</string>
     <string name="settings_bubble_color_surface_container_high">Raised surface</string>
     <string name="settings_bubble_color_primary">Primary</string>
@@ -2053,7 +2061,7 @@
     <string name="settings_wallpaper_importing">Importing image…</string>
     <string name="settings_wallpaper_invalid">Could not save wallpaper. Choose a valid image up to 20 MiB.</string>
     <string name="settings_wallpaper_outline_color">Outline color</string>
-    <string name="settings_wallpaper_color_default">Default (theme color)</string>
+    <string name="settings_wallpaper_color_default">Theme color · %1$s</string>
     <string name="settings_wallpaper_color_builtin_only">Outline color applies to builtin drawings only. Your color is retained for the fallback; photos keep their original colors.</string>
     <string name="settings_wallpaper_color_none">Choose a builtin wallpaper to change its outline color.</string>
     <string name="settings_wallpaper_color_wheel">Color wheel: hue and saturation. The sliders below also adjust these values.</string>
@@ -2076,9 +2084,9 @@
     <string name="settings_splash_screen_soft_wash">Soft wash</string>
     <string name="settings_splash_screen_traveling_pulse">Traveling pulse</string>
     <string name="settings_splash_screen_static">Static</string>
-    <string name="settings_splash_screen_default">Default</string>
+    <string name="settings_splash_screen_default">Traces the logo edge on launch.</string>
     <string name="settings_splash_screen_replay">Replay</string>
-    <string name="settings_app_icon_default">Default</string>
+    <string name="settings_app_icon_default">Teal ceramic</string>
     <string name="settings_app_icon_mono">Mono</string>
     <string name="settings_app_icon_terminal">Terminal</string>
     <string name="settings_app_icon_gruvbox">Gruvbox</string>
@@ -2123,7 +2131,7 @@
 
     <!-- App font picker -->
     <string name="settings_app_font">Font</string>
-    <string name="settings_font_system">System default</string>
+    <string name="settings_font_system">System typeface</string>
     <string name="settings_font_sans">Sans serif</string>
     <string name="settings_font_serif">Serif</string>
     <string name="settings_font_mono">Monospace</string>
@@ -2570,4 +2578,5 @@
     <string name="read_aloud_pitch_name">Pitch</string>
     <string name="read_aloud_gap_name">Gap after completion</string>
     <string name="read_aloud_gap_value">%1$d ms</string>
+    <string name="agentwire_collaboration_standard">Standard collaboration</string>
 </resources>

@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.settings.bouncer
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -101,6 +102,7 @@ fun NetworkEditorDialog(
                             modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
                         )
                         ExposedDropdownMenu(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                             expanded = presetsExpanded,
                             onDismissRequest = { presetsExpanded = false },
                         ) {
@@ -475,11 +477,16 @@ fun TriStateField(
                     .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                     .fillMaxWidth(),
         )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
             listOf<Boolean?>(null, true, false).forEach { option ->
                 DropdownMenuItem(
+                    colors =
+                        androidx.compose.material3.MenuDefaults.itemColors(
+                            textColor = if (value == option) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
+                            trailingIconColor = if (value == option) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
                     modifier =
-                        Modifier.semantics {
+                        Modifier.background(if (value == option) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent).semantics {
                             this.selected = value == option
                             role = Role.RadioButton
                         },

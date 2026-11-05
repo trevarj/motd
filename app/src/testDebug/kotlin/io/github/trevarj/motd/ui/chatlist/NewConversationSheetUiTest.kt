@@ -1,10 +1,16 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import androidx.compose.material3.LocalRippleConfiguration
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
@@ -15,6 +21,10 @@ import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -22,13 +32,18 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.contrastRatio
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,6 +60,49 @@ class NewConversationSheetUiTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun selectedTabsAndNetworkOptionsPaintTheSameAccessiblePair() {
+        var fill = Color.Unspecified
+        var ink = Color.Unspecified
+        compose.setContent {
+            MotdTheme(dynamicColor = false, themePreset = ColorThemePreset.ONE_DARK, useThemeTextColors = true) {
+                fill = MaterialTheme.colorScheme.secondaryContainer
+                ink = MaterialTheme.colorScheme.onSecondaryContainer
+                // Sample the selected fill, not the transient native ripple left by a real click.
+                CompositionLocalProvider(LocalRippleConfiguration provides null) {
+                    NewConversationSheetContent(
+                        networks = listOf(network(1, "Libera"), network(2, "OFTC")),
+                        preselectedNetworkId = 2,
+                        onJoinChannel = { _, _, _ -> },
+                        onMessageUser = { _, _ -> },
+                    )
+                }
+            }
+        }
+        for (tab in listOf("new_conversation_join_tab", "new_conversation_message_tab", "new_conversation_join_tab")) {
+            val row = compose.onNodeWithTag(tab).performClick().assertIsSelected()
+            val pixels = row.captureToImage().toPixelMap()
+            assertEquals(fill, pixels[2, pixels.height / 2])
+        }
+        compose.onNodeWithTag("new_conversation_network_selector").performClick()
+        val option = compose.onNodeWithTag("new_conversation_network_option_2").assertIsSelected()
+        val pixels = option.captureToImage().toPixelMap()
+        assertEquals(fill, pixels[2, pixels.height / 2])
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNode(hasText("OFTC") and hasAnyAncestor(hasTestTag("new_conversation_network_option_2")), useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals(
+            ink,
+            layouts
+                .single()
+                .layoutInput.style.color,
+        )
+        assertTrue(contrastRatio(ink, fill) >= 4.49)
+        compose.onNodeWithTag("new_conversation_network_option_1").performClick()
+        compose.onNodeWithTag("new_conversation_network_selector").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Libera"),
+        )
+    }
 
     @Test
     fun hierarchyUsesHeadingTabsDescriptionsAndSingleNetworkValue() {

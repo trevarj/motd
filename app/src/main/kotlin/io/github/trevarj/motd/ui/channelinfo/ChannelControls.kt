@@ -290,6 +290,7 @@ private fun SectionHeader(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
     )
@@ -300,7 +301,7 @@ private fun GroupHeader(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 2.dp),
     )
@@ -315,6 +316,9 @@ private fun ActionRow(
     onClick: () -> Unit,
 ) {
     ListItem(
+        colors =
+            androidx.compose.material3.ListItemDefaults
+                .colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         headlineContent = { Text(headline) },
         supportingContent = { Text(supporting) },
         modifier =
@@ -334,6 +338,9 @@ private fun FlagModeRow(
     onFlagMode: (Char, Boolean) -> Unit,
 ) {
     ListItem(
+        colors =
+            androidx.compose.material3.ListItemDefaults
+                .colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         headlineContent = { Text(headline) },
         supportingContent = { Text(supporting) },
         trailingContent = {
@@ -367,6 +374,9 @@ private fun SetOrRemoveRow(
     onRemove: () -> Unit,
 ) {
     ListItem(
+        colors =
+            androidx.compose.material3.ListItemDefaults
+                .colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         headlineContent = { Text(headline) },
         supportingContent = { Text(supporting) },
         trailingContent = {

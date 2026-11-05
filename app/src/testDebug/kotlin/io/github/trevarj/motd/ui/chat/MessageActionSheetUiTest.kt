@@ -26,6 +26,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.platform.testTag
@@ -37,6 +38,8 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
@@ -67,6 +70,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -263,6 +267,43 @@ class MessageActionSheetUiTest {
             action.performClick()
         }
         compose.runOnIdle { assertEquals(allActionTags, invoked) }
+    }
+
+    @Test
+    fun actionBackingsLeaveLabelsUnboxedAndTabsHighlightOnlyTheCurrentSelection() {
+        render(
+            reactions = listOf(ReactionChip("👍", 1, false, listOf("Alice"))),
+            canRedact = true,
+            themePreset = ColorThemePreset.AYU_LIGHT,
+        )
+        val action =
+            compose
+                .onNodeWithTag("message_action_copy")
+                .assertIsDisplayed()
+                .captureToImage()
+                .toPixelMap()
+        val padding = ButtonDefaults.TextButtonContentPadding.calculateTopPadding().value
+        val backingX = (action.width / 2 - 13f * pixelsPerDp).toInt()
+        val backingY = ((padding + 16f) * pixelsPerDp).toInt()
+        val plainFill = action[1, action.height / 2]
+        assertNotEquals("The action icon has a subtle backing", plainFill, action[backingX, backingY])
+        assertEquals("The label remains on the plain sheet, not inside a tile capsule", plainFill, action[action.width / 2, action.height - 2])
+
+        fun tabFill(tag: String): Color {
+            val image = compose.onNodeWithTag(tag).captureToImage().toPixelMap()
+            return image[2, 2]
+        }
+        compose.onNodeWithTag("message_action_tab_actions").assertIsSelected()
+        compose.onNodeWithTag("message_action_tab_reactions").assertIsNotSelected()
+        val selectedFill = tabFill("message_action_tab_actions")
+        val idleFill = tabFill("message_action_tab_reactions")
+        assertNotEquals("The active tab is visibly selected", idleFill, selectedFill)
+        assertNotEquals("An ordinary action backing does not impersonate a selected tab", action[backingX, backingY], selectedFill)
+        compose.onNodeWithTag("message_action_tab_reactions").performClick().assertIsSelected()
+        compose.onNodeWithTag("message_action_tab_actions").assertIsNotSelected()
+        assertEquals("The selected fill follows the selected tab", selectedFill, tabFill("message_action_tab_reactions"))
+        assertEquals("The old tab returns to its neutral fill", idleFill, tabFill("message_action_tab_actions"))
+        compose.onNodeWithTag("message_reaction_reactors").assertIsDisplayed()
     }
 
     @Test

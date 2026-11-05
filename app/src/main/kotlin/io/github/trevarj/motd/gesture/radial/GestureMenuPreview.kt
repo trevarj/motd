@@ -69,7 +69,7 @@ internal fun GestureMenuPreview(
     val metrics = rememberRadialMetrics()
     val more = stringResource(R.string.action_more)
     val density = LocalDensity.current
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), modifier = Modifier.testTag("gesture_menu_preview")) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), modifier = Modifier.testTag("gesture_menu_preview")) {
         SheetSystemBars()
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
             Text(stringResource(R.string.settings_gesture_preview_scope))

@@ -1,6 +1,10 @@
 package io.github.trevarj.motd.ui.settings
 
+import android.database.ContentObserver
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.text.format.DateFormat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -31,9 +35,11 @@ import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.TextFields
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -44,6 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -53,6 +60,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
@@ -66,6 +75,9 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
@@ -111,6 +123,7 @@ import io.github.trevarj.motd.ui.theme.fontFamily
 import io.github.trevarj.motd.ui.theme.rememberAppFontFamily
 import java.io.File
 import kotlin.math.roundToInt
+import android.provider.Settings as AndroidSettings
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Appearance category: theme, dynamic color, layout density, avatar style, nick colors, wallpaper. */
@@ -240,6 +253,31 @@ fun AppearanceSettingsContent(
     target: SettingsTarget? = null,
     snackbarHostState: SnackbarHostState? = null,
 ) {
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var deviceUses24Hour by remember(context) { mutableStateOf(DateFormat.is24HourFormat(context)) }
+    DisposableEffect(context, configuration, lifecycleOwner) {
+        fun refreshTimeFormat() {
+            deviceUses24Hour = DateFormat.is24HourFormat(context)
+        }
+        val resolver = context.contentResolver
+        val settingsObserver =
+            object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) = refreshTimeFormat()
+            }
+        val lifecycleObserver =
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) refreshTimeFormat()
+            }
+        resolver.registerContentObserver(AndroidSettings.System.getUriFor(AndroidSettings.System.TIME_12_24), false, settingsObserver)
+        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
+        refreshTimeFormat()
+        onDispose {
+            resolver.unregisterContentObserver(settingsObserver)
+            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
+        }
+    }
     var showThemeSheet by rememberSaveable { mutableStateOf(false) }
     var showFontSheet by rememberSaveable { mutableStateOf(false) }
     var showBubbleColorSheet by rememberSaveable { mutableStateOf(false) }
@@ -448,7 +486,7 @@ fun AppearanceSettingsContent(
             SettingsTarget(target?.name, SettingsTarget.CHAT_CARD_SHAPE.name) { targetModifier ->
                 SettingsNavigationRow(
                     title = stringResource(R.string.settings_chat_card_shape),
-                    value = uiCornerStyleLabel(previewAppearance.chatCardCornerStyle),
+                    value = uiCornerStyleLabel(previewAppearance.chatCardCornerStyle, stringResource(R.string.settings_shape_radius, 16)),
                     summary = stringResource(R.string.settings_chat_card_shape_desc),
                     modifier = targetModifier.testTag("settings_chat_card_shape_picker"),
                     onClick = { choiceSheet = AppearanceChoice.CHAT_CARD_SHAPE },
@@ -478,7 +516,7 @@ fun AppearanceSettingsContent(
             SettingsTarget(target?.name, SettingsTarget.INPUT_SHAPE.name) { targetModifier ->
                 SettingsNavigationRow(
                     title = stringResource(R.string.settings_input_shape),
-                    value = uiCornerStyleLabel(previewAppearance.inputCornerStyle),
+                    value = uiCornerStyleLabel(previewAppearance.inputCornerStyle, inputShapeBaselineLabel(previewAppearance.composerStyle)),
                     summary = stringResource(R.string.settings_input_shape_desc),
                     modifier = targetModifier.testTag("settings_input_shape_picker"),
                     onClick = { choiceSheet = AppearanceChoice.INPUT_SHAPE },
@@ -488,7 +526,7 @@ fun AppearanceSettingsContent(
             SettingsTarget(target?.name, SettingsTarget.MEDIA_SHAPE.name) { targetModifier ->
                 SettingsNavigationRow(
                     title = stringResource(R.string.settings_media_shape),
-                    value = uiCornerStyleLabel(previewAppearance.mediaCornerStyle),
+                    value = uiCornerStyleLabel(previewAppearance.mediaCornerStyle, stringResource(R.string.settings_media_shape_baseline)),
                     summary = stringResource(R.string.settings_media_shape_desc),
                     modifier = targetModifier.testTag("settings_media_shape_picker"),
                     onClick = { choiceSheet = AppearanceChoice.MEDIA_SHAPE },
@@ -512,7 +550,7 @@ fun AppearanceSettingsContent(
             SettingsTarget(target?.name, SettingsTarget.TIME_FORMAT.name) { targetModifier ->
                 SettingsNavigationRow(
                     title = stringResource(R.string.settings_time_format),
-                    value = timeFormatLabel(appearance.timeFormat),
+                    value = timeFormatLabel(appearance.timeFormat, deviceUses24Hour),
                     modifier = targetModifier.testTag("settings_time_format_picker"),
                     onClick = { choiceSheet = AppearanceChoice.TIME },
                 )
@@ -729,6 +767,7 @@ fun AppearanceSettingsContent(
             choice = choice,
             settings = previewSettings,
             appearance = previewAppearance,
+            deviceUses24Hour = deviceUses24Hour,
             customFontFile = customFontFile,
             previewDensity = previewDensity,
             previewSpacing = previewSpacing,
@@ -959,6 +998,7 @@ private fun AppearanceChoiceSheet(
     choice: AppearanceChoice,
     settings: Settings,
     appearance: io.github.trevarj.motd.data.prefs.AppearanceConfig,
+    deviceUses24Hour: Boolean,
     customFontFile: File?,
     previewDensity: LayoutDensity,
     previewSpacing: MessageSpacing,
@@ -1022,12 +1062,39 @@ private fun AppearanceChoiceSheet(
                     AppearanceChoice.CHAT_CARD_SHAPE -> appearance.chatCardCornerStyle
                     else -> appearance.mediaCornerStyle
                 }
+            val baselineLabel =
+                when (choice) {
+                    AppearanceChoice.INPUT_SHAPE -> inputShapeBaselineLabel(appearance.composerStyle)
+                    AppearanceChoice.CHAT_CARD_SHAPE -> stringResource(R.string.settings_shape_radius, 16)
+                    else -> stringResource(R.string.settings_media_shape_baseline)
+                }
+            val baselineDescription =
+                when (choice) {
+                    AppearanceChoice.INPUT_SHAPE -> {
+                        stringResource(R.string.settings_input_shape_baseline_desc)
+                    }
+
+                    AppearanceChoice.CHAT_CARD_SHAPE -> {
+                        stringResource(R.string.settings_chat_card_shape_baseline_desc)
+                    }
+
+                    else -> {
+                        stringResource(
+                            R.string.settings_media_shape_baseline_desc,
+                            when (previewDensity) {
+                                LayoutDensity.COMFORTABLE -> 12
+                                LayoutDensity.COMPACT -> 8
+                                LayoutDensity.TWO_LINE -> 10
+                            },
+                        )
+                    }
+                }
             SingleChoiceSheet(
                 title = stringResource(title),
                 selected = selected,
                 options =
                     UiCornerStyle.entries.map {
-                        ChoiceOption(it, uiCornerStyleLabel(it), if (it == UiCornerStyle.DEFAULT) stringResource(R.string.settings_shape_default_desc) else null, "${prefix}_${it.name.lowercase()}")
+                        ChoiceOption(it, uiCornerStyleLabel(it, baselineLabel), if (it == UiCornerStyle.DEFAULT) baselineDescription else null, "${prefix}_${it.name.lowercase()}")
                     },
                 onSelect =
                     when (choice) {
@@ -1061,7 +1128,7 @@ private fun AppearanceChoiceSheet(
                 selected = appearance.avatarShape,
                 options =
                     AvatarShape.entries.map {
-                        ChoiceOption(it, avatarShapeLabel(it), if (it == AvatarShape.DEFAULT) stringResource(R.string.settings_shape_default_desc) else null, "settings_avatar_shape_${it.name.lowercase()}")
+                        ChoiceOption(it, avatarShapeLabel(it), if (it == AvatarShape.DEFAULT) stringResource(R.string.settings_avatar_shape_baseline_desc) else null, "settings_avatar_shape_${it.name.lowercase()}")
                     },
                 onSelect = onAvatarShape,
                 onDismiss = onDismiss,
@@ -1188,7 +1255,7 @@ private fun AppearanceChoiceSheet(
             SingleChoiceSheet(
                 title = stringResource(R.string.settings_time_format),
                 selected = appearance.timeFormat,
-                options = TimeFormat.entries.map { ChoiceOption(it, timeFormatLabel(it), tag = "settings_time_format_${it.name.lowercase()}") },
+                options = TimeFormat.entries.map { ChoiceOption(it, timeFormatLabel(it, deviceUses24Hour), tag = "settings_time_format_${it.name.lowercase()}") },
                 onSelect = onTime,
                 onDismiss = onDismiss,
                 tag = "settings_time_format_sheet",
@@ -1324,21 +1391,25 @@ private fun folderDisplayModeDescription(value: FolderDisplayMode): String =
     )
 
 @Composable
-private fun uiCornerStyleLabel(value: UiCornerStyle): String =
-    stringResource(
-        when (value) {
-            UiCornerStyle.DEFAULT -> R.string.settings_shape_default
-            UiCornerStyle.SQUARE -> R.string.settings_shape_square
-            UiCornerStyle.SOFT -> R.string.settings_shape_soft
-            UiCornerStyle.ROUNDED -> R.string.settings_shape_rounded
-        },
-    )
+private fun uiCornerStyleLabel(
+    value: UiCornerStyle,
+    baselineLabel: String,
+): String =
+    when (value) {
+        UiCornerStyle.DEFAULT -> baselineLabel
+        UiCornerStyle.SQUARE -> stringResource(R.string.settings_shape_square)
+        UiCornerStyle.SOFT -> stringResource(R.string.settings_shape_soft)
+        UiCornerStyle.ROUNDED -> stringResource(R.string.settings_shape_rounded)
+    }
+
+@Composable
+private fun inputShapeBaselineLabel(composerStyle: ComposerStyle): String = stringResource(R.string.settings_shape_radius, if (composerStyle == ComposerStyle.LARGE) 16 else 28)
 
 @Composable
 private fun avatarShapeLabel(value: AvatarShape): String =
     stringResource(
         when (value) {
-            AvatarShape.DEFAULT -> R.string.settings_shape_default
+            AvatarShape.DEFAULT -> R.string.settings_avatar_shape_baseline
             AvatarShape.SQUARE -> R.string.settings_shape_square
             AvatarShape.SOFT -> R.string.settings_shape_soft
             AvatarShape.ROUNDED -> R.string.settings_shape_rounded
@@ -1386,15 +1457,36 @@ private fun avatarStyleDescription(value: AvatarStyle): String? =
     }
 
 @Composable
-private fun timeFormatLabel(value: TimeFormat): String =
-    stringResource(
-        when (value) {
-            TimeFormat.AUTO -> R.string.settings_time_format_auto
-            TimeFormat.H12 -> R.string.settings_time_format_h12
-            TimeFormat.H24 -> R.string.settings_time_format_h24
-            TimeFormat.CUSTOM -> R.string.settings_time_format_custom
-        },
-    )
+private fun timeFormatLabel(
+    value: TimeFormat,
+    deviceUses24Hour: Boolean,
+): String =
+    when (value) {
+        TimeFormat.AUTO -> {
+            stringResource(
+                R.string.settings_time_format_auto,
+                stringResource(
+                    if (deviceUses24Hour) {
+                        R.string.settings_time_format_h24
+                    } else {
+                        R.string.settings_time_format_h12
+                    },
+                ),
+            )
+        }
+
+        TimeFormat.H12 -> {
+            stringResource(R.string.settings_time_format_h12)
+        }
+
+        TimeFormat.H24 -> {
+            stringResource(R.string.settings_time_format_h24)
+        }
+
+        TimeFormat.CUSTOM -> {
+            stringResource(R.string.settings_time_format_custom)
+        }
+    }
 
 @Composable
 private fun messageSpacingLabel(value: io.github.trevarj.motd.data.prefs.MessageSpacing): String =
@@ -1438,7 +1530,8 @@ private fun FontScaleSlider(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Text(percent, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            io.github.trevarj.motd.ui.components
+                .MetadataPill(percent)
         }
         Slider(
             value = pending,
@@ -1488,12 +1581,19 @@ private fun ThemePickerSheet(
 ) {
     var query by remember { mutableStateOf("") }
     val normalized = query.trim().lowercase()
+    val systemLabel = themePresetLabel(ColorThemePreset.SYSTEM)
 
     fun filtered(items: List<ColorThemePreset>) =
         items.filter {
-            themePresetLabelText(it).lowercase().contains(normalized)
+            (if (it == ColorThemePreset.SYSTEM) "$systemLabel device system default" else themePresetLabelText(it)).lowercase().contains(normalized)
         }
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("settings_theme_sheet")) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        modifier = Modifier.testTag("settings_theme_sheet"),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    ) {
         SheetSystemBars()
         LazyColumn(
             Modifier
@@ -1503,7 +1603,7 @@ private fun ThemePickerSheet(
                 .padding(bottom = 24.dp),
         ) {
             item {
-                Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
+                Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(16.dp))
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -1631,7 +1731,13 @@ private fun FontPickerSheet(
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             uri?.let(onImportCustomFont)
         }
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("settings_font_sheet")) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        modifier = Modifier.testTag("settings_font_sheet"),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    ) {
         SheetSystemBars()
         LazyColumn(
             Modifier
@@ -1640,7 +1746,7 @@ private fun FontPickerSheet(
                 .padding(bottom = 24.dp)
                 .testTag("settings_font_options"),
         ) {
-            item { Text(stringResource(R.string.settings_app_font), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp)) }
+            item { Text(stringResource(R.string.settings_app_font), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(16.dp)) }
             items(FontChoice.entries.size) { index ->
                 val choice = FontChoice.entries[index]
                 if (choice == FontChoice.CUSTOM) {
@@ -1695,7 +1801,10 @@ private fun CustomFontRow(
             Column {
                 Text("Aa 0O1lI", fontFamily = previewFamily)
                 if (imported) {
-                    TextButton(onClick = onChange) {
+                    TextButton(
+                        onClick = onChange,
+                        colors = ButtonDefaults.textButtonColors(contentColor = if (selected) LocalContentColor.current else MaterialTheme.colorScheme.primary),
+                    ) {
                         Text(stringResource(R.string.settings_font_custom_change))
                     }
                 }
@@ -1718,11 +1827,16 @@ private fun fontChoiceLabel(choice: FontChoice): String =
     )
 
 @Composable
-internal fun themePresetLabel(mode: ColorThemePreset): String = stringResource(themePresetLabelRes(mode))
+internal fun themePresetLabel(mode: ColorThemePreset): String =
+    if (mode == ColorThemePreset.SYSTEM) {
+        stringResource(R.string.settings_theme_system, stringResource(if (androidx.compose.foundation.isSystemInDarkTheme()) R.string.settings_theme_dark else R.string.settings_theme_light))
+    } else {
+        stringResource(themePresetLabelRes(mode))
+    }
 
 internal fun themePresetLabelText(mode: ColorThemePreset): String =
     when (mode) {
-        ColorThemePreset.SYSTEM -> "System default"
+        ColorThemePreset.SYSTEM -> "Device appearance"
         ColorThemePreset.LIGHT -> "Light"
         ColorThemePreset.DARK -> "Dark"
         ColorThemePreset.AMOLED -> "AMOLED (true black)"

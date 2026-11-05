@@ -268,11 +268,12 @@ private fun ModelSelectionSheet(
     onOpenModelLibrary: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("${featureState.feature.tag()}_model_sheet")) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag("${featureState.feature.tag()}_model_sheet")) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).selectableGroup()) {
             Text(
                 text = stringResource(R.string.ai_choose_active_model),
                 style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
             featureState.selectableModels.forEach { model ->

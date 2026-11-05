@@ -50,14 +50,22 @@ flowchart TD
   go through `ConnectionManager` instead of constructing IRC clients in screens.
 - Fixed theme contrast normalization is cached on demand per preset and text-color
   mode. `SYSTEM`, `LIGHT`, `DARK`, and `AMOLED` never warm the fixed palette catalog.
-- The chat-list Scaffold canvas and chat rows use theme `surface`, matching the top bar's original unscrolled `surface`; its scrolled `surfaceContainerLow` remains unchanged. After the active-scope chip, folder tabs overlay the scrolling chat viewport on an unpainted, transparent strip; the measured tab-and-pinned-mentions header is reserved only for the list's initial position, so rows can scroll beneath it. A separate `surfaceContainerHigh` capsule carries the tabs, and the selected pill uses the stronger `primary`/`onPrimary` colors.
-  Selected history-coverage glyphs and advertised-activity dots also use `onPrimary`;
-  unselected indicators retain `onSurfaceVariant` and `primary`, respectively.
+- Utility canvases and unscrolled utility top bars use `surfaceContainerLowest`; grouped
+  panels and menus use `surfaceContainerLow`, with primary section headings and meaningful icons.
+  Short noninteractive metadata uses the wrapping neutral `MetadataPill`; addresses, fingerprints,
+  security disclosures and operational statuses remain readable text, not decorative chips.
+  Selected utility rows/tabs use `secondaryContainer`/`onSecondaryContainer` and retain native
+  indicators and selection semantics. Tertiary utility fills are reserved for settings-search targets;
+  content swatches and conversation colors are not utility chrome.
+- Chat rows retain theme `surface`. After the active-scope chip, folder tabs overlay the scrolling
+  chat viewport on an unpainted strip; the measured header is reserved only for the initial position.
+  The capsule matches unread chat-card fill; selected pills, coverage glyphs and activity dots use
+  the secondary-container pair. Unread and mention badges retain their independent semantic colors.
 - Archive pull hints, the revealed folder and the archive-only route share the chat-card
   8dp horizontal/2dp vertical gutters, 16dp shape, 12dp inner inset and density-scaled
   avatar host/vertical padding. `titleMedium` labels may wrap at accessible font scales;
   their shared measured extent, including gutters, drives both pull geometry and list
-  translation. The resting fill matches unread chat cards; armed feedback uses `primaryContainer`.
+  translation. The resting fill matches unread chat cards; armed feedback uses `secondaryContainer`.
   Pull input reads that measurement live, including before the first recomposition, and keeps
   one release observer/nested-scroll connection across card remeasurement and armed feedback.
   Pulling through 85% of the measured row emits the first haptic and “Keep holding…”;
@@ -172,18 +180,23 @@ flowchart TD
   inheritance as chat. Fictional examples reuse production renderers with local data and isolated
   avatar, action and theme environments, without remote lookup or real chat actions.
   Native whole-row radio selection owns one selected-state target of at least 48dp; wrapping
-  labels and scrollable forms keep choices and editor actions reachable. Topic editing uses one
-  native field state for raw IRC text, reactive formatting and click-time Save.
+  labels and scrollable forms keep choices and editor actions reachable.
+  Selected radio labels, supporting samples, and their custom-font action share matched
+  container ink; transient search fills remain visible above selection and fit that ink
+  through the fade before restoring the normal selected backing.
+  Topic editing uses one native field state for raw IRC text, reactive formatting and click-time Save.
 - Appearance's input style is an IRC-only preference shared by channel, query,
-  and server buffers. Default, Large, and Nickname use one editor/draft path;
+  and server buffers. Floating, Large, and Nickname use one editor/draft path;
   Nickname's network-owned identity is decoration, never submitted text.
   The input host overlays the full timeline; matching scroll padding keeps the
-  newest row clear, and fully covered rows do not advance read state. Default and
-  Nickname keep tools/send/record inside their floating pills; Large keeps its
-  separate action. Agentwire always uses Default. Stored enum names are unchanged.
+  newest row clear, and fully covered rows do not advance read state. Floating and
+  Nickname keep tools/send/record inside their floating inputs; Large keeps its
+  separate action. Agentwire always uses Floating. Stored enum names are unchanged.
   Independent named presets control input corners, in-app avatar shape, chat-list
-  card corners, and media-preview corners; Default preserves each surface/layout's
-  existing heterogeneous geometry. Notification avatars remain circular.
+  card corners, and media-preview corners; stored `DEFAULT` preserves each surface/layout's
+  heterogeneous geometry, while visible values name the resolved geometry (including the input
+  layout's current radius). Theme/time inheritance also names the device's resolved mode;
+  notification policy retains effective policy and its global/server source. Notification avatars remain circular.
   Appearance also selects Material (the exact existing Filled/Outlined/AutoMirrored
   variants) or Lucide UI icons. The shared native `UiIcon` leaf resolves cached vectors
   at composition time, so remembered action descriptors and persisted gesture icon
@@ -194,7 +207,7 @@ flowchart TD
   Avatars, launcher/brand/notification artwork and saved `MATERIAL` folder icons
   remain explicit. Static message-status glyphs follow the set; custom Lottie
   clock/check/cross morphs remain set-independent artwork.
-  At ordinary font scale, Default/Nickname have nominal 52dp/48dp pill minima and
+  At ordinary font scale, Floating/Nickname have nominal 52dp/48dp input minima and
   44dp floating primary artwork, retaining 48dp targets and unchanged Large geometry.
   Artwork is inset inside each native button, never around its clickable/semantics host.
   Read/refresh visibility excludes rendered leading grouping gaps, not real content;

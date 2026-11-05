@@ -405,7 +405,7 @@ private fun RowOverflow(
         IconButton(onClick = { open = true }, modifier = Modifier.testTag(gestureEditorOverflowTag(id))) {
             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
             if (row.canRename) {
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.gesture_editor_rename)) },
@@ -497,7 +497,7 @@ private fun ActionBindingSheet(
 ) {
     var draft by remember(leaf.id) { mutableStateOf(gestureActionDraft(leaf.action)) }
     val built = buildGestureAction(draft)
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag(GESTURE_EDITOR_ACTION_SHEET_TAG)) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag(GESTURE_EDITOR_ACTION_SHEET_TAG)) {
         Column(
             modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
         ) {
@@ -589,7 +589,7 @@ private fun ProviderSheet(
 ) {
     var kind by remember(provider.id) { mutableStateOf(provider.kind) }
     var limit by remember(provider.id) { mutableIntStateOf(provider.clampedLimit) }
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag(GESTURE_EDITOR_PROVIDER_SHEET_TAG)) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag(GESTURE_EDITOR_PROVIDER_SHEET_TAG)) {
         Column(
             modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
         ) {
@@ -698,6 +698,7 @@ private fun SheetTitle(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
     )
 }

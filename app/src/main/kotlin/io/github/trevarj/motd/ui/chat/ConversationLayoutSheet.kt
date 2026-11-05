@@ -58,6 +58,7 @@ fun ConversationLayoutSheet(
                         densityLabel(state.effective),
                     ),
                     style = MaterialTheme.typography.bodyMedium,
+                    fontStyle = if (state.override == null) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
                 )
                 ChatLayoutPreview(
                     density = state.effective,

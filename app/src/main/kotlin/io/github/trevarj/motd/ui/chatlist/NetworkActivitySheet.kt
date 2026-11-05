@@ -63,7 +63,7 @@ fun NetworkActivitySheet(
     onServerMessages: (Long) -> Unit,
     onClearRecent: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, modifier = Modifier.testTag("network_activity_sheet")) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, sheetState = sheetState, modifier = Modifier.testTag("network_activity_sheet")) {
         SheetSystemBars()
         NetworkActivitySheetContent(activity, syncChrome, onDismiss, onIssueAction, onConnect, onSettings, onServerMessages, onClearRecent)
     }
@@ -83,7 +83,7 @@ internal fun NetworkActivitySheetContent(
     var recentExpanded by rememberSaveable { mutableStateOf(false) }
     val recentToggleLabel = stringResource(if (recentExpanded) R.string.network_activity_hide_recent else R.string.network_activity_show_recent)
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.network_activity_title), style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).semantics { heading() })
+        Text(stringResource(R.string.network_activity_title), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f).semantics { heading() })
         TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp).testTag("network_activity_close")) { Text(stringResource(R.string.network_activity_close)) }
     }
     LazyColumn(Modifier.fillMaxWidth().testTag("network_activity_list"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -126,7 +126,7 @@ internal fun NetworkActivitySheetContent(
         if (activity.recent.isNotEmpty()) {
             item {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("network_activity_recent_heading"), verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.network_activity_recent, activity.recent.size), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f).semantics { heading() })
+                    Text(stringResource(R.string.network_activity_recent, activity.recent.size), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f).semantics { heading() })
                     TextButton(onClick = { recentExpanded = !recentExpanded }, modifier = Modifier.heightIn(min = 48.dp).testTag("network_activity_recent_toggle").semantics { contentDescription = recentToggleLabel }) {
                         Text(stringResource(if (recentExpanded) R.string.network_activity_hide else R.string.network_activity_show))
                     }
@@ -154,7 +154,7 @@ private fun ActivityNetwork(
     val serverLabel = stringResource(R.string.network_activity_server_target, network.name)
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("network_activity_network_${network.id}"), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(network.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(network.name, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(connectionLabel(network.connection), style = MaterialTheme.typography.bodySmall)
             if (network.history.any { it.status == HistorySyncStatus.AwaitingConnection }) Text(stringResource(R.string.chatlist_sync_waiting), style = MaterialTheme.typography.bodySmall)
             if (network.history.any { it.status == HistorySyncStatus.Queued }) Text(stringResource(R.string.chatlist_sync_queued), style = MaterialTheme.typography.bodySmall)
@@ -164,7 +164,7 @@ private fun ActivityNetwork(
             IconButton(onClick = { menuExpanded = true }, modifier = Modifier.testTag("network_activity_network_${network.id}_more")) {
                 Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.network_activity_more_target, network.name))
             }
-            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }, modifier = Modifier.testTag("network_activity_network_${network.id}_menu")) {
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.testTag("network_activity_network_${network.id}_menu")) {
                 if (network.connection !is IrcClientState.Ready && network.connection != IrcClientState.Connecting && network.connection != IrcClientState.Registering) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.network_activity_connect)) }, enabled = !network.certificatePending, onClick = {
                         menuExpanded = false
@@ -186,7 +186,7 @@ private fun ActivityNetwork(
 
 @Composable
 private fun ActivityHeading(text: String) {
-    Text(text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp).semantics { heading() })
+    Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 16.dp).semantics { heading() })
 }
 
 @Composable

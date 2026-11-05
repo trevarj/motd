@@ -100,8 +100,12 @@ fun CreateInviteContent(
         }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {
             TopAppBar(
+                colors =
+                    androidx.compose.material3.TopAppBarDefaults
+                        .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                 title = { Text(stringResource(R.string.invite_create_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -169,6 +173,7 @@ fun CreateInviteContent(
                         Text(
                             stringResource(R.string.invite_how_it_works),
                             style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         NumberedInstruction(1, stringResource(R.string.invite_step_scan))
@@ -249,7 +254,7 @@ private fun InviteQrCard(
     modifier: Modifier,
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.primaryContainer,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = MaterialTheme.shapes.extraLarge,
         tonalElevation = 4.dp,
         modifier = modifier.sizeIn(maxWidth = 420.dp),
@@ -277,7 +282,7 @@ internal fun NumberedInstruction(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        Text("$number.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+        Text("$number.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         Text(text, modifier = Modifier.weight(1f))
     }
 }

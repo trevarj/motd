@@ -394,7 +394,8 @@ fun NetworkSettingsContent(
                         headlineContent = { Text(stringResource(R.string.network_settings_stored_messages)) },
                         supportingContent = { Text(stringResource(R.string.network_settings_stored_messages_desc)) },
                         trailingContent = {
-                            Text(state.storedMessages?.let { NumberFormat.getIntegerInstance().format(it) } ?: "…")
+                            io.github.trevarj.motd.ui.components
+                                .MetadataPill(state.storedMessages?.let { NumberFormat.getIntegerInstance().format(it) } ?: "…")
                         },
                         modifier = Modifier.testTag("network_settings_stored_messages"),
                         colors =
@@ -557,6 +558,9 @@ private fun StatusCard(
     onDisconnect: () -> Unit,
 ) {
     ListItem(
+        colors =
+            androidx.compose.material3.ListItemDefaults
+                .colors(containerColor = Color.Transparent),
         leadingContent = {
             Box(
                 Modifier
@@ -741,7 +745,7 @@ private fun ObfuscationSection(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.network_settings_routing), style = MaterialTheme.typography.titleSmall)
+                    Text(stringResource(R.string.network_settings_routing), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                     Text(
                         stringResource(R.string.network_settings_current_value, obfsModeLabel(mode)),
                         style = MaterialTheme.typography.bodySmall,
@@ -888,7 +892,7 @@ private fun TransportSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.network_settings_transport), style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.network_settings_transport), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                 Text(
                     stringResource(
                         R.string.network_settings_current_value,

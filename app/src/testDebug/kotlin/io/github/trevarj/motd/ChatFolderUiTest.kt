@@ -333,7 +333,7 @@ class ChatFolderUiTest {
         val selectedFill = pillPixel(allTag)
         val plainFill = pillPixel(folderTag)
         assertNotEquals(plainFill, selectedFill)
-        assertEquals(colors.primary.toArgb(), selectedFill)
+        assertEquals(colors.secondaryContainer.toArgb(), selectedFill)
         val unreadFill = lerp(colors.surface, colors.primaryContainer, 0.20f).toArgb()
         assertEquals(unreadFill, plainFill)
         val unreadRowPixels = compose.onNodeWithTag("chatlist_row_1").captureToImage().asAndroidBitmap()
@@ -391,21 +391,21 @@ class ChatFolderUiTest {
         )
         val selectedBounds = compose.onNodeWithTag(allTag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         assertEquals(
-            "The selected pill remains primary above the row",
-            colors.primary.toArgb(),
+            "The selected pill remains secondary-container above the row",
+            colors.secondaryContainer.toArgb(),
             rootPixel((selectedBounds.left + selectedBounds.right) / 2, selectedBounds.top + with(compose.density) { 2.dp.toPx() }),
         )
-        var onPrimaryVisible = false
+        var selectedInkVisible = false
         for (x in (selectedBounds.left - rootBounds.left).toInt() until (selectedBounds.right - rootBounds.left).toInt()) {
             for (y in (selectedBounds.top - rootBounds.top).toInt() until (selectedBounds.bottom - rootBounds.top).toInt()) {
-                if (pixelsUnderStrip.getPixel(x, y) == colors.onPrimary.toArgb()) {
-                    onPrimaryVisible = true
+                if (pixelsUnderStrip.getPixel(x, y) == colors.onSecondaryContainer.toArgb()) {
+                    selectedInkVisible = true
                     break
                 }
             }
-            if (onPrimaryVisible) break
+            if (selectedInkVisible) break
         }
-        assertTrue("Selected tab content uses onPrimary", onPrimaryVisible)
+        assertTrue("Selected tab content uses its paired ink", selectedInkVisible)
 
         compose.onNodeWithTag("chatlist_pinned_mentions").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_folder_tab_7").performClick().assertIsSelected()
@@ -414,7 +414,7 @@ class ChatFolderUiTest {
     }
 
     @Test
-    fun selected_folder_and_all_tabs_invert_unread_badges_without_changing_mentions() {
+    fun selected_folder_and_all_tabs_preserve_unread_and_mention_badge_meaning() {
         val colors =
             lightColorScheme(
                 primary = Color(0xFF3322CC),
@@ -437,7 +437,6 @@ class ChatFolderUiTest {
         fun assertBadgeColors(
             tabTag: String,
             count: Int,
-            inverted: Boolean = false,
             mention: Boolean = false,
         ) {
             val description = resources.getQuantityString(if (mention) R.plurals.badge_mention else R.plurals.badge_unread, count, count)
@@ -446,18 +445,8 @@ class ChatFolderUiTest {
                 compose
                     .onNode(hasContentDescription(description) and hasAnyAncestor(hasTestTag(tabTag)), useUnmergedTree = true)
                     .assertIsDisplayed()
-            val background =
-                when {
-                    mention -> colors.secondary
-                    inverted -> colors.onPrimary
-                    else -> colors.primary
-                }
-            val foreground =
-                when {
-                    mention -> colors.onSecondary
-                    inverted -> colors.primary
-                    else -> colors.onPrimary
-                }
+            val background = if (mention) colors.secondary else colors.primary
+            val foreground = if (mention) colors.onSecondary else colors.onPrimary
             var backgroundVisible = false
             var foregroundVisible = false
             // Badge semantics/layout can precede the native repaint after text and palette changes.
@@ -482,11 +471,11 @@ class ChatFolderUiTest {
         }
 
         compose.onNodeWithTag("chatlist_folder_tab_all").assertIsSelected()
-        assertBadgeColors("chatlist_folder_tab_all", 16, inverted = true)
+        assertBadgeColors("chatlist_folder_tab_all", 16)
         assertBadgeColors("chatlist_folder_tab_7", 8)
         compose.onNodeWithTag("chatlist_folder_tab_7").performClick().assertIsSelected()
         assertBadgeColors("chatlist_folder_tab_all", 16)
-        assertBadgeColors("chatlist_folder_tab_7", 8, inverted = true)
+        assertBadgeColors("chatlist_folder_tab_7", 8)
         assertBadgeColors("chatlist_folder_tab_8", 8)
 
         compose.runOnIdle {
@@ -498,7 +487,7 @@ class ChatFolderUiTest {
     }
 
     @Test
-    fun selected_folder_countless_indicators_use_on_primary_without_changing_unselected_colors() {
+    fun selected_folder_countless_indicators_use_paired_ink_without_changing_unselected_colors() {
         val colors =
             lightColorScheme(
                 primary = Color(0xFF3322CC),
@@ -533,7 +522,7 @@ class ChatFolderUiTest {
                     .onNode(hasContentDescription(description) and hasAnyAncestor(hasTestTag(tabTag)), useUnmergedTree = true)
                     .assertIsDisplayed()
             var expectedVisible = false
-            // Scan only the indicator: the leading icon and label also use onPrimary.
+            // Scan only the indicator, excluding the selected label and leading icon.
             compose.waitUntil(timeoutMillis = 5_000) {
                 val pixels = tab.captureToImage().asAndroidBitmap()
                 val tabBounds = tab.fetchSemanticsNode().boundsInRoot
@@ -555,13 +544,13 @@ class ChatFolderUiTest {
         assertIndicatorColor("chatlist_folder_tab_7", history, colors.onSurfaceVariant)
         assertIndicatorColor("chatlist_folder_tab_8", history, colors.onSurfaceVariant)
         compose.onNodeWithTag("chatlist_folder_tab_7").performClick().assertIsSelected()
-        assertIndicatorColor("chatlist_folder_tab_7", history, colors.onPrimary)
+        assertIndicatorColor("chatlist_folder_tab_7", history, colors.onSecondaryContainer)
         assertIndicatorColor("chatlist_folder_tab_all", history, colors.onSurfaceVariant)
         compose.onNodeWithTag("chatlist_folder_tab_8").performClick().assertIsSelected()
-        assertIndicatorColor("chatlist_folder_tab_8", history, colors.onPrimary)
+        assertIndicatorColor("chatlist_folder_tab_8", history, colors.onSecondaryContainer)
         assertIndicatorColor("chatlist_folder_tab_7", history, colors.onSurfaceVariant)
         compose.onNodeWithTag("chatlist_folder_tab_all").performClick().assertIsSelected()
-        assertIndicatorColor("chatlist_folder_tab_all", history, colors.onPrimary)
+        assertIndicatorColor("chatlist_folder_tab_all", history, colors.onSecondaryContainer)
 
         compose.runOnIdle {
             state.value =
@@ -576,10 +565,10 @@ class ChatFolderUiTest {
         assertIndicatorColor("chatlist_folder_tab_7", pending, colors.primary)
         assertIndicatorColor("chatlist_folder_tab_8", pending, colors.primary)
         compose.onNodeWithTag("chatlist_folder_tab_7").performClick().assertIsSelected()
-        assertIndicatorColor("chatlist_folder_tab_7", pending, colors.onPrimary)
+        assertIndicatorColor("chatlist_folder_tab_7", pending, colors.onSecondaryContainer)
         assertIndicatorColor("chatlist_folder_tab_all", pending, colors.primary)
         compose.onNodeWithTag("chatlist_folder_tab_all").performClick().assertIsSelected()
-        assertIndicatorColor("chatlist_folder_tab_all", pending, colors.onPrimary)
+        assertIndicatorColor("chatlist_folder_tab_all", pending, colors.onSecondaryContainer)
     }
 
     @Test
@@ -645,9 +634,9 @@ class ChatFolderUiTest {
             ) = pixels.getPixel((x - rootBounds.left).toInt(), (y - rootBounds.top).toInt())
 
             val centerY = (bounds.top + bounds.bottom) / 2
-            assertEquals("The transparent strip shows the unified chat surface", colors.surface.toArgb(), pixel(rootBounds.left + sampleInset, centerY))
+            assertEquals("The transparent strip shows the lowest utility canvas", colors.surfaceContainerLowest.toArgb(), pixel(rootBounds.left + sampleInset, centerY))
             val topBar = compose.onNodeWithTag("chatlist_top_app_bar").fetchSemanticsNode().boundsInRoot
-            assertEquals("The title bar retains its original surface color", colors.surface.toArgb(), pixel(topBar.left + sampleInset, (topBar.top + topBar.bottom) / 2))
+            assertEquals("The title bar uses the utility canvas", colors.surfaceContainerLowest.toArgb(), pixel(topBar.left + sampleInset, (topBar.top + topBar.bottom) / 2))
             compose.onNodeWithTag("chatlist_folder_tab_all").assertIsSelected()
             val selected =
                 compose
@@ -655,7 +644,7 @@ class ChatFolderUiTest {
                     .assertIsDisplayed()
                     .fetchSemanticsNode()
                     .boundsInRoot
-            assertEquals("The selected pill uses the stronger theme primary color", colors.primary.toArgb(), pixel((selected.left + selected.right) / 2, selected.top + 2 * sampleInset))
+            assertEquals("The selected pill uses the paired secondary container", colors.secondaryContainer.toArgb(), pixel((selected.left + selected.right) / 2, selected.top + 2 * sampleInset))
             val tabBounds = compose.onNodeWithTag("chatlist_folder_tab_all").fetchSemanticsNode().boundsInRoot
             val pillInset = with(compose.density) { 4.dp.toPx() }
             assertEquals("The clickable tab retains its original 48dp height", with(compose.density) { 48.dp.toPx() }, tabBounds.height, 0.5f)

@@ -101,6 +101,7 @@ fun BanTargetPicker(
                         .testTag("${tagPrefix}_member_dropdown"),
             )
             ExposedDropdownMenu(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 expanded = membersExpanded && !locked,
                 onDismissRequest = { membersExpanded = false },
             ) {

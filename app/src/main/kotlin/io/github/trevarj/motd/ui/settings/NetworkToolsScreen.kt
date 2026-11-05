@@ -164,6 +164,9 @@ private fun IgnoreSection(
         } else {
             state.ignores.forEach { ignore ->
                 ListItem(
+                    colors =
+                        androidx.compose.material3.ListItemDefaults
+                            .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
                     headlineContent = { Text(ignore.pattern) },
                     supportingContent = {
                         Text(stringResource(if (ignore.enabled) R.string.network_tools_enabled else R.string.network_tools_disabled))
@@ -201,6 +204,9 @@ private fun MuteSection(
         } else {
             state.buffers.forEach { row ->
                 ListItem(
+                    colors =
+                        androidx.compose.material3.ListItemDefaults
+                            .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
                     headlineContent = { Text(row.displayName) },
                     supportingContent = {
                         Text(
@@ -258,6 +264,9 @@ private fun OperatorSection(
 
     SettingsGroup(title = stringResource(R.string.network_tools_operator_section)) {
         ListItem(
+            colors =
+                androidx.compose.material3.ListItemDefaults
+                    .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
             headlineContent = { Text(stringResource(R.string.network_tools_ircop_header)) },
             supportingContent = { Text(stringResource(R.string.network_tools_ircop_desc)) },
             trailingContent = {
@@ -334,6 +343,7 @@ private fun OperatorSection(
                                 .testTag("network_tools_mode_target"),
                     )
                     ExposedDropdownMenu(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                         expanded = modeTargetExpanded,
                         onDismissRequest = { modeTargetExpanded = false },
                     ) {

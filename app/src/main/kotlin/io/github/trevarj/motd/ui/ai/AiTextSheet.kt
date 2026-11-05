@@ -101,6 +101,8 @@ fun AiTextSheet(
     val composer = source is AiTextSource.Composer
     val contentScroll = key(state::class) { rememberScrollState() }
     ModalBottomSheet(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         modifier = Modifier.testTag("ai_text_sheet"),
@@ -362,7 +364,7 @@ fun AiTranslationTargetPicker(
 ) {
     var other by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf(if (selected?.code == "other") selected.name else "") }
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("ai_translation_picker")) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag("ai_translation_picker")) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -409,7 +411,7 @@ fun AiCustomStylesSheet(
     onDismiss: () -> Unit,
 ) {
     var editing by remember { mutableStateOf<AiCustomStyle?>(null) }
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("ai_custom_styles")) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag("ai_custom_styles")) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp)) {
             Text(stringResource(R.string.ai_text_custom_styles), style = MaterialTheme.typography.titleLarge)
             styles.forEach { style ->

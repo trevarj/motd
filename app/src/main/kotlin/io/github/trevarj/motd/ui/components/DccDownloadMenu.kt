@@ -77,7 +77,7 @@ internal fun DccDownloadMenu(
         ) {
             Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.dcc_file_options))
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerLow) {
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.dcc_save_to_downloads)) },
                 modifier = Modifier.testTag("dcc_save_to_downloads_${transfer.id}"),

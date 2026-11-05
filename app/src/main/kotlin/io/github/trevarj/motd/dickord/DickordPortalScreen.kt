@@ -68,7 +68,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -186,6 +185,7 @@ internal fun DickordPortalContent(
         }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         modifier = Modifier.fillMaxSize().testTag("screen_dickord_portal"),
         snackbarHost = {
             if (snackbarHostState != null) SnackbarHost(snackbarHostState)
@@ -448,11 +448,11 @@ private fun DickordGroupPane(
     val allConversationCount = state.groups.sumOf { it.conversations.size }
     val waitingForDetails =
         selectedGroup?.conversations?.any { it.descriptor?.channelName == null } == true
-    Column(modifier = modifier.fillMaxHeight().background(MaterialTheme.colorScheme.surface)) {
+    Column(modifier = modifier.fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainerLowest)) {
         if (state.offline && allConversationCount > 0) {
             Surface(
-                color = MaterialTheme.colorScheme.tertiaryContainer,
-                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                color = io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors.current.warningContainer,
+                contentColor = io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors.current.onWarningContainer,
                 modifier = Modifier.fillMaxWidth().testTag("dickord_portal_offline"),
             ) {
                 Text(
@@ -576,7 +576,7 @@ private fun DickordPortalHeader(
                 ) {
                     Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.chatlist_more_actions))
                 }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.drawer_mark_all_read)) },
                         leadingIcon = { Icon(Icons.Outlined.DoneAll, contentDescription = null) },
@@ -608,7 +608,7 @@ private fun DickordPortalHeader(
         },
         colors =
             TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.surface,
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
                 scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             ),
     )
@@ -704,7 +704,7 @@ private fun DickordChannelRow(
     val badges = chatListBadgeState(row)
     val scheme = MaterialTheme.colorScheme
     val rowColor = if (selected) scheme.secondaryContainer else Color.Transparent
-    val readingInk = ensureContrast(readingInk(scheme), listOf(rowColor.compositeOver(scheme.surface)), MESSAGE_TEXT_CONTRAST)
+    val readingInk = if (selected) scheme.onSecondaryContainer else ensureContrast(readingInk(scheme), listOf(scheme.surfaceContainerLowest), MESSAGE_TEXT_CONTRAST)
     Row(
         modifier =
             Modifier
@@ -721,7 +721,14 @@ private fun DickordChannelRow(
         Icon(
             Icons.Outlined.Forum,
             contentDescription = null,
-            tint = if (row.muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+            tint =
+                if (selected) {
+                    scheme.onSecondaryContainer
+                } else if (row.muted) {
+                    scheme.onSurfaceVariant
+                } else {
+                    scheme.primary
+                },
             modifier = Modifier.size(20.dp),
         )
         Spacer(Modifier.width(10.dp))
@@ -738,7 +745,7 @@ private fun DickordChannelRow(
             Icon(
                 Icons.Outlined.PushPin,
                 contentDescription = stringResource(R.string.chatlist_pinned),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (selected) scheme.onSecondaryContainer else scheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 4.dp).size(14.dp),
             )
         }
@@ -746,7 +753,7 @@ private fun DickordChannelRow(
             Icon(
                 Icons.Filled.NotificationsOff,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = if (selected) scheme.onSecondaryContainer else scheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 4.dp).size(14.dp),
             )
         }
@@ -776,7 +783,7 @@ private fun DickordConversationMenu(
         onDismiss()
         block()
     }
-    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         DropdownMenuItem(
             text = { Text(stringResource(R.string.chatlist_mark_read)) },
             leadingIcon = { Icon(Icons.Outlined.DoneAll, contentDescription = null) },

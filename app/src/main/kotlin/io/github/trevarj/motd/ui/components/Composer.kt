@@ -1590,6 +1590,8 @@ private fun ComposerColorSheet(
 ) {
     var editingBackground by remember { mutableStateOf(false) }
     ModalBottomSheet(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         onDismissRequest = onCancel,
         modifier = Modifier.testTag("chat_composer_color_sheet"),
     ) {
@@ -1604,16 +1606,26 @@ private fun ComposerColorSheet(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("IRC color", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                Text("IRC color", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
                 Button(onClick = onApply, modifier = Modifier.testTag("chat_composer_color_apply")) {
                     Text("Apply")
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { editingBackground = false }) {
+                TextButton(
+                    onClick = { editingBackground = false },
+                    colors =
+                        androidx.compose.material3.ButtonDefaults
+                            .textButtonColors(containerColor = if (!editingBackground) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent, contentColor = if (!editingBackground) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary),
+                ) {
                     Text(if (editingBackground) "Text" else "Text ✓")
                 }
-                TextButton(onClick = { editingBackground = true }) {
+                TextButton(
+                    onClick = { editingBackground = true },
+                    colors =
+                        androidx.compose.material3.ButtonDefaults
+                            .textButtonColors(containerColor = if (editingBackground) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent, contentColor = if (editingBackground) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary),
+                ) {
                     Text(if (editingBackground) "Background ✓" else "Background")
                 }
                 if (editingBackground) TextButton(onClick = { onBackground(null) }) { Text("No background") }
@@ -1635,14 +1647,14 @@ private fun ComposerColorSheet(
                     modifier = Modifier.fillMaxWidth().padding(12.dp).testTag("chat_composer_color_preview"),
                 )
             }
-            Text("Basic 16", style = MaterialTheme.typography.titleSmall)
+            Text("Basic 16", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             ColorGrid(
                 colors = (0..15).toList(),
                 selected = if (editingBackground) background else foreground,
                 onSelect = if (editingBackground) onBackground else onForeground,
                 modifier = Modifier.height(96.dp),
             )
-            Text("Extended 16–98", style = MaterialTheme.typography.titleSmall)
+            Text("Extended 16–98", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
             ColorGrid(
                 colors = (16..98).toList(),
                 selected = if (editingBackground) background else foreground,

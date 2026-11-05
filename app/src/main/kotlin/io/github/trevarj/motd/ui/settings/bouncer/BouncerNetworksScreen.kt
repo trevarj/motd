@@ -553,7 +553,7 @@ private fun BouncerRow(
                         IconButton(onClick = { menuOpen = true }, enabled = enabled) {
                             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
                         }
-                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.action_edit)) },
                                 leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },

@@ -125,8 +125,12 @@ fun QrInviteScannerScreen(
             )
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {
             TopAppBar(
+                colors =
+                    androidx.compose.material3.TopAppBarDefaults
+                        .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                 title = { Text(stringResource(R.string.invite_scan_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {

@@ -55,6 +55,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
@@ -473,9 +474,13 @@ fun ChannelInfoContent(
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
+                colors =
+                    androidx.compose.material3.TopAppBarDefaults
+                        .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                 title = { Text(stringResource(R.string.channelinfo_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -628,7 +633,7 @@ fun ChannelInfoContent(
                         Text(
                             text = section.prefix?.let { "$it" } ?: stringResource(R.string.channelinfo_section_regular),
                             style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.SemiBold,
                             // Headers move with their rows but never fade: their identity is the
                             // section, not the membership.
@@ -774,9 +779,10 @@ private fun TopicText(
     topic: String,
     modifier: Modifier = Modifier,
     linksEnabled: Boolean = true,
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerLowest,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val fill = scheme.background
+    val fill = containerColor
     val ink = ensureContrast(readingInk(scheme), listOf(fill), MESSAGE_TEXT_CONTRAST)
     val formatted =
         io.github.trevarj.motd.ui.components
@@ -825,7 +831,7 @@ internal fun TopicEditDialog(
                 )
                 Text(stringResource(R.string.settings_topic_preview), style = MaterialTheme.typography.labelLarge)
                 androidx.compose.material3.Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    TopicText(text.text.toString(), Modifier.padding(12.dp).testTag("channelinfo_topic_preview"), linksEnabled = false)
+                    TopicText(text.text.toString(), Modifier.padding(12.dp).testTag("channelinfo_topic_preview"), linksEnabled = false, containerColor = MaterialTheme.colorScheme.background)
                 }
                 if (topicEditShowsError(mutation)) {
                     Text(
@@ -991,6 +997,9 @@ private fun NotificationSummaryRow(
     onClick: () -> Unit,
 ) {
     ListItem(
+        colors =
+            androidx.compose.material3.ListItemDefaults
+                .colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         headlineContent = { Text(stringResource(R.string.channelinfo_notifications)) },
         supportingContent = { Text(presentation.summary()) },
         leadingContent = {
@@ -1016,6 +1025,9 @@ private fun ActionsRow(
     val muted = buffer?.muted == true
     if (avatarsHidden()) {
         ListItem(
+            colors =
+                androidx.compose.material3.ListItemDefaults
+                    .colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
             headlineContent = { Text(stringResource(R.string.avatar_editor_action)) },
             leadingContent = { Icon(Icons.Outlined.Edit, contentDescription = null) },
             modifier = Modifier.testTag("channelinfo_avatar_action").clickable(onClick = onEditAvatar),
@@ -1060,7 +1072,7 @@ private fun ActionItem(
         modifier = Modifier.clickable(onClick = onClick).padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp))
+        Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
         Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 4.dp))
     }
 }
@@ -1154,7 +1166,7 @@ private fun LagReadout(
     val dotColor =
         when (tone) {
             LagTone.GOOD -> MaterialTheme.colorScheme.primary
-            LagTone.DEGRADED -> MaterialTheme.colorScheme.tertiary
+            LagTone.DEGRADED -> io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors.current.warning
             LagTone.BAD -> MaterialTheme.colorScheme.error
         }
     val description = stringResource(R.string.chat_lag_content_description, lagMs)

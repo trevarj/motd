@@ -70,12 +70,39 @@ class DickordPortalUiTest {
     val compose = createComposeRule()
 
     @Test
+    fun offlineNoticeUsesUprightSemanticWarningOnTheTrueBlackUtilityCanvas() {
+        var warningFill = Color.Unspecified
+        var warningInk = Color.Unspecified
+        compose.setContent {
+            MotdTheme(dynamicColor = false, themePreset = ColorThemePreset.ONE_DARK, useThemeTextColors = true, trueBlack = true) {
+                warningFill = io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors.current.warningContainer
+                warningInk = io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors.current.onWarningContainer
+                DickordPortalContent(state = portalState().copy(offline = true))
+            }
+        }
+        val notice = compose.onNodeWithTag("dickord_portal_offline").assertIsDisplayed()
+        val pixels = notice.captureToImage().toPixelMap()
+        assertEquals(warningFill, pixels[1, pixels.height / 2])
+        val label = InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.dickord_portal_offline)
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText(label, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val style = layouts.single().layoutInput.style
+        assertEquals(warningInk, style.color)
+        assertTrue(
+            io.github.trevarj.motd.ui.theme
+                .contrastRatio(style.color, warningFill) >= 4.49,
+        )
+        assertEquals(androidx.compose.ui.text.font.FontStyle.Normal, style.fontStyle ?: androidx.compose.ui.text.font.FontStyle.Normal)
+    }
+
+    @Test
     fun guildAndPendingTitlesUseNeutralInkOnSelectedFillWithoutChangingIconsOrBadges() {
         val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
         val pending = mutableStateOf(false)
         val selected = mutableStateOf(false)
         val rowState = mutableStateOf(false to 2)
         var fill = Color.Unspecified
+        var selectedInk = Color.Unspecified
         var iconInk = Color.Unspecified
         var badgeInk = Color.Unspecified
         var mentionInk = Color.Unspecified
@@ -83,8 +110,16 @@ class DickordPortalUiTest {
             MotdTheme(dynamicColor = false, themePreset = preset.value) {
                 val scheme = MaterialTheme.colorScheme
                 val (muted, unread) = rowState.value
-                fill = (if (selected.value) scheme.secondaryContainer else Color.Transparent).compositeOver(scheme.surface)
-                iconInk = if (muted) scheme.onSurfaceVariant else scheme.primary
+                fill = (if (selected.value) scheme.secondaryContainer else Color.Transparent).compositeOver(scheme.surfaceContainerLowest)
+                selectedInk = scheme.onSecondaryContainer
+                iconInk =
+                    if (selected.value) {
+                        scheme.onSecondaryContainer
+                    } else if (muted) {
+                        scheme.onSurfaceVariant
+                    } else {
+                        scheme.primary
+                    }
                 badgeInk = if (muted) scheme.onSurfaceVariant else scheme.onPrimary
                 mentionInk = scheme.onSecondary
                 val conversation =
@@ -142,7 +177,7 @@ class DickordPortalUiTest {
                         val layouts = mutableListOf<TextLayoutResult>()
                         title.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
                         val style = layouts.single().layoutInput.style
-                        assertEquals("$label title ink", ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST), style.color)
+                        assertEquals("$label title ink", if (isSelected) selectedInk else ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST), style.color)
                         assertEquals("$label unread weight", if (!flags.first && flags.second > 0) FontWeight.Bold else FontWeight.Medium, style.fontWeight)
                         val rowNode = compose.onNodeWithTag("dickord_conversation_11")
                         val rowBounds = rowNode.fetchSemanticsNode().boundsInRoot

@@ -102,13 +102,13 @@ internal fun ComfortableBubbleColorPickerSheet(
     val received = ComfortableBubbleColor(ComfortableBubbleColorRole.valueOf(receivedRole), receivedCustom)
     val selected = if (editSent) sent else received
 
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("settings_bubble_color_sheet")) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag("settings_bubble_color_sheet")) {
         SheetSystemBars()
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(stringResource(R.string.settings_bubble_colors), style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.settings_bubble_colors), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
             Text(stringResource(R.string.settings_bubble_colors_desc), style = MaterialTheme.typography.bodyMedium)
             AppearanceBubbleColorOptions(settings, appearance) {
                 Row(
@@ -274,14 +274,36 @@ private fun BubbleColorOption(
     onClick: () -> Unit,
 ) {
     val fill = bubbleColorSample(ComfortableBubbleColor(role, customColor), isSent)
+    val ink = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
     Row(
-        Modifier.fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, onClick = onClick).padding(vertical = 6.dp),
+        Modifier
+            .fillMaxWidth()
+            .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+            .heightIn(min = 48.dp)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .testTag("settings_bubble_color_" + role.name.lowercase())
+            .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        RadioButton(selected = selected, onClick = onClick, modifier = Modifier.testTag("settings_bubble_color_" + role.name.lowercase()))
+        RadioButton(
+            selected = selected,
+            onClick = null,
+            colors =
+                androidx.compose.material3.RadioButtonDefaults
+                    .colors(selectedColor = ink),
+        )
         BubbleColorSwatch(fill, "settings_bubble_color_${role.name.lowercase()}_swatch")
-        Text(stringResource(bubbleColorRoleLabel(role)))
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(bubbleColorRoleLabel(role, isSent)), color = ink)
+            if (role == ComfortableBubbleColorRole.DEFAULT) {
+                Text(
+                    stringResource(if (isSent) R.string.settings_bubble_color_baseline_sent_desc else R.string.settings_bubble_color_baseline_received_desc),
+                    color = if (selected) ink else MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
     }
 }
 
@@ -435,9 +457,12 @@ private fun ComfortableBubbleCustomColorDialog(
     )
 }
 
-private fun bubbleColorRoleLabel(role: ComfortableBubbleColorRole): Int =
+private fun bubbleColorRoleLabel(
+    role: ComfortableBubbleColorRole,
+    isSent: Boolean,
+): Int =
     when (role) {
-        ComfortableBubbleColorRole.DEFAULT -> R.string.settings_bubble_color_default
+        ComfortableBubbleColorRole.DEFAULT -> if (isSent) R.string.settings_bubble_color_baseline_sent else R.string.settings_bubble_color_baseline_received
         ComfortableBubbleColorRole.SURFACE_CONTAINER -> R.string.settings_bubble_color_surface_container
         ComfortableBubbleColorRole.SURFACE_CONTAINER_HIGH -> R.string.settings_bubble_color_surface_container_high
         ComfortableBubbleColorRole.PRIMARY -> R.string.settings_bubble_color_primary

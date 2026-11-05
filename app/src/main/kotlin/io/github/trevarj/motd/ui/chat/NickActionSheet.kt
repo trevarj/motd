@@ -100,7 +100,7 @@ fun NickActionSheet(
     val canEditAvatar = canEditConversationAvatar && !relayIdentity
 
     // Root tag disambiguates from MessageActionSheet when both could be open.
-    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.testTag("nick_sheet")) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag("nick_sheet")) {
         SheetSystemBars()
         Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
             // Header: avatar + nick + whois summary (or the fallback line when whois is unavailable).
@@ -338,8 +338,11 @@ private fun NickAction(
 ) {
     Row(modifier = Modifier.fillMaxWidth()) {
         ListItem(
+            colors =
+                androidx.compose.material3.ListItemDefaults
+                    .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
             headlineContent = { Text(label) },
-            leadingContent = { Icon(icon, contentDescription = null) },
+            leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
             modifier = Modifier.then(tag?.let(Modifier::testTag) ?: Modifier).clickable(onClick = onClick),
         )
     }

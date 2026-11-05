@@ -103,8 +103,12 @@ fun JoinInviteContent(
 ) {
     var detailsExpanded by rememberSaveable { mutableStateOf(false) }
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {
             TopAppBar(
+                colors =
+                    androidx.compose.material3.TopAppBarDefaults
+                        .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                 title = { Text(stringResource(R.string.invite_join_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -133,6 +137,7 @@ fun JoinInviteContent(
                         Text(
                             stringResource(if (contactInvite != null) R.string.contact_invite_review_title else R.string.invite_review_title),
                             style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary,
                         )
                         Text(
                             contactInvite?.contactNick ?: channelInvite?.channel.orEmpty(),

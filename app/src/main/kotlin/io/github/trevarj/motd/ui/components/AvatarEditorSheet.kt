@@ -19,6 +19,8 @@ import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -77,6 +79,8 @@ fun AvatarEditorSheet(
         }
 
     ModalBottomSheet(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         modifier = Modifier.testTag("avatar_editor_sheet"),
@@ -86,6 +90,7 @@ fun AvatarEditorSheet(
             Text(
                 stringResource(R.string.avatar_editor_title),
                 style = androidx.compose.material3.MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
             CurrentAvatarInspection(name, isChannel, currentModel, Modifier.padding(horizontal = 16.dp))
@@ -194,9 +199,10 @@ private fun AvatarEditorAction(
     onClick: () -> Unit,
 ) {
     ListItem(
+        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
         headlineContent = { Text(title) },
         supportingContent = supporting?.let { value -> { Text(value) } },
-        leadingContent = { Icon(icon, contentDescription = null) },
+        leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
         modifier =
             Modifier
                 .fillMaxWidth()

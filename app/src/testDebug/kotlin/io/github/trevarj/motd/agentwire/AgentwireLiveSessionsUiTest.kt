@@ -1,19 +1,30 @@
 package io.github.trevarj.motd.agentwire
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontStyle
 import io.github.trevarj.motd.UiDispatcherResetRule
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.contrastRatio
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -30,6 +41,65 @@ class AgentwireLiveSessionsUiTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun attachedSessionMetadataKeepsPairedInkAndUprightStatusAcrossLiveThemes() {
+        val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
+        val themedText = mutableStateOf(false)
+        val trueBlack = mutableStateOf(false)
+        var fill = Color.Unspecified
+        var ink = Color.Unspecified
+        compose.setContent {
+            MotdTheme(dynamicColor = false, themePreset = preset.value, useThemeTextColors = themedText.value, trueBlack = trueBlack.value) {
+                fill = MaterialTheme.colorScheme.secondaryContainer
+                ink = MaterialTheme.colorScheme.onSecondaryContainer
+                AgentwireSessionDrawer(
+                    rows =
+                        listOf(
+                            AgentwireDrawerRow(
+                                sid = "bound",
+                                title = "Attached project",
+                                backend = "pi",
+                                cwd = "/work/motd",
+                                directory = "motd",
+                                status = AgentwireDrawerStatus.WORKING,
+                                tuiAttached = false,
+                                attached = true,
+                                section = AgentwireDrawerSection.BOUND,
+                            ),
+                        ),
+                    attached = true,
+                    actions = emptySet(),
+                    onSelect = { error("The attached session is not a second attach action") },
+                    onDetach = {},
+                    onNewSession = {},
+                )
+            }
+        }
+        for ((theme, useText, black) in listOf(
+            Triple(ColorThemePreset.AYU_LIGHT, false, false),
+            Triple(ColorThemePreset.ONE_DARK, true, false),
+            Triple(ColorThemePreset.AYU_DARK, true, true),
+            Triple(ColorThemePreset.AYU_LIGHT, false, false),
+        )) {
+            compose.runOnIdle {
+                preset.value = theme
+                themedText.value = useText
+                trueBlack.value = black
+            }
+            val row = compose.onNodeWithTag("agentwire_drawer_row_bound").assertIsDisplayed().assertHasNoClickAction()
+            val image = row.captureToImage().toPixelMap()
+            assertEquals(fill, image[image.width / 2, 3])
+            for (text in listOf("Attached project", "/work/motd", "working", "Attached")) {
+                val layouts = mutableListOf<TextLayoutResult>()
+                compose.onNodeWithText(text, useUnmergedTree = true).assertIsDisplayed().performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                val style = layouts.single().layoutInput.style
+                assertEquals(ink, style.color)
+                assertTrue(contrastRatio(style.color, fill) >= 4.49)
+                assertEquals(FontStyle.Normal, style.fontStyle ?: FontStyle.Normal)
+            }
+        }
+    }
 
     @Test
     fun closeChannel_requiresConfirmation() {

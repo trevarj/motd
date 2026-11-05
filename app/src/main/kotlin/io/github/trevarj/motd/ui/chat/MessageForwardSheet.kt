@@ -101,6 +101,8 @@ internal fun MessageForwardSheet(
             else -> null
         }
     ModalBottomSheet(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         onDismissRequest = { if (!sending) onDismiss() },
         sheetState = sheetState,
         modifier = Modifier.testTag("message_forward_sheet"),

@@ -74,8 +74,12 @@ fun AccountSetupContent(
 ) {
     val uriHandler = LocalUriHandler.current
     Scaffold(
+        containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {
             TopAppBar(
+                colors =
+                    androidx.compose.material3.TopAppBarDefaults
+                        .topAppBarColors(containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerLowest),
                 title = { Text(stringResource(R.string.account_setup_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {

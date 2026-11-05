@@ -274,7 +274,7 @@ private fun AiModelCard(
     SettingsGroup(title = model.displayName, modifier = Modifier.testTag("ai_model_${model.id}")) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(modelMetadataSummary(model), style = MaterialTheme.typography.bodyMedium)
-            Text(stringResource(R.string.ai_model_imported_at, imported), style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.ai_model_imported_at, imported), style = MaterialTheme.typography.bodyMedium, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
             SelectionContainer {
                 Text(stringResource(R.string.ai_model_sha256, model.id), style = MaterialTheme.typography.bodySmall)
             }
@@ -332,21 +332,19 @@ private fun AiModelCard(
 }
 
 @Composable
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 private fun CapabilityBadges(model: AiModelRecord) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.testTag("ai_model_${model.id}_capabilities")) {
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.testTag("ai_model_${model.id}_capabilities")) {
         model.capabilities.forEach { capability ->
-            Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.testTag("ai_model_${model.id}_capability_${capability.tag()}")) {
-                Text(
-                    stringResource(
-                        when (capability) {
-                            AiModelCapability.TRANSCRIPTION -> R.string.ai_role_transcription
-                            AiModelCapability.TEXT_TOOLS -> R.string.ai_text_tools
-                        },
-                    ),
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
+            io.github.trevarj.motd.ui.components.MetadataPill(
+                stringResource(
+                    when (capability) {
+                        AiModelCapability.TRANSCRIPTION -> R.string.ai_role_transcription
+                        AiModelCapability.TEXT_TOOLS -> R.string.ai_text_tools
+                    },
+                ),
+                modifier = Modifier.testTag("ai_model_${model.id}_capability_${capability.tag()}"),
+            )
         }
     }
 }

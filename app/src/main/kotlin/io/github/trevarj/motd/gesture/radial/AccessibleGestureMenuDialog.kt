@@ -12,6 +12,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -50,6 +51,8 @@ internal fun AccessibleGestureMenuDialog(
     var path by remember(root) { mutableStateOf(listOf(root)) }
     val current = path.last()
     AlertDialog(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        titleContentColor = MaterialTheme.colorScheme.primary,
         onDismissRequest = onDismiss,
         modifier = Modifier.testTag(GESTURE_MENU_A11Y_DIALOG_TAG),
         title = {
@@ -70,7 +73,7 @@ internal fun AccessibleGestureMenuDialog(
                 items(current.children, key = { it.id }) { entry ->
                     ListItem(
                         headlineContent = { Text(entry.label) },
-                        leadingContent = { Icon(entry.icon.vector, contentDescription = null) },
+                        leadingContent = { Icon(entry.icon.vector, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                         trailingContent = {
                             if (entry.children.isNotEmpty()) {
                                 Icon(Icons.Outlined.ChevronRight, contentDescription = null)

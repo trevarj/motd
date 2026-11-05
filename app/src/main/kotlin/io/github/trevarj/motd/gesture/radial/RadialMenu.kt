@@ -2,6 +2,7 @@ package io.github.trevarj.motd.gesture.radial
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -174,13 +175,13 @@ private fun RadialSliceLabel(
 ) {
     val container =
         if (focused) {
-            MaterialTheme.colorScheme.inverseSurface
+            MaterialTheme.colorScheme.secondaryContainer
         } else {
             MaterialTheme.colorScheme.surfaceContainerHighest
         }
     val content =
         if (focused) {
-            MaterialTheme.colorScheme.inverseOnSurface
+            MaterialTheme.colorScheme.onSecondaryContainer
         } else {
             MaterialTheme.colorScheme.onSurface
         }
@@ -193,6 +194,7 @@ private fun RadialSliceLabel(
                 .widthIn(max = 112.dp)
                 .clip(RoundedCornerShape(12.dp))
                 .background(container)
+                .then(if (focused) Modifier.border(2.dp, content, RoundedCornerShape(12.dp)) else Modifier)
                 .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
         Icon(

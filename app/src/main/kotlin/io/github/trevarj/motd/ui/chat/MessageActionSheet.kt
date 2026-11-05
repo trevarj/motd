@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chat
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.SheetState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -102,6 +104,8 @@ fun MessageActionSheet(
         sheetState = sheetState,
         // Root tag disambiguates from NickActionSheet when both could be open.
         modifier = Modifier.testTag("message_action_sheet"),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         SheetSystemBars()
         Column(modifier = Modifier.padding(bottom = 24.dp)) {
@@ -109,18 +113,29 @@ fun MessageActionSheet(
                 PrimaryTabRow(
                     selectedTabIndex = selectedTab,
                     modifier = Modifier.testTag("message_action_tabs"),
+                    containerColor = Color.Transparent,
                 ) {
                     Tab(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
                         text = { Text(stringResource(R.string.chat_action_tab_actions)) },
-                        modifier = Modifier.testTag("message_action_tab_actions"),
+                        selectedContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier =
+                            Modifier
+                                .testTag("message_action_tab_actions")
+                                .background(if (selectedTab == 0) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent),
                     )
                     Tab(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
                         text = { Text(stringResource(R.string.chat_action_tab_reactions)) },
-                        modifier = Modifier.testTag("message_action_tab_reactions"),
+                        selectedContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier =
+                            Modifier
+                                .testTag("message_action_tab_reactions")
+                                .background(if (selectedTab == 1) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent),
                     )
                 }
             }
@@ -163,7 +178,7 @@ fun MessageActionSheet(
                             Text(
                                 text = "＋",
                                 fontSize = 24.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = MaterialTheme.colorScheme.primary,
                             )
                         }
                     }
@@ -361,12 +376,22 @@ private fun ActionItem(
                 }
             },
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, contentDescription = null, tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = tint ?: MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(4.dp),
+                )
+            }
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
-                color = tint ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                color = tint ?: MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
             )
         }

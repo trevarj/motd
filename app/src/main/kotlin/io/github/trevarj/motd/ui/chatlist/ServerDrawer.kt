@@ -386,7 +386,7 @@ internal fun DrawerActionTile(
             },
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Text(
                 text = visibleLabel,
                 style = MaterialTheme.typography.labelSmall,
@@ -423,7 +423,7 @@ private fun NetworksHeader(
             Text(
                 text = stringResource(R.string.drawer_networks).uppercase(),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
@@ -642,7 +642,13 @@ private fun DrawerNetworkItem(
                         text = row.name,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
+                        color =
+                            if (selected || dragging) {
+                                io.github.trevarj.motd.ui.theme
+                                    .ensureContrast(MaterialTheme.colorScheme.onSecondaryContainer, listOf(background))
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -651,7 +657,11 @@ private fun DrawerNetworkItem(
                         style = MaterialTheme.typography.bodySmall,
                         color =
                             if (row.state is IrcClientState.Failed) {
-                                MaterialTheme.colorScheme.error
+                                io.github.trevarj.motd.ui.theme
+                                    .ensureContrast(MaterialTheme.colorScheme.error, listOf(if (selected || dragging) background else MaterialTheme.colorScheme.surfaceContainerLow))
+                            } else if (selected || dragging) {
+                                io.github.trevarj.motd.ui.theme
+                                    .ensureContrast(MaterialTheme.colorScheme.onSecondaryContainer, listOf(background))
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             },
@@ -705,7 +715,7 @@ private fun DrawerNetworkItem(
             }
         }
 
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
             // Visible, tappable alternative to dragging — no long hold, no fine motor control.
             if (canMoveUp) {
                 DropdownMenuItem(

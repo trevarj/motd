@@ -139,7 +139,7 @@ fun SettingsContent(
                 Text(
                     stringResource(R.string.settings_search_results),
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.semantics { heading() },
                 )
                 if (results.isEmpty()) {

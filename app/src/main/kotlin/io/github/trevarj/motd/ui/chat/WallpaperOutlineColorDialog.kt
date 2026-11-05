@@ -109,7 +109,7 @@ internal fun WallpaperOutlineColorDialog(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Box(Modifier.size(32.dp).background(Color(draft ?: themeColor), CircleShape).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape))
-                    Text(if (useDefault) stringResource(R.string.settings_wallpaper_color_default) else wallpaperColorHex(draft ?: color))
+                    Text(if (useDefault) stringResource(R.string.settings_wallpaper_color_default, wallpaperColorHex(themeColor)) else wallpaperColorHex(draft ?: color))
                 }
                 WallpaperPreview(
                     selection.copy(outlineColor = draft),
@@ -183,7 +183,7 @@ internal fun WallpaperOutlineColorDialog(
                         useDefault = true
                     },
                     modifier = Modifier.testTag("settings_wallpaper_color_default"),
-                ) { Text(stringResource(R.string.settings_wallpaper_color_default)) }
+                ) { Text(stringResource(R.string.settings_wallpaper_color_default, wallpaperColorHex(themeColor))) }
             }
         },
         dismissButton = {

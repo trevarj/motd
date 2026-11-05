@@ -292,6 +292,8 @@ internal fun FoolSettingsSheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         modifier = Modifier.testTag("fool_settings_sheet"),

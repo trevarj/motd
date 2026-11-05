@@ -34,13 +34,12 @@ import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
-/** Unread count pill (primary, or inverted on a primary surface). Renders "99+" for large counts. */
+/** Unread count pill. Renders "99+" for large counts and preserves the full accessible count. */
 @Composable
 fun UnreadBadge(
     count: Int,
     modifier: Modifier = Modifier,
     lowerBound: Boolean = false,
-    inverted: Boolean = false,
 ) {
     // CD carries the real count (the visible text caps at "99+") so the e2e harness can read it.
     val cd =
@@ -56,8 +55,8 @@ fun UnreadBadge(
                 lowerBound -> "$count+"
                 else -> count.toString()
             },
-        background = if (inverted) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
-        foreground = if (inverted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onPrimary,
+        background = MaterialTheme.colorScheme.primary,
+        foreground = MaterialTheme.colorScheme.onPrimary,
         modifier = modifier,
         contentDescription = cd,
     )

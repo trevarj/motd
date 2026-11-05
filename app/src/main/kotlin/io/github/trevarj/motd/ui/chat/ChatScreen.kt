@@ -3311,7 +3311,7 @@ internal fun ChatContent(
         }
     }
     val conversationActionsMenu: @Composable () -> Unit = {
-        DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, modifier = Modifier.testTag("chat_overflow_menu")) {
+        DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.testTag("chat_overflow_menu")) {
             if (compactHeader) {
                 if (titleClickLabel != null) {
                     DropdownMenuItem(
@@ -4362,6 +4362,8 @@ internal fun ChatContent(
 
     if (eligibleEbooksRoomId != null && ebooksOffersOpen) {
         ModalBottomSheet(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            contentColor = MaterialTheme.colorScheme.onSurface,
             onDismissRequest = { ebooksOffersOpen = false },
             modifier = Modifier.testTag("chat_ebooks_dcc_sheet"),
         ) {
@@ -5855,6 +5857,8 @@ internal fun VoiceDestinationSheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {

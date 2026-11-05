@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -43,6 +44,10 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.FolderIconKind
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
@@ -68,6 +73,7 @@ import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.UiIcon
+import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.fixedThemeScheme
 import org.junit.Assert.assertEquals
@@ -82,6 +88,7 @@ import org.robolectric.annotation.GraphicsMode
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import android.provider.Settings as AndroidSettings
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -662,6 +669,56 @@ class AppearanceFolderLayoutUiTest {
     }
 
     @Test
+    fun deviceTimeFormatLabelsFollowNativeChangesAndResumeWithoutChangingAuto() {
+        val context = RuntimeEnvironment.getApplication()
+        val resolver = context.contentResolver
+        val original = AndroidSettings.System.getString(resolver, AndroidSettings.System.TIME_12_24)
+        val persisted = AppearanceConfig(timeFormat = TimeFormat.AUTO)
+        val selected = mutableListOf<TimeFormat>()
+        val owner =
+            object : LifecycleOwner {
+                override val lifecycle = LifecycleRegistry.createUnsafe(this).apply { currentState = Lifecycle.State.RESUMED }
+            }
+        val sheet = "settings_time_format_sheet"
+
+        fun label(format: Int) =
+            context.getString(
+                io.github.trevarj.motd.R.string.settings_time_format_auto,
+                context.getString(format),
+            )
+        val twelveHour = label(io.github.trevarj.motd.R.string.settings_time_format_h12)
+        val twentyFourHour = label(io.github.trevarj.motd.R.string.settings_time_format_h24)
+        try {
+            AndroidSettings.System.putString(resolver, AndroidSettings.System.TIME_12_24, "12")
+            setContent(appearance = persisted, onTimeFormat = selected::add, lifecycleOwner = owner)
+            val row = compose.onNodeWithTag("settings_time_format_picker")
+            row.performScrollTo().assert(hasText(twelveHour))
+            compose.runOnIdle { AndroidSettings.System.putString(resolver, AndroidSettings.System.TIME_12_24, "24") }
+            row.assert(hasText(twentyFourHour)).performClick()
+            scrollToSheetNode(sheet, "settings_time_format_auto").assertIsSelected().assertTextEquals(twentyFourHour)
+
+            // The already-open sheet must refresh without a tap or an appearance emission.
+            compose.runOnIdle { AndroidSettings.System.putString(resolver, AndroidSettings.System.TIME_12_24, "12") }
+            compose.onNodeWithTag("settings_time_format_auto").assertIsSelected().assertTextEquals(twelveHour)
+            dismissSheet(sheet)
+            row.assert(hasText(twelveHour))
+
+            // Returning from native settings keeps the same composition and stored AUTO choice.
+            compose.runOnIdle {
+                owner.lifecycle.currentState = Lifecycle.State.CREATED
+                AndroidSettings.System.putString(resolver, AndroidSettings.System.TIME_12_24, "24")
+                owner.lifecycle.currentState = Lifecycle.State.RESUMED
+            }
+            row.assert(hasText(twentyFourHour)).performClick()
+            scrollToSheetNode(sheet, "settings_time_format_auto").assertIsSelected().assertTextEquals(twentyFourHour)
+            assertEquals(TimeFormat.AUTO, persisted.timeFormat)
+            assertTrue("Resolving the device setting must not persist a different choice", selected.isEmpty())
+        } finally {
+            compose.runOnUiThread { AndroidSettings.System.putString(resolver, AndroidSettings.System.TIME_12_24, original) }
+        }
+    }
+
+    @Test
     fun wallpaperPreviewKeepsImmediateEditsAcrossStaleEmissionsAndExplicitImport() {
         val appearance = mutableStateOf(AppearanceConfig())
         val imported = mutableStateOf<WallpaperSelection?>(null)
@@ -730,6 +787,65 @@ class AppearanceFolderLayoutUiTest {
     }
 
     @Test
+    @Config(qualifiers = "w411dp-h891dp")
+    fun selectedFontSamplesAndCustomChangeStayReadableInOneDarkThemeText() {
+        val filename = "Imported conversation font.ttf"
+        val context = RuntimeEnvironment.getApplication()
+        val customFont = java.io.File.createTempFile("palette-imported-", ".ttf", context.cacheDir)
+        context.resources.openRawResource(io.github.trevarj.motd.R.font.jetbrains_mono_wght).use { source ->
+            customFont.outputStream().use { source.copyTo(it) }
+        }
+        setContent(
+            customFontFile = customFont,
+            appearance =
+                AppearanceConfig(
+                    theme = ColorThemePreset.ONE_DARK,
+                    useThemeTextColors = true,
+                    customFontName = filename,
+                ),
+        )
+        compose.onNodeWithTag("settings_font_picker").performScrollTo().performClick()
+        val captures = mutableListOf<android.graphics.Bitmap>()
+        for (choice in listOf(FontChoice.SYSTEM, FontChoice.SERIF, FontChoice.CUSTOM, FontChoice.SYSTEM)) {
+            val tag = "settings_font_${choice.name.lowercase()}"
+            compose.onNodeWithTag("settings_font_options").performScrollToNode(hasTestTag(tag))
+            val row = compose.onNodeWithTag(tag).performClick().assertIsSelected()
+            compose.onNodeWithTag("settings_font_sheet").assertIsDisplayed()
+            for (text in if (choice == FontChoice.CUSTOM) listOf("Aa 0O1lI", filename, "Change") else listOf("Aa 0O1lI")) {
+                // A visible lazy row can still have supporting text below the sheet viewport.
+                val sample =
+                    compose
+                        .onNode(hasText(text) and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)
+                        .performScrollTo()
+                        .assertIsDisplayed()
+                val image = row.captureToImage().asAndroidBitmap()
+                val fill = Color(image.getPixel(image.width - 2, image.height / 2))
+                assertTrue("$choice $text ink contrasts with the painted selected row", contrastRatio(inkOf(text, tag), fill) >= 4.49)
+                val rendered = sample.captureToImage().asAndroidBitmap()
+                var paintedContrast = 1.0
+                for (y in 0 until rendered.height) {
+                    for (x in 0 until rendered.width) {
+                        paintedContrast = maxOf(paintedContrast, contrastRatio(Color(rendered.getPixel(x, y)), fill))
+                    }
+                }
+                // Native 8-bit captures may round a contrast-fitted channel by one step.
+                assertTrue("$choice $text must paint readable native glyphs", paintedContrast >= 4.49)
+            }
+            if (choice == FontChoice.CUSTOM) {
+                assertEquals("The selected Change action uses the sample's readable ink", inkOf("Aa 0O1lI", tag), inkOf("Change", tag))
+            }
+            captures +=
+                row
+                    .performScrollTo()
+                    .assertIsDisplayed()
+                    .captureToImage()
+                    .asAndroidBitmap()
+        }
+        assertTrue("Restoring System restores its exact selected native pixels", captures.first().sameAs(captures.last()))
+        customFont.delete()
+    }
+
+    @Test
     @Config(qualifiers = "fr-w411dp-h891dp")
     fun timestampExampleUsesFixedLocalTimeAndNativeInvalidPatternFallback() {
         val appearance = mutableStateOf(AppearanceConfig(timeFormat = TimeFormat.AUTO))
@@ -747,6 +863,28 @@ class AppearanceFolderLayoutUiTest {
         compose.onNodeWithTag("settings_time_preview_value").assertTextEquals(system)
         compose.runOnIdle { appearance.value = appearance.value.copy(customTimeFormatPattern = "yyyy-MM-dd HH:mm:ss") }
         compose.onNodeWithTag("settings_time_preview_value").assertTextEquals("2024-01-02 15:04:05")
+    }
+
+    @Test
+    fun inputBaselineNameTracksTheDraftLayoutWithoutChangingTheStoredShape() {
+        val persisted = AppearanceConfig(theme = ColorThemePreset.AYU_LIGHT)
+        val calls = mutableListOf<ComposerStyle>()
+        setContent(appearance = persisted, onComposerStyle = calls::add)
+        val resources = RuntimeEnvironment.getApplication().resources
+        for ((layout, radius) in listOf("large" to 16, "comfortable" to 28, "compact" to 28)) {
+            compose.onNodeWithTag("settings_composer_style_picker").performScrollTo().performClick()
+            scrollToSheetNode("settings_composer_style_sheet", "settings_composer_style_$layout").performClick().assertIsSelected()
+            dismissSheet("settings_composer_style_sheet")
+            openShapeSheet("input")
+            val baseline = scrollToSheetNode("settings_input_shape_sheet", "settings_input_shape_default").assertIsSelected()
+            baseline.assertTextEquals(
+                resources.getString(io.github.trevarj.motd.R.string.settings_shape_radius, radius),
+                resources.getString(io.github.trevarj.motd.R.string.settings_input_shape_baseline_desc),
+            )
+            dismissSheet("settings_input_shape_sheet")
+            assertEquals(UiCornerStyle.DEFAULT, persisted.inputCornerStyle)
+        }
+        assertEquals(listOf(ComposerStyle.LARGE, ComposerStyle.COMFORTABLE, ComposerStyle.COMPACT), calls)
     }
 
     @Test
@@ -781,7 +919,6 @@ class AppearanceFolderLayoutUiTest {
                 val sheet = "settings_${surface}_shape_sheet"
                 openShapeSheet(surface)
                 scrollToSheetNode(sheet, "settings_${surface}_shape_default").assertIsSelectedIf(selected.getValue(surface) == "default")
-                compose.onNodeWithText("Keep the current shape").assertExists()
                 for (label in listOf("Square", "Soft", "Rounded") + if (surface == "avatar") listOf("Circle") else emptyList()) {
                     scrollToSheetNode(sheet, "settings_${surface}_shape_${label.lowercase()}")
                     compose.onNode(hasTestTag("settings_${surface}_shape_${label.lowercase()}") and hasText(label)).assertExists()
@@ -930,9 +1067,12 @@ class AppearanceFolderLayoutUiTest {
         settings: Settings = Settings(),
         appearance: AppearanceConfig = AppearanceConfig(),
         appearanceProvider: () -> AppearanceConfig = { appearance },
+        customFontFile: java.io.File? = null,
         onFolderDisplayMode: (FolderDisplayMode) -> Unit = {},
         onShowFolderChatsInAll: (Boolean) -> Unit = {},
         onAvatarStyle: (AvatarStyle) -> Unit = {},
+        onTimeFormat: (TimeFormat) -> Unit = {},
+        lifecycleOwner: LifecycleOwner? = null,
         onLayoutDensity: (LayoutDensity) -> Unit = {},
         onComposerStyle: (ComposerStyle) -> Unit = {},
         onInputCornerStyle: (UiCornerStyle) -> Unit = {},
@@ -961,9 +1101,13 @@ class AppearanceFolderLayoutUiTest {
                 uiFontScalePercent = currentAppearance.uiFontScalePercent,
                 uiIconSet = currentAppearance.uiIconSet,
             ) {
-                CompositionLocalProvider(LocalRippleConfiguration provides null) {
+                CompositionLocalProvider(
+                    LocalRippleConfiguration provides null,
+                    LocalLifecycleOwner provides (lifecycleOwner ?: LocalLifecycleOwner.current),
+                ) {
                     AppearanceSettingsContent(
                         settings = settings,
+                        customFontFile = customFontFile,
                         appearance = currentAppearance,
                         onBack = {},
                         onOpenNickColors = {},
@@ -990,7 +1134,7 @@ class AppearanceFolderLayoutUiTest {
                         onConversationFontScale = {},
                         onFontChoice = onFontChoice,
                         onShowTimestamps = {},
-                        onTimeFormat = {},
+                        onTimeFormat = onTimeFormat,
                         onCustomTimeFormatPattern = {},
                         onMessageSpacing = onMessageSpacing,
                         onBubbleCornerStyle = onBubbleCornerStyle,

@@ -20,6 +20,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -34,6 +35,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -106,9 +109,13 @@ fun AutoGroupScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val proposals = autoGroupProposals(state.chats, state.ignored, networkId)
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         modifier = Modifier.testTag("screen_auto_group"),
         topBar = {
             TopAppBar(
+                colors =
+                    androidx.compose.material3.TopAppBarDefaults
+                        .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                 title = { Text(stringResource(R.string.folders_auto_group)) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back)) } },
             )
@@ -127,7 +134,7 @@ fun AutoGroupScreen(
 }
 
 @Composable
-private fun AutoGroupProposalCard(
+internal fun AutoGroupProposalCard(
     proposal: AutoGroupProposal,
     folders: List<ChatFolderEntity>,
     onApprove: (AutoGroupProposal, Collection<Long>, Long?, String, FolderIconRef, (Boolean) -> Unit) -> Unit,
@@ -141,12 +148,17 @@ private fun AutoGroupProposalCard(
     var destinationMenu by remember { mutableStateOf(false) }
     var iconPicker by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
-    Card(modifier = Modifier.fillMaxWidth().padding(12.dp).testTag("auto_group_${proposal.networkId}_${proposal.normalizedPrefix}")) {
+    Card(
+        colors =
+            androidx.compose.material3.CardDefaults
+                .cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        modifier = Modifier.fillMaxWidth().padding(12.dp).testTag("auto_group_${proposal.networkId}_${proposal.normalizedPrefix}"),
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }) {
                 FolderIcon(icon, null, Modifier.size(24.dp))
                 Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                    Text(name)
+                    Text(name, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
                     Text(stringResource(R.string.folders_matched_prefix, proposal.matchedPrefix))
                 }
                 Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null)
@@ -166,7 +178,7 @@ private fun AutoGroupProposalCard(
             TextButton(onClick = { destinationMenu = true }) {
                 Text(destination?.let { id -> folders.firstOrNull { it.id == id }?.displayName } ?: stringResource(R.string.folders_new_destination))
             }
-            DropdownMenu(destinationMenu, { destinationMenu = false }) {
+            DropdownMenu(destinationMenu, { destinationMenu = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                 DropdownMenuItem(text = { Text(stringResource(R.string.folders_new_destination)) }, onClick = {
                     destination = null
                     destinationMenu = false
@@ -190,7 +202,7 @@ private fun AutoGroupProposalCard(
                     Text(stringResource(R.string.folders_reject))
                 }
             }
-            if (error) Text(stringResource(R.string.folders_operation_failed))
+            if (error) Text(stringResource(R.string.folders_operation_failed), color = MaterialTheme.colorScheme.error)
         }
     }
     if (iconPicker) {

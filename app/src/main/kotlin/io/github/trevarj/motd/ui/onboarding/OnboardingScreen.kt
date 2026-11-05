@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -164,7 +165,7 @@ fun OnboardingContent(
         pagerState.animateScrollToPage(steps.indexOf(state.step))
     }
 
-    Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLowest).statusBarsPadding()) {
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.weight(1f),
@@ -475,6 +476,11 @@ private fun ChoiceCard(
     modifier: Modifier = Modifier,
 ) {
     Card(
+        colors =
+            androidx.compose.material3.CardDefaults.cardColors(
+                containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
+            ),
         modifier =
             modifier
                 .fillMaxWidth()
@@ -483,7 +489,7 @@ private fun ChoiceCard(
                     if (selected) {
                         Modifier.border(
                             2.dp,
-                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.onSecondaryContainer,
                             RoundedCornerShape(12.dp),
                         )
                     } else {
@@ -491,14 +497,23 @@ private fun ChoiceCard(
                     },
                 ),
     ) {
-        Column(Modifier.padding(16.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text(
-                desc,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            RadioButton(
+                selected = selected,
+                onClick = null,
+                colors =
+                    androidx.compose.material3.RadioButtonDefaults
+                        .colors(selectedColor = MaterialTheme.colorScheme.onSecondaryContainer),
             )
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    desc,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
     }
 }
@@ -702,6 +717,7 @@ private fun BouncerNetworksSection(
     Text(
         stringResource(R.string.onboarding_connect_networks_title),
         style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.primary,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(top = 12.dp),
     )
@@ -906,7 +922,7 @@ private fun OnboardingDisclosure(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                 summary?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.chatlist
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -91,6 +92,8 @@ fun NewConversationSheet(
     onNickSuggestionQuery: (Long?, String) -> Unit = { _, _ -> },
 ) {
     ModalBottomSheet(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         modifier = Modifier.testTag("new_conversation_sheet"),
@@ -203,6 +206,7 @@ internal fun NewConversationSheetContent(
             Text(
                 text = stringResource(R.string.new_sheet_title),
                 style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.semantics { heading() }.testTag("new_conversation_header"),
             )
@@ -213,20 +217,24 @@ internal fun NewConversationSheetContent(
             )
         }
 
-        PrimaryTabRow(selectedTabIndex = tab) {
+        PrimaryTabRow(selectedTabIndex = tab, containerColor = androidx.compose.ui.graphics.Color.Transparent) {
             Tab(
                 selected = tab == 0,
                 onClick = { tab = 0 },
                 text = { Text(stringResource(R.string.new_sheet_join_channel)) },
                 icon = { Icon(Icons.Outlined.Forum, contentDescription = null) },
-                modifier = Modifier.testTag("new_conversation_join_tab"),
+                selectedContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("new_conversation_join_tab").background(if (tab == 0) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent),
             )
             Tab(
                 selected = tab == 1,
                 onClick = { tab = 1 },
                 text = { Text(stringResource(R.string.new_sheet_message_user)) },
                 icon = { Icon(Icons.Outlined.Person, contentDescription = null) },
-                modifier = Modifier.testTag("new_conversation_message_tab"),
+                selectedContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("new_conversation_message_tab").background(if (tab == 1) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent),
             )
         }
 
@@ -455,13 +463,13 @@ private fun NetworkSelector(
                         stateDescription = current.name
                     }.testTag("new_conversation_network_selector"),
         )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { onExpandedChange(false) }) {
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { onExpandedChange(false) }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
             networks.forEach { network ->
                 val isSelected = network.id == current.id
                 DropdownMenuItem(
-                    text = { Text(network.name) },
+                    text = { Text(network.name, color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface) },
                     trailingIcon = {
-                        if (isSelected) Icon(Icons.Filled.Check, contentDescription = null)
+                        if (isSelected) Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
                     },
                     onClick = {
                         onSelect(network)
@@ -469,6 +477,7 @@ private fun NetworkSelector(
                     },
                     modifier =
                         Modifier
+                            .background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent)
                             .semantics { this.selected = isSelected }
                             .testTag("new_conversation_network_option_${network.id}"),
                 )
