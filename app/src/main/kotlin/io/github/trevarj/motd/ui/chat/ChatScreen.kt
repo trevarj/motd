@@ -1496,7 +1496,7 @@ internal fun ChatContent(
     val visibleEbooksOffers =
         if (eligibleEbooksRoomId != null) {
             ebooksDccOffers.filter {
-                it.networkId == state.buffer?.networkId && it.direction == DccDirection.INCOMING &&
+                it.networkId == state.buffer.networkId && it.direction == DccDirection.INCOMING &&
                     it.state != DccTransferState.REMOVED
             }
         } else {
@@ -2320,11 +2320,11 @@ internal fun ChatContent(
             return@LaunchedEffect
         }
         if (!currentPresentationCompatible || !lease.admit(snapshot) || items.itemSnapshotList !== snapshot) return@LaunchedEffect
-        if (canAdoptRetainedFallback?.invoke(fallback.intent) != true) return@LaunchedEffect
+        if (canAdoptRetainedFallback.invoke(fallback.intent) != true) return@LaunchedEffect
         selectingRetainedViewport = true
         try {
             automaticPositionJob.value?.cancelAndJoin()
-            if (canAdoptRetainedFallback?.invoke(fallback.intent) != true) return@LaunchedEffect
+            if (canAdoptRetainedFallback.invoke(fallback.intent) != true) return@LaunchedEffect
             lease.prepareTarget(
                 target.index,
                 target.expectedEventId,
@@ -4457,9 +4457,9 @@ internal fun ChatContent(
     val selectedEbooksResults = ebooksResults
     if (eligibleEbooksRoomId != null && selectedEbooksResults != null) {
         fun canRequest() =
-            eligibleEbooksRoomId == state.buffer?.id &&
+            eligibleEbooksRoomId == state.buffer.id &&
                 composerDraft.hydrated && composerDraft.text == "@Search " && composerText.text == "@Search " &&
-                state.replyTo == null && state.buffer?.joined == true && !state.parted &&
+                state.replyTo == null && state.buffer.joined == true && !state.parted &&
                 state.connState is IrcClientState.Ready
         AlertDialog(
             onDismissRequest = { ebooksResults = null },
