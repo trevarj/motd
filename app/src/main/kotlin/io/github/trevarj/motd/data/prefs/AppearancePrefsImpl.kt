@@ -44,6 +44,7 @@ private val SENT_BUBBLE_COLOR_CUSTOM = intPreferencesKey("sent_bubble_color_cust
 private val RECEIVED_BUBBLE_COLOR_ROLE = stringPreferencesKey("received_bubble_color_role_v1")
 private val RECEIVED_BUBBLE_COLOR_CUSTOM = intPreferencesKey("received_bubble_color_custom_v1")
 private val LAUNCHER_ICON = stringPreferencesKey("launcher_icon_v1")
+private val SPLASH_SCREEN_ANIMATION = stringPreferencesKey("splash_screen_animation_v1")
 private val CUSTOM_FONT_NAME = stringPreferencesKey("custom_font_name_v1")
 
 internal data class StoredThemeResolution(
@@ -141,6 +142,10 @@ class AppearancePrefsImpl
                     launcherIcon =
                         prefs[LAUNCHER_ICON]?.let { runCatching { LauncherIcon.valueOf(it) }.getOrNull() }
                             ?: LauncherIcon.DEFAULT,
+                    splashScreenAnimation =
+                        prefs[SPLASH_SCREEN_ANIMATION]
+                            ?.let { runCatching { SplashScreenAnimation.valueOf(it) }.getOrNull() }
+                            ?: SplashScreenAnimation.EDGE_TRACE,
                     customFontName = prefs[CUSTOM_FONT_NAME] ?: "",
                 )
             }
@@ -256,6 +261,10 @@ class AppearancePrefsImpl
 
         override suspend fun setLauncherIcon(icon: LauncherIcon) {
             store.edit { it[LAUNCHER_ICON] = icon.name }
+        }
+
+        override suspend fun setSplashScreenAnimation(animation: SplashScreenAnimation) {
+            store.edit { it[SPLASH_SCREEN_ANIMATION] = animation.name }
         }
 
         override suspend fun setCustomFontName(name: String) {

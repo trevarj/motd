@@ -42,6 +42,7 @@ import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
+import io.github.trevarj.motd.data.prefs.SplashScreenAnimation
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
@@ -517,6 +518,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setReceivedBubbleColor(ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, 0xff12ab34.toInt()))
             appearancePrefs.setUseThemeTextColors(true)
             appearancePrefs.setLauncherIcon(LauncherIcon.GRUVBOX)
+            appearancePrefs.setSplashScreenAnimation(SplashScreenAnimation.SOFT_WASH)
             appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, "12345678-1234-1234-1234-123456789abc.image", 0xff12ab34.toInt()))
             // Only the display name travels; the font binary itself is not part of the backup payload.
             appearancePrefs.setCustomFontName("Iosevka Term.ttf")
@@ -541,6 +543,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setReceivedBubbleColor(ComfortableBubbleColor())
             appearancePrefs.setUseThemeTextColors(false)
             appearancePrefs.setLauncherIcon(LauncherIcon.DEFAULT)
+            appearancePrefs.setSplashScreenAnimation(SplashScreenAnimation.STATIC)
             appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.MEMES, 20))
             appearancePrefs.setCustomFontName("")
 
@@ -560,6 +563,7 @@ class ConfigurationBackupRepositoryTest {
             assertEquals(ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, 0xff12ab34.toInt()), config.receivedBubbleColor)
             assertEquals(true, config.useThemeTextColors)
             assertEquals(LauncherIcon.GRUVBOX, config.launcherIcon)
+            assertEquals(SplashScreenAnimation.SOFT_WASH, config.splashScreenAnimation)
             assertEquals("Iosevka Term.ttf", config.customFontName)
             assertEquals(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, outlineColor = 0xff12ab34.toInt()), config.wallpaper)
             assertTrue(

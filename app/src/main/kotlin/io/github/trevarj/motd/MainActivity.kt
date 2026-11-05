@@ -1,6 +1,7 @@
 package io.github.trevarj.motd
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -21,6 +22,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -40,6 +43,7 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.prefs.SplashScreenAnimation
 import io.github.trevarj.motd.di.NotificationPermissionStatus
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.dickord.DickordLabsPrefs
@@ -67,14 +71,19 @@ import io.github.trevarj.motd.ui.nav.NotificationTarget
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.PendingShareStore
 import io.github.trevarj.motd.ui.share.parseSharedContent
+import io.github.trevarj.motd.ui.splash.SplashOverlayRequest
+import io.github.trevarj.motd.ui.splash.StartupSplashGate
+import io.github.trevarj.motd.ui.splash.shouldShowStartupSplash
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SystemBarThemeHost
 import io.github.trevarj.motd.ui.theme.TimestampConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -127,6 +136,15 @@ class MainActivity :
     // so the destination can render a safe error instead of silently dropping the user's scan.
     private var pendingJoinInvite by mutableStateOf<String?>(null)
 
+    // The platform splash owns Android 12+ until its exit callback. Keep its exact measured icon
+    // canvas for the Compose handoff instead of assuming the system's 288dp outer canvas.
+    private var startupSplashAnimation by mutableStateOf<SplashScreenAnimation?>(null)
+    private var startupSplashOverlay by mutableStateOf<SplashOverlayRequest?>(null)
+    private var removeStartupPlatformSplash: (() -> Unit)? = null
+    private var startupSplashIconSizePx: Int? = null
+    private var startupSplashIconLocation: IntOffset? = null
+    private var startupSplashPlaying = false
+
     private val rootUiState by lazy {
         combine(
             settingsRepository.settings,
@@ -149,6 +167,7 @@ class MainActivity :
         setTheme(R.style.Theme_Motd)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        configureStartupSplash(isFirstActivityCreation = savedInstanceState == null)
 
         requestPostNotificationsIfNeeded()
         maybeStartForegroundService()
@@ -181,83 +200,158 @@ class MainActivity :
                 remember(appearance.customFontName, fontRevision) {
                     customFontStore.installedFile()
                 }
-            MotdTheme(
-                themePreset = appearance.theme,
-                trueBlack = appearance.trueBlack,
-                dynamicColor = settings.dynamicColor,
-                followSystem = appearance.followSystem,
-                useThemeTextColors = appearance.useThemeTextColors,
-                layoutDensity = settings.layoutDensity,
-                nickColorsEnabled = settings.nickColorsEnabled,
-                nickColorPalette = settings.nickColorPalette,
-                nickColorOverrides = settings.nickColorOverrides,
-                avatarStyle = settings.avatarStyle,
-                uiFontScalePercent = appearance.uiFontScalePercent,
-                fontChoice = appearance.fontChoice,
-                customFontFile = customFontFile,
-                timestampConfig =
-                    TimestampConfig(
-                        appearance.showTimestamps,
-                        appearance.timeFormat,
-                        appearance.customTimeFormatPattern,
-                    ),
-                messageSpacing = appearance.messageSpacing,
-                bubbleCornerStyle = appearance.bubbleCornerStyle,
-                inputCornerStyle = appearance.inputCornerStyle,
-                avatarShape = appearance.avatarShape,
-                chatCardCornerStyle = appearance.chatCardCornerStyle,
-                mediaCornerStyle = appearance.mediaCornerStyle,
-                uiIconSet = appearance.uiIconSet,
-                chatShadowsEnabled = appearance.chatShadowsEnabled,
-                nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
-                sentBubbleColor = appearance.sentBubbleColor,
-                receivedBubbleColor = appearance.receivedBubbleColor,
+            StartupSplashGate(
+                request = startupSplashOverlay,
+                loading = startupSplashAnimation == null,
+                onShown = ::removePlatformSplashForOverlay,
+                onFinished = ::finishStartupSplash,
             ) {
-                CompositionLocalProvider(
-                    LocalDickordLabsEnabled provides dickordEnabled,
-                    LocalAutomaticRemoteMedia provides automaticRemoteMedia,
-                    LocalNetworkMediaHttp provides networkMediaHttp,
-                    LocalRemoteAvatars provides
-                        RemoteAvatarState(
-                            enabled = uiState.avatarConfig.showSharedAvatars && uiState.contentPreviews.showImages,
-                            records = uiState.avatarRecords,
+                MotdTheme(
+                    themePreset = appearance.theme,
+                    trueBlack = appearance.trueBlack,
+                    dynamicColor = settings.dynamicColor,
+                    followSystem = appearance.followSystem,
+                    useThemeTextColors = appearance.useThemeTextColors,
+                    layoutDensity = settings.layoutDensity,
+                    nickColorsEnabled = settings.nickColorsEnabled,
+                    nickColorPalette = settings.nickColorPalette,
+                    nickColorOverrides = settings.nickColorOverrides,
+                    avatarStyle = settings.avatarStyle,
+                    uiFontScalePercent = appearance.uiFontScalePercent,
+                    fontChoice = appearance.fontChoice,
+                    customFontFile = customFontFile,
+                    timestampConfig =
+                        TimestampConfig(
+                            appearance.showTimestamps,
+                            appearance.timeFormat,
+                            appearance.customTimeFormatPattern,
                         ),
+                    messageSpacing = appearance.messageSpacing,
+                    bubbleCornerStyle = appearance.bubbleCornerStyle,
+                    inputCornerStyle = appearance.inputCornerStyle,
+                    avatarShape = appearance.avatarShape,
+                    chatCardCornerStyle = appearance.chatCardCornerStyle,
+                    mediaCornerStyle = appearance.mediaCornerStyle,
+                    uiIconSet = appearance.uiIconSet,
+                    chatShadowsEnabled = appearance.chatShadowsEnabled,
+                    nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
+                    sentBubbleColor = appearance.sentBubbleColor,
+                    receivedBubbleColor = appearance.receivedBubbleColor,
                 ) {
-                    // Root Surface paints the themed background under every screen (incl.
-                    // non-Scaffold ones like onboarding) so the window follows the color scheme.
-                    // Expose test tags once here for the uiautomator E2E harness.
-                    Surface(
-                        modifier =
-                            Modifier
-                                .fillMaxSize()
-                                // Edge-to-edge windows receive IME insets instead of being resized.
-                                // Consume them once here so every destination stays above the keyboard.
-                                .imePadding()
-                                .semantics { testTagsAsResourceId = true },
-                        color = MaterialTheme.colorScheme.background,
+                    CompositionLocalProvider(
+                        LocalDickordLabsEnabled provides dickordEnabled,
+                        LocalAutomaticRemoteMedia provides automaticRemoteMedia,
+                        LocalNetworkMediaHttp provides networkMediaHttp,
+                        LocalRemoteAvatars provides
+                            RemoteAvatarState(
+                                enabled = uiState.avatarConfig.showSharedAvatars && uiState.contentPreviews.showImages,
+                                records = uiState.avatarRecords,
+                            ),
                     ) {
-                        PreloadChatWallpaperTile(appearance.wallpaper)
-                        MotdNavGraph(
-                            appearance = appearance,
-                            showComposerEmoji = settings.showComposerEmoji,
-                            showComposerFormattingTools = settings.showComposerFormattingTools,
-                            navController = navController,
-                            notificationTarget = notificationTarget,
-                            onNotificationTargetHandled = ::consumeNotificationTarget,
-                            pendingShare = pendingShare,
-                            onPendingShareHandled = ::consumePendingShare,
-                            pendingJoinInvite = pendingJoinInvite,
-                            onPendingJoinInviteHandled = ::consumePendingJoinInvite,
-                        )
-                        // Global TOFU cert-trust dialog host, above the whole navigation graph.
-                        CertTrustDialogHost()
-                        // Labs gesture orb, above every destination and inert while the lab is off.
-                        GestureOrbHost(navController)
+                        // Root Surface paints the themed background under every screen (incl.
+                        // non-Scaffold ones like onboarding) so the window follows the color scheme.
+                        // Expose test tags once here for the uiautomator E2E harness.
+                        Surface(
+                            modifier =
+                                Modifier
+                                    .fillMaxSize()
+                                    // Edge-to-edge windows receive IME insets instead of being resized.
+                                    // Consume them once here so every destination stays above the keyboard.
+                                    .imePadding()
+                                    .semantics { testTagsAsResourceId = true },
+                            color = MaterialTheme.colorScheme.background,
+                        ) {
+                            PreloadChatWallpaperTile(appearance.wallpaper)
+                            MotdNavGraph(
+                                appearance = appearance,
+                                showComposerEmoji = settings.showComposerEmoji,
+                                showComposerFormattingTools = settings.showComposerFormattingTools,
+                                navController = navController,
+                                notificationTarget = notificationTarget,
+                                onNotificationTargetHandled = ::consumeNotificationTarget,
+                                pendingShare = pendingShare,
+                                onPendingShareHandled = ::consumePendingShare,
+                                pendingJoinInvite = pendingJoinInvite,
+                                onPendingJoinInviteHandled = ::consumePendingJoinInvite,
+                            )
+                            // Global TOFU cert-trust dialog host, above the whole navigation graph.
+                            CertTrustDialogHost()
+                            // Labs gesture orb, above every destination and inert while the lab is off.
+                            GestureOrbHost(navController)
+                        }
                     }
                 }
             }
         }
     }
+
+    private fun configureStartupSplash(isFirstActivityCreation: Boolean) {
+        if (!isFirstActivityCreation || !areSystemAnimatorsEnabled()) {
+            // Recreation and reduced-motion launches never wait for DataStore or paint a second
+            // launch surface. The native/static splash gives way directly to first content.
+            startupSplashAnimation = SplashScreenAnimation.STATIC
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isFirstActivityCreation) {
+            splashScreen.setOnExitAnimationListener { splashView ->
+                removeStartupPlatformSplash = splashView::remove
+                splashView.iconView?.takeIf { it.width > 0 }?.let { icon ->
+                    startupSplashIconSizePx = icon.width
+                    val location = IntArray(2)
+                    icon.getLocationInWindow(location)
+                    startupSplashIconLocation = IntOffset(location[0], location[1])
+                }
+                startSplashWhenReady(isFirstActivityCreation)
+            }
+        }
+        lifecycleScope.launch {
+            // DataStore normally yields synchronously from its on-disk snapshot. If storage is
+            // unavailable, release the black launch surface instead of trapping startup forever.
+            startupSplashAnimation =
+                try {
+                    withTimeoutOrNull(1_000) { appearancePrefs.config.first().splashScreenAnimation }
+                        ?: SplashScreenAnimation.STATIC
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    SplashScreenAnimation.STATIC
+                }
+            startSplashWhenReady(isFirstActivityCreation)
+        }
+    }
+
+    private fun startSplashWhenReady(isFirstActivityCreation: Boolean) {
+        val animation = startupSplashAnimation ?: return
+        if (!shouldShowStartupSplash(isFirstActivityCreation, animation, areSystemAnimatorsEnabled())) {
+            removeStartupPlatformSplash?.invoke()
+            finishStartupSplash()
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && removeStartupPlatformSplash == null) return
+        if (startupSplashPlaying) return
+        startupSplashPlaying = true
+        val sizeDp =
+            startupSplashIconSizePx
+                ?.let { px -> px / resources.displayMetrics.density }
+                ?.dp
+                // The pre-31 window background explicitly uses a 180dp logo canvas.
+                ?: 180.dp
+        startupSplashOverlay = SplashOverlayRequest(animation, sizeDp, startupSplashIconLocation)
+    }
+
+    private fun removePlatformSplashForOverlay() {
+        removeStartupPlatformSplash?.invoke()
+        removeStartupPlatformSplash = null
+    }
+
+    private fun finishStartupSplash() {
+        removeStartupPlatformSplash?.invoke()
+        removeStartupPlatformSplash = null
+        startupSplashOverlay = null
+        startupSplashAnimation = SplashScreenAnimation.STATIC
+    }
+
+    private fun areSystemAnimatorsEnabled(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.O || ValueAnimator.areAnimatorsEnabled()
 
     /** Warm start: the running activity is re-delivered the tapped notification's content intent. */
     override fun onNewIntent(intent: Intent) {

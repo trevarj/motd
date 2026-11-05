@@ -29,6 +29,7 @@ import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.prefs.SplashScreenAnimation
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
@@ -310,6 +311,10 @@ internal class FakeAppearance(
     override suspend fun setBubbleCornerStyle(style: BubbleCornerStyle) = Unit
 
     override suspend fun setLauncherIcon(icon: LauncherIcon) = Unit
+
+    override suspend fun setSplashScreenAnimation(animation: SplashScreenAnimation) {
+        state.value = state.value.copy(splashScreenAnimation = animation)
+    }
 
     override suspend fun setCustomFontName(name: String) = Unit
 }

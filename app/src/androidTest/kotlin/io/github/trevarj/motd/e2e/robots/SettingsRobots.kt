@@ -132,6 +132,17 @@ internal class SettingsRobot(
         dismissChoiceSheet(sheet)
     }
 
+    fun selectSplashTravelingPulse() {
+        scrollToAndClick("settings_splash_screen_picker")
+        val sheet = "settings_splash_screen_sheet"
+        scrollContainerTo("${sheet}_options", "settings_splash_screen_traveling_pulse")
+        click("settings_splash_screen_traveling_pulse")
+        compose.onNodeWithTag("settings_splash_screen_traveling_pulse").assertIsSelected()
+        scrollContainerTo("${sheet}_options", "settings_splash_screen_replay")
+        assertDisplayed("settings_splash_screen_replay")
+        dismissChoiceSheet(sheet)
+    }
+
     fun assertLucideIconsPersistedAndRestoreMaterial() {
         scrollToAndClick("settings_icon_set_picker")
         val sheet = "settings_icon_set_sheet"

@@ -172,6 +172,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_bubble_colors, R.string.settings_bubble_colors_desc, "chat bubble background composer input palette custom color wheel sent received", SettingsSearchPage.APPEARANCE, SettingsTarget.BUBBLE_COLORS),
         spec(R.string.settings_wallpaper, R.string.settings_appearance_summary, "background image drawing outline tint color wheel", SettingsSearchPage.APPEARANCE, SettingsTarget.WALLPAPER),
         spec(R.string.settings_app_icon_section, R.string.settings_appearance_summary, "launcher", SettingsSearchPage.APPEARANCE, SettingsTarget.LAUNCHER_ICON),
+        spec(R.string.settings_splash_screen, R.string.settings_splash_screen_default, "launch startup edge trace soft wash traveling pulse static", SettingsSearchPage.APPEARANCE, SettingsTarget.SPLASH_SCREEN),
         spec(R.string.settings_presence_title, R.string.settings_presence_smart_desc, "join part quit away", SettingsSearchPage.CHAT, SettingsTarget.PRESENCE),
         spec(R.string.settings_show_redacted_messages, R.string.settings_show_redacted_messages_desc, "deleted accountability", SettingsSearchPage.CHAT, SettingsTarget.DELETED_MESSAGES),
         spec(R.string.settings_chat_list_swipe, R.string.settings_chat_list_swipe_desc, "left swipe gesture archive read mute unmute pin unpin delete nothing chat list", SettingsSearchPage.CHAT, SettingsTarget.CHAT_LIST_SWIPE),

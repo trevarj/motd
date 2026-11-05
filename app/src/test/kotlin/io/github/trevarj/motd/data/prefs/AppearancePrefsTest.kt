@@ -41,6 +41,7 @@ class AppearancePrefsTest {
         assertEquals(false, AppearanceConfig().chatShadowsEnabled)
         assertEquals(false, AppearanceConfig().useThemeTextColors)
         assertEquals(LauncherIcon.DEFAULT, AppearanceConfig().launcherIcon)
+        assertEquals(SplashScreenAnimation.EDGE_TRACE, AppearanceConfig().splashScreenAnimation)
         assertEquals("", AppearanceConfig().customFontName)
     }
 
@@ -52,6 +53,7 @@ class AppearancePrefsTest {
             prefs.setMessageSpacing(MessageSpacing.RELAXED)
             prefs.setBubbleCornerStyle(BubbleCornerStyle.SQUARE)
             prefs.setLauncherIcon(LauncherIcon.GRUVBOX)
+            prefs.setSplashScreenAnimation(SplashScreenAnimation.TRAVELING_PULSE)
 
             val config = prefs.config.first()
             assertEquals(FontChoice.JETBRAINS_MONO, config.fontChoice)
@@ -60,6 +62,7 @@ class AppearancePrefsTest {
             assertEquals(MessageSpacing.RELAXED, config.messageSpacing)
             assertEquals(BubbleCornerStyle.SQUARE, config.bubbleCornerStyle)
             assertEquals(LauncherIcon.GRUVBOX, config.launcherIcon)
+            assertEquals(SplashScreenAnimation.TRAVELING_PULSE, config.splashScreenAnimation)
         }
 
     @Test fun composerStyleRoundTripsAndFallsBackToComfortable() =
@@ -283,6 +286,7 @@ class AppearancePrefsTest {
                 it[stringPreferencesKey("message_spacing_v1")] = "not-a-spacing"
                 it[stringPreferencesKey("bubble_corner_style_v1")] = "not-a-style"
                 it[stringPreferencesKey("launcher_icon_v1")] = "not-an-icon"
+                it[stringPreferencesKey("splash_screen_animation_v1")] = "not-an-animation"
             }
 
             val config = prefs.config.first()
@@ -291,6 +295,7 @@ class AppearancePrefsTest {
             assertEquals(MessageSpacing.DEFAULT, config.messageSpacing)
             assertEquals(BubbleCornerStyle.ROUNDED, config.bubbleCornerStyle)
             assertEquals(LauncherIcon.DEFAULT, config.launcherIcon)
+            assertEquals(SplashScreenAnimation.EDGE_TRACE, config.splashScreenAnimation)
         }
 
     @Test fun themeAndWallpaper_roundTrip() =

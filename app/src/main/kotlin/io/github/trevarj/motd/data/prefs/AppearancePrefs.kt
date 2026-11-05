@@ -233,6 +233,9 @@ data class ComfortableBubbleColor(
 
 enum class LauncherIcon { DEFAULT, MONO, TERMINAL, GRUVBOX, CATPPUCCIN, NORD, LIGHT }
 
+/** One-shot light treatment shown after the platform's static launch artwork. */
+enum class SplashScreenAnimation { EDGE_TRACE, SOFT_WASH, TRAVELING_PULSE, STATIC }
+
 @Serializable
 data class WallpaperSelection(
     val preset: ChatWallpaperPreset = ChatWallpaperPreset.MOTD,
@@ -269,6 +272,7 @@ data class AppearanceConfig(
     val sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     val receivedBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     val launcherIcon: LauncherIcon = LauncherIcon.DEFAULT,
+    val splashScreenAnimation: SplashScreenAnimation = SplashScreenAnimation.EDGE_TRACE,
     // Display name of a user-imported custom font file; empty means nothing imported. The font
     // binary itself lives in CustomFontStore, not DataStore or backups.
     val customFontName: String = "",
@@ -331,6 +335,8 @@ interface AppearancePrefs {
     suspend fun setReceivedBubbleColor(color: ComfortableBubbleColor)
 
     suspend fun setLauncherIcon(icon: LauncherIcon)
+
+    suspend fun setSplashScreenAnimation(animation: SplashScreenAnimation)
 
     suspend fun setCustomFontName(name: String)
 }

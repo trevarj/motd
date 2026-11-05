@@ -575,6 +575,7 @@ class ConfigurationBackupRepositoryImpl
                 appearancePrefs.setSentBubbleColor(it.sentBubbleColor)
                 appearancePrefs.setReceivedBubbleColor(it.receivedBubbleColor)
                 appearancePrefs.setLauncherIcon(it.launcherIcon)
+                appearancePrefs.setSplashScreenAnimation(it.splashScreenAnimation)
                 // The font binary itself is not backed up; only the display name travels. A restored
                 // CUSTOM choice falls back to system until the user re-imports the file (see AppFonts).
                 appearancePrefs.setCustomFontName(it.customFontName)
