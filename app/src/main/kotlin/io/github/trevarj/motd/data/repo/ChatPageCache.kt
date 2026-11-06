@@ -539,6 +539,12 @@ class ChatPageCache
                 if (stale) requestRefresh()
             }
 
+            /** Refreshes only if this room actually moved; unrelated rooms' commits leave it alone. */
+            internal fun recheckVersion(loadedSource: PagingSource<Int, MessageEntity>) {
+                // A retired or superseded source revokes this read, which only cancels the launch.
+                scope.launch(ioDispatcher) { ensureVersion(readVersion(loadedSource)) }
+            }
+
             internal fun takeRefreshKey(): Int? = synchronized(lock) { requestedRefreshKey.also { requestedRefreshKey = null } }
 
             internal fun clearWindows() {

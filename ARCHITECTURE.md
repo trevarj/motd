@@ -268,6 +268,8 @@ flowchart TD
   A confirmation committed after the first SQL read but before its caller resumes discards that
   generation; the replacement page keeps the canonical event ID and viewport/read anchors.
   This covers Room 2.8.5's initial-load invalidation gap without a separate delivery-status store.
+  A retained load defers to its room-version bracket while in flight, so commits elsewhere cannot
+  restart it; a recheck after the load refreshes it only if its own room changed.
   Observer registration uses the repository's injected IO dispatcher (`Dispatchers.IO` in production);
   deterministic Paging fixtures supply their test scheduler so draining it also completes registration.
 - Chat-list navigation owns a two-room LRU of native `cachedIn` page events. A root UI-only
