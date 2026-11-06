@@ -12,6 +12,7 @@ import androidx.paging.LoadType
 import androidx.paging.PagingData
 import androidx.paging.PagingDataEvent
 import androidx.paging.PagingDataPresenter
+import androidx.paging.PagingSource
 import androidx.paging.PagingState
 import androidx.paging.RemoteMediator
 import androidx.recyclerview.widget.DiffUtil
@@ -582,6 +583,96 @@ class ChatPageCacheTest {
             val reopened = fixture.acquire(room, index = 1_490, expectedId = target.id)
             assertSame(entry.pages, reopened.pages)
             present(reopened).detach()
+        }
+
+    private fun editDuringClosingVersionRead(edit: () -> Unit): () -> Unit {
+        // The second version read is the load's closing bracket: the observer is registered by then.
+        val reads = AtomicInteger()
+        return { if (reads.incrementAndGet() == 2) edit() }
+    }
+
+    private fun Fixture.editNewestRow(room: Long) {
+        db.openHelper.writableDatabase.execSQL(
+            "UPDATE messages SET text = 'edited' WHERE id = (SELECT MAX(id) FROM messages WHERE bufferId = ?)",
+            arrayOf(room),
+        )
+    }
+
+    @Test
+    fun unrelatedRoomNotificationDuringLoadDoesNotDiscardItsPage() =
+        cacheTest { fixture ->
+            val rooms = fixture.seedRooms(2)
+            val row = checkNotNull(fixture.db.messageDao().newestMessage(rooms[0]))
+            // No Pager of its own: its Room source would react to the commit and supersede this one.
+            startHostCollections = false
+            val entry = fixture.acquire(rooms[0]).entry
+            val delivered = CompletableDeferred<Unit>()
+            val tracker = fixture.db.invalidationTracker
+            val syncCommit =
+                object : PagingSource<Int, MessageEntity>() {
+                    override fun getRefreshKey(state: PagingState<Int, MessageEntity>): Int? = null
+
+                    // The load is mid-flight when sync commits to another room and Room reports it.
+                    override suspend fun load(params: LoadParams<Int>): LoadResult<Int, MessageEntity> {
+                        val waiter =
+                            object : InvalidationTracker.Observer("messages") {
+                                override fun onInvalidated(tables: Set<String>) {
+                                    delivered.complete(Unit)
+                                }
+                            }
+                        tracker.addObserver(waiter)
+                        fixture.editNewestRow(rooms[1])
+                        tracker.refreshAsync()
+                        delivered.await()
+                        tracker.removeObserver(waiter)
+                        return LoadResult.Page(listOf(row), null, null, 0, 0)
+                    }
+                }
+            val source =
+                ViewportPagingSource(
+                    syncCommit,
+                    MutableStateFlow(null),
+                    tracker,
+                    bufferId = rooms[0],
+                    ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+                    cacheEntry = entry,
+                ) { null }
+            entry.sourceCreated(source)
+            val result = source.load(PagingSource.LoadParams.Refresh(0, 50, true))
+            assertTrue("sync traffic elsewhere must not discard this page: $result", result is PagingSource.LoadResult.Page)
+            assertFalse(source.invalid)
+        }
+
+    @Test
+    fun sameRoomCommitDuringFirstLoadStillReachesTheScreen() {
+        lateinit var edit: () -> Unit
+        cacheTest(beforePageVersionRead = editDuringClosingVersionRead { edit() }) { fixture ->
+            val room = fixture.seedRooms(1).single()
+            edit = { fixture.editNewestRow(room) }
+            val lease = fixture.acquire(room)
+            val view = present(lease)
+            assertEquals("edited", view.differ.peek(0)?.text)
+            view.detach()
+        }
+    }
+
+    @Test
+    fun versionRecheckRefreshesOnlyWhenThisRoomMoved() =
+        cacheTest { fixture ->
+            val rooms = fixture.seedRooms(2)
+            val lease = fixture.acquire(rooms[0])
+            val view = present(lease)
+            val source = checkNotNull(lease.entry.source)
+            // Hold Room's own notification: only the recheck can notice these commits.
+            fixture.databaseTasks.paused = true
+            fixture.editNewestRow(rooms[1])
+            lease.entry.recheckVersion(source)
+            assertFalse("another room's commit must not refresh this presentation", source.invalid)
+            fixture.editNewestRow(rooms[0])
+            lease.entry.recheckVersion(source)
+            assertTrue("a commit the closing version read missed must refresh", source.invalid)
+            fixture.databaseTasks.resume()
+            view.detach()
         }
 
     @Test
