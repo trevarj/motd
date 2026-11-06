@@ -233,7 +233,7 @@ data class ComfortableBubbleColor(
 
 enum class LauncherIcon { DEFAULT, MONO, TERMINAL, GRUVBOX, CATPPUCCIN, NORD, LIGHT }
 
-/** One-shot light treatment shown after the platform's static launch artwork. */
+/** Retained for preference and configuration-backup compatibility; startup no longer reads it. */
 enum class SplashScreenAnimation { EDGE_TRACE, SOFT_WASH, TRAVELING_PULSE, STATIC }
 
 @Serializable

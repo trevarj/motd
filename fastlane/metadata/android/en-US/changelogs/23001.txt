@@ -1,0 +1,3 @@
+- Replace the previous splash effects with a brief spark cutting the ceramic logo's slash, settling on the original artwork.
+- Remove the old splash animation picker while preserving saved preferences and backup compatibility.
+- Skip the animation for reduced motion and activity recreation.

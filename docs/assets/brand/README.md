@@ -28,10 +28,11 @@ In-app logos and launcher choices stay **theme-colored matte ceramic**. The
 runtime marks use `ceramicLogoColorMatrix` with their existing theme targets.
 Launcher palette backgrounds and the terminal-green artwork are unchanged.
 
-Only splash and README branding use neutral black/white treatment: splash is a
-white ceramic mark on black in both OS modes (including status/navigation bars),
-and README lockups pair a dark ceramic mark with a light page or a white ceramic
-mark with a dark page. Black/white describes polarity, **not flat silhouettes**.
+Splash and README branding settle on neutral black/white treatment: splash uses
+a white ceramic mark on black in both OS modes (including status/navigation bars),
+with a brief warm spark cutting its slash aperture. README lockups pair a dark
+ceramic mark with a light page or a white ceramic mark with a dark page.
+Black/white describes polarity, **not flat silhouettes**.
 
 The immutable RGB masters supply the matte ceramic shading as well as geometry.
 The smoothed `motd-splash-master.png` supplies splash and README contours with
@@ -58,6 +59,25 @@ Verify exports with:
 ```sh
 nix develop .#sprite-studies -c node tools/verify-branding.mjs
 ```
+
+Startup has one 950 ms spark-cut treatment, not selectable light treatments.
+Reduced motion and activity recreation skip the animation. Saved legacy splash
+choices remain readable in preferences and configuration backups but do not
+control startup. The native launch surface is black so it never exposes the
+finished aperture before the app-owned cut.
+
+`tools/splash-spark-cut.html` is the editable artwork preview. Reconstruct the
+uncut ceramic face (`drawable-nodpi/splash_spark_intact.png`) from the original
+800px splash raster and regenerate the self-contained preview, GIF, phone-size
+proofs, 50 ms frames, and final-frame comparison under `output/splash-laser-preview/`:
+
+```sh
+nix develop .#sprite-studies -c node tools/render-splash-spark-cut.mjs
+```
+
+These browser-rendered proofs document artwork, not native cold-launch timing.
+Native pixel regression lives in `SplashLogoUiTest`; release verification also
+inspects the actual launch-to-content transition on the owned emulator.
 
 F-Droid's `fastlane/metadata/android/en-US/images/phoneScreenshots/` uses the
 actual full-app light/dark showcase composites from `screenshots/` (chat list,

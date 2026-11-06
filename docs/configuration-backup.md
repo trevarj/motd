@@ -65,6 +65,11 @@ restored too. Older appearance objects without it restore `MATERIAL`; missing
 appearance objects still leave the local icon set untouched. No format-version
 change is required for these defaulted additive fields.
 
+Legacy `splashScreenAnimation` values (`EDGE_TRACE`, `SOFT_WASH`, `TRAVELING_PULSE`,
+`STATIC`) still round-trip and restore for compatibility, although startup now
+uses a single non-configurable spark cut. Missing fields default to `EDGE_TRACE`;
+an absent appearance object leaves the stored legacy choice untouched.
+
 Credentials-excluded imports keep already stored local credentials on matching
 networks. New networks that require omitted SASL passwords, server passwords,
 VLESS links, or client certificates are imported with `autoConnect = false` and

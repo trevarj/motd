@@ -43,7 +43,6 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
-import io.github.trevarj.motd.data.prefs.SplashScreenAnimation
 import io.github.trevarj.motd.di.NotificationPermissionStatus
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.dickord.DickordLabsPrefs
@@ -77,13 +76,11 @@ import io.github.trevarj.motd.ui.splash.shouldShowStartupSplash
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SystemBarThemeHost
 import io.github.trevarj.motd.ui.theme.TimestampConfig
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -138,7 +135,7 @@ class MainActivity :
 
     // The platform splash owns Android 12+ until its exit callback. Keep its exact measured icon
     // canvas for the Compose handoff instead of assuming the system's 288dp outer canvas.
-    private var startupSplashAnimation by mutableStateOf<SplashScreenAnimation?>(null)
+    private var startupSplashLoading by mutableStateOf(true)
     private var startupSplashOverlay by mutableStateOf<SplashOverlayRequest?>(null)
     private var removeStartupPlatformSplash: (() -> Unit)? = null
     private var startupSplashIconSizePx: Int? = null
@@ -202,7 +199,7 @@ class MainActivity :
                 }
             StartupSplashGate(
                 request = startupSplashOverlay,
-                loading = startupSplashAnimation == null,
+                loading = startupSplashLoading,
                 onShown = ::removePlatformSplashForOverlay,
                 onFinished = ::finishStartupSplash,
             ) {
@@ -286,13 +283,11 @@ class MainActivity :
     }
 
     private fun configureStartupSplash(isFirstActivityCreation: Boolean) {
-        if (!isFirstActivityCreation || !areSystemAnimatorsEnabled()) {
-            // Recreation and reduced-motion launches never wait for DataStore or paint a second
-            // launch surface. The native/static splash gives way directly to first content.
-            startupSplashAnimation = SplashScreenAnimation.STATIC
+        if (!shouldShowStartupSplash(isFirstActivityCreation, areSystemAnimatorsEnabled())) {
+            startupSplashLoading = false
             return
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isFirstActivityCreation) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             splashScreen.setOnExitAnimationListener { splashView ->
                 removeStartupPlatformSplash = splashView::remove
                 splashView.iconView?.takeIf { it.width > 0 }?.let { icon ->
@@ -301,42 +296,23 @@ class MainActivity :
                     icon.getLocationInWindow(location)
                     startupSplashIconLocation = IntOffset(location[0], location[1])
                 }
-                startSplashWhenReady(isFirstActivityCreation)
+                startStartupSplash()
             }
-        }
-        lifecycleScope.launch {
-            // DataStore normally yields synchronously from its on-disk snapshot. If storage is
-            // unavailable, release the black launch surface instead of trapping startup forever.
-            startupSplashAnimation =
-                try {
-                    withTimeoutOrNull(1_000) { appearancePrefs.config.first().splashScreenAnimation }
-                        ?: SplashScreenAnimation.STATIC
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    SplashScreenAnimation.STATIC
-                }
-            startSplashWhenReady(isFirstActivityCreation)
+        } else {
+            startStartupSplash()
         }
     }
 
-    private fun startSplashWhenReady(isFirstActivityCreation: Boolean) {
-        val animation = startupSplashAnimation ?: return
-        if (!shouldShowStartupSplash(isFirstActivityCreation, animation, areSystemAnimatorsEnabled())) {
-            removeStartupPlatformSplash?.invoke()
+    private fun startStartupSplash() {
+        if (!areSystemAnimatorsEnabled()) {
             finishStartupSplash()
             return
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && removeStartupPlatformSplash == null) return
         if (startupSplashPlaying) return
         startupSplashPlaying = true
-        val sizeDp =
-            startupSplashIconSizePx
-                ?.let { px -> px / resources.displayMetrics.density }
-                ?.dp
-                // The pre-31 window background explicitly uses a 180dp logo canvas.
-                ?: 180.dp
-        startupSplashOverlay = SplashOverlayRequest(animation, sizeDp, startupSplashIconLocation)
+        val sizeDp = startupSplashIconSizePx?.let { px -> px / resources.displayMetrics.density }?.dp ?: 180.dp
+        startupSplashOverlay = SplashOverlayRequest(sizeDp, startupSplashIconLocation)
+        startupSplashLoading = false
     }
 
     private fun removePlatformSplashForOverlay() {
@@ -348,7 +324,7 @@ class MainActivity :
         removeStartupPlatformSplash?.invoke()
         removeStartupPlatformSplash = null
         startupSplashOverlay = null
-        startupSplashAnimation = SplashScreenAnimation.STATIC
+        startupSplashLoading = false
     }
 
     private fun areSystemAnimatorsEnabled(): Boolean = ValueAnimator.areAnimatorsEnabled()

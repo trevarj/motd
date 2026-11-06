@@ -584,6 +584,7 @@ class ConfigurationBackupRepositoryTest {
                 appearancePrefs.setComposerStyle(ComposerStyle.COMPACT)
                 appearancePrefs.setUseThemeTextColors(true)
                 appearancePrefs.setNicknameBackgroundsEnabled(false)
+                appearancePrefs.setSplashScreenAnimation(SplashScreenAnimation.TRAVELING_PULSE)
                 appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80, outlineColor = 0xffffffff.toInt()))
                 val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
                 val oldRaw =
@@ -591,16 +592,19 @@ class ConfigurationBackupRepositoryTest {
                         .replace(Regex(""",\s*"composerStyle"\s*:\s*"COMPACT""""), "")
                         .replace(Regex(""",\s*"useThemeTextColors"\s*:\s*true"""), "")
                         .replace(Regex(""",\s*"nicknameBackgroundsEnabled"\s*:\s*false"""), "")
+                        .replace(Regex(""",\s*"splashScreenAnimation"\s*:\s*"TRAVELING_PULSE""""), "")
                         .replace(Regex(""",\s*"outlineColor"\s*:\s*-?\d+"""), "")
                 assertFalse(oldRaw.contains("composerStyle"))
                 assertFalse(oldRaw.contains("useThemeTextColors"))
                 assertFalse(oldRaw.contains("nicknameBackgroundsEnabled"))
+                assertFalse(oldRaw.contains("splashScreenAnimation"))
                 assertFalse(oldRaw.contains("outlineColor"))
 
                 backup.import(oldRaw, importMode = BackupImportMode.MERGE)
                 assertEquals(ComposerStyle.COMFORTABLE, appearancePrefs.config.first().composerStyle)
                 assertEquals(false, appearancePrefs.config.first().useThemeTextColors)
                 assertEquals(true, appearancePrefs.config.first().nicknameBackgroundsEnabled)
+                assertEquals(SplashScreenAnimation.EDGE_TRACE, appearancePrefs.config.first().splashScreenAnimation)
                 assertEquals(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80), appearancePrefs.config.first().wallpaper)
 
                 val withoutAppearance =
@@ -612,14 +616,17 @@ class ConfigurationBackupRepositoryTest {
                 appearancePrefs.setComposerStyle(ComposerStyle.LARGE)
                 appearancePrefs.setUseThemeTextColors(true)
                 appearancePrefs.setNicknameBackgroundsEnabled(false)
+                appearancePrefs.setSplashScreenAnimation(SplashScreenAnimation.STATIC)
                 backup.import(withoutAppearance, importMode = BackupImportMode.MERGE)
                 assertEquals(ComposerStyle.LARGE, appearancePrefs.config.first().composerStyle)
                 assertEquals(true, appearancePrefs.config.first().useThemeTextColors)
                 assertEquals(false, appearancePrefs.config.first().nicknameBackgroundsEnabled)
+                assertEquals(SplashScreenAnimation.STATIC, appearancePrefs.config.first().splashScreenAnimation)
             } finally {
                 appearancePrefs.setComposerStyle(ComposerStyle.COMFORTABLE)
                 appearancePrefs.setUseThemeTextColors(false)
                 appearancePrefs.setNicknameBackgroundsEnabled(true)
+                appearancePrefs.setSplashScreenAnimation(SplashScreenAnimation.EDGE_TRACE)
                 appearancePrefs.setWallpaper(WallpaperSelection())
                 db.close()
             }

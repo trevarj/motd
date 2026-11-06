@@ -1,11 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Pre-API-31 splash: white logo on black in both light and dark mode. On API 31+ the
-     platform SplashScreen (Theme.Motd.Splash in values-v31) supersedes this. -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@android:color/black" />
-    <item
-        android:width="180dp"
-        android:height="180dp"
-        android:drawable="@drawable/ic_splash_logo"
-        android:gravity="center" />
-</layer-list>
+<!-- The app owns the complete ceramic cut, so the native launch never reveals its finished hole. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@android:color/black" />
+</shape>

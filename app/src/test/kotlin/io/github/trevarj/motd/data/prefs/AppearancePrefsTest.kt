@@ -65,6 +65,23 @@ class AppearancePrefsTest {
             assertEquals(SplashScreenAnimation.TRAVELING_PULSE, config.splashScreenAnimation)
         }
 
+    @Test fun legacySplashSelectionsStillPersistAndDecode() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val original = prefs.config.first().splashScreenAnimation
+            try {
+                assertEquals(SplashScreenAnimation.EDGE_TRACE, Json.decodeFromString<AppearanceConfig>("""{}""").splashScreenAnimation)
+                SplashScreenAnimation.entries.forEach { animation ->
+                    prefs.setSplashScreenAnimation(animation)
+                    val reloaded = AppearancePrefsImpl(context).config.first()
+                    assertEquals(animation, reloaded.splashScreenAnimation)
+                    assertEquals(animation, Json.decodeFromString<AppearanceConfig>(jsonWithDefaults.encodeToString(reloaded)).splashScreenAnimation)
+                }
+            } finally {
+                prefs.setSplashScreenAnimation(original)
+            }
+        }
+
     @Test fun composerStyleRoundTripsAndFallsBackToComfortable() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()

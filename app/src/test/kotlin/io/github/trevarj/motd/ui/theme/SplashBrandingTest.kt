@@ -61,15 +61,17 @@ class SplashBrandingTest {
             }
         }
         if (Build.VERSION.SDK_INT >= 31) {
-            val splash = theme.obtainStyledAttributes(intArrayOf(android.R.attr.windowSplashScreenBackground))
+            val splash = theme.obtainStyledAttributes(intArrayOf(android.R.attr.windowSplashScreenBackground, android.R.attr.windowSplashScreenAnimatedIcon))
             try {
                 assertEquals(Color.BLACK, splash.getColor(0, Color.WHITE))
+                assertEquals(R.drawable.splash_launch_placeholder, splash.getResourceId(1, 0))
             } finally {
                 splash.recycle()
             }
         } else {
             val background = render(R.drawable.splash_window_background)
             assertEquals(Color.BLACK, background.getPixel(0, 0))
+            assertEquals(Color.BLACK, background.getPixel(100, 100))
         }
 
         val mark = render(R.drawable.ic_splash_logo)

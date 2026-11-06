@@ -2085,13 +2085,6 @@
     <string name="settings_wallpaper_color_apply">Apply</string>
 
     <string name="settings_app_icon_section">App icon</string>
-    <string name="settings_splash_screen">Splash screen</string>
-    <string name="settings_splash_screen_edge_trace">Edge trace</string>
-    <string name="settings_splash_screen_soft_wash">Soft wash</string>
-    <string name="settings_splash_screen_traveling_pulse">Traveling pulse</string>
-    <string name="settings_splash_screen_static">Static</string>
-    <string name="settings_splash_screen_default">Traces the logo edge on launch.</string>
-    <string name="settings_splash_screen_replay">Replay</string>
     <string name="settings_app_icon_default">Teal ceramic</string>
     <string name="settings_app_icon_mono">Mono</string>
     <string name="settings_app_icon_terminal">Terminal</string>

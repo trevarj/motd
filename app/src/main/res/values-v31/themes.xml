@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Android 12+ platform SplashScreen: white logo on black in both light and dark mode.
+    <!-- Android 12+ platform SplashScreen: neutral black launch surface before the app-owned ceramic cut.
          Supersedes the pre-31 windowBackground splash. -->
     <style name="Theme.Motd.Splash" parent="Base.Theme.Motd.Splash">
         <item name="android:windowSplashScreenBackground">@android:color/black</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_launch_placeholder</item>
         <item name="android:windowLightNavigationBar">false</item>
     </style>
 </resources>

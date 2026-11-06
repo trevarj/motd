@@ -62,7 +62,6 @@ import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.Settings
-import io.github.trevarj.motd.data.prefs.SplashScreenAnimation
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
@@ -99,18 +98,10 @@ class AppearanceFolderLayoutUiTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
-    fun splashPickerOffersAllTreatmentsAndReplaysTheSelectedPreview() {
-        val selected = mutableListOf<SplashScreenAnimation>()
-        setContent(onSplashScreenAnimation = selected::add)
-
-        compose.onNodeWithTag("settings_splash_screen_picker").performScrollTo().performClick()
-        val sheet = "settings_splash_screen_sheet"
-        SplashScreenAnimation.entries.forEach { animation ->
-            scrollToSheetNode(sheet, "settings_splash_screen_${animation.name.lowercase()}").assertIsDisplayed()
-        }
-        scrollToSheetNode(sheet, "settings_splash_screen_soft_wash").performClick()
-        compose.onNodeWithTag("settings_splash_screen_replay").performClick()
-        assertEquals(listOf(SplashScreenAnimation.SOFT_WASH), selected)
+    fun appearanceKeepsAppIconChoiceWithoutSplashConfiguration() {
+        setContent()
+        compose.onNodeWithTag("settings_app_icon_picker").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("settings_splash_screen_picker").assertDoesNotExist()
     }
 
     @Test
@@ -1087,7 +1078,6 @@ class AppearanceFolderLayoutUiTest {
         onNicknameBackgroundsEnabled: (Boolean) -> Unit = {},
         onUseThemeTextColors: (Boolean) -> Unit = {},
         onWallpaper: (WallpaperSelection) -> Unit = {},
-        onSplashScreenAnimation: (SplashScreenAnimation) -> Unit = {},
         importedWallpaperProvider: () -> WallpaperSelection? = { null },
         targetProvider: () -> SettingsTarget? = { null },
     ) {
@@ -1141,7 +1131,6 @@ class AppearanceFolderLayoutUiTest {
                         onChatShadowsEnabled = onChatShadowsEnabled,
                         onNicknameBackgroundsEnabled = onNicknameBackgroundsEnabled,
                         onLauncherIcon = {},
-                        onSplashScreenAnimation = onSplashScreenAnimation,
                         target = targetProvider(),
                     )
                 }

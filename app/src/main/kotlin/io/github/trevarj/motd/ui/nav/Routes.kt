@@ -92,7 +92,6 @@ enum class SettingsTarget {
     BUBBLE_COLORS,
     WALLPAPER,
     LAUNCHER_ICON,
-    SPLASH_SCREEN,
     PRESENCE,
     DELETED_MESSAGES,
     SEND_TYPING,

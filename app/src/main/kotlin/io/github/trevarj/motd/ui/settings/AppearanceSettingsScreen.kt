@@ -98,7 +98,6 @@ import io.github.trevarj.motd.data.prefs.MIN_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
-import io.github.trevarj.motd.data.prefs.SplashScreenAnimation
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
@@ -112,7 +111,6 @@ import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.densityDescription
 import io.github.trevarj.motd.ui.components.densityLabel
 import io.github.trevarj.motd.ui.nav.SettingsTarget
-import io.github.trevarj.motd.ui.splash.SplashLogoPreview
 import io.github.trevarj.motd.ui.theme.ConversationTypography
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
@@ -201,7 +199,6 @@ fun AppearanceSettingsScreen(
         onSentBubbleColor = viewModel::setSentBubbleColor,
         onReceivedBubbleColor = viewModel::setReceivedBubbleColor,
         onLauncherIcon = viewModel::setLauncherIcon,
-        onSplashScreenAnimation = viewModel::setSplashScreenAnimation,
         target = target,
         snackbarHostState = snackbarHostState,
     )
@@ -244,7 +241,6 @@ fun AppearanceSettingsContent(
     onSentBubbleColor: (ComfortableBubbleColor) -> Unit = {},
     onReceivedBubbleColor: (ComfortableBubbleColor) -> Unit = {},
     onLauncherIcon: (LauncherIcon) -> Unit,
-    onSplashScreenAnimation: (SplashScreenAnimation) -> Unit = {},
     customFontFile: File? = null,
     onImportCustomFont: (Uri) -> Unit = {},
     onImportWallpaper: (Uri) -> Unit = {},
@@ -738,14 +734,6 @@ fun AppearanceSettingsContent(
                     modifier = Modifier.testTag("settings_app_icon_picker"),
                     onClick = { choiceSheet = AppearanceChoice.LAUNCHER },
                 )
-                SettingsTarget(target?.name, SettingsTarget.SPLASH_SCREEN.name) { splashTargetModifier ->
-                    SettingsNavigationRow(
-                        title = stringResource(R.string.settings_splash_screen),
-                        value = stringResource(splashScreenAnimationLabelRes(appearance.splashScreenAnimation)),
-                        modifier = splashTargetModifier.testTag("settings_splash_screen_picker"),
-                        onClick = { choiceSheet = AppearanceChoice.SPLASH_SCREEN },
-                    )
-                }
             }
         }
     }
@@ -835,10 +823,6 @@ fun AppearanceSettingsContent(
                 previewAppearance = previewAppearance.copy(launcherIcon = it)
                 onLauncherIcon(it)
             },
-            onSplashScreen = {
-                previewAppearance = previewAppearance.copy(splashScreenAnimation = it)
-                onSplashScreenAnimation(it)
-            },
             onDismiss = { choiceSheet = null },
         )
     }
@@ -873,7 +857,7 @@ fun AppearanceSettingsContent(
     }
 }
 
-private enum class AppearanceChoice { PALETTE, ICONS, FOLDER_LAYOUT, CHAT_CARD_SHAPE, DENSITY, COMPOSER_STYLE, INPUT_SHAPE, MEDIA_SHAPE, AVATAR, AVATAR_SHAPE, TIME, SPACING, BUBBLES, LAUNCHER, SPLASH_SCREEN }
+private enum class AppearanceChoice { PALETTE, ICONS, FOLDER_LAYOUT, CHAT_CARD_SHAPE, DENSITY, COMPOSER_STYLE, INPUT_SHAPE, MEDIA_SHAPE, AVATAR, AVATAR_SHAPE, TIME, SPACING, BUBBLES, LAUNCHER }
 
 @Composable
 private fun AppearanceChatLayoutPreview(
@@ -1019,7 +1003,6 @@ private fun AppearanceChoiceSheet(
     onSpacing: (MessageSpacing) -> Unit,
     onBubbles: (BubbleCornerStyle) -> Unit,
     onLauncher: (LauncherIcon) -> Unit,
-    onSplashScreen: (SplashScreenAnimation) -> Unit,
     onDismiss: () -> Unit,
 ) {
     when (choice) {
@@ -1327,27 +1310,6 @@ private fun AppearanceChoiceSheet(
                 tag = "settings_app_icon_sheet",
                 dismissOnSelect = false,
                 preview = { LauncherArtworkPreview(appearance.launcherIcon) },
-            )
-        }
-
-        AppearanceChoice.SPLASH_SCREEN -> {
-            SingleChoiceSheet(
-                title = stringResource(R.string.settings_splash_screen),
-                selected = appearance.splashScreenAnimation,
-                options =
-                    SplashScreenAnimation.entries.map {
-                        ChoiceOption(
-                            it,
-                            stringResource(splashScreenAnimationLabelRes(it)),
-                            splashScreenAnimationDescription(it),
-                            "settings_splash_screen_${it.name.lowercase()}",
-                        )
-                    },
-                onSelect = onSplashScreen,
-                onDismiss = onDismiss,
-                tag = "settings_splash_screen_sheet",
-                dismissOnSelect = false,
-                preview = { SplashLogoPreview(appearance.splashScreenAnimation) },
             )
         }
     }
@@ -1932,22 +1894,6 @@ private fun launcherIconLabelRes(icon: LauncherIcon): Int =
         LauncherIcon.CATPPUCCIN -> R.string.settings_app_icon_catppuccin
         LauncherIcon.NORD -> R.string.settings_app_icon_nord
         LauncherIcon.LIGHT -> R.string.settings_app_icon_light
-    }
-
-private fun splashScreenAnimationLabelRes(animation: SplashScreenAnimation): Int =
-    when (animation) {
-        SplashScreenAnimation.EDGE_TRACE -> R.string.settings_splash_screen_edge_trace
-        SplashScreenAnimation.SOFT_WASH -> R.string.settings_splash_screen_soft_wash
-        SplashScreenAnimation.TRAVELING_PULSE -> R.string.settings_splash_screen_traveling_pulse
-        SplashScreenAnimation.STATIC -> R.string.settings_splash_screen_static
-    }
-
-@Composable
-private fun splashScreenAnimationDescription(animation: SplashScreenAnimation): String? =
-    if (animation == SplashScreenAnimation.EDGE_TRACE) {
-        stringResource(R.string.settings_splash_screen_default)
-    } else {
-        null
     }
 
 @Preview

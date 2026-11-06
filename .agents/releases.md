@@ -7,6 +7,8 @@ automation in `.github/workflows/release.yml` is authoritative.
 
 1. Inspect the branch, status, staged diff, and recent tags. Do not include
    unrelated work or assume uncommitted user changes should be released.
+   When releasing the latest feature work, reconcile its pending changes with the
+   candidate before tagging; never silently publish an older committed implementation.
 2. Run the nearest local checks from [`testing.md`](testing.md). Only when
    cutting a release, also perform focused actual-emulator visual verification:
    inspect fresh screenshots of changed surfaces, exercise changed UI

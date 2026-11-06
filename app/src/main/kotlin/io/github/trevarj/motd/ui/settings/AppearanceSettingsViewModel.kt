@@ -22,7 +22,6 @@ import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
-import io.github.trevarj.motd.data.prefs.SplashScreenAnimation
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
@@ -188,8 +187,6 @@ class AppearanceSettingsViewModel
         fun setReceivedBubbleColor(value: ComfortableBubbleColor) = launch { appearancePrefs.setReceivedBubbleColor(value) }
 
         fun setLauncherIcon(value: LauncherIcon) = launch { appearancePrefs.setLauncherIcon(value) }
-
-        fun setSplashScreenAnimation(value: SplashScreenAnimation) = launch { appearancePrefs.setSplashScreenAnimation(value) }
 
         fun importCustomFont(uri: Uri) =
             launch {

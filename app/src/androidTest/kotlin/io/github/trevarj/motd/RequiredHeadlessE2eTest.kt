@@ -819,7 +819,6 @@ class RequiredHeadlessE2eTest {
         SettingsRobot(compose).disableNicknameBackgrounds()
         SettingsRobot(compose).selectSurfaceShapes()
         SettingsRobot(compose).selectLucideIcons()
-        SettingsRobot(compose).selectSplashTravelingPulse()
         // Return from Appearance to Settings, then exercise the category and bouncer routes.
         SettingsRobot(compose).apply {
             returnToRoot()

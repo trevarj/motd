@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MOTD splash — Spark cut preview</title>
+<style>
+:root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; background:#000; color:#f7f4ef; }
+* { box-sizing:border-box; }
+body { margin:0; min-height:100vh; background:#000; }
+main { max-width:780px; margin:auto; padding:28px 20px 42px; }
+h1 { margin:0 0 6px; font-size:20px; font-weight:650; }
+p { margin:0; color:#aaa5a0; font-size:14px; line-height:1.45; }
+.stage { margin:22px 0; display:grid; grid-template-columns:minmax(0,1fr) 210px; gap:28px; align-items:center; }
+.large-wrap { display:grid; place-items:center; min-height:480px; border:1px solid #2a2928; border-radius:18px; background:radial-gradient(circle at 50% 45%,#10100f,#000 72%); }
+canvas { display:block; }
+#hero { width:min(100%,480px); height:auto; border-radius:12px; }
+.reference { display:grid; gap:11px; justify-items:center; text-align:center; }
+#mini { width:180px; height:180px; border:1px solid #292725; border-radius:12px; background:#000; }
+.reference strong { font-size:13px; }
+.reference span { color:#928e89; font-size:12px; }
+.controls { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:12px; padding:15px; border:1px solid #2a2928; border-radius:14px; background:#0a0a09; }
+button { appearance:none; border:1px solid #4f4640; background:#1c1917; color:#fff; border-radius:8px; padding:9px 12px; font:600 13px inherit; cursor:pointer; }
+button:hover { background:#2b2420; border-color:#b07a45; }
+input { width:100%; accent-color:#e89035; }
+#time { min-width:58px; color:#aaa5a0; font:12px ui-monospace,SFMono-Regular,monospace; text-align:right; }
+.note { margin-top:12px; font-size:12px; color:#77716b; }
+@media (max-width:650px) { main{padding:18px 14px 30px}.stage{grid-template-columns:1fr;gap:18px}.large-wrap{min-height:0}.reference{display:none}.controls{grid-template-columns:auto 1fr}.note{grid-column:1/-1} }
+</style>
+</head>
+<body>
+<main id="app">
+<h1>Spark cut</h1>
+<p>One 950 ms splash treatment. The uncut face is reconstructed from ceramic pixels around the true slash aperture; the final frame is the original splash raster.</p>
+<section class="stage" aria-label="Splash animation preview">
+<div class="large-wrap"><canvas id="hero" width="512" height="512" aria-label="Large spark cut preview"></canvas></div>
+<div class="reference"><canvas id="mini" width="180" height="180" aria-label="Actual size 180 dp preview"></canvas><strong>Actual size · 180 dp</strong><span>Original asset at rest</span></div>
+</section>
+<section class="controls" aria-label="Preview controls">
+<button id="play" type="button">Play spark cut</button>
+<input id="scrub" type="range" min="0" max="950" value="0" step="1" aria-label="Animation timeline">
+<output id="time" for="scrub">000 ms</output>
+<p class="note">Motion is paused by default when your system prefers reduced motion. Play always works.</p>
+</section>
+</main>
+<script>
+(() => {
+  "use strict";
+  const DURATION = 950;
+  const SIZE = 800;
+  const UNIT = SIZE / 200;
+  const AX = 0.54, AY = -0.842; // bottom-left toward top-right, along the capsule slash
+  const NX = -AY, NY = AX;
+const logoUri = "../app/src/main/res/drawable-xxxhdpi/ic_splash_logo.png";
+  const hero = document.querySelector("#hero");
+  const mini = document.querySelector("#mini");
+  const slider = document.querySelector("#scrub");
+  const playButton = document.querySelector("#play");
+  const timeLabel = document.querySelector("#time");
+  const exportMode = new URLSearchParams(location.search).get("export") === "1";
+  const exportTime = Number(new URLSearchParams(location.search).get("t") || 0);
+  const exportSize = Number(new URLSearchParams(location.search).get("s") || 512);
+  const effectCanvases = new Map();
+  let intactCanvas;
+  let source, intact, scratch, holePixels, cutPixels, slashMin, slashMax, cutMin, cutMax;
+  let playing = false, startStamp = 0, startingTime = 0, now = 0;
+
+  const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+  const smooth = (a, b, x) => { const q = clamp((x - a) / (b - a)); return q * q * (3 - 2 * q); };
+  const contextFor = (canvas) => canvas.getContext("2d", { alpha: false });
+
+  function deriveMasks(img) {
+    const c = document.createElement("canvas");
+    c.width = c.height = SIZE;
+    const cx = c.getContext("2d", { willReadFrequently: true });
+    cx.drawImage(img, 0, 0, SIZE, SIZE);
+    source = cx.getImageData(0, 0, SIZE, SIZE);
+    const pixels = source.data;
+    const exterior = new Uint8Array(SIZE * SIZE);
+    const queue = new Int32Array(SIZE * SIZE);
+    let head = 0, tail = 0;
+    const pushIfTransparent = (x, y) => {
+      if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return;
+      const index = y * SIZE + x;
+      if (exterior[index] || pixels[index * 4 + 3] > 18) return;
+      exterior[index] = 1; queue[tail++] = index;
+    };
+    for (let x = 0; x < SIZE; x++) { pushIfTransparent(x, 0); pushIfTransparent(x, SIZE - 1); }
+    for (let y = 0; y < SIZE; y++) { pushIfTransparent(0, y); pushIfTransparent(SIZE - 1, y); }
+    while (head < tail) {
+      const i = queue[head++], x = i % SIZE, y = (i / SIZE) | 0;
+      pushIfTransparent(x - 1, y); pushIfTransparent(x + 1, y);
+      pushIfTransparent(x, y - 1); pushIfTransparent(x, y + 1);
+    }
+    intact = new ImageData(new Uint8ClampedArray(pixels), SIZE, SIZE);
+    holePixels = [];
+    slashMin = Infinity; slashMax = -Infinity;
+    for (let y = 1; y < SIZE - 1; y++) for (let x = 1; x < SIZE - 1; x++) {
+      const i = y * SIZE + x, p = i * 4;
+      if (pixels[p + 3] > 18 || exterior[i]) continue;
+      const u = x * AX + y * AY;
+      slashMin = Math.min(slashMin, u); slashMax = Math.max(slashMax, u);
+      holePixels.push({ i, x, y, u });
+    }
+    // Dilate the aperture through its anti-aliased bevel, never through exterior
+    // transparency. This gives the initial logo a continuous ceramic face instead
+    // of retaining the source's raised/grey capsule edge.
+    const fillDistance = new Int16Array(SIZE * SIZE);
+    fillDistance.fill(-1);
+    head = 0; tail = 0;
+    for (const h of holePixels) { fillDistance[h.i] = 0; queue[tail++] = h.i; }
+    while (head < tail) {
+      const i = queue[head++], x = i % SIZE, y = (i / SIZE) | 0, d = fillDistance[i];
+      if (d >= 18) continue;
+      for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+        if (!ox && !oy) continue;
+        const sx = x + ox, sy = y + oy;
+        if (sx < 0 || sy < 0 || sx >= SIZE || sy >= SIZE) continue;
+        const si = sy * SIZE + sx;
+        if (fillDistance[si] >= 0 || (exterior[si] && pixels[si * 4 + 3] <= 18)) continue;
+        fillDistance[si] = d + 1; queue[tail++] = si;
+      }
+    }
+    cutPixels = [];
+    cutMin = Infinity; cutMax = -Infinity;
+    for (let i = 0; i < fillDistance.length; i++) {
+      if (fillDistance[i] < 0) continue;
+      const x = i % SIZE, y = (i / SIZE) | 0, u = x * AX + y * AY;
+      cutPixels.push({ i, x, y, u, d: fillDistance[i] });
+      cutMin = Math.min(cutMin, u); cutMax = Math.max(cutMax, u);
+    }
+    // The source's transparent aperture is the exact final cut. Before cutting,
+    // reconstruct the aperture and its adjacent bevel from pale ceramic samples on
+    // both normal sides, then feather the reconstruction into the original body.
+    for (const h of cutPixels) {
+      let samples = [], fallback = null;
+      for (let step = 26; step <= 58; step += 8) {
+        for (const sign of [-1, 1]) {
+          const sx = Math.round(h.x + NX * step * sign);
+          const sy = Math.round(h.y + NY * step * sign);
+          if (sx < 0 || sy < 0 || sx >= SIZE || sy >= SIZE) continue;
+          const si = (sy * SIZE + sx) * 4;
+          if (pixels[si + 3] > 220) {
+            // Reject near-black background and retain the pale ceramic body.
+            const brightness = pixels[si] + pixels[si + 1] + pixels[si + 2];
+            if (brightness > 300) samples.push(si);
+            fallback ||= si;
+          }
+        }
+        if (samples.length >= 4) break;
+      }
+      if (!samples.length && fallback != null) samples = [fallback];
+      const p = h.i * 4;
+      const weight = 1 - smooth(12, 19, h.d);
+      if (samples.length) {
+        for (let ch = 0; ch < 3; ch++) {
+          const ceramic = samples.reduce((sum, si) => sum + pixels[si + ch], 0) / samples.length;
+          intact.data[p + ch] = Math.round(pixels[p + ch] * (1 - weight) + ceramic * weight);
+        }
+        intact.data[p + 3] = Math.round(pixels[p + 3] + (255 - pixels[p + 3]) * weight);
+      } else {
+        const ceramic = 230;
+        for (let ch = 0; ch < 3; ch++) intact.data[p + ch] = Math.round(pixels[p + ch] * (1 - weight) + ceramic * weight);
+        intact.data[p + 3] = Math.round(pixels[p + 3] + (255 - pixels[p + 3]) * weight);
+      }
+    }
+    intactCanvas = document.createElement("canvas");
+    intactCanvas.width = intactCanvas.height = SIZE;
+    intactCanvas.getContext("2d").putImageData(intact, 0, 0);
+    scratch = document.createElement("canvas");
+    scratch.width = scratch.height = SIZE;
+  }
+
+  function makeLogoFrame(ms) {
+    const cx = scratch.getContext("2d", { willReadFrequently: true });
+    if (ms >= 860) { cx.putImageData(source, 0, 0); return scratch; }
+    cx.putImageData(intact, 0, 0);
+    const reveal = smooth(120, 700, ms);
+    if (reveal <= 0) return scratch;
+    const threshold = cutMin + (cutMax - cutMin) * reveal;
+    const frame = cx.getImageData(0, 0, SIZE, SIZE);
+    for (const h of cutPixels) {
+      if (h.u <= threshold) {
+        const p = h.i * 4;
+        frame.data[p] = source.data[p];
+        frame.data[p + 1] = source.data[p + 1];
+        frame.data[p + 2] = source.data[p + 2];
+        frame.data[p + 3] = source.data[p + 3];
+      }
+    }
+    cx.putImageData(frame, 0, 0);
+    return scratch;
+  }
+
+  function drawSparks(cx, x, y, scale, phase) {
+    const count = 15;
+    const energy = Math.sin(Math.PI * clamp((phase - 120) / 610));
+    if (energy <= 0) return;
+    cx.save();
+    cx.globalCompositeOperation = "screen";
+    for (let i = 0; i < count; i++) {
+      const n = ((i * 47) % 97) / 97;
+      const side = i % 2 ? 1 : -1;
+      const angle = Math.atan2(NY * side, NX * side) + (n - .5) * 1.1;
+      const distance = (10 + n * 39) * energy * scale * UNIT;
+      const drift = ((phase * (0.012 + n * .006) + i * 2.1) % 1) * 8 * scale * UNIT;
+      const sx = x + Math.cos(angle) * (distance + drift);
+      const sy = y + Math.sin(angle) * (distance + drift);
+      const r = (i % 3 === 0 ? 1.8 : .9) * scale * UNIT * (0.55 + energy);
+      cx.fillStyle = i % 4 === 0 ? "rgba(255,255,255,.95)" : "rgba(255,157,39,.85)";
+      cx.beginPath(); cx.arc(sx, sy, r, 0, Math.PI * 2); cx.fill();
+    }
+    cx.restore();
+  }
+
+  function render(ms, canvas) {
+    const base = contextFor(canvas), width = canvas.width, scale = width / SIZE;
+    base.fillStyle = "#000"; base.fillRect(0, 0, width, canvas.height);
+    if (!source) return;
+    base.imageSmoothingEnabled = true;
+    base.drawImage(makeLogoFrame(ms), 0, 0, width, width);
+    if (!effectCanvases.has(width)) {
+      const effect = document.createElement("canvas");
+      effect.width = effect.height = width;
+      effectCanvases.set(width, effect);
+    }
+    const effect = effectCanvases.get(width), cx = effect.getContext("2d");
+    cx.clearRect(0, 0, width, width);
+    // A moving contact point travels bottom-to-top along the exact slash interval.
+    if (ms >= 115 && ms < 810) {
+      const travel = smooth(120, 700, ms);
+      const u = cutMin + (cutMax - cutMin) * travel;
+      const centerX = SIZE / 2, centerY = SIZE / 2;
+      const normalOffset = 0;
+      const contactX = centerX + AX * (u - (centerX * AX + centerY * AY)) + NX * normalOffset;
+      const contactY = centerY + AY * (u - (centerX * AX + centerY * AY)) + NY * normalOffset;
+      const x = contactX * scale, y = contactY * scale;
+      const pulse = .78 + .22 * Math.sin(ms * .075);
+      const glow = cx.createRadialGradient(x, y, 0, x, y, 32 * scale * UNIT * pulse);
+      glow.addColorStop(0, "rgba(255,255,244,.98)");
+      glow.addColorStop(.12, "rgba(255,207,92,.85)");
+      glow.addColorStop(.42, "rgba(248,111,15,.32)");
+      glow.addColorStop(1, "rgba(255,95,0,0)");
+      cx.save();
+      cx.globalCompositeOperation = "screen";
+      cx.fillStyle = glow; cx.beginPath(); cx.arc(x, y, 32 * scale * UNIT * pulse, 0, Math.PI * 2); cx.fill();
+      cx.restore();
+      drawSparks(cx, x, y, scale, ms);
+    } else if (ms >= 810 && ms < 860) {
+      const k = 1 - (ms - 810) / 50;
+      const x = (SIZE / 2 + AX * (cutMax - (SIZE / 2 * AX + SIZE / 2 * AY))) * scale;
+      const y = (SIZE / 2 + AY * (cutMax - (SIZE / 2 * AX + SIZE / 2 * AY))) * scale;
+      const g = cx.createRadialGradient(x, y, 0, x, y, 20 * scale * UNIT);
+      g.addColorStop(0, "rgba(255,185,55," + (k * .22) + ")");
+      g.addColorStop(1, "rgba(255,100,0,0)");
+      cx.fillStyle = g; cx.beginPath(); cx.arc(x, y, 20 * scale * UNIT, 0, Math.PI * 2); cx.fill();
+    }
+    // The intact face masks the contact and particles, including the not-yet-open hole.
+    cx.globalCompositeOperation = "destination-in";
+    cx.drawImage(intactCanvas, 0, 0, width, width);
+    cx.globalCompositeOperation = "source-over";
+    base.save();
+    base.globalCompositeOperation = "screen";
+    base.drawImage(effect, 0, 0);
+    base.restore();
+  }
+
+  function paint(ms) {
+    now = clamp(Math.round(ms), 0, DURATION);
+    render(now, hero);
+    render(now, mini);
+    slider.value = String(now);
+    timeLabel.value = String(now).padStart(3, "0") + " ms";
+  }
+  function stop() { playing = false; playButton.textContent = now >= DURATION ? "Replay spark cut" : "Play spark cut"; }
+  function tick(stamp) {
+    if (!playing) return;
+    paint(startingTime + stamp - startStamp);
+    if (now >= DURATION) { stop(); return; }
+    requestAnimationFrame(tick);
+  }
+  function play() {
+    if (now >= DURATION) now = 0;
+    startingTime = now; startStamp = performance.now(); playing = true;
+    playButton.textContent = "Playing…"; requestAnimationFrame(tick);
+  }
+
+  const img = new Image();
+  img.onload = () => {
+    deriveMasks(img);
+    if (new URLSearchParams(location.search).has("asset")) {
+      const asset = document.createElement("canvas");
+      asset.width = asset.height = SIZE;
+      asset.getContext("2d").putImageData(intact, 0, 0);
+      document.body.textContent = JSON.stringify({ png: asset.toDataURL("image/png"), cutMin, cutMax });
+      return;
+    }
+    if (exportMode) {
+      document.body.innerHTML = "";
+      document.body.append(hero);
+      hero.width = hero.height = exportSize;
+      hero.style.width = exportSize + "px";
+      hero.style.height = exportSize + "px";
+      render(clamp(exportTime, 0, DURATION), hero);
+      return;
+    }
+    paint(0);
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches) play();
+  };
+  img.src = logoUri;
+  slider.addEventListener("input", () => { stop(); paint(Number(slider.value)); });
+  playButton.addEventListener("click", play);
+  window.__laserCut = { duration: DURATION, render };
+})();
+</script>
+</body>
+</html>
+
