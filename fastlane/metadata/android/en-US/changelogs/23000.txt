@@ -1,0 +1,6 @@
+- Customize input, avatar, chat-card, and media-preview shapes with live previews.
+- Choose Material or Lucide icons and splash screen animations.
+- Make nickname row backgrounds optional.
+- Find appearance options more easily with reorganized settings and clearer labels.
+- Enjoy refined themed controls and smoother logo artwork.
+- Get clearer upload-provider guidance, website links, and custom endpoint setup.
