@@ -101,7 +101,7 @@ class BackupRestoreFlowUiTest {
 
         compose.onNodeWithTag("backup_selected_document").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("backup_completed_mode").assertIsDisplayed()
-        compose.onNodeWithTag("backup_import_result").assertIsDisplayed()
+        compose.onNodeWithTag("backup_import_result").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Review networks").performScrollTo().performClick()
         compose.runOnIdle { assertTrue(reviewed) }
         compose.onNodeWithText("Dismiss").performScrollTo().performClick()

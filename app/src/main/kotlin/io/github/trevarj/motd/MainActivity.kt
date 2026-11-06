@@ -351,7 +351,7 @@ class MainActivity :
         startupSplashAnimation = SplashScreenAnimation.STATIC
     }
 
-    private fun areSystemAnimatorsEnabled(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.O || ValueAnimator.areAnimatorsEnabled()
+    private fun areSystemAnimatorsEnabled(): Boolean = ValueAnimator.areAnimatorsEnabled()
 
     /** Warm start: the running activity is re-delivered the tapped notification's content intent. */
     override fun onNewIntent(intent: Intent) {

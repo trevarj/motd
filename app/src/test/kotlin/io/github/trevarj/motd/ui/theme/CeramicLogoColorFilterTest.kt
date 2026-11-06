@@ -51,6 +51,8 @@ class CeramicLogoColorFilterTest {
         val white = renderMark(context, Color.WHITE)
 
         assertTrue("mark background must be transparent", source.pixels().any { Color.alpha(it) == 0 })
+        assertEquals(source.pixels().map(Color::alpha), black.pixels().map(Color::alpha))
+        assertEquals(source.pixels().map(Color::alpha), white.pixels().map(Color::alpha))
         assertShaded(source, "source")
         assertShaded(black, "black target")
         assertShaded(white, "white target")
@@ -81,13 +83,14 @@ class CeramicLogoColorFilterTest {
         bitmap: Bitmap,
         description: String,
     ) {
-        val opaqueGrays =
+        val ceramicGrays =
             bitmap
                 .pixels()
-                .filter { Color.alpha(it) == 255 }
+                // Density scaling can leave the ceramic interior just below full opacity.
+                .filter { Color.alpha(it) >= 250 }
                 .map(Color::red)
                 .toSet()
-        assertTrue("$description mark must contain more than one opaque ceramic tone", opaqueGrays.size > 1)
+        assertTrue("$description mark must contain more than one near-opaque ceramic tone", ceramicGrays.size > 1)
     }
 
     private fun Bitmap.pixels(): List<Int> = List(width * height) { index -> getPixel(index % width, index / width) }

@@ -164,9 +164,9 @@ private fun SplashMark(
     animation: SplashScreenAnimation,
     replayKey: Int,
     size: Dp,
+    modifier: Modifier = Modifier,
     onShown: () -> Unit = {},
     onFinished: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     val progress = remember(animation, replayKey) { Animatable(0f) }
     LaunchedEffect(animation, replayKey) {
