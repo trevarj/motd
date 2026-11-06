@@ -323,15 +323,24 @@ class EventProcessor
         ) {
             connectionGenerations[networkId] = db.connectionGenerationDao().next(networkId)
             networkDao.setServerIconUrl(networkId, isupport["draft/ICON"]?.let(::validateAvatarUrl))
+            val previous = networkIdentityDao.byNetwork(networkId)
+            // 001 completes registration before any 005, and 005 can span several lines, so an absent
+            // key usually means "not advertised yet". Blanking it would change the rules twice on every
+            // connect and restart every open chat's paging.
+            // ponytail: a server that stops advertising a key keeps its last value until it sends a new one.
             val identity =
                 NetworkIdentityEntity(
                     networkId = networkId,
-                    caseMapping = isupport["CASEMAPPING"],
-                    chanTypes = isupport["CHANTYPES"],
+                    caseMapping = isupport["CASEMAPPING"] ?: previous?.caseMapping,
+                    chanTypes = isupport["CHANTYPES"] ?: previous?.chanTypes,
                     selfNick = nick,
                 )
             networkIdentityDao.upsert(identity)
             val identityRules = identity.identityRules
+            AutoFollowTrace.record("identity_registered") {
+                "network=$networkId rules_changed=${previous?.identityRules != identityRules} " +
+                    "advertised_casemapping=${"CASEMAPPING" in isupport} advertised_chantypes=${"CHANTYPES" in isupport}"
+            }
             states[networkId] =
                 NetworkState(
                     selfNick = nick,

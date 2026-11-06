@@ -4970,6 +4970,23 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun `live connection without ISUPPORT yet keeps the persisted identity rules`() =
+        runTest {
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(network.id, caseMapping = "ascii", chanTypes = "#"))
+            val persisted =
+                io.github.trevarj.motd.irc.proto.IrcIdentityRules
+                    .from("ascii", "#")
+            val vm = viewModel(channel, FakeConnectionManager(network.id, client = testClient()))
+
+            // The screen hides messages unless these rules equal the paging entry's persisted rules.
+            val rules =
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    kotlinx.coroutines.withTimeoutOrNull(5_000) { vm.identityRules.first { it == persisted } }
+                }
+            assertEquals(persisted, rules)
+        }
+
+    @Test
     fun `cold ASCII Hidden bracket nick jump loads persisted rules before delayed identity observation`() =
         runTest {
             db.networkIdentityDao().upsert(NetworkIdentityEntity(network.id, caseMapping = "ascii"))

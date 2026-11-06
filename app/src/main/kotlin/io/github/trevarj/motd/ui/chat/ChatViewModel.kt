@@ -1507,7 +1507,11 @@ class ChatViewModel
                     networkId?.let(networkDao::observeById) ?: flowOf(null)
                 }
 
-        /** Live ISUPPORT wins while connected; persisted rules keep offline rendering deterministic. */
+        /**
+         * Live ISUPPORT wins while connected; persisted rules keep offline rendering deterministic and
+         * fill keys the server has not advertised yet, matching what EventProcessor stores. The screen
+         * hides messages unless these equal the paging entry's rules, so the two must not disagree.
+         */
         val identityRules: StateFlow<IrcIdentityRules> =
             combine(
                 buffer,
@@ -1515,7 +1519,12 @@ class ChatViewModel
                 persistedIdentity,
             ) { current, connection, persisted ->
                 if (current != null && connection is IrcClientState.Ready) {
-                    connectionManager.clientFor(current.networkId)?.isupport?.identityRules
+                    connectionManager.clientFor(current.networkId)?.isupport?.let { live ->
+                        IrcIdentityRules.from(
+                            live["CASEMAPPING"] ?: persisted?.caseMapping,
+                            live["CHANTYPES"] ?: persisted?.chanTypes,
+                        )
+                    }
                         ?: persisted?.identityRules
                         ?: IrcIdentityRules()
                 } else {

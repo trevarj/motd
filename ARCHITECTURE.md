@@ -46,6 +46,8 @@ flowchart TD
   before mapping following JOINs. Exact identity changes publish `Registered`
   with current CAP/ISUPPORT snapshots for persistence; the welcome remains `Raw`,
   and late `005` retains the corrected nick.
+  Registration persists identity rules per key: a key absent from the snapshot keeps its last value,
+  because 001 precedes 005 and blanking it would restart every open chat on each connect.
 - UI observes repositories and ViewModel state. Connection and protocol actions
   go through `ConnectionManager` instead of constructing IRC clients in screens.
 - Fixed theme contrast normalization is cached on demand per preset and text-color
