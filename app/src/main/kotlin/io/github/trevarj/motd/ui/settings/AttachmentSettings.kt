@@ -9,8 +9,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -46,6 +51,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 @HiltViewModel
 class AttachmentSettingsViewModel
@@ -79,7 +85,16 @@ fun UploadsSettingsContent(
     viewModel: AttachmentSettingsViewModel = hiltViewModel(),
 ) {
     val config by viewModel.config.collectAsStateWithLifecycle()
-    var customEndpoint by rememberSaveable { mutableStateOf("") }
+    UploadsSettingsContent(config = config, onUpdate = { viewModel.update(it) }, target = target)
+}
+
+@Composable
+fun UploadsSettingsContent(
+    config: PasteBackendConfig,
+    onUpdate: ((PasteBackendConfig) -> PasteBackendConfig) -> Unit,
+    target: SettingsTarget? = null,
+) {
+    var customEndpoint by rememberSaveable { mutableStateOf(config.customEndpoint) }
     var providerSheet by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(config.customEndpoint) {
         customEndpoint = config.customEndpoint
@@ -119,8 +134,58 @@ fun UploadsSettingsContent(
         label = "upload_backend_options",
     ) { backend ->
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (backend == AttachmentBackend.TERMBIN) {
-                UploadWarning(stringResource(io.github.trevarj.motd.R.string.settings_upload_termbin_warning))
+            UploadWarning(
+                message =
+                    stringResource(
+                        when (backend) {
+                            AttachmentBackend.CRAFTERBIN, AttachmentBackend.ZERO_X_ZERO -> R.string.settings_upload_crafterbin_guidance
+                            AttachmentBackend.CUSTOM_0X0 -> R.string.settings_upload_custom_guidance
+                            AttachmentBackend.LITTERBOX -> R.string.settings_upload_litterbox_guidance
+                            AttachmentBackend.UGUU -> R.string.settings_upload_uguu_warning
+                            AttachmentBackend.X0_AT -> R.string.settings_upload_x0at_warning
+                            AttachmentBackend.CNET -> R.string.settings_upload_cnet_warning
+                            AttachmentBackend.CATBOX -> R.string.settings_upload_catbox_warning
+                            AttachmentBackend.SOJU_FILEHOST -> R.string.settings_upload_soju_warning
+                            AttachmentBackend.TERMBIN -> R.string.settings_upload_termbin_warning
+                        },
+                    ),
+                caution = backend == AttachmentBackend.CATBOX || backend == AttachmentBackend.TERMBIN,
+            )
+            val website =
+                when (backend) {
+                    AttachmentBackend.CRAFTERBIN -> "https://crafterbin.glennstack.dev"
+                    AttachmentBackend.X0_AT -> "https://x0.at"
+                    AttachmentBackend.CNET -> "https://paste.c-net.org"
+                    AttachmentBackend.UGUU -> "https://uguu.se/"
+                    AttachmentBackend.LITTERBOX -> "https://litterbox.catbox.moe/"
+                    AttachmentBackend.CATBOX -> "https://catbox.moe/"
+                    AttachmentBackend.SOJU_FILEHOST -> "https://soju.im"
+                    AttachmentBackend.TERMBIN -> "https://termbin.com/"
+                    AttachmentBackend.CUSTOM_0X0 -> validateEndpoint(customEndpoint)?.takeIf { it == validateEndpoint(config.customEndpoint) }
+                    AttachmentBackend.ZERO_X_ZERO -> null
+                }
+            if (website != null) {
+                val uriHandler = LocalUriHandler.current
+                AssistChip(
+                    onClick = { uriHandler.openUri(website) },
+                    label = {
+                        Text(
+                            when (backend) {
+                                AttachmentBackend.SOJU_FILEHOST -> stringResource(R.string.settings_upload_about_soju)
+                                AttachmentBackend.CUSTOM_0X0 -> stringResource(R.string.settings_upload_open_endpoint)
+                                else -> attachmentBackendLabel(backend)
+                            },
+                        )
+                    },
+                    trailingIcon = {
+                        Icon(
+                            Icons.Outlined.Link,
+                            contentDescription = null,
+                            modifier = Modifier.size(AssistChipDefaults.IconSize),
+                        )
+                    },
+                    modifier = Modifier.testTag("settings_upload_website"),
+                )
             }
             if (backend == AttachmentBackend.CUSTOM_0X0) {
                 SettingsTarget(target?.name, SettingsTarget.UPLOAD_CONNECTION.name) { targetModifier ->
@@ -138,7 +203,7 @@ fun UploadsSettingsContent(
                                 if (value.isBlank()) {
                                     usernameDraft = ""
                                     passwordDraft = ""
-                                    viewModel.update {
+                                    onUpdate {
                                         it.copy(endpoint = "", customEndpoint = "", username = "", password = "")
                                     }
                                 } else {
@@ -150,7 +215,7 @@ fun UploadsSettingsContent(
                                             usernameDraft = ""
                                             passwordDraft = ""
                                         }
-                                        viewModel.update {
+                                        onUpdate {
                                             it.copy(
                                                 endpoint = endpoint,
                                                 customEndpoint = endpoint,
@@ -186,7 +251,7 @@ fun UploadsSettingsContent(
                             value = usernameDraft ?: config.username,
                             onValueChange = { value ->
                                 usernameDraft = value
-                                viewModel.update { it.copy(username = value) }
+                                onUpdate { it.copy(username = value) }
                             },
                             label = { Text(stringResource(io.github.trevarj.motd.R.string.settings_upload_custom_username)) },
                             singleLine = true,
@@ -196,18 +261,13 @@ fun UploadsSettingsContent(
                                     .padding(horizontal = 16.dp, vertical = 8.dp)
                                     .testTag("settings_upload_custom_username"),
                         )
-                        OutlinedTextField(
+                        PasswordField(
                             value = passwordDraft ?: config.password,
                             onValueChange = { value ->
                                 passwordDraft = value
-                                viewModel.update { it.copy(password = value) }
+                                onUpdate { it.copy(password = value) }
                             },
-                            label = { Text(stringResource(io.github.trevarj.motd.R.string.settings_upload_custom_password)) },
-                            visualTransformation =
-                                androidx.compose.ui.text.input
-                                    .PasswordVisualTransformation(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                            singleLine = true,
+                            label = stringResource(R.string.settings_upload_custom_password),
                             modifier =
                                 Modifier
                                     .fillMaxWidth()
@@ -217,68 +277,37 @@ fun UploadsSettingsContent(
                     }
                 }
             }
-
-            when (backend) {
-                AttachmentBackend.CRAFTERBIN,
-                AttachmentBackend.ZERO_X_ZERO,
-                AttachmentBackend.CUSTOM_0X0,
-                AttachmentBackend.LITTERBOX,
-                -> {
-                    // Privacy and expiry controls are shown on Security.
-                }
-
-                AttachmentBackend.UGUU -> {
-                    UploadWarning(
-                        stringResource(io.github.trevarj.motd.R.string.settings_upload_uguu_warning),
-                        caution = false,
-                    )
-                }
-
-                AttachmentBackend.X0_AT -> {
-                    UploadWarning(
-                        stringResource(io.github.trevarj.motd.R.string.settings_upload_x0at_warning),
-                        caution = false,
-                    )
-                }
-
-                AttachmentBackend.CNET -> {
-                    UploadWarning(
-                        stringResource(io.github.trevarj.motd.R.string.settings_upload_cnet_warning),
-                        caution = false,
-                    )
-                }
-
-                AttachmentBackend.CATBOX -> {
-                    UploadWarning(stringResource(io.github.trevarj.motd.R.string.settings_upload_catbox_warning))
-                }
-
-                AttachmentBackend.SOJU_FILEHOST -> {
-                    UploadWarning(
-                        stringResource(io.github.trevarj.motd.R.string.settings_upload_soju_warning),
-                        caution = false,
-                    )
-                }
-
-                AttachmentBackend.TERMBIN -> {}
-            }
         }
     }
 
     SettingsTarget(target?.name, SettingsTarget.UPLOAD_LIMIT.name) { targetModifier ->
         SettingsGroup(title = stringResource(R.string.settings_upload_limits)) {
             val maximumMiB = uploadLimitMaximumMiB(config.backend)
+            var sizeDraft by remember(config.backend, config.sizeLimitBytes) {
+                mutableStateOf((config.sizeLimitBytes / MIB).toString())
+            }
+            val validSize = sizeDraft.toLongOrNull()?.takeIf { it in 1..maximumMiB }
             OutlinedTextField(
-                value = (config.sizeLimitBytes / MIB).toString(),
+                value = sizeDraft,
                 onValueChange = { value ->
-                    value.toLongOrNull()?.coerceIn(1, maximumMiB)?.let { mib ->
-                        viewModel.update { it.copy(sizeLimitBytes = mib * MIB) }
+                    sizeDraft = value
+                    value.toLongOrNull()?.takeIf { it in 1..maximumMiB }?.let { mib ->
+                        onUpdate { it.copy(sizeLimitBytes = mib * MIB) }
                     }
                 },
                 label = { Text(stringResource(R.string.settings_upload_limit)) },
-                supportingText = { Text(stringResource(R.string.settings_upload_limit_desc, maximumMiB)) },
+                isError = validSize == null,
+                supportingText = {
+                    Text(
+                        stringResource(
+                            if (validSize == null) R.string.settings_upload_limit_error else R.string.settings_upload_limit_desc,
+                            maximumMiB,
+                        ),
+                    )
+                },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true,
-                modifier = targetModifier.fillMaxWidth().padding(16.dp),
+                modifier = targetModifier.fillMaxWidth().padding(16.dp).testTag("settings_upload_size_limit"),
             )
         }
     }
@@ -295,7 +324,7 @@ fun UploadsSettingsContent(
                         tag = "settings_upload_backend_${backend.name.lowercase()}",
                     )
                 },
-            onSelect = { backend -> viewModel.update { it.forBackend(backend) } },
+            onSelect = { backend -> onUpdate { it.forBackend(backend) } },
             onDismiss = { providerSheet = false },
             tag = "settings_upload_provider_sheet",
         )
@@ -309,7 +338,7 @@ private fun UploadWarning(
 ) {
     val colors = androidx.compose.material3.MaterialTheme.colorScheme
     androidx.compose.material3.Surface(
-        color = if (caution) colors.errorContainer else colors.surfaceContainerHigh,
+        color = if (caution) colors.errorContainer else colors.surfaceContainerLow,
         shape =
             androidx.compose.foundation.shape
                 .RoundedCornerShape(16.dp),
@@ -317,7 +346,7 @@ private fun UploadWarning(
         Text(
             message,
             color = if (caution) colors.onErrorContainer else colors.onSurface,
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("settings_upload_guidance"),
         )
     }
 }
