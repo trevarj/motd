@@ -8,8 +8,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -809,8 +812,9 @@ class MessagePagingDemandUiTest {
         lateinit var items: LazyPagingItems<MessageEntity>
         lateinit var listState: LazyListState
         var phase = "entry"
-        var watchedAnchor: Long? = null
+        var watchedAnchor by mutableStateOf<Long?>(null)
         var expectedOffsets = emptyMap<Long, Int>()
+        var expectedSizes = emptyMap<Long, Int>()
         val presentations = mutableListOf<String>()
 
         fun failedState(): String {
@@ -842,18 +846,18 @@ class MessagePagingDemandUiTest {
 
         fun bounds(id: Long): Rect = compose.onNodeWithTag("chat_message_stationary-${id / 10}", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
 
-        fun paintedRow(id: Long): Bitmap {
-            val timeline = compose.onNodeWithTag("chat_timeline")
-            val root = timeline.fetchSemanticsNode().boundsInRoot
-            val row = bounds(id)
-            return Bitmap.createBitmap(
-                timeline.captureToImage().asAndroidBitmap(),
+        fun paintedRow(
+            image: Bitmap,
+            root: Rect,
+            row: Rect,
+        ): Bitmap =
+            Bitmap.createBitmap(
+                image,
                 (row.left - root.left).toInt() + 1,
                 (row.top - root.top).toInt() + 1,
                 row.width.toInt() - 2,
                 row.height.toInt() - 2,
             )
-        }
 
         try {
             compose.setContent {
@@ -891,6 +895,7 @@ class MessagePagingDemandUiTest {
                                     assertTrue("Painted entity $id left the presentation; $state", visible.index in 0 until collected.itemCount)
                                     assertEquals("Painted entity $id became a placeholder; $state", id, collected.peek(visible.index)?.id)
                                     assertEquals("Stationary entity $id moved; $state", offset, visible.offset)
+                                    assertEquals("Stationary entity $id resized; $state", expectedSizes.getValue(id), visible.size)
                                 }
                             }
                         },
@@ -948,7 +953,8 @@ class MessagePagingDemandUiTest {
             compose.runOnIdle {
                 assertTrue("Fixture never grew beyond the initial window; ${failedState()}", items.itemSnapshotList.items.size > MESSAGE_PAGING_CONFIG.initialLoadSize)
             }
-            val timelineBounds = compose.onNodeWithTag("chat_timeline").fetchSemanticsNode().boundsInRoot
+            val timeline = compose.onNodeWithTag("chat_timeline")
+            val timelineBounds = timeline.fetchSemanticsNode().boundsInRoot
             val hostTop =
                 compose
                     .onNodeWithTag("chat_bottom_host")
@@ -964,7 +970,8 @@ class MessagePagingDemandUiTest {
             val paintedIds = listOf(6_490L, olderEdge)
             val beforeBounds = paintedIds.associateWith(::bounds)
             compose.mainClock.autoAdvance = false
-            val beforePaint = paintedIds.associateWith(::paintedRow)
+            val beforeImage = timeline.captureToImage().asAndroidBitmap()
+            val beforePaint = paintedIds.associateWith { id -> paintedRow(beforeImage, timelineBounds, beforeBounds.getValue(id)) }
             compose.runOnIdle {
                 expectedOffsets =
                     (paintedIds + parkedId).associateWith { id ->
@@ -972,14 +979,25 @@ class MessagePagingDemandUiTest {
                             .single { it.key == id }
                             .offset
                     }
+                expectedSizes =
+                    expectedOffsets.keys.associateWith { id ->
+                        listState.layoutInfo.visibleItemsInfo
+                            .single { it.key == id }
+                            .size
+                    }
                 watchedAnchor = parkedId
             }
 
             fun assertPainted() {
+                // Semantics queries drain Room/Main between rows, even with the frame clock paused.
+                // Compare one native frame at the ORIGINAL bounds; the draw guard checks every
+                // row's identity, offset and size in that same paint, not an intermediate layout.
+                val image = timeline.captureToImage().asAndroidBitmap()
                 for (id in paintedIds) {
-                    compose.onAllNodesWithTag("chat_message_stationary-${id / 10}", useUnmergedTree = true).assertCountEquals(1)
-                    assertEquals("Unchanged row $id moved; ${failedState()}", beforeBounds.getValue(id), bounds(id))
-                    assertTrue("Unchanged row $id lost opaque pixels; ${failedState()}", beforePaint.getValue(id).sameAs(paintedRow(id)))
+                    assertTrue(
+                        "Unchanged row $id lost opaque pixels; ${failedState()}",
+                        beforePaint.getValue(id).sameAs(paintedRow(image, timelineBounds, beforeBounds.getValue(id))),
+                    )
                 }
             }
 

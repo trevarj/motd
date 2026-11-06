@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 
 // Paging 3 stream backed by the local pagingSource, with a RemoteMediator supplied per buffer
@@ -104,6 +105,7 @@ class MessageRepositoryImpl
         ): Flow<PagingData<MessageEntity>> =
             pagingContextFlow(bufferId).flatMapLatest { context ->
                 entry?.contextChanged(context)
+                val refreshWindow = AtomicReference<ViewportRefreshWindow?>()
                 Pager(
                     config = MESSAGE_PAGING_CONFIG,
                     // Initial entry retains its own computed key until the screen has a laid-out
@@ -135,6 +137,7 @@ class MessageRepositoryImpl
                                 bufferId = context.roomId,
                                 ioDispatcher = ioDispatcher,
                                 cacheEntry = entry,
+                                refreshWindow = refreshWindow,
                             ) { id ->
                                 if (entry == null) {
                                     resolveParkedIndex(context, visibility, id)
@@ -350,7 +353,13 @@ private class PagingStatementBindings(
     }
 }
 
-// ponytail: Room still owns pages/counts; only the refresh key follows the visual viewport.
+internal data class ViewportRefreshWindow(
+    val anchorId: Long,
+    val rowsBeforeAnchor: Int,
+    val rowCount: Int,
+)
+
+// Room owns pages/counts; parked refreshes preserve the already-loaded bounded window.
 @OptIn(ExperimentalPagingApi::class)
 internal class ViewportPagingSource(
     private val room: PagingSource<Int, MessageEntity>,
@@ -359,6 +368,7 @@ internal class ViewportPagingSource(
     private val bufferId: Long,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val cacheEntry: ChatPageCache.Entry? = null,
+    private val refreshWindow: AtomicReference<ViewportRefreshWindow?>? = null,
     private val resolveParkedIndex: suspend (Long) -> Int?,
 ) : PagingSource<Int, MessageEntity>() {
     // ponytail: remember loaded offsets for this generation; Room owns the actual rows and counts.
@@ -377,7 +387,30 @@ internal class ViewportPagingSource(
     override val jumpingSupported: Boolean get() = room.jumpingSupported
 
     // Parked refresh resolves its current Room position in load, after intervening inserts.
-    override fun getRefreshKey(state: PagingState<Int, MessageEntity>): Int? = if (viewport.value != null) 0 else room.getRefreshKey(state)
+    override fun getRefreshKey(state: PagingState<Int, MessageEntity>): Int? {
+        val anchor = viewport.value
+        if (refreshWindow != null) {
+            var rowCount = 0
+            var anchorOffset: Int? = null
+            if (anchor is ViewportRefreshAnchor.Parked) {
+                for (page in state.pages) {
+                    if (anchorOffset == null) {
+                        val offset = page.data.indexOfFirst { it.id == anchor.id }
+                        if (offset >= 0) anchorOffset = rowCount + offset
+                    }
+                    rowCount += page.data.size
+                }
+            }
+            refreshWindow.set(
+                if (anchor is ViewportRefreshAnchor.Parked && anchorOffset != null) {
+                    ViewportRefreshWindow(anchor.id, anchorOffset, rowCount)
+                } else {
+                    null
+                },
+            )
+        }
+        return if (anchor != null) 0 else room.getRefreshKey(state)
+    }
 
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, MessageEntity> {
         cacheEntry?.beginLoad()
@@ -445,18 +478,41 @@ internal class ViewportPagingSource(
         val adoptedKey = if (params is LoadParams.Refresh) cacheEntry?.takeRefreshKey() else null
         val roomParams =
             if (params is LoadParams.Refresh && adoptedKey != null) {
+                refreshWindow?.set(null)
                 LoadParams.Refresh(adoptedKey, params.loadSize, params.placeholdersEnabled)
             } else if (params !is LoadParams.Refresh || (params.key != null && params.key != 0)) {
+                if (params is LoadParams.Refresh) refreshWindow?.set(null)
                 params
             } else {
                 // ponytail: viewport invalidations use key zero; preserve explicit nonzero jumps/entries.
+                var loadSize = params.loadSize
                 val key =
                     when (val anchor = viewport.value) {
-                        ViewportRefreshAnchor.Newest -> 0
-                        is ViewportRefreshAnchor.Parked -> resolveParkedIndex(anchor.id)?.let { entryAnchorPagingKey(it) ?: 0 }
-                        null -> null
+                        ViewportRefreshAnchor.Newest -> {
+                            refreshWindow?.set(null)
+                            0
+                        }
+
+                        is ViewportRefreshAnchor.Parked -> {
+                            resolveParkedIndex(anchor.id)?.let { index ->
+                                val entryKey = entryAnchorPagingKey(index)
+                                val prior = refreshWindow?.get()?.takeIf { it.anchorId == anchor.id }
+                                if (prior != null) {
+                                    // Reuse only rows Paging already held, not a larger guessed margin.
+                                    loadSize = maxOf(loadSize, prior.rowCount)
+                                    // Near-newest parked rows still belong to the initial newest window.
+                                    if (entryKey == null) 0 else (index - prior.rowsBeforeAnchor).coerceAtLeast(0)
+                                } else {
+                                    entryKey ?: 0
+                                }
+                            }
+                        }
+
+                        null -> {
+                            null
+                        }
                     } ?: params.key
-                LoadParams.Refresh(key, params.loadSize, params.placeholdersEnabled)
+                LoadParams.Refresh(key, loadSize, params.placeholdersEnabled)
             }
         AutoFollowTrace.record("paging_room_load_start", bufferId) {
             val type =

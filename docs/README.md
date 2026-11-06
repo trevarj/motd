@@ -64,6 +64,8 @@ strip. On the right, 56dp floating buttons stack conversation actions, Back, and
 latest from top to bottom with 8dp gaps; Back is separate from the actions menu
 and appears only where Back navigation is available. Latest restores the full
 toolbar. Large accessibility text can grow the strip rather than being clipped.
+History refreshes preserve the already-loaded bounded window around a parked
+reader, so collapsed presence runs do not replace painted messages with placeholders.
 
 Chat-list tabs use the same theme surface as the title bar and chat rows.
 The selected tab retains its distinct pill highlight.

@@ -52,6 +52,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.CoroutineContext
 import kotlin.time.Duration.Companion.minutes
 
@@ -910,6 +911,115 @@ class MessageRepositoryPagingTest {
             }
             assertEquals(older.id, refreshed.data[3].id)
             assertEquals(3, reader.countTimelineNewer(bufferId, older.serverTime, older.id, spec))
+        }
+
+    @Test
+    fun parkedRefreshPreservesGrownWindowAcrossCanonicalInsertAndDelete() =
+        runTest {
+            val dao = db.messageDao()
+            val repository = repository()
+            val spec = MessageVisibilitySpec()
+            val ids =
+                dao.insertAll(
+                    (1L..1_600L).map { ordinal ->
+                        message(bufferId, "row-$ordinal", serverTime = ordinal * 1_000, dedupKey = "row-$ordinal")
+                    },
+                )
+            val viewport = MutableStateFlow<ViewportRefreshAnchor?>(ViewportRefreshAnchor.Parked(ids[849]))
+            val refreshWindow = AtomicReference<ViewportRefreshWindow?>()
+
+            fun freshSource() =
+                ViewportPagingSource(
+                    dao.pagingSource(messagePagingQuery(bufferId, spec)),
+                    viewport,
+                    db.invalidationTracker,
+                    bufferId,
+                    refreshWindow = refreshWindow,
+                ) { id ->
+                    val row = dao.byCanonicalId(id) ?: return@ViewportPagingSource null
+                    repository.countNewerThan(bufferId, row.serverTime, row.id, spec)
+                }
+
+            fun refreshKey(
+                source: ViewportPagingSource,
+                pages: List<PagingSource.LoadResult.Page<Int, MessageEntity>>,
+            ) = source.getRefreshKey(
+                PagingState(
+                    pages = pages,
+                    anchorPosition = 950,
+                    config = MESSAGE_PAGING_CONFIG,
+                    leadingPlaceholderCount = pages.first().itemsBefore,
+                ),
+            )
+
+            val source = freshSource()
+            val pages =
+                mutableListOf(
+                    source.load(PagingSource.LoadParams.Refresh(200, MESSAGE_PAGING_CONFIG.initialLoadSize, true)).requirePage(),
+                )
+            repeat(6) {
+                pages += source.load(PagingSource.LoadParams.Append(checkNotNull(pages.last().nextKey), 50, true)).requirePage()
+            }
+            val beforeIds = pages.flatMap { page -> page.data.map { it.id } }
+            assertEquals(900, beforeIds.size)
+            assertTrue(beforeIds.contains(ids[649]))
+
+            val insertedId =
+                dao
+                    .insertAll(listOf(message(bufferId, "newest", serverTime = 1_601_000, dedupKey = "newest")))
+                    .single()
+            assertTrue(source.invalid)
+            val afterInsert = freshSource()
+            val insertedPage =
+                afterInsert
+                    .load(PagingSource.LoadParams.Refresh(refreshKey(source, pages), MESSAGE_PAGING_CONFIG.initialLoadSize, true))
+                    .requirePage()
+            assertEquals(201, insertedPage.itemsBefore)
+            assertEquals(beforeIds, insertedPage.data.map { it.id })
+
+            dao.deleteById(insertedId)
+            assertTrue(afterInsert.invalid)
+            val deletedPage =
+                freshSource()
+                    .load(
+                        PagingSource.LoadParams.Refresh(
+                            refreshKey(afterInsert, listOf(insertedPage)),
+                            MESSAGE_PAGING_CONFIG.initialLoadSize,
+                            true,
+                        ),
+                    ).requirePage()
+            assertEquals(200, deletedPage.itemsBefore)
+            assertEquals(beforeIds, deletedPage.data.map { it.id })
+
+            // A new head can temporarily leave the old newest row parked at index one.
+            // Preserve the grown width without excluding the new head from its initial window.
+            viewport.value = ViewportRefreshAnchor.Parked(ids.last())
+            val nearNewest = freshSource()
+            val newestPages =
+                mutableListOf(
+                    nearNewest.load(PagingSource.LoadParams.Refresh(null, MESSAGE_PAGING_CONFIG.initialLoadSize, true)).requirePage(),
+                )
+            repeat(6) {
+                newestPages += nearNewest.load(PagingSource.LoadParams.Append(checkNotNull(newestPages.last().nextKey), 50, true)).requirePage()
+            }
+            val latestId =
+                dao
+                    .insertAll(listOf(message(bufferId, "newest again", serverTime = 1_601_000, dedupKey = "newest-again")))
+                    .single()
+            assertTrue(nearNewest.invalid)
+            val newestPage =
+                freshSource()
+                    .load(
+                        PagingSource.LoadParams.Refresh(
+                            refreshKey(nearNewest, newestPages),
+                            MESSAGE_PAGING_CONFIG.initialLoadSize,
+                            true,
+                        ),
+                    ).requirePage()
+            assertEquals(0, newestPage.itemsBefore)
+            assertEquals(900, newestPage.data.size)
+            assertEquals(latestId, newestPage.data.first().id)
+            assertEquals(ids.last(), newestPage.data[1].id)
         }
 
     @Test
