@@ -32,6 +32,9 @@ import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.data.sync.MessageNotifier
+import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.service.AppVisibility
@@ -117,6 +120,28 @@ class ChatPageCacheTest {
             )
             assertEquals("replay must not execute another Room LIMIT/OFFSET load", loads, fixture.localLoads.get())
             savedAgainView.detach()
+        }
+
+    @Test
+    fun registrationBeforeIsupportDoesNotRetireTheOpenPresentation() =
+        cacheTest { fixture ->
+            val identity = NetworkIdentityEntity(fixture.networkId, caseMapping = "ascii", chanTypes = "#")
+            fixture.db.networkIdentityDao().upsert(identity)
+            val room = fixture.seedRooms(1).single()
+            val lease = fixture.acquire(room)
+            val view = present(lease)
+            val processor = EventProcessor(fixture.db, TypingTrackerImpl(), MessageNotifier.Noop)
+
+            // Every reconnect: 001 with no ISUPPORT yet, then the 005 that restores the same rules.
+            processor.onRegistered(fixture.networkId, "me", emptyMap())
+            advanceUntilIdle()
+            assertFalse("the empty 001 must not look like new identity rules", lease.entry.retired)
+            processor.onRegistered(fixture.networkId, "me", mapOf("CASEMAPPING" to "ascii", "CHANTYPES" to "#"))
+            advanceUntilIdle()
+
+            assertFalse("an unchanged connection must keep the loaded presentation", lease.entry.retired)
+            assertTrue(lease.ownsSlot())
+            view.detach()
         }
 
     @Test

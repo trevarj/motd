@@ -485,6 +485,50 @@ class EventProcessorTest {
         }
 
     @Test
+    fun registrationBeforeIsupportKeepsLastKnownIdentityRules() =
+        runTest {
+            processor.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "ascii", "CHANTYPES" to "#"))
+
+            // 001 completes registration before any 005 has arrived.
+            processor.onRegistered(networkId, "renamed", emptyMap())
+            val welcomed = db.networkIdentityDao().byNetwork(networkId)!!
+            assertEquals("ascii", welcomed.caseMapping)
+            assertEquals("#", welcomed.chanTypes)
+            assertEquals("renamed", welcomed.selfNick)
+
+            // 005 can span lines: each one replaces only the keys it advertises.
+            processor.onRegistered(networkId, "renamed", mapOf("CASEMAPPING" to "rfc1459"))
+            val partial = db.networkIdentityDao().byNetwork(networkId)!!
+            assertEquals("rfc1459", partial.caseMapping)
+            assertEquals("#", partial.chanTypes)
+
+            // An advertised empty value is authoritative, unlike an absent key.
+            processor.onRegistered(networkId, "renamed", mapOf("CHANTYPES" to ""))
+            assertEquals("", db.networkIdentityDao().byNetwork(networkId)!!.chanTypes)
+        }
+
+    @Test
+    fun firstRegistrationBeforeIsupportUsesProtocolDefaults() =
+        runTest {
+            val fresh =
+                db.networkDao().insert(
+                    NetworkEntity(
+                        name = "fresh",
+                        role = NetworkRole.DIRECT,
+                        host = "irc.example",
+                        port = 6697,
+                        nick = "me",
+                        username = "me",
+                        realname = "Me",
+                    ),
+                )
+            processor.onRegistered(fresh, "me", emptyMap())
+            val identity = db.networkIdentityDao().byNetwork(fresh)!!
+            assertNull(identity.caseMapping)
+            assertNull(identity.chanTypes)
+        }
+
+    @Test
     fun customChantypesRestoreAfterProcessDeathForPushRouting() =
         runTest {
             processor.onRegistered(
