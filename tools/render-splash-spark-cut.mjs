@@ -84,4 +84,3 @@ if (hashes[0].slice(-64) === hashes[1].slice(-64) || hashes[1].slice(-64) === ha
   throw new Error("Expected start, mid, and final frames to differ.");
 }
 if (!/^0(?: \(0\))?$/.test(ae)) process.exitCode = 2;
-
