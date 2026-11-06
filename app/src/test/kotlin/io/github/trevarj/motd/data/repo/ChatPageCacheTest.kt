@@ -65,6 +65,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -741,6 +742,63 @@ class ChatPageCacheTest {
         }
 
     @Test
+    fun unrelatedRoomCommitsLeaveAnOpenPresentationAndItsSourceAlone() =
+        cacheTest { fixture ->
+            val rooms = fixture.seedRooms(2)
+            val lease = fixture.acquire(rooms[0])
+            val view = present(lease)
+            val source = checkNotNull(lease.entry.source)
+            val loads = fixture.localLoads.get()
+            repeat(3) {
+                fixture.editNewestRow(rooms[1])
+                fixture.db.invalidationTracker.refreshAsync()
+                advanceUntilIdle()
+            }
+            assertSame("sync elsewhere must not start a new generation", source, lease.entry.source)
+            assertFalse(source.invalid)
+            assertEquals("sync elsewhere must not reload this room", loads, fixture.localLoads.get())
+            view.detach()
+        }
+
+    @Test
+    fun sameRoomCommitRefreshesAnOpenPresentation() =
+        cacheTest { fixture ->
+            val room = fixture.seedRooms(1).single()
+            val lease = fixture.acquire(room)
+            val view = present(lease)
+            val source = checkNotNull(lease.entry.source)
+            fixture.editNewestRow(room)
+            fixture.db.invalidationTracker.refreshAsync()
+            advanceUntilIdle()
+            assertTrue("this room moved, so the old generation must end", source.invalid)
+            present(lease)
+            assertEquals("edited", view.differ.peek(0)?.text)
+            view.detach()
+        }
+
+    @Test
+    fun scrollingAfterAnUnrelatedCommitLoadsMoreInTheSameGeneration() =
+        cacheTest { fixture ->
+            val rooms = fixture.seedRooms(2)
+            val lease = fixture.acquire(rooms[0])
+            val view = present(lease)
+            val source = checkNotNull(lease.entry.source)
+            fixture.editNewestRow(rooms[1])
+            fixture.db.invalidationTracker.refreshAsync()
+            advanceUntilIdle()
+
+            // Room's own source has tripped by now; the next load must swap it, not lose the pages.
+            assertNull("row 620 starts unloaded", view.differ.peek(620))
+            view.differ.getItem(599)
+            advanceUntilIdle()
+            present(lease)
+            assertEquals("row-280", view.differ.peek(620)?.text)
+            assertSame("the generation must survive", source, lease.entry.source)
+            assertFalse(source.invalid)
+            view.detach()
+        }
+
+    @Test
     fun sameRoomCommitDuringFirstLoadStillReachesTheScreen() {
         lateinit var edit: () -> Unit
         cacheTest(beforePageVersionRead = editDuringClosingVersionRead { edit() }) { fixture ->
@@ -1172,15 +1230,8 @@ class ChatPageCacheTest {
             val counts = fixture.localCounts.get()
             fixture.databaseTasks.paused = true
             try {
-                fixture.db.openHelper.writableDatabase.execSQL(
-                    "UPDATE messages SET text = 'unrelated room' WHERE bufferId = ? AND serverTime = 900",
-                    arrayOf(rooms[1]),
-                )
-                fixture.db.invalidationTracker.refreshAsync()
-                // Deliver the real coarse invalidation, but retain the ensuing database-Job work.
-                fixture.databaseTasks.pending
-                    .receive()
-                    .run()
+                // A refresh with this room unchanged; Room's ensuing database-Job work stays retained.
+                lease.entry.requestRefresh()
                 view.differ.loadStateFlow.first { it.source.refresh is LoadState.Loading }
                 val pending = checkNotNull(lease.entry.source)
                 assertEquals(loads, fixture.localLoads.get())

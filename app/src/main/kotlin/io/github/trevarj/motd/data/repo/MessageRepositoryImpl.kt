@@ -118,7 +118,8 @@ class MessageRepositoryImpl
                     pagingSourceFactory = {
                         val query = messagePagingQuery(context.roomId, visibility, context.identityRules)
                         lateinit var source: ViewportPagingSource
-                        val nativeSource =
+
+                        fun nativeSource(): PagingSource<Int, MessageEntity> =
                             if (entry == null) {
                                 messageDao.pagingSource(query)
                             } else {
@@ -131,13 +132,14 @@ class MessageRepositoryImpl
                             }
                         source =
                             ViewportPagingSource(
-                                nativeSource,
+                                nativeSource(),
                                 viewport,
                                 db.invalidationTracker,
                                 bufferId = context.roomId,
                                 ioDispatcher = ioDispatcher,
                                 cacheEntry = entry,
                                 refreshWindow = refreshWindow,
+                                freshRoom = if (entry == null) null else ::nativeSource,
                             ) { id ->
                                 if (entry == null) {
                                     resolveParkedIndex(context, visibility, id)
@@ -362,22 +364,26 @@ internal data class ViewportRefreshWindow(
 // Room owns pages/counts; parked refreshes preserve the already-loaded bounded window.
 @OptIn(ExperimentalPagingApi::class)
 internal class ViewportPagingSource(
-    private val room: PagingSource<Int, MessageEntity>,
+    initialRoom: PagingSource<Int, MessageEntity>,
     private val viewport: StateFlow<ViewportRefreshAnchor?>,
     private val invalidationTracker: InvalidationTracker,
     private val bufferId: Long,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val cacheEntry: ChatPageCache.Entry? = null,
     private val refreshWindow: AtomicReference<ViewportRefreshWindow?>? = null,
+    private val freshRoom: (() -> PagingSource<Int, MessageEntity>)? = null,
     private val resolveParkedIndex: suspend (Long) -> Int?,
 ) : PagingSource<Int, MessageEntity>() {
+    @Volatile
+    private var room = initialRoom
+
     // ponytail: remember loaded offsets for this generation; Room owns the actual rows and counts.
     private val loadedOffsets = HashMap<Long, Int>()
     private val observing = AtomicBoolean(false)
 
-    // A retained load's version bracket already proves this room did not change, so table-wide
-    // commits must not restart it: sync commits faster than a large room loads, and restarting on
-    // each one meant the first page could not land until sync stopped.
+    // Room reports commits per table, but sync commits to other rooms faster than a page can load and
+    // reach the screen. A retained source asks its room-version counters instead: the bracket covers
+    // an in-flight load, and a recheck refreshes only if this room really moved.
     private val loadLock = Any()
     private var loadsInFlight = 0
     private var changedDuringLoad = false
@@ -393,13 +399,50 @@ internal class ViewportPagingSource(
                             false
                         }
                     }
-                if (!deferred) invalidate()
+                when {
+                    deferred -> Unit
+                    cacheEntry == null -> invalidate()
+                    else -> cacheEntry.recheckVersion(this@ViewportPagingSource)
+                }
             }
         }
 
     init {
-        room.registerInvalidatedCallback { invalidate() }
-        registerInvalidatedCallback { room.invalidate() }
+        watchRoom(initialRoom)
+        registerInvalidatedCallback {
+            AutoFollowTrace.record("paging_invalidated", bufferId)
+            room.invalidate()
+        }
+    }
+
+    private fun watchRoom(source: PagingSource<Int, MessageEntity>) {
+        source.registerInvalidatedCallback {
+            when {
+                invalid -> {
+                    Unit
+                }
+
+                // Room's source invalidates itself for any messages commit and cannot recover, so a
+                // retained generation swaps it at the next load instead of losing its pages.
+                cacheEntry != null && freshRoom != null -> {
+                    cacheEntry.recheckVersion(this)
+                }
+
+                else -> {
+                    invalidate()
+                }
+            }
+        }
+    }
+
+    /** Next load's Room source: the current one, or a new one if an unrelated commit tripped it. */
+    private fun currentRoom(): PagingSource<Int, MessageEntity> {
+        val factory = freshRoom
+        if (room.invalid && factory != null && !invalid) {
+            room = factory().also(::watchRoom)
+            if (invalid) room.invalidate()
+        }
+        return room
     }
 
     override val jumpingSupported: Boolean get() = room.jumpingSupported
@@ -451,6 +494,7 @@ internal class ViewportPagingSource(
                         if (result is LoadResult.Page && cacheEntry != null) {
                             val after = cacheEntry.readVersion(this@ViewportPagingSource)
                             if (!cacheEntry.loaded(this@ViewportPagingSource, params is LoadParams.Refresh, result, checkNotNull(before), after)) {
+                                AutoFollowTrace.record("paging_load_rejected", bufferId) { "version_changed=${before != after}" }
                                 invalidate()
                                 return@withContext LoadResult.Invalid()
                             }
@@ -555,7 +599,10 @@ internal class ViewportPagingSource(
                 }
             "type=$type key=${roomParams.key} loadSize=${roomParams.loadSize} requestedKey=${params.key}"
         }
-        val result = room.load(roomParams)
+        var result = currentRoom().load(roomParams)
+        // A commit elsewhere can trip Room's source mid-load. The bracket still decides for this room,
+        // and a fresh source's first load cannot be tripped, so one retry is enough.
+        if (result is LoadResult.Invalid && freshRoom != null && !invalid) result = currentRoom().load(roomParams)
         AutoFollowTrace.record("paging_room_load_result", bufferId) {
             when (result) {
                 is LoadResult.Page -> {
