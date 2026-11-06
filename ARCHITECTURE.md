@@ -276,9 +276,12 @@ flowchart TD
   A confirmation committed after the first SQL read but before its caller resumes discards that
   generation; the replacement page keeps the canonical event ID and viewport/read anchors.
   This covers Room 2.8.5's initial-load invalidation gap without a separate delivery-status store.
-  A retained load defers to its room-version bracket while in flight, so commits elsewhere cannot
-  restart it. Notification deferral and the last concurrent load's drain share one short monitor;
-  the ensuing recheck runs outside it and refreshes only if this room changed.
+  A retained load defers to its room-version bracket while in flight, and table-wide commits
+  afterwards only trigger a conflated version recheck, so commits elsewhere cannot restart it or
+  discard a page on its way to the screen. Notification deferral and the last concurrent load's
+  drain share one short monitor; the ensuing recheck runs outside it and refreshes only if this
+  room changed. A Room source tripped by such a commit is replaced at the next load within the same
+  generation.
   Observer registration uses the repository's injected IO dispatcher (`Dispatchers.IO` in production);
   deterministic Paging fixtures supply their test scheduler so draining it also completes registration.
 - Chat-list navigation owns a two-room LRU of native `cachedIn` page events. A root UI-only

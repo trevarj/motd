@@ -28,6 +28,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -419,8 +420,12 @@ class ChatPageCache
                     .flowOn(ioDispatcher)
                     .cachedIn(scope)
 
+            // Conflated so a burst of commits costs one version read per writer turn, not one per commit.
+            private val rechecks = Channel<PagingSource<Int, MessageEntity>>(Channel.CONFLATED)
+
             init {
                 accountWindows()
+                scope.launch(ioDispatcher) { for (next in rechecks) recheck(next) }
                 scope.launch(start = CoroutineStart.UNDISPATCHED) {
                     try {
                         awaitCancellation()
@@ -541,8 +546,23 @@ class ChatPageCache
 
             /** Refreshes only if this room actually moved; unrelated rooms' commits leave it alone. */
             internal fun recheckVersion(loadedSource: PagingSource<Int, MessageEntity>) {
-                // A retired or superseded source revokes this read, which only cancels the launch.
-                scope.launch(ioDispatcher) { ensureVersion(readVersion(loadedSource)) }
+                rechecks.trySend(loadedSource)
+            }
+
+            private suspend fun recheck(loadedSource: PagingSource<Int, MessageEntity>) {
+                try {
+                    val current = readVersion(loadedSource)
+                    val moved = synchronized(lock) { cohort != current }
+                    trace("recheck", key.context.roomId, if (moved) "moved" else "unchanged")
+                    ensureVersion(current)
+                } catch (_: RevokedChatPageQuery) {
+                    // Not allowed to read now, so leave the decision to the paused successor.
+                    loadedSource.invalidate()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    loadedSource.invalidate()
+                }
             }
 
             internal fun takeRefreshKey(): Int? = synchronized(lock) { requestedRefreshKey.also { requestedRefreshKey = null } }
