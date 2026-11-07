@@ -157,6 +157,65 @@ class IrcClientTest {
         }
 
     @Test
+    fun explicitIdentityRemovalsPropagateThroughRuntimeSnapshots() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredWithIsupport(ft, "CASEMAPPING=ascii CHANTYPES=+!")
+            val events = mutableListOf<IrcEvent.Registered>()
+            val job =
+                launch(UnconfinedTestDispatcher(testScheduler)) {
+                    client.broadcastEvents.filterIsInstance<IrcEvent.Registered>().toList(events)
+                }
+            try {
+                ft.feed(":srv 005 motd -CHANTYPES :are supported")
+                runCurrent()
+                val channelReset = client.state.value as IrcClientState.Ready
+                assertNull(channelReset.isupport["CHANTYPES"])
+                assertEquals("ascii", channelReset.isupport["CASEMAPPING"])
+                assertEquals(setOf("CHANTYPES"), channelReset.removedIsupport)
+                assertEquals(channelReset.removedIsupport, events.last().removedIsupport)
+                assertTrue(client.isupport.isChannel("#room"))
+                assertFalse(client.isupport.isChannel("+room"))
+                assertEquals("nick[", client.isupport.normalize("Nick["))
+
+                ft.feed(":srv 005 motd -CASEMAPPING :are supported")
+                ft.feed(":srv 005 motd NETWORK=Test :are supported")
+                ft.feed(":srv 001 renamed :Welcome")
+                runCurrent()
+                val reset = client.state.value as IrcClientState.Ready
+                assertNull(reset.isupport["CASEMAPPING"])
+                assertEquals(setOf("CASEMAPPING", "CHANTYPES"), reset.removedIsupport)
+                assertEquals(IrcEvent.Registered(reset.nick, reset.caps, reset.isupport, reset.removedIsupport), events.last())
+                assertEquals("nick{|}^", client.isupport.normalize("Nick[\\]~"))
+                assertEquals(setOf("CHANTYPES"), channelReset.removedIsupport)
+                assertEquals(setOf("CHANTYPES"), events.first().removedIsupport)
+
+                ft.feed(":srv 005 renamed CASEMAPPING=ascii CHANTYPES=+! :are supported")
+                runCurrent()
+                assertEquals(emptySet<String>(), (client.state.value as IrcClientState.Ready).removedIsupport)
+                assertEquals(emptySet<String>(), events.last().removedIsupport)
+                assertTrue(client.isupport.isChannel("+room"))
+                assertFalse(client.isupport.isChannel("#room"))
+                assertEquals("nick[", client.isupport.normalize("Nick["))
+            } finally {
+                job.cancelAndJoin()
+            }
+        }
+
+    @Test
+    fun identityRemovalsBeforeWelcomePublishAuthoritativeDefaults() =
+        runTest {
+            val client = registeredWithIsupport(FakeTransport(), "-CHANTYPES -CASEMAPPING")
+            val ready = client.state.value as IrcClientState.Ready
+            assertEquals(setOf("CHANTYPES", "CASEMAPPING"), ready.removedIsupport)
+            assertNull(ready.isupport["CHANTYPES"])
+            assertNull(ready.isupport["CASEMAPPING"])
+            assertTrue(client.targetClassificationReady.value)
+            assertTrue(client.isupport.isChannel("#room"))
+            assertEquals("nick{", client.isupport.normalize("Nick["))
+        }
+
+    @Test
     fun `stop restart and EOF clear current socket membership`() =
         runTest {
             val first = FakeTransport()

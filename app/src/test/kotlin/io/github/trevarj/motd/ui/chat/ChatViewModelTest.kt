@@ -5066,6 +5066,49 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun explicitIdentityRemovalsOverrideStalePersistedRules() =
+        runTest {
+            val stale = NetworkIdentityEntity(network.id, caseMapping = "ascii", chanTypes = "+!")
+            db.networkIdentityDao().upsert(stale)
+            val manager = FakeConnectionManager(network.id)
+            val vm = viewModel(channel, manager)
+
+            suspend fun awaitRules(expected: IrcIdentityRules) {
+                val actual =
+                    withContext(Dispatchers.Default) {
+                        withTimeoutOrNull(5_000) { vm.identityRules.first { it == expected } }
+                    }
+                assertEquals(expected, actual)
+            }
+
+            awaitRules(IrcIdentityRules.from("ascii", "+!"))
+
+            // Keep Room deliberately unchanged: the live removal must defeat the old fallback.
+            manager.publishState(
+                network.id,
+                IrcClientState.Ready("me", emptySet(), emptyMap(), removedIsupport = setOf("CHANTYPES")),
+            )
+            awaitRules(IrcIdentityRules.from("ascii", null))
+            assertTrue(vm.identityRules.value.isChannel("#room"))
+            assertFalse(vm.identityRules.value.isChannel("+room"))
+            assertEquals("nick[", vm.identityRules.value.normalize("Nick["))
+
+            manager.publishState(
+                network.id,
+                IrcClientState.Ready("me", emptySet(), emptyMap(), removedIsupport = setOf("CASEMAPPING", "CHANTYPES")),
+            )
+            awaitRules(IrcIdentityRules())
+            assertEquals("nick{|}^", vm.identityRules.value.normalize("Nick[\\]~"))
+            assertEquals(stale, db.networkIdentityDao().byNetwork(network.id))
+
+            manager.publishState(
+                network.id,
+                IrcClientState.Ready("me", emptySet(), mapOf("CASEMAPPING" to "ascii", "CHANTYPES" to "+!")),
+            )
+            awaitRules(IrcIdentityRules.from("ascii", "+!"))
+        }
+
+    @Test
     fun `cold ASCII Hidden bracket nick jump loads persisted rules before delayed identity observation`() =
         runTest {
             db.networkIdentityDao().upsert(NetworkIdentityEntity(network.id, caseMapping = "ascii"))

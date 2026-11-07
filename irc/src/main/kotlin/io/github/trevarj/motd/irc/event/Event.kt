@@ -15,6 +15,8 @@ sealed interface IrcClientState {
         val nick: String,
         val caps: Set<String>,
         val isupport: Map<String, String>,
+        /** Uppercase keys explicitly removed by 005, not merely awaiting advertisement. */
+        val removedIsupport: Set<String> = emptySet(),
     ) : IrcClientState
 
     data class Failed(
@@ -50,6 +52,8 @@ sealed interface IrcEvent {
         val nick: String,
         val caps: Set<String>,
         val isupport: Map<String, String>,
+        /** Uppercase keys explicitly removed by 005, not merely awaiting advertisement. */
+        val removedIsupport: Set<String> = emptySet(),
     ) : IrcEvent
 
     data class CapsChanged(

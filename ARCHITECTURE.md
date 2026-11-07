@@ -46,8 +46,11 @@ flowchart TD
   before mapping following JOINs. Exact identity changes publish `Registered`
   with current CAP/ISUPPORT snapshots for persistence; the welcome remains `Raw`,
   and late `005` retains the corrected nick.
-  Registration persists identity rules per key: a key absent from the snapshot keeps its last value,
+  Registration persists identity rules per key: a key not advertised yet keeps its last value,
   because 001 precedes 005 and blanking it would restart every open chat on each connect.
+  ISUPPORT tracks explicit `-KEY` removals separately and carries immutable removal snapshots on
+  Ready/Registered until re-advertisement. Removing CASEMAPPING/CHANTYPES clears their persisted
+  fallback and restores protocol defaults; the ViewModel resolves the same immutable Ready snapshot.
 - UI observes repositories and ViewModel state. Connection and protocol actions
   go through `ConnectionManager` instead of constructing IRC clients in screens.
 - Fixed theme contrast normalization is cached on demand per preset and text-color
@@ -284,8 +287,10 @@ flowchart TD
   afterwards only trigger a conflated version recheck, so commits elsewhere cannot restart it or
   discard a page on its way to the screen. Notification deferral and the last concurrent load's
   drain share one short monitor; the ensuing recheck runs outside it and refreshes only if this
-  room changed. A Room source tripped by such a commit is replaced at the next load within the same
-  generation.
+  room changed. Rechecks blocked by any entry load remain pending until the last local or mediator
+  load ends, including remote failure/cancellation; the drain revalidates source/query ownership
+  before reading. A Room source tripped by an unrelated commit is replaced at the next load within
+  the same generation.
   Observer registration uses the repository's injected IO dispatcher (`Dispatchers.IO` in production);
   deterministic Paging fixtures supply their test scheduler so draining it also completes registration.
 - Chat-list navigation owns a two-room LRU of native `cachedIn` page events. A root UI-only

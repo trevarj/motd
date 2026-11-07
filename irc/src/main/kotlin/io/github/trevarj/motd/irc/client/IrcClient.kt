@@ -530,14 +530,15 @@ class IrcClient(
             is RegistrationStateMachine.Action.Complete -> {
                 selfNick.set(a.nick)
                 _isupport.set(a.isupport)
+                val removedIsupport = a.isupport.removedKeys
                 _targetClassificationReady.value =
-                    a.isupport["CHANTYPES"] != null || a.assumeDefaultTargetClassification
+                    a.isupport["CHANTYPES"] != null || "CHANTYPES" in removedIsupport || a.assumeDefaultTargetClassification
                 ackedCaps.set(a.caps)
                 _pendingFeatureCaps.value = a.deferredCaps
                 registered = true
                 val isupportMap = isupportToMap(a.isupport)
-                _state.value = IrcClientState.Ready(a.nick, a.caps, isupportMap)
-                publish(criticalEvents, IrcEvent.Registered(a.nick, a.caps, isupportMap))
+                _state.value = IrcClientState.Ready(a.nick, a.caps, isupportMap, removedIsupport)
+                publish(criticalEvents, IrcEvent.Registered(a.nick, a.caps, isupportMap, removedIsupport))
             }
 
             is RegistrationStateMachine.Action.Fail -> {
@@ -576,7 +577,7 @@ class IrcClient(
             if (nick != null && current != null && nick != current.nick) {
                 selfNick.set(nick)
                 _state.value = current.copy(nick = nick)
-                publish(criticalEvents, IrcEvent.Registered(nick, current.caps, current.isupport))
+                publish(criticalEvents, IrcEvent.Registered(nick, current.caps, current.isupport, current.removedIsupport))
             }
         }
 
@@ -999,11 +1000,12 @@ class IrcClient(
     ) {
         val isupport = _isupport.get()
         isupport.update(msg.params.drop(1).dropLast(1))
-        if (isupport["CHANTYPES"] != null) _targetClassificationReady.value = true
+        val removedIsupport = isupport.removedKeys
+        if (isupport["CHANTYPES"] != null || "CHANTYPES" in removedIsupport) _targetClassificationReady.value = true
         val current = _state.value as? IrcClientState.Ready ?: return
         val snapshot = isupportToMap(isupport)
-        _state.value = current.copy(isupport = snapshot)
-        publish(criticalEvents, IrcEvent.Registered(current.nick, current.caps, snapshot))
+        _state.value = current.copy(isupport = snapshot, removedIsupport = removedIsupport)
+        publish(criticalEvents, IrcEvent.Registered(current.nick, current.caps, snapshot, removedIsupport))
     }
 
     private suspend fun emitDisconnected(

@@ -60,6 +60,40 @@ class IsupportTest {
     }
 
     @Test
+    fun explicitIdentityRemovalsRestoreDefaultsAndSurviveUnrelatedUpdates() {
+        val isup = Isupport()
+        assertEquals(emptySet<String>(), isup.removedKeys)
+        isup.update(listOf("CASEMAPPING=ascii", "CHANTYPES=+!"))
+        isup.update(listOf("-casemapping", "-chantypes"))
+        val removed = isup.removedKeys
+        assertEquals(setOf("CASEMAPPING", "CHANTYPES"), removed)
+        assertNull(isup["CASEMAPPING"])
+        assertNull(isup["CHANTYPES"])
+        assertEquals("rfc1459", isup.caseMapping)
+        assertEquals("nick{|}^", isup.normalize("Nick[\\]~"))
+        assertTrue(isup.isChannel("#room"))
+        assertFalse(isup.isChannel("+room"))
+
+        isup.update(listOf("NETWORK=Test"))
+        assertEquals(removed, isup.removedKeys)
+        isup.update(listOf("CASEMAPPING=ascii"))
+        assertEquals(setOf("CHANTYPES"), isup.removedKeys)
+        isup.update(listOf("CHANTYPES="))
+        assertEquals(emptySet<String>(), isup.removedKeys)
+        assertEquals("", isup.chanTypes)
+        assertEquals("nick[\\]~", isup.normalize("Nick[\\]~"))
+        assertEquals("retained snapshots must not change on re-advertisement", setOf("CASEMAPPING", "CHANTYPES"), removed)
+    }
+
+    @Test
+    fun removalBeforeAdvertisementIsStillExplicit() {
+        val isup = Isupport()
+        isup.update(listOf("-CHANTYPES", "-CASEMAPPING"))
+        assertEquals(setOf("CHANTYPES", "CASEMAPPING"), isup.removedKeys)
+        assertEquals(IrcIdentityRules(), isup.identityRules)
+    }
+
+    @Test
     fun `accumulates across multiple updates`() {
         val isup = Isupport()
         isup.update(listOf("CHATHISTORY=1000"))

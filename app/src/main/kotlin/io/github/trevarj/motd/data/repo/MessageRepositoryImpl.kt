@@ -417,11 +417,8 @@ internal class ViewportPagingSource(
 
     private fun watchRoom(source: PagingSource<Int, MessageEntity>) {
         source.registerInvalidatedCallback {
+            if (invalid) return@registerInvalidatedCallback
             when {
-                invalid -> {
-                    Unit
-                }
-
                 // Room's source invalidates itself for any messages commit and cannot recover, so a
                 // retained generation swaps it at the next load instead of losing its pages.
                 cacheEntry != null && freshRoom != null -> {

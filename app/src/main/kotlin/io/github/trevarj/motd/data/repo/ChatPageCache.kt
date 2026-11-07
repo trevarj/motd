@@ -394,6 +394,7 @@ class ChatPageCache
             private val _changes = MutableStateFlow(0L)
             val changes: StateFlow<Long> = _changes.asStateFlow()
             private var loading = 0
+            private var pendingRecheck: PagingSource<Int, MessageEntity>? = null
             private var remoteLoading = 0
             internal var remoteAllowed = true
             private var presentedIdle = false
@@ -470,6 +471,7 @@ class ChatPageCache
                             source = next
                             querySource = next
                             cohort = null
+                            pendingRecheck = null
                             // The canceled generation's published window is still counted separately.
                             pendingPages.clear()
                             refreshProof = null
@@ -537,11 +539,31 @@ class ChatPageCache
                 version: ChatPageVersion,
             ): Boolean = synchronized(lock) { source === loadedSource && querySource === loadedSource && (cohort == null || cohort == version) }
 
-            internal fun ensureVersion(version: ChatPageVersion) {
+            internal fun ensureVersion(
+                version: ChatPageVersion,
+                loadedSource: PagingSource<Int, MessageEntity>? = null,
+            ) {
                 // A fresh REFRESH may already have returned while the native UI still shows its
                 // previous PageStore. Wait for publication instead of invalidating that good work.
-                val stale = synchronized(lock) { cohort != version && loading == 0 && !refreshFailed }
-                if (stale) requestRefresh()
+                val stale =
+                    synchronized(lock) {
+                        val current = source
+                        if (!active || retired || refreshFailed || current == null || current.invalid ||
+                            querySource !== current || (loadedSource != null && current !== loadedSource) || cohort == version
+                        ) {
+                            return@synchronized null
+                        }
+                        if (loading != 0) {
+                            // Mediator loads have no local closing version bracket. Re-read after the
+                            // last entry load, even when the remote request fails or is cancelled.
+                            pendingRecheck = current
+                            null
+                        } else {
+                            querySource = null
+                            current
+                        }
+                    }
+                stale?.let { current -> scope.launch(ioDispatcher) { current.invalidate() } }
             }
 
             /** Refreshes only if this room actually moved; unrelated rooms' commits leave it alone. */
@@ -554,7 +576,7 @@ class ChatPageCache
                     val current = readVersion(loadedSource)
                     val moved = synchronized(lock) { cohort != current }
                     trace("recheck", key.context.roomId, if (moved) "moved" else "unchanged")
-                    ensureVersion(current)
+                    ensureVersion(current, loadedSource)
                 } catch (_: RevokedChatPageQuery) {
                     // Not allowed to read now, so leave the decision to the paused successor.
                     loadedSource.invalidate()
@@ -599,10 +621,13 @@ class ChatPageCache
             }
 
             internal fun endLoad(foregroundRequired: Boolean = false) {
-                synchronized(lock) {
-                    loading--
-                    if (foregroundRequired) remoteLoading--
-                }
+                val recheck =
+                    synchronized(lock) {
+                        loading--
+                        if (foregroundRequired) remoteLoading--
+                        if (loading == 0) pendingRecheck.also { pendingRecheck = null } else null
+                    }
+                recheck?.let(::recheckVersion)
             }
 
             /** A source cohort never mixes pages from distinct committed room revisions. */

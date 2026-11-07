@@ -320,6 +320,7 @@ class EventProcessor
             networkId: Long,
             nick: String,
             isupport: Map<String, String>,
+            removedIsupport: Set<String> = emptySet(),
         ) {
             connectionGenerations[networkId] = db.connectionGenerationDao().next(networkId)
             networkDao.setServerIconUrl(networkId, isupport["draft/ICON"]?.let(::validateAvatarUrl))
@@ -327,12 +328,12 @@ class EventProcessor
             // 001 completes registration before any 005, and 005 can span several lines, so an absent
             // key usually means "not advertised yet". Blanking it would change the rules twice on every
             // connect and restart every open chat's paging.
-            // ponytail: a server that stops advertising a key keeps its last value until it sends a new one.
+            // Explicit -KEY removals instead restore protocol defaults and clear persisted fallbacks.
             val identity =
                 NetworkIdentityEntity(
                     networkId = networkId,
-                    caseMapping = isupport["CASEMAPPING"] ?: previous?.caseMapping,
-                    chanTypes = isupport["CHANTYPES"] ?: previous?.chanTypes,
+                    caseMapping = isupport["CASEMAPPING"] ?: previous?.caseMapping.takeUnless { "CASEMAPPING" in removedIsupport },
+                    chanTypes = isupport["CHANTYPES"] ?: previous?.chanTypes.takeUnless { "CHANTYPES" in removedIsupport },
                     selfNick = nick,
                 )
             networkIdentityDao.upsert(identity)
@@ -462,7 +463,7 @@ class EventProcessor
             when (event) {
                 is IrcEvent.Registered -> {
                     if (origin.mutatesSessionState) {
-                        applyRegistered(networkId, event.nick, event.isupport)
+                        applyRegistered(networkId, event.nick, event.isupport, event.removedIsupport)
                     }
                 }
 

@@ -1510,8 +1510,8 @@ class ChatViewModel
 
         /**
          * Live ISUPPORT wins while connected; persisted rules keep offline rendering deterministic and
-         * fill keys the server has not advertised yet, matching what EventProcessor stores. The screen
-         * hides messages unless these equal the paging entry's rules, so the two must not disagree.
+         * fill keys the server has not advertised yet, matching what EventProcessor stores. Explicit
+         * removals restore defaults instead. The screen and paging entry must use the same rules.
          */
         val identityRules: StateFlow<IrcIdentityRules> =
             combine(
@@ -1520,14 +1520,12 @@ class ChatViewModel
                 persistedIdentity,
             ) { current, connection, persisted ->
                 if (current != null && connection is IrcClientState.Ready) {
-                    connectionManager.clientFor(current.networkId)?.isupport?.let { live ->
-                        IrcIdentityRules.from(
-                            live["CASEMAPPING"] ?: persisted?.caseMapping,
-                            live["CHANTYPES"] ?: persisted?.chanTypes,
-                        )
-                    }
-                        ?: persisted?.identityRules
-                        ?: IrcIdentityRules()
+                    IrcIdentityRules.from(
+                        connection.isupport["CASEMAPPING"]
+                            ?: persisted?.caseMapping.takeUnless { "CASEMAPPING" in connection.removedIsupport },
+                        connection.isupport["CHANTYPES"]
+                            ?: persisted?.chanTypes.takeUnless { "CHANTYPES" in connection.removedIsupport },
+                    )
                 } else {
                     persisted?.identityRules ?: IrcIdentityRules()
                 }

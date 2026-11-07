@@ -777,6 +777,66 @@ class ChatPageCacheTest {
         }
 
     @Test
+    fun sameRoomCommitDuringFailedMediatorLoadStillReachesTheScreen() = sameRoomCommitDuringUnsuccessfulMediatorLoad(cancelled = false)
+
+    @Test
+    fun sameRoomCommitDuringCancelledMediatorLoadStillReachesTheScreen() = sameRoomCommitDuringUnsuccessfulMediatorLoad(cancelled = true)
+
+    private fun sameRoomCommitDuringUnsuccessfulMediatorLoad(cancelled: Boolean) =
+        cacheTest { fixture ->
+            val room = fixture.seedRooms(1).single()
+            val lease = fixture.acquire(room)
+            val view = present(lease)
+            val source = checkNotNull(lease.entry.source)
+            val started = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val failure = IllegalStateException("history request failed")
+            val mediator =
+                lease.entry.mediator(
+                    object : RemoteMediator<Int, MessageEntity>() {
+                        override suspend fun load(
+                            loadType: LoadType,
+                            state: PagingState<Int, MessageEntity>,
+                        ): MediatorResult {
+                            started.complete(Unit)
+                            release.await()
+                            return MediatorResult.Error(failure)
+                        }
+                    },
+                )
+            val pending =
+                backgroundScope.async {
+                    mediator.load(LoadType.APPEND, PagingState(emptyList(), null, MESSAGE_PAGING_CONFIG, 0))
+                }
+            try {
+                started.await()
+                val checks = fixture.epochQueries.get()
+                fixture.editNewestRow(room)
+                fixture.db.invalidationTracker.refreshAsync()
+                advanceUntilIdle()
+                assertTrue("the idle source must check the commit while the mediator is suspended", fixture.epochQueries.get() > checks)
+                assertFalse(pending.isCompleted)
+                assertFalse("the mediator still owns entry load accounting", source.invalid)
+                assertEquals("row-900", view.differ.peek(0)?.text)
+
+                if (cancelled) {
+                    pending.cancelAndJoin()
+                    assertTrue(pending.isCancelled)
+                } else {
+                    release.complete(Unit)
+                    assertSame(failure, (pending.await() as RemoteMediator.MediatorResult.Error).throwable)
+                }
+                advanceUntilIdle()
+                assertTrue("the final entry load must drain the deferred same-room recheck", source.invalid)
+                present(lease)
+                assertEquals("edited", view.differ.peek(0)?.text)
+            } finally {
+                pending.cancelAndJoin()
+                view.detach()
+            }
+        }
+
+    @Test
     fun scrollingAfterAnUnrelatedCommitLoadsMoreInTheSameGeneration() =
         cacheTest { fixture ->
             val rooms = fixture.seedRooms(2)

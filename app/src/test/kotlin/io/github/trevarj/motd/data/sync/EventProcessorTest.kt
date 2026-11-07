@@ -508,6 +508,70 @@ class EventProcessorTest {
         }
 
     @Test
+    fun explicitIdentityRemovalsClearPersistedFallbacksAndRestoreDefaultRouting() =
+        runTest {
+            val advertised =
+                IrcEvent.Registered(
+                    "me",
+                    emptySet(),
+                    mapOf("CASEMAPPING" to "ascii", "CHANTYPES" to "+!"),
+                )
+            processor.process(networkId, advertised)
+            processor.process(
+                networkId,
+                advertised.copy(
+                    isupport = mapOf("CASEMAPPING" to "ascii"),
+                    removedIsupport = setOf("CHANTYPES"),
+                ),
+            )
+            val partial = db.networkIdentityDao().byNetwork(networkId)!!
+            assertNull(partial.chanTypes)
+            assertEquals("ascii", partial.caseMapping)
+            val message =
+                IrcEvent.ChatMessage(
+                    ctx = ctx(msgid = "removed-chantypes"),
+                    kind = IrcEvent.ChatKind.PRIVMSG,
+                    source = Prefix("Alice["),
+                    target = "#room",
+                    text = "default channel",
+                    isSelf = false,
+                    replyToMsgid = null,
+                )
+            processor.process(networkId, message)
+            val channel = db.bufferDao().byName(networkId, "#room")!!
+            assertEquals(BufferType.CHANNEL, channel.type)
+            assertEquals("alice[", pagingList(channel.id).single().normalizedActor)
+            assertNull(db.bufferDao().byName(networkId, "alice["))
+
+            processor.process(
+                networkId,
+                advertised.copy(isupport = emptyMap(), removedIsupport = setOf("CASEMAPPING", "CHANTYPES")),
+            )
+            val reset = db.networkIdentityDao().byNetwork(networkId)!!
+            assertNull(reset.caseMapping)
+            assertNull(reset.chanTypes)
+            assertEquals("nick{|}^", reset.identityRules.normalize("Nick[\\]~"))
+            processor.process(
+                networkId,
+                message.copy(ctx = ctx(msgid = "removed-casemapping"), target = "#after["),
+            )
+            val foldedChannel = db.bufferDao().byName(networkId, "#after{")!!
+            assertEquals(BufferType.CHANNEL, foldedChannel.type)
+            assertEquals("alice{", pagingList(foldedChannel.id).single().normalizedActor)
+
+            // A later partial 005 and process restart must not resurrect either old fallback.
+            processor.process(networkId, advertised.copy(isupport = mapOf("NETWORK" to "Test")))
+            val restarted = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
+            restarted.processPush(
+                networkId,
+                message.copy(ctx = ctx(msgid = "removed-after-restart"), target = "#restored["),
+            )
+            val restored = db.bufferDao().byName(networkId, "#restored{")!!
+            assertEquals(BufferType.CHANNEL, restored.type)
+            assertEquals("alice{", pagingList(restored.id).single().normalizedActor)
+        }
+
+    @Test
     fun firstRegistrationBeforeIsupportUsesProtocolDefaults() =
         runTest {
             val fresh =

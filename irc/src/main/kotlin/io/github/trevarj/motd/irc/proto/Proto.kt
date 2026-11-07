@@ -260,6 +260,10 @@ class IrcParseException(
 /** RPL_ISUPPORT (005) accumulator. */
 class Isupport {
     private val tokens = LinkedHashMap<String, String>()
+    private val removedTokens = LinkedHashSet<String>()
+
+    /** Explicitly removed keys, distinct from keys not advertised yet. Safe to retain as a snapshot. */
+    val removedKeys: Set<String> get() = removedTokens.toSet()
 
     /** params from a 005, minus nick + trailing text */
     fun update(tokens: List<String>) {
@@ -267,15 +271,15 @@ class Isupport {
             if (token.isEmpty()) continue
             if (token.startsWith("-")) {
                 // Negation: `-KEY` removes a previously advertised token.
-                this.tokens.remove(token.substring(1).uppercase())
+                val key = token.substring(1).uppercase()
+                this.tokens.remove(key)
+                removedTokens.add(key)
                 continue
             }
             val eq = token.indexOf('=')
-            if (eq < 0) {
-                this.tokens[token.uppercase()] = ""
-            } else {
-                this.tokens[token.substring(0, eq).uppercase()] = unescapeIsupportValue(token.substring(eq + 1))
-            }
+            val key = if (eq < 0) token.uppercase() else token.substring(0, eq).uppercase()
+            removedTokens.remove(key)
+            this.tokens[key] = if (eq < 0) "" else unescapeIsupportValue(token.substring(eq + 1))
         }
     }
 
