@@ -446,14 +446,26 @@ class AppearanceFolderLayoutUiTest {
         )
         compose.onNodeWithTag("settings_message_background_opacity").assertDoesNotExist()
         compose.onNodeWithTag("settings_density_picker").performScrollTo().performClick()
+        val options = compose.onNodeWithTag("settings_density_sheet_options")
+
+        fun previewPixels(layout: LayoutDensity): android.graphics.Bitmap {
+            options.performScrollToIndex(0)
+            compose.onNodeWithTag("settings_chat_preview_sheet_${layout.name.lowercase()}_default_rounded").assertExists()
+            val incoming = compose.onNodeWithTag("settings_chat_preview_sheet_incoming").assertIsDisplayed()
+            val viewport = options.fetchSemanticsNode().boundsInRoot
+            val bounds = incoming.fetchSemanticsNode().boundsInRoot
+            val unclipped = incoming.getUnclippedBoundsInRoot()
+            assertTrue("native preview must be fully inside its lazy viewport", bounds.top >= viewport.top && bounds.bottom <= viewport.bottom)
+            assertEquals(with(compose.density) { (unclipped.right - unclipped.left).toPx() }, bounds.width, 1f)
+            assertEquals(with(compose.density) { (unclipped.bottom - unclipped.top).toPx() }, bounds.height, 1f)
+            return incoming.captureToImage().asAndroidBitmap()
+        }
         for (layout in LayoutDensity.entries) {
             val option = "settings_density_${layout.name.lowercase()}"
             scrollToSheetNode("settings_density_sheet", option).performClick()
             scrollToSheetNode("settings_density_sheet", option).assertIsSelected()
             assertEquals(layout, selectedLayout)
-            val preview = compose.onNodeWithTag("settings_chat_preview_sheet_${layout.name.lowercase()}_default_rounded")
-            preview.performScrollTo()
-            val baseline = preview.captureToImage().asAndroidBitmap()
+            val baseline = previewPixels(layout)
             var intermediate: android.graphics.Bitmap? = null
             for (percent in listOf(37, 0, 100)) {
                 val slider = scrollToSheetNode("settings_density_sheet", "settings_message_background_opacity")
@@ -464,8 +476,7 @@ class AppearanceFolderLayoutUiTest {
                 assertTrue(slider.fetchSemanticsNode().boundsInRoot.height >= with(compose.density) { 48.dp.toPx() })
                 assertEquals(percent, selectedOpacity)
                 assertEquals(100, persisted.messageBackgroundOpacityPercent)
-                preview.performScrollTo()
-                val pixels = preview.captureToImage().asAndroidBitmap()
+                val pixels = previewPixels(layout)
                 when (percent) {
                     37 -> {
                         intermediate = pixels

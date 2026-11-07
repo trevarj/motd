@@ -147,7 +147,7 @@ class SettingsSearchTest {
     }
 
     @Test
-    fun `AI search opens shared setup and independent feature targets without retired features or model data`() {
+    fun `AI search opens shared setup and independent feature targets without exposing model data`() {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
 
         listOf(
@@ -161,8 +161,8 @@ class SettingsSearchTest {
         ).forEach { (query, destination) ->
             assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
         }
-        listOf("briefs", "semantic", "generation", "embeddings", "private-model.bin", "/storage/emulated/0/models").forEach { query ->
-            assertTrue(searchSettings(query, entries).isEmpty())
+        listOf("private-model.bin", "/storage/emulated/0/models").forEach { query ->
+            assertTrue("Model data must not enter search results for $query", searchSettings(query, entries).isEmpty())
         }
     }
 
