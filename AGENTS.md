@@ -95,10 +95,11 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
   an individual job fails, inspect its existing diagnostics and begin fixing it
   immediately rather than waiting for aggregate `gate`; remaining coverage
   continues normally.
-- For UI changes, if a device is available, install the changed debug build with
-  `nix develop -c ./gradlew :app:installDebug`, perform a quick ADB check, and
-  inspect a fresh screencapture. Otherwise, leave visual testing to the user and
-  report it as unverified. Do not start an emulator solely for routine verification.
+- For UI changes, if a device is available, install the changed debug build using
+  the [serial-targeted debug install workflow](docs/human-developing.md#debug-device-install),
+  perform a quick ADB check, and inspect a fresh screencapture. Otherwise, leave
+  visual testing to the user and report it as unverified. Do not start an emulator
+  solely for routine verification.
 - Large new features must add an emulator test for their main user journey.
   Do not run long-running emulator suites for routine task validation; hosted
   CI runs E2E coverage. Update affected `RequiredHeadlessE2eTest` journeys.

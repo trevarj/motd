@@ -33,9 +33,10 @@ connection ownership, or module boundaries.
    in each affected module. Before committing implementation changes, build each
    changed module and run its formatting and lint checks. Do not routinely run
    full test classes, unfiltered suites, or long-running emulator suites.
-   For UI changes, if a device is available, install the changed debug build with
-   `nix develop -c ./gradlew :app:installDebug`, check it with ADB, and inspect a
-   fresh screencapture; otherwise leave visual testing to the user and report it.
+   For UI changes, if a device is available, install the changed debug build using
+   the [serial-targeted debug install workflow](../docs/human-developing.md#debug-device-install),
+   check it with ADB, and inspect a fresh screencapture; otherwise leave visual
+   testing to the user and report it.
    Add an emulator test for the main journey of a large new feature and update
    affected `RequiredHeadlessE2eTest` journeys; hosted CI runs E2E coverage.
    Follow [`releases.md`](releases.md) for release-specific verification.

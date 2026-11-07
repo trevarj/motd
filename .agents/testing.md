@@ -7,10 +7,11 @@ needs a new or updated regression unless an existing named test already exercise
 that branch. Do not automatically run a full test class, unfiltered suite, emulator
 suite, or full pre-push gate.
 
-For UI changes, if a device is available, install the changed debug build with
-`nix develop -c ./gradlew :app:installDebug`, use ADB for a quick check, and
-inspect a fresh screencapture. Otherwise, report visual testing as unverified
-and leave it to the user. Do not boot an emulator solely for a routine check.
+For UI changes, if a device is available, install the changed debug build using
+the [serial-targeted debug install workflow](../docs/human-developing.md#debug-device-install),
+use ADB for a quick check, and inspect a fresh screencapture. Otherwise, report
+visual testing as unverified and leave it to the user. Do not boot an emulator
+solely for a routine check.
 Add an emulator test covering the main journey of a large new feature; hosted CI
 runs it.
 

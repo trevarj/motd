@@ -25,42 +25,49 @@ git submodule update --init --recursive
 ./gradlew :app:assembleDebug      # Google-free arm64 debug APK
 ```
 
-The debug APK lands under `app/build/outputs/apk/debug/`. Install it with
-`adb install`. The debug build carries the `.debug` application-id suffix, so
-it can coexist with a release install.
+The debug APK lands under `app/build/outputs/apk/debug/`. The debug build carries
+the `.debug` application-id suffix, so it can coexist with a release install.
+Ordinary Gradle, IDE, and CI builds use normal Kotlin incremental compilation
+and the configured build caches.
 
-`:app` Kotlin compilation is deliberately non-incremental: Kotlin 2.4.21 with
-Compose has left older callers referencing generated `$stable` fields absent
-from recompiled classes, crashing on channel entry with `NoSuchFieldError`
-(`ChatPageCache.Entry` and previously `Lease`). The module's task configuration
-applies to Gradle, IDE, and CI builds; an explicit task input invalidates older
-outputs and cache entries. Gradle up-to-date checks and build caching remain
-enabled, and other modules retain their existing compilation policy. Revisit
-this workaround only after a compiler upgrade is verified across edits to both
-Compose callers and their model classes.
+## Debug device install
 
-To replace an already affected debug APK, force only the app Kotlin task to
-rerun without restoring cached output, then package normally:
+For an authorized arm64 physical-device install, run this single invocation from
+the repository root. Replace `<serial>` with the target's `adb devices` serial:
 
 ```sh
-bash ./gradlew :app:compileDebugKotlin --rerun :app:assembleDebug \
-  --no-build-cache -PmotdAiAbis=arm64-v8a --stacktrace --console=plain
+nix develop -c env ANDROID_SERIAL="<serial>" bash ./gradlew \
+  :app:compileDebugKotlin --rerun :app:installDebug \
+  -Pkotlin.incremental=false --no-build-cache \
+  -PmotdAiAbis=arm64-v8a --stacktrace --console=plain
 ```
 
-With physical-device install authorization, use
-`adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk`.
-Keep app data; clearing data or uninstalling cannot repair mismatched bytecode.
+Kotlin 2.4.21 Compose incremental output has retained callers of generated
+`$stable` fields missing from recompiled classes, causing `NoSuchFieldError`
+on channel entry (`ChatPageCache.Entry` and previously `Lease`). This workflow
+recompiles coherently before packaging and installing; ADB does not repair the
+compiler output. The pinned Android Gradle plugin honors `ANDROID_SERIAL` for
+`installDebug`, restricting installation to that device.
 
-For a local arm64 device install loop, build both AI engines only for arm64:
+Gradle's task-local `--rerun` forces only `:app:compileDebugKotlin` to execute
+even when up-to-date, unlike `--rerun-tasks`, which forces its dependencies too.
+`-Pkotlin.incremental=false` disables Kotlin incremental compilation only for
+this invocation; `--no-build-cache` prevents restoring older compiler output.
+Other tasks retain their normal up-to-date checks, and configuration caching
+remains enabled.
 
-```sh
-./gradlew :app:installDebug -PmotdAiAbis=arm64-v8a
-```
+Run this workflow as the first debug build after restoring incremental defaults,
+even without source changes, so existing outputs or cached bytecode cannot
+supply the installed app. The non-incremental compile also invalidates Kotlin's
+incremental caches. Subsequent ordinary builds use the incremental defaults
+again; keep these flags command-local and use this workflow for debug installs.
+Keep app data: clearing data or uninstalling cannot repair mismatched bytecode.
 
-This opt-in changes only the native AI modules' ABI filters; AI features and
-source builds stay enabled. Without the property, both modules still build
-`arm64-v8a` and `x86_64`. The property accepts a comma-separated subset of those
-ABIs; empty or unsupported entries fail configuration. Append `--dry-run` to
+The `-PmotdAiAbis=arm64-v8a` opt-in changes only the native AI modules' ABI
+filters; AI features and source builds stay enabled. Without the property, both
+modules still build `arm64-v8a` and `x86_64`. The property accepts a
+comma-separated subset of those ABIs; empty or unsupported entries fail
+configuration. Append `--dry-run` to
 inspect the task graph without building or installing: the override should
 remove only the AI `x86_64` CMake tasks, retaining their arm64 tasks and app
 packaging/install tasks.
