@@ -199,6 +199,7 @@ private fun SettingsRoot(
     onOpenHistory: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val colors = MaterialTheme.colorScheme
     SettingsGroup(title = stringResource(R.string.settings_group_connections)) {
         SettingsNavigationRow(
             title = stringResource(R.string.settings_networks),
@@ -213,6 +214,7 @@ private fun SettingsRoot(
         SettingsNavigationRow(
             title = stringResource(R.string.settings_appearance),
             icon = Icons.Outlined.Palette,
+            iconTint = colors.tertiary,
             summary = stringResource(R.string.settings_appearance_summary),
             value = themePresetLabel(state.appearance.theme),
             modifier = Modifier.testTag("settings_category_appearance"),
@@ -222,6 +224,7 @@ private fun SettingsRoot(
         SettingsNavigationRow(
             title = stringResource(R.string.settings_chat),
             icon = Icons.Outlined.ChatBubbleOutline,
+            iconTint = colors.secondary,
             summary = stringResource(R.string.settings_chat_summary),
             modifier = Modifier.testTag("settings_category_chat"),
             onClick = onOpenChat,
@@ -239,6 +242,7 @@ private fun SettingsRoot(
         SettingsNavigationRow(
             title = stringResource(R.string.settings_delivery),
             icon = Icons.AutoMirrored.Outlined.Send,
+            iconTint = colors.secondary,
             summary = stringResource(R.string.settings_delivery_summary),
             value =
                 stringResource(
@@ -255,6 +259,7 @@ private fun SettingsRoot(
         SettingsNavigationRow(
             title = stringResource(R.string.settings_notifications),
             icon = Icons.Outlined.Notifications,
+            iconTint = colors.tertiary,
             summary = stringResource(R.string.settings_notifications_summary),
             modifier = Modifier.testTag("settings_category_notifications"),
             onClick = onOpenNotifications,
@@ -273,6 +278,7 @@ private fun SettingsRoot(
         SettingsNavigationRow(
             title = stringResource(R.string.settings_history),
             icon = Icons.Outlined.History,
+            iconTint = colors.secondary,
             summary = stringResource(R.string.settings_history_summary),
             value = historyRetentionValue(state.settings),
             modifier = Modifier.testTag("settings_category_history"),
@@ -290,6 +296,7 @@ private fun SettingsRoot(
         SettingsNavigationRow(
             title = stringResource(R.string.settings_labs),
             icon = Icons.Outlined.Science,
+            iconTint = colors.tertiary,
             summary = stringResource(R.string.settings_labs_summary),
             modifier = Modifier.testTag("settings_category_labs"),
             onClick = onOpenLabs,
@@ -298,6 +305,7 @@ private fun SettingsRoot(
         SettingsNavigationRow(
             title = stringResource(R.string.settings_about),
             icon = Icons.Outlined.Info,
+            iconTint = colors.secondary,
             summary = stringResource(R.string.settings_about_summary, appVersion(context)),
             modifier = Modifier.testTag("settings_category_about"),
             onClick = onOpenAbout,

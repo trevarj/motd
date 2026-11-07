@@ -171,11 +171,12 @@ internal fun SettingsNavigationRow(
     enabled: Boolean = true,
     requestedTarget: String? = null,
     targetName: String? = null,
+    iconTint: Color = MaterialTheme.colorScheme.primary,
     onClick: () -> Unit,
 ) {
     val row: @Composable (Modifier) -> Unit = { targetModifier ->
         ListItem(
-            leadingContent = icon?.let { image -> ({ Icon(image, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }) },
+            leadingContent = icon?.let { image -> ({ Icon(image, contentDescription = null, tint = iconTint) }) },
             headlineContent = { Text(title, fontWeight = FontWeight.Medium) },
             supportingContent =
                 if (summary != null || value != null) {
