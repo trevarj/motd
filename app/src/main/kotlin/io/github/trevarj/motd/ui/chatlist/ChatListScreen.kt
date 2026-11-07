@@ -624,7 +624,7 @@ fun ChatListContent(
     ) {
         Scaffold(
             modifier = Modifier.testTag("screen_chat_list"),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+            containerColor = MaterialTheme.colorScheme.surface,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 ChatListTopBar(
@@ -2723,7 +2723,7 @@ private fun FoolsSectionHeader(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+                .background(MaterialTheme.colorScheme.surface)
                 .clickable(onClick = onToggle)
                 .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -3019,7 +3019,7 @@ private fun ChatListTopBar(
 ) {
     val colors =
         TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+            containerColor = MaterialTheme.colorScheme.surface,
             scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         )
     var titleHeightPx by remember { mutableIntStateOf(0) }
@@ -3247,7 +3247,7 @@ private fun SectionHeader(text: String) {
         modifier =
             Modifier
                 .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+                .background(MaterialTheme.colorScheme.surface)
                 .padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
     )
 }

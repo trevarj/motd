@@ -518,7 +518,7 @@ class ChatListSelectionUiTest {
                     archivePixels,
                     radius * pixelsPerDp,
                     lerp(colors.surface, colors.primaryContainer, .20f),
-                    colors.surfaceContainerLowest,
+                    colors.surface,
                     pixelsPerDp,
                     "$label archive",
                 )
@@ -670,7 +670,7 @@ class ChatListSelectionUiTest {
                 val pixels = folder.captureToImage().asAndroidBitmap()
                 val sampleInset = with(compose.density) { 8.dp.roundToPx() }
                 assertEquals(lerp(colors.surface, colors.primaryContainer, .20f).toArgb(), pixels.getPixel(pixels.width - sampleInset, pixels.height / 2))
-                assertEquals("The card keeps rounded, unpainted corners", colors.surfaceContainerLowest.toArgb(), pixels.getPixel(0, 0))
+                assertEquals("The card keeps rounded, unpainted corners", colors.surface.toArgb(), pixels.getPixel(0, 0))
 
                 compose.runOnIdle { state.value = state.value.copy(rows = emptyList()) }
                 val onlyCard = compose.onNodeWithTag("chatlist_archived_folder").assertIsDisplayed().getUnclippedBoundsInRoot()

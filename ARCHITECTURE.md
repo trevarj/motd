@@ -59,7 +59,9 @@ flowchart TD
   Selected utility rows/tabs use `secondaryContainer`/`onSecondaryContainer` and retain native
   indicators and selection semantics. Tertiary utility fills are reserved for settings-search targets;
   content swatches and conversation colors are not utility chrome.
-- Chat rows retain theme `surface`. After the active-scope chip, folder tabs overlay the scrolling
+- The chat-list canvas, section headers, chat rows and unscrolled top bar share theme `surface`;
+  the top bar's scrolled color remains `surfaceContainerLow`. Other utility canvases keep
+  `surfaceContainerLowest`. After the active-scope chip, folder tabs overlay the scrolling
   chat viewport on an unpainted strip; the measured header is reserved only for the initial position.
   The capsule matches unread chat-card fill; selected pills, coverage glyphs and activity dots use
   the secondary-container pair. Unread and mention badges retain their independent semantic colors.
