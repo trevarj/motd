@@ -184,6 +184,8 @@ class AppearanceSettingsViewModel
 
         fun setMessageBackgroundOpacity(value: Int) = launch { appearancePrefs.setMessageBackgroundOpacity(value) }
 
+        fun setMessageBackgroundBlur(value: Int) = launch { appearancePrefs.setMessageBackgroundBlur(value) }
+
         fun setSentBubbleColor(value: ComfortableBubbleColor) = launch { appearancePrefs.setSentBubbleColor(value) }
 
         fun setReceivedBubbleColor(value: ComfortableBubbleColor) = launch { appearancePrefs.setReceivedBubbleColor(value) }

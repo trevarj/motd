@@ -3,26 +3,36 @@ package io.github.trevarj.motd.ui.components
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
@@ -97,6 +107,303 @@ class MessageBubbleFooterUiTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
+    @Config(sdk = [35])
+    fun nativeBlurCoversAllBackingsAndIntensitiesWithoutBlurringForegroundOrChangingOff() {
+        data class Case(
+            val density: LayoutDensity,
+            val kind: MessageKind,
+            val nick: Boolean,
+            val opacity: Int = 0,
+            val self: Boolean = false,
+            val sender: Boolean = true,
+            val intensities: List<Int> = listOf(75),
+        )
+        val current = mutableStateOf(Case(LayoutDensity.COMFORTABLE, MessageKind.PRIVMSG, false))
+        val blur = mutableStateOf(0)
+        val invertedWallpaper = mutableStateOf(false)
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f)) {
+                val row = current.value
+                BlurSample(
+                    row.density,
+                    row.kind,
+                    row.nick,
+                    row.opacity,
+                    blur.value,
+                    showSender = row.sender,
+                    isSelf = row.self,
+                    invertWallpaper = { invertedWallpaper.value },
+                )
+            }
+        }
+        val sample = compose.onNodeWithTag("blur_sample")
+        val cases =
+            LayoutDensity.entries.flatMap { density ->
+                listOf(MessageKind.PRIVMSG, MessageKind.ACTION).flatMap { kind ->
+                    listOf(false, true).map { nick -> Case(density, kind, nick) }
+                } + Case(density, MessageKind.NOTICE, false)
+            } +
+                listOf(
+                    Case(LayoutDensity.COMFORTABLE, MessageKind.PRIVMSG, false, sender = false),
+                    Case(LayoutDensity.COMFORTABLE, MessageKind.PRIVMSG, false, self = true),
+                    Case(LayoutDensity.COMFORTABLE, MessageKind.PRIVMSG, false, self = true, sender = false),
+                    Case(LayoutDensity.COMFORTABLE, MessageKind.PRIVMSG, false, opacity = 37, intensities = listOf(25, 75, 100)),
+                    Case(LayoutDensity.COMPACT, MessageKind.ACTION, true, opacity = 37),
+                    Case(LayoutDensity.COMFORTABLE, MessageKind.PRIVMSG, false, opacity = 100),
+                    Case(LayoutDensity.TWO_LINE, MessageKind.ACTION, false, opacity = 100),
+                )
+        for (row in cases) {
+            val label = row.toString()
+            compose.runOnIdle {
+                current.value = row
+                blur.value = 0
+                invertedWallpaper.value = false
+            }
+            val original = sample.captureToImage().asAndroidBitmap()
+            // A near-solid antialiased pixel can round to the ink byte on one background.
+            // Both opposite checker colors must paint that byte before treating it as solid ink.
+            compose.runOnIdle { invertedWallpaper.value = true }
+            val opposite = sample.captureToImage().asAndroidBitmap()
+            compose.runOnIdle { invertedWallpaper.value = false }
+            val parent = sample.fetchSemanticsNode().boundsInRoot
+            val backing = compose.onNodeWithTag("blur_backing", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val left = (backing.left - parent.left).toInt()
+            val right = (backing.right - parent.left).toInt()
+            val top = (backing.top - parent.top).toInt()
+            val xs = (left + 24) until (right - 24)
+            assertTrue("$label has a real painted sample band", !xs.isEmpty())
+
+            fun edgeStep(image: Bitmap): Int {
+                val values = xs.map { image.getPixel(it, top + 1) and 255 }
+                // Low blur softens edges before the wide tiles lose their flat-color extrema.
+                return values.zipWithNext().maxOf { (before, after) -> kotlin.math.abs(after - before) }
+            }
+            val body = compose.onNodeWithText("Reading wallpaper with crisp text", substring = true, useUnmergedTree = true)
+            val text = body.textLayout()
+            val ink = text.inkAt("Reading")
+            val textBounds = body.fetchSemanticsNode().boundsInRoot
+            val first = text.getBoundingBox(text.layoutInput.text.indexOf("Reading"))
+            val glyphs =
+                ((textBounds.left - parent.left + first.left).toInt() until (textBounds.left - parent.left + first.right).toInt()).flatMap { x ->
+                    ((textBounds.top - parent.top + first.top).toInt() until (textBounds.top - parent.top + first.bottom).toInt()).mapNotNull { y ->
+                        (x to y).takeIf { original.getPixel(x, y) == ink.toArgb() && opposite.getPixel(x, y) == ink.toArgb() }
+                    }
+                }
+            assertTrue("$label contains background-invariant solid glyph pixels", glyphs.isNotEmpty())
+            val edgeSteps = mutableListOf(edgeStep(original))
+            for (intensity in row.intensities) {
+                compose.runOnIdle { blur.value = intensity }
+                val blurred = sample.captureToImage().asAndroidBitmap()
+                edgeSteps += edgeStep(blurred)
+                val changedGlyphs = glyphs.filter { (x, y) -> blurred.getPixel(x, y) != ink.toArgb() }
+                val changedColors = changedGlyphs.take(3).map { (x, y) -> "$x,$y ${ink.toArgb().toUInt().toString(16)} -> ${blurred.getPixel(x, y).toUInt().toString(16)}" }
+                assertTrue("$label blur=$intensity leaves solid glyphs sharp: $changedColors", changedGlyphs.isEmpty())
+                assertEquals("$label never blurs the wallpaper outside a message", original.getPixel(4, 4), blurred.getPixel(4, 4))
+                if (row.density == LayoutDensity.COMFORTABLE) {
+                    assertEquals("$label retains the grouped outline", original.getPixel(left, top), blurred.getPixel(left, top))
+                }
+            }
+            if (row.opacity < 100) {
+                assertTrue("$label smooths wallpaper edges at zero/intermediate tint: $edgeSteps", edgeSteps[1] < edgeSteps[0] - 4)
+                assertTrue("$label higher intensity cannot sharpen edges: $edgeSteps", edgeSteps.zipWithNext().all { (before, after) -> after <= before })
+            }
+            compose.runOnIdle { blur.value = 0 }
+            assertTrue("$label blur Off restores exact baseline pixels", original.sameAs(sample.captureToImage().asAndroidBitmap()))
+        }
+    }
+
+    @Test
+    @Config(sdk = [35])
+    fun blurTracksDrawOnlySourceFramesScrollAndRunwayWithoutMovingWallpaperSamples() {
+        val frame = mutableStateOf(0f)
+        val translation = mutableStateOf(Offset.Zero)
+        val viewportHeight = mutableStateOf(260)
+        val scrolling = ScrollState(0)
+        val blur = mutableStateOf(75)
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f)) {
+                BlurSample(
+                    LayoutDensity.COMPACT,
+                    MessageKind.PRIVMSG,
+                    false,
+                    0,
+                    blur.value,
+                    frame = { frame.value },
+                    translation = { translation.value },
+                    scrolling = scrolling,
+                    viewportHeight = viewportHeight.value,
+                )
+            }
+        }
+        val sample = compose.onNodeWithTag("blur_sample")
+
+        fun band(): List<Int> {
+            val image = sample.captureToImage().asAndroidBitmap()
+            val parent = sample.fetchSemanticsNode().boundsInRoot
+            val row = compose.onNodeWithTag("blur_backing", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            // Fixed screen-space points remain inside the backing before and after each motion.
+            val y = 80
+            assertTrue("sample remains inside the moving backing", y >= row.top - parent.top && y < row.bottom - parent.top)
+            return (80 until 280).map { image.getPixel(it, y) }
+        }
+        val original = band()
+        compose.runOnIdle { frame.value = 16f }
+        val animated = band()
+        assertTrue("draw-only wallpaper changes reach already-recorded consumers", original != animated)
+        compose.runOnIdle { frame.value = 0f }
+        assertEquals("source frame restoration", original, band())
+        compose.runOnIdle { translation.value = Offset(0f, -2f) }
+        assertEquals("runway graphicsLayer translation must not drag wallpaper", original, band())
+        compose.runOnIdle { translation.value = Offset.Zero }
+        compose.runOnIdle { runBlocking { scrolling.scrollTo(2) } }
+        compose.runOnIdle { viewportHeight.value = 220 }
+        assertEquals("IME viewport remeasurement must not drag wallpaper", original, band())
+        compose.runOnIdle { viewportHeight.value = 260 }
+        assertEquals("scroll placement must not drag wallpaper", original, band())
+        compose.runOnIdle {
+            runBlocking { scrolling.scrollTo(0) }
+            blur.value = 0
+        }
+        val off = sample.captureToImage().asAndroidBitmap()
+        compose.runOnIdle { blur.value = 75 }
+        assertTrue("returning from Off reattaches live native layers", !off.sameAs(sample.captureToImage().asAndroidBitmap()))
+    }
+
+    @Test
+    @Config(sdk = [30])
+    fun preAndroid12RetainsUnblurredTintForAllLayoutsAndZeroOpacity() {
+        val layout = mutableStateOf(LayoutDensity.COMFORTABLE)
+        val blur = mutableStateOf(0)
+        val opacity = mutableStateOf(0)
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f)) {
+                BlurSample(layout.value, MessageKind.ACTION, true, opacity.value, blur.value)
+            }
+        }
+        for (density in LayoutDensity.entries) {
+            for (percent in listOf(0, 37, 100)) {
+                compose.runOnIdle {
+                    layout.value = density
+                    opacity.value = percent
+                    blur.value = 0
+                }
+                val baseline = compose.onNodeWithTag("blur_sample").captureToImage().asAndroidBitmap()
+                compose.runOnIdle { blur.value = 100 }
+                assertTrue("$density opacity=$percent keeps the existing tint-only fallback", baseline.sameAs(compose.onNodeWithTag("blur_sample").captureToImage().asAndroidBitmap()))
+            }
+        }
+    }
+
+    @Test
+    @Config(sdk = [35])
+    fun nativeBlurPreservesOpaqueMentionsRailsAndReplyAudioSurfacesAcrossLayouts() {
+        val layout = mutableStateOf(LayoutDensity.COMFORTABLE)
+        val kind = mutableStateOf(MessageKind.PRIVMSG)
+        val blur = mutableStateOf(0)
+        val mention = mutableStateOf(true)
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f)) {
+                BlurSample(layout.value, kind.value, true, 0, blur.value, mention = mention.value, reply = ReplyPreviewData("quoted", "Quoted reply"), audio = true, viewportHeight = 360)
+            }
+        }
+        for (density in LayoutDensity.entries) {
+            for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)) {
+                compose.runOnIdle {
+                    layout.value = density
+                    kind.value = messageKind
+                    mention.value = true
+                    blur.value = 0
+                }
+                val sample = compose.onNodeWithTag("blur_sample")
+                val highlighted = sample.captureToImage().asAndroidBitmap()
+                val reply = compose.onNodeWithText("Quoted reply", useUnmergedTree = true)
+                val originalReply = reply.captureToImage().asAndroidBitmap()
+                compose.runOnIdle { blur.value = 100 }
+                assertTrue("$density $messageKind incoming opaque mention remains exact", highlighted.sameAs(sample.captureToImage().asAndroidBitmap()))
+                assertTrue("$density $messageKind reply stays sharp and opaque", originalReply.sameAs(reply.captureToImage().asAndroidBitmap()))
+                compose.runOnIdle {
+                    mention.value = false
+                    blur.value = 0
+                }
+                val ordinary = sample.captureToImage().asAndroidBitmap()
+                val ordinaryReply = reply.captureToImage().asAndroidBitmap()
+                val audio = compose.onNodeWithTag("audio_player", useUnmergedTree = true).captureToImage().asAndroidBitmap()
+                val railColor =
+                    if (messageKind == MessageKind.ACTION && density != LayoutDensity.COMFORTABLE) {
+                        requireNotNull(fixedThemeScheme(ColorThemePreset.AYU_LIGHT)).tertiary.toArgb()
+                    } else {
+                        null
+                    }
+                val railPixels = mutableListOf<Pair<Int, Int>>()
+                if (railColor != null) {
+                    for (x in 0 until ordinary.width) {
+                        for (y in 0 until ordinary.height) {
+                            if (ordinary.getPixel(x, y) == railColor) railPixels += x to y
+                        }
+                    }
+                    assertTrue("$density ACTION has a real semantic rail", railPixels.isNotEmpty())
+                }
+                compose.runOnIdle { blur.value = 100 }
+                val blurred = sample.captureToImage().asAndroidBitmap()
+                assertTrue("$density $messageKind ordinary reply is independent of backing blur", ordinaryReply.sameAs(reply.captureToImage().asAndroidBitmap()))
+                val blurredAudio = compose.onNodeWithTag("audio_player", useUnmergedTree = true).captureToImage().asAndroidBitmap()
+                for (x in 16 until audio.width - 16) {
+                    for (y in 16 until audio.height - 16) {
+                        assertEquals("$density $messageKind audio content and controls stay sharp", audio.getPixel(x, y), blurredAudio.getPixel(x, y))
+                    }
+                }
+                assertTrue("$density $messageKind accent stays sharp", railPixels.all { (x, y) -> blurred.getPixel(x, y) == railColor })
+            }
+        }
+    }
+
+    @Test
+    @Config(sdk = [35])
+    fun nativeBlurKeepsComfortableMorphWallpaperFixedInsideItsGrowingGroupedMask() {
+        val progress = mutableStateOf(1f)
+        val morphEnabled = mutableStateOf(false)
+        val morphProgress = { progress.value }
+        val blur = mutableStateOf(75)
+        val sender = mutableStateOf(true)
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f)) {
+                BlurSample(
+                    LayoutDensity.COMFORTABLE,
+                    MessageKind.PRIVMSG,
+                    false,
+                    0,
+                    blur.value,
+                    showSender = sender.value,
+                    morphProgress = if (morphEnabled.value) morphProgress else null,
+                )
+            }
+        }
+        val sample = compose.onNodeWithTag("blur_sample")
+        for (showSender in listOf(true, false)) {
+            compose.runOnIdle {
+                sender.value = showSender
+                morphEnabled.value = false
+                progress.value = 1f
+                blur.value = 75
+            }
+            val full = sample.captureToImage().asAndroidBitmap()
+            val parent = sample.fetchSemanticsNode().boundsInRoot
+            val backing = compose.onNodeWithTag("blur_backing", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val x = ((backing.left + backing.right) / 2 - parent.left).toInt()
+            val y = (backing.top - parent.top + 3).toInt()
+            compose.runOnIdle { morphEnabled.value = true }
+            assertTrue("sender=$showSender completed morph matches the ordinary grouped surface", full.sameAs(sample.captureToImage().asAndroidBitmap()))
+            compose.runOnIdle { progress.value = 0.75f }
+            val growing = sample.captureToImage().asAndroidBitmap()
+            assertEquals("morph scales the mask, not the sampled wallpaper", full.getPixel(x, y), growing.getPixel(x, y))
+            compose.runOnIdle { progress.value = 0f }
+            val noSurface = sample.captureToImage().asAndroidBitmap()
+            compose.runOnIdle { blur.value = 0 }
+            assertTrue("zero morph alpha removes blur as well as tint", noSurface.sameAs(sample.captureToImage().asAndroidBitmap()))
+        }
+    }
+
+    @Test
     fun comfortableMorphOutlineAndCompletedRectBothHonorBackingOpacity() {
         val opacity = mutableStateOf(100)
         val progress = mutableStateOf(0.5f)
@@ -160,6 +467,7 @@ class MessageBubbleFooterUiTest {
     }
 
     @Test
+    @Config(sdk = [35])
     fun loadedImageAndVideoCornerPresetsCoverEveryDensityAndActionAndRestoreDefault() {
         RoutedInlineMediaFixture().use { fixture ->
             fixture.server.enqueue(solidMediaResponse())
@@ -169,6 +477,7 @@ class MessageBubbleFooterUiTest {
             val corners = mutableStateOf(UiCornerStyle.DEFAULT)
             val video = mutableStateOf(false)
             val opacity = mutableStateOf(100)
+            val blur = mutableStateOf(0)
             val imageUrl = "http://media.invalid/corner-mask.png"
             val videoUrl = "http://media.invalid/corner-mask.mp4"
             var pixelsPerDp = 1f
@@ -181,23 +490,32 @@ class MessageBubbleFooterUiTest {
                     mediaCornerStyle = corners.value,
                     chatShadowsEnabled = false,
                     messageBackgroundOpacityPercent = opacity.value,
+                    messageBackgroundBlur = blur.value,
                 ) {
                     CompositionLocalProvider(
                         LocalAutomaticRemoteMedia provides true,
                         LocalNetworkMediaHttp provides fixture.http,
                     ) {
                         Box(Modifier.width(380.dp).background(Color.Cyan)) {
-                            MessageBubble(
-                                sender = "alice",
-                                text = "Media",
-                                timeMs = 0,
-                                formattedTime = TIME,
-                                isSelf = false,
-                                kind = kind.value,
-                                showSender = true,
-                                networkId = fixture.networkId,
-                                mediaUrls = listOf(if (video.value) videoUrl else imageUrl),
-                            )
+                            val backdrop = rememberMessageWallpaperBackdrop(blur.value)
+                            Canvas(Modifier.matchParentSize().recordMessageWallpaper(backdrop, Color.Cyan)) {
+                                for (x in 0..12) {
+                                    drawRect(if (x % 2 == 0) Color.Black else Color.White, Offset(x * 32f, 0f), Size(32f, size.height))
+                                }
+                            }
+                            CompositionLocalProvider(LocalMessageWallpaperBackdrop provides backdrop) {
+                                MessageBubble(
+                                    sender = "alice",
+                                    text = "Media",
+                                    timeMs = 0,
+                                    formattedTime = TIME,
+                                    isSelf = false,
+                                    kind = kind.value,
+                                    showSender = true,
+                                    networkId = fixture.networkId,
+                                    mediaUrls = listOf(if (video.value) videoUrl else imageUrl),
+                                )
+                            }
                         }
                     }
                 }
@@ -211,6 +529,7 @@ class MessageBubbleFooterUiTest {
                             kind.value = messageKind
                             corners.value = UiCornerStyle.DEFAULT
                             opacity.value = 100
+                            blur.value = 0
                         }
                         compose.waitUntil(10_000) {
                             compose.onAllNodesWithTag("inline_media_loaded", useUnmergedTree = true).fetchSemanticsNodes().size == 1
@@ -250,11 +569,16 @@ class MessageBubbleFooterUiTest {
                             if (preset == UiCornerStyle.DEFAULT) assertTrue("$label restored loaded pixels", baseline.sameAs(image))
                         }
                         for (percent in listOf(37, 0, 100)) {
-                            compose.runOnIdle { opacity.value = percent }
-                            val image = media.captureToImage().asAndroidBitmap()
-                            for (x in image.width / 4 until image.width * 3 / 4) {
-                                for (y in image.height / 4 until image.height * 3 / 4) {
-                                    assertEquals("$layout $messageKind video=$isVideo opacity=$percent never fades loaded media", baseline.getPixel(x, y), image.getPixel(x, y))
+                            for (intensity in listOf(0, 75)) {
+                                compose.runOnIdle {
+                                    opacity.value = percent
+                                    blur.value = intensity
+                                }
+                                val image = media.captureToImage().asAndroidBitmap()
+                                for (x in image.width / 4 until image.width * 3 / 4) {
+                                    for (y in image.height / 4 until image.height * 3 / 4) {
+                                        assertEquals("$layout $messageKind video=$isVideo opacity=$percent blur=$intensity never fades or blurs loaded media", baseline.getPixel(x, y), image.getPixel(x, y))
+                                    }
                                 }
                             }
                         }
@@ -658,7 +982,7 @@ class MessageBubbleFooterUiTest {
                     }
                 linkColor = ensureContrast(linkInk, listOf(fill), MESSAGE_TEXT_CONTRAST)
                 mentionColor = ensureContrast(nicks.nick("bob", Color.Unspecified), listOf(fill), MESSAGE_TEXT_CONTRAST)
-                Surface(Modifier.width(380.dp)) {
+                Surface(Modifier.width(380.dp), color = scheme.background) {
                     MessageBubble(
                         sender = "alice",
                         text = "Reading https://example.com @bob `code`",
@@ -671,6 +995,7 @@ class MessageBubbleFooterUiTest {
                         showSender = true,
                         knownNicks = setOf("bob"),
                         reply = ReplyPreviewData("quoted", "Quoted reply"),
+                        modifier = Modifier.testTag("reading_ink_message"),
                     )
                 }
             }
@@ -709,13 +1034,16 @@ class MessageBubbleFooterUiTest {
                                 .textLayout()
                                 .layoutInput.style.color
                         if (layout == LayoutDensity.TWO_LINE) {
-                            // Wallpaper-safe tone adjustments are not a fixed palette RGB contract.
-                            val attainable = maxOf(contrastRatio(Color.Black, fill), contrastRatio(Color.White, fill))
+                            // Resolve contrast against the actual baseline over the known theme canvas,
+                            // not the unattenuated nick tint or arbitrary wallpaper.
+                            val pixels = compose.onNodeWithTag("reading_ink_message", useUnmergedTree = true).captureToImage().toPixelMap()
+                            val paintedFill = pixels[8, 2]
+                            val attainable = maxOf(contrastRatio(Color.Black, paintedFill), contrastRatio(Color.White, paintedFill))
                             val minimum = if (attainable >= MESSAGE_TEXT_CONTRAST) MESSAGE_TEXT_CONTRAST else 4.5
                             for (word in listOf("Reading", "https://", "@bob")) {
-                                assertTrue("$label $word reading contrast", contrastRatio(body.inkAt(word), fill) >= minimum - 0.05)
+                                assertTrue("$label $word reading contrast", contrastRatio(body.inkAt(word), paintedFill) >= minimum - 0.05)
                             }
-                            assertTrue("$label timestamp reading contrast", contrastRatio(timestamp, fill) >= minimum - 0.05)
+                            assertTrue("$label timestamp reading contrast", contrastRatio(timestamp, paintedFill) >= minimum - 0.05)
                         } else {
                             assertEquals("$label prose", ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST), body.inkAt("Reading"))
                             assertEquals("$label link", linkColor, body.inkAt("https://"))
@@ -1260,10 +1588,13 @@ class MessageBubbleFooterUiTest {
                         }
                         val fullImage = sample.captureToImage()
                         val fullInk = fullImage.toPixelMap()
-                        assertPaintedTextContrast("$label wallpaper=100", compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true))
+                        // Arbitrary wallpaper has no 7:1 guarantee; this fixture must still paint
+                        // readable, full-opacity glyphs rather than fading the message content.
+                        assertPaintedTextContrast("$label wallpaper=100", compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true), minimumTarget = 4.5)
                         compose.runOnIdle { intensity.value = 0 }
                         val noImage = sample.captureToImage()
                         val noInk = noImage.toPixelMap()
+                        assertPaintedTextContrast("$label known theme canvas", compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true))
                         if (layout == LayoutDensity.TWO_LINE && (nicknameBackgroundsEnabled || mention || messageKind == MessageKind.ACTION)) {
                             assertTrue(
                                 "$label must let wallpaper contribute to the row fill",
@@ -1404,6 +1735,104 @@ class MessageBubbleFooterUiTest {
         assertPaintedTextContrast("dimmed standalone audio title", compose.onNodeWithText("Reading audio", useUnmergedTree = true), 4.5)
         assertPaintedTextContrast("dimmed standalone audio timestamp", compose.onNodeWithText(TIME, useUnmergedTree = true), 4.5)
         compose.onNodeWithContentDescription("Download and play audio").assertIsDisplayed().performClick()
+    }
+
+    @Composable
+    private fun BlurSample(
+        density: LayoutDensity,
+        kind: MessageKind,
+        nicknameBackgrounds: Boolean,
+        opacity: Int,
+        blur: Int,
+        showSender: Boolean = true,
+        isSelf: Boolean = false,
+        frame: () -> Float = { 0f },
+        invertWallpaper: () -> Boolean = { false },
+        translation: () -> Offset = { Offset.Zero },
+        scrolling: ScrollState? = null,
+        mention: Boolean = false,
+        morphProgress: (() -> Float)? = null,
+        reply: ReplyPreviewData? = null,
+        audio: Boolean = false,
+        viewportHeight: Int = 260,
+    ) {
+        MotdTheme(
+            dynamicColor = false,
+            themePreset = ColorThemePreset.AYU_LIGHT,
+            layoutDensity = density,
+            avatarStyle = AvatarStyle.MONOGRAM,
+            nicknameBackgroundsEnabled = nicknameBackgrounds,
+            messageBackgroundOpacityPercent = opacity,
+            messageBackgroundBlur = blur,
+            chatShadowsEnabled = false,
+        ) {
+            val backdrop = rememberMessageWallpaperBackdrop(blur)
+            Box(
+                Modifier
+                    .width(380.dp)
+                    .height(viewportHeight.dp)
+                    .background(Color.Magenta)
+                    .testTag("blur_sample"),
+            ) {
+                Canvas(Modifier.matchParentSize().recordMessageWallpaper(backdrop, Color.Magenta)) {
+                    val phase = frame()
+                    val inverted = invertWallpaper()
+                    for (x in -1..12) {
+                        for (y in -1..9) {
+                            drawRect(
+                                if (((x + y) % 2 == 0) != inverted) Color.White else Color.Black,
+                                topLeft = Offset(x * 32f + phase, y * 32f + phase),
+                                size = Size(32f, 32f),
+                            )
+                        }
+                    }
+                }
+                CompositionLocalProvider(LocalMessageWallpaperBackdrop provides backdrop) {
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .clipToBounds()
+                            .let { if (scrolling == null) it else it.verticalScroll(scrolling) }
+                            .graphicsLayer {
+                                translationX = translation().x
+                                translationY = translation().y
+                            },
+                    ) {
+                        Spacer(Modifier.height(80.dp))
+                        MessageBubble(
+                            sender = "alice",
+                            text = "Reading wallpaper with crisp text",
+                            timeMs = 0,
+                            formattedTime = TIME,
+                            isSelf = isSelf,
+                            kind = kind,
+                            showSender = showSender,
+                            hasMention = mention,
+                            sendMorphProgress = morphProgress,
+                            reply = reply,
+                            modifier = Modifier.fillMaxWidth(),
+                            containerModifier = Modifier.testTag("blur_backing"),
+                            trailingContent =
+                                if (audio) {
+                                    {
+                                        AudioAttachmentPlayers(
+                                            attachments = listOf(AudioAttachment(url = "https://blur-preview.invalid/voice.ogg", title = "Voice message", durationMs = 42_000)),
+                                            playbackState = AudioPlaybackState(),
+                                            networkId = null,
+                                            isSelf = false,
+                                            onToggle = { _, _ -> },
+                                            onSeek = { _, _ -> },
+                                        )
+                                    }
+                                } else {
+                                    null
+                                },
+                        )
+                        Spacer(Modifier.height(400.dp))
+                    }
+                }
+            }
+        }
     }
 
     @Composable
@@ -1593,5 +2022,30 @@ class MessageBubbleFooterUiTest {
         const val LONG_NICK = "trev-before-rename-with-a-very-long-stored-nickname"
         const val BODY = "That sounds good to me."
         const val TIME = "14:32"
+    }
+}
+
+/** A private imported image exercises the real wallpaper loader/crop in both settings previews. */
+internal fun withStripedMessageWallpaper(block: (WallpaperSelection) -> Unit) {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val store = CustomWallpaperStore(context)
+    val source = File.createTempFile("message-blur-wallpaper", ".png", context.cacheDir)
+    val bitmap = Bitmap.createBitmap(380, 640, Bitmap.Config.ARGB_8888)
+    try {
+        for (x in 0 until bitmap.width) {
+            for (y in 0 until bitmap.height) {
+                bitmap.setPixel(x, y, if ((x / 32 + y / 32) % 2 == 0) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+            }
+        }
+        source.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    } finally {
+        bitmap.recycle()
+    }
+    val image = runBlocking { store.import(Uri.fromFile(source)).getOrThrow() }
+    try {
+        block(WallpaperSelection(ChatWallpaperPreset.NONE, 100, image))
+    } finally {
+        runBlocking { store.delete(image) }
+        source.delete()
     }
 }

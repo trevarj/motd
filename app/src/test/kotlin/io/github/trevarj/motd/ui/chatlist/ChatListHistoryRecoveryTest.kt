@@ -451,6 +451,11 @@ class ChatListHistoryRecoveryTest {
                     percent: Int?,
                 ): Boolean = error("Unexpected opacity mutation")
 
+                override suspend fun setMessageBackgroundBlurOverride(
+                    id: Long,
+                    intensity: Int?,
+                ): Boolean = error("Unexpected blur mutation")
+
                 override suspend fun setPresenceModeOverride(
                     id: Long,
                     mode: PresenceMode?,

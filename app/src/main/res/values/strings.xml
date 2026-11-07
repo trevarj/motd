@@ -989,10 +989,15 @@
     <string name="settings_nickname_backgrounds">Nickname backgrounds</string>
     <string name="settings_nickname_backgrounds_desc">Tint Compact and Two-line message backgrounds by sender. Nickname colors and mention highlights are unchanged.</string>
     <string name="settings_message_background_opacity">Message background opacity</string>
-    <string name="settings_message_background_opacity_desc" formatted="false">Message backing in every layout. 0% turns it off; content, mention highlights, and semantic rails stay visible.</string>
+    <string name="settings_message_background_opacity_desc" formatted="false">Message tint in every layout. 0% removes tint, not blur; content, mention highlights, and semantic rails stay visible.</string>
     <string name="settings_message_background_opacity_off" formatted="false">0% (off)</string>
     <string name="chat_layout_global_opacity">Use global opacity</string>
     <string name="chat_layout_global_opacity_desc">Inherit message background opacity independently of message layout.</string>
+    <string name="settings_message_background_blur">Message background blur</string>
+    <string name="settings_message_background_blur_desc">Blur the wallpaper behind messages. Lower opacity reveals more blur. Android 12+ only; older devices keep the unblurred tint.</string>
+    <string name="settings_message_background_blur_off">Off</string>
+    <string name="chat_layout_global_blur">Use global blur</string>
+    <string name="chat_layout_global_blur_desc">Inherit wallpaper blur independently of message layout and opacity.</string>
     <string name="settings_composer_style">Message input layout</string>
     <string name="settings_composer_style_desc">Choose how the message input and its tools appear in chats.</string>
     <string name="settings_composer_style_comfortable">Floating</string>

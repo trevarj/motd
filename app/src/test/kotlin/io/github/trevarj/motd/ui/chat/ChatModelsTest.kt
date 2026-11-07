@@ -77,6 +77,20 @@ class ChatModelsTest {
     }
 
     @Test
+    fun `blur inheritance preserves explicit off independently of density and opacity`() {
+        val inherited = ConversationLayoutState(override = LayoutDensity.COMPACT, messageBackgroundOpacityOverride = 0)
+        assertEquals(63, inherited.effectiveMessageBackgroundBlur(63))
+        assertEquals(0, inherited.effectiveMessageBackgroundBlur(-1))
+        assertEquals(100, inherited.effectiveMessageBackgroundBlur(101))
+        val local = inherited.copy(messageBackgroundBlurOverride = 0)
+        assertEquals(0, local.effectiveMessageBackgroundBlur(100))
+        assertEquals(0, local.copy(override = null, messageBackgroundOpacityOverride = 100).effectiveMessageBackgroundBlur(37))
+        assertEquals(100, local.copy(messageBackgroundBlurOverride = 120).effectiveMessageBackgroundBlur(37))
+        assertEquals(37, local.copy(messageBackgroundBlurOverride = null).effectiveMessageBackgroundBlur(37))
+        assertEquals(0, local.copy(messageBackgroundBlurOverride = 63).effectiveMessageBackgroundOpacity(100))
+    }
+
+    @Test
     fun `history sync override remains explicit when the global mode changes`() {
         val state =
             ConversationHistorySyncState(

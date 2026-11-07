@@ -758,12 +758,9 @@ class RequiredHeadlessE2eTest {
         val roomId = runBlocking { BufferProbe(bootstrap.seams.buffers(), milestones).awaitJoinedChannel(network.childId, bootstrap.args.channel) }
         val settings = DataStoreSettingsRepository(InstrumentationRegistry.getInstrumentation().targetContext)
         val originalSettings = runBlocking { settings.settings.first() }
-        val originalOpacity =
+        val originalAppearance =
             runBlocking {
-                AppearancePrefsImpl(InstrumentationRegistry.getInstrumentation().targetContext)
-                    .config
-                    .first()
-                    .messageBackgroundOpacityPercent
+                AppearancePrefsImpl(InstrumentationRegistry.getInstrumentation().targetContext).config.first()
             }
         val token = "fools${bootstrap.args.runId.filter(Char::isLetterOrDigit).takeLast(16)}"
         val messages = MessageLifecycleProbe(bootstrap.seams.search(), milestones)
@@ -778,7 +775,7 @@ class RequiredHeadlessE2eTest {
             try {
                 val configured = runBlocking { settings.settings.first() }
                 ChatListRobot(compose).open(roomId)
-                SettingsRobot(compose).exerciseConversationOpacityInheritance()
+                SettingsRobot(compose).exerciseConversationBackingInheritance()
                 ChatRobot(compose).send("$token ordinary")
                 val ordinary = runBlocking { messages.awaitCanonical("$token ordinary", roomId) }
                 TimelineRobot(compose).assertMessageVisible(ordinary.tag())
@@ -825,7 +822,7 @@ class RequiredHeadlessE2eTest {
         SettingsRobot(compose).selectIrcSprites()
         SettingsRobot(compose).selectWallpaperAndIntensity()
         SettingsRobot(compose).selectComfortableBubbleColors()
-        SettingsRobot(compose).disableNicknameBackgrounds(opacityPercent = 37)
+        SettingsRobot(compose).disableNicknameBackgrounds(opacityPercent = 37, blurIntensity = 63)
         SettingsRobot(compose).selectSurfaceShapes()
         SettingsRobot(compose).selectLucideIcons()
         // Return from Appearance to Settings, then exercise the category and bouncer routes.
@@ -835,7 +832,9 @@ class RequiredHeadlessE2eTest {
             assertThemeTextColorsEnabled()
             restoreNicknameBackgrounds(
                 expectedOpacityPercent = 37,
-                originalOpacityPercent = originalOpacity,
+                originalOpacityPercent = originalAppearance.messageBackgroundOpacityPercent,
+                expectedBlurIntensity = 63,
+                originalBlurIntensity = originalAppearance.messageBackgroundBlur,
                 originalLayout = originalSettings.layoutDensity,
             )
             assertSurfaceShapesPersistedAndRestoreDefaults()

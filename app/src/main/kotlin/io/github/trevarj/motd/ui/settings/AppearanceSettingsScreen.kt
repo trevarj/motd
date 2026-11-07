@@ -197,6 +197,7 @@ fun AppearanceSettingsScreen(
         onChatShadowsEnabled = viewModel::setChatShadowsEnabled,
         onNicknameBackgroundsEnabled = viewModel::setNicknameBackgroundsEnabled,
         onMessageBackgroundOpacity = viewModel::setMessageBackgroundOpacity,
+        onMessageBackgroundBlur = viewModel::setMessageBackgroundBlur,
         onSentBubbleColor = viewModel::setSentBubbleColor,
         onReceivedBubbleColor = viewModel::setReceivedBubbleColor,
         onLauncherIcon = viewModel::setLauncherIcon,
@@ -240,6 +241,7 @@ fun AppearanceSettingsContent(
     onChatShadowsEnabled: (Boolean) -> Unit = {},
     onNicknameBackgroundsEnabled: (Boolean) -> Unit = {},
     onMessageBackgroundOpacity: (Int) -> Unit = {},
+    onMessageBackgroundBlur: (Int) -> Unit = {},
     onSentBubbleColor: (ComfortableBubbleColor) -> Unit = {},
     onReceivedBubbleColor: (ComfortableBubbleColor) -> Unit = {},
     onLauncherIcon: (LauncherIcon) -> Unit,
@@ -298,7 +300,7 @@ fun AppearanceSettingsContent(
         previewAppearance = appearance.copy(wallpaper = pendingWallpaper ?: appearance.wallpaper)
     }
     LaunchedEffect(target) {
-        if (target == SettingsTarget.MESSAGE_BACKGROUND_OPACITY) choiceSheet = AppearanceChoice.DENSITY
+        if (target == SettingsTarget.MESSAGE_BACKGROUND_OPACITY || target == SettingsTarget.MESSAGE_BACKGROUND_BLUR) choiceSheet = AppearanceChoice.DENSITY
     }
     LaunchedEffect(importedWallpaper) {
         importedWallpaper?.let {
@@ -779,6 +781,10 @@ fun AppearanceSettingsContent(
                 previewAppearance = previewAppearance.copy(messageBackgroundOpacityPercent = it)
                 onMessageBackgroundOpacity(it)
             },
+            onMessageBackgroundBlur = {
+                previewAppearance = previewAppearance.copy(messageBackgroundBlur = it)
+                onMessageBackgroundBlur(it)
+            },
             onComposerStyle = {
                 previewAppearance = previewAppearance.copy(composerStyle = it)
                 onComposerStyle(it)
@@ -911,6 +917,7 @@ private fun AppearanceChatLayoutPreview(
         chatShadowsEnabled = chatShadowsEnabled,
         nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
         messageBackgroundOpacityPercent = appearance.messageBackgroundOpacityPercent,
+        messageBackgroundBlur = appearance.messageBackgroundBlur,
         sentBubbleColor = appearance.sentBubbleColor,
         receivedBubbleColor = appearance.receivedBubbleColor,
         syncSystemBars = false,
@@ -968,6 +975,7 @@ private fun ComposerStylePreview(
         chatShadowsEnabled = appearance.chatShadowsEnabled,
         nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
         messageBackgroundOpacityPercent = appearance.messageBackgroundOpacityPercent,
+        messageBackgroundBlur = appearance.messageBackgroundBlur,
         sentBubbleColor = appearance.sentBubbleColor,
         receivedBubbleColor = appearance.receivedBubbleColor,
         syncSystemBars = false,
@@ -1004,6 +1012,7 @@ private fun AppearanceChoiceSheet(
     onPalette: (NickColorPalette) -> Unit,
     onDensity: (LayoutDensity) -> Unit,
     onMessageBackgroundOpacity: (Int) -> Unit,
+    onMessageBackgroundBlur: (Int) -> Unit,
     target: SettingsTarget? = null,
     onComposerStyle: (ComposerStyle) -> Unit,
     onInputCornerStyle: (UiCornerStyle) -> Unit,
@@ -1199,7 +1208,7 @@ private fun AppearanceChoiceSheet(
                 onSelect = onDensity,
                 onDismiss = onDismiss,
                 tag = "settings_density_sheet",
-                initiallyShowFooter = target == SettingsTarget.MESSAGE_BACKGROUND_OPACITY,
+                initiallyShowFooter = target == SettingsTarget.MESSAGE_BACKGROUND_OPACITY || target == SettingsTarget.MESSAGE_BACKGROUND_BLUR,
                 dismissOnSelect = false,
                 preview = {
                     AppearanceChatLayoutPreview(
@@ -1218,6 +1227,13 @@ private fun AppearanceChoiceSheet(
                         MessageBackgroundOpacitySlider(
                             value = appearance.messageBackgroundOpacityPercent,
                             onValue = onMessageBackgroundOpacity,
+                            modifier = targetModifier,
+                        )
+                    }
+                    SettingsTarget(target?.name, SettingsTarget.MESSAGE_BACKGROUND_BLUR.name) { targetModifier ->
+                        MessageBackgroundBlurSlider(
+                            value = appearance.messageBackgroundBlur,
+                            onValue = onMessageBackgroundBlur,
                             modifier = targetModifier,
                         )
                     }

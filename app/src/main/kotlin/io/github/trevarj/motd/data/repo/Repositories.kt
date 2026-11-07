@@ -192,6 +192,12 @@ interface BufferRepository {
         percent: Int?,
     ): Boolean
 
+    /** Null inherits global blur; zero disables it. False means the conversation disappeared. */
+    suspend fun setMessageBackgroundBlurOverride(
+        id: Long,
+        intensity: Int?,
+    ): Boolean
+
     /** Persists a nullable per-conversation presence override; false means the room disappeared. */
     suspend fun setPresenceModeOverride(
         id: Long,

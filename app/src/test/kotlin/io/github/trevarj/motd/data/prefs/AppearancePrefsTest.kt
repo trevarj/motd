@@ -261,6 +261,33 @@ class AppearancePrefsTest {
             }
         }
 
+    @Test fun messageBackgroundBlurRoundTripsClampsAndDefaultsWithoutChangingOpacity() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val key = intPreferencesKey("message_background_blur_v1")
+            val originalOpacity = prefs.config.first().messageBackgroundOpacityPercent
+            context.appearanceDataStore.edit { it.remove(key) }
+            try {
+                assertEquals(0, AppearancePrefsImpl(context).config.first().messageBackgroundBlur)
+                assertEquals(0, Json.decodeFromString<AppearanceConfig>("{}").messageBackgroundBlur)
+                for (intensity in listOf(0, 1, 37, 100, -12, 130)) {
+                    val expected = intensity.coerceIn(0, 100)
+                    prefs.setMessageBackgroundBlur(intensity)
+                    val reloaded = AppearancePrefsImpl(context).config.first()
+                    assertEquals(expected, reloaded.messageBackgroundBlur)
+                    assertEquals(expected, context.appearanceDataStore.data.first()[key])
+                    assertEquals(expected, Json.decodeFromString<AppearanceConfig>(jsonWithDefaults.encodeToString(reloaded)).messageBackgroundBlur)
+                    assertEquals(originalOpacity, reloaded.messageBackgroundOpacityPercent)
+                }
+                for (intensity in listOf(-12, 130)) {
+                    context.appearanceDataStore.edit { it[key] = intensity }
+                    assertEquals(intensity.coerceIn(0, 100), AppearancePrefsImpl(context).config.first().messageBackgroundBlur)
+                }
+            } finally {
+                context.appearanceDataStore.edit { it.remove(key) }
+            }
+        }
+
     @Test fun comfortableBubbleColors_roundTripWithCustomOpaqueColorAndDefaultFallback() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()

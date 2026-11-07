@@ -43,7 +43,6 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -51,8 +50,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
-import androidx.compose.ui.graphics.drawOutline
-import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
@@ -657,27 +654,14 @@ fun MessageBubble(
     val elevation = if (backgroundAlpha == 0f) 0.dp else comfortableElevation(COMFORTABLE_BUBBLE_ELEVATION)
     val surfaceModifier =
         if (sendMorphProgress == null) {
-            Modifier.shadow(elevation, shape).clip(shape).background(bubbleFill)
+            Modifier.shadow(elevation, shape).clip(shape).messageBacking(bubbleFill, shape)
         } else {
             Modifier
                 .graphicsLayer {
                     shadowElevation = elevation.toPx() * sendMorphProgress().coerceIn(0f, 1f)
                     this.shape = shape
                 }.clip(shape)
-                .drawWithCache {
-                    val outline = shape.createOutline(size, layoutDirection, this)
-                    onDrawBehind {
-                        val progress = sendMorphProgress().coerceIn(0f, 1f)
-                        if (progress == 1f) {
-                            // Match the ordinary background: only the outer clip shapes the fill.
-                            drawRect(bubbleFill)
-                        } else {
-                            scale(0.85f + 0.15f * progress) {
-                                drawOutline(outline, bubbleFill, alpha = (progress * 1.6f).coerceAtMost(1f))
-                            }
-                        }
-                    }
-                }
+                .messageBacking(bubbleFill, shape, sendMorphProgress)
         }
 
     Row(
@@ -1061,7 +1045,7 @@ private fun ComfortableActionBubble(
                     .chatBubbleWidth()
                     .shadow(if (backgroundAlpha == 0f) 0.dp else comfortableElevation(COMFORTABLE_BUBBLE_ELEVATION), shape)
                     .clip(shape)
-                    .background(rowFill)
+                    .messageBacking(rowFill, shape)
                     .then(containerModifier),
             sourceModifier =
                 Modifier
@@ -1307,7 +1291,7 @@ private fun ActionMessageRow(
             modifier =
                 Modifier
                     .fillMaxWidth()
-                    .background(drawFill)
+                    .messageBacking(drawFill, blurEnabled = !hasMention)
                     .actionAccentRail(accent)
                     .then(containerModifier),
             sourceModifier =
@@ -1630,7 +1614,7 @@ private fun TwoLineMessageRow(
         modifier =
             modifier
                 .fillMaxWidth()
-                .background(drawFill)
+                .messageBacking(drawFill, blurEnabled = !hasMention)
                 .then(containerModifier),
         sourceModifier =
             Modifier.messageRowClicks(

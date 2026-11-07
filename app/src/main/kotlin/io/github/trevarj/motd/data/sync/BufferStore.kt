@@ -344,6 +344,7 @@ class BufferStore
                             historyDiscardedThroughTime = discardedBoundary?.historyDiscardedThroughTime,
                             layoutDensityOverride = winner.layoutDensityOverride ?: loser.layoutDensityOverride,
                             messageBackgroundOpacityOverride = winner.messageBackgroundOpacityOverride ?: loser.messageBackgroundOpacityOverride,
+                            messageBackgroundBlurOverride = winner.messageBackgroundBlurOverride ?: loser.messageBackgroundBlurOverride,
                             presenceModeOverride = winner.presenceModeOverride ?: loser.presenceModeOverride,
                             presenceCustomKindsOverride = winner.presenceCustomKindsOverride ?: loser.presenceCustomKindsOverride,
                             historySyncModeOverride = winner.historySyncModeOverride ?: loser.historySyncModeOverride,

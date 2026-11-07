@@ -468,20 +468,61 @@ internal fun <T> SingleChoiceSheet(
     }
 }
 
-/** Keep the native touch/semantics target; only the visible track is slimmed down. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MessageBackgroundOpacitySlider(
     value: Int,
     onValue: (Int) -> Unit,
     modifier: Modifier = Modifier,
     tag: String = "settings_message_background_opacity",
+) = MessageBackgroundSlider(
+    value,
+    onValue,
+    stringResource(R.string.settings_message_background_opacity),
+    stringResource(R.string.settings_message_background_opacity_off),
+    modifier,
+    tag,
+)
+
+@Composable
+internal fun MessageBackgroundBlurSlider(
+    value: Int,
+    onValue: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    tag: String = "settings_message_background_blur",
 ) {
-    val title = stringResource(R.string.settings_message_background_opacity)
+    Column(modifier) {
+        MessageBackgroundSlider(
+            value,
+            onValue,
+            stringResource(R.string.settings_message_background_blur),
+            stringResource(R.string.settings_message_background_blur_off),
+            Modifier,
+            tag,
+        )
+        Text(
+            stringResource(R.string.settings_message_background_blur_desc),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Keep the native touch/semantics target; only the visible track is slimmed down. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MessageBackgroundSlider(
+    value: Int,
+    onValue: (Int) -> Unit,
+    title: String,
+    offLabel: String,
+    modifier: Modifier,
+    tag: String,
+) {
     val bounded = value.coerceIn(0, 100)
     val interactionSource = remember { MutableInteractionSource() }
     val percent =
-        if (bounded == 0) stringResource(R.string.settings_message_background_opacity_off) else stringResource(R.string.settings_font_size_percent, bounded)
+        if (bounded == 0) offLabel else stringResource(R.string.settings_font_size_percent, bounded)
     Column(modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)

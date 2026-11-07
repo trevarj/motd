@@ -70,8 +70,9 @@ flowchart TD
   for an empty state releases its source even if folder tabs remain. Folder, pinned-Mentions
   and archive overlays are never captured. The rounded capsule replays the live source at its
   actual viewport-relative offset through a bounded 32dp native blur on API 31+, then adds
-  the unread chat-card tint at 80% opacity. API 26–30 and source-free Appearance previews
-  use the same translucent tint without blur. Sampling extends beyond the capsule before
+  the unread chat-card tint at 60% opacity, leaving 40% of the blurred source visible.
+  API 26–30 and source-free Appearance previews use the same translucent tint without blur.
+  Sampling extends beyond the capsule before
   the final rounded clip; external gutters stay unpainted. No bitmap copies, redraw loop,
   or foreground blur are involved. Selected pills, coverage glyphs and activity dots use
   the secondary-container pair; text, icons and badges stay sharp. Unread and mention
@@ -212,14 +213,24 @@ flowchart TD
   heterogeneous geometry, while visible values name the resolved geometry (including the input
   layout's current radius). Theme/time inheritance also names the device's resolved mode;
   notification policy retains effective policy and its global/server source. Notification avatars remain circular.
-  Message layout owns a continuous 0–100% background-opacity slider (default 100%) for ordinary
-  PRIVMSG, NOTICE, and ACTION backings in every layout, with or without nickname tint. Zero draws
-  no ordinary backing; content, child surfaces, incoming mention fills, and semantic rails remain.
-  Dimming precedes draw alpha, and contrast uses the fill composited over the known theme canvas.
-  Two-line tinted/ACTION fills retain their existing 90%/opaque baseline before multiplying opacity.
-  Global choices preview immediately; each durable chat independently inherits or overrides opacity
-  through accepted Room state, separately from density. Search opens the dismissable layout sheet
-  and highlights its footer slider. Canonical merges retain the winner's explicit override, including zero.
+  Message layout owns continuous 0–100 controls for ordinary PRIVMSG, NOTICE, and ACTION
+  backings in every layout, with or without nickname tint: opacity defaults to 100%, and independent
+  wallpaper blur defaults to Off (0), mapping linearly to 32dp at 100. Zero opacity removes tint,
+  not blur; content, child surfaces, incoming mention fills, and semantic rails remain sharp.
+  Dimming precedes tint alpha, and contrast uses the fill composited over the known theme canvas,
+  not arbitrary wallpaper pixels. Two-line tinted/ACTION fills retain their existing 90%/opaque
+  baseline before multiplying opacity; zero tint keeps the existing no-elevation rule.
+  Incoming mentions keep their exact existing fill/alpha and do not sample backdrop blur.
+  Android 12+ records only the rendered wallpaper and its actual canvas into one raw GPU layer
+  and one full-screen blurred layer per chat/preview intensity, shared by timeline and send flight.
+  Backings sample that layer in live draw coordinates and retain their grouped/morph outlines;
+  scrolling, runway/IME movement, flight translations and wallpaper frames invalidate drawing,
+  not a permanent frame loop. Layers leave with composition; Off and Android 8–11 do no capture
+  or blur work. Older Android keeps the explicitly labeled unblurred-tint fallback.
+  Global choices preview immediately; each durable chat independently inherits or overrides
+  opacity and blur through accepted Room state, separately from density. Search opens the
+  dismissable layout sheet and highlights the requested footer slider. Room 49 adds nullable blur;
+  canonical merges retain each winner's non-null override, including explicit zero.
   Appearance also selects Material (the exact existing Filled/Outlined/AutoMirrored
   variants) or Lucide UI icons. The shared native `UiIcon` leaf resolves cached vectors
   at composition time, so remembered action descriptors and persisted gesture icon

@@ -28,7 +28,7 @@ export. Envelope metadata is authenticated as associated data.
 - User-facing settings for appearance, chat behavior, previews, replies,
   upload backend configuration, avatar display, per-network self-avatar setting,
   and delivery mode
-- Global message background opacity, including its saved value independently of message layout
+- Global message background opacity and blur, saved independently of each other and message layout
 - Fool membership, default visibility, and sparse per-fool visibility/notification preferences
 
 ## Excluded
@@ -37,7 +37,7 @@ export. Envelope metadata is authenticated as associated data.
   upload history, deletion tokens, generated push endpoints, push keypairs,
   certificate pins, STS policy state, diagnostics, history cursors, and other
   runtime/cache state
-- Per-chat message layout and background-opacity overrides; these remain local to each durable chat
+- Per-chat message layout, background-opacity and blur overrides; these remain local to each durable chat
 - Android KeyChain aliases. A network that used a client certificate is imported
   disconnected until the user selects a certificate on the destination device.
 - Custom wallpaper image files and their private local filenames. The retained builtin wallpaper
@@ -49,6 +49,10 @@ The importer validates the complete document before mutating local state.
 Unsupported versions, malformed hierarchy, invalid ports, invalid WebSocket
 URLs, oversized files, truncated encrypted payloads, wrong passwords, and
 tampered ciphertext fail without applying the backup.
+
+Global blur is additive appearance data: an older present appearance without it restores Off (0).
+Values are clamped to 0–100 on restore. A backup with no appearance section leaves local appearance,
+including blur and opacity, untouched; no backup-envelope version change is needed.
 
 `MERGE` updates matching networks in place and keeps local-only networks.
 `REPLACE` updates matching networks in place, adds missing networks, and deletes

@@ -159,6 +159,9 @@ val LocalNicknameBackgroundsEnabled: ProvidableCompositionLocal<Boolean> = stati
 /** Ordinary message backing in every layout; incoming mention fills and child surfaces are separate. */
 val LocalMessageBackgroundOpacityPercent: ProvidableCompositionLocal<Int> = staticCompositionLocalOf { 100 }
 
+/** Native wallpaper blur intensity, independent of ordinary message tint opacity. */
+val LocalMessageBackgroundBlur: ProvidableCompositionLocal<Int> = staticCompositionLocalOf { 0 }
+
 /** Resolved fills for ordinary Comfortable PRIVMSG bubbles; null preserves the theme default. */
 data class ComfortableBubbleColors(
     val sent: Color? = null,
@@ -258,6 +261,7 @@ fun MotdTheme(
     chatShadowsEnabled: Boolean = false,
     nicknameBackgroundsEnabled: Boolean = true,
     messageBackgroundOpacityPercent: Int = 100,
+    messageBackgroundBlur: Int = 0,
     sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     receivedBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     // Nested previews can render a different palette from the app shell without restyling its bars.
@@ -364,6 +368,7 @@ fun MotdTheme(
             LocalChatShadowsEnabled provides chatShadowsEnabled,
             LocalNicknameBackgroundsEnabled provides nicknameBackgroundsEnabled,
             LocalMessageBackgroundOpacityPercent provides messageBackgroundOpacityPercent.coerceIn(0, 100),
+            LocalMessageBackgroundBlur provides messageBackgroundBlur.coerceIn(0, 100),
             LocalComfortableBubbleColors provides comfortableBubbleColors,
             LocalMotdDark provides dark,
             LocalNickColors provides

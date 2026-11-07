@@ -138,6 +138,11 @@ class BufferRepositoryImpl
             percent: Int?,
         ): Boolean = bufferDao.setMessageBackgroundOpacityOverride(id, percent?.coerceIn(0, 100)) == 1
 
+        override suspend fun setMessageBackgroundBlurOverride(
+            id: Long,
+            intensity: Int?,
+        ): Boolean = bufferDao.setMessageBackgroundBlurOverride(id, intensity?.coerceIn(0, 100)) == 1
+
         override suspend fun setPresenceModeOverride(
             id: Long,
             mode: PresenceMode?,

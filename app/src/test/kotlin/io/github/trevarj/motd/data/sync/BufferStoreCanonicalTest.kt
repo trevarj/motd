@@ -1081,6 +1081,40 @@ class BufferStoreCanonicalTest {
         }
 
     @Test
+    fun blurMergePreservesZeroAndCanonicalWritesResetOnlyBlur() =
+        runTest {
+            val winner = store.getOrCreate(networkId, "older", "Older", BufferType.QUERY)
+            val loser = store.getOrCreate(networkId, "newer", "Newer", BufferType.QUERY)
+            val unrelated = store.getOrCreate(networkId, "#room", "#room", BufferType.CHANNEL)
+            db.bufferDao().setMessageBackgroundBlurOverride(winner.id, 0)
+            db.bufferDao().setMessageBackgroundBlurOverride(loser.id, 63)
+            db.bufferDao().setMessageBackgroundOpacityOverride(winner.id, 37)
+            db.bufferDao().setLayoutDensityOverride(winner.id, LayoutDensity.COMPACT)
+            assertEquals(0, store.mergeRooms(winner.id, loser.id).messageBackgroundBlurOverride)
+            assertEquals(1, db.bufferDao().setMessageBackgroundBlurOverride(loser.id, 41))
+            assertEquals(41, db.bufferDao().rawById(winner.id)?.messageBackgroundBlurOverride)
+            assertEquals(63, db.bufferDao().rawById(loser.id)?.messageBackgroundBlurOverride)
+            assertEquals(null, db.bufferDao().rawById(unrelated.id)?.messageBackgroundBlurOverride)
+            assertEquals(1, db.bufferDao().setMessageBackgroundBlurOverride(loser.id, null))
+            val reset = requireNotNull(db.bufferDao().rawById(winner.id))
+            assertEquals(null, reset.messageBackgroundBlurOverride)
+            assertEquals(37, reset.messageBackgroundOpacityOverride)
+            assertEquals(LayoutDensity.COMPACT, reset.layoutDensityOverride)
+            val inherited = store.getOrCreate(networkId, "third", "Third", BufferType.QUERY)
+            val configured = store.getOrCreate(networkId, "fourth", "Fourth", BufferType.QUERY)
+            db.bufferDao().setMessageBackgroundBlurOverride(configured.id, 41)
+            assertEquals(41, store.mergeRooms(inherited.id, configured.id).messageBackgroundBlurOverride)
+            val inheritedOff = store.getOrCreate(networkId, "fifth", "Fifth", BufferType.QUERY)
+            val explicitOff = store.getOrCreate(networkId, "sixth", "Sixth", BufferType.QUERY)
+            db.bufferDao().setMessageBackgroundBlurOverride(explicitOff.id, 0)
+            assertEquals(0, store.mergeRooms(inheritedOff.id, explicitOff.id).messageBackgroundBlurOverride)
+            db.bufferDao().setMessageBackgroundBlurOverride(unrelated.id, 0)
+            db.bufferDao().deleteBuffer(unrelated.id)
+            assertEquals(null, store.getOrCreate(networkId, "#room", "#room", BufferType.CHANNEL).messageBackgroundBlurOverride)
+            assertEquals(0, db.bufferDao().setMessageBackgroundBlurOverride(-1, 63))
+        }
+
+    @Test
     fun dismissingCanonicalQueryPreservesRedirectsAndNickIdentity() =
         runTest {
             val old = store.getOrCreate(networkId, "oldnick", "OldNick", BufferType.QUERY)

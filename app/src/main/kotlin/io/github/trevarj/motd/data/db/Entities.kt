@@ -323,6 +323,8 @@ data class RoomEntity(
     val layoutDensityOverride: LayoutDensity? = null,
     /** Null inherits the global backing opacity, independently of message layout. */
     val messageBackgroundOpacityOverride: Int? = null,
+    /** Null inherits global wallpaper blur; zero explicitly disables it, independently of tint. */
+    val messageBackgroundBlurOverride: Int? = null,
     /** Null inherits the global presence-event preference for this durable conversation. */
     val presenceModeOverride: PresenceMode? = null,
     /** Null inherits global Custom kinds; an empty set is an explicit local hide. */

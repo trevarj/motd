@@ -26,6 +26,7 @@ import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
 import io.github.trevarj.motd.ui.theme.ConversationTypography
 import io.github.trevarj.motd.ui.theme.LocalChatShadowsEnabled
+import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundBlur
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdShapes
@@ -45,9 +46,11 @@ internal fun ChatLayoutPreview(
 ) {
     val spacing = remember(density, messageSpacing, bubbleCorners) { spacingFor(density, messageSpacing, bubbleCorners) }
     val avatars = remember { RemoteAvatarState() }
+    val backdrop = rememberMessageWallpaperBackdrop(LocalMessageBackgroundBlur.current)
     CompositionLocalProvider(
         LocalSpacing provides spacing,
         LocalChatShadowsEnabled provides chatShadowsEnabled,
+        LocalMessageWallpaperBackdrop provides backdrop,
         LocalRemoteAvatars provides avatars,
         LocalAutomaticRemoteMedia provides false,
         LocalMessageActionsEnabled provides false,
@@ -67,7 +70,10 @@ internal fun ChatLayoutPreview(
             ) {
                 val wallpaperKind = if (wallpaper.localImageName == null) wallpaper.preset.name.lowercase() else "custom"
                 Box(Modifier.testTag("${tagPrefix}_wallpaper_${wallpaperKind}_${wallpaper.intensity}")) {
-                    ChatWallpaperBackground(wallpaper, Modifier.matchParentSize())
+                    ChatWallpaperBackground(
+                        wallpaper,
+                        Modifier.matchParentSize().recordMessageWallpaper(backdrop, MaterialTheme.colorScheme.surfaceContainerLow),
+                    )
                     ConversationTypography(conversationFontScalePercent) {
                         Column(
                             Modifier

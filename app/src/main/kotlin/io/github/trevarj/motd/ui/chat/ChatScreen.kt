@@ -254,6 +254,7 @@ import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.ComposerReply
 import io.github.trevarj.motd.ui.components.HistorySyncModeSheet
 import io.github.trevarj.motd.ui.components.HistorySyncSpinner
+import io.github.trevarj.motd.ui.components.LocalMessageWallpaperBackdrop
 import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
 import io.github.trevarj.motd.ui.components.ReadAloudPlayer
 import io.github.trevarj.motd.ui.components.ReadAloudVoiceOptions
@@ -263,12 +264,15 @@ import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.densityLabel
 import io.github.trevarj.motd.ui.components.historySyncModeLabel
 import io.github.trevarj.motd.ui.components.notificationIcon
+import io.github.trevarj.motd.ui.components.recordMessageWallpaper
+import io.github.trevarj.motd.ui.components.rememberMessageWallpaperBackdrop
 import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
 import io.github.trevarj.motd.ui.settings.foolEditorPreferences
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.ConversationTypography
+import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundBlur
 import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundOpacityPercent
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdMotion
@@ -814,6 +818,7 @@ fun ChatScreen(
         conversationLayout = state.conversationLayout,
         onConversationLayoutSelected = viewModel::setConversationLayoutOverride,
         onConversationMessageBackgroundOpacitySelected = viewModel::setConversationMessageBackgroundOpacityOverride,
+        onConversationMessageBackgroundBlurSelected = viewModel::setConversationMessageBackgroundBlurOverride,
         onPresenceModeSelected = viewModel::setPresenceModeOverride,
         onPresenceCustomKindSelected = viewModel::togglePresenceCustomKind,
         onHistorySyncModeSelected = viewModel::setHistorySyncModeOverride,
@@ -1256,6 +1261,7 @@ internal fun ChatContent(
     conversationLayout: ConversationLayoutState = ConversationLayoutState(),
     onConversationLayoutSelected: (io.github.trevarj.motd.data.prefs.LayoutDensity?) -> Unit = {},
     onConversationMessageBackgroundOpacitySelected: (Int?) -> Unit = {},
+    onConversationMessageBackgroundBlurSelected: (Int?) -> Unit = {},
     onPresenceModeSelected: (io.github.trevarj.motd.data.prefs.PresenceMode?) -> Unit = {},
     onPresenceCustomKindSelected: (io.github.trevarj.motd.data.db.MessageKind) -> Unit = {},
     onHistorySyncModeSelected: (io.github.trevarj.motd.data.prefs.HistorySyncMode?) -> Unit = {},
@@ -3717,7 +3723,12 @@ internal fun ChatContent(
         },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize()) {
-            ChatWallpaperBackground(chatWallpaper, modifier = Modifier.matchParentSize())
+            val effectiveBlur = conversationLayout.effectiveMessageBackgroundBlur(LocalMessageBackgroundBlur.current)
+            val wallpaperBackdrop = rememberMessageWallpaperBackdrop(effectiveBlur)
+            ChatWallpaperBackground(
+                chatWallpaper,
+                modifier = Modifier.matchParentSize().recordMessageWallpaper(wallpaperBackdrop, MaterialTheme.colorScheme.surface),
+            )
             // No composition-phase IME read here on purpose: the composer samples the animated inset
             // in its own measure phase, so the whole timeline stays skippable while the keyboard
             // animates instead of recomposing once per frame.
@@ -3997,6 +4008,8 @@ internal fun ChatContent(
                             CompositionLocalProvider(
                                 LocalSpacing provides conversationSpacing,
                                 LocalMessageBackgroundOpacityPercent provides conversationLayout.effectiveMessageBackgroundOpacity(LocalMessageBackgroundOpacityPercent.current),
+                                LocalMessageBackgroundBlur provides effectiveBlur,
+                                LocalMessageWallpaperBackdrop provides wallpaperBackdrop,
                             ) {
                                 Box(
                                     modifier =
@@ -4326,6 +4339,8 @@ internal fun ChatContent(
                     CompositionLocalProvider(
                         LocalSpacing provides conversationSpacing,
                         LocalMessageBackgroundOpacityPercent provides conversationLayout.effectiveMessageBackgroundOpacity(LocalMessageBackgroundOpacityPercent.current),
+                        LocalMessageBackgroundBlur provides effectiveBlur,
+                        LocalMessageWallpaperBackdrop provides wallpaperBackdrop,
                     ) {
                         Box(
                             modifier =
@@ -4758,6 +4773,8 @@ internal fun ChatContent(
             onSelect = onConversationLayoutSelected,
             onOpacity = onConversationMessageBackgroundOpacitySelected,
             globalOpacity = LocalMessageBackgroundOpacityPercent.current,
+            onBlur = onConversationMessageBackgroundBlurSelected,
+            globalBlur = LocalMessageBackgroundBlur.current,
             onDismiss = { conversationLayoutSheetOpen = false },
             wallpaper = chatWallpaper,
             conversationFontScalePercent = conversationFontScalePercent,

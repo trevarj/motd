@@ -64,7 +64,16 @@ class SettingsSearchTest {
     fun messageBackgroundOpacityQueriesOpenTheirTypedAppearanceControl() {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
         val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.MESSAGE_BACKGROUND_OPACITY)
-        for (query in listOf("message background opacity", "transparency", "comfortable opacity", "bubbles opacity", "compact opacity", "two line opacity")) {
+        for (query in listOf("message background opacity", "transparency", "compact opacity", "two line opacity")) {
+            assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
+        }
+    }
+
+    @Test
+    fun messageBackgroundBlurQueriesOpenTheirIndependentTypedControl() {
+        val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
+        val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.MESSAGE_BACKGROUND_BLUR)
+        for (query in listOf("message background blur", "wallpaper backdrop", "blur intensity", "compact blur", "two line blur")) {
             assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
         }
     }
@@ -251,6 +260,10 @@ class SettingsSearchTest {
             R.string.settings_notifications_summary -> "Global, server, and channel alerts and watches"
             R.string.settings_composer_formatting_tools -> "Formatting tools"
             R.string.settings_composer_formatting_tools_desc -> "Show rich text controls"
+            R.string.settings_message_background_opacity -> "Message background opacity"
+            R.string.settings_message_background_opacity_desc -> "Message tint in every layout. 0% removes tint, not blur; content, mention highlights, and semantic rails stay visible."
+            R.string.settings_message_background_blur -> "Message background blur"
+            R.string.settings_message_background_blur_desc -> "Blur the wallpaper behind messages. Lower opacity reveals more blur. Android 12+ only; older devices keep the unblurred tint."
             R.string.backup_export_title -> "Export configuration"
             R.string.backup_export_guidance -> "Save settings"
             R.string.network_settings_connection_section -> "Connection"

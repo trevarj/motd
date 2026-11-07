@@ -211,6 +211,11 @@ class SearchViewModelTest {
             percent: Int?,
         ): Boolean = true
 
+        override suspend fun setMessageBackgroundBlurOverride(
+            id: Long,
+            intensity: Int?,
+        ): Boolean = true
+
         override suspend fun setPresenceModeOverride(
             id: Long,
             mode: PresenceMode?,

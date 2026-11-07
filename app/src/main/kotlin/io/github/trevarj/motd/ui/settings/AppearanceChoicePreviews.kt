@@ -83,6 +83,7 @@ internal fun AppearanceSampleTheme(
         uiIconSet = appearance.uiIconSet,
         nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
         messageBackgroundOpacityPercent = appearance.messageBackgroundOpacityPercent,
+        messageBackgroundBlur = appearance.messageBackgroundBlur,
         uiFontScalePercent = appearance.uiFontScalePercent,
         fontChoice = appearance.fontChoice,
         customFontFile = font,

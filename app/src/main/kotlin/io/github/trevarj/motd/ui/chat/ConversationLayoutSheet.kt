@@ -15,9 +15,11 @@ import io.github.trevarj.motd.ui.components.ChatLayoutPreview
 import io.github.trevarj.motd.ui.components.densityDescription
 import io.github.trevarj.motd.ui.components.densityLabel
 import io.github.trevarj.motd.ui.settings.ChoiceOption
+import io.github.trevarj.motd.ui.settings.MessageBackgroundBlurSlider
 import io.github.trevarj.motd.ui.settings.MessageBackgroundOpacitySlider
 import io.github.trevarj.motd.ui.settings.SingleChoiceSheet
 import io.github.trevarj.motd.ui.settings.SwitchRow
+import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundBlur
 import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundOpacityPercent
 
 @Composable
@@ -26,6 +28,8 @@ fun ConversationLayoutSheet(
     onSelect: (LayoutDensity?) -> Unit,
     onOpacity: (Int?) -> Unit,
     globalOpacity: Int,
+    onBlur: (Int?) -> Unit,
+    globalBlur: Int,
     onDismiss: () -> Unit,
     wallpaper: WallpaperSelection,
     conversationFontScalePercent: Int,
@@ -66,7 +70,10 @@ fun ConversationLayoutSheet(
                     style = MaterialTheme.typography.bodyMedium,
                     fontStyle = if (state.override == null) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
                 )
-                CompositionLocalProvider(LocalMessageBackgroundOpacityPercent provides state.effectiveMessageBackgroundOpacity(globalOpacity)) {
+                CompositionLocalProvider(
+                    LocalMessageBackgroundOpacityPercent provides state.effectiveMessageBackgroundOpacity(globalOpacity),
+                    LocalMessageBackgroundBlur provides state.effectiveMessageBackgroundBlur(globalBlur),
+                ) {
                     ChatLayoutPreview(
                         density = state.effective,
                         messageSpacing = messageSpacing,
@@ -90,6 +97,18 @@ fun ConversationLayoutSheet(
                 value = state.effectiveMessageBackgroundOpacity(globalOpacity),
                 onValue = onOpacity,
                 tag = "chat_message_background_opacity",
+            )
+            SwitchRow(
+                title = stringResource(R.string.chat_layout_global_blur),
+                subtitle = stringResource(R.string.chat_layout_global_blur_desc),
+                checked = state.messageBackgroundBlurOverride == null,
+                onCheckedChange = { inherit -> onBlur(if (inherit) null else state.effectiveMessageBackgroundBlur(globalBlur)) },
+                switchTag = "chat_layout_global_blur",
+            )
+            MessageBackgroundBlurSlider(
+                value = state.effectiveMessageBackgroundBlur(globalBlur),
+                onValue = onBlur,
+                tag = "chat_message_background_blur",
             )
         },
     )

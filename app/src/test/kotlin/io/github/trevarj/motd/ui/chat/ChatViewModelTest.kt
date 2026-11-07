@@ -2419,6 +2419,91 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun `conversation blur repository clamps persists and clears only blur`() =
+        runTest {
+            val repository =
+                BufferRepositoryImpl(
+                    bufferDao = db.bufferDao(),
+                    memberDao = db.memberDao(),
+                    messageDao = db.messageDao(),
+                    settings = FakeSettingsRepository(),
+                    visibilityReader = MessageVisibilityReader(db),
+                    localAvatarStore = LocalAvatarStore(ApplicationProvider.getApplicationContext()),
+                )
+            db.bufferDao().setMessageBackgroundOpacityOverride(channel.id, 0)
+            for ((input, expected) in listOf(-1 to 0, 63 to 63, 101 to 100)) {
+                assertTrue(repository.setMessageBackgroundBlurOverride(channel.id, input))
+                assertEquals(expected, db.bufferDao().observeById(channel.id)?.messageBackgroundBlurOverride)
+                assertEquals(0, db.bufferDao().observeById(channel.id)?.messageBackgroundOpacityOverride)
+                assertNull(db.bufferDao().observeById(query.id)?.messageBackgroundBlurOverride)
+            }
+            assertTrue(repository.setMessageBackgroundBlurOverride(channel.id, null))
+            assertNull(db.bufferDao().observeById(channel.id)?.messageBackgroundBlurOverride)
+            assertFalse(repository.setMessageBackgroundBlurOverride(-1, 63))
+        }
+
+    @Test
+    fun `conversation blur waits for Room then resets independently using the captured canonical id`() =
+        runTest {
+            val initial = channel.copy(messageBackgroundOpacityOverride = 0)
+            val buffers = FakeBufferRepository(initial, routeId = query.id).apply { emitBlurWrites = false }
+            val vm = viewModel(channel, FakeConnectionManager(network.id), routeBufferId = query.id, buffers = buffers)
+            vm.state.first { it.buffer?.id == channel.id }
+            vm.setConversationMessageBackgroundBlurOverride(63).join()
+            assertNull(vm.state.value.conversationLayout.messageBackgroundBlurOverride)
+            buffers.update(initial.copy(messageBackgroundBlurOverride = 63))
+            vm.state.first { it.conversationLayout.messageBackgroundBlurOverride == 63 }
+            vm.setConversationLayoutOverride(LayoutDensity.COMPACT).join()
+            vm.state.first { it.conversationLayout.override == LayoutDensity.COMPACT }
+            assertEquals(
+                63,
+                vm.state.value.conversationLayout
+                    .effectiveMessageBackgroundBlur(0),
+            )
+            assertEquals(
+                0,
+                vm.state.value.conversationLayout
+                    .effectiveMessageBackgroundOpacity(100),
+            )
+            buffers.emitBlurWrites = true
+            vm.setConversationMessageBackgroundBlurOverride(0).join()
+            vm.state.first { it.conversationLayout.messageBackgroundBlurOverride == 0 }
+            vm.setConversationMessageBackgroundBlurOverride(null).join()
+            vm.state.first { it.conversationLayout.messageBackgroundBlurOverride == null }
+            assertEquals(
+                41,
+                vm.state.value.conversationLayout
+                    .effectiveMessageBackgroundBlur(41),
+            )
+            val captured = vm.setConversationMessageBackgroundBlurOverride(37)
+            buffers.update(initial.copy(id = query.id))
+            captured.join()
+            assertEquals(listOf(channel.id to 63, channel.id to 0, channel.id to null, channel.id to 37), buffers.blurWrites)
+        }
+
+    @Test
+    fun `conversation blur rejected throwing and canceled writes preserve accepted state`() =
+        runTest {
+            val buffers = FakeBufferRepository(channel.copy(messageBackgroundBlurOverride = 63)).apply { blurWriteResult = false }
+            val vm = viewModel(channel, FakeConnectionManager(network.id), buffers = buffers)
+            vm.state.first { it.conversationLayout.messageBackgroundBlurOverride == 63 }
+            for (failure in listOf(null, IllegalStateException("write failed"))) {
+                buffers.blurWriteFailure = failure
+                vm.setConversationMessageBackgroundBlurOverride(0).join()
+                assertEquals(63, vm.state.value.conversationLayout.messageBackgroundBlurOverride)
+                val event = vm.uiEvents.first { it.isNotEmpty() }.single()
+                assertEquals(ChatUiEvent.ConversationLayoutWriteFailed, event.value)
+                vm.acknowledgeUiEvent(event.id)
+            }
+            buffers.blurWriteFailure = CancellationException("leaving")
+            val canceled = vm.setConversationMessageBackgroundBlurOverride(null)
+            canceled.join()
+            assertTrue(canceled.isCancelled)
+            assertEquals(63, vm.state.value.conversationLayout.messageBackgroundBlurOverride)
+            assertTrue(vm.uiEvents.value.isEmpty())
+        }
+
+    @Test
     fun `presence mode inherits global then persists and clears an override`() =
         runTest {
             val settings = FakeSettingsRepository()
@@ -7054,6 +7139,10 @@ class ChatViewModelTest {
         val opacityWrites = mutableListOf<Pair<Long, Int?>>()
         var opacityWriteResult = true
         var opacityWriteFailure: Exception? = null
+        val blurWrites = mutableListOf<Pair<Long, Int?>>()
+        var blurWriteResult = true
+        var blurWriteFailure: Exception? = null
+        var emitBlurWrites = true
         val presenceWrites = mutableListOf<Pair<Long, PresenceMode?>>()
         var presenceWriteResult = true
         val historySyncWrites = mutableListOf<Pair<Long, HistorySyncMode?>>()
@@ -7107,6 +7196,16 @@ class ChatViewModelTest {
             opacityWriteFailure?.let { throw it }
             if (opacityWriteResult) buffer.value = buffer.value.copy(messageBackgroundOpacityOverride = percent)
             return opacityWriteResult
+        }
+
+        override suspend fun setMessageBackgroundBlurOverride(
+            id: Long,
+            intensity: Int?,
+        ): Boolean {
+            blurWrites += id to intensity
+            blurWriteFailure?.let { throw it }
+            if (blurWriteResult && emitBlurWrites) buffer.value = buffer.value.copy(messageBackgroundBlurOverride = intensity)
+            return blurWriteResult
         }
 
         override suspend fun setPresenceModeOverride(

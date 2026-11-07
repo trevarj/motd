@@ -515,6 +515,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setChatShadowsEnabled(false)
             appearancePrefs.setNicknameBackgroundsEnabled(false)
             appearancePrefs.setMessageBackgroundOpacity(37)
+            appearancePrefs.setMessageBackgroundBlur(63)
             appearancePrefs.setSentBubbleColor(ComfortableBubbleColor(ComfortableBubbleColorRole.PRIMARY))
             appearancePrefs.setReceivedBubbleColor(ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, 0xff12ab34.toInt()))
             appearancePrefs.setUseThemeTextColors(true)
@@ -541,6 +542,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setChatShadowsEnabled(true)
             appearancePrefs.setNicknameBackgroundsEnabled(true)
             appearancePrefs.setMessageBackgroundOpacity(100)
+            appearancePrefs.setMessageBackgroundBlur(0)
             appearancePrefs.setSentBubbleColor(ComfortableBubbleColor())
             appearancePrefs.setReceivedBubbleColor(ComfortableBubbleColor())
             appearancePrefs.setUseThemeTextColors(false)
@@ -562,6 +564,7 @@ class ConfigurationBackupRepositoryTest {
             assertEquals(false, config.chatShadowsEnabled)
             assertEquals(false, config.nicknameBackgroundsEnabled)
             assertEquals(37, config.messageBackgroundOpacityPercent)
+            assertEquals(63, config.messageBackgroundBlur)
             assertEquals(ComfortableBubbleColor(ComfortableBubbleColorRole.PRIMARY), config.sentBubbleColor)
             assertEquals(ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, 0xff12ab34.toInt()), config.receivedBubbleColor)
             assertEquals(true, config.useThemeTextColors)
@@ -588,6 +591,7 @@ class ConfigurationBackupRepositoryTest {
                 appearancePrefs.setUseThemeTextColors(true)
                 appearancePrefs.setNicknameBackgroundsEnabled(false)
                 appearancePrefs.setMessageBackgroundOpacity(37)
+                appearancePrefs.setMessageBackgroundBlur(63)
                 appearancePrefs.setSplashScreenAnimation(SplashScreenAnimation.TRAVELING_PULSE)
                 appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80, outlineColor = 0xffffffff.toInt()))
                 val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
@@ -597,12 +601,14 @@ class ConfigurationBackupRepositoryTest {
                         .replace(Regex(""",\s*"useThemeTextColors"\s*:\s*true"""), "")
                         .replace(Regex(""",\s*"nicknameBackgroundsEnabled"\s*:\s*false"""), "")
                         .replace(Regex(""",\s*"messageBackgroundOpacityPercent"\s*:\s*37"""), "")
+                        .replace(Regex(""",\s*"messageBackgroundBlur"\s*:\s*63"""), "")
                         .replace(Regex(""",\s*"splashScreenAnimation"\s*:\s*"TRAVELING_PULSE""""), "")
                         .replace(Regex(""",\s*"outlineColor"\s*:\s*-?\d+"""), "")
                 assertFalse(oldRaw.contains("composerStyle"))
                 assertFalse(oldRaw.contains("useThemeTextColors"))
                 assertFalse(oldRaw.contains("nicknameBackgroundsEnabled"))
                 assertFalse(oldRaw.contains("messageBackgroundOpacityPercent"))
+                assertFalse(oldRaw.contains("messageBackgroundBlur"))
                 assertFalse(oldRaw.contains("splashScreenAnimation"))
                 assertFalse(oldRaw.contains("outlineColor"))
 
@@ -611,6 +617,7 @@ class ConfigurationBackupRepositoryTest {
                 assertEquals(false, appearancePrefs.config.first().useThemeTextColors)
                 assertEquals(true, appearancePrefs.config.first().nicknameBackgroundsEnabled)
                 assertEquals(100, AppearancePrefsImpl(context).config.first().messageBackgroundOpacityPercent)
+                assertEquals(0, AppearancePrefsImpl(context).config.first().messageBackgroundBlur)
                 assertEquals(SplashScreenAnimation.EDGE_TRACE, appearancePrefs.config.first().splashScreenAnimation)
                 assertEquals(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80), appearancePrefs.config.first().wallpaper)
                 for (percent in listOf(-12, 130)) {
@@ -619,6 +626,11 @@ class ConfigurationBackupRepositoryTest {
                         importMode = BackupImportMode.MERGE,
                     )
                     assertEquals(percent.coerceIn(0, 100), AppearancePrefsImpl(context).config.first().messageBackgroundOpacityPercent)
+                    backup.import(
+                        raw.replace(Regex(""""messageBackgroundBlur"\s*:\s*63"""), """"messageBackgroundBlur":$percent"""),
+                        importMode = BackupImportMode.MERGE,
+                    )
+                    assertEquals(percent.coerceIn(0, 100), AppearancePrefsImpl(context).config.first().messageBackgroundBlur)
                 }
 
                 val withoutAppearance =
@@ -631,18 +643,21 @@ class ConfigurationBackupRepositoryTest {
                 appearancePrefs.setUseThemeTextColors(true)
                 appearancePrefs.setNicknameBackgroundsEnabled(false)
                 appearancePrefs.setMessageBackgroundOpacity(27)
+                appearancePrefs.setMessageBackgroundBlur(41)
                 appearancePrefs.setSplashScreenAnimation(SplashScreenAnimation.STATIC)
                 backup.import(withoutAppearance, importMode = BackupImportMode.MERGE)
                 assertEquals(ComposerStyle.LARGE, appearancePrefs.config.first().composerStyle)
                 assertEquals(true, appearancePrefs.config.first().useThemeTextColors)
                 assertEquals(false, appearancePrefs.config.first().nicknameBackgroundsEnabled)
                 assertEquals(27, AppearancePrefsImpl(context).config.first().messageBackgroundOpacityPercent)
+                assertEquals(41, AppearancePrefsImpl(context).config.first().messageBackgroundBlur)
                 assertEquals(SplashScreenAnimation.STATIC, appearancePrefs.config.first().splashScreenAnimation)
             } finally {
                 appearancePrefs.setComposerStyle(ComposerStyle.COMFORTABLE)
                 appearancePrefs.setUseThemeTextColors(false)
                 appearancePrefs.setNicknameBackgroundsEnabled(true)
                 appearancePrefs.setMessageBackgroundOpacity(100)
+                appearancePrefs.setMessageBackgroundBlur(0)
                 appearancePrefs.setSplashScreenAnimation(SplashScreenAnimation.EDGE_TRACE)
                 appearancePrefs.setWallpaper(WallpaperSelection())
                 db.close()

@@ -53,7 +53,10 @@ internal class SettingsRobot(
         compose.onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true).performScrollTo().assertIsOn()
     }
 
-    fun disableNicknameBackgrounds(opacityPercent: Int) {
+    fun disableNicknameBackgrounds(
+        opacityPercent: Int,
+        blurIntensity: Int,
+    ) {
         selectMessageLayout(LayoutDensity.COMPACT)
         awaitTag("settings_switch_nickname_backgrounds_row")
         compose
@@ -64,12 +67,15 @@ internal class SettingsRobot(
             .assertIsOff()
         scrollToAndClick("settings_density_picker")
         setMessageBackgroundOpacity(opacityPercent)
+        setMessageBackgroundBlur(blurIntensity)
         dismissChoiceSheet("settings_density_sheet")
     }
 
     fun restoreNicknameBackgrounds(
         expectedOpacityPercent: Int,
         originalOpacityPercent: Int,
+        expectedBlurIntensity: Int,
+        originalBlurIntensity: Int,
         originalLayout: LayoutDensity,
     ) {
         scrollToAndClick("settings_density_picker")
@@ -81,8 +87,22 @@ internal class SettingsRobot(
                 it.config[SemanticsProperties.ProgressBarRangeInfo].current == expectedOpacityPercent.toFloat()
             },
         )
+        scrollContainerTo("settings_density_sheet_options", "settings_message_background_blur")
+        compose.onNodeWithTag("settings_message_background_blur").assert(
+            SemanticsMatcher("Persisted message background blur") {
+                it.config[SemanticsProperties.ProgressBarRangeInfo].current == expectedBlurIntensity.toFloat()
+            },
+        )
         setMessageBackgroundOpacity(0)
+        scrollContainerTo("settings_density_sheet_options", "settings_message_background_blur")
+        compose.onNodeWithTag("settings_message_background_blur").assert(
+            SemanticsMatcher("Opacity does not reset blur") {
+                it.config[SemanticsProperties.ProgressBarRangeInfo].current == expectedBlurIntensity.toFloat()
+            },
+        )
+        setMessageBackgroundBlur(0)
         setMessageBackgroundOpacity(originalOpacityPercent)
+        setMessageBackgroundBlur(originalBlurIntensity)
         dismissChoiceSheet("settings_density_sheet")
         awaitTag("settings_switch_nickname_backgrounds_row")
         compose
@@ -108,6 +128,16 @@ internal class SettingsRobot(
         )
     }
 
+    private fun setMessageBackgroundBlur(intensity: Int) {
+        scrollContainerTo("settings_density_sheet_options", "settings_message_background_blur")
+        compose.onNodeWithTag("settings_message_background_blur").performSemanticsAction(SemanticsActions.SetProgress) { it(intensity.toFloat()) }
+        compose.onNodeWithTag("settings_message_background_blur").assert(
+            SemanticsMatcher("Message background blur $intensity") {
+                it.config[SemanticsProperties.ProgressBarRangeInfo].current == intensity.toFloat()
+            },
+        )
+    }
+
     private fun selectMessageLayout(layout: LayoutDensity) {
         scrollToAndClick("settings_density_picker")
         val tag = "settings_density_${layout.name.lowercase()}"
@@ -118,33 +148,59 @@ internal class SettingsRobot(
         dismissChoiceSheet("settings_density_sheet")
     }
 
-    fun exerciseConversationOpacityInheritance() {
+    fun exerciseConversationBackingInheritance() {
         fun openSheet() {
             click("chat_overflow")
             click("chat_layout_menu")
             awaitTag("chat_layout_sheet")
-            scrollContainerTo("chat_layout_sheet_options", "chat_message_background_opacity")
+        }
+
+        fun setAndAwait(
+            setting: String,
+            value: Int,
+        ) {
+            val tag = "chat_message_background_$setting"
+            scrollContainerTo("chat_layout_sheet_options", tag)
+            compose.onNodeWithTag(tag).performSemanticsAction(SemanticsActions.SetProgress) { it(value.toFloat()) }
+            compose.waitUntil("Room accepts conversation $setting", 10_000) {
+                compose
+                    .onNodeWithTag(tag)
+                    .fetchSemanticsNode()
+                    .config[SemanticsProperties.ProgressBarRangeInfo]
+                    .current == value.toFloat()
+            }
+            scrollContainerTo("chat_layout_sheet_options", "chat_layout_global_${setting}_row")
+            compose.onNodeWithTag("chat_layout_global_${setting}_row", useUnmergedTree = true).assertIsOff()
+        }
+
+        fun assertSaved(
+            setting: String,
+            expected: Int,
+        ) {
+            val tag = "chat_message_background_$setting"
+            scrollContainerTo("chat_layout_sheet_options", tag)
+            compose.onNodeWithTag(tag).assert(
+                SemanticsMatcher("Persisted local $setting") { it.config[SemanticsProperties.ProgressBarRangeInfo].current == expected.toFloat() },
+            )
         }
         openSheet()
-        compose.onNodeWithTag("chat_layout_global_opacity_row", useUnmergedTree = true).assertIsOn()
-        compose.onNodeWithTag("chat_message_background_opacity").performSemanticsAction(SemanticsActions.SetProgress) { it(37f) }
-        compose.waitUntil("Room accepts conversation opacity", 10_000) {
-            compose
-                .onNodeWithTag("chat_message_background_opacity")
-                .fetchSemanticsNode()
-                .config[SemanticsProperties.ProgressBarRangeInfo]
-                .current == 37f
-        }
-        compose.onNodeWithTag("chat_layout_global_opacity_row", useUnmergedTree = true).assertIsOff()
+        setAndAwait("opacity", 37)
+        setAndAwait("blur", 63)
+        assertSaved("opacity", 37)
         dismissChoiceSheet("chat_layout_sheet")
         openSheet()
-        compose.onNodeWithTag("chat_message_background_opacity").assert(
-            SemanticsMatcher("Persisted local opacity") { it.config[SemanticsProperties.ProgressBarRangeInfo].current == 37f },
-        )
-        compose.onNodeWithTag("chat_layout_global_opacity_row", useUnmergedTree = true).performClick()
-        compose.waitUntil("Room restores opacity inheritance", 10_000) {
-            compose.onNodeWithTag("chat_layout_global_opacity_row", useUnmergedTree = true).fetchSemanticsNode().config[SemanticsProperties.ToggleableState] ==
-                androidx.compose.ui.state.ToggleableState.On
+        assertSaved("opacity", 37)
+        assertSaved("blur", 63)
+        setAndAwait("blur", 0)
+        for (setting in listOf("opacity", "blur")) {
+            val tag = "chat_layout_global_${setting}_row"
+            scrollContainerTo("chat_layout_sheet_options", tag)
+            compose.onNodeWithTag(tag, useUnmergedTree = true).performClick()
+            compose.waitUntil("Room restores $setting inheritance", 10_000) {
+                compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().config[SemanticsProperties.ToggleableState] ==
+                    androidx.compose.ui.state.ToggleableState.On
+            }
+            if (setting == "opacity") assertSaved("blur", 0)
         }
         dismissChoiceSheet("chat_layout_sheet")
     }

@@ -185,7 +185,7 @@ internal fun CompactMessageRow(
             modifier
                 .fillMaxWidth()
                 // Fade only the ordinary backing, never the row's text, avatars or highlights.
-                .background(drawFill)
+                .messageBacking(drawFill)
                 .then(containerModifier),
         sourceModifier =
             Modifier.messageRowClicks(

@@ -270,6 +270,7 @@ data class AppearanceConfig(
     val chatShadowsEnabled: Boolean = false,
     val nicknameBackgroundsEnabled: Boolean = true,
     val messageBackgroundOpacityPercent: Int = 100,
+    val messageBackgroundBlur: Int = 0,
     val sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     val receivedBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     val launcherIcon: LauncherIcon = LauncherIcon.DEFAULT,
@@ -332,6 +333,8 @@ interface AppearancePrefs {
     suspend fun setNicknameBackgroundsEnabled(enabled: Boolean)
 
     suspend fun setMessageBackgroundOpacity(percent: Int)
+
+    suspend fun setMessageBackgroundBlur(intensity: Int)
 
     suspend fun setSentBubbleColor(color: ComfortableBubbleColor)
 

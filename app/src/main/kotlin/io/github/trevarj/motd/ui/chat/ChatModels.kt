@@ -1543,10 +1543,13 @@ data class ConversationLayoutState(
     val override: LayoutDensity? = null,
     val bufferDefault: LayoutDensity? = null,
     val messageBackgroundOpacityOverride: Int? = null,
+    val messageBackgroundBlurOverride: Int? = null,
 ) {
     val effective: LayoutDensity get() = override ?: bufferDefault ?: global
 
     fun effectiveMessageBackgroundOpacity(globalOpacity: Int): Int = (messageBackgroundOpacityOverride ?: globalOpacity).coerceIn(0, 100)
+
+    fun effectiveMessageBackgroundBlur(globalBlur: Int): Int = (messageBackgroundBlurOverride ?: globalBlur).coerceIn(0, 100)
 }
 
 data class ConversationPresenceState(

@@ -31,6 +31,7 @@ import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -39,6 +40,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
@@ -70,6 +72,7 @@ import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.ui.components.FolderIcon
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
+import io.github.trevarj.motd.ui.components.withStripedMessageWallpaper
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.UiIcon
@@ -360,6 +363,74 @@ class AppearanceFolderLayoutUiTest {
             assertTrue("$density live preview must restore its sender wash", tinted.sameAs(preview.captureToImage().asAndroidBitmap()))
         }
     }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w411dp-h891dp")
+    fun messageLayoutBlurSearchHighlightsIndependentLiveDraftAndRestoresOff() =
+        withStripedMessageWallpaper { wallpaper ->
+            val persisted = AppearanceConfig(theme = ColorThemePreset.AYU_LIGHT, wallpaper = wallpaper, messageBackgroundOpacityPercent = 0)
+            val settings = Settings(layoutDensity = LayoutDensity.COMFORTABLE, dynamicColor = false, avatarStyle = AvatarStyle.NONE)
+            val calls = mutableListOf<Int>()
+            setContent(
+                settings = settings,
+                appearance = persisted,
+                onMessageBackgroundBlur = calls::add,
+                targetProvider = { SettingsTarget.MESSAGE_BACKGROUND_BLUR },
+            )
+            val sheet = "settings_density_sheet"
+            compose.onNodeWithTag(sheet).assertIsDisplayed()
+            compose.onNodeWithTag("settings_target_highlight_MESSAGE_BACKGROUND_BLUR").assertIsDisplayed()
+            val initial = scrollToSheetNode(sheet, "settings_message_background_blur").assertIsEnabled()
+            initial.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Off"))
+
+            fun pixels(): android.graphics.Bitmap {
+                val options = compose.onNodeWithTag("${sheet}_options")
+                options.performScrollToIndex(0)
+                val incoming = compose.onNodeWithTag("settings_chat_preview_sheet_incoming").assertIsDisplayed()
+                val viewport = options.fetchSemanticsNode().boundsInRoot
+                val bounds = incoming.fetchSemanticsNode().boundsInRoot
+                val unclipped = incoming.getUnclippedBoundsInRoot()
+                assertTrue(bounds.top >= viewport.top && bounds.bottom <= viewport.bottom)
+                assertEquals(with(compose.density) { (unclipped.bottom - unclipped.top).toPx() }, bounds.height, 1f)
+                return incoming.captureToImage().asAndroidBitmap()
+            }
+            compose.waitUntil(10_000) {
+                val image = pixels()
+                var black = 0
+                var white = 0
+                for (x in 0 until image.width) {
+                    for (y in 0 until image.height) {
+                        if (image.getPixel(x, y) == android.graphics.Color.BLACK) black++
+                        if (image.getPixel(x, y) == android.graphics.Color.WHITE) white++
+                    }
+                }
+                black > image.width * image.height / 8 && white > image.width * image.height / 8
+            }
+            for (layout in LayoutDensity.entries) {
+                scrollToSheetNode(sheet, "settings_density_${layout.name.lowercase()}").performClick().assertIsSelected()
+                val baseline = pixels()
+                var medium: android.graphics.Bitmap? = null
+                for (intensity in listOf(25, 75, 0)) {
+                    val slider = scrollToSheetNode(sheet, "settings_message_background_blur")
+                    slider.performSemanticsAction(SemanticsActions.SetProgress) { it(intensity.toFloat()) }
+                    slider.assert(SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(intensity.toFloat(), 0f..100f, 0)))
+                    compose.onNodeWithTag(sheet).assertIsDisplayed()
+                    val image = pixels()
+                    if (intensity == 0) {
+                        assertTrue("$layout Off restores exact preview pixels", baseline.sameAs(image))
+                    } else {
+                        assertTrue("$layout draft blur changes the real wallpaper preview before persistence", !baseline.sameAs(image))
+                        if (medium != null) assertTrue("$layout intensities have different native pixels", !medium.sameAs(image))
+                        medium = image
+                    }
+                    assertEquals(0, persisted.messageBackgroundBlur)
+                    assertEquals(0, persisted.messageBackgroundOpacityPercent)
+                    assertEquals(LayoutDensity.COMFORTABLE, settings.layoutDensity)
+                }
+            }
+            assertEquals(List(3) { listOf(25, 75, 0) }.flatten(), calls)
+            dismissSheet(sheet)
+        }
 
     @Test
     fun messageLayoutOpacityIsAlwaysAvailableAndPreviewsDraftBeforePersistence() {
@@ -1176,6 +1247,7 @@ class AppearanceFolderLayoutUiTest {
         onChatShadowsEnabled: (Boolean) -> Unit = {},
         onNicknameBackgroundsEnabled: (Boolean) -> Unit = {},
         onMessageBackgroundOpacity: (Int) -> Unit = {},
+        onMessageBackgroundBlur: (Int) -> Unit = {},
         onUseThemeTextColors: (Boolean) -> Unit = {},
         onWallpaper: (WallpaperSelection) -> Unit = {},
         importedWallpaperProvider: () -> WallpaperSelection? = { null },
@@ -1231,6 +1303,7 @@ class AppearanceFolderLayoutUiTest {
                         onChatShadowsEnabled = onChatShadowsEnabled,
                         onNicknameBackgroundsEnabled = onNicknameBackgroundsEnabled,
                         onMessageBackgroundOpacity = onMessageBackgroundOpacity,
+                        onMessageBackgroundBlur = onMessageBackgroundBlur,
                         onLauncherIcon = {},
                         target = targetProvider(),
                     )

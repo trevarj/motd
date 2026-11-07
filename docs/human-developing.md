@@ -38,7 +38,7 @@ the repository root. Replace `<serial>` with the target's `adb devices` serial:
 ```sh
 nix develop -c env ANDROID_SERIAL="<serial>" bash ./gradlew \
   :app:compileDebugKotlin --rerun :app:installDebug \
-  -Pkotlin.incremental=false --no-build-cache \
+  -Pkotlin.incremental=false -Pksp.incremental=false --no-build-cache \
   -PmotdAiAbis=arm64-v8a --stacktrace --console=plain
 ```
 
@@ -52,9 +52,10 @@ compiler output. The pinned Android Gradle plugin honors `ANDROID_SERIAL` for
 Gradle's task-local `--rerun` forces only `:app:compileDebugKotlin` to execute
 even when up-to-date, unlike `--rerun-tasks`, which forces its dependencies too.
 `-Pkotlin.incremental=false` disables Kotlin incremental compilation only for
-this invocation; `--no-build-cache` prevents restoring older compiler output.
-Other tasks retain their normal up-to-date checks, and configuration caching
-remains enabled.
+this invocation; `-Pksp.incremental=false` also regenerates changed Hilt/Room
+outputs without stale incremental backup files. `--no-build-cache` prevents
+restoring older compiler output. Other tasks retain their normal up-to-date
+checks, and configuration caching remains enabled.
 
 Run this workflow as the first debug build after restoring incremental defaults,
 even without source changes, so existing outputs or cached bytecode cannot

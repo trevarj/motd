@@ -202,6 +202,11 @@ internal class FakeBuffers : BufferRepository {
         percent: Int?,
     ): Boolean = false
 
+    override suspend fun setMessageBackgroundBlurOverride(
+        id: Long,
+        intensity: Int?,
+    ): Boolean = false
+
     override suspend fun setPresenceModeOverride(
         id: Long,
         mode: PresenceMode?,
@@ -307,6 +312,10 @@ internal class FakeAppearance(
 
     override suspend fun setMessageBackgroundOpacity(percent: Int) {
         state.value = state.value.copy(messageBackgroundOpacityPercent = percent.coerceIn(0, 100))
+    }
+
+    override suspend fun setMessageBackgroundBlur(intensity: Int) {
+        state.value = state.value.copy(messageBackgroundBlur = intensity.coerceIn(0, 100))
     }
 
     override suspend fun setSentBubbleColor(color: ComfortableBubbleColor) {

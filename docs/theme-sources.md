@@ -51,11 +51,23 @@ Flattened rows retain their nick/attention tint over the theme canvas. At 100% m
 normal tinted Two-line rows and ACTION rows admit wallpaper through their existing 90%-opaque
 baseline only when contrast is safe; Dimmed rows and contrast fallbacks use an opaque baseline.
 The Message layout opacity control multiplies that baseline in all layouts, including Comfortable
-and nickname-tinted rows; contrast and dimming never override the chosen percentage. At zero no
-ordinary message backing is drawn. Incoming mention fills and semantic rails are preserved.
-Text contrast is resolved against the effective fill composited over the known theme canvas;
-arbitrary wallpaper pixels cannot guarantee the same contrast. Content and child surfaces do not fade.
-Wallpaper intensity independently controls builtin ink or full-color image opacity, including 100%.
+and nickname-tinted rows; contrast and dimming never override the chosen percentage. Zero removes
+ordinary tint, not independently selected wallpaper blur. Incoming mention fills retain their exact
+baseline alpha and do not sample blur; semantic rails are preserved. Text contrast uses the effective
+tint over the known theme canvas; arbitrary wallpaper pixels cannot guarantee the same contrast. Content and child
+surfaces do not fade or blur.
+
+**Message background blur** is an independent continuous 0–100 intensity, linearly mapping to
+0–32dp. It defaults to **Off** (0), preserving the previous appearance. Lower message opacity reveals
+more blur; 0% tint still blurs, and an opaque tint naturally covers the blur beneath it. Each chat can
+inherit or override blur separately from opacity and layout; an explicit zero disables global blur.
+Android 12+ shares one raw and one native blurred wallpaper layer between the timeline and send
+flight. Only the rendered wallpaper and its actual canvas are captured, never foreground content.
+Existing backing shapes, grouped corners, morph alpha, rails and the zero-opacity shadow rule stay
+unchanged. Source frames and current draw coordinates keep sampling aligned during scroll,
+keyboard/runway movement and send flight; composition owns layer lifetime. At Off no capture or
+effect is created. Android 8–11 use the labeled existing unblurred-tint fallback, with no software
+bitmap-copy loop. Wallpaper intensity separately controls builtin ink or full-color image opacity.
 
 Two-line headers keep sender names on one ellipsized line, reserving room for the avatar, friend
 indicator, delivery status, and timestamp even in narrow panes with large system fonts.

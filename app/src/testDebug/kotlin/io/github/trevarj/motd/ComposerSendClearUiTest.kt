@@ -155,6 +155,7 @@ import io.github.trevarj.motd.ui.chat.ChatPositionTarget
 import io.github.trevarj.motd.ui.chat.ChatState
 import io.github.trevarj.motd.ui.chat.ChatViewModel
 import io.github.trevarj.motd.ui.chat.ChatViewModelTest
+import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
 import io.github.trevarj.motd.ui.chat.ComposerDraftState
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chat.EntryPositionState
@@ -177,9 +178,13 @@ import io.github.trevarj.motd.ui.chat.swipeNativeEmojiBody
 import io.github.trevarj.motd.ui.chat.tapNativeEmojiCategory
 import io.github.trevarj.motd.ui.chat.timelineMessageTag
 import io.github.trevarj.motd.ui.chat.touchNativeEmojiView
+import io.github.trevarj.motd.ui.components.LocalMessageWallpaperBackdrop
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.ReactionChip
+import io.github.trevarj.motd.ui.components.recordMessageWallpaper
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
+import io.github.trevarj.motd.ui.components.rememberMessageWallpaperBackdrop
+import io.github.trevarj.motd.ui.components.withStripedMessageWallpaper
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.PendingShareStore
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
@@ -4192,149 +4197,184 @@ class ComposerSendClearUiTest {
     }
 
     @Test
-    fun completedMorph_matchesTheRealBubbleWhileLandingIsStillDelayed() {
-        val nick = "metadata-wider-than-body"
-        val flight = OutgoingFlight(token = 7, text = "\u0002hi\u0002", launchedAtMs = 1_000)
-        val anchors = SendFlightAnchors().apply { composerField = Rect(0f, 0f, 380f, 48f) }
-        val motion = SendFlightMotion(morphEnabled = true)
-        runBlocking { motion.morph.snapTo(1f) }
-        var renderFlight by mutableStateOf(false)
-        var status by mutableStateOf(true to false)
-        var opacity by mutableStateOf(100)
-        compose.setContent {
-            MotdTheme(dynamicColor = false, messageBackgroundOpacityPercent = opacity) {
-                val formatTime = rememberMessageTimeFormatter()
-                // Compare at the same window origin, not two separately rasterized stacked rows.
-                CompositionLocalProvider(LocalLottieMotionEnabled provides false) {
-                    Box(
-                        Modifier
-                            .width(380.dp)
-                            .height(120.dp)
-                            .background(MaterialTheme.colorScheme.background)
-                            .testTag("bubble_sample"),
-                    ) {
-                        if (!renderFlight) {
-                            MessageBubble(
-                                sender = nick,
-                                text = flight.text,
-                                timeMs = flight.launchedAtMs,
-                                isSelf = true,
-                                kind = MessageKind.PRIVMSG,
-                                showSender = true,
-                                formattedTime = formatTime(flight.launchedAtMs),
-                                pending = status.first,
-                                failed = status.second,
-                            )
-                        } else {
-                            SendFlightOverlay(
-                                flight = flight,
-                                pending = status.first,
-                                failed = status.second,
-                                anchors = anchors,
-                                motion = motion,
-                                listShift = { 0f },
-                                selfNick = nick,
-                                showSender = true,
-                                networkId = null,
-                                knownNicks = emptySet(),
-                                identityRules = IrcIdentityRules(),
-                            )
+    @Config(sdk = [35])
+    fun completedMorph_matchesTheRealBubbleWhileLandingIsStillDelayed() =
+        withStripedMessageWallpaper { wallpaper ->
+            val nick = "metadata-wider-than-body"
+            val flight = OutgoingFlight(token = 7, text = "\u0002hi\u0002", launchedAtMs = 1_000)
+            val anchors = SendFlightAnchors().apply { composerField = Rect(0f, 0f, 380f, 48f) }
+            val motion = SendFlightMotion(morphEnabled = true)
+            runBlocking { motion.morph.snapTo(1f) }
+            var renderFlight by mutableStateOf(false)
+            var status by mutableStateOf(true to false)
+            var opacity by mutableStateOf(100)
+            var blur by mutableStateOf(0)
+            compose.setContent {
+                MotdTheme(dynamicColor = false, messageBackgroundOpacityPercent = opacity, messageBackgroundBlur = blur) {
+                    val formatTime = rememberMessageTimeFormatter()
+                    // Compare at the same window origin, not two separately rasterized stacked rows.
+                    CompositionLocalProvider(LocalLottieMotionEnabled provides false) {
+                        Box(
+                            Modifier
+                                .width(380.dp)
+                                .height(120.dp)
+                                .background(MaterialTheme.colorScheme.background)
+                                .testTag("bubble_sample"),
+                        ) {
+                            val backdrop = rememberMessageWallpaperBackdrop(blur)
+                            ChatWallpaperBackground(wallpaper, Modifier.matchParentSize().recordMessageWallpaper(backdrop, MaterialTheme.colorScheme.background))
+                            CompositionLocalProvider(LocalMessageWallpaperBackdrop provides backdrop) {
+                                if (!renderFlight) {
+                                    MessageBubble(
+                                        sender = nick,
+                                        text = flight.text,
+                                        timeMs = flight.launchedAtMs,
+                                        isSelf = true,
+                                        kind = MessageKind.PRIVMSG,
+                                        showSender = true,
+                                        formattedTime = formatTime(flight.launchedAtMs),
+                                        pending = status.first,
+                                        failed = status.second,
+                                    )
+                                } else {
+                                    SendFlightOverlay(
+                                        flight = flight,
+                                        pending = status.first,
+                                        failed = status.second,
+                                        anchors = anchors,
+                                        motion = motion,
+                                        listShift = { 0f },
+                                        selfNick = nick,
+                                        showSender = true,
+                                        networkId = null,
+                                        knownNicks = emptySet(),
+                                        identityRules = IrcIdentityRules(),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
-        compose.waitForIdle()
+            compose.waitForIdle()
 
-        val sample = compose.onNodeWithTag("bubble_sample")
-        for ((flags, percent) in listOf(true to false, false to false, true to true, false to true).flatMap { flags -> listOf(100, 37, 0, 100).map { flags to it } }) {
-            compose.runOnIdle {
-                status = flags
-                opacity = percent
-                renderFlight = false
+            val sample = compose.onNodeWithTag("bubble_sample")
+            compose.waitUntil(10_000) {
+                val image = sample.captureToImage().asAndroidBitmap()
+                val colors = (0 until image.width).map { image.getPixel(it, image.height - 1) }
+                colors.count { it == android.graphics.Color.BLACK } > image.width / 8 &&
+                    colors.count { it == android.graphics.Color.WHITE } > image.width / 8
             }
-            compose.waitForIdle()
-            val real = sample.captureToImage().asAndroidBitmap()
-            compose.onAllNodesWithText("hi", useUnmergedTree = true).assertCountEquals(1)
-            compose.runOnIdle { renderFlight = true }
-            compose.waitForIdle()
-            val airborne = sample.captureToImage().asAndroidBitmap()
-            assertTrue("The delayed ghost must match the real bubble with pending/failed=$flags opacity=$percent", real.sameAs(airborne))
-            // The merged accessibility tree excludes the overlay's cleared semantics subtree.
-            compose.onAllNodesWithText("hi").assertCountEquals(0)
+            for ((flags, percent, intensity) in listOf(true to false, false to false, true to true, false to true).flatMap { flags ->
+                listOf(100, 37, 0, 100).flatMap { percent -> listOf(0, 75).map { Triple(flags, percent, it) } }
+            }) {
+                compose.runOnIdle {
+                    status = flags
+                    opacity = percent
+                    blur = intensity
+                    renderFlight = false
+                }
+                compose.waitForIdle()
+                val real = sample.captureToImage().asAndroidBitmap()
+                compose.onAllNodesWithText("hi", useUnmergedTree = true).assertCountEquals(1)
+                compose.runOnIdle { renderFlight = true }
+                compose.waitForIdle()
+                val airborne = sample.captureToImage().asAndroidBitmap()
+                assertTrue("The delayed ghost must match the real bubble with pending/failed=$flags opacity=$percent blur=$intensity", real.sameAs(airborne))
+                // The merged accessibility tree excludes the overlay's cleared semantics subtree.
+                compose.onAllNodesWithText("hi").assertCountEquals(0)
+            }
+            assertEquals(0f, motion.progress.value, 0.001f)
         }
-        assertEquals(0f, motion.progress.value, 0.001f)
-    }
 
     @Test
-    fun completedMorph_keepsWindowLaunchPositionWhenHeaderMovesOverlayHost() {
-        val flight = OutgoingFlight(token = 7, text = "\u0002hi\u0002", launchedAtMs = 1_000)
-        val anchors = SendFlightAnchors()
-        val motion = SendFlightMotion(morphEnabled = true)
-        runBlocking { motion.morph.snapTo(1f) }
-        var headerHeight by mutableStateOf(54.dp)
-        compose.setContent {
-            MotdTheme(dynamicColor = false) {
-                val density = LocalDensity.current
-                Column(
-                    Modifier
-                        .width(380.dp)
-                        .height(400.dp)
-                        .background(MaterialTheme.colorScheme.background)
-                        .testTag("flight_panel")
-                        .onGloballyPositioned {
-                            if (anchors.launchField == null) {
-                                val origin = it.positionInWindow()
-                                anchors.launchField =
-                                    with(density) {
-                                        Rect(
-                                            origin.x,
-                                            origin.y + 200.dp.toPx(),
-                                            origin.x + 380.dp.toPx(),
-                                            origin.y + 248.dp.toPx(),
-                                        )
-                                    }
+    @Config(sdk = [35])
+    fun nativeBlur_keepsWindowSamplesDuringFlightMorphAndHeaderMovement() =
+        withStripedMessageWallpaper { wallpaper ->
+            val flight = OutgoingFlight(token = 7, text = "\u0002hi\u0002", launchedAtMs = 1_000)
+            val anchors = SendFlightAnchors().apply { launchTextOrigin = Offset(240f, 200f) }
+            val motion = SendFlightMotion(morphEnabled = true)
+            runBlocking { motion.morph.snapTo(1f) }
+            var headerHeight by mutableStateOf(54.dp)
+            compose.setContent {
+                MotdTheme(dynamicColor = false, messageBackgroundOpacityPercent = 0, messageBackgroundBlur = 75) {
+                    val backdrop = rememberMessageWallpaperBackdrop(75)
+                    Box(Modifier.width(380.dp).height(400.dp).background(MaterialTheme.colorScheme.background)) {
+                        ChatWallpaperBackground(wallpaper, Modifier.matchParentSize().recordMessageWallpaper(backdrop, MaterialTheme.colorScheme.background))
+                        CompositionLocalProvider(LocalMessageWallpaperBackdrop provides backdrop) {
+                            val density = LocalDensity.current
+                            Column(
+                                Modifier
+                                    .width(380.dp)
+                                    .height(400.dp)
+                                    .testTag("flight_panel")
+                                    .onGloballyPositioned {
+                                        if (anchors.launchField == null) {
+                                            val origin = it.positionInWindow()
+                                            anchors.launchField =
+                                                with(density) {
+                                                    Rect(
+                                                        origin.x,
+                                                        origin.y + 200.dp.toPx(),
+                                                        origin.x + 380.dp.toPx(),
+                                                        origin.y + 248.dp.toPx(),
+                                                    )
+                                                }
+                                        }
+                                    },
+                            ) {
+                                Spacer(Modifier.height(headerHeight))
+                                Box(
+                                    Modifier
+                                        .weight(1f)
+                                        .fillMaxSize()
+                                        .onGloballyPositioned { anchors.hostOrigin = it.positionInWindow() },
+                                ) {
+                                    SendFlightOverlay(
+                                        flight = flight,
+                                        pending = true,
+                                        failed = false,
+                                        anchors = anchors,
+                                        motion = motion,
+                                        listShift = { 0f },
+                                        selfNick = "metadata-wider-than-body",
+                                        showSender = true,
+                                        networkId = null,
+                                        knownNicks = emptySet(),
+                                        identityRules = IrcIdentityRules(),
+                                    )
+                                }
                             }
-                        },
-                ) {
-                    Spacer(Modifier.height(headerHeight))
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxSize()
-                            .onGloballyPositioned { anchors.hostOrigin = it.positionInWindow() },
-                    ) {
-                        SendFlightOverlay(
-                            flight = flight,
-                            pending = true,
-                            failed = false,
-                            anchors = anchors,
-                            motion = motion,
-                            listShift = { 0f },
-                            selfNick = "metadata-wider-than-body",
-                            showSender = true,
-                            networkId = null,
-                            knownNicks = emptySet(),
-                            identityRules = IrcIdentityRules(),
-                        )
+                        }
                     }
                 }
             }
-        }
-        compose.waitForIdle()
+            compose.waitForIdle()
 
-        assertTrue("The flight must be rendered before comparing pixels", anchors.ghostHeight > 0f)
-        val panel = compose.onNodeWithTag("flight_panel")
-        val before = panel.captureToImage().asAndroidBitmap()
-        val initialHostY = anchors.hostOrigin.y
-        compose.runOnIdle { headerHeight = 96.dp }
-        compose.waitForIdle()
-        assertTrue("Header expansion must move the overlay host", anchors.hostOrigin.y > initialHostY)
-        val after = panel.captureToImage().asAndroidBitmap()
-        assertTrue("The ghost must stay at its window launch position when the host moves", before.sameAs(after))
-        assertEquals(0f, motion.lift.value, 0.001f)
-        assertEquals(0f, motion.progress.value, 0.001f)
-    }
+            assertTrue("The flight must be rendered before comparing pixels", anchors.ghostHeight > 0f)
+            val panel = compose.onNodeWithTag("flight_panel")
+            compose.waitUntil(10_000) {
+                val image = panel.captureToImage().asAndroidBitmap()
+                val colors = (0 until image.width).map { image.getPixel(it, image.height - 1) }
+                colors.count { it == android.graphics.Color.BLACK } > image.width / 8 &&
+                    colors.count { it == android.graphics.Color.WHITE } > image.width / 8
+            }
+            for (phase in listOf(1f, 0.75f)) {
+                compose.runOnIdle {
+                    headerHeight = 54.dp
+                    runBlocking { motion.morph.snapTo(phase) }
+                }
+                val before = panel.captureToImage().asAndroidBitmap()
+                val initialHostY = anchors.hostOrigin.y
+                compose.runOnIdle { headerHeight = 96.dp }
+                compose.waitForIdle()
+                assertTrue("Header expansion must move the overlay host", anchors.hostOrigin.y > initialHostY)
+                val after = panel.captureToImage().asAndroidBitmap()
+                assertTrue("Morph=$phase must keep both flight translations sampling the fixed wallpaper when its host moves", before.sameAs(after))
+            }
+            assertEquals(0f, motion.lift.value, 0.001f)
+            assertEquals(0f, motion.progress.value, 0.001f)
+        }
 
     @Test
     fun activeFlight_tracksCanonicalStatusBeforeLandingWithoutGuessingByText() {

@@ -233,6 +233,7 @@ class MainActivity :
                     chatShadowsEnabled = appearance.chatShadowsEnabled,
                     nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
                     messageBackgroundOpacityPercent = appearance.messageBackgroundOpacityPercent,
+                    messageBackgroundBlur = appearance.messageBackgroundBlur,
                     sentBubbleColor = appearance.sentBubbleColor,
                     receivedBubbleColor = appearance.receivedBubbleColor,
                 ) {

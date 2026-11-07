@@ -46,6 +46,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
@@ -62,6 +63,7 @@ import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.chat.ConversationLayoutSheet
 import io.github.trevarj.motd.ui.chat.ConversationLayoutState
+import io.github.trevarj.motd.ui.components.withStripedMessageWallpaper
 import io.github.trevarj.motd.ui.nav.NetworkSettingsTarget
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdLightScheme
@@ -561,6 +563,8 @@ class SettingsHomeAndPrimitivesUiTest {
                     },
                     onOpacity = { if (!rejectWrite) saved = saved.copy(messageBackgroundOpacityOverride = it) },
                     globalOpacity = 73,
+                    onBlur = { if (!rejectWrite) saved = saved.copy(messageBackgroundBlurOverride = it) },
+                    globalBlur = 41,
                     onDismiss = { dismissals++ },
                     wallpaper = WallpaperSelection(),
                     conversationFontScalePercent = 140,
@@ -618,6 +622,7 @@ class SettingsHomeAndPrimitivesUiTest {
     }
 
     @Test
+    @Config(qualifiers = "w411dp-h891dp")
     fun chatOpacityPreviewUsesAcceptedLocalOrGlobalValueAndIndependentResets() {
         var saved by mutableStateOf(ConversationLayoutState(global = LayoutDensity.COMFORTABLE))
         var globalOpacity by mutableStateOf(100)
@@ -629,6 +634,8 @@ class SettingsHomeAndPrimitivesUiTest {
                     onSelect = { saved = saved.copy(override = it) },
                     onOpacity = { if (!rejectWrite) saved = saved.copy(messageBackgroundOpacityOverride = it) },
                     globalOpacity = globalOpacity,
+                    onBlur = { if (!rejectWrite) saved = saved.copy(messageBackgroundBlurOverride = it) },
+                    globalBlur = 0,
                     onDismiss = {},
                     wallpaper = WallpaperSelection(io.github.trevarj.motd.data.prefs.ChatWallpaperPreset.NONE),
                     conversationFontScalePercent = 100,
@@ -642,8 +649,16 @@ class SettingsHomeAndPrimitivesUiTest {
         fun control(tag: String) = options.performScrollToNode(hasTestTag(tag)).let { compose.onNodeWithTag(tag) }
 
         fun pixels(): android.graphics.Bitmap {
-            control("chat_layout_preview_incoming")
-            return compose.onNodeWithTag("chat_layout_preview_incoming").captureToImage().asAndroidBitmap()
+            // Reset the whole lazy viewport, not merely the potentially clipped preview descendant.
+            options.performScrollToIndex(0)
+            val incoming = compose.onNodeWithTag("chat_layout_preview_incoming").assertIsDisplayed()
+            val viewport = options.fetchSemanticsNode().boundsInRoot
+            val bounds = incoming.fetchSemanticsNode().boundsInRoot
+            val unclipped = incoming.getUnclippedBoundsInRoot()
+            assertTrue("preview must be fully in the viewport", bounds.top >= viewport.top && bounds.bottom <= viewport.bottom)
+            assertEquals("unclipped width", with(compose.density) { (unclipped.right - unclipped.left).toPx() }, bounds.width, 1f)
+            assertEquals("unclipped height", with(compose.density) { (unclipped.bottom - unclipped.top).toPx() }, bounds.height, 1f)
+            return incoming.captureToImage().asAndroidBitmap()
         }
         val baseline = pixels()
         control("chat_message_background_opacity").performSemanticsAction(SemanticsActions.SetProgress) { it(37f) }
@@ -665,6 +680,122 @@ class SettingsHomeAndPrimitivesUiTest {
         assertTrue("inherit uses the current global value", !local.sameAs(pixels()))
         compose.runOnIdle { globalOpacity = 100 }
         assertTrue("inherited global reset restores exact baseline", baseline.sameAs(pixels()))
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w411dp-h891dp")
+    fun chatBlurPreviewUsesAcceptedRoomValuesAndIndependentInheritance() =
+        withStripedMessageWallpaper { wallpaper ->
+            var saved by mutableStateOf(ConversationLayoutState(global = LayoutDensity.COMFORTABLE, messageBackgroundOpacityOverride = 0))
+            var globalBlur by mutableStateOf(0)
+            var rejectWrite = false
+            val writes = mutableListOf<Int?>()
+            compose.setContent {
+                MotdTheme(dynamicColor = false, themePreset = ColorThemePreset.AYU_LIGHT, avatarStyle = io.github.trevarj.motd.data.prefs.AvatarStyle.NONE) {
+                    ConversationLayoutSheet(
+                        state = saved,
+                        onSelect = { saved = saved.copy(override = it) },
+                        onOpacity = { saved = saved.copy(messageBackgroundOpacityOverride = it) },
+                        globalOpacity = 100,
+                        onBlur = {
+                            writes += it
+                            if (!rejectWrite) saved = saved.copy(messageBackgroundBlurOverride = it)
+                        },
+                        globalBlur = globalBlur,
+                        onDismiss = {},
+                        wallpaper = wallpaper,
+                        conversationFontScalePercent = 100,
+                        messageSpacing = MessageSpacing.DEFAULT,
+                        bubbleCorners = BubbleCornerStyle.ROUNDED,
+                    )
+                }
+            }
+            val options = compose.onNodeWithTag("chat_layout_sheet_options")
+
+            fun control(tag: String) = options.performScrollToNode(hasTestTag(tag)).let { compose.onNodeWithTag(tag) }
+
+            fun pixels(): android.graphics.Bitmap {
+                options.performScrollToIndex(0)
+                val incoming = compose.onNodeWithTag("chat_layout_preview_incoming").assertIsDisplayed()
+                val viewport = options.fetchSemanticsNode().boundsInRoot
+                val bounds = incoming.fetchSemanticsNode().boundsInRoot
+                val unclipped = incoming.getUnclippedBoundsInRoot()
+                assertTrue(bounds.top >= viewport.top && bounds.bottom <= viewport.bottom)
+                assertEquals(with(compose.density) { (unclipped.bottom - unclipped.top).toPx() }, bounds.height, 1f)
+                return incoming.captureToImage().asAndroidBitmap()
+            }
+            compose.waitUntil(10_000) {
+                val image = pixels()
+                var black = 0
+                var white = 0
+                for (x in 0 until image.width) {
+                    for (y in 0 until image.height) {
+                        if (image.getPixel(x, y) == android.graphics.Color.BLACK) black++
+                        if (image.getPixel(x, y) == android.graphics.Color.WHITE) white++
+                    }
+                }
+                black > image.width * image.height / 8 && white > image.width * image.height / 8
+            }
+            val baseline = pixels()
+            control("chat_layout_global_blur_row").assertIsOn().performClick().assertIsOff()
+            assertEquals(0, saved.messageBackgroundBlurOverride)
+            control("chat_message_background_blur").performSemanticsAction(SemanticsActions.SetProgress) { it(63f) }
+            val local = pixels()
+            assertTrue("accepted local blur changes the real wallpaper preview at zero tint", !baseline.sameAs(local))
+            compose.runOnIdle { globalBlur = 100 }
+            assertTrue("local blur ignores global edits", local.sameAs(pixels()))
+            control("chat_layout_compact").performClick()
+            control("chat_layout_global").performClick()
+            assertEquals(63, saved.messageBackgroundBlurOverride)
+            assertTrue("density reset preserves blur", local.sameAs(pixels()))
+            control("chat_message_background_opacity").performSemanticsAction(SemanticsActions.SetProgress) { it(37f) }
+            assertEquals(63, saved.messageBackgroundBlurOverride)
+            control("chat_message_background_opacity").performSemanticsAction(SemanticsActions.SetProgress) { it(0f) }
+            assertTrue("opacity reset preserves blur", local.sameAs(pixels()))
+            control("chat_message_background_blur").performSemanticsAction(SemanticsActions.SetProgress) { it(0f) }
+            assertEquals(0, saved.messageBackgroundBlurOverride)
+            assertTrue("explicit Off overrides a nonzero global value", baseline.sameAs(pixels()))
+            compose.runOnIdle { rejectWrite = true }
+            control("chat_message_background_blur").performSemanticsAction(SemanticsActions.SetProgress) { it(63f) }
+            assertTrue("rejected writes cannot change the accepted preview", baseline.sameAs(pixels()))
+            compose.runOnIdle { rejectWrite = false }
+            control("chat_layout_global_blur_row").performClick().assertIsOn()
+            assertEquals(null, saved.messageBackgroundBlurOverride)
+            assertTrue("inherit uses current global blur", !baseline.sameAs(pixels()))
+            compose.runOnIdle { globalBlur = 0 }
+            assertTrue("global Off restores exact original pixels", baseline.sameAs(pixels()))
+            assertEquals(0, saved.messageBackgroundOpacityOverride)
+            assertEquals(listOf(0, 63, 0, 63, null), writes)
+            compose.onNodeWithTag("chat_layout_sheet").assertIsDisplayed()
+        }
+
+    @Test
+    fun blurControlKeepsNativeContinuousSemanticsSlimTrackFullTouchHeightAndOffLabel() {
+        var value by mutableStateOf(37)
+        var background = Color.Unspecified
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                background = MaterialTheme.colorScheme.surface
+                Surface { MessageBackgroundBlurSlider(value = value, onValue = { value = it }) }
+            }
+        }
+        val slider = compose.onNodeWithTag("settings_message_background_blur")
+        val bounds = slider.getUnclippedBoundsInRoot()
+        assertTrue(bounds.bottom - bounds.top >= 48.dp)
+        slider.assertContentDescriptionEquals("Message background blur").assert(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.ProgressBarRangeInfo,
+                androidx.compose.ui.semantics
+                    .ProgressBarRangeInfo(37f, 0f..100f, 0),
+            ),
+        )
+        val image = slider.captureToImage().toPixelMap()
+        val trackRows = (0 until image.height).count { image[image.width * 3 / 4, it] != background }
+        assertTrue("4dp track retains native 48dp interaction target", trackRows in 1..with(compose.density) { 4.dp.roundToPx() + 1 })
+        slider.performSemanticsAction(SemanticsActions.SetProgress) { it(0f) }
+        assertEquals(0, value)
+        slider.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Off"))
+        compose.onNodeWithText("Blur the wallpaper behind messages. Lower opacity reveals more blur. Android 12+ only; older devices keep the unblurred tint.").assertExists()
     }
 
     @Test

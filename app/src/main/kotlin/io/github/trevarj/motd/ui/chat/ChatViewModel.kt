@@ -1047,6 +1047,7 @@ class ChatViewModel
                     override = room?.layoutDensityOverride,
                     bufferDefault = LayoutDensity.TWO_LINE.takeIf { room?.type == BufferType.SERVER },
                     messageBackgroundOpacityOverride = room?.messageBackgroundOpacityOverride,
+                    messageBackgroundBlurOverride = room?.messageBackgroundBlurOverride,
                 )
             }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ConversationLayoutState())
 
@@ -1783,6 +1784,22 @@ class ChatViewModel
                     }
                 if (!written) uiEventQueue.enqueue(ChatUiEvent.ConversationLayoutWriteFailed)
             }
+
+        /** Tint, blur and density are independent; only accepted Room emissions update the sheet. */
+        fun setConversationMessageBackgroundBlurOverride(intensity: Int?): Job {
+            val requestedId = operationalBufferId.value
+            return viewModelScope.launch {
+                val written =
+                    try {
+                        bufferRepository.setMessageBackgroundBlurOverride(requestedId, intensity)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        false
+                    }
+                if (!written) uiEventQueue.enqueue(ChatUiEvent.ConversationLayoutWriteFailed)
+            }
+        }
 
         /** Persist to the canonical id captured at the time of selection; Room then drives the UI. */
         fun setPresenceModeOverride(override: PresenceMode?) =
