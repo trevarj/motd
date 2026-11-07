@@ -17,6 +17,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -28,6 +29,7 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
@@ -557,6 +559,8 @@ class SettingsHomeAndPrimitivesUiTest {
                         writes += it
                         if (!rejectWrite) saved = saved.copy(override = it)
                     },
+                    onOpacity = { if (!rejectWrite) saved = saved.copy(messageBackgroundOpacityOverride = it) },
+                    globalOpacity = 73,
                     onDismiss = { dismissals++ },
                     wallpaper = WallpaperSelection(),
                     conversationFontScalePercent = 140,
@@ -591,15 +595,113 @@ class SettingsHomeAndPrimitivesUiTest {
         choice("chat_layout_global").performClick().assertIsSelected()
         sample(LayoutDensity.TWO_LINE)
 
+        choice("chat_message_background_opacity").performSemanticsAction(SemanticsActions.SetProgress) { it(37f) }
+        choice("chat_layout_global_opacity_row").assertIsOff()
+        assertEquals(37, saved.messageBackgroundOpacityOverride)
+        choice("chat_layout_comfortable").performClick().assertIsSelected()
+        choice("chat_layout_global").performClick().assertIsSelected()
+        assertEquals(37, saved.messageBackgroundOpacityOverride)
+        choice("chat_layout_global_opacity_row").performClick().assertIsOn()
+        assertEquals(null, saved.messageBackgroundOpacityOverride)
         compose.runOnIdle { rejectWrite = true }
         choice("chat_layout_comfortable").performClick().assertIsNotSelected()
         choice("chat_layout_global").assertIsSelected()
         sample(LayoutDensity.TWO_LINE)
+        choice("chat_message_background_opacity").performSemanticsAction(SemanticsActions.SetProgress) { it(0f) }
+        choice("chat_layout_global_opacity_row").assertIsOn()
+        assertEquals(null, saved.messageBackgroundOpacityOverride)
         compose.runOnIdle {
-            assertEquals(listOf(LayoutDensity.COMFORTABLE, null, LayoutDensity.COMPACT, null, LayoutDensity.COMFORTABLE), writes)
+            assertEquals(listOf(LayoutDensity.COMFORTABLE, null, LayoutDensity.COMPACT, null, LayoutDensity.COMFORTABLE, null, LayoutDensity.COMFORTABLE), writes)
             assertEquals(0, dismissals)
             assertEquals(null, saved.override)
         }
+    }
+
+    @Test
+    fun chatOpacityPreviewUsesAcceptedLocalOrGlobalValueAndIndependentResets() {
+        var saved by mutableStateOf(ConversationLayoutState(global = LayoutDensity.COMFORTABLE))
+        var globalOpacity by mutableStateOf(100)
+        var rejectWrite = false
+        compose.setContent {
+            MotdTheme(dynamicColor = false, themePreset = ColorThemePreset.AYU_LIGHT, avatarStyle = io.github.trevarj.motd.data.prefs.AvatarStyle.NONE) {
+                ConversationLayoutSheet(
+                    state = saved,
+                    onSelect = { saved = saved.copy(override = it) },
+                    onOpacity = { if (!rejectWrite) saved = saved.copy(messageBackgroundOpacityOverride = it) },
+                    globalOpacity = globalOpacity,
+                    onDismiss = {},
+                    wallpaper = WallpaperSelection(io.github.trevarj.motd.data.prefs.ChatWallpaperPreset.NONE),
+                    conversationFontScalePercent = 100,
+                    messageSpacing = MessageSpacing.DEFAULT,
+                    bubbleCorners = BubbleCornerStyle.ROUNDED,
+                )
+            }
+        }
+        val options = compose.onNodeWithTag("chat_layout_sheet_options")
+
+        fun control(tag: String) = options.performScrollToNode(hasTestTag(tag)).let { compose.onNodeWithTag(tag) }
+
+        fun pixels(): android.graphics.Bitmap {
+            control("chat_layout_preview_incoming")
+            return compose.onNodeWithTag("chat_layout_preview_incoming").captureToImage().asAndroidBitmap()
+        }
+        val baseline = pixels()
+        control("chat_message_background_opacity").performSemanticsAction(SemanticsActions.SetProgress) { it(37f) }
+        control("chat_layout_global_opacity_row").assertIsOff()
+        val local = pixels()
+        assertTrue(!baseline.sameAs(local))
+        compose.runOnIdle { globalOpacity = 0 }
+        assertTrue("local override ignores global edits", local.sameAs(pixels()))
+        control("chat_layout_comfortable").performClick()
+        control("chat_layout_global").performClick()
+        assertEquals(37, saved.messageBackgroundOpacityOverride)
+        assertTrue("density reset preserves opacity", local.sameAs(pixels()))
+        compose.runOnIdle { rejectWrite = true }
+        control("chat_message_background_opacity").performSemanticsAction(SemanticsActions.SetProgress) { it(0f) }
+        assertTrue("rejected writes preserve accepted preview", local.sameAs(pixels()))
+        compose.runOnIdle { rejectWrite = false }
+        control("chat_layout_global_opacity_row").performClick().assertIsOn()
+        assertEquals(null, saved.messageBackgroundOpacityOverride)
+        assertTrue("inherit uses the current global value", !local.sameAs(pixels()))
+        compose.runOnIdle { globalOpacity = 100 }
+        assertTrue("inherited global reset restores exact baseline", baseline.sameAs(pixels()))
+    }
+
+    @Test
+    fun opacityControlKeepsNativeContinuousSemanticsAndSlimTrackWithFullTouchHeight() {
+        var value by mutableStateOf(37)
+        var background = Color.Unspecified
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                background = MaterialTheme.colorScheme.surface
+                Surface {
+                    MessageBackgroundOpacitySlider(value = value, onValue = { value = it })
+                }
+            }
+        }
+        val slider = compose.onNodeWithTag("settings_message_background_opacity")
+        val bounds = slider.getUnclippedBoundsInRoot()
+        assertTrue(bounds.bottom - bounds.top >= 48.dp)
+        slider.assert(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.ProgressBarRangeInfo,
+                androidx.compose.ui.semantics
+                    .ProgressBarRangeInfo(37f, 0f..100f, 0),
+            ),
+        )
+        val image = slider.captureToImage().toPixelMap()
+        val trackRows = (0 until image.height).count { image[image.width * 3 / 4, it] != background }
+        assertTrue("4dp track, no ticks or stop decoration: $trackRows rows", trackRows in 1..with(compose.density) { 4.dp.roundToPx() + 1 })
+        slider.performSemanticsAction(SemanticsActions.SetProgress) { it(0f) }
+        assertEquals(0, value)
+        slider.assert(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.StateDescription,
+                org.robolectric.RuntimeEnvironment
+                    .getApplication()
+                    .getString(io.github.trevarj.motd.R.string.settings_message_background_opacity_off),
+            ),
+        )
     }
 
     @Test

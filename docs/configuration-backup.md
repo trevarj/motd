@@ -28,6 +28,7 @@ export. Envelope metadata is authenticated as associated data.
 - User-facing settings for appearance, chat behavior, previews, replies,
   upload backend configuration, avatar display, per-network self-avatar setting,
   and delivery mode
+- Global message background opacity, including its saved value independently of message layout
 - Fool membership, default visibility, and sparse per-fool visibility/notification preferences
 
 ## Excluded
@@ -36,6 +37,7 @@ export. Envelope metadata is authenticated as associated data.
   upload history, deletion tokens, generated push endpoints, push keypairs,
   certificate pins, STS policy state, diagnostics, history cursors, and other
   runtime/cache state
+- Per-chat message layout and background-opacity overrides; these remain local to each durable chat
 - Android KeyChain aliases. A network that used a client certificate is imported
   disconnected until the user selects a certificate on the destination device.
 - Custom wallpaper image files and their private local filenames. The retained builtin wallpaper

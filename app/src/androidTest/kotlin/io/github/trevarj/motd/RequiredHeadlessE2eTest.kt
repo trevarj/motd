@@ -778,6 +778,7 @@ class RequiredHeadlessE2eTest {
             try {
                 val configured = runBlocking { settings.settings.first() }
                 ChatListRobot(compose).open(roomId)
+                SettingsRobot(compose).exerciseConversationOpacityInheritance()
                 ChatRobot(compose).send("$token ordinary")
                 val ordinary = runBlocking { messages.awaitCanonical("$token ordinary", roomId) }
                 TimelineRobot(compose).assertMessageVisible(ordinary.tag())

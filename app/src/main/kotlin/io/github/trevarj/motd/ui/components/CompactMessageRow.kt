@@ -128,12 +128,9 @@ internal fun CompactMessageRow(
     val canvas = MaterialTheme.colorScheme.background
     val normalPaintedRow = rowTint.compositeOver(canvas)
     val paintedRow = messageContainerColor(normalPaintedRow, canvas, dimmed)
-    val controlledBackground = !hasMention && !LocalNicknameBackgroundsEnabled.current
-    val backgroundAlpha = LocalMessageBackgroundOpacityPercent.current / 100f
-    val contrastRow =
-        remember(paintedRow, canvas, controlledBackground, backgroundAlpha) {
-            if (controlledBackground) paintedRow.copy(alpha = backgroundAlpha).compositeOver(canvas) else paintedRow
-        }
+    val backgroundAlpha = if (hasMention) 1f else LocalMessageBackgroundOpacityPercent.current / 100f
+    val drawFill = paintedRow.copy(alpha = paintedRow.alpha * backgroundAlpha)
+    val contrastRow = drawFill.compositeOver(canvas)
     val bodyInk = codeColor
     val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
 
@@ -188,7 +185,7 @@ internal fun CompactMessageRow(
             modifier
                 .fillMaxWidth()
                 // Fade only the ordinary backing, never the row's text, avatars or highlights.
-                .background(if (controlledBackground) paintedRow.copy(alpha = backgroundAlpha) else paintedRow)
+                .background(drawFill)
                 .then(containerModifier),
         sourceModifier =
             Modifier.messageRowClicks(
@@ -198,12 +195,12 @@ internal fun CompactMessageRow(
                 onLongPressLabel = onLongPressLabel ?: actionsLabel,
             ),
         contentModifier = Modifier.padding(horizontal = spacing.messageOuterHPad, vertical = spacing.compactRowVPad),
-        parentColor = paintedRow,
+        parentColor = contrastRow,
         sourceWrapper = sourceWrapper,
         trailingContent = trailingContent,
     ) {
         reply?.let {
-            ReplyMiniBubble(it, nickColors, onReplyClick, paintedRow, dimmed)
+            ReplyMiniBubble(it, nickColors, onReplyClick, contrastRow, dimmed)
         }
 
         Row(verticalAlignment = Alignment.Top) {
@@ -221,7 +218,7 @@ internal fun CompactMessageRow(
             // Trailing timestamp keeps the IRC "right gutter" feel without a bubble.
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                 val metadataInk = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                val metadataColor = remember(metadataInk, paintedRow, normalPaintedRow, dimmed) { messageContentColor(metadataInk, paintedRow, dimmed, normalPaintedRow) }
+                val metadataColor = remember(metadataInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(metadataInk, contrastRow, dimmed, normalPaintedRow) }
                 MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed, contentColor = metadataColor)
                 if (LocalTimestampConfig.current.show) {
                     Text(

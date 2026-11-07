@@ -1043,6 +1043,44 @@ class BufferStoreCanonicalTest {
         }
 
     @Test
+    fun opacityMergePreservesExplicitZeroAndTransfersOnlyIntoInheritance() =
+        runTest {
+            val winner = store.getOrCreate(networkId, "older", "Older", BufferType.QUERY)
+            val loser = store.getOrCreate(networkId, "newer", "Newer", BufferType.QUERY)
+            db.bufferDao().setMessageBackgroundOpacityOverride(winner.id, 0)
+            db.bufferDao().setMessageBackgroundOpacityOverride(loser.id, 37)
+            assertEquals(0, store.mergeRooms(winner.id, loser.id).messageBackgroundOpacityOverride)
+            val inherited = store.getOrCreate(networkId, "third", "Third", BufferType.QUERY)
+            val configured = store.getOrCreate(networkId, "fourth", "Fourth", BufferType.QUERY)
+            db.bufferDao().setMessageBackgroundOpacityOverride(configured.id, 37)
+            assertEquals(37, store.mergeRooms(inherited.id, configured.id).messageBackgroundOpacityOverride)
+        }
+
+    @Test
+    fun opacityWritesFollowRedirectsRemainIsolatedAndClearIndependently() =
+        runTest {
+            val winner = store.getOrCreate(networkId, "older", "Older", BufferType.QUERY)
+            val loser = store.getOrCreate(networkId, "newer", "Newer", BufferType.QUERY)
+            val channel = store.getOrCreate(networkId, "#room", "#room", BufferType.CHANNEL)
+            store.mergeRooms(winner.id, loser.id)
+            db.bufferDao().setLayoutDensityOverride(winner.id, LayoutDensity.COMPACT)
+            assertEquals(1, db.bufferDao().setMessageBackgroundOpacityOverride(loser.id, 37))
+            assertEquals(37, db.bufferDao().rawById(winner.id)?.messageBackgroundOpacityOverride)
+            assertEquals(null, db.bufferDao().rawById(loser.id)?.messageBackgroundOpacityOverride)
+            assertEquals(null, db.bufferDao().rawById(channel.id)?.messageBackgroundOpacityOverride)
+            db.bufferDao().setLayoutDensityOverride(winner.id, null)
+            assertEquals(37, db.bufferDao().rawById(winner.id)?.messageBackgroundOpacityOverride)
+            db.bufferDao().setLayoutDensityOverride(winner.id, LayoutDensity.COMPACT)
+            assertEquals(1, db.bufferDao().setMessageBackgroundOpacityOverride(loser.id, null))
+            assertEquals(null, db.bufferDao().rawById(winner.id)?.messageBackgroundOpacityOverride)
+            assertEquals(LayoutDensity.COMPACT, db.bufferDao().rawById(winner.id)?.layoutDensityOverride)
+            db.bufferDao().setMessageBackgroundOpacityOverride(channel.id, 0)
+            db.bufferDao().deleteBuffer(channel.id)
+            assertEquals(null, store.getOrCreate(networkId, "#room", "#room", BufferType.CHANNEL).messageBackgroundOpacityOverride)
+            assertEquals(0, db.bufferDao().setMessageBackgroundOpacityOverride(-1, 37))
+        }
+
+    @Test
     fun dismissingCanonicalQueryPreservesRedirectsAndNickIdentity() =
         runTest {
             val old = store.getOrCreate(networkId, "oldnick", "OldNick", BufferType.QUERY)

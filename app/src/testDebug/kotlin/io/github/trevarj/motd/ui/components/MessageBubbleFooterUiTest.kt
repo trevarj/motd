@@ -97,6 +97,69 @@ class MessageBubbleFooterUiTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
+    fun comfortableMorphOutlineAndCompletedRectBothHonorBackingOpacity() {
+        val opacity = mutableStateOf(100)
+        val progress = mutableStateOf(0.5f)
+        compose.setContent {
+            MotdTheme(dynamicColor = false, messageBackgroundOpacityPercent = opacity.value, chatShadowsEnabled = false) {
+                Box(
+                    Modifier
+                        .width(380.dp)
+                        .height(140.dp)
+                        .background(Color.Magenta)
+                        .testTag("morph_opacity_sample"),
+                ) {
+                    MessageBubble(
+                        sender = "me",
+                        text = "Reading",
+                        timeMs = 0,
+                        formattedTime = TIME,
+                        isSelf = true,
+                        kind = MessageKind.PRIVMSG,
+                        showSender = true,
+                        sendMorphProgress = { progress.value },
+                    )
+                }
+            }
+        }
+        val sample = compose.onNodeWithTag("morph_opacity_sample")
+        for (phase in listOf(0.5f, 1f)) {
+            compose.runOnIdle {
+                progress.value = phase
+                opacity.value = 100
+            }
+            val baseline = sample.captureToImage().asAndroidBitmap()
+            val colors = mutableMapOf<Int, Int>()
+            for (y in 0 until baseline.height) {
+                for (x in 0 until baseline.width) {
+                    val color = baseline.getPixel(x, y)
+                    if (color != Color.Magenta.toArgb()) colors[color] = (colors[color] ?: 0) + 1
+                }
+            }
+            val backing = Color(colors.maxBy { it.value }.key)
+            var fillPoint = 0 to 0
+            findFill@ for (y in 0 until baseline.height) {
+                for (x in 0 until baseline.width) {
+                    if (baseline.getPixel(x, y) == backing.toArgb()) {
+                        fillPoint = x to y
+                        break@findFill
+                    }
+                }
+            }
+            for (percent in listOf(37, 0, 100)) {
+                compose.runOnIdle { opacity.value = percent }
+                val pixels = sample.captureToImage().asAndroidBitmap()
+                val actual = pixels.getPixel(fillPoint.first, fillPoint.second)
+                val expected = backing.copy(alpha = percent / 100f).compositeOver(Color.Magenta).toArgb()
+                for (shift in listOf(0, 8, 16, 24)) {
+                    assertTrue("morph=$phase opacity=$percent channel=$shift", kotlin.math.abs((actual ushr shift and 255) - (expected ushr shift and 255)) <= 2)
+                }
+                if (percent == 100) assertTrue("morph=$phase restores baseline", baseline.sameAs(pixels))
+            }
+        }
+    }
+
+    @Test
     fun loadedImageAndVideoCornerPresetsCoverEveryDensityAndActionAndRestoreDefault() {
         RoutedInlineMediaFixture().use { fixture ->
             fixture.server.enqueue(solidMediaResponse())
@@ -105,6 +168,7 @@ class MessageBubbleFooterUiTest {
             val kind = mutableStateOf(MessageKind.PRIVMSG)
             val corners = mutableStateOf(UiCornerStyle.DEFAULT)
             val video = mutableStateOf(false)
+            val opacity = mutableStateOf(100)
             val imageUrl = "http://media.invalid/corner-mask.png"
             val videoUrl = "http://media.invalid/corner-mask.mp4"
             var pixelsPerDp = 1f
@@ -116,6 +180,7 @@ class MessageBubbleFooterUiTest {
                     avatarStyle = AvatarStyle.NONE,
                     mediaCornerStyle = corners.value,
                     chatShadowsEnabled = false,
+                    messageBackgroundOpacityPercent = opacity.value,
                 ) {
                     CompositionLocalProvider(
                         LocalAutomaticRemoteMedia provides true,
@@ -145,6 +210,7 @@ class MessageBubbleFooterUiTest {
                             density.value = layout
                             kind.value = messageKind
                             corners.value = UiCornerStyle.DEFAULT
+                            opacity.value = 100
                         }
                         compose.waitUntil(10_000) {
                             compose.onAllNodesWithTag("inline_media_loaded", useUnmergedTree = true).fetchSemanticsNodes().size == 1
@@ -182,6 +248,15 @@ class MessageBubbleFooterUiTest {
                             assertMediaCornerPixels(image, radius * pixelsPerDp, Color.Magenta, pixelsPerDp, label)
                             assertEquals("$label unchanged bounds", bounds, media.fetchSemanticsNode().boundsInRoot)
                             if (preset == UiCornerStyle.DEFAULT) assertTrue("$label restored loaded pixels", baseline.sameAs(image))
+                        }
+                        for (percent in listOf(37, 0, 100)) {
+                            compose.runOnIdle { opacity.value = percent }
+                            val image = media.captureToImage().asAndroidBitmap()
+                            for (x in image.width / 4 until image.width * 3 / 4) {
+                                for (y in image.height / 4 until image.height * 3 / 4) {
+                                    assertEquals("$layout $messageKind video=$isVideo opacity=$percent never fades loaded media", baseline.getPixel(x, y), image.getPixel(x, y))
+                                }
+                            }
                         }
                     }
                 }
@@ -895,14 +970,15 @@ class MessageBubbleFooterUiTest {
     }
 
     @Test
-    fun messageBackgroundOpacityLeavesNicknameWashComfortableActionsAndMentionsUnchanged() {
+    fun opacityControlsEveryOrdinaryLayoutTintAndActionButPreservesMentionFills() {
         data class Row(
             val density: LayoutDensity,
-            val enabled: Boolean = false,
+            val enabled: Boolean,
             val mention: Boolean = false,
             val kind: MessageKind = MessageKind.PRIVMSG,
+            val dimmed: Boolean = false,
         )
-        val row = mutableStateOf(Row(LayoutDensity.COMFORTABLE))
+        val row = mutableStateOf(Row(LayoutDensity.COMFORTABLE, true))
         val opacity = mutableStateOf(100)
         compose.setContent {
             ContrastSample(
@@ -911,20 +987,20 @@ class MessageBubbleFooterUiTest {
                 messageBackgroundOpacityPercent = opacity.value,
                 hasMention = row.value.mention,
                 kind = row.value.kind,
+                dimmed = row.value.dimmed,
                 showSender = true,
+                showTimestamp = true,
                 canvasColor = Color.Magenta,
             )
         }
         val rows =
-            listOf(Row(LayoutDensity.COMFORTABLE)) +
-                listOf(LayoutDensity.COMPACT, LayoutDensity.TWO_LINE).flatMap { density ->
-                    listOf(
-                        Row(density, enabled = true),
-                        Row(density, mention = true),
-                        Row(density, kind = MessageKind.ACTION),
-                        Row(density, mention = true, kind = MessageKind.ACTION),
-                    )
+            LayoutDensity.entries.flatMap { density ->
+                listOf(false, true).flatMap { enabled ->
+                    listOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION).flatMap { kind ->
+                        listOf(Row(density, enabled, kind = kind), Row(density, enabled, kind = kind, dimmed = true), Row(density, enabled, mention = true, kind = kind))
+                    }
                 }
+            }
         for (sample in rows) {
             compose.runOnIdle {
                 row.value = sample
@@ -932,9 +1008,120 @@ class MessageBubbleFooterUiTest {
             }
             val canvas = compose.onNodeWithTag("contrast_sample")
             val original = canvas.captureToImage().asAndroidBitmap()
-            for (percent in listOf(0, 37, 100)) {
+            // A pixel from the dominant backing color avoids text, rounded edges, shadows and rails.
+            val counts = mutableMapOf<Int, Int>()
+            for (x in 0 until original.width) {
+                for (y in 0 until original.height) {
+                    val pixel = original.getPixel(x, y)
+                    if (pixel != Color.Magenta.toArgb()) counts[pixel] = (counts[pixel] ?: 0) + 1
+                }
+            }
+            val backing = counts.maxBy { it.value }.key
+            var sampleX = 0
+            var sampleY = 0
+            findPixel@ for (y in 0 until original.height) {
+                for (x in 0 until original.width) {
+                    if (original.getPixel(x, y) == backing) {
+                        sampleX = x
+                        sampleY = y
+                        break@findPixel
+                    }
+                }
+            }
+            for (percent in listOf(37, 0, 100)) {
                 compose.runOnIdle { opacity.value = percent }
-                assertTrue("$sample opacity=$percent must not affect this surface", original.sameAs(canvas.captureToImage().asAndroidBitmap()))
+                val pixels = canvas.captureToImage().asAndroidBitmap()
+                if (sample.mention || percent == 100) {
+                    assertTrue("$sample opacity=$percent preserves highlights or restores baseline", original.sameAs(pixels))
+                } else {
+                    val expected = Color(backing).copy(alpha = percent / 100f).compositeOver(Color.Magenta).toArgb()
+                    val actual = pixels.getPixel(sampleX, sampleY)
+                    for (shift in listOf(0, 8, 16, 24)) {
+                        assertTrue("$sample opacity=$percent backing channel=$shift", kotlin.math.abs((actual ushr shift and 255) - (expected ushr shift and 255)) <= 2)
+                    }
+                    assertTrue("$sample opacity=$percent changes backing", !original.sameAs(pixels))
+                }
+                val body = compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true)
+                val layout = body.textLayout()
+                val ink = layout.inkAt("Reading")
+                assertEquals("$sample text never fades", 1f, ink.alpha, 0f)
+                val canvasBounds = canvas.fetchSemanticsNode().boundsInRoot
+                val bounds = body.fetchSemanticsNode().boundsInRoot
+                val offset = layout.layoutInput.text.indexOf("Reading")
+                val first = layout.getBoundingBox(offset)
+                val last = layout.getBoundingBox(offset + "Reading".lastIndex)
+                assertTrue(
+                    "$sample opacity=$percent paints fully opaque glyphs",
+                    ((bounds.left - canvasBounds.left + first.left).toInt() until (bounds.left - canvasBounds.left + last.right).toInt()).any { x ->
+                        ((bounds.top - canvasBounds.top + first.top).toInt() until (bounds.top - canvasBounds.top + first.bottom).toInt()).any { y -> pixels.getPixel(x, y) == ink.toArgb() }
+                    },
+                )
+            }
+        }
+    }
+
+    @Test
+    fun opacityLeavesReplyAndAudioChildSurfacesOpaqueAcrossEveryLayout() {
+        val density = mutableStateOf(LayoutDensity.COMFORTABLE)
+        val audio = mutableStateOf(false)
+        val opacity = mutableStateOf(100)
+        compose.setContent {
+            ContrastSample(
+                density = density.value,
+                audio = audio.value,
+                reply = ReplyPreviewData("quoted", "Quoted reply"),
+                messageBackgroundOpacityPercent = opacity.value,
+                canvasColor = Color.Magenta,
+            )
+        }
+        for (layout in LayoutDensity.entries) {
+            for (isAudio in listOf(false, true)) {
+                compose.runOnIdle {
+                    density.value = layout
+                    audio.value = isAudio
+                    opacity.value = 100
+                }
+                val child = if (isAudio) compose.onNodeWithTag("audio_player", useUnmergedTree = true) else compose.onNodeWithText("Quoted reply", useUnmergedTree = true)
+                val original = child.captureToImage().asAndroidBitmap()
+                for (percent in listOf(37, 0, 100)) {
+                    compose.runOnIdle { opacity.value = percent }
+                    assertTrue("$layout audio=$isAudio opacity=$percent child does not fade", original.sameAs(child.captureToImage().asAndroidBitmap()))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun opacityKeepsKnownCanvasBodyAndMetadataReadableInEveryLayoutAndKind() {
+        val density = mutableStateOf(LayoutDensity.COMFORTABLE)
+        val kind = mutableStateOf(MessageKind.PRIVMSG)
+        val theme = mutableStateOf(ColorThemePreset.AYU_LIGHT)
+        val opacity = mutableStateOf(100)
+        compose.setContent {
+            ContrastSample(
+                density = density.value,
+                kind = kind.value,
+                theme = theme.value,
+                messageBackgroundOpacityPercent = opacity.value,
+                showSender = true,
+                showTimestamp = true,
+            )
+        }
+        for (preset in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
+            for (layout in LayoutDensity.entries) {
+                for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)) {
+                    for (percent in listOf(0, 37, 100)) {
+                        compose.runOnIdle {
+                            theme.value = preset
+                            density.value = layout
+                            kind.value = messageKind
+                            opacity.value = percent
+                        }
+                        val label = "$preset $layout $messageKind opacity=$percent"
+                        assertPaintedTextContrast(label, compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true))
+                        assertPaintedTextContrast(label, compose.onNodeWithText(TIME, useUnmergedTree = true))
+                    }
+                }
             }
         }
     }

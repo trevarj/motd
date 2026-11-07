@@ -446,6 +446,11 @@ class ChatListHistoryRecoveryTest {
                     layout: LayoutDensity?,
                 ): Boolean = error("Unexpected layout mutation")
 
+                override suspend fun setMessageBackgroundOpacityOverride(
+                    id: Long,
+                    percent: Int?,
+                ): Boolean = error("Unexpected opacity mutation")
+
                 override suspend fun setPresenceModeOverride(
                     id: Long,
                     mode: PresenceMode?,

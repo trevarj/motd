@@ -1046,6 +1046,7 @@ class ChatViewModel
                     global = settings.layoutDensity,
                     override = room?.layoutDensityOverride,
                     bufferDefault = LayoutDensity.TWO_LINE.takeIf { room?.type == BufferType.SERVER },
+                    messageBackgroundOpacityOverride = room?.messageBackgroundOpacityOverride,
                 )
             }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ConversationLayoutState())
 
@@ -1762,6 +1763,21 @@ class ChatViewModel
                 val written =
                     try {
                         bufferRepository.setLayoutDensityOverride(requestedId, override)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        false
+                    }
+                if (!written) uiEventQueue.enqueue(ChatUiEvent.ConversationLayoutWriteFailed)
+            }
+
+        /** Opacity and density are independent; only accepted Room emissions update the sheet. */
+        fun setConversationMessageBackgroundOpacityOverride(percent: Int?) =
+            viewModelScope.launch {
+                val requestedId = operationalBufferId.value
+                val written =
+                    try {
+                        bufferRepository.setMessageBackgroundOpacityOverride(requestedId, percent)
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: Exception) {

@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.res.stringResource
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
@@ -14,12 +15,17 @@ import io.github.trevarj.motd.ui.components.ChatLayoutPreview
 import io.github.trevarj.motd.ui.components.densityDescription
 import io.github.trevarj.motd.ui.components.densityLabel
 import io.github.trevarj.motd.ui.settings.ChoiceOption
+import io.github.trevarj.motd.ui.settings.MessageBackgroundOpacitySlider
 import io.github.trevarj.motd.ui.settings.SingleChoiceSheet
+import io.github.trevarj.motd.ui.settings.SwitchRow
+import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundOpacityPercent
 
 @Composable
 fun ConversationLayoutSheet(
     state: ConversationLayoutState,
     onSelect: (LayoutDensity?) -> Unit,
+    onOpacity: (Int?) -> Unit,
+    globalOpacity: Int,
     onDismiss: () -> Unit,
     wallpaper: WallpaperSelection,
     conversationFontScalePercent: Int,
@@ -60,15 +66,31 @@ fun ConversationLayoutSheet(
                     style = MaterialTheme.typography.bodyMedium,
                     fontStyle = if (state.override == null) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
                 )
-                ChatLayoutPreview(
-                    density = state.effective,
-                    messageSpacing = messageSpacing,
-                    bubbleCorners = bubbleCorners,
-                    wallpaper = wallpaper,
-                    conversationFontScalePercent = conversationFontScalePercent,
-                    tagPrefix = "chat_layout_preview",
-                )
+                CompositionLocalProvider(LocalMessageBackgroundOpacityPercent provides state.effectiveMessageBackgroundOpacity(globalOpacity)) {
+                    ChatLayoutPreview(
+                        density = state.effective,
+                        messageSpacing = messageSpacing,
+                        bubbleCorners = bubbleCorners,
+                        wallpaper = wallpaper,
+                        conversationFontScalePercent = conversationFontScalePercent,
+                        tagPrefix = "chat_layout_preview",
+                    )
+                }
             }
+        },
+        footer = {
+            SwitchRow(
+                title = stringResource(R.string.chat_layout_global_opacity),
+                subtitle = stringResource(R.string.chat_layout_global_opacity_desc),
+                checked = state.messageBackgroundOpacityOverride == null,
+                onCheckedChange = { inherit -> onOpacity(if (inherit) null else state.effectiveMessageBackgroundOpacity(globalOpacity)) },
+                switchTag = "chat_layout_global_opacity",
+            )
+            MessageBackgroundOpacitySlider(
+                value = state.effectiveMessageBackgroundOpacity(globalOpacity),
+                onValue = onOpacity,
+                tag = "chat_message_background_opacity",
+            )
         },
     )
 }

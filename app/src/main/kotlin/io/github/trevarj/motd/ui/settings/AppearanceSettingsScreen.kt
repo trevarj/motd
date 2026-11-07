@@ -297,6 +297,9 @@ fun AppearanceSettingsContent(
         if (appearance.wallpaper == pendingWallpaper) pendingWallpaper = null
         previewAppearance = appearance.copy(wallpaper = pendingWallpaper ?: appearance.wallpaper)
     }
+    LaunchedEffect(target) {
+        if (target == SettingsTarget.MESSAGE_BACKGROUND_OPACITY) choiceSheet = AppearanceChoice.DENSITY
+    }
     LaunchedEffect(importedWallpaper) {
         importedWallpaper?.let {
             pendingWallpaper = it
@@ -650,20 +653,6 @@ fun AppearanceSettingsContent(
                     modifier = targetModifier,
                 )
             }
-            val opacityAvailable = previewDensity != LayoutDensity.COMFORTABLE && !previewAppearance.nicknameBackgroundsEnabled
-            if (opacityAvailable || target == SettingsTarget.MESSAGE_BACKGROUND_OPACITY) {
-                SettingsTarget(target?.name, SettingsTarget.MESSAGE_BACKGROUND_OPACITY.name) { targetModifier ->
-                    MessageBackgroundOpacitySlider(
-                        value = previewAppearance.messageBackgroundOpacityPercent,
-                        enabled = opacityAvailable,
-                        onValue = {
-                            previewAppearance = previewAppearance.copy(messageBackgroundOpacityPercent = it)
-                            onMessageBackgroundOpacity(it)
-                        },
-                        modifier = targetModifier,
-                    )
-                }
-            }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsTarget(target?.name, SettingsTarget.AVATAR_STYLE.name) { targetModifier ->
                 SettingsNavigationRow(
@@ -773,6 +762,7 @@ fun AppearanceSettingsContent(
             appearance = previewAppearance,
             deviceUses24Hour = deviceUses24Hour,
             customFontFile = customFontFile,
+            target = target,
             previewDensity = previewDensity,
             previewSpacing = previewSpacing,
             previewCorners = previewCorners,
@@ -784,6 +774,10 @@ fun AppearanceSettingsContent(
             onDensity = {
                 previewDensity = it
                 onLayoutDensity(it)
+            },
+            onMessageBackgroundOpacity = {
+                previewAppearance = previewAppearance.copy(messageBackgroundOpacityPercent = it)
+                onMessageBackgroundOpacity(it)
             },
             onComposerStyle = {
                 previewAppearance = previewAppearance.copy(composerStyle = it)
@@ -1009,6 +1003,8 @@ private fun AppearanceChoiceSheet(
     previewShadows: Boolean,
     onPalette: (NickColorPalette) -> Unit,
     onDensity: (LayoutDensity) -> Unit,
+    onMessageBackgroundOpacity: (Int) -> Unit,
+    target: SettingsTarget? = null,
     onComposerStyle: (ComposerStyle) -> Unit,
     onInputCornerStyle: (UiCornerStyle) -> Unit,
     onAvatarShape: (AvatarShape) -> Unit,
@@ -1203,6 +1199,7 @@ private fun AppearanceChoiceSheet(
                 onSelect = onDensity,
                 onDismiss = onDismiss,
                 tag = "settings_density_sheet",
+                initiallyShowFooter = target == SettingsTarget.MESSAGE_BACKGROUND_OPACITY,
                 dismissOnSelect = false,
                 preview = {
                     AppearanceChatLayoutPreview(
@@ -1215,6 +1212,15 @@ private fun AppearanceChoiceSheet(
                         previewShadows,
                         "settings_chat_preview_sheet",
                     )
+                },
+                footer = {
+                    SettingsTarget(target?.name, SettingsTarget.MESSAGE_BACKGROUND_OPACITY.name) { targetModifier ->
+                        MessageBackgroundOpacitySlider(
+                            value = appearance.messageBackgroundOpacityPercent,
+                            onValue = onMessageBackgroundOpacity,
+                            modifier = targetModifier,
+                        )
+                    }
                 },
             )
         }
@@ -1488,50 +1494,6 @@ private fun bubbleCornerLabel(value: io.github.trevarj.motd.data.prefs.BubbleCor
             io.github.trevarj.motd.data.prefs.BubbleCornerStyle.SQUARE -> R.string.settings_bubble_corner_square
         },
     )
-
-@Composable
-private fun MessageBackgroundOpacitySlider(
-    value: Int,
-    onValue: (Int) -> Unit,
-    enabled: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val title = stringResource(R.string.settings_message_background_opacity)
-    val percent =
-        if (value == 0) {
-            stringResource(R.string.settings_message_background_opacity_off)
-        } else {
-            stringResource(R.string.settings_font_size_percent, value)
-        }
-    Column(modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
-                Text(
-                    stringResource(
-                        if (enabled) R.string.settings_message_background_opacity_desc else R.string.settings_message_background_opacity_unavailable,
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            io.github.trevarj.motd.ui.components
-                .MetadataPill(percent)
-        }
-        Slider(
-            value = value.coerceIn(0, 100).toFloat(),
-            onValueChange = { onValue(it.roundToInt().coerceIn(0, 100)) },
-            valueRange = 0f..100f,
-            steps = 99,
-            enabled = enabled,
-            modifier =
-                Modifier.testTag("settings_message_background_opacity").semantics {
-                    contentDescription = title
-                    stateDescription = percent
-                },
-        )
-    }
-}
 
 @Composable
 private fun FontScaleSlider(

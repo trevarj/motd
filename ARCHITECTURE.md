@@ -199,12 +199,14 @@ flowchart TD
   heterogeneous geometry, while visible values name the resolved geometry (including the input
   layout's current radius). Theme/time inheritance also names the device's resolved mode;
   notification policy retains effective policy and its global/server source. Notification avatars remain circular.
-  With nickname backgrounds off, a retained 0–100% appearance slider controls only ordinary
-  Compact/Two-line row backings (default 100%, zero paints nothing), never text, avatars,
-  Comfortable bubbles, ACTION or mention fills. Its visibility and real-row previews follow
-  immediate draft layout/toggle changes; dimming and contrast do not override the chosen alpha.
-  A search-requested unavailable slider stays visible but disabled with prerequisite instructions,
-  without changing the saved layout or nickname-background preference.
+  Message layout owns a continuous 0–100% background-opacity slider (default 100%) for ordinary
+  PRIVMSG, NOTICE, and ACTION backings in every layout, with or without nickname tint. Zero draws
+  no ordinary backing; content, child surfaces, incoming mention fills, and semantic rails remain.
+  Dimming precedes draw alpha, and contrast uses the fill composited over the known theme canvas.
+  Two-line tinted/ACTION fills retain their existing 90%/opaque baseline before multiplying opacity.
+  Global choices preview immediately; each durable chat independently inherits or overrides opacity
+  through accepted Room state, separately from density. Search opens the dismissable layout sheet
+  and highlights its footer slider. Canonical merges retain the winner's explicit override, including zero.
   Appearance also selects Material (the exact existing Filled/Outlined/AutoMirrored
   variants) or Lucide UI icons. The shared native `UiIcon` leaf resolves cached vectors
   at composition time, so remembered action descriptors and persisted gesture icon

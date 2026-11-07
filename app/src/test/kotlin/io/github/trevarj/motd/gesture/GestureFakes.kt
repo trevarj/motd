@@ -197,6 +197,11 @@ internal class FakeBuffers : BufferRepository {
         layout: LayoutDensity?,
     ): Boolean = false
 
+    override suspend fun setMessageBackgroundOpacityOverride(
+        id: Long,
+        percent: Int?,
+    ): Boolean = false
+
     override suspend fun setPresenceModeOverride(
         id: Long,
         mode: PresenceMode?,

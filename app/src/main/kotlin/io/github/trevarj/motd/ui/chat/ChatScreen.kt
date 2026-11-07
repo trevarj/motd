@@ -269,6 +269,7 @@ import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
 import io.github.trevarj.motd.ui.settings.foolEditorPreferences
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.ConversationTypography
+import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundOpacityPercent
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdSizes
@@ -812,6 +813,7 @@ fun ChatScreen(
         onDismissAccountSetup = viewModel::dismissAccountSetupReminder,
         conversationLayout = state.conversationLayout,
         onConversationLayoutSelected = viewModel::setConversationLayoutOverride,
+        onConversationMessageBackgroundOpacitySelected = viewModel::setConversationMessageBackgroundOpacityOverride,
         onPresenceModeSelected = viewModel::setPresenceModeOverride,
         onPresenceCustomKindSelected = viewModel::togglePresenceCustomKind,
         onHistorySyncModeSelected = viewModel::setHistorySyncModeOverride,
@@ -1253,6 +1255,7 @@ internal fun ChatContent(
     nearestUnreadMentionBelow: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> ChatPositionTarget? = { _, _ -> null },
     conversationLayout: ConversationLayoutState = ConversationLayoutState(),
     onConversationLayoutSelected: (io.github.trevarj.motd.data.prefs.LayoutDensity?) -> Unit = {},
+    onConversationMessageBackgroundOpacitySelected: (Int?) -> Unit = {},
     onPresenceModeSelected: (io.github.trevarj.motd.data.prefs.PresenceMode?) -> Unit = {},
     onPresenceCustomKindSelected: (io.github.trevarj.motd.data.db.MessageKind) -> Unit = {},
     onHistorySyncModeSelected: (io.github.trevarj.motd.data.prefs.HistorySyncMode?) -> Unit = {},
@@ -3991,7 +3994,10 @@ internal fun ChatContent(
                         // Scaffold measures the host before the full-area timeline in this same pass.
                         if (bottomHostPadding !== innerPadding) bottomHostPadding = innerPadding
                         Box(modifier = Modifier.fillMaxSize()) {
-                            CompositionLocalProvider(LocalSpacing provides conversationSpacing) {
+                            CompositionLocalProvider(
+                                LocalSpacing provides conversationSpacing,
+                                LocalMessageBackgroundOpacityPercent provides conversationLayout.effectiveMessageBackgroundOpacity(LocalMessageBackgroundOpacityPercent.current),
+                            ) {
                                 Box(
                                     modifier =
                                         Modifier
@@ -4317,7 +4323,10 @@ internal fun ChatContent(
                     // clipping the ghost itself would clip nothing, since its layer translation carries
                     // its bounds along with its pixels. The spacing provider mirrors the timeline
                     // pane's, so the replica renders under exactly the tokens the rows use.
-                    CompositionLocalProvider(LocalSpacing provides conversationSpacing) {
+                    CompositionLocalProvider(
+                        LocalSpacing provides conversationSpacing,
+                        LocalMessageBackgroundOpacityPercent provides conversationLayout.effectiveMessageBackgroundOpacity(LocalMessageBackgroundOpacityPercent.current),
+                    ) {
                         Box(
                             modifier =
                                 Modifier
@@ -4747,6 +4756,8 @@ internal fun ChatContent(
         ConversationLayoutSheet(
             state = conversationLayout,
             onSelect = onConversationLayoutSelected,
+            onOpacity = onConversationMessageBackgroundOpacitySelected,
+            globalOpacity = LocalMessageBackgroundOpacityPercent.current,
             onDismiss = { conversationLayoutSheetOpen = false },
             wallpaper = chatWallpaper,
             conversationFontScalePercent = conversationFontScalePercent,

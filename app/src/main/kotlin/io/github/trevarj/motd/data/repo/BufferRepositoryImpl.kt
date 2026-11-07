@@ -133,6 +133,11 @@ class BufferRepositoryImpl
             layout: LayoutDensity?,
         ): Boolean = bufferDao.setLayoutDensityOverride(id, layout) == 1
 
+        override suspend fun setMessageBackgroundOpacityOverride(
+            id: Long,
+            percent: Int?,
+        ): Boolean = bufferDao.setMessageBackgroundOpacityOverride(id, percent?.coerceIn(0, 100)) == 1
+
         override suspend fun setPresenceModeOverride(
             id: Long,
             mode: PresenceMode?,

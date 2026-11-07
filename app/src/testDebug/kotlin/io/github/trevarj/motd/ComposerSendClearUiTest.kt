@@ -4200,8 +4200,9 @@ class ComposerSendClearUiTest {
         runBlocking { motion.morph.snapTo(1f) }
         var renderFlight by mutableStateOf(false)
         var status by mutableStateOf(true to false)
+        var opacity by mutableStateOf(100)
         compose.setContent {
-            MotdTheme(dynamicColor = false) {
+            MotdTheme(dynamicColor = false, messageBackgroundOpacityPercent = opacity) {
                 val formatTime = rememberMessageTimeFormatter()
                 // Compare at the same window origin, not two separately rasterized stacked rows.
                 CompositionLocalProvider(LocalLottieMotionEnabled provides false) {
@@ -4246,9 +4247,10 @@ class ComposerSendClearUiTest {
         compose.waitForIdle()
 
         val sample = compose.onNodeWithTag("bubble_sample")
-        for (flags in listOf(true to false, false to false, true to true, false to true)) {
+        for ((flags, percent) in listOf(true to false, false to false, true to true, false to true).flatMap { flags -> listOf(100, 37, 0, 100).map { flags to it } }) {
             compose.runOnIdle {
                 status = flags
+                opacity = percent
                 renderFlight = false
             }
             compose.waitForIdle()
@@ -4257,7 +4259,7 @@ class ComposerSendClearUiTest {
             compose.runOnIdle { renderFlight = true }
             compose.waitForIdle()
             val airborne = sample.captureToImage().asAndroidBitmap()
-            assertTrue("The delayed ghost must match the real bubble with pending/failed=$flags", real.sameAs(airborne))
+            assertTrue("The delayed ghost must match the real bubble with pending/failed=$flags opacity=$percent", real.sameAs(airborne))
             // The merged accessibility tree excludes the overlay's cleared semantics subtree.
             compose.onAllNodesWithText("hi").assertCountEquals(0)
         }

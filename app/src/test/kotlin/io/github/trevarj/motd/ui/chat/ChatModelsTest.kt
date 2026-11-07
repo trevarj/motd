@@ -64,6 +64,19 @@ class ChatModelsTest {
     }
 
     @Test
+    fun `opacity inheritance is independent of density and clamps both sources`() {
+        val inherited = ConversationLayoutState(override = LayoutDensity.COMPACT, bufferDefault = LayoutDensity.TWO_LINE)
+        assertEquals(37, inherited.effectiveMessageBackgroundOpacity(37))
+        assertEquals(0, inherited.effectiveMessageBackgroundOpacity(-1))
+        assertEquals(100, inherited.effectiveMessageBackgroundOpacity(101))
+        val local = inherited.copy(messageBackgroundOpacityOverride = 0)
+        assertEquals(0, local.effectiveMessageBackgroundOpacity(100))
+        assertEquals(0, local.copy(override = null).effectiveMessageBackgroundOpacity(37))
+        assertEquals(100, local.copy(messageBackgroundOpacityOverride = 120).effectiveMessageBackgroundOpacity(37))
+        assertEquals(37, local.copy(messageBackgroundOpacityOverride = null).effectiveMessageBackgroundOpacity(37))
+    }
+
+    @Test
     fun `history sync override remains explicit when the global mode changes`() {
         val state =
             ConversationHistorySyncState(

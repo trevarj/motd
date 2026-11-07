@@ -104,6 +104,11 @@ class ChatListReadFreshnessTest {
             layout: LayoutDensity?,
         ): Boolean = true
 
+        override suspend fun setMessageBackgroundOpacityOverride(
+            id: Long,
+            percent: Int?,
+        ): Boolean = true
+
         override suspend fun setPresenceModeOverride(
             id: Long,
             mode: PresenceMode?,

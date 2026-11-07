@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.settings
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
@@ -40,6 +42,8 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -67,12 +71,15 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkEntity
@@ -81,6 +88,7 @@ import io.github.trevarj.motd.ui.components.MetadataPill
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Shared Material 3 shell for settings-style pages. */
@@ -420,6 +428,7 @@ internal fun <T> SingleChoiceSheet(
     tag: String,
     dismissOnSelect: Boolean = true,
     preview: (@Composable () -> Unit)? = null,
+    initiallyShowFooter: Boolean = false,
     footer: @Composable () -> Unit = {},
 ) {
     ModalBottomSheet(
@@ -430,7 +439,11 @@ internal fun <T> SingleChoiceSheet(
         contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         SheetSystemBars()
-        LazyColumn(Modifier.fillMaxWidth().selectableGroup().testTag("${tag}_options")) {
+        val listState = rememberLazyListState(initialFirstVisibleItemIndex = if (initiallyShowFooter) options.size + (if (preview == null) 1 else 2) else 0)
+        LaunchedEffect(initiallyShowFooter) {
+            if (initiallyShowFooter) listState.scrollToItem(options.size + if (preview == null) 1 else 2)
+        }
+        LazyColumn(Modifier.fillMaxWidth().selectableGroup().testTag("${tag}_options"), state = listState) {
             item { Box(Modifier.padding(horizontal = 12.dp)) { SectionHeader(title) } }
             if (preview != null) {
                 item { Column(Modifier.fillMaxWidth().padding(16.dp)) { preview() } }
@@ -451,6 +464,53 @@ internal fun <T> SingleChoiceSheet(
             item { footer() }
             item { Spacer(Modifier.height(20.dp)) }
         }
+    }
+}
+
+/** Keep the native touch/semantics target; only the visible track is slimmed down. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun MessageBackgroundOpacitySlider(
+    value: Int,
+    onValue: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    tag: String = "settings_message_background_opacity",
+) {
+    val title = stringResource(R.string.settings_message_background_opacity)
+    val bounded = value.coerceIn(0, 100)
+    val interactionSource = remember { MutableInteractionSource() }
+    val percent =
+        if (bounded == 0) stringResource(R.string.settings_message_background_opacity_off) else stringResource(R.string.settings_font_size_percent, bounded)
+    Column(modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            Text(percent, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Slider(
+            value = bounded.toFloat(),
+            onValueChange = { onValue(it.roundToInt().coerceIn(0, 100)) },
+            valueRange = 0f..100f,
+            interactionSource = interactionSource,
+            thumb = {
+                Box(Modifier.height(48.dp), contentAlignment = Alignment.Center) {
+                    SliderDefaults.Thumb(interactionSource = interactionSource, thumbSize = DpSize(20.dp, 20.dp))
+                }
+            },
+            track = { state ->
+                SliderDefaults.Track(
+                    sliderState = state,
+                    modifier = Modifier.height(4.dp),
+                    drawStopIndicator = null,
+                    thumbTrackGapSize = 0.dp,
+                    trackInsideCornerSize = 2.dp,
+                )
+            },
+            modifier =
+                Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(tag).semantics {
+                    contentDescription = title
+                    stateDescription = percent
+                },
+        )
     }
 }
 

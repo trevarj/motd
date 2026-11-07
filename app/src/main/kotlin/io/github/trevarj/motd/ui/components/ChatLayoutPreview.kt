@@ -82,6 +82,7 @@ internal fun ChatLayoutPreview(
                                     isSelf = false,
                                     kind = MessageKind.PRIVMSG,
                                     showSender = true,
+                                    modifier = Modifier.testTag("${tagPrefix}_incoming"),
                                 )
                                 Spacer(Modifier.height(spacing.bubbleBurstGap))
                                 MessageBubble(

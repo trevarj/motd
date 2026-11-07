@@ -37,7 +37,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 47,
+    version = 48,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -1113,6 +1113,14 @@ val MIGRATION_46_47 =
         }
     }
 
+/** v47 -> v48 adds independently inherited conversation backing opacity. */
+val MIGRATION_47_48 =
+    object : Migration(47, 48) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE buffers ADD COLUMN messageBackgroundOpacityOverride INTEGER")
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1172,6 +1180,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_44_45,
         MIGRATION_45_46,
         MIGRATION_46_47,
+        MIGRATION_47_48,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"

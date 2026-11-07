@@ -674,6 +674,20 @@ interface BufferDao {
 
     /** Write via a stale redirect shell to its current canonical conversation. */
     @Query(
+        """UPDATE buffers SET messageBackgroundOpacityOverride = :percent
+           WHERE id = (
+               SELECT COALESCE(redirectToRoomId, id)
+               FROM buffers
+               WHERE id = :requestedId
+           )""",
+    )
+    suspend fun setMessageBackgroundOpacityOverride(
+        requestedId: RoomId,
+        percent: Int?,
+    ): Int
+
+    /** Write via a stale redirect shell to its current canonical conversation. */
+    @Query(
         """UPDATE buffers SET presenceModeOverride = :mode,
                presenceCustomKindsOverride = CASE
                    WHEN :mode = 'CUSTOM' THEN COALESCE(presenceCustomKindsOverride, :initialCustomKinds)

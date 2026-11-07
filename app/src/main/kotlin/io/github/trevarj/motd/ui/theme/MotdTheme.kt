@@ -156,7 +156,7 @@ val LocalChatShadowsEnabled: ProvidableCompositionLocal<Boolean> = staticComposi
 /** Controls only the ordinary sender wash in Compact and Two-line message rows. */
 val LocalNicknameBackgroundsEnabled: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { true }
 
-/** Ordinary dense-row backing only, when nickname backgrounds are disabled; zero paints nothing. */
+/** Ordinary message backing in every layout; incoming mention fills and child surfaces are separate. */
 val LocalMessageBackgroundOpacityPercent: ProvidableCompositionLocal<Int> = staticCompositionLocalOf { 100 }
 
 /** Resolved fills for ordinary Comfortable PRIVMSG bubbles; null preserves the theme default. */

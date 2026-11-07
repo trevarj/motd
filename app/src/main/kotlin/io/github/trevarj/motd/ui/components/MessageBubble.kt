@@ -152,7 +152,7 @@ internal fun messageContentColor(
         if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
     )
 
-/** Bound unknown wallpaper ink contrast; keep mid-tone fills opaque when neither ink can reach 7:1. */
+/** Resolve the existing Two-line baseline before applying explicit user opacity. */
 private fun twoLineContrastFill(fill: Color): Color {
     val translucent = fill.copy(alpha = TWO_LINE_FILL_ALPHA)
     val darkest = translucent.compositeOver(Color.Black)
@@ -161,8 +161,7 @@ private fun twoLineContrastFill(fill: Color): Color {
     val lightInkContrast = contrastRatio(Color.White, lightest)
     return when {
         maxOf(darkInkContrast, lightInkContrast) < MESSAGE_TEXT_CONTRAST -> fill
-        darkInkContrast >= lightInkContrast -> darkest
-        else -> lightest
+        else -> translucent
     }
 }
 
@@ -640,10 +639,12 @@ fun MessageBubble(
                 comfortableBubbleColors.received,
             )
         }
-    val bubbleColor = bubbleRoles.container
-    val textColor = bubbleRoles.content
+    val backgroundAlpha = if (mentionHighlighted) 1f else LocalMessageBackgroundOpacityPercent.current / 100f
+    val bubbleFill = bubbleRoles.container.copy(alpha = bubbleRoles.container.alpha * backgroundAlpha)
+    val bubbleColor = bubbleFill.compositeOver(scheme.background)
+    val textColor = messageContentColor(bubbleRoles.normalContent, bubbleColor, dimmed, bubbleRoles.normalContainer)
     val bodyInk = readingInk(scheme)
-    val bodyColor = remember(bodyInk, bubbleRoles, dimmed) { messageContentColor(bodyInk, bubbleColor, dimmed, bubbleRoles.normalContainer) }
+    val bodyColor = remember(bodyInk, bubbleColor, bubbleRoles, dimmed) { messageContentColor(bodyInk, bubbleColor, dimmed, bubbleRoles.normalContainer) }
     // Tighten the inner grouped edge while retaining the shared outer silhouette.
     val groupedCorner = spacing.bubbleGroupedCorner
     val topCorner = if (showSender) spacing.bubbleCorner else groupedCorner
@@ -653,10 +654,10 @@ fun MessageBubble(
         } else {
             RoundedCornerShape(topStart = topCorner, topEnd = spacing.bubbleCorner, bottomEnd = spacing.bubbleCorner, bottomStart = groupedCorner)
         }
-    val elevation = comfortableElevation(COMFORTABLE_BUBBLE_ELEVATION)
+    val elevation = if (backgroundAlpha == 0f) 0.dp else comfortableElevation(COMFORTABLE_BUBBLE_ELEVATION)
     val surfaceModifier =
         if (sendMorphProgress == null) {
-            Modifier.shadow(elevation, shape).clip(shape).background(bubbleColor)
+            Modifier.shadow(elevation, shape).clip(shape).background(bubbleFill)
         } else {
             Modifier
                 .graphicsLayer {
@@ -669,10 +670,10 @@ fun MessageBubble(
                         val progress = sendMorphProgress().coerceIn(0f, 1f)
                         if (progress == 1f) {
                             // Match the ordinary background: only the outer clip shapes the fill.
-                            drawRect(bubbleColor)
+                            drawRect(bubbleFill)
                         } else {
                             scale(0.85f + 0.15f * progress) {
-                                drawOutline(outline, bubbleColor, alpha = (progress * 1.6f).coerceAtMost(1f))
+                                drawOutline(outline, bubbleFill, alpha = (progress * 1.6f).coerceAtMost(1f))
                             }
                         }
                     }
@@ -964,9 +965,11 @@ private fun ComfortableActionBubble(
         remember(scheme.tertiaryContainer, scheme.onTertiaryContainer, scheme.background, semanticColors.warningContainer, semanticColors.onWarningContainer, isSelf, hasMention, dimmed) {
             messageBubbleRoleColors(scheme, isSelf, hasMention, MessageKind.ACTION, semanticColors, dimmed)
         }
-    val rowColor = roles.container
+    val backgroundAlpha = if (hasMention && !isSelf) 1f else LocalMessageBackgroundOpacityPercent.current / 100f
+    val rowFill = roles.container.copy(alpha = roles.container.alpha * backgroundAlpha)
+    val rowColor = rowFill.compositeOver(scheme.background)
     val bodyInk = readingInk(scheme)
-    val bodyColor = remember(bodyInk, roles, dimmed) { messageContentColor(bodyInk, rowColor, dimmed, roles.normalContainer) }
+    val bodyColor = remember(bodyInk, rowColor, roles, dimmed) { messageContentColor(bodyInk, rowColor, dimmed, roles.normalContainer) }
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
     val linkColor = roles.normalContent
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
@@ -1056,9 +1059,9 @@ private fun ComfortableActionBubble(
             modifier =
                 Modifier
                     .chatBubbleWidth()
-                    .shadow(comfortableElevation(COMFORTABLE_BUBBLE_ELEVATION), shape)
+                    .shadow(if (backgroundAlpha == 0f) 0.dp else comfortableElevation(COMFORTABLE_BUBBLE_ELEVATION), shape)
                     .clip(shape)
-                    .background(rowColor)
+                    .background(rowFill)
                     .then(containerModifier),
             sourceModifier =
                 Modifier
@@ -1116,8 +1119,8 @@ private fun ComfortableActionBubble(
                             .align(Alignment.Bottom)
                             .padding(start = 8.dp, bottom = 1.dp),
                 ) {
-                    val metadataInk = if (failed) MaterialTheme.colorScheme.error else roles.content
-                    val metadataColor = if (failed) messageContentColor(metadataInk, rowColor, dimmed, roles.normalContainer) else roles.content
+                    val metadataInk = if (failed) MaterialTheme.colorScheme.error else roles.normalContent
+                    val metadataColor = messageContentColor(metadataInk, rowColor, dimmed, roles.normalContainer)
                     MessageStatusIcon(
                         isSelf = isSelf,
                         pending = pending,
@@ -1231,7 +1234,10 @@ private fun ActionMessageRow(
         }
     val normalPaintedRow = rowColor.compositeOver(MaterialTheme.colorScheme.background)
     val paintedRow = messageContainerColor(normalPaintedRow, MaterialTheme.colorScheme.background, dimmed)
-    val contrastRow = remember(paintedRow, spacing.twoLine, dimmed) { if (spacing.twoLine && !dimmed) twoLineContrastFill(paintedRow) else paintedRow }
+    val baselineFill = if (spacing.twoLine && !dimmed) twoLineContrastFill(paintedRow) else paintedRow
+    val backgroundAlpha = if (hasMention && !isSelf) 1f else LocalMessageBackgroundOpacityPercent.current / 100f
+    val drawFill = baselineFill.copy(alpha = baselineFill.alpha * backgroundAlpha)
+    val contrastRow = drawFill.compositeOver(MaterialTheme.colorScheme.background)
     val bodyInk = readingInk(MaterialTheme.colorScheme)
     val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
@@ -1301,7 +1307,7 @@ private fun ActionMessageRow(
             modifier =
                 Modifier
                     .fillMaxWidth()
-                    .background(if (contrastRow == paintedRow) paintedRow else paintedRow.copy(alpha = TWO_LINE_FILL_ALPHA))
+                    .background(drawFill)
                     .actionAccentRail(accent)
                     .then(containerModifier),
             sourceModifier =
@@ -1317,12 +1323,12 @@ private fun ActionMessageRow(
                         onLongPressLabel = onLongPressLabel ?: actionsLabel,
                     ),
             contentModifier = Modifier.padding(horizontal = spacing.messageOuterHPad, vertical = spacing.actionVPad),
-            parentColor = paintedRow,
+            parentColor = contrastRow,
             sourceWrapper = sourceWrapper,
             trailingContent = trailingContent,
         ) {
             reply?.let {
-                ReplyMiniBubble(it, nickColors, onReplyClick, paintedRow, dimmed)
+                ReplyMiniBubble(it, nickColors, onReplyClick, contrastRow, dimmed)
             }
 
             Row(verticalAlignment = Alignment.Bottom) {
@@ -1591,16 +1597,15 @@ private fun TwoLineMessageRow(
     val canvas = MaterialTheme.colorScheme.background
     val normalPaintedRow = rowTint.compositeOver(canvas)
     val paintedRow = messageContainerColor(normalPaintedRow, canvas, dimmed)
-    val controlledBackground = !hasMention && !LocalNicknameBackgroundsEnabled.current
-    val backgroundAlpha = LocalMessageBackgroundOpacityPercent.current / 100f
-    val contrastRow =
-        remember(paintedRow, canvas, dimmed, controlledBackground, backgroundAlpha) {
-            when {
-                controlledBackground -> paintedRow.copy(alpha = backgroundAlpha).compositeOver(canvas)
-                dimmed -> paintedRow
-                else -> twoLineContrastFill(paintedRow)
-            }
+    val baselineFill =
+        if (LocalNicknameBackgroundsEnabled.current || hasMention) {
+            if (dimmed) paintedRow else twoLineContrastFill(paintedRow)
+        } else {
+            paintedRow
         }
+    val backgroundAlpha = if (hasMention) 1f else LocalMessageBackgroundOpacityPercent.current / 100f
+    val drawFill = baselineFill.copy(alpha = baselineFill.alpha * backgroundAlpha)
+    val contrastRow = drawFill.compositeOver(canvas)
     val bodyInk = codeColor
     val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
     val nameBackground =
@@ -1625,14 +1630,8 @@ private fun TwoLineMessageRow(
         modifier =
             modifier
                 .fillMaxWidth()
-                // User-controlled opacity never becomes opaque for contrast or dimmed rows.
-                .background(
-                    when {
-                        controlledBackground -> paintedRow.copy(alpha = backgroundAlpha)
-                        contrastRow == paintedRow -> paintedRow
-                        else -> paintedRow.copy(alpha = TWO_LINE_FILL_ALPHA)
-                    },
-                ).then(containerModifier),
+                .background(drawFill)
+                .then(containerModifier),
         sourceModifier =
             Modifier.messageRowClicks(
                 onClick = onClick,
@@ -1641,7 +1640,7 @@ private fun TwoLineMessageRow(
                 onLongPressLabel = onLongPressLabel ?: actionsLabel,
             ),
         contentModifier = Modifier.padding(horizontal = spacing.messageOuterHPad, vertical = spacing.bubbleRowVPad),
-        parentColor = paintedRow,
+        parentColor = contrastRow,
         sourceWrapper = sourceWrapper,
         trailingContent =
             trailingContent?.let { trailing ->
@@ -1722,7 +1721,7 @@ private fun TwoLineMessageRow(
                     ).testTag("message_two_line_body"),
         ) {
             reply?.let {
-                ReplyMiniBubble(it, nickColors, onReplyClick, paintedRow, dimmed)
+                ReplyMiniBubble(it, nickColors, onReplyClick, contrastRow, dimmed)
             }
 
             if (kind == MessageKind.NOTICE) {

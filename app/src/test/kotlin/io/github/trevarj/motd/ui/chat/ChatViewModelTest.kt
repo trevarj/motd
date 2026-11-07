@@ -2340,6 +2340,85 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun `conversation opacity repository clamps persists and clears only its room`() =
+        runTest {
+            val repository =
+                BufferRepositoryImpl(
+                    bufferDao = db.bufferDao(),
+                    memberDao = db.memberDao(),
+                    messageDao = db.messageDao(),
+                    settings = FakeSettingsRepository(),
+                    visibilityReader = MessageVisibilityReader(db),
+                    localAvatarStore = LocalAvatarStore(ApplicationProvider.getApplicationContext()),
+                )
+            for ((input, expected) in listOf(-1 to 0, 37 to 37, 101 to 100)) {
+                assertTrue(repository.setMessageBackgroundOpacityOverride(channel.id, input))
+                assertEquals(expected, db.bufferDao().observeById(channel.id)?.messageBackgroundOpacityOverride)
+                assertNull(db.bufferDao().observeById(query.id)?.messageBackgroundOpacityOverride)
+            }
+            assertTrue(repository.setMessageBackgroundOpacityOverride(channel.id, null))
+            assertNull(db.bufferDao().observeById(channel.id)?.messageBackgroundOpacityOverride)
+            assertFalse(repository.setMessageBackgroundOpacityOverride(-1, 37))
+        }
+
+    @Test
+    fun `conversation opacity uses canonical room state and resets independently of density`() =
+        runTest {
+            val buffers = FakeBufferRepository(channel, routeId = query.id)
+            val other = FakeBufferRepository(query)
+            val vm = viewModel(channel, FakeConnectionManager(network.id), routeBufferId = query.id, buffers = buffers)
+            val otherVm = viewModel(query, FakeConnectionManager(network.id), buffers = other)
+            vm.state.first { it.buffer?.id == channel.id }
+            otherVm.state.first { it.buffer != null }
+            vm.setConversationMessageBackgroundOpacityOverride(37)
+            vm.state.first { it.conversationLayout.messageBackgroundOpacityOverride == 37 }
+            vm.setConversationLayoutOverride(LayoutDensity.COMPACT)
+            vm.state.first { it.conversationLayout.override == LayoutDensity.COMPACT }
+            vm.setConversationLayoutOverride(null)
+            vm.state.first { it.conversationLayout.override == null }
+            assertEquals(
+                37,
+                vm.state.value.conversationLayout
+                    .effectiveMessageBackgroundOpacity(100),
+            )
+            assertNull(otherVm.state.value.conversationLayout.messageBackgroundOpacityOverride)
+            vm.setConversationMessageBackgroundOpacityOverride(null)
+            vm.state.first { it.conversationLayout.messageBackgroundOpacityOverride == null }
+            assertEquals(
+                73,
+                vm.state.value.conversationLayout
+                    .effectiveMessageBackgroundOpacity(73),
+            )
+            assertEquals(listOf(channel.id to 37, channel.id to null), buffers.opacityWrites)
+            assertTrue(other.opacityWrites.isEmpty())
+        }
+
+    @Test
+    fun `conversation opacity rejected and throwing writes leave accepted state unchanged`() =
+        runTest {
+            val buffers = FakeBufferRepository(channel.copy(messageBackgroundOpacityOverride = 37)).apply { opacityWriteResult = false }
+            val vm = viewModel(channel, FakeConnectionManager(network.id), buffers = buffers)
+            vm.state.first { it.conversationLayout.messageBackgroundOpacityOverride == 37 }
+            vm.setConversationMessageBackgroundOpacityOverride(0)
+            advanceUntilIdle()
+            assertEquals(37, vm.state.value.conversationLayout.messageBackgroundOpacityOverride)
+            val firstFailure = vm.uiEvents.first().single()
+            assertEquals(ChatUiEvent.ConversationLayoutWriteFailed, firstFailure.value)
+            vm.acknowledgeUiEvent(firstFailure.id)
+            buffers.opacityWriteFailure = IllegalStateException("write failed")
+            vm.setConversationMessageBackgroundOpacityOverride(null)
+            advanceUntilIdle()
+            assertEquals(37, vm.state.value.conversationLayout.messageBackgroundOpacityOverride)
+            assertEquals(
+                ChatUiEvent.ConversationLayoutWriteFailed,
+                vm.uiEvents
+                    .first { it.isNotEmpty() }
+                    .single()
+                    .value,
+            )
+        }
+
+    @Test
     fun `presence mode inherits global then persists and clears an override`() =
         runTest {
             val settings = FakeSettingsRepository()
@@ -6929,6 +7008,9 @@ class ChatViewModelTest {
         val chatList = MutableStateFlow<List<ChatListRow>>(emptyList())
         val layoutWrites = mutableListOf<Pair<Long, LayoutDensity?>>()
         var layoutWriteResult = true
+        val opacityWrites = mutableListOf<Pair<Long, Int?>>()
+        var opacityWriteResult = true
+        var opacityWriteFailure: Exception? = null
         val presenceWrites = mutableListOf<Pair<Long, PresenceMode?>>()
         var presenceWriteResult = true
         val historySyncWrites = mutableListOf<Pair<Long, HistorySyncMode?>>()
@@ -6972,6 +7054,16 @@ class ChatViewModelTest {
             layoutWrites += id to layout
             if (layoutWriteResult) buffer.value = buffer.value.copy(layoutDensityOverride = layout)
             return layoutWriteResult
+        }
+
+        override suspend fun setMessageBackgroundOpacityOverride(
+            id: Long,
+            percent: Int?,
+        ): Boolean {
+            opacityWrites += id to percent
+            opacityWriteFailure?.let { throw it }
+            if (opacityWriteResult) buffer.value = buffer.value.copy(messageBackgroundOpacityOverride = percent)
+            return opacityWriteResult
         }
 
         override suspend fun setPresenceModeOverride(

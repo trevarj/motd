@@ -186,6 +186,12 @@ interface BufferRepository {
         layout: LayoutDensity?,
     ): Boolean
 
+    /** Null inherits global opacity; false means the requested conversation disappeared. */
+    suspend fun setMessageBackgroundOpacityOverride(
+        id: Long,
+        percent: Int?,
+    ): Boolean
+
     /** Persists a nullable per-conversation presence override; false means the room disappeared. */
     suspend fun setPresenceModeOverride(
         id: Long,

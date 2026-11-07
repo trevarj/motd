@@ -321,6 +321,8 @@ data class RoomEntity(
     val redirectToRoomId: RoomId? = null,
     /** Null inherits the global message-layout preference for this durable conversation. */
     val layoutDensityOverride: LayoutDensity? = null,
+    /** Null inherits the global backing opacity, independently of message layout. */
+    val messageBackgroundOpacityOverride: Int? = null,
     /** Null inherits the global presence-event preference for this durable conversation. */
     val presenceModeOverride: PresenceMode? = null,
     /** Null inherits global Custom kinds; an empty set is an explicit local hide. */
