@@ -1347,7 +1347,7 @@ internal fun Modifier.recordFolderTabBackdrop(
 
 @Composable
 private fun Modifier.folderCapsuleBackdrop(backdrop: FolderTabBackdrop?): Modifier {
-    val tint = chatListRowContainer(ChatListRowVisualState.UNREAD, MaterialTheme.colorScheme).copy(alpha = 0.80f)
+    val tint = chatListRowContainer(ChatListRowVisualState.UNREAD, MaterialTheme.colorScheme).copy(alpha = 0.60f)
     if (backdrop == null) return background(tint, MotdShapes.channelAvatar)
     val canvasColor = MaterialTheme.colorScheme.surface
     var origin by remember(backdrop) { mutableStateOf(Offset.Zero) }

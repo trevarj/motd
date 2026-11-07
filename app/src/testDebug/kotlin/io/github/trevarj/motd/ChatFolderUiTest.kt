@@ -355,8 +355,8 @@ class ChatFolderUiTest {
         assertEquals(colors.secondaryContainer.toArgb(), selectedFill)
         val unreadTint = lerp(colors.surface, colors.primaryContainer, 0.20f)
         val unreadFill = unreadTint.toArgb()
-        val restingFill = unreadTint.copy(alpha = 0.80f).compositeOver(colors.surface).toArgb()
-        assertColorNear("The capsule is an 80%-opaque unread tint, not an opaque card", restingFill, plainFill)
+        val restingFill = unreadTint.copy(alpha = 0.60f).compositeOver(colors.surface).toArgb()
+        assertColorNear("The capsule is a 60%-opaque unread tint, not an opaque card", restingFill, plainFill)
         assertNotEquals(unreadFill, plainFill)
         val unreadRowPixels = compose.onNodeWithTag("chatlist_row_1").captureToImage().asAndroidBitmap()
         val unreadRowFill = unreadRowPixels.getPixel(unreadRowPixels.width / 2, 2)
@@ -721,9 +721,9 @@ class ChatFolderUiTest {
             val samples = xs.map { pixels.getPixel((it - rootBounds.left).toInt(), y) }
             val greens = samples.map(android.graphics.Color::green)
             assertTrue("32dp blur removes the 8dp source stripes, unlike sharp translucency", greens.max() - greens.min() < 8)
-            val tint = lerp(backdropColors.surface, backdropColors.primaryContainer, 0.20f).copy(alpha = 0.80f)
+            val tint = lerp(backdropColors.surface, backdropColors.primaryContainer, 0.20f).copy(alpha = 0.60f)
             val expected = tint.compositeOver(if (redBand) Color(0xFFFF8000) else Color(0xFF0080FF)).toArgb()
-            assertColorNear("The live sampled band and 80% tint match at the capsule's actual coordinates", expected, samples[samples.size / 2], tolerance = 3)
+            assertColorNear("The live sampled band and 60% tint match at the capsule's actual coordinates", expected, samples[samples.size / 2], tolerance = 3)
             val plainY = (source.top + with(compose.density) { 360.dp.toPx() } - rootBounds.top).toInt()
             val sharpGreens = xs.map { android.graphics.Color.green(pixels.getPixel((it - rootBounds.left).toInt(), plainY)) }
             assertEquals("Only the capsule backing is blurred; exposed source stripes stay sharp", 255, sharpGreens.max() - sharpGreens.min())
@@ -759,7 +759,7 @@ class ChatFolderUiTest {
 
     @Test
     @Config(sdk = [26, 30], qualifiers = "w411dp-h891dp")
-    fun folder_capsule_uses_sharp_80_percent_tint_without_native_blur() {
+    fun folder_capsule_uses_sharp_60_percent_tint_without_native_blur() {
         setStripedBackdropContent(mutableStateOf(48.dp))
         assertSharpTintedBackdrop()
     }
@@ -787,7 +787,7 @@ class ChatFolderUiTest {
                 ),
             )
         setContent(state, colorScheme = colors)
-        val tintOnly = lerp(colors.surface, colors.primaryContainer, 0.20f).copy(alpha = 0.80f).compositeOver(colors.surface).toArgb()
+        val tintOnly = lerp(colors.surface, colors.primaryContainer, 0.20f).copy(alpha = 0.60f).compositeOver(colors.surface).toArgb()
 
         fun capsulePixel(): Int {
             val root = compose.onRoot()
@@ -1283,7 +1283,7 @@ class ChatFolderUiTest {
         val pixels = root.captureToImage().asAndroidBitmap()
         val y = ((capsule.top + capsule.bottom) / 2 - rootBounds.top).toInt()
         val stripe = with(compose.density) { 8.dp.toPx() }
-        val tint = lerp(backdropColors.surface, backdropColors.primaryContainer, 0.20f).copy(alpha = 0.80f)
+        val tint = lerp(backdropColors.surface, backdropColors.primaryContainer, 0.20f).copy(alpha = 0.60f)
         val xs = (capsule.right - with(compose.density) { 96.dp.toPx() }).toInt() until (capsule.right - with(compose.density) { 24.dp.toPx() }).toInt()
         val samples =
             xs.map { x ->
@@ -1293,7 +1293,7 @@ class ChatFolderUiTest {
                 assertColorNear("Without a native source, the capsule only tints the sharp canvas", expected, actual)
                 android.graphics.Color.green(actual)
             }
-        assertTrue("Tint-only fallback preserves stripe contrast instead of claiming blur", samples.max() - samples.min() >= 49)
+        assertTrue("Tint-only fallback preserves 40% of the source stripe contrast instead of claiming blur", samples.max() - samples.min() >= 99)
     }
 
     private fun assertColorNear(
