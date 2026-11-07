@@ -29,6 +29,28 @@ The debug APK lands under `app/build/outputs/apk/debug/`. Install it with
 `adb install`. The debug build carries the `.debug` application-id suffix, so
 it can coexist with a release install.
 
+`:app` Kotlin compilation is deliberately non-incremental: Kotlin 2.4.21 with
+Compose has left older callers referencing generated `$stable` fields absent
+from recompiled classes, crashing on channel entry with `NoSuchFieldError`
+(`ChatPageCache.Entry` and previously `Lease`). The module's task configuration
+applies to Gradle, IDE, and CI builds; an explicit task input invalidates older
+outputs and cache entries. Gradle up-to-date checks and build caching remain
+enabled, and other modules retain their existing compilation policy. Revisit
+this workaround only after a compiler upgrade is verified across edits to both
+Compose callers and their model classes.
+
+To replace an already affected debug APK, force only the app Kotlin task to
+rerun without restoring cached output, then package normally:
+
+```sh
+bash ./gradlew :app:compileDebugKotlin --rerun :app:assembleDebug \
+  --no-build-cache -PmotdAiAbis=arm64-v8a --stacktrace --console=plain
+```
+
+With physical-device install authorization, use
+`adb -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk`.
+Keep app data; clearing data or uninstalling cannot repair mismatched bytecode.
+
 For a local arm64 device install loop, build both AI engines only for arm64:
 
 ```sh

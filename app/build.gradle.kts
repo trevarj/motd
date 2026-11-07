@@ -13,6 +13,7 @@ import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.bundling.Zip
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -30,6 +31,17 @@ plugins {
 
 room {
     schemaDirectory("$projectDir/schemas")
+}
+
+// ponytail: Kotlin 2.4.21 incremental Compose output can retain callers of removed $stable fields.
+// Recompile :app coherently until a compiler upgrade is verified; other modules stay incremental.
+// AGP registers compiler tasks after evaluation; override KGP defaults after that registration.
+afterEvaluate {
+    tasks.withType<KotlinCompile>().configureEach {
+        incremental = false
+        // KGP marks incremental @Internal; this input invalidates older outputs and build-cache entries.
+        inputs.property("motdKotlinIncremental", false)
+    }
 }
 
 // Opt in for release-only characterization without slowing routine builds or checking generated
