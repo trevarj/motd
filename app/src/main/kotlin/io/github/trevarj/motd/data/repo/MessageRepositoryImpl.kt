@@ -430,7 +430,7 @@ internal class ViewportPagingSource(
                 withContext(ioDispatcher) {
                     try {
                         val before = cacheEntry?.readVersion(this@ViewportPagingSource)
-                        if (before != null && cacheEntry?.acceptsVersion(this@ViewportPagingSource, before) == false) {
+                        if (before != null && cacheEntry.acceptsVersion(this@ViewportPagingSource, before) == false) {
                             invalidate()
                             return@withContext LoadResult.Invalid()
                         }
