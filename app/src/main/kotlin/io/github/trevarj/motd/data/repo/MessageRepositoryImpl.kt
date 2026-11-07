@@ -44,7 +44,6 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 
@@ -379,12 +378,22 @@ internal class ViewportPagingSource(
     // A retained load's version bracket already proves this room did not change, so table-wide
     // commits must not restart it: sync commits faster than a large room loads, and restarting on
     // each one meant the first page could not land until sync stopped.
-    private val loadsInFlight = AtomicInteger(0)
-    private val changedDuringLoad = AtomicBoolean(false)
+    private val loadLock = Any()
+    private var loadsInFlight = 0
+    private var changedDuringLoad = false
     private val observer =
         object : InvalidationTracker.Observer("messages") {
             override fun onInvalidated(tables: Set<String>) {
-                if (cacheEntry != null && loadsInFlight.get() > 0) changedDuringLoad.set(true) else invalidate()
+                val deferred =
+                    synchronized(loadLock) {
+                        if (cacheEntry != null && loadsInFlight > 0) {
+                            changedDuringLoad = true
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                if (!deferred) invalidate()
             }
         }
 
@@ -423,7 +432,7 @@ internal class ViewportPagingSource(
 
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, MessageEntity> {
         cacheEntry?.beginLoad()
-        loadsInFlight.incrementAndGet()
+        synchronized(loadLock) { loadsInFlight++ }
         try {
             // Room keeps its own read transaction; the short writer checks bracket the whole load.
             val result =
@@ -456,10 +465,20 @@ internal class ViewportPagingSource(
             // An invalidation can arrive while the IO result waits to resume on its caller.
             return if (result is LoadResult.Page && invalid) LoadResult.Invalid() else result
         } finally {
-            loadsInFlight.decrementAndGet()
             cacheEntry?.endLoad()
+            // Finish cache accounting before the last concurrent load drains the notification.
+            val recheck =
+                synchronized(loadLock) {
+                    loadsInFlight--
+                    if (loadsInFlight == 0 && changedDuringLoad) {
+                        changedDuringLoad = false
+                        true
+                    } else {
+                        false
+                    }
+                }
             // A commit between the closing version read and here was not seen by the bracket.
-            if (cacheEntry != null && changedDuringLoad.getAndSet(false)) cacheEntry.recheckVersion(this)
+            if (recheck) cacheEntry?.recheckVersion(this)
         }
     }
 

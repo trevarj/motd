@@ -40,6 +40,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
@@ -641,6 +642,77 @@ class ChatPageCacheTest {
             val result = source.load(PagingSource.LoadParams.Refresh(0, 50, true))
             assertTrue("sync traffic elsewhere must not discard this page: $result", result is PagingSource.LoadResult.Page)
             assertFalse(source.invalid)
+        }
+
+    @Test
+    fun sameRoomNotificationSurvivesConcurrentLoadHandoffs() =
+        cacheTest { fixture ->
+            val room = fixture.seedRooms(1).single()
+            val row = checkNotNull(fixture.db.messageDao().newestMessage(room))
+            startHostCollections = false
+            val entry = fixture.acquire(room).entry
+            advanceUntilIdle()
+            val started = Channel<Unit>(2)
+            val releasePages = CompletableDeferred<Unit>()
+            val caller = HoldingExecutor()
+            val tracker = fixture.db.invalidationTracker
+            val source =
+                ViewportPagingSource(
+                    object : PagingSource<Int, MessageEntity>() {
+                        override fun getRefreshKey(state: PagingState<Int, MessageEntity>): Int? = null
+
+                        override suspend fun load(params: LoadParams<Int>): LoadResult<Int, MessageEntity> {
+                            started.send(Unit)
+                            releasePages.await()
+                            return LoadResult.Page(listOf(row), null, null, 0, 0)
+                        }
+                    },
+                    MutableStateFlow(null),
+                    tracker,
+                    bufferId = room,
+                    ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+                    cacheEntry = entry,
+                ) { null }
+            entry.sourceCreated(source)
+            val loads =
+                List(2) {
+                    async(caller.asCoroutineDispatcher()) {
+                        source.load(PagingSource.LoadParams.Refresh(0, 50, true))
+                    }
+                }
+            val delivered = CompletableDeferred<Unit>()
+            val waiter =
+                object : InvalidationTracker.Observer("messages") {
+                    override fun onInvalidated(tables: Set<String>) {
+                        delivered.complete(Unit)
+                    }
+                }
+            tracker.addObserver(waiter)
+            try {
+                repeat(2) { started.receive() }
+                caller.paused = true
+                releasePages.complete(Unit)
+                // Both closing version reads finish before either caller receives its page.
+                val handoffs = List(2) { caller.pending.receive() }
+                fixture.editNewestRow(room)
+                tracker.refreshAsync()
+                delivered.await()
+                advanceUntilIdle()
+                assertFalse("the same-room notification must defer until the load handoff", source.invalid)
+
+                handoffs[0].run()
+                advanceUntilIdle()
+                assertFalse("another load still owns the deferred notification", source.invalid)
+                handoffs[1].run()
+                loads.forEach { assertTrue(it.await() is PagingSource.LoadResult.Page) }
+                advanceUntilIdle()
+                assertTrue("the last handoff must notice the commit missed by both version brackets", source.invalid)
+            } finally {
+                releasePages.complete(Unit)
+                caller.resume()
+                tracker.removeObserver(waiter)
+                source.invalidate()
+            }
         }
 
     @Test
