@@ -1,15 +1,30 @@
 package io.github.trevarj.motd
 
 import android.content.Context
+import android.graphics.Bitmap
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assert
@@ -33,6 +48,7 @@ import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferType
@@ -45,8 +61,11 @@ import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.ui.chatlist.ChatListContent
 import io.github.trevarj.motd.ui.chatlist.ChatListInvitation
 import io.github.trevarj.motd.ui.chatlist.ChatListState
+import io.github.trevarj.motd.ui.chatlist.FolderTabStrip
 import io.github.trevarj.motd.ui.chatlist.ordinaryChatListRows
 import io.github.trevarj.motd.ui.chatlist.partitionArchivedRows
+import io.github.trevarj.motd.ui.chatlist.recordFolderTabBackdrop
+import io.github.trevarj.motd.ui.chatlist.rememberFolderTabBackdrop
 import io.github.trevarj.motd.ui.chatlist.summarizeFolder
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -294,7 +313,7 @@ class ChatFolderUiTest {
     }
 
     @Test
-    fun folder_tabs_share_unread_card_fill_with_only_selected_pill_and_no_underline_or_separator() {
+    fun folder_tabs_keep_selected_pills_sharp_above_the_translucent_capsule_and_scrolling_rows() {
         val colors =
             lightColorScheme(
                 surface = Color(0xFFABCDEF),
@@ -334,20 +353,23 @@ class ChatFolderUiTest {
         val plainFill = pillPixel(folderTag)
         assertNotEquals(plainFill, selectedFill)
         assertEquals(colors.secondaryContainer.toArgb(), selectedFill)
-        val unreadFill = lerp(colors.surface, colors.primaryContainer, 0.20f).toArgb()
-        assertEquals(unreadFill, plainFill)
+        val unreadTint = lerp(colors.surface, colors.primaryContainer, 0.20f)
+        val unreadFill = unreadTint.toArgb()
+        val restingFill = unreadTint.copy(alpha = 0.80f).compositeOver(colors.surface).toArgb()
+        assertColorNear("The capsule is an 80%-opaque unread tint, not an opaque card", restingFill, plainFill)
+        assertNotEquals(unreadFill, plainFill)
         val unreadRowPixels = compose.onNodeWithTag("chatlist_row_1").captureToImage().asAndroidBitmap()
         val unreadRowFill = unreadRowPixels.getPixel(unreadRowPixels.width / 2, 2)
         assertEquals("The unread row uses the unread card tint", unreadFill, unreadRowFill)
-        assertEquals("Unselected tabs reveal the capsule's unread card tint", unreadRowFill, plainFill)
+        assertNotEquals("The unselected tab is translucent while the unread row stays opaque", unreadRowFill, plainFill)
 
         val strip = compose.onNodeWithTag("chatlist_folder_tabs")
         val stripBounds = strip.fetchSemanticsNode().boundsInRoot
         val pillBounds = compose.onNodeWithTag(allTag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val pixels = strip.captureToImage().asAndroidBitmap()
         val center = ((pillBounds.left + pillBounds.right) / 2 - stripBounds.left).toInt()
-        assertEquals(plainFill, pixels.getPixel(center, 0))
-        assertEquals(plainFill, pixels.getPixel(center, pixels.height - 1))
+        assertColorNear("No underline above the selected pill", plainFill, pixels.getPixel(center, 0))
+        assertColorNear("No separator below the selected pill", plainFill, pixels.getPixel(center, pixels.height - 1))
         val root = compose.onRoot()
         val rootBounds = root.fetchSemanticsNode().boundsInRoot
         val overlay = compose.onNodeWithTag("chatlist_folder_overlay").fetchSemanticsNode().boundsInRoot
@@ -384,11 +406,13 @@ class ChatFolderUiTest {
         assertTrue(underStripY in shiftedRow.top..shiftedRow.bottom)
         assertEquals("The transparent strip reveals the moving chat row", colors.surface.toArgb(), rootPixel(underStripX, underStripY))
         val capsuleBounds = compose.onNodeWithTag("chatlist_folder_capsule").fetchSemanticsNode().boundsInRoot
-        assertEquals(
-            "The shared capsule matches the actual unread chat card surface",
-            unreadRowFill,
-            rootPixel(capsuleBounds.right - with(compose.density) { 8.dp.toPx() }, underStripY),
-        )
+        val movingCapsulePixel = rootPixel(capsuleBounds.right - with(compose.density) { 8.dp.toPx() }, underStripY)
+        for (shift in listOf(16, 8, 0)) {
+            val channel = (movingCapsulePixel shr shift) and 0xFF
+            val resting = (restingFill shr shift) and 0xFF
+            val unread = (unreadFill shr shift) and 0xFF
+            assertTrue("The blurred capsule stays between the tinted canvas and unread row", channel in minOf(resting, unread) - 2..maxOf(resting, unread) + 2)
+        }
         val selectedBounds = compose.onNodeWithTag(allTag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         assertEquals(
             "The selected pill remains secondary-container above the row",
@@ -409,8 +433,8 @@ class ChatFolderUiTest {
 
         compose.onNodeWithTag("chatlist_pinned_mentions").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_folder_tab_7").performClick().assertIsSelected()
-        assertEquals(plainFill, pillPixel(allTag))
-        assertNotEquals(plainFill, pillPixel(folderTag))
+        assertColorNear("Switching tabs restores the measured initial backdrop", plainFill, pillPixel(allTag))
+        assertEquals(colors.secondaryContainer.toArgb(), pillPixel(folderTag))
     }
 
     @Test
@@ -572,7 +596,7 @@ class ChatFolderUiTest {
     }
 
     @Test
-    fun folder_strip_keeps_transparent_backdrop_and_capsule_matching_unread_chat_card_in_light_and_dark_themes() {
+    fun folder_strip_keeps_transparent_gutters_and_smooth_capsule_edges_in_light_and_dark_themes() {
         val preset = mutableStateOf(ColorThemePreset.LIGHT)
         lateinit var colors: ColorScheme
         val state =
@@ -658,10 +682,11 @@ class ChatFolderUiTest {
             assertEquals(tabBounds.right, selected.right, 0.5f)
             assertEquals("The selected pill is inset 4dp from the tab top", pillInset, selected.top - tabBounds.top, 0.5f)
             assertEquals("The selected pill is inset 4dp from the tab bottom", pillInset, tabBounds.bottom - selected.bottom, 0.5f)
-            val unreadFill = lerp(colors.surface, colors.primaryContainer, 0.20f).toArgb()
-            assertEquals("The leading capsule inset uses the unread card tint", unreadFill, pixel(bounds.left + sampleInset, centerY))
-            assertEquals("The upper capsule inset uses the unread card tint", unreadFill, pixel((selected.left + selected.right) / 2, bounds.top + sampleInset))
-            assertEquals("The lower capsule inset uses the unread card tint", unreadFill, pixel((selected.left + selected.right) / 2, bounds.bottom - sampleInset))
+            // The blur samples first-row artwork below the header, so its edges need not match a flat canvas.
+            val pillCenterX = (selected.left + selected.right) / 2
+            assertColorNear("The leading inset has no hard border", pixel(bounds.left + 2 * sampleInset, centerY), pixel(bounds.left + sampleInset, centerY))
+            assertColorNear("The upper inset has no underline", pixel(pillCenterX, bounds.top + 2 * sampleInset), pixel(pillCenterX, bounds.top + sampleInset))
+            assertColorNear("The lower inset has no separator", pixel(pillCenterX, bounds.bottom - 2 * sampleInset), pixel(pillCenterX, bounds.bottom - sampleInset))
             val mentionsTab = compose.onNodeWithTag("chatlist_folder_tab_mentions").fetchSemanticsNode().boundsInRoot
             val mentionsPill = compose.onNodeWithTag("chatlist_folder_tab_pill_mentions", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
             assertEquals("Mentions keeps the same 48dp target", tabBounds.height, mentionsTab.height, 0.5f)
@@ -670,6 +695,130 @@ class ChatFolderUiTest {
             assertEquals(pillInset, mentionsTab.bottom - mentionsPill.bottom, 0.5f)
             compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
         }
+    }
+
+    @Test
+    @Config(sdk = [31, 35], qualifiers = "w411dp-h891dp")
+    fun folder_capsule_blurs_live_scrolling_backdrop_and_tracks_capsule_offsets() {
+        val capsuleTop = mutableStateOf(48.dp)
+        setStripedBackdropContent(capsuleTop)
+        val root = compose.onRoot()
+        val rootBounds = root.fetchSemanticsNode().boundsInRoot
+        val source = compose.onNodeWithTag("folder_backdrop_source").fetchSemanticsNode().boundsInRoot
+
+        fun capture(): Bitmap {
+            compose.waitForIdle()
+            return root.captureToImage().asAndroidBitmap()
+        }
+
+        fun assertBackdrop(
+            pixels: Bitmap,
+            redBand: Boolean,
+        ) {
+            val capsule = compose.onNodeWithTag("chatlist_folder_capsule").fetchSemanticsNode().boundsInRoot
+            val y = ((capsule.top + capsule.bottom) / 2 - rootBounds.top).toInt()
+            val xs = (capsule.right - with(compose.density) { 96.dp.toPx() }).toInt() until (capsule.right - with(compose.density) { 24.dp.toPx() }).toInt()
+            val samples = xs.map { pixels.getPixel((it - rootBounds.left).toInt(), y) }
+            val greens = samples.map(android.graphics.Color::green)
+            assertTrue("32dp blur removes the 8dp source stripes, unlike sharp translucency", greens.max() - greens.min() < 8)
+            val tint = lerp(backdropColors.surface, backdropColors.primaryContainer, 0.20f).copy(alpha = 0.80f)
+            val expected = tint.compositeOver(if (redBand) Color(0xFFFF8000) else Color(0xFF0080FF)).toArgb()
+            assertColorNear("The live sampled band and 80% tint match at the capsule's actual coordinates", expected, samples[samples.size / 2], tolerance = 3)
+            val plainY = (source.top + with(compose.density) { 360.dp.toPx() } - rootBounds.top).toInt()
+            val sharpGreens = xs.map { android.graphics.Color.green(pixels.getPixel((it - rootBounds.left).toInt(), plainY)) }
+            assertEquals("Only the capsule backing is blurred; exposed source stripes stay sharp", 255, sharpGreens.max() - sharpGreens.min())
+            val pill = compose.onNodeWithTag("chatlist_folder_tab_pill_all", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertEquals(
+                "The selected pill remains opaque and sharp",
+                backdropColors.secondaryContainer.toArgb(),
+                pixels.getPixel(((pill.left + pill.right) / 2 - rootBounds.left).toInt(), (pill.top + with(compose.density) { 2.dp.toPx() } - rootBounds.top).toInt()),
+            )
+            val ink =
+                (pill.left.toInt() until pill.right.toInt()).sumOf { x ->
+                    (pill.top.toInt() until pill.bottom.toInt()).count { py ->
+                        pixels.getPixel((x - rootBounds.left).toInt(), (py - rootBounds.top).toInt()) == backdropColors.onSecondaryContainer.toArgb()
+                    }
+                }
+            assertTrue("Tab text and icons retain solid foreground ink, not blurred artwork", ink > 10)
+            val gutterX = (capsule.left - with(compose.density) { 4.dp.toPx() } - rootBounds.left).toInt()
+            val gutter = pixels.getPixel(gutterX, y)
+            assertTrue("External gutters expose untinted, unblurred source stripes", android.graphics.Color.green(gutter) in listOf(0, 255))
+        }
+
+        val initial = capture()
+        assertBackdrop(initial, redBand = true)
+        compose.onNodeWithTag("folder_backdrop_source").performSemanticsAction(SemanticsActions.ScrollBy) {
+            assertTrue(it(0f, with(compose.density) { 160.dp.toPx() }))
+        }
+        val scrolled = capture()
+        assertBackdrop(scrolled, redBand = false)
+        compose.runOnIdle { capsuleTop.value = 208.dp }
+        val repositioned = capture()
+        assertBackdrop(repositioned, redBand = true)
+    }
+
+    @Test
+    @Config(sdk = [26, 30], qualifiers = "w411dp-h891dp")
+    fun folder_capsule_uses_sharp_80_percent_tint_without_native_blur() {
+        setStripedBackdropContent(mutableStateOf(48.dp))
+        assertSharpTintedBackdrop()
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w411dp-h891dp")
+    fun folder_preview_without_backdrop_source_keeps_translucent_tint() {
+        setStripedBackdropContent(mutableStateOf(48.dp), attachSource = false)
+        assertSharpTintedBackdrop()
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w411dp-h891dp")
+    fun folder_capsule_releases_backdrop_when_last_chat_disappears_and_recaptures_on_return() {
+        val colors = lightColorScheme(surface = Color.Black, primaryContainer = Color.White)
+        val rows = (1L..20L).map { row(it, "#room$it", folderId = null).copy(unreadCount = 1) }
+        val state =
+            mutableStateOf(
+                ChatListState(
+                    rows = rows,
+                    folderDisplayMode = FolderDisplayMode.TABS,
+                    mentionsEnabled = true,
+                    mentionsPlacement = MentionsPlacement.FOLDER_TAB,
+                    loading = false,
+                ),
+            )
+        setContent(state, colorScheme = colors)
+        val tintOnly = lerp(colors.surface, colors.primaryContainer, 0.20f).copy(alpha = 0.80f).compositeOver(colors.surface).toArgb()
+
+        fun capsulePixel(): Int {
+            val root = compose.onRoot()
+            val rootBounds = root.fetchSemanticsNode().boundsInRoot
+            val capsule = compose.onNodeWithTag("chatlist_folder_capsule").fetchSemanticsNode().boundsInRoot
+            return root.captureToImage().asAndroidBitmap().getPixel(
+                (capsule.right - with(compose.density) { 32.dp.toPx() } - rootBounds.left).toInt(),
+                ((capsule.top + capsule.bottom) / 2 - rootBounds.top).toInt(),
+            )
+        }
+
+        fun scrollUnreadRowsBehindCapsule() {
+            compose.onNodeWithTag("chatlist_rows").performSemanticsAction(SemanticsActions.ScrollBy) {
+                assertTrue(it(0f, with(compose.density) { 360.dp.toPx() }))
+            }
+            compose.waitForIdle()
+            assertTrue(
+                "The mounted unread rows visibly contribute to the backdrop before removal",
+                android.graphics.Color.red(capsulePixel()) - android.graphics.Color.red(tintOnly) >= 5,
+            )
+        }
+
+        scrollUnreadRowsBehindCapsule()
+        compose.runOnIdle { state.value = state.value.copy(rows = emptyList()) }
+        compose.onAllNodesWithTag("chatlist_rows").assertCountEquals(0)
+        compose.onNodeWithTag("chatlist_folder_tab_mentions").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_folder_tab_all").assertIsSelected()
+        assertColorNear("The empty header shows only its tint, never disposed unread rows", tintOnly, capsulePixel())
+
+        compose.runOnIdle { state.value = state.value.copy(rows = rows) }
+        scrollUnreadRowsBehindCapsule()
     }
 
     @Test
@@ -1060,6 +1209,102 @@ class ChatFolderUiTest {
         succeeds.value = true
         compose.onNodeWithTag("folder_destination_none").performClick()
         compose.onAllNodesWithTag("chatlist_selection_top_app_bar").assertCountEquals(0)
+    }
+
+    private val backdropColors =
+        lightColorScheme(
+            surface = Color(0xFF27313D),
+            primaryContainer = Color(0xFF586C80),
+            secondaryContainer = Color(0xFF5B347A),
+            onSecondaryContainer = Color.White,
+        )
+
+    private fun setStripedBackdropContent(
+        capsuleTop: State<Dp>,
+        attachSource: Boolean = true,
+    ) {
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                MaterialTheme(colorScheme = backdropColors) {
+                    val backdrop = if (attachSource) rememberFolderTabBackdrop() else null
+                    Box(Modifier.fillMaxSize().background(Color.Magenta).padding(start = 24.dp, top = 40.dp, end = 12.dp, bottom = 12.dp)) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .recordFolderTabBackdrop(backdrop, backdropColors.surface)
+                                .verticalScroll(rememberScrollState())
+                                .testTag("folder_backdrop_source"),
+                        ) {
+                            Canvas(Modifier.fillMaxWidth().height(1600.dp)) {
+                                val stripe = 8.dp.toPx()
+                                val band = 160.dp.toPx()
+                                repeat(10) { row ->
+                                    var column = 0
+                                    while (column * stripe < size.width) {
+                                        val color =
+                                            if (row % 2 == 0) {
+                                                if (column % 2 == 0) Color.Red else Color.Yellow
+                                            } else {
+                                                if (column % 2 == 0) Color.Blue else Color.Cyan
+                                            }
+                                        drawRect(color, Offset(column * stripe, row * band), Size(stripe, band))
+                                        column++
+                                    }
+                                }
+                            }
+                        }
+                        Box(Modifier.padding(start = 16.dp, top = capsuleTop.value, end = 8.dp)) {
+                            FolderTabStrip(
+                                folders = emptyList(),
+                                allSummary = summarizeFolder(emptyList()),
+                                showAllTab = true,
+                                dickordSummary = null,
+                                mentionsEnabled = false,
+                                mentionsCount = 0,
+                                mentionsIncomplete = false,
+                                selectedFolderId = null,
+                                onSelect = {},
+                                onOpenDickord = {},
+                                onOpenMentions = {},
+                                backdrop = backdrop,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun assertSharpTintedBackdrop() {
+        val root = compose.onRoot()
+        val rootBounds = root.fetchSemanticsNode().boundsInRoot
+        val capsule = compose.onNodeWithTag("chatlist_folder_capsule").fetchSemanticsNode().boundsInRoot
+        val source = compose.onNodeWithTag("folder_backdrop_source").fetchSemanticsNode().boundsInRoot
+        val pixels = root.captureToImage().asAndroidBitmap()
+        val y = ((capsule.top + capsule.bottom) / 2 - rootBounds.top).toInt()
+        val stripe = with(compose.density) { 8.dp.toPx() }
+        val tint = lerp(backdropColors.surface, backdropColors.primaryContainer, 0.20f).copy(alpha = 0.80f)
+        val xs = (capsule.right - with(compose.density) { 96.dp.toPx() }).toInt() until (capsule.right - with(compose.density) { 24.dp.toPx() }).toInt()
+        val samples =
+            xs.map { x ->
+                val sourceColumn = ((x + 0.5f - source.left) / stripe).toInt()
+                val expected = tint.compositeOver(if (sourceColumn % 2 == 0) Color.Red else Color.Yellow).toArgb()
+                val actual = pixels.getPixel((x - rootBounds.left).toInt(), y)
+                assertColorNear("Without a native source, the capsule only tints the sharp canvas", expected, actual)
+                android.graphics.Color.green(actual)
+            }
+        assertTrue("Tint-only fallback preserves stripe contrast instead of claiming blur", samples.max() - samples.min() >= 49)
+    }
+
+    private fun assertColorNear(
+        message: String,
+        expected: Int,
+        actual: Int,
+        tolerance: Int = 2,
+    ) {
+        for (shift in listOf(16, 8, 0)) {
+            assertEquals(message, ((expected shr shift) and 0xFF).toDouble(), ((actual shr shift) and 0xFF).toDouble(), tolerance.toDouble())
+        }
     }
 
     private fun setContent(

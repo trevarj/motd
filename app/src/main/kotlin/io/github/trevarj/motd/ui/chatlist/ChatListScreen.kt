@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import android.os.Build
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
@@ -135,10 +136,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.addOutline
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -146,7 +158,9 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
@@ -167,6 +181,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -986,6 +1001,7 @@ fun ChatListContent(
                         !invitationMode && !shouldRenderChatList(archiveMode, state.rows, state.archivedRows) && !hasInvitationRoute && !state.loading
                     var folderHeaderHeightPx by remember { mutableIntStateOf(0) }
                     val folderHeaderHeight = with(LocalDensity.current) { folderHeaderHeightPx.toDp() }
+                    val folderBackdrop = if (folderTabsVisible && !showEmptyState) rememberFolderTabBackdrop() else null
 
                     if (!folderTabsVisible && pinnedMentionsVisible) {
                         MentionsPinnedRow(state.allMentions, state.allMentionsIncomplete, onOpenMentions)
@@ -1060,6 +1076,7 @@ fun ChatListContent(
                                 onRemoveSelection = { ids -> selectedIds = selectedIds.filterNot(ids::contains) },
                                 scrollToTopSignal = tabChangeSignal,
                                 topContentPaddingPx = if (folderTabsVisible) folderHeaderHeightPx else 0,
+                                folderBackdrop = folderBackdrop,
                             )
                         }
 
@@ -1096,6 +1113,7 @@ fun ChatListContent(
                                         selectedIds = emptyList()
                                         onOpenMentions()
                                     },
+                                    backdrop = folderBackdrop,
                                 )
                                 if (pinnedMentionsVisible) MentionsPinnedRow(state.allMentions, state.allMentionsIncomplete, onOpenMentions)
                             }
@@ -1290,6 +1308,77 @@ private fun ScopeChip(
     }
 }
 
+// Only the scrolling viewport is recorded; no folder, pinned-Mentions, or archive overlays.
+internal class FolderTabBackdrop(
+    val layer: GraphicsLayer,
+) {
+    var origin by mutableStateOf(Offset.Zero)
+    var size by mutableStateOf(IntSize.Zero)
+}
+
+@Composable
+internal fun rememberFolderTabBackdrop(): FolderTabBackdrop? {
+    // ponytail: API 26–30 use the same tint without a software blur/copy loop.
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+    val layer = rememberGraphicsLayer()
+    return remember(layer) { FolderTabBackdrop(layer) }
+}
+
+internal fun Modifier.recordFolderTabBackdrop(
+    backdrop: FolderTabBackdrop?,
+    canvasColor: Color,
+): Modifier {
+    if (backdrop == null) return this
+    return this
+        .onGloballyPositioned {
+            backdrop.origin = it.positionInRoot()
+            backdrop.size = it.size
+        }.drawWithCache {
+            val recordContent: ContentDrawScope.() -> Unit = {
+                drawRect(canvasColor)
+                drawContent()
+            }
+            onDrawWithContent {
+                backdrop.layer.record(block = recordContent)
+                drawLayer(backdrop.layer)
+            }
+        }
+}
+
+@Composable
+private fun Modifier.folderCapsuleBackdrop(backdrop: FolderTabBackdrop?): Modifier {
+    val tint = chatListRowContainer(ChatListRowVisualState.UNREAD, MaterialTheme.colorScheme).copy(alpha = 0.80f)
+    if (backdrop == null) return background(tint, MotdShapes.channelAvatar)
+    val canvasColor = MaterialTheme.colorScheme.surface
+    var origin by remember(backdrop) { mutableStateOf(Offset.Zero) }
+    return this
+        .onGloballyPositioned { origin = it.positionInRoot() }
+        .drawWithCache {
+            val capsule = Path().apply { addOutline(MotdShapes.channelAvatar.createOutline(size, layoutDirection, this@drawWithCache)) }
+            val radius = 32.dp.toPx()
+            // Keep Gaussian sampling outside the capsule, but never allocate a viewport-sized blur.
+            val margin = kotlin.math.ceil(radius * 2).toInt()
+            val offset = backdrop.origin - origin
+            val sourceSize = backdrop.size
+            val blurred = obtainGraphicsLayer()
+            blurred.renderEffect = BlurEffect(radius, radius, TileMode.Clamp)
+            blurred.record(size = IntSize(kotlin.math.ceil(size.width).toInt() + margin * 2, kotlin.math.ceil(size.height).toInt() + margin * 2)) {
+                drawRect(canvasColor)
+                translate(offset.x + margin, offset.y + margin) {
+                    drawLayer(backdrop.layer)
+                }
+            }
+            onDrawBehind {
+                clipPath(capsule) {
+                    if (sourceSize != IntSize.Zero) {
+                        translate(-margin.toFloat(), -margin.toFloat()) { drawLayer(blurred) }
+                    }
+                    drawRect(tint)
+                }
+            }
+        }
+}
+
 @Composable
 internal fun FolderTabStrip(
     folders: List<PresentedChatFolder>,
@@ -1304,13 +1393,14 @@ internal fun FolderTabStrip(
     onOpenDickord: () -> Unit,
     onOpenMentions: () -> Unit,
     mentionsSelected: Boolean = false,
+    backdrop: FolderTabBackdrop? = null,
 ) {
     Box(
         modifier =
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 4.dp)
-                .background(chatListRowContainer(ChatListRowVisualState.UNREAD, MaterialTheme.colorScheme), MotdShapes.channelAvatar)
+                .folderCapsuleBackdrop(backdrop)
                 .testTag("chatlist_folder_capsule"),
     ) {
         Row(
@@ -1638,6 +1728,7 @@ private fun ChatList(
     onRemoveSelection: (Collection<Long>) -> Unit,
     scrollToTopSignal: Int,
     topContentPaddingPx: Int,
+    folderBackdrop: FolderTabBackdrop?,
 ) {
     // Pinned rows escape folders; non-empty folders follow in manual order, then legacy tiers.
     val presentation =
@@ -1978,101 +2069,87 @@ private fun ChatList(
     ) {
         ArchiveAccessibilityAnnouncement(archiveAnnouncement)
 
-        LazyColumn(
-            state = listState,
-            modifier =
-                Modifier
-                    .fillMaxSize()
-                    .testTag("chatlist_rows")
-                    .graphicsLayer {
-                        translationY =
-                            when {
-                                archivedOnly -> archiveFolderGeometry.rowPx
-                                archiveFolderPullEligible -> archiveDisplayExposurePx
-                                else -> 0f
-                            }
-                    },
-            contentPadding = PaddingValues(top = with(LocalDensity.current) { topContentPaddingPx.toDp() }, bottom = 88.dp),
+        Box(
+            modifier = Modifier.fillMaxSize().recordFolderTabBackdrop(folderBackdrop, MaterialTheme.colorScheme.surface),
         ) {
-            if (invitationMode) {
-                if (invitations.isEmpty()) {
-                    item(key = "invitations-empty") {
-                        EmptyState(
-                            icon = Icons.Outlined.Mail,
-                            title = stringResource(R.string.chatlist_invitations_empty),
-                            message = null,
-                        )
-                    }
-                } else {
-                    items(invitations, key = { "invitation-${it.messageId}" }) { invitation ->
-                        InvitationListItem(
-                            invitation = invitation,
-                            onJoin = { onAcceptInvitation(invitation.messageId) },
-                            onIgnore = { onIgnoreInvitation(invitation.messageId) },
-                            modifier =
-                                Modifier.animateItem(
-                                    fadeInSpec = ChatListItemMotion.fadeInSpec,
-                                    fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                    placementSpec = placementSpec,
-                                ),
-                        )
-                    }
-                }
-            } else {
-                if (actionableInvitationCount > 0) {
-                    item(key = "invitations-folder") {
-                        // Box wrapper (as for fools rows below) so the header items animate with
-                        // their neighbor rows without threading a Modifier into each composable.
-                        Box(
-                            modifier =
-                                Modifier.animateItem(
-                                    fadeInSpec = ChatListItemMotion.fadeInSpec,
-                                    fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                    placementSpec = placementSpec,
-                                ),
-                        ) {
-                            InvitationsFolder(
-                                count = invitations.size,
-                                actionableCount = actionableInvitationCount,
-                                onOpen = onOpenInvitations,
+            LazyColumn(
+                state = listState,
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .testTag("chatlist_rows")
+                        .graphicsLayer {
+                            translationY =
+                                when {
+                                    archivedOnly -> archiveFolderGeometry.rowPx
+                                    archiveFolderPullEligible -> archiveDisplayExposurePx
+                                    else -> 0f
+                                }
+                        },
+                contentPadding = PaddingValues(top = with(LocalDensity.current) { topContentPaddingPx.toDp() }, bottom = 88.dp),
+            ) {
+                if (invitationMode) {
+                    if (invitations.isEmpty()) {
+                        item(key = "invitations-empty") {
+                            EmptyState(
+                                icon = Icons.Outlined.Mail,
+                                title = stringResource(R.string.chatlist_invitations_empty),
+                                message = null,
+                            )
+                        }
+                    } else {
+                        items(invitations, key = { "invitation-${it.messageId}" }) { invitation ->
+                            InvitationListItem(
+                                invitation = invitation,
+                                onJoin = { onAcceptInvitation(invitation.messageId) },
+                                onIgnore = { onIgnoreInvitation(invitation.messageId) },
+                                modifier =
+                                    Modifier.animateItem(
+                                        fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                        fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                        placementSpec = placementSpec,
+                                    ),
                             )
                         }
                     }
-                }
-                items(presentation.pinned, key = { it.bufferId }) { row ->
-                    SelectableChatListRow(
-                        row,
-                        presence[row.bufferId],
-                        isFriend = isFriendQuery(row, friends),
-                        multiNetwork,
-                        onOpenBuffer,
-                        archiveMode,
-                        swipeAction = swipeAction,
-                        selected = row.bufferId in selectedIds,
-                        active = row.bufferId == activeBufferId,
-                        selectionActive = selectionActive,
-                        onToggleSelection = onToggleSelection,
-                        onStartSelection = onStartSelection,
-                        onSwipe = { onSwipe(row) },
-                        syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
-                        activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
-                        modifier =
-                            Modifier.animateItem(
-                                fadeInSpec = ChatListItemMotion.fadeInSpec,
-                                fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                placementSpec = placementSpec,
-                            ),
-                    )
-                }
-                presentation.folders.forEach { folder ->
-                    item(key = "folder-${folder.folder.id}") {
-                        ChatFolderHeader(
-                            folder = folder,
-                            onToggle = {
-                                if (folder.expanded) onRemoveSelection(folder.children.map(ChatListRow::bufferId))
-                                onSetFolderExpanded(folder.folder.id, !folder.folder.expanded)
-                            },
-                            onEdit = { onOpenFolderEditor(folder.folder.id) },
+                } else {
+                    if (actionableInvitationCount > 0) {
+                        item(key = "invitations-folder") {
+                            // Box wrapper (as for fools rows below) so the header items animate with
+                            // their neighbor rows without threading a Modifier into each composable.
+                            Box(
+                                modifier =
+                                    Modifier.animateItem(
+                                        fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                        fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                        placementSpec = placementSpec,
+                                    ),
+                            ) {
+                                InvitationsFolder(
+                                    count = invitations.size,
+                                    actionableCount = actionableInvitationCount,
+                                    onOpen = onOpenInvitations,
+                                )
+                            }
+                        }
+                    }
+                    items(presentation.pinned, key = { it.bufferId }) { row ->
+                        SelectableChatListRow(
+                            row,
+                            presence[row.bufferId],
+                            isFriend = isFriendQuery(row, friends),
+                            multiNetwork,
+                            onOpenBuffer,
+                            archiveMode,
+                            swipeAction = swipeAction,
+                            selected = row.bufferId in selectedIds,
+                            active = row.bufferId == activeBufferId,
+                            selectionActive = selectionActive,
+                            onToggleSelection = onToggleSelection,
+                            onStartSelection = onStartSelection,
+                            onSwipe = { onSwipe(row) },
+                            syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
+                            activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
                             modifier =
                                 Modifier.animateItem(
                                     fadeInSpec = ChatListItemMotion.fadeInSpec,
@@ -2081,12 +2158,69 @@ private fun ChatList(
                                 ),
                         )
                     }
-                    if (folder.expanded) {
-                        items(folder.children, key = { it.bufferId }) { row ->
+                    presentation.folders.forEach { folder ->
+                        item(key = "folder-${folder.folder.id}") {
+                            ChatFolderHeader(
+                                folder = folder,
+                                onToggle = {
+                                    if (folder.expanded) onRemoveSelection(folder.children.map(ChatListRow::bufferId))
+                                    onSetFolderExpanded(folder.folder.id, !folder.folder.expanded)
+                                },
+                                onEdit = { onOpenFolderEditor(folder.folder.id) },
+                                modifier =
+                                    Modifier.animateItem(
+                                        fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                        fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                        placementSpec = placementSpec,
+                                    ),
+                            )
+                        }
+                        if (folder.expanded) {
+                            items(folder.children, key = { it.bufferId }) { row ->
+                                SelectableChatListRow(
+                                    row,
+                                    presence[row.bufferId],
+                                    isFriend = isFriendQuery(row, friends),
+                                    multiNetwork,
+                                    onOpenBuffer,
+                                    archiveMode,
+                                    swipeAction = swipeAction,
+                                    selected = row.bufferId in selectedIds,
+                                    active = row.bufferId == activeBufferId,
+                                    selectionActive = selectionActive,
+                                    onToggleSelection = onToggleSelection,
+                                    onStartSelection = onStartSelection,
+                                    onSwipe = { onSwipe(row) },
+                                    syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
+                                    activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
+                                    modifier =
+                                        Modifier.animateItem(
+                                            fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                            fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                            placementSpec = placementSpec,
+                                        ),
+                                )
+                            }
+                        }
+                    }
+                    if (sections.friends.isNotEmpty()) {
+                        item(key = "friends-header") {
+                            Box(
+                                modifier =
+                                    Modifier.animateItem(
+                                        fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                        fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                        placementSpec = placementSpec,
+                                    ),
+                            ) {
+                                SectionHeader(stringResource(R.string.chatlist_friends))
+                            }
+                        }
+                        items(sections.friends, key = { it.bufferId }) { row ->
                             SelectableChatListRow(
                                 row,
                                 presence[row.bufferId],
-                                isFriend = isFriendQuery(row, friends),
+                                isFriend = true,
                                 multiNetwork,
                                 onOpenBuffer,
                                 archiveMode,
@@ -2108,25 +2242,25 @@ private fun ChatList(
                             )
                         }
                     }
-                }
-                if (sections.friends.isNotEmpty()) {
-                    item(key = "friends-header") {
-                        Box(
-                            modifier =
-                                Modifier.animateItem(
-                                    fadeInSpec = ChatListItemMotion.fadeInSpec,
-                                    fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                    placementSpec = placementSpec,
-                                ),
-                        ) {
-                            SectionHeader(stringResource(R.string.chatlist_friends))
+                    if (sections.showRecentHeader) {
+                        item(key = "recent-header") {
+                            Box(
+                                modifier =
+                                    Modifier.animateItem(
+                                        fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                        fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                        placementSpec = placementSpec,
+                                    ),
+                            ) {
+                                SectionHeader(stringResource(R.string.chatlist_recent))
+                            }
                         }
                     }
-                    items(sections.friends, key = { it.bufferId }) { row ->
+                    items(sections.regular, key = { it.bufferId }) { row ->
                         SelectableChatListRow(
                             row,
                             presence[row.bufferId],
-                            isFriend = true,
+                            isFriend = false,
                             multiNetwork,
                             onOpenBuffer,
                             archiveMode,
@@ -2147,94 +2281,55 @@ private fun ChatList(
                                 ),
                         )
                     }
-                }
-                if (sections.showRecentHeader) {
-                    item(key = "recent-header") {
-                        Box(
-                            modifier =
-                                Modifier.animateItem(
-                                    fadeInSpec = ChatListItemMotion.fadeInSpec,
-                                    fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                    placementSpec = placementSpec,
-                                ),
-                        ) {
-                            SectionHeader(stringResource(R.string.chatlist_recent))
-                        }
-                    }
-                }
-                items(sections.regular, key = { it.bufferId }) { row ->
-                    SelectableChatListRow(
-                        row,
-                        presence[row.bufferId],
-                        isFriend = false,
-                        multiNetwork,
-                        onOpenBuffer,
-                        archiveMode,
-                        swipeAction = swipeAction,
-                        selected = row.bufferId in selectedIds,
-                        active = row.bufferId == activeBufferId,
-                        selectionActive = selectionActive,
-                        onToggleSelection = onToggleSelection,
-                        onStartSelection = onStartSelection,
-                        onSwipe = { onSwipe(row) },
-                        syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
-                        activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
-                        modifier =
-                            Modifier.animateItem(
-                                fadeInSpec = ChatListItemMotion.fadeInSpec,
-                                fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                placementSpec = placementSpec,
-                            ),
-                    )
-                }
-                if (sections.fools.isNotEmpty()) {
-                    item(key = "fools-header") {
-                        Box(
-                            modifier =
-                                Modifier.animateItem(
-                                    fadeInSpec = ChatListItemMotion.fadeInSpec,
-                                    fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                    placementSpec = placementSpec,
-                                ),
-                        ) {
-                            FoolsSectionHeader(
-                                count = sections.fools.size,
-                                expanded = foolsExpanded,
-                                onToggle = {
-                                    if (foolsExpanded) onRemoveSelection(sections.fools.map(ChatListRow::bufferId))
-                                    foolsExpanded = !foolsExpanded
-                                },
-                            )
-                        }
-                    }
-                    if (foolsExpanded) {
-                        items(sections.fools, key = { it.bufferId }) { row ->
+                    if (sections.fools.isNotEmpty()) {
+                        item(key = "fools-header") {
                             Box(
                                 modifier =
-                                    Modifier
-                                        .animateItem(
-                                            fadeInSpec = ChatListItemMotion.fadeInSpec,
-                                            fadeOutSpec = ChatListItemMotion.fadeOutSpec,
-                                            placementSpec = placementSpec,
-                                        ),
+                                    Modifier.animateItem(
+                                        fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                        fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                        placementSpec = placementSpec,
+                                    ),
                             ) {
-                                SelectableChatListRow(
-                                    row = row,
-                                    presence = presence[row.bufferId],
-                                    isFriend = false,
-                                    multiNetwork = multiNetwork,
-                                    onOpenBuffer = onOpenBuffer,
-                                    archiveMode = archiveMode,
-                                    swipeAction = swipeAction,
-                                    selected = row.bufferId in selectedIds,
-                                    active = row.bufferId == activeBufferId,
-                                    selectionActive = selectionActive,
-                                    onToggleSelection = onToggleSelection,
-                                    onStartSelection = onStartSelection,
-                                    onSwipe = { onSwipe(row) },
-                                    syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
-                                    activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
+                                FoolsSectionHeader(
+                                    count = sections.fools.size,
+                                    expanded = foolsExpanded,
+                                    onToggle = {
+                                        if (foolsExpanded) onRemoveSelection(sections.fools.map(ChatListRow::bufferId))
+                                        foolsExpanded = !foolsExpanded
+                                    },
                                 )
+                            }
+                        }
+                        if (foolsExpanded) {
+                            items(sections.fools, key = { it.bufferId }) { row ->
+                                Box(
+                                    modifier =
+                                        Modifier
+                                            .animateItem(
+                                                fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                                fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                                placementSpec = placementSpec,
+                                            ),
+                                ) {
+                                    SelectableChatListRow(
+                                        row = row,
+                                        presence = presence[row.bufferId],
+                                        isFriend = false,
+                                        multiNetwork = multiNetwork,
+                                        onOpenBuffer = onOpenBuffer,
+                                        archiveMode = archiveMode,
+                                        swipeAction = swipeAction,
+                                        selected = row.bufferId in selectedIds,
+                                        active = row.bufferId == activeBufferId,
+                                        selectionActive = selectionActive,
+                                        onToggleSelection = onToggleSelection,
+                                        onStartSelection = onStartSelection,
+                                        onSwipe = { onSwipe(row) },
+                                        syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
+                                        activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
+                                    )
+                                }
                             }
                         }
                     }

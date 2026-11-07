@@ -66,8 +66,16 @@ flowchart TD
   the top bar's scrolled color remains `surfaceContainerLow`. Other utility canvases keep
   `surfaceContainerLowest`. After the active-scope chip, folder tabs overlay the scrolling
   chat viewport on an unpainted strip; the measured header is reserved only for the initial position.
-  The capsule matches unread chat-card fill; selected pills, coverage glyphs and activity dots use
-  the secondary-container pair. Unread and mention badges retain their independent semantic colors.
+  Only a mounted scrolling viewport owns the cached Compose capture layer; removing the list
+  for an empty state releases its source even if folder tabs remain. Folder, pinned-Mentions
+  and archive overlays are never captured. The rounded capsule replays the live source at its
+  actual viewport-relative offset through a bounded 32dp native blur on API 31+, then adds
+  the unread chat-card tint at 80% opacity. API 26–30 and source-free Appearance previews
+  use the same translucent tint without blur. Sampling extends beyond the capsule before
+  the final rounded clip; external gutters stay unpainted. No bitmap copies, redraw loop,
+  or foreground blur are involved. Selected pills, coverage glyphs and activity dots use
+  the secondary-container pair; text, icons and badges stay sharp. Unread and mention
+  badges retain their independent semantic colors.
 - Archive pull hints, the revealed folder and the archive-only route share the chat-card
   8dp horizontal/2dp vertical gutters, 16dp shape, 12dp inner inset and density-scaled
   avatar host/vertical padding. `titleMedium` labels may wrap at accessible font scales;
