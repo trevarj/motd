@@ -1,18 +1,25 @@
 # Testing and verification
 
 Run all Gradle commands through the repository Nix shell (`nix develop -c ...`,
-or enter `nix develop` once and invoke Gradle there). While editing, run the
-nearest relevant test method; before handoff/push, run its class once.
-Cross-module changes run the nearest affected tests in each module. Changed
-behavior needs a new or updated regression unless an existing named test already
-exercises that branch. Do not automatically append an unfiltered suite, Android
-lint, APK assembly, or a full pre-push gate.
+or enter `nix develop` once and invoke Gradle there). For task validation, run
+the nearest relevant unit test method in each affected module. Changed behavior
+needs a new or updated regression unless an existing named test already exercises
+that branch. Do not automatically run a full test class, unfiltered suite, emulator
+suite, or full pre-push gate.
 
-Before handoff, run each changed module's existing `:app:ktlintCheck`,
-`:irc:ktlintCheck`, `:ai-whisper:ktlintCheck`, or `:ai-text:ktlintCheck`
-once through Nix. Root Gradle/style configuration changes
-still require root `ktlintCheck`. Use the corresponding `ktlintFormat` task to
-apply enforced style.
+For UI changes, if a device is available, install the changed debug build with
+`nix develop -c ./gradlew :app:installDebug`, use ADB for a quick check, and
+inspect a fresh screencapture. Otherwise, report visual testing as unverified
+and leave it to the user. Do not boot an emulator solely for a routine check.
+Add an emulator test covering the main journey of a large new feature; hosted CI
+runs it.
+
+Before committing implementation changes, build each changed module with
+`:app:assembleDebug`, `:irc:assemble`, `:ai-whisper:assembleDebug`, or
+`:ai-text:assembleDebug`, as applicable. Run each changed module's existing
+`ktlintCheck` and each changed Android module's `lintDebug`. Root Gradle/style
+configuration changes require root `ktlintCheck`. Use the corresponding
+`ktlintFormat` task to apply enforced style.
 
 The local Nix development shells limit Gradle to two workers without cross-project
 parallelism, JVM processor-sized pools to two CPUs, and each native Ninja build to
@@ -22,22 +29,21 @@ quota; hosted builds without the shell environment retain their existing setting
 
 ## Command matrix
 
-| Changed surface | Required local checks |
+| Changed surface | Task validation (in addition to pre-commit build and lint above) |
 | --- | --- |
 | Documentation only | `git diff --check`; verify links, commands, and referenced paths |
 | Shell harness/config | `bash -n test/e2e/*.sh test/e2e/fixtures/*.sh test/e2e/hermetic/*/*.sh` plus the relevant dry run |
-| IRC parser/client/transport | Nearest `:irc:test` method while editing; its class once before handoff/push |
-| Android repositories, services, preferences, or ViewModels | Nearest `:app` test method while editing; its class once before handoff/push |
-| Room entities/schema/migrations | Nearest database regression method, then its class before handoff/push; review and commit generated `app/schemas` changes |
-| Compose Kotlin | Nearest Robolectric behavior method in `testDebug`, then its class before handoff/push |
-| Resources/manifest/packaging | Nearest test when behavior changed, then `:app:assembleDebug` |
-| Instrumentation source or affected journey | `:app:compileE2eAndroidTestKotlin`; not a routine full E2E suite |
-| Ordinary app user journey | Nearest unit/integration method, then its class before handoff/push |
-| Cross-module or release-sensitive work | Nearest affected methods in each module while editing; their classes once before handoff/push |
+| IRC parser/client/transport | Nearest `:irc:test` unit test method |
+| Android repositories, services, preferences, or ViewModels | Nearest `:app` unit test method |
+| Room entities/schema/migrations | Nearest database unit regression; review and commit generated `app/schemas` changes |
+| Compose Kotlin | Nearest Robolectric behavior method in `testDebug` |
+| Resources/manifest/packaging | Nearest unit test when behavior changed |
+| Instrumentation source, affected journey, or large new feature | Update the affected journey or add an emulator test for the feature's main journey; hosted CI runs E2E coverage |
+| Ordinary app user journey | Nearest unit test method |
+| Cross-module or release-sensitive work | Nearest affected unit test methods in each module |
 | Cutting a release | Nearest local checks plus focused actual-emulator visual verification below and [`releases.md`](releases.md) preflight |
 
-Target one method while editing, then use the class filter once before
-handoff/push:
+To target one unit test method:
 
 ```sh
 nix develop -c ./gradlew :app:testDebugUnitTest \
@@ -45,9 +51,8 @@ nix develop -c ./gradlew :app:testDebugUnitTest \
 ```
 
 Use `:irc:test` instead for protocol tests. These filters narrow execution, not
-compilation of the test source set and its dependencies. Run `:app:assembleDebug`
-only when resources, manifest, packaging, or an actual APK require it. Release
-visual checks use the x86_64 `:app:assembleE2e` APK instead.
+compilation of the test source set and its dependencies. Release visual checks
+use the x86_64 `:app:assembleE2e` APK instead.
 
 App test JVMs export `java.base/jdk.internal.access` to unnamed modules in
 `app/build.gradle.kts` so Robolectric 4.17's FileDescriptor interceptor can use
@@ -153,10 +158,9 @@ version, seed, case, and fixture in that module's
   keep captures private and outside tracked screenshots. Follow
   [`releases.md`](releases.md) preflight and report concrete blockers and
   unverified behavior.
-- Routine feature/fix work does not run these emulator, screenshot, or video
-  checks. Full local `fast`/`full` E2E suites remain non-routine because of
-  workstation cost; release visual checks do not run those suites or replace
-  hosted CI.
+- Routine feature/fix work uses the quick ADB screencapture check above when a
+  suitable device is available. Full local `fast`/`full` E2E suites remain
+  non-routine; release visual checks do not run those suites or replace hosted CI.
 - `.github/workflows/ci.yml` owns the complete required gate. Its `headless` job runs exactly
   four isolated `@FastHeadlessE2e` methods on API34 Pixel 6 AOSP, while the parallel
   component tier runs fixture-free Compose/UI tests through `:app:testDebugUnitTest` under
@@ -166,13 +170,10 @@ version, seed, case, and fixture in that module's
   tagging a release. An `action_required` external-PR run is not evidence:
   approve it and wait for the exact candidate or integration SHA to pass before
   merging.
-- Use a physical device for hardware- or OS-integration evidence: input latency,
-  scrolling performance, wallpaper/rendering quality, background lifecycle,
-  notifications and UnifiedPush, system pickers, certificates outside the
-  fixture trust flow, and a real release installation. Only do this when the
-  maintainer explicitly asks for device validation.
-- Only when lower-level checks cannot validate behavior, reproduce the focused
-  CI suite with `./test/e2e/headless.sh fast`.
+- Hardware- or OS-integration evidence may require physical-device validation
+  beyond the quick ADB check; obtain explicit maintainer authorization first.
+- Reproduce the focused CI suite with `./test/e2e/headless.sh fast` only for
+  explicitly requested E2E diagnosis, not routine task validation.
 - Fixture-free Compose/component tests live in `app/src/testDebug` and run with
   `:app:testDebugUnitTest`; only real-stack journeys and their support remain in `androidTest`.
 - `test/e2e/fast-suite.sh` is the canonical fast-suite launcher and fixture

@@ -75,21 +75,18 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
   distribution unless the maintainer explicitly asks for it. Lint warnings are
   errors.
   When a change crosses modules or release behavior, run the nearest affected
-  tests in each module; Required CI owns full release parity.
-- While editing, run the nearest relevant test method; before handoff/push, run
-  its class once. Use `nix develop -c ./gradlew :app:testDebugUnitTest --tests
-  '<fully-qualified-class.method>' --stacktrace`, replacing the filter with the
-  class for handoff and the task with `:irc:test` for protocol changes. Filters
-  narrow execution, not compilation of test sources and dependencies. Humans
-  may enter `nix develop` once and run Gradle there. Robolectric Compose tests
-  are local unit-tier checks, not hosted-emulator follow-up.
-- Before handoff, run each changed module's existing `:app:ktlintCheck`,
-  `:irc:ktlintCheck`, or `:ai-whisper:ktlintCheck` once. Use root `ktlintCheck`
-  only for root Gradle/style configuration changes. Do not automatically append
-  an unfiltered suite, Android lint, APK assembly, or a full pre-push gate.
-- For database changes, run the nearest database regression and review/commit
-  generated `app/schemas` changes. Run `:app:assembleDebug` when resources,
-  manifest, packaging, or an actual APK require it.
+  unit tests in each module; Required CI owns full release parity.
+- For task validation, run the nearest relevant unit test method in each
+  affected module. Use `nix develop -c ./gradlew :app:testDebugUnitTest --tests
+  '<fully-qualified-class.method>' --stacktrace`, or `:irc:test` for protocol
+  changes. Filters narrow execution, not compilation of test sources and
+  dependencies. Robolectric Compose tests are local unit-tier checks.
+- Before committing implementation changes, build each changed module and run
+  its formatting and lint checks as described in the command matrix. Use root
+  `ktlintCheck` for root Gradle/style configuration changes. Do not automatically
+  append an unfiltered test suite or a full pre-push gate.
+- For database changes, run the nearest database unit regression and review/commit
+  generated `app/schemas` changes.
 - `./tools/prepush.sh` is optional local gate reproduction only when explicitly
   requested to diagnose broader failures, not a handoff/push prerequisite or a
   substitute for hosted CI. It requires a clean, committed tree; use
@@ -98,29 +95,25 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
   an individual job fails, inspect its existing diagnostics and begin fixing it
   immediately rather than waiting for aggregate `gate`; remaining coverage
   continues normally.
-- Only when cutting a release, focused actual-emulator visual verification is
-  required: inspect fresh PNGs of the changed surface, exercise changed UI
-  interactions, and capture/inspect a short MP4 for interaction or navigation
-  transitions. Reuse a persistent owned emulator and app data; follow the warm
-  loop in [`test/e2e/README.md`](test/e2e/README.md) and the
-  [`release preflight`](.agents/releases.md). Routine feature/fix work does not
-  run these emulator, screenshot, or video checks; nearest tests remain required.
-- Full local emulator E2E suites are not routine. Before committing a change
-  that affects a journey covered by `RequiredHeadlessE2eTest`, inspect and update
-  that journey in the same commit and run `:app:compileE2eAndroidTestKotlin`.
-  Reserve `nix develop -c ./test/e2e/headless.sh fast` for behavior that cannot
-  be validated below E2E; do not defer a known required-gate mismatch until
-  after push. Physical-device validation requires explicit maintainer authorization.
-- Use `test/e2e/znc-stack.sh` for ZNC-specific SASL, two-client, reconnect-gap,
-  and native-playback work. Its TLS endpoint is adb-reversed at
-  `127.0.0.1:6698`; exact credentials, commands, and the observed degradation
+- For UI changes, if a device is available, install the changed debug build with
+  `nix develop -c ./gradlew :app:installDebug`, perform a quick ADB check, and
+  inspect a fresh screencapture. Otherwise, leave visual testing to the user and
+  report it as unverified. Do not start an emulator solely for routine verification.
+- Large new features must add an emulator test for their main user journey.
+  Do not run long-running emulator suites for routine task validation; hosted
+  CI runs E2E coverage. Update affected `RequiredHeadlessE2eTest` journeys.
+- Release-specific visual verification remains in
+  [`release preflight`](.agents/releases.md).
+- For explicitly requested ZNC-specific E2E diagnosis, use `test/e2e/znc-stack.sh`
+  for SASL, two-client, reconnect-gap, and native-playback work. Its TLS endpoint
+  is adb-reversed at `127.0.0.1:6698`; exact credentials, commands, and the observed degradation
   contract are in [`test/e2e/README.md`](test/e2e/README.md).
 
 ## Changes, commits, and releases
 
 - Do not rewrite, discard, or reformat unrelated changes. Avoid destructive Git
-  commands. Do not commit, push, tag, install on a device, publish, or cut a
-  release unless the user requests that action.
+  commands. Device installation for the UI check above is authorized; do not
+  commit, push, tag, publish, or cut a release unless the user requests it.
 - Do not add "Co-Authored-By:" trailer when LLMs have assisted with commits.
 - Keep commits narrowly scoped and report the verification performed. A request
   to release authorizes the documented release workflow, not unrelated cleanup

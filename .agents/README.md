@@ -29,35 +29,19 @@ connection ownership, or module boundaries.
    behavior in long-running work.
 4. Add or update tests at the same boundary. For UI changes, include semantics
    or stable tags when the interaction belongs in the device harness.
-5. Follow [`testing.md`](testing.md): while editing, run the nearest relevant
-   test method; before handoff/push, run its class once, in each affected module
-   for cross-module changes. Use `nix develop -c ./gradlew
-   :app:testDebugUnitTest --tests '<fully-qualified-class.method>' --stacktrace`
-   (class filter for handoff; `:irc:test` for protocol changes). Filters narrow
-   execution, not compilation of test sources and dependencies; humans may
-   enter `nix develop` once. Run each changed module's existing
-   `:app:ktlintCheck`, `:irc:ktlintCheck`, `:ai-whisper:ktlintCheck`,
-   or `:ai-text:ktlintCheck` once before handoff; root
-   Gradle/style configuration changes still require root `ktlintCheck`.
-   Keep the nearest database regression and review/commit of
-   generated `app/schemas`, `:app:compileE2eAndroidTestKotlin` for affected
-   instrumentation journeys, and `:app:assembleDebug` when resources, manifest,
-   packaging, or an actual APK require it. Do not automatically append an
-   unfiltered suite, Android lint, APK assembly, or a full pre-push gate.
-   Routine feature/fix work does not run local emulator, screenshot, or video
-   verification. Only when cutting a release, perform the focused actual-emulator
-   checks in [`releases.md`](releases.md), reusing the owned warm session in
-   [`../test/e2e/README.md`](../test/e2e/README.md). Full local E2E suites remain
-   non-routine, and physical-device validation requires explicit maintainer
-   authorization.
-   `./tools/prepush.sh` is only an explicitly requested diagnostic for broader
-   failures, requires a clean committed tree, and accepts
-   `MOTD_PREFLIGHT_BASE=<ref>` to override `origin/main`; it is not a handoff/push
-   prerequisite or a substitute for hosted CI. Require all
-   applicable hosted `Required CI / gate` checks before merge. Inspect an
-   individual failed job's existing diagnostics and start its fix immediately,
-   without waiting for aggregate `gate`; remaining coverage continues normally.
-   Inspect the diff and report any verification that could not be performed.
+5. Follow [`testing.md`](testing.md): run the nearest relevant unit test method
+   in each affected module. Before committing implementation changes, build each
+   changed module and run its formatting and lint checks. Do not routinely run
+   full test classes, unfiltered suites, or long-running emulator suites.
+   For UI changes, if a device is available, install the changed debug build with
+   `nix develop -c ./gradlew :app:installDebug`, check it with ADB, and inspect a
+   fresh screencapture; otherwise leave visual testing to the user and report it.
+   Add an emulator test for the main journey of a large new feature and update
+   affected `RequiredHeadlessE2eTest` journeys; hosted CI runs E2E coverage.
+   Follow [`releases.md`](releases.md) for release-specific verification.
+   `./tools/prepush.sh` is an explicitly requested diagnostic, not a handoff or
+   push prerequisite. Require applicable hosted `Required CI / gate` checks
+   before merge; inspect individual failures promptly. Report checks not run.
 
 ## Gradle and Kotlin agent tools
 
