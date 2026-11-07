@@ -807,7 +807,7 @@ class ChatListViewModel
                 }
 
                 else -> {
-                    Unit
+                    return@launch
                 }
             }
         }

@@ -1145,7 +1145,7 @@ private fun DccTransferActions(
                 }
             }
         }
-        if (canAccept && privateResults && onReceiveResultsPrivately != null) {
+        if (canAccept && privateResults) {
             OutlinedButton(
                 onClick = { onReceiveResultsPrivately(transfer, privateRisk != null) },
                 modifier = Modifier.testTag("chat_ebooks_receive_results_${transfer.id}"),

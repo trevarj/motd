@@ -120,7 +120,7 @@ internal class NetworkActivityLedger {
                     val changed = if (issue.bufferId == null) previousConnections[issue.networkId] != connectionSignatures[issue.networkId] else previousHistory[issue.bufferId] != status
                     val retrying = if (issue.bufferId == null) connections[issue.networkId].let { it == IrcClientState.Connecting || it == IrcClientState.Registering } else status == HistorySyncStatus.Queued || status == HistorySyncStatus.AwaitingConnection || status == HistorySyncStatus.Syncing
                     val settled = if (issue.bufferId == null) connections[issue.networkId] is IrcClientState.Failed else status is HistorySyncStatus.Failed || status is HistorySyncStatus.Partial
-                    val networkName = network?.name ?: issue.networkName
+                    val networkName = network.name
                     val chatName = buffer?.displayName ?: issue.chatName
                     active +=
                         if (changed || networkName != issue.networkName || chatName != issue.chatName || retrying != issue.retrying || settled != issue.settled) {
