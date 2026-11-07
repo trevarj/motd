@@ -808,6 +808,201 @@ class MessageBubbleFooterUiTest {
     }
 
     @Test
+    fun messageBackgroundOpacityPaintsZeroIntermediateAndFullAlphaWithoutFadingContent() {
+        data class Row(
+            val self: Boolean = false,
+            val sender: Boolean = true,
+            val kind: MessageKind = MessageKind.PRIVMSG,
+            val friend: Boolean = false,
+            val dimmed: Boolean = false,
+            val mention: Boolean = false,
+        )
+        val density = mutableStateOf(LayoutDensity.COMPACT)
+        val row = mutableStateOf(Row())
+        val opacity = mutableStateOf(100)
+        compose.setContent {
+            ContrastSample(
+                density = density.value,
+                isSelf = row.value.self,
+                showSender = row.value.sender,
+                showTimestamp = true,
+                kind = row.value.kind,
+                senderIsFriend = row.value.friend,
+                dimmed = row.value.dimmed,
+                hasMention = row.value.mention,
+                nicknameBackgroundsEnabled = false,
+                messageBackgroundOpacityPercent = opacity.value,
+                // Mid-tone fills exercise the old opaque contrast fallback; the contrasting
+                // canvas makes even zero opacity observable without asynchronous wallpaper loads.
+                background = Color.Gray,
+                canvasColor = Color.Magenta,
+                avatarStyle = AvatarStyle.MONOGRAM,
+            )
+        }
+        for (layout in listOf(LayoutDensity.COMPACT, LayoutDensity.TWO_LINE)) {
+            for (sample in listOf(Row(), Row(self = true), Row(sender = false), Row(self = true, sender = false), Row(kind = MessageKind.NOTICE), Row(friend = true), Row(dimmed = true), Row(self = true, mention = true))) {
+                compose.runOnIdle {
+                    density.value = layout
+                    row.value = sample
+                    opacity.value = 100
+                }
+                val canvas = compose.onNodeWithTag("contrast_sample")
+                val original = canvas.captureToImage().asAndroidBitmap()
+                val canvasBounds = canvas.fetchSemanticsNode().boundsInRoot
+                val bounds = compose.onNodeWithTag("contrast_message", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val y = (bounds.top - canvasBounds.top).toInt() + 2
+                val avatar = compose.onAllNodesWithTag("chat_sender_avatar", useUnmergedTree = true).fetchSemanticsNodes().singleOrNull()
+                val identity = avatar?.let { compose.onNodeWithTag("chat_sender_avatar", useUnmergedTree = true).captureToImage().asAndroidBitmap() }
+                for (percent in listOf(0, 37, 100)) {
+                    compose.runOnIdle { opacity.value = percent }
+                    val pixels = canvas.captureToImage().asAndroidBitmap()
+                    val expected =
+                        Color.Gray
+                            .copy(alpha = percent / 100f)
+                            .compositeOver(Color.Magenta)
+                            .toArgb()
+                    val actual = pixels.getPixel(8, y)
+                    for (channel in 0..3) {
+                        val shift = channel * 8
+                        assertTrue(
+                            "$layout $sample opacity=$percent channel=$channel must paint the requested alpha, even when dimmed",
+                            kotlin.math.abs((actual ushr shift and 255) - (expected ushr shift and 255)) <= 1,
+                        )
+                    }
+                    val body = compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true)
+                    val text = body.textLayout()
+                    val ink = text.inkAt("Reading")
+                    assertEquals("$layout $sample opacity=$percent must retain opaque text ink", 1f, ink.alpha, 0f)
+                    val textBounds = body.fetchSemanticsNode().boundsInRoot
+                    val offset = text.layoutInput.text.indexOf("Reading")
+                    val first = text.getBoundingBox(offset)
+                    val last = text.getBoundingBox(offset + "Reading".lastIndex)
+                    val left = (textBounds.left - canvasBounds.left + first.left).toInt()
+                    val right = (textBounds.left - canvasBounds.left + last.right).toInt()
+                    val top = (textBounds.top - canvasBounds.top + first.top).toInt()
+                    val bottom = (textBounds.top - canvasBounds.top + first.bottom).toInt()
+                    assertTrue(
+                        "$layout $sample opacity=$percent must paint full-opacity glyph pixels",
+                        (left until right).any { x -> (top until bottom).any { py -> pixels.getPixel(x, py) == ink.toArgb() } },
+                    )
+                    if (identity != null) {
+                        assertTrue("$layout opacity=$percent must not fade avatars", identity.sameAs(compose.onNodeWithTag("chat_sender_avatar", useUnmergedTree = true).captureToImage().asAndroidBitmap()))
+                    }
+                }
+                assertTrue("$layout $sample must restore the exact 100% rendering", original.sameAs(canvas.captureToImage().asAndroidBitmap()))
+            }
+        }
+    }
+
+    @Test
+    fun messageBackgroundOpacityLeavesNicknameWashComfortableActionsAndMentionsUnchanged() {
+        data class Row(
+            val density: LayoutDensity,
+            val enabled: Boolean = false,
+            val mention: Boolean = false,
+            val kind: MessageKind = MessageKind.PRIVMSG,
+        )
+        val row = mutableStateOf(Row(LayoutDensity.COMFORTABLE))
+        val opacity = mutableStateOf(100)
+        compose.setContent {
+            ContrastSample(
+                density = row.value.density,
+                nicknameBackgroundsEnabled = row.value.enabled,
+                messageBackgroundOpacityPercent = opacity.value,
+                hasMention = row.value.mention,
+                kind = row.value.kind,
+                showSender = true,
+                canvasColor = Color.Magenta,
+            )
+        }
+        val rows =
+            listOf(Row(LayoutDensity.COMFORTABLE)) +
+                listOf(LayoutDensity.COMPACT, LayoutDensity.TWO_LINE).flatMap { density ->
+                    listOf(
+                        Row(density, enabled = true),
+                        Row(density, mention = true),
+                        Row(density, kind = MessageKind.ACTION),
+                        Row(density, mention = true, kind = MessageKind.ACTION),
+                    )
+                }
+        for (sample in rows) {
+            compose.runOnIdle {
+                row.value = sample
+                opacity.value = 100
+            }
+            val canvas = compose.onNodeWithTag("contrast_sample")
+            val original = canvas.captureToImage().asAndroidBitmap()
+            for (percent in listOf(0, 37, 100)) {
+                compose.runOnIdle { opacity.value = percent }
+                assertTrue("$sample opacity=$percent must not affect this surface", original.sameAs(canvas.captureToImage().asAndroidBitmap()))
+            }
+        }
+    }
+
+    @Test
+    fun messageBackgroundOpacityKeepsLightAndDarkBodyInkReadableAtZeroAndLowAlpha() {
+        val theme = mutableStateOf(ColorThemePreset.AYU_LIGHT)
+        val density = mutableStateOf(LayoutDensity.COMPACT)
+        val opacity = mutableStateOf(0)
+        compose.setContent {
+            ContrastSample(
+                theme = theme.value,
+                density = density.value,
+                nicknameBackgroundsEnabled = false,
+                messageBackgroundOpacityPercent = opacity.value,
+                showSender = true,
+                showTimestamp = true,
+            )
+        }
+        for (preset in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
+            for (layout in listOf(LayoutDensity.COMPACT, LayoutDensity.TWO_LINE)) {
+                for (percent in listOf(0, 10, 37, 100)) {
+                    compose.runOnIdle {
+                        theme.value = preset
+                        density.value = layout
+                        opacity.value = percent
+                    }
+                    val label = "$preset $layout opacity=$percent"
+                    val canvas = compose.onNodeWithTag("contrast_sample")
+                    val image = canvas.captureToImage()
+                    val pixels = image.toPixelMap()
+                    val canvasBounds = canvas.fetchSemanticsNode().boundsInRoot
+                    val row = compose.onNodeWithTag("contrast_message", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                    val fill = pixels[8, (row.top - canvasBounds.top).toInt() + 2]
+                    val expectedFill = requireNotNull(fixedThemeScheme(preset)).background.toArgb()
+                    val actualFill = fill.toArgb()
+                    for (channel in 0..3) {
+                        val shift = channel * 8
+                        assertTrue(
+                            "$label must retain its actual theme canvas",
+                            kotlin.math.abs(((expectedFill ushr shift) and 0xff) - ((actualFill ushr shift) and 0xff)) <= 1,
+                        )
+                    }
+                    val body = compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true)
+                    val text = body.textLayout()
+                    val ink = text.inkAt("Reading")
+                    assertTrue(
+                        "$label must use dark ink on the light canvas and light ink on the dark canvas",
+                        if (preset == ColorThemePreset.AYU_LIGHT) ink.luminance() < 0.5f else ink.luminance() > 0.5f,
+                    )
+                    // Native 8-bit alpha compositing may shift the canvas by one channel step.
+                    assertPaintedTextContrast(label, body, minimumTarget = MESSAGE_TEXT_CONTRAST - 0.1)
+                    val textBounds = body.fetchSemanticsNode().boundsInRoot
+                    val offset = text.layoutInput.text.indexOf("Reading")
+                    val first = text.getBoundingBox(offset)
+                    val last = text.getBoundingBox(offset + "Reading".lastIndex)
+                    val left = (textBounds.left - canvasBounds.left + first.left).toInt()
+                    val right = (textBounds.left - canvasBounds.left + last.right).toInt()
+                    val top = (textBounds.top - canvasBounds.top + first.top).toInt()
+                    val bottom = (textBounds.top - canvasBounds.top + first.bottom).toInt()
+                    val paintedContrast = (left until right).maxOf { x -> (top until bottom).maxOf { y -> contrastRatio(pixels[x, y], fill) } }
+                    assertTrue("$label actual body glyph contrast=$paintedContrast", paintedContrast >= MESSAGE_TEXT_CONTRAST - 0.2)
+                }
+            }
+        }
+    }
+
+    @Test
     fun rowsPreserveInkWhileOnlyNormalTwoLineFillLetsWallpaperThrough() = assertRowsPreserveInkAndWallpaper(true)
 
     @Test
@@ -882,7 +1077,7 @@ class MessageBubbleFooterUiTest {
                         compose.runOnIdle { intensity.value = 0 }
                         val noImage = sample.captureToImage()
                         val noInk = noImage.toPixelMap()
-                        if (layout == LayoutDensity.TWO_LINE) {
+                        if (layout == LayoutDensity.TWO_LINE && (nicknameBackgroundsEnabled || mention || messageKind == MessageKind.ACTION)) {
                             assertTrue(
                                 "$label must let wallpaper contribute to the row fill",
                                 (top + 2 until bottom - 2).any { y -> noInk[8, y] != fullInk[8, y] },
@@ -1030,6 +1225,7 @@ class MessageBubbleFooterUiTest {
         kind: MessageKind = MessageKind.PRIVMSG,
         hasMention: Boolean = false,
         density: LayoutDensity = LayoutDensity.COMFORTABLE,
+        theme: ColorThemePreset = ColorThemePreset.AYU_LIGHT,
         wallpaperIntensity: Int? = null,
         wallpaperImage: String? = null,
         reply: ReplyPreviewData? = null,
@@ -1039,17 +1235,20 @@ class MessageBubbleFooterUiTest {
         audio: Boolean = false,
         background: Color? = null,
         nicknameBackgroundsEnabled: Boolean = true,
+        messageBackgroundOpacityPercent: Int = 100,
+        canvasColor: Color? = null,
         nickColorsEnabled: Boolean = true,
         senderIsFriend: Boolean = false,
         avatarStyle: AvatarStyle = AvatarStyle.NONE,
     ) {
         MotdTheme(
             dynamicColor = false,
-            themePreset = ColorThemePreset.AYU_LIGHT,
+            themePreset = theme,
             layoutDensity = density,
             avatarStyle = avatarStyle,
             timestampConfig = TimestampConfig(show = showTimestamp),
             nicknameBackgroundsEnabled = nicknameBackgroundsEnabled,
+            messageBackgroundOpacityPercent = messageBackgroundOpacityPercent,
             nickColorsEnabled = nickColorsEnabled,
         ) {
             val scheme = MaterialTheme.colorScheme
@@ -1058,7 +1257,7 @@ class MessageBubbleFooterUiTest {
                     Modifier
                         .width(380.dp)
                         .height(360.dp)
-                        .background(MaterialTheme.colorScheme.background)
+                        .background(canvasColor ?: MaterialTheme.colorScheme.background)
                         .testTag("contrast_sample"),
                 ) {
                     wallpaperIntensity?.let { ChatWallpaperBackground(WallpaperSelection(ChatWallpaperPreset.MOTD, it, wallpaperImage)) }

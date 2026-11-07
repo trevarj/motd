@@ -300,6 +300,10 @@ internal class FakeAppearance(
         state.value = state.value.copy(nicknameBackgroundsEnabled = enabled)
     }
 
+    override suspend fun setMessageBackgroundOpacity(percent: Int) {
+        state.value = state.value.copy(messageBackgroundOpacityPercent = percent.coerceIn(0, 100))
+    }
+
     override suspend fun setSentBubbleColor(color: ComfortableBubbleColor) {
         state.value = state.value.copy(sentBubbleColor = color)
     }

@@ -238,6 +238,8 @@ private fun AppearanceBubblePreview(
         mediaCornerStyle = appearance.mediaCornerStyle,
         uiIconSet = appearance.uiIconSet,
         chatShadowsEnabled = appearance.chatShadowsEnabled,
+        nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
+        messageBackgroundOpacityPercent = appearance.messageBackgroundOpacityPercent,
         sentBubbleColor = appearance.sentBubbleColor,
         receivedBubbleColor = appearance.receivedBubbleColor,
         syncSystemBars = false,

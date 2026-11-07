@@ -30,6 +30,7 @@ import io.github.trevarj.motd.audio.VoiceSendProgress
 import io.github.trevarj.motd.audio.VoiceSendRequest
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
@@ -757,6 +758,13 @@ class RequiredHeadlessE2eTest {
         val roomId = runBlocking { BufferProbe(bootstrap.seams.buffers(), milestones).awaitJoinedChannel(network.childId, bootstrap.args.channel) }
         val settings = DataStoreSettingsRepository(InstrumentationRegistry.getInstrumentation().targetContext)
         val originalSettings = runBlocking { settings.settings.first() }
+        val originalOpacity =
+            runBlocking {
+                AppearancePrefsImpl(InstrumentationRegistry.getInstrumentation().targetContext)
+                    .config
+                    .first()
+                    .messageBackgroundOpacityPercent
+            }
         val token = "fools${bootstrap.args.runId.filter(Char::isLetterOrDigit).takeLast(16)}"
         val messages = MessageLifecycleProbe(bootstrap.seams.search(), milestones)
         FixtureIrcClient.connect(bootstrap.args).use { peer ->
@@ -816,7 +824,7 @@ class RequiredHeadlessE2eTest {
         SettingsRobot(compose).selectIrcSprites()
         SettingsRobot(compose).selectWallpaperAndIntensity()
         SettingsRobot(compose).selectComfortableBubbleColors()
-        SettingsRobot(compose).disableNicknameBackgrounds()
+        SettingsRobot(compose).disableNicknameBackgrounds(opacityPercent = 37)
         SettingsRobot(compose).selectSurfaceShapes()
         SettingsRobot(compose).selectLucideIcons()
         // Return from Appearance to Settings, then exercise the category and bouncer routes.
@@ -824,7 +832,11 @@ class RequiredHeadlessE2eTest {
             returnToRoot()
             appearance()
             assertThemeTextColorsEnabled()
-            restoreNicknameBackgrounds()
+            restoreNicknameBackgrounds(
+                expectedOpacityPercent = 37,
+                originalOpacityPercent = originalOpacity,
+                originalLayout = originalSettings.layoutDensity,
+            )
             assertSurfaceShapesPersistedAndRestoreDefaults()
             assertLucideIconsPersistedAndRestoreMaterial()
             returnToRoot()

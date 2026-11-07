@@ -37,6 +37,7 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.theme.LocalMediaCornerStyle
+import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundOpacityPercent
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalNicknameBackgroundsEnabled
 import io.github.trevarj.motd.ui.theme.LocalSpacing
@@ -124,10 +125,17 @@ internal fun CompactMessageRow(
         } else {
             Color.Transparent
         }
-    val normalPaintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
-    val paintedRow = messageContainerColor(normalPaintedRow, MaterialTheme.colorScheme.background, dimmed)
+    val canvas = MaterialTheme.colorScheme.background
+    val normalPaintedRow = rowTint.compositeOver(canvas)
+    val paintedRow = messageContainerColor(normalPaintedRow, canvas, dimmed)
+    val controlledBackground = !hasMention && !LocalNicknameBackgroundsEnabled.current
+    val backgroundAlpha = LocalMessageBackgroundOpacityPercent.current / 100f
+    val contrastRow =
+        remember(paintedRow, canvas, controlledBackground, backgroundAlpha) {
+            if (controlledBackground) paintedRow.copy(alpha = backgroundAlpha).compositeOver(canvas) else paintedRow
+        }
     val bodyInk = codeColor
-    val bodyColor = remember(bodyInk, paintedRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, paintedRow, dimmed, normalPaintedRow) }
+    val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
 
     // The `nick: text` content is a single flowing AnnotatedString so it wraps as one paragraph
     // like a real IRC line, with the nick colored (+ friend tint) and URLs linkified.
@@ -152,7 +160,7 @@ internal fun CompactMessageRow(
             codeBackground,
             codeColor,
             nickFontSize,
-            paintedRow,
+            contrastRow,
             dimmed,
         ) {
             buildCompactLine(
@@ -169,7 +177,7 @@ internal fun CompactMessageRow(
                 codeBackground,
                 codeColor,
                 nickFontSize = nickFontSize,
-                containerColor = paintedRow,
+                containerColor = contrastRow,
                 minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                 normalContainerColor = normalPaintedRow,
             ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
@@ -179,8 +187,8 @@ internal fun CompactMessageRow(
         modifier =
             modifier
                 .fillMaxWidth()
-                // Paint the flattened speaker band opaquely beneath source and inset.
-                .background(paintedRow)
+                // Fade only the ordinary backing, never the row's text, avatars or highlights.
+                .background(if (controlledBackground) paintedRow.copy(alpha = backgroundAlpha) else paintedRow)
                 .then(containerModifier),
         sourceModifier =
             Modifier.messageRowClicks(

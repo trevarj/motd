@@ -236,6 +236,31 @@ class AppearancePrefsTest {
             }
         }
 
+    @Test fun messageBackgroundOpacityRoundTripsClampsReloadsAndDefaultsForOldJson() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val key = intPreferencesKey("message_background_opacity_v1")
+            context.appearanceDataStore.edit { it.remove(key) }
+            try {
+                assertEquals(100, AppearancePrefsImpl(context).config.first().messageBackgroundOpacityPercent)
+                assertEquals(100, Json.decodeFromString<AppearanceConfig>("{}").messageBackgroundOpacityPercent)
+                for (percent in listOf(0, 37, 100, -12, 130)) {
+                    val expected = percent.coerceIn(0, 100)
+                    prefs.setMessageBackgroundOpacity(percent)
+                    val reloaded = AppearancePrefsImpl(context).config.first()
+                    assertEquals(expected, reloaded.messageBackgroundOpacityPercent)
+                    assertEquals(expected, context.appearanceDataStore.data.first()[key])
+                    assertEquals(expected, Json.decodeFromString<AppearanceConfig>(jsonWithDefaults.encodeToString(reloaded)).messageBackgroundOpacityPercent)
+                }
+                for (percent in listOf(-12, 130)) {
+                    context.appearanceDataStore.edit { it[key] = percent }
+                    assertEquals(percent.coerceIn(0, 100), AppearancePrefsImpl(context).config.first().messageBackgroundOpacityPercent)
+                }
+            } finally {
+                context.appearanceDataStore.edit { it.remove(key) }
+            }
+        }
+
     @Test fun comfortableBubbleColors_roundTripWithCustomOpaqueColorAndDefaultFallback() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()

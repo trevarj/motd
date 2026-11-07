@@ -572,6 +572,7 @@ class ConfigurationBackupRepositoryImpl
                 appearancePrefs.setBubbleCornerStyle(it.bubbleCornerStyle)
                 appearancePrefs.setChatShadowsEnabled(it.chatShadowsEnabled)
                 appearancePrefs.setNicknameBackgroundsEnabled(it.nicknameBackgroundsEnabled)
+                appearancePrefs.setMessageBackgroundOpacity(it.messageBackgroundOpacityPercent)
                 appearancePrefs.setSentBubbleColor(it.sentBubbleColor)
                 appearancePrefs.setReceivedBubbleColor(it.receivedBubbleColor)
                 appearancePrefs.setLauncherIcon(it.launcherIcon)

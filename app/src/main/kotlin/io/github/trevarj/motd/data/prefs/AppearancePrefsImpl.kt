@@ -39,6 +39,7 @@ private val UI_ICON_SET = stringPreferencesKey("ui_icon_set_v1")
 private val BUBBLE_CORNER_STYLE = stringPreferencesKey("bubble_corner_style_v1")
 private val CHAT_SHADOWS_ENABLED = booleanPreferencesKey("chat_shadows_enabled_v1")
 private val NICKNAME_BACKGROUNDS_ENABLED = booleanPreferencesKey("nickname_backgrounds_enabled_v1")
+private val MESSAGE_BACKGROUND_OPACITY = intPreferencesKey("message_background_opacity_v1")
 private val SENT_BUBBLE_COLOR_ROLE = stringPreferencesKey("sent_bubble_color_role_v1")
 private val SENT_BUBBLE_COLOR_CUSTOM = intPreferencesKey("sent_bubble_color_custom_v1")
 private val RECEIVED_BUBBLE_COLOR_ROLE = stringPreferencesKey("received_bubble_color_role_v1")
@@ -137,6 +138,7 @@ class AppearancePrefsImpl
                             ?: BubbleCornerStyle.ROUNDED,
                     chatShadowsEnabled = prefs[CHAT_SHADOWS_ENABLED] ?: false,
                     nicknameBackgroundsEnabled = prefs[NICKNAME_BACKGROUNDS_ENABLED] ?: true,
+                    messageBackgroundOpacityPercent = (prefs[MESSAGE_BACKGROUND_OPACITY] ?: 100).coerceIn(0, 100),
                     sentBubbleColor = storedComfortableBubbleColor(prefs[SENT_BUBBLE_COLOR_ROLE], prefs[SENT_BUBBLE_COLOR_CUSTOM]),
                     receivedBubbleColor = storedComfortableBubbleColor(prefs[RECEIVED_BUBBLE_COLOR_ROLE], prefs[RECEIVED_BUBBLE_COLOR_CUSTOM]),
                     launcherIcon =
@@ -249,6 +251,10 @@ class AppearancePrefsImpl
 
         override suspend fun setNicknameBackgroundsEnabled(enabled: Boolean) {
             store.edit { it[NICKNAME_BACKGROUNDS_ENABLED] = enabled }
+        }
+
+        override suspend fun setMessageBackgroundOpacity(percent: Int) {
+            store.edit { it[MESSAGE_BACKGROUND_OPACITY] = percent.coerceIn(0, 100) }
         }
 
         override suspend fun setSentBubbleColor(color: ComfortableBubbleColor) {

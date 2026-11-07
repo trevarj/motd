@@ -182,6 +182,8 @@ class AppearanceSettingsViewModel
 
         fun setNicknameBackgroundsEnabled(value: Boolean) = launch { appearancePrefs.setNicknameBackgroundsEnabled(value) }
 
+        fun setMessageBackgroundOpacity(value: Int) = launch { appearancePrefs.setMessageBackgroundOpacity(value) }
+
         fun setSentBubbleColor(value: ComfortableBubbleColor) = launch { appearancePrefs.setSentBubbleColor(value) }
 
         fun setReceivedBubbleColor(value: ComfortableBubbleColor) = launch { appearancePrefs.setReceivedBubbleColor(value) }

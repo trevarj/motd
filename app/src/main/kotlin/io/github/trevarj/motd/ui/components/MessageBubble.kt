@@ -101,6 +101,7 @@ import io.github.trevarj.motd.ui.theme.LocalChatShadowsEnabled
 import io.github.trevarj.motd.ui.theme.LocalComfortableBubbleColors
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.LocalMediaCornerStyle
+import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundOpacityPercent
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalNicknameBackgroundsEnabled
@@ -132,7 +133,7 @@ private const val ACTION_ROW_TINT_ALPHA = 0.22f
 internal const val MESSAGE_TEXT_CONTRAST = 7.0
 internal const val DIMMED_MESSAGE_TEXT_CONTRAST = 4.5
 
-/** Dimmed rows paint an opaque fill, so wallpapers cannot defeat their reading contrast. */
+/** Subdue the row's base palette; backing opacity is applied separately at the draw boundary. */
 internal fun messageContainerColor(
     normal: Color,
     canvas: Color,
@@ -1587,9 +1588,19 @@ private fun TwoLineMessageRow(
         } else {
             Color.Transparent
         }
-    val normalPaintedRow = rowTint.compositeOver(MaterialTheme.colorScheme.background)
-    val paintedRow = messageContainerColor(normalPaintedRow, MaterialTheme.colorScheme.background, dimmed)
-    val contrastRow = remember(paintedRow, dimmed) { if (dimmed) paintedRow else twoLineContrastFill(paintedRow) }
+    val canvas = MaterialTheme.colorScheme.background
+    val normalPaintedRow = rowTint.compositeOver(canvas)
+    val paintedRow = messageContainerColor(normalPaintedRow, canvas, dimmed)
+    val controlledBackground = !hasMention && !LocalNicknameBackgroundsEnabled.current
+    val backgroundAlpha = LocalMessageBackgroundOpacityPercent.current / 100f
+    val contrastRow =
+        remember(paintedRow, canvas, dimmed, controlledBackground, backgroundAlpha) {
+            when {
+                controlledBackground -> paintedRow.copy(alpha = backgroundAlpha).compositeOver(canvas)
+                dimmed -> paintedRow
+                else -> twoLineContrastFill(paintedRow)
+            }
+        }
     val bodyInk = codeColor
     val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
     val nameBackground =
@@ -1614,9 +1625,14 @@ private fun TwoLineMessageRow(
         modifier =
             modifier
                 .fillMaxWidth()
-                // Only the fill admits wallpaper, with opaque fallback when contrast needs it.
-                .background(if (contrastRow == paintedRow) paintedRow else paintedRow.copy(alpha = TWO_LINE_FILL_ALPHA))
-                .then(containerModifier),
+                // User-controlled opacity never becomes opaque for contrast or dimmed rows.
+                .background(
+                    when {
+                        controlledBackground -> paintedRow.copy(alpha = backgroundAlpha)
+                        contrastRow == paintedRow -> paintedRow
+                        else -> paintedRow.copy(alpha = TWO_LINE_FILL_ALPHA)
+                    },
+                ).then(containerModifier),
         sourceModifier =
             Modifier.messageRowClicks(
                 onClick = onClick,

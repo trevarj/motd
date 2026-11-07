@@ -17,6 +17,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.AnnotatedString
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 
 internal class SettingsRobot(
     compose: ComposeTestRule,
@@ -52,7 +53,8 @@ internal class SettingsRobot(
         compose.onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true).performScrollTo().assertIsOn()
     }
 
-    fun disableNicknameBackgrounds() {
+    fun disableNicknameBackgrounds(opacityPercent: Int) {
+        selectMessageLayout(LayoutDensity.COMPACT)
         awaitTag("settings_switch_nickname_backgrounds_row")
         compose
             .onNodeWithTag("settings_switch_nickname_backgrounds_row", useUnmergedTree = true)
@@ -60,9 +62,25 @@ internal class SettingsRobot(
             .assertIsOn()
             .performClick()
             .assertIsOff()
+        setMessageBackgroundOpacity(opacityPercent)
     }
 
-    fun restoreNicknameBackgrounds() {
+    fun restoreNicknameBackgrounds(
+        expectedOpacityPercent: Int,
+        originalOpacityPercent: Int,
+        originalLayout: LayoutDensity,
+    ) {
+        scrollToAndClick("settings_density_picker")
+        scrollContainerTo("settings_density_sheet_options", "settings_density_compact")
+        compose.onNodeWithTag("settings_density_compact").assertIsSelected()
+        dismissChoiceSheet("settings_density_sheet")
+        compose.onNodeWithTag("settings_message_background_opacity").performScrollTo().assert(
+            SemanticsMatcher("Persisted message background opacity") {
+                it.config[SemanticsProperties.ProgressBarRangeInfo].current == expectedOpacityPercent.toFloat()
+            },
+        )
+        setMessageBackgroundOpacity(0)
+        setMessageBackgroundOpacity(originalOpacityPercent)
         awaitTag("settings_switch_nickname_backgrounds_row")
         compose
             .onNodeWithTag("settings_switch_nickname_backgrounds_row", useUnmergedTree = true)
@@ -70,6 +88,30 @@ internal class SettingsRobot(
             .assertIsOff()
             .performClick()
             .assertIsOn()
+        compose.onNodeWithTag("settings_message_background_opacity").assertDoesNotExist()
+        selectMessageLayout(originalLayout)
+    }
+
+    private fun setMessageBackgroundOpacity(percent: Int) {
+        compose
+            .onNodeWithTag("settings_message_background_opacity")
+            .performScrollTo()
+            .performSemanticsAction(SemanticsActions.SetProgress) { it(percent.toFloat()) }
+        compose.onNodeWithTag("settings_message_background_opacity").assert(
+            SemanticsMatcher("Message background opacity $percent") {
+                it.config[SemanticsProperties.ProgressBarRangeInfo].current == percent.toFloat()
+            },
+        )
+    }
+
+    private fun selectMessageLayout(layout: LayoutDensity) {
+        scrollToAndClick("settings_density_picker")
+        val tag = "settings_density_${layout.name.lowercase()}"
+        scrollContainerTo("settings_density_sheet_options", tag)
+        click(tag)
+        scrollContainerTo("settings_density_sheet_options", tag)
+        compose.onNodeWithTag(tag).assertIsSelected()
+        dismissChoiceSheet("settings_density_sheet")
     }
 
     fun selectIrcSprites() {

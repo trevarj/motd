@@ -196,6 +196,7 @@ fun AppearanceSettingsScreen(
         onBubbleCornerStyle = viewModel::setBubbleCornerStyle,
         onChatShadowsEnabled = viewModel::setChatShadowsEnabled,
         onNicknameBackgroundsEnabled = viewModel::setNicknameBackgroundsEnabled,
+        onMessageBackgroundOpacity = viewModel::setMessageBackgroundOpacity,
         onSentBubbleColor = viewModel::setSentBubbleColor,
         onReceivedBubbleColor = viewModel::setReceivedBubbleColor,
         onLauncherIcon = viewModel::setLauncherIcon,
@@ -238,6 +239,7 @@ fun AppearanceSettingsContent(
     onBubbleCornerStyle: (io.github.trevarj.motd.data.prefs.BubbleCornerStyle) -> Unit,
     onChatShadowsEnabled: (Boolean) -> Unit = {},
     onNicknameBackgroundsEnabled: (Boolean) -> Unit = {},
+    onMessageBackgroundOpacity: (Int) -> Unit = {},
     onSentBubbleColor: (ComfortableBubbleColor) -> Unit = {},
     onReceivedBubbleColor: (ComfortableBubbleColor) -> Unit = {},
     onLauncherIcon: (LauncherIcon) -> Unit,
@@ -648,6 +650,20 @@ fun AppearanceSettingsContent(
                     modifier = targetModifier,
                 )
             }
+            val opacityAvailable = previewDensity != LayoutDensity.COMFORTABLE && !previewAppearance.nicknameBackgroundsEnabled
+            if (opacityAvailable || target == SettingsTarget.MESSAGE_BACKGROUND_OPACITY) {
+                SettingsTarget(target?.name, SettingsTarget.MESSAGE_BACKGROUND_OPACITY.name) { targetModifier ->
+                    MessageBackgroundOpacitySlider(
+                        value = previewAppearance.messageBackgroundOpacityPercent,
+                        enabled = opacityAvailable,
+                        onValue = {
+                            previewAppearance = previewAppearance.copy(messageBackgroundOpacityPercent = it)
+                            onMessageBackgroundOpacity(it)
+                        },
+                        modifier = targetModifier,
+                    )
+                }
+            }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsTarget(target?.name, SettingsTarget.AVATAR_STYLE.name) { targetModifier ->
                 SettingsNavigationRow(
@@ -900,6 +916,7 @@ private fun AppearanceChatLayoutPreview(
         uiIconSet = appearance.uiIconSet,
         chatShadowsEnabled = chatShadowsEnabled,
         nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
+        messageBackgroundOpacityPercent = appearance.messageBackgroundOpacityPercent,
         sentBubbleColor = appearance.sentBubbleColor,
         receivedBubbleColor = appearance.receivedBubbleColor,
         syncSystemBars = false,
@@ -955,6 +972,8 @@ private fun ComposerStylePreview(
         mediaCornerStyle = appearance.mediaCornerStyle,
         uiIconSet = appearance.uiIconSet,
         chatShadowsEnabled = appearance.chatShadowsEnabled,
+        nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
+        messageBackgroundOpacityPercent = appearance.messageBackgroundOpacityPercent,
         sentBubbleColor = appearance.sentBubbleColor,
         receivedBubbleColor = appearance.receivedBubbleColor,
         syncSystemBars = false,
@@ -1469,6 +1488,50 @@ private fun bubbleCornerLabel(value: io.github.trevarj.motd.data.prefs.BubbleCor
             io.github.trevarj.motd.data.prefs.BubbleCornerStyle.SQUARE -> R.string.settings_bubble_corner_square
         },
     )
+
+@Composable
+private fun MessageBackgroundOpacitySlider(
+    value: Int,
+    onValue: (Int) -> Unit,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val title = stringResource(R.string.settings_message_background_opacity)
+    val percent =
+        if (value == 0) {
+            stringResource(R.string.settings_message_background_opacity_off)
+        } else {
+            stringResource(R.string.settings_font_size_percent, value)
+        }
+    Column(modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                Text(
+                    stringResource(
+                        if (enabled) R.string.settings_message_background_opacity_desc else R.string.settings_message_background_opacity_unavailable,
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            io.github.trevarj.motd.ui.components
+                .MetadataPill(percent)
+        }
+        Slider(
+            value = value.coerceIn(0, 100).toFloat(),
+            onValueChange = { onValue(it.roundToInt().coerceIn(0, 100)) },
+            valueRange = 0f..100f,
+            steps = 99,
+            enabled = enabled,
+            modifier =
+                Modifier.testTag("settings_message_background_opacity").semantics {
+                    contentDescription = title
+                    stateDescription = percent
+                },
+        )
+    }
+}
 
 @Composable
 private fun FontScaleSlider(

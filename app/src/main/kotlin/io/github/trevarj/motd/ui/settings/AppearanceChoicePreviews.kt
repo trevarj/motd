@@ -81,6 +81,8 @@ internal fun AppearanceSampleTheme(
         chatCardCornerStyle = appearance.chatCardCornerStyle,
         mediaCornerStyle = appearance.mediaCornerStyle,
         uiIconSet = appearance.uiIconSet,
+        nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
+        messageBackgroundOpacityPercent = appearance.messageBackgroundOpacityPercent,
         uiFontScalePercent = appearance.uiFontScalePercent,
         fontChoice = appearance.fontChoice,
         customFontFile = font,

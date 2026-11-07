@@ -988,6 +988,10 @@
     <string name="settings_density">Message layout</string>
     <string name="settings_nickname_backgrounds">Nickname backgrounds</string>
     <string name="settings_nickname_backgrounds_desc">Tint Compact and Two-line message backgrounds by sender. Nickname colors and mention highlights are unchanged.</string>
+    <string name="settings_message_background_opacity">Message background opacity</string>
+    <string name="settings_message_background_opacity_desc" formatted="false">Backing for Compact and Two-line messages when nickname backgrounds are off. 0% turns it off; text and mention highlights stay unchanged.</string>
+    <string name="settings_message_background_opacity_off" formatted="false">0% (off)</string>
+    <string name="settings_message_background_opacity_unavailable">Choose Compact or Two-line message layout and turn off Nickname backgrounds to adjust opacity.</string>
     <string name="settings_composer_style">Message input layout</string>
     <string name="settings_composer_style_desc">Choose how the message input and its tools appear in chats.</string>
     <string name="settings_composer_style_comfortable">Floating</string>

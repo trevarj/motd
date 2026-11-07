@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -76,6 +77,7 @@ import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.fixedThemeScheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -357,6 +359,159 @@ class AppearanceFolderLayoutUiTest {
             preview.performScrollTo().assertIsDisplayed()
             assertTrue("$density live preview must restore its sender wash", tinted.sameAs(preview.captureToImage().asAndroidBitmap()))
         }
+    }
+
+    @Test
+    fun messageBackgroundOpacityUsesImmediateLayoutAndToggleDraftAndRetainsHiddenValue() {
+        val persisted = AppearanceConfig(theme = ColorThemePreset.AYU_LIGHT, wallpaper = WallpaperSelection(ChatWallpaperPreset.NONE))
+        val settings = Settings(layoutDensity = LayoutDensity.COMFORTABLE, dynamicColor = false, avatarStyle = AvatarStyle.NONE)
+        val target = mutableStateOf<SettingsTarget?>(null)
+        var selectedOpacity: Int? = null
+        var selectedLayout: LayoutDensity? = null
+        setContent(
+            settings = settings,
+            appearance = persisted,
+            targetProvider = { target.value },
+            onLayoutDensity = { selectedLayout = it },
+            onMessageBackgroundOpacity = { selectedOpacity = it },
+        )
+        val slider = compose.onNodeWithTag("settings_message_background_opacity")
+        val toggle = compose.onNodeWithTag("settings_switch_nickname_backgrounds_row", useUnmergedTree = true)
+
+        fun selectLayout(layout: String) {
+            compose.onNodeWithTag("settings_density_picker").performScrollTo().performClick()
+            scrollToSheetNode("settings_density_sheet", "settings_density_$layout").performClick()
+            // A taller selected preview can dispose the option from the lazy viewport.
+            scrollToSheetNode("settings_density_sheet", "settings_density_$layout").assertIsSelected()
+            dismissSheet("settings_density_sheet")
+        }
+
+        fun assertOpacity(percent: Int) {
+            slider.performScrollTo().assert(
+                SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(percent.toFloat(), 0f..100f, 99)),
+            )
+        }
+        slider.assertDoesNotExist()
+        toggle.performScrollTo().performClick().assertIsOff()
+        slider.assertDoesNotExist()
+        selectLayout("compact")
+        assertEquals(LayoutDensity.COMPACT, selectedLayout)
+        assertEquals(LayoutDensity.COMFORTABLE, settings.layoutDensity)
+        assertOpacity(100)
+        val preview = compose.onNodeWithTag("settings_chat_preview_inline_compact_default_rounded")
+        preview.performScrollTo().assertIsDisplayed()
+        val opaque = preview.captureToImage().asAndroidBitmap()
+        var intermediate: android.graphics.Bitmap? = null
+        for (percent in listOf(37, 0, 100)) {
+            slider.performScrollTo().performSemanticsAction(SemanticsActions.SetProgress) { it(percent.toFloat()) }
+            assertOpacity(percent)
+            assertEquals(percent, selectedOpacity)
+            assertEquals(100, persisted.messageBackgroundOpacityPercent)
+            assertEquals(true, persisted.nicknameBackgroundsEnabled)
+            if (percent == 0) {
+                slider.assert(
+                    SemanticsMatcher.expectValue(
+                        SemanticsProperties.StateDescription,
+                        RuntimeEnvironment.getApplication().getString(io.github.trevarj.motd.R.string.settings_message_background_opacity_off),
+                    ),
+                )
+            }
+            preview.performScrollTo().assertIsDisplayed()
+            val pixels = preview.captureToImage().asAndroidBitmap()
+            when (percent) {
+                37 -> {
+                    intermediate = pixels
+                    assertTrue("intermediate opacity changes the real preview before persistence emits", !opaque.sameAs(pixels))
+                }
+
+                0 -> {
+                    assertTrue("zero opacity removes the real row backing", !opaque.sameAs(pixels))
+                    assertTrue("intermediate opacity is not an on/off toggle", !requireNotNull(intermediate).sameAs(pixels))
+                }
+
+                100 -> {
+                    assertTrue("100% restores the original real preview pixels", opaque.sameAs(pixels))
+                }
+            }
+        }
+        slider.performScrollTo().performSemanticsAction(SemanticsActions.SetProgress) { it(37f) }
+        toggle.performScrollTo().performClick().assertIsOn()
+        slider.assertDoesNotExist()
+        toggle.performClick().assertIsOff()
+        assertOpacity(37)
+        selectLayout("comfortable")
+        slider.assertDoesNotExist()
+        selectLayout("two_line")
+        assertOpacity(37)
+        assertEquals(37, selectedOpacity)
+        assertEquals(LayoutDensity.TWO_LINE, selectedLayout)
+        assertEquals(LayoutDensity.COMFORTABLE, settings.layoutDensity)
+
+        val context = RuntimeEnvironment.getApplication()
+        val entries = buildSettingsSearchEntries(emptyList(), { context.getString(it) }, { network, section -> "$network · $section" })
+        val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.MESSAGE_BACKGROUND_OPACITY)
+        compose.runOnIdle {
+            target.value = (searchSettings("transparency", entries).single { it.destination == destination }.destination as SettingsSearchDestination.Page).target
+        }
+        compose.onNodeWithTag("settings_target_highlight_MESSAGE_BACKGROUND_OPACITY").assertIsDisplayed()
+        assertOpacity(37)
+    }
+
+    @Test
+    fun messageBackgroundOpacitySearchTargetExplainsUnavailablePrerequisitesWithoutChangingPreferences() {
+        val settings = Settings(layoutDensity = LayoutDensity.COMFORTABLE)
+        val persisted = AppearanceConfig(messageBackgroundOpacityPercent = 37)
+        val target = mutableStateOf<SettingsTarget?>(SettingsTarget.MESSAGE_BACKGROUND_OPACITY)
+        var selectedOpacity: Int? = null
+        var selectedLayout: LayoutDensity? = null
+        var selectedBackgrounds: Boolean? = null
+        setContent(
+            settings = settings,
+            appearance = persisted,
+            targetProvider = { target.value },
+            onMessageBackgroundOpacity = { selectedOpacity = it },
+            onLayoutDensity = { selectedLayout = it },
+            onNicknameBackgroundsEnabled = { selectedBackgrounds = it },
+        )
+        val slider = compose.onNodeWithTag("settings_message_background_opacity")
+        compose.onNodeWithTag("settings_target_highlight_MESSAGE_BACKGROUND_OPACITY").assertIsDisplayed()
+        slider.assertIsNotEnabled().assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(37f, 0f..100f, 99)),
+        )
+        compose
+            .onNodeWithText(
+                RuntimeEnvironment.getApplication().getString(io.github.trevarj.motd.R.string.settings_message_background_opacity_unavailable),
+            ).assertIsDisplayed()
+        assertNull(selectedOpacity)
+        assertNull(selectedLayout)
+        assertNull(selectedBackgrounds)
+        assertEquals(LayoutDensity.COMFORTABLE, settings.layoutDensity)
+        assertEquals(true, persisted.nicknameBackgroundsEnabled)
+        assertEquals(37, persisted.messageBackgroundOpacityPercent)
+
+        compose.runOnIdle { target.value = null }
+        slider.assertDoesNotExist()
+        compose.runOnIdle { target.value = SettingsTarget.MESSAGE_BACKGROUND_OPACITY }
+        compose.onNodeWithTag("settings_target_highlight_MESSAGE_BACKGROUND_OPACITY").assertIsDisplayed()
+        val toggle = compose.onNodeWithTag("settings_switch_nickname_backgrounds_row", useUnmergedTree = true)
+        toggle.performScrollTo().performClick().assertIsOff()
+        slider.performScrollTo().assertIsNotEnabled()
+        assertEquals(false, selectedBackgrounds)
+        assertNull(selectedOpacity)
+        compose.onNodeWithTag("settings_density_picker").performScrollTo().performClick()
+        scrollToSheetNode("settings_density_sheet", "settings_density_compact").performClick()
+        scrollToSheetNode("settings_density_sheet", "settings_density_compact").assertIsSelected()
+        dismissSheet("settings_density_sheet")
+        slider.performScrollTo().assertIsEnabled().performSemanticsAction(SemanticsActions.SetProgress) { it(0f) }
+        assertEquals(LayoutDensity.COMPACT, selectedLayout)
+        assertEquals(0, selectedOpacity)
+        toggle.performScrollTo().performClick().assertIsOn()
+        slider.performScrollTo().assertIsNotEnabled().assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(0f, 0f..100f, 99)),
+        )
+        assertEquals(LayoutDensity.COMFORTABLE, settings.layoutDensity)
+        assertEquals(true, persisted.nicknameBackgroundsEnabled)
+        assertEquals(37, persisted.messageBackgroundOpacityPercent)
     }
 
     @Test
@@ -1076,6 +1231,7 @@ class AppearanceFolderLayoutUiTest {
         onBubbleCornerStyle: (BubbleCornerStyle) -> Unit = {},
         onChatShadowsEnabled: (Boolean) -> Unit = {},
         onNicknameBackgroundsEnabled: (Boolean) -> Unit = {},
+        onMessageBackgroundOpacity: (Int) -> Unit = {},
         onUseThemeTextColors: (Boolean) -> Unit = {},
         onWallpaper: (WallpaperSelection) -> Unit = {},
         importedWallpaperProvider: () -> WallpaperSelection? = { null },
@@ -1130,6 +1286,7 @@ class AppearanceFolderLayoutUiTest {
                         onBubbleCornerStyle = onBubbleCornerStyle,
                         onChatShadowsEnabled = onChatShadowsEnabled,
                         onNicknameBackgroundsEnabled = onNicknameBackgroundsEnabled,
+                        onMessageBackgroundOpacity = onMessageBackgroundOpacity,
                         onLauncherIcon = {},
                         target = targetProvider(),
                     )

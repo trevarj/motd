@@ -156,6 +156,9 @@ val LocalChatShadowsEnabled: ProvidableCompositionLocal<Boolean> = staticComposi
 /** Controls only the ordinary sender wash in Compact and Two-line message rows. */
 val LocalNicknameBackgroundsEnabled: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { true }
 
+/** Ordinary dense-row backing only, when nickname backgrounds are disabled; zero paints nothing. */
+val LocalMessageBackgroundOpacityPercent: ProvidableCompositionLocal<Int> = staticCompositionLocalOf { 100 }
+
 /** Resolved fills for ordinary Comfortable PRIVMSG bubbles; null preserves the theme default. */
 data class ComfortableBubbleColors(
     val sent: Color? = null,
@@ -254,6 +257,7 @@ fun MotdTheme(
     uiIconSet: UiIconSet = LocalUiIconSet.current,
     chatShadowsEnabled: Boolean = false,
     nicknameBackgroundsEnabled: Boolean = true,
+    messageBackgroundOpacityPercent: Int = 100,
     sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     receivedBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     // Nested previews can render a different palette from the app shell without restyling its bars.
@@ -359,6 +363,7 @@ fun MotdTheme(
             LocalUiIconSet provides uiIconSet,
             LocalChatShadowsEnabled provides chatShadowsEnabled,
             LocalNicknameBackgroundsEnabled provides nicknameBackgroundsEnabled,
+            LocalMessageBackgroundOpacityPercent provides messageBackgroundOpacityPercent.coerceIn(0, 100),
             LocalComfortableBubbleColors provides comfortableBubbleColors,
             LocalMotdDark provides dark,
             LocalNickColors provides

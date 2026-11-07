@@ -61,6 +61,15 @@ class SettingsSearchTest {
     }
 
     @Test
+    fun messageBackgroundOpacityQueriesOpenTheirTypedAppearanceControl() {
+        val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
+        val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.MESSAGE_BACKGROUND_OPACITY)
+        for (query in listOf("message background opacity", "transparency", "compact opacity", "two line opacity")) {
+            assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
+        }
+    }
+
+    @Test
     fun surfaceShapeQueriesOpenTheirTypedAppearanceTargets() {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
         listOf(
