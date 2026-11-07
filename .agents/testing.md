@@ -14,6 +14,12 @@ once through Nix. Root Gradle/style configuration changes
 still require root `ktlintCheck`. Use the corresponding `ktlintFormat` task to
 apply enforced style.
 
+The local Nix development shells limit Gradle to two workers without cross-project
+parallelism, JVM processor-sized pools to two CPUs, and each native Ninja build to
+a shared two-job compile/link pool. Gradle and Kotlin daemon heaps remain capped
+at 4 GiB each. These limits leave desktop headroom, not an aggregate OS resource
+quota; hosted builds without the shell environment retain their existing settings.
+
 ## Command matrix
 
 | Changed surface | Required local checks |

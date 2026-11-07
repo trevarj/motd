@@ -40,6 +40,17 @@ android {
                 providers.environmentVariable("CMAKE_MAKE_PROGRAM").orNull?.let {
                     arguments += "-DCMAKE_MAKE_PROGRAM=$it"
                 }
+                // AGP invokes Ninja directly, bypassing cmake --build's environment cap.
+                providers.environmentVariable("CMAKE_BUILD_PARALLEL_LEVEL").orNull?.let { value ->
+                    val jobs = value.toIntOrNull()
+                    require(jobs != null && jobs > 0) { "CMAKE_BUILD_PARALLEL_LEVEL must be a positive integer" }
+                    arguments +=
+                        listOf(
+                            "-DCMAKE_JOB_POOLS=motd_build=$jobs",
+                            "-DCMAKE_JOB_POOL_COMPILE=motd_build",
+                            "-DCMAKE_JOB_POOL_LINK=motd_build",
+                        )
+                }
             }
         }
     }

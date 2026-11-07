@@ -46,6 +46,15 @@
           rm "$out/libexec/android-sdk/ndk-bundle"
         '';
         sdkRoot = "${androidSdk}/libexec/android-sdk";
+        # Local i5-10210U (4 cores / 8 threads, 46 GiB RAM): leave desktop headroom.
+        # Explicit daemon arguments prevent reusing uncapped Gradle/Kotlin JVMs.
+        localGradleOpts = pkgs.lib.concatStringsSep " " [
+          "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/36.0.0/aapt2"
+          "-Dorg.gradle.workers.max=2"
+          "-Dorg.gradle.parallel=false"
+          "\"-Dorg.gradle.jvmargs=-Xmx4g -XX:ActiveProcessorCount=2 -Dfile.encoding=UTF-8\""
+          "\"-Dorg.gradle.project.kotlin.daemon.jvmargs=-Xmx4g -XX:ActiveProcessorCount=2\""
+        ];
         # Opt-in, large emulator closure for the local headless E2E loop. Keeping this separate
         # avoids making every ordinary build fetch an API image and emulator runtime.
         # This shell only runs emulator/avdmanager/adb; headless.sh shells back out to the
@@ -88,7 +97,11 @@
           CMAKE_MAKE_PROGRAM = "${pkgs.ninja}/bin/ninja";
           # AGP downloads a dynamically-linked aapt2 that won't run outside FHS;
           # point Gradle at the Nix-provided one instead.
-          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/36.0.0/aapt2 -Dorg.gradle.workers.max=2";
+          GRADLE_OPTS = localGradleOpts;
+          # Also bound processor-sized pools in test and other child JVMs.
+          JAVA_TOOL_OPTIONS = "-XX:ActiveProcessorCount=2";
+          # Native modules translate this into Ninja compile/link job pools.
+          CMAKE_BUILD_PARALLEL_LEVEL = "2";
         };
         devShells.mcp = self.devShells.${system}.default.overrideAttrs (previous: {
           nativeBuildInputs = previous.nativeBuildInputs ++ [ gradleMcp ];
@@ -101,7 +114,9 @@
           ANDROID_NDK_HOME = "${sdkRoot}/ndk/${nativeNdkVersion}";
           ANDROID_NDK_ROOT = "${sdkRoot}/ndk/${nativeNdkVersion}";
           CMAKE_MAKE_PROGRAM = "${pkgs.ninja}/bin/ninja";
-          GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${sdkRoot}/build-tools/36.0.0/aapt2 -Dorg.gradle.workers.max=2";
+          GRADLE_OPTS = localGradleOpts;
+          JAVA_TOOL_OPTIONS = "-XX:ActiveProcessorCount=2";
+          CMAKE_BUILD_PARALLEL_LEVEL = "2";
         };
         # Standalone raster studies and browser verification, without the Android SDK.
         devShells.sprite-studies = pkgs.mkShell {
