@@ -3316,6 +3316,24 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun `leaving the chat does not cancel a read marker waiting for the writer`() =
+        runTest {
+            val manager = FakeConnectionManager(network.id).apply { markReadGate = CompletableDeferred() }
+            val vm = viewModel(channel, manager)
+            vm.state.first { it.buffer != null }
+            vm.onResume()
+            val anchor = TimelineAnchor(serverTime = 500, eventId = 5)
+
+            vm.markRead(anchor)
+            vm.onPause()
+            vm.viewModelScope.cancel()
+            checkNotNull(manager.markReadGate).complete(Unit)
+            advanceUntilIdle()
+
+            assertEquals(listOf(channel.id to anchor), manager.readMarkers)
+        }
+
+    @Test
     fun `timeline history status follows the current buffer`() =
         runTest {
             val history = FakeHistoryResyncController()
@@ -6916,6 +6934,9 @@ class ChatViewModelTest {
         val parts = mutableListOf<Pair<Long, String?>>()
         val invites = mutableListOf<Pair<Long, String>>()
         val readMarkers = mutableListOf<Pair<Long, TimelineAnchor>>()
+
+        /** Holds markRead as a busy database writer would. */
+        var markReadGate: CompletableDeferred<Unit>? = null
         val messageStarted = CompletableDeferred<Unit>()
         val messageAttempts = mutableListOf<SentMessage>()
         val typingSent = CompletableDeferred<Unit>()
@@ -7073,6 +7094,7 @@ class ChatViewModelTest {
             bufferId: Long,
             anchor: TimelineAnchor,
         ) {
+            markReadGate?.await()
             readMarkers += bufferId to anchor
         }
 

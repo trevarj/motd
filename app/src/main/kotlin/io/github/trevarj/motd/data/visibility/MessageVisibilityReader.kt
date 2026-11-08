@@ -10,10 +10,12 @@ import io.github.trevarj.motd.data.db.RoomEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -433,7 +435,10 @@ class MessageVisibilityReader
         suspend fun chatListRow(
             roomId: Long,
             spec: MessageVisibilitySpec,
-        ): ChatListRow? = resolveChatList(db.bufferDao().observeChatList(roomId).first(), spec).singleOrNull()
+        ): ChatListRow? =
+            // A plain read: a Flow would register an observer, and both that and the Flow query's
+            // transaction can need the writer, which a history sync holds for seconds.
+            resolveChatList(withContext(Dispatchers.IO) { db.bufferDao().chatListNow(roomId) }, spec).singleOrNull()
 
         /** Replace fool-authored chat-list state, then re-sort by the resulting meaningful activity. */
         suspend fun resolveChatList(
@@ -484,8 +489,10 @@ class MessageVisibilityReader
         ): SimpleSQLiteQuery {
             val selectedIds = rows.joinToString(",") { it.bufferId.toString() }
             val visibility = MessageVisibilitySql(spec, identityRules)
+            // Android routes only statements that start with SELECT to reader connections; a leading WITH
+            // would run on the writer's connection and wait out every history write.
             return SimpleSQLiteQuery(
-                "WITH selected AS (" +
+                "SELECT * FROM (WITH selected AS (" +
                     "SELECT b.*, COALESCE(anchor.timelineOrder, COALESCE(b.localReadAnchorEventId, 0)) " +
                     "AS localReadAnchorOrder FROM buffers b " +
                     "LEFT JOIN messages anchor ON anchor.id = b.localReadAnchorEventId " +
@@ -496,7 +503,7 @@ class MessageVisibilityReader
                     cappedChatListCountSql(visibility.mentionAttention("b.type"), mentionsOnly = true) + " AS mentionCount " +
                     "FROM selected b LEFT JOIN messages preview ON preview.id = (" +
                     "SELECT m.id FROM messages m WHERE m.bufferId = b.id AND ${visibility.preview()} " +
-                    "ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT 1)",
+                    "ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT 1))",
             )
         }
 

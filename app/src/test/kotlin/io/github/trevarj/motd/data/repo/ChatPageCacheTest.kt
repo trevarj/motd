@@ -54,6 +54,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -61,9 +62,12 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -74,6 +78,7 @@ import org.robolectric.RobolectricTestRunner
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -944,7 +949,7 @@ class ChatPageCacheTest {
         }
 
     @Test
-    fun externalWriterCommitChangesTheSamePrimaryConnectionsDataVersion() =
+    fun externalWriterCommitBumpsTheRoomRevision() =
         cacheTest(onDisk = true) { fixture ->
             val room = fixture.seedRooms(1).single()
             val original = fixture.acquire(room)
@@ -963,8 +968,7 @@ class ChatPageCacheTest {
             val replacement = fixture.acquire(room)
             assertSame(original.pages, replacement.pages)
             assertEquals(oldVersion.session, replacement.entry.version.session)
-            assertEquals("the external writer has no access to this connection's TEMP triggers", oldVersion.revision, replacement.entry.version.revision)
-            assertNotEquals(oldVersion.externalVersion, replacement.entry.version.externalVersion)
+            assertNotEquals("persistent triggers fire for every connection", oldVersion.revision, replacement.entry.version.revision)
             assertFalse(replacement.admit(oldSnapshot))
             val replacementView = present(replacement)
             assertEquals("external edit", replacementView.differ.peek(0)?.text)
@@ -972,7 +976,7 @@ class ChatPageCacheTest {
         }
 
     @Test
-    fun lostTempSessionRejectsUntrackedEditEvenWhenRevisionResetsToZero() =
+    fun rebuiltRevisionTrackingRejectsTheOldCertificationEvenWhenRevisionsRestart() =
         cacheTest(onDisk = true) { fixture ->
             val room = fixture.seedRooms(1).single()
             val original = fixture.acquire(room)
@@ -981,17 +985,16 @@ class ChatPageCacheTest {
             val oldVersion = original.entry.version
             val oldSnapshot = checkNotNull(original.entry.snapshot)
             view.detach()
-            // Closing Room's openHelper directly leaves its compatibility pool holding a closed
-            // database. Model complete loss of our connection-local state instead, without
-            // invalidating Room's connection ownership or allowing its callbacks to mask the race.
+            // Lose the revision tables entirely, then edit: the counters restart from nothing.
             fixture.databaseTasks.paused = true
             try {
                 fixture.db.withTransaction {
                     val writer = fixture.db.openHelper.writableDatabase
                     for (operation in listOf("insert", "update", "delete")) {
-                        writer.execSQL("DROP TRIGGER temp.motd_chat_page_$operation")
+                        writer.execSQL("DROP TRIGGER motd_room_revision_$operation")
                     }
-                    writer.execSQL("DROP TABLE temp.motd_chat_page_version")
+                    writer.execSQL("DROP TABLE motd_room_revision")
+                    writer.execSQL("DROP TABLE motd_room_revision_session")
                     writer.execSQL(
                         "UPDATE messages SET text = 'session-loss edit' WHERE id = ?",
                         arrayOf<Any>(oldRow.id),
@@ -1001,9 +1004,6 @@ class ChatPageCacheTest {
                 assertEquals(oldRow.text, view.differ.peek(186)?.text)
                 val replacement = fixture.acquire(room, index = 186, expectedId = oldRow.id)
                 assertSame(original.pages, replacement.pages)
-                assertEquals(0L, oldVersion.revision)
-                assertEquals(0L, replacement.entry.version.revision)
-                assertEquals(oldVersion.externalVersion, replacement.entry.version.externalVersion)
                 assertNotEquals(oldVersion.session, replacement.entry.version.session)
                 assertFalse(replacement.admit(oldSnapshot))
                 fixture.databaseTasks.resume()
@@ -1017,7 +1017,7 @@ class ChatPageCacheTest {
         }
 
     @Test
-    fun missingTempTriggerChangesSessionRatherThanTrustingAnUntrackedWrite() =
+    fun missingTriggerChangesSessionRatherThanTrustingAnUntrackedWrite() =
         cacheTest { fixture ->
             val room = fixture.seedRooms(1).single()
             val original = fixture.acquire(room)
@@ -1027,7 +1027,7 @@ class ChatPageCacheTest {
             val oldSnapshot = checkNotNull(original.entry.snapshot)
             view.detach()
             fixture.db.openHelper.writableDatabase
-                .execSQL("DROP TRIGGER temp.motd_chat_page_update")
+                .execSQL("DROP TRIGGER motd_room_revision_update")
             fixture.db.openHelper.writableDatabase
                 .execSQL("UPDATE messages SET text = 'untracked edit' WHERE id = ?", arrayOf(id))
             val replacement = fixture.acquire(room)
@@ -1060,6 +1060,38 @@ class ChatPageCacheTest {
         }
 
     @Test
+    fun versionReadsDoNotWaitForAWriterTransaction() =
+        cacheTest(onDisk = true, realCacheIo = true) { fixture ->
+            val room = fixture.seedRooms(1).single()
+            val lease = fixture.acquire(room)
+            present(lease).detach()
+            val holding = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            // A long history write holds the writer, as a big CHATHISTORY page does during sync.
+            val writer =
+                Thread {
+                    runBlocking {
+                        fixture.db.withTransaction {
+                            fixture.db.openHelper.writableDatabase
+                                .execSQL("UPDATE messages SET text = text WHERE bufferId = ?", arrayOf<Any>(room))
+                            holding.countDown()
+                            release.await()
+                        }
+                    }
+                }.apply { start() }
+            try {
+                assertTrue(holding.await(10, TimeUnit.SECONDS))
+                // A read stuck on the writer blocks uninterruptibly; time the wait, not the read.
+                val read = async(Dispatchers.IO) { lease.entry.readVersion() }
+                val version = withContext(Dispatchers.IO) { withTimeoutOrNull(5_000) { read.await() } }
+                assertNotNull("certifying a page must not queue behind the writer", version)
+            } finally {
+                release.countDown()
+                writer.join()
+            }
+        }
+
+    @Test
     fun versionQueriesUseIoRatherThanTheUiDispatcher() =
         cacheTest(realCacheIo = true) { fixture ->
             val room = fixture.seedRooms(1).single()
@@ -1069,7 +1101,7 @@ class ChatPageCacheTest {
             assertSame(original.pages, replacement.pages)
             present(replacement).detach()
             assertTrue(fixture.epochQueries.get() > 0)
-            assertFalse("TEMP schema/version SQL must never execute on Main", fixture.epochOnMain.get())
+            assertFalse("revision SQL must never execute on Main", fixture.epochOnMain.get())
         }
 
     @Test
@@ -1451,12 +1483,6 @@ class ChatPageCacheTest {
                 fixture.cache.slots.value
                     .single(),
             )
-            fixture.db.withTransaction {
-                fixture.db.openHelper.writableDatabase.query("SELECT COUNT(*) FROM temp.motd_chat_page_version").use {
-                    assertTrue(it.moveToFirst())
-                    assertEquals("canceled staging releases its unused TEMP registration", 1, it.getInt(0))
-                }
-            }
             val latest =
                 fixture.cache.acquire(
                     room,
@@ -1504,11 +1530,11 @@ class ChatPageCacheTest {
                 .setTransactionExecutor(Runnable::run)
                 .setQueryCallback(
                     { sql, _ ->
-                        if (sql.startsWith("INSERT OR IGNORE INTO temp.motd_chat_page_version")) beforePageVersionRead?.invoke()
+                        if (sql.contains("FROM motd_room_revision_session")) beforePageVersionRead?.invoke()
                         val count = sql.trimStart().startsWith("SELECT COUNT(", ignoreCase = true)
                         if (sql.contains("messages") && !count && sql.contains("LIMIT") && sql.contains("OFFSET")) loads.incrementAndGet()
                         if (sql.contains("messages") && count) counts.incrementAndGet()
-                        if (sql.contains("motd_chat_page_")) {
+                        if (sql.contains("motd_room_revision")) {
                             epochQueries.incrementAndGet()
                             if (Looper.myLooper() == Looper.getMainLooper()) epochOnMain.set(true)
                         }

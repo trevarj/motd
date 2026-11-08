@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.db
 
 import androidx.room.Database
+import androidx.room.InvalidationTracker
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
@@ -1206,3 +1207,56 @@ private fun SupportSQLiteDatabase.addNetworkColumnsIfMissing(vararg columns: Pai
         if (name !in existing) execSQL("ALTER TABLE networks ADD COLUMN $name $type")
     }
 }
+
+/**
+ * Tables some Flow, paging source or [InvalidationTracker.Observer] in the app watches. Add a table
+ * here when something starts observing it; [MotdDatabaseTablesTest] makes every table pick a side.
+ */
+internal val OBSERVED_TABLES =
+    arrayOf(
+        "buffers",
+        "chat_folders",
+        "composer_drafts",
+        "dcc_transfers",
+        "event_redirects",
+        "history_gaps",
+        "ignored_auto_group_patterns",
+        "members",
+        "messages",
+        "messages_fts",
+        "network_identity",
+        "network_ignores",
+        "networks",
+        "reactions",
+        "users",
+    )
+
+/** Tables nothing observes. Most are history-sync bookkeeping written for every stored message. */
+internal val UNOBSERVED_TABLES =
+    arrayOf(
+        "app_state",
+        "connection_generations",
+        "discarded_message_ids",
+        "event_aliases",
+        "event_observations",
+        "history_backfill_cursors",
+        "history_cursors",
+        "network_history_cursors",
+        "pending_folder_assignments",
+        "room_aliases",
+    )
+
+/**
+ * Room installs a table's change triggers when its first observer arrives and drops them when the last
+ * leaves, each in a writer transaction. A chat screen observes tables nothing else does, so every open
+ * and close queued behind whatever history write held the writer. One observer of [OBSERVED_TABLES] for
+ * the life of the process keeps that trigger set fixed. Tables nothing observes stay untracked: their
+ * triggers would fire on every history write and, measured on a phone, cost about a quarter of each
+ * page's write time. Blocking: call it off Main.
+ */
+internal fun MotdDatabase.keepObservedTablesTracked() =
+    invalidationTracker.addObserver(
+        object : InvalidationTracker.Observer(OBSERVED_TABLES) {
+            override fun onInvalidated(tables: Set<String>) = Unit
+        },
+    )

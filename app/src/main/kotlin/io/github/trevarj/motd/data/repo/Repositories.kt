@@ -25,6 +25,7 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
@@ -106,6 +107,9 @@ object NoopNetworkIgnoreRepository : NetworkIgnoreRepository {
 
 interface BufferRepository {
     fun observeChatList(): Flow<List<ChatListRow>>
+
+    /** One read of [observeBuffer], for callers that need no updates. */
+    suspend fun buffer(id: Long): BufferEntity? = observeBuffer(id).firstOrNull()
 
     /**
      * Existing QUERY conversations, newest activity first once ordered by the caller.

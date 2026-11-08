@@ -144,6 +144,10 @@ interface NetworkIdentityDao {
     @Query("SELECT * FROM network_identity WHERE networkId = :networkId")
     suspend fun byNetwork(networkId: Long): NetworkIdentityEntity?
 
+    /** Blocking [byNetwork] for chat-open reads that must not queue on Room's query executor. */
+    @Query("SELECT * FROM network_identity WHERE networkId = :networkId")
+    fun byNetworkNow(networkId: Long): NetworkIdentityEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(identity: NetworkIdentityEntity)
 
@@ -310,122 +314,14 @@ interface BufferDao {
     // light the cue on rooms the pass has already proven converged. What no comparison can settle —
     // an advertisement replay never serves — is retired at the source by
     // `EventProcessor.clampAdvertisedActivity`.
-    @Transaction
-    @Query(
-        """
-        WITH visible_buffers AS (
-            SELECT base.*,
-                   COALESCE(anchor.timelineOrder, COALESCE(base.localReadAnchorEventId, 0))
-                       AS localReadAnchorOrder
-            FROM buffers base
-            LEFT JOIN messages anchor ON anchor.id = base.localReadAnchorEventId
-            WHERE base.type != 'SERVER' AND base.dismissed = 0
-              AND base.pendingCloseAt IS NULL AND base.redirectToRoomId IS NULL
-              AND (:roomId IS NULL OR base.id = :roomId)
-        )
-        SELECT
-            b.id AS bufferId,
-            b.networkId AS networkId,
-            n.name AS networkName,
-            ni.caseMapping AS caseMapping,
-            ni.chanTypes AS chanTypes,
-            b.displayName AS displayName,
-            b.type AS type,
-            b.pinned AS pinned,
-            b.muted AS muted,
-            b.archived AS archived,
-            b.avatarOverrideModel AS avatarOverrideModel,
-            b.folderId AS folderId,
-            b.dickordChannelJson AS dickordChannelJson,
-            lm.text AS lastMessageText,
-            lm.sender AS lastMessageSender,
-            lm.serverTime AS lastMessageTime,
-            (SELECT COUNT(*) FROM (SELECT 1 FROM messages m WHERE m.bufferId = b.id
-                AND (
-                    m.serverTime > MAX(COALESCE(b.localReadAnchorTime, 0), COALESCE(b.localUnreadFloorTime, 0))
-                    OR (
-                        m.serverTime = b.localReadAnchorTime
-                        AND COALESCE(b.localUnreadFloorTime, -9223372036854775808) < b.localReadAnchorTime
-                        AND (
-                            m.timelineOrder > b.localReadAnchorOrder
-                            OR (m.timelineOrder = b.localReadAnchorOrder
-                                AND m.id > COALESCE(b.localReadAnchorEventId, 0))
-                        )
-                    )
-                )
-                AND m.isSelf = 0
-                AND (
-                    m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
-                    OR (m.kind = 'DCC_TRANSFER' AND m.eventPayload IS NOT NULL)
-                ) LIMIT 1000)) AS unreadCount,
-            (SELECT COUNT(*) FROM (SELECT 1 FROM messages m WHERE m.bufferId = b.id
-                AND (
-                    m.serverTime > MAX(COALESCE(b.localReadAnchorTime, 0), COALESCE(b.localUnreadFloorTime, 0))
-                    OR (
-                        m.serverTime = b.localReadAnchorTime
-                        AND COALESCE(b.localUnreadFloorTime, -9223372036854775808) < b.localReadAnchorTime
-                        AND (
-                            m.timelineOrder > b.localReadAnchorOrder
-                            OR (m.timelineOrder = b.localReadAnchorOrder
-                                AND m.id > COALESCE(b.localReadAnchorEventId, 0))
-                        )
-                    )
-                )
-                AND m.isSelf = 0
-                AND m.hasMention = 1
-                AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION') LIMIT 1000)) AS mentionCount,
-            EXISTS(SELECT 1 FROM history_gaps g WHERE g.roomId = b.id
-                AND (g.newerServerTime > MAX(COALESCE(b.localReadAnchorTime, 0),
-                    COALESCE(b.localUnreadFloorTime, 0)) OR
-                    (g.newerServerTime = MAX(COALESCE(b.localReadAnchorTime, 0),
-                        COALESCE(b.localUnreadFloorTime, 0)) AND
-                     COALESCE(b.localUnreadFloorTime, -9223372036854775808) <
-                         COALESCE(b.localReadAnchorTime, 0) AND
-                     (g.recoverable = 0 AND g.olderServerTime = g.newerServerTime OR
-                      g.newerEventId IS NULL OR g.newerTimelineOrder IS NULL OR
-                      g.newerTimelineOrder > b.localReadAnchorOrder OR
-                      (g.newerTimelineOrder = b.localReadAnchorOrder AND
-                       g.newerEventId > COALESCE(b.localReadAnchorEventId, 0)))))) OR
-            (b.historyComplete = 0 AND b.oldestFetchedTime >
-                MAX(COALESCE(b.localReadAnchorTime, 0),
-                    COALESCE(b.localUnreadFloorTime, 0))) AS unreadCountIncomplete,
-            EXISTS(SELECT 1 FROM history_gaps g WHERE g.roomId = b.id
-                AND (g.newerServerTime > MAX(COALESCE(b.localReadAnchorTime, 0),
-                    COALESCE(b.localUnreadFloorTime, 0)) OR
-                    (g.newerServerTime = MAX(COALESCE(b.localReadAnchorTime, 0),
-                        COALESCE(b.localUnreadFloorTime, 0)) AND
-                     COALESCE(b.localUnreadFloorTime, -9223372036854775808) <
-                         COALESCE(b.localReadAnchorTime, 0) AND
-                     (g.recoverable = 0 AND g.olderServerTime = g.newerServerTime OR
-                      g.newerEventId IS NULL OR g.newerTimelineOrder IS NULL OR
-                      g.newerTimelineOrder > b.localReadAnchorOrder OR
-                      (g.newerTimelineOrder = b.localReadAnchorOrder AND
-                       g.newerEventId > COALESCE(b.localReadAnchorEventId, 0)))))) OR
-            (b.historyComplete = 0 AND b.oldestFetchedTime >
-                MAX(COALESCE(b.localReadAnchorTime, 0),
-                    COALESCE(b.localUnreadFloorTime, 0))) AS mentionCountIncomplete,
-            (b.advertisedLatestTime IS NOT NULL
-                AND b.advertisedLatestTime / 1000 > MAX(COALESCE(b.localReadAnchorTime, 0),
-                    COALESCE(b.localUnreadFloorTime, 0)) / 1000
-                AND b.advertisedLatestTime / 1000 > COALESCE(lm.serverTime, 0) / 1000)
-                AS advertisedUnread
-        FROM visible_buffers b
-        JOIN networks n ON n.id = b.networkId
-        LEFT JOIN network_identity ni ON ni.networkId = b.networkId
-        LEFT JOIN messages lm ON lm.id = (
-            SELECT m.id FROM messages m
-            WHERE m.bufferId = b.id
-              AND m.kind NOT IN ('JOIN', 'PART', 'QUIT', 'AWAY', 'BACK', 'NETSPLIT', 'NETJOIN')
-            ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC
-            LIMIT 1
-        )
-        ORDER BY b.pinned DESC,
-                 (COALESCE(lm.serverTime, 0) = 0) ASC,
-                 COALESCE(lm.serverTime, 0) DESC,
-                 b.id DESC
-        """,
-    )
+    // No @Transaction: one SELECT already reads one snapshot, and Room would run the transaction on
+    // the writer, so every refresh during a history sync would queue behind its pages.
+    @Query(CHAT_LIST_SQL)
     fun observeChatList(roomId: Long? = null): Flow<List<ChatListRow>>
+
+    /** One-shot [observeChatList] for a chat open, with no observer to register. Blocking; call it on IO. */
+    @Query(CHAT_LIST_SQL)
+    fun chatListNow(roomId: Long? = null): List<ChatListRow>
 
     // QUERY-only materialization keeps channel traffic from invalidating this always-on projection.
     @Query(
@@ -464,6 +360,14 @@ interface BufferDao {
            WHERE requested.id = :id""",
     )
     suspend fun observeById(id: Long): BufferEntity?
+
+    /** Blocking [observeById] for chat-open reads that must not queue on Room's query executor. */
+    @Query(
+        """SELECT canonical.* FROM buffers requested
+           JOIN buffers canonical ON canonical.id = COALESCE(requested.redirectToRoomId, requested.id)
+           WHERE requested.id = :id""",
+    )
+    fun canonicalNow(id: Long): BufferEntity?
 
     @Query("SELECT * FROM buffers WHERE id = :id")
     suspend fun rawById(id: RoomId): BufferEntity?
@@ -1289,6 +1193,19 @@ interface MessageDao {
     @RawQuery(observedEntities = [MessageEntity::class])
     fun pagingSource(query: SupportSQLiteQuery): PagingSource<Int, MessageEntity>
 
+    /**
+     * A room's committed revision from [io.github.trevarj.motd.data.repo.ChatRoomRevisions], plus how
+     * many tracking objects exist. A plain read, so it runs on a reader connection.
+     */
+    @SkipQueryVerification
+    @Query(
+        "SELECT s.token AS session, COALESCE(r.revision, 0) AS revision, (" +
+            io.github.trevarj.motd.data.repo.ChatRoomRevisions.TRACKING_OBJECTS_SQL +
+            ") AS trackingObjects FROM motd_room_revision_session s " +
+            "LEFT JOIN motd_room_revision r ON r.roomId = :roomId WHERE s.id = 1",
+    )
+    fun roomRevision(roomId: Long): RoomRevisionRow?
+
     /** Retained paging binds its ownership guard at execution, including Room's COUNT query. */
     @RawQuery(observedEntities = [MessageEntity::class])
     fun pagingSource(query: RoomRawQuery): PagingSource<Int, MessageEntity>
@@ -1320,6 +1237,13 @@ interface MessageDao {
 
     @RawQuery
     suspend fun rawCount(query: SupportSQLiteQuery): Int
+
+    /** Blocking raw reads for chat-open paths that must not queue on Room's query executor. */
+    @RawQuery
+    fun rawMessageNow(query: SupportSQLiteQuery): MessageEntity?
+
+    @RawQuery
+    fun rawCountNow(query: SupportSQLiteQuery): Int
 
     @RawQuery
     suspend fun rawChatListVisibility(query: SupportSQLiteQuery): List<ChatListVisibilityRow>
@@ -1927,8 +1851,9 @@ interface MemberDao {
     @Query("SELECT * FROM members WHERE bufferId = :bufferId")
     suspend fun allNow(bufferId: Long): List<MemberEntity>
 
+    // Wrapped to start with SELECT: Android sends any other leading keyword to the writer's connection.
     @Query(
-        """WITH candidates(nick) AS (
+        """SELECT * FROM (WITH candidates(nick) AS (
                SELECT m.nick FROM members m
                JOIN buffers b ON b.id = m.bufferId
                WHERE b.networkId = :networkId AND b.redirectToRoomId IS NULL
@@ -1949,7 +1874,7 @@ interface MemberDao {
            WHERE identityKey LIKE :pattern ESCAPE '\' AND identityKey != :selfKey
            GROUP BY identityKey
            ORDER BY identityKey, nick
-           LIMIT :limit""",
+           LIMIT :limit)""",
     )
     fun observeNickSuggestions(
         networkId: Long,
@@ -2671,6 +2596,13 @@ data class PrunableRoom(
     val presenceRowCount: Int,
 )
 
+/** Row shape for [MessageDao.roomRevision]. */
+data class RoomRevisionRow(
+    val session: String,
+    val revision: Long,
+    val trackingObjects: Int,
+)
+
 /** One room's locally held history: how many rows and the span they cover. */
 data class RoomSpan(
     val roomId: RoomId,
@@ -3017,3 +2949,119 @@ interface AppStateDao {
     @Query("DELETE FROM app_state WHERE `key` = :key")
     suspend fun delete(key: String)
 }
+
+// Wrapped to start with SELECT: Android routes only SELECT statements to reader connections, and a
+// leading WITH would run every chat-list read on the writer's connection.
+internal const val CHAT_LIST_SQL =
+    """SELECT * FROM (
+    WITH visible_buffers AS (
+        SELECT base.*,
+               COALESCE(anchor.timelineOrder, COALESCE(base.localReadAnchorEventId, 0))
+                   AS localReadAnchorOrder
+        FROM buffers base
+        LEFT JOIN messages anchor ON anchor.id = base.localReadAnchorEventId
+        WHERE base.type != 'SERVER' AND base.dismissed = 0
+          AND base.pendingCloseAt IS NULL AND base.redirectToRoomId IS NULL
+          AND (:roomId IS NULL OR base.id = :roomId)
+    )
+    SELECT
+        b.id AS bufferId,
+        b.networkId AS networkId,
+        n.name AS networkName,
+        ni.caseMapping AS caseMapping,
+        ni.chanTypes AS chanTypes,
+        b.displayName AS displayName,
+        b.type AS type,
+        b.pinned AS pinned,
+        b.muted AS muted,
+        b.archived AS archived,
+        b.avatarOverrideModel AS avatarOverrideModel,
+        b.folderId AS folderId,
+        b.dickordChannelJson AS dickordChannelJson,
+        lm.text AS lastMessageText,
+        lm.sender AS lastMessageSender,
+        lm.serverTime AS lastMessageTime,
+        (SELECT COUNT(*) FROM (SELECT 1 FROM messages m WHERE m.bufferId = b.id
+            AND (
+                m.serverTime > MAX(COALESCE(b.localReadAnchorTime, 0), COALESCE(b.localUnreadFloorTime, 0))
+                OR (
+                    m.serverTime = b.localReadAnchorTime
+                    AND COALESCE(b.localUnreadFloorTime, -9223372036854775808) < b.localReadAnchorTime
+                    AND (
+                        m.timelineOrder > b.localReadAnchorOrder
+                        OR (m.timelineOrder = b.localReadAnchorOrder
+                            AND m.id > COALESCE(b.localReadAnchorEventId, 0))
+                    )
+                )
+            )
+            AND m.isSelf = 0
+            AND (
+                m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+                OR (m.kind = 'DCC_TRANSFER' AND m.eventPayload IS NOT NULL)
+            ) LIMIT 1000)) AS unreadCount,
+        (SELECT COUNT(*) FROM (SELECT 1 FROM messages m WHERE m.bufferId = b.id
+            AND (
+                m.serverTime > MAX(COALESCE(b.localReadAnchorTime, 0), COALESCE(b.localUnreadFloorTime, 0))
+                OR (
+                    m.serverTime = b.localReadAnchorTime
+                    AND COALESCE(b.localUnreadFloorTime, -9223372036854775808) < b.localReadAnchorTime
+                    AND (
+                        m.timelineOrder > b.localReadAnchorOrder
+                        OR (m.timelineOrder = b.localReadAnchorOrder
+                            AND m.id > COALESCE(b.localReadAnchorEventId, 0))
+                    )
+                )
+            )
+            AND m.isSelf = 0
+            AND m.hasMention = 1
+            AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION') LIMIT 1000)) AS mentionCount,
+        EXISTS(SELECT 1 FROM history_gaps g WHERE g.roomId = b.id
+            AND (g.newerServerTime > MAX(COALESCE(b.localReadAnchorTime, 0),
+                COALESCE(b.localUnreadFloorTime, 0)) OR
+                (g.newerServerTime = MAX(COALESCE(b.localReadAnchorTime, 0),
+                    COALESCE(b.localUnreadFloorTime, 0)) AND
+                 COALESCE(b.localUnreadFloorTime, -9223372036854775808) <
+                     COALESCE(b.localReadAnchorTime, 0) AND
+                 (g.recoverable = 0 AND g.olderServerTime = g.newerServerTime OR
+                  g.newerEventId IS NULL OR g.newerTimelineOrder IS NULL OR
+                  g.newerTimelineOrder > b.localReadAnchorOrder OR
+                  (g.newerTimelineOrder = b.localReadAnchorOrder AND
+                   g.newerEventId > COALESCE(b.localReadAnchorEventId, 0)))))) OR
+        (b.historyComplete = 0 AND b.oldestFetchedTime >
+            MAX(COALESCE(b.localReadAnchorTime, 0),
+                COALESCE(b.localUnreadFloorTime, 0))) AS unreadCountIncomplete,
+        EXISTS(SELECT 1 FROM history_gaps g WHERE g.roomId = b.id
+            AND (g.newerServerTime > MAX(COALESCE(b.localReadAnchorTime, 0),
+                COALESCE(b.localUnreadFloorTime, 0)) OR
+                (g.newerServerTime = MAX(COALESCE(b.localReadAnchorTime, 0),
+                    COALESCE(b.localUnreadFloorTime, 0)) AND
+                 COALESCE(b.localUnreadFloorTime, -9223372036854775808) <
+                     COALESCE(b.localReadAnchorTime, 0) AND
+                 (g.recoverable = 0 AND g.olderServerTime = g.newerServerTime OR
+                  g.newerEventId IS NULL OR g.newerTimelineOrder IS NULL OR
+                  g.newerTimelineOrder > b.localReadAnchorOrder OR
+                  (g.newerTimelineOrder = b.localReadAnchorOrder AND
+                   g.newerEventId > COALESCE(b.localReadAnchorEventId, 0)))))) OR
+        (b.historyComplete = 0 AND b.oldestFetchedTime >
+            MAX(COALESCE(b.localReadAnchorTime, 0),
+                COALESCE(b.localUnreadFloorTime, 0))) AS mentionCountIncomplete,
+        (b.advertisedLatestTime IS NOT NULL
+            AND b.advertisedLatestTime / 1000 > MAX(COALESCE(b.localReadAnchorTime, 0),
+                COALESCE(b.localUnreadFloorTime, 0)) / 1000
+            AND b.advertisedLatestTime / 1000 > COALESCE(lm.serverTime, 0) / 1000)
+            AS advertisedUnread
+    FROM visible_buffers b
+    JOIN networks n ON n.id = b.networkId
+    LEFT JOIN network_identity ni ON ni.networkId = b.networkId
+    LEFT JOIN messages lm ON lm.id = (
+        SELECT m.id FROM messages m
+        WHERE m.bufferId = b.id
+          AND m.kind NOT IN ('JOIN', 'PART', 'QUIT', 'AWAY', 'BACK', 'NETSPLIT', 'NETJOIN')
+        ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC
+        LIMIT 1
+    )
+    ORDER BY b.pinned DESC,
+             (COALESCE(lm.serverTime, 0) = 0) ASC,
+             COALESCE(lm.serverTime, 0) DESC,
+             b.id DESC
+    )"""

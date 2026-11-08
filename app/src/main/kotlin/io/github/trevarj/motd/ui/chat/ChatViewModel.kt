@@ -113,6 +113,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
@@ -870,7 +871,7 @@ class ChatViewModel
                 AutoFollowTrace.record("entry_anchors_resolve_start", bufferId) {
                     "presence=${spec.presenceMode} revealHidden=${spec.revealHiddenFools} discardUnresolvedSaved=$discardUnresolvedSaved"
                 }
-                val room = bufferRepository.observeBuffer(bufferId).firstOrNull()
+                val room = bufferRepository.buffer(bufferId)
                 // Do not wait for Main's operationalBufferId collector to publish this same room.
                 val roomId = room?.id ?: bufferId
                 val marker = room?.let { visibilityReader.effectiveLocalReadAnchor(it) }
@@ -2095,7 +2096,11 @@ class ChatViewModel
             AutoFollowTrace.record("markread_request", roomId) {
                 "marker=${anchor.serverTime}:${anchor.eventId}"
             }
-            viewModelScope.launch { connectionManager.markRead(roomId, anchor) }
+            // The reader has seen these rows: leaving the chat must not cancel the write while it waits
+            // for the database writer, which a history sync can hold for seconds.
+            viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                withContext(NonCancellable) { connectionManager.markRead(roomId, anchor) }
+            }
         }
 
         fun acceptInvite(messageId: Long) =
@@ -3364,7 +3369,7 @@ class ChatViewModel
                 // A restored visit already positioned itself in a previous process; only a fresh one may
                 // still be corrected below.
                 val freshVisit = _entryState.value is EntryPositionState.Pending
-                val initialEntryBuffer = bufferRepository.observeBuffer(bufferId).firstOrNull()
+                val initialEntryBuffer = bufferRepository.buffer(bufferId)
                 // Must match the paging spec exactly, presence override included, or the entry index it
                 // resolves would count rows the PagingSource never emits.
                 val entrySpec =

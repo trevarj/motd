@@ -15,6 +15,7 @@ import io.github.trevarj.motd.audio.AudioCacheStore
 import io.github.trevarj.motd.audio.NetworkMediaHttp
 import io.github.trevarj.motd.avatar.LocalAvatarStore
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.keepObservedTablesTracked
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.sync.HistoryPrunerImpl
 import io.github.trevarj.motd.di.AppVisibilityImpl
@@ -93,6 +94,7 @@ class MotdApplication :
         pushLifecycleCoordinator.start()
         autoAwayCoordinator.start()
         historyPruner.start()
+        applicationScope.launch(Dispatchers.IO) { database.keepObservedTablesTracked() }
         applicationScope.launch(Dispatchers.IO) {
             localAvatarStore.prune(database.bufferDao().localAvatarModels())
         }

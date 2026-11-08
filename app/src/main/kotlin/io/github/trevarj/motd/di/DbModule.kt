@@ -2,6 +2,8 @@ package io.github.trevarj.motd.di
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.RoomDatabase
+import androidx.sqlite.db.SupportSQLiteDatabase
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -24,6 +26,7 @@ import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.NetworkIgnoreDao
 import io.github.trevarj.motd.data.db.ReactionDao
 import io.github.trevarj.motd.data.db.UserDao
+import io.github.trevarj.motd.data.repo.ChatRoomRevisions
 import javax.inject.Singleton
 
 @Module
@@ -53,7 +56,13 @@ internal object DbModule {
             // versions (e.g. the obfs branch's v3 vs main's v2); released builds only ever move the
             // version up. Wipe-and-recreate on downgrade instead of crashing on a missing migration.
             .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
-            .build()
+            // Chat page revisions must exist before any reader certifies a page, whatever the
+            // migration path; creation is idempotent and needs no schema version.
+            .addCallback(
+                object : RoomDatabase.Callback() {
+                    override fun onOpen(db: SupportSQLiteDatabase) = ChatRoomRevisions.install(db)
+                },
+            ).build()
 
     @Provides fun provideNetworkDao(db: MotdDatabase): NetworkDao = db.networkDao()
 

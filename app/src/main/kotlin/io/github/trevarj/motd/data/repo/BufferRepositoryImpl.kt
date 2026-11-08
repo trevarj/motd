@@ -20,12 +20,14 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 internal fun nickSuggestionLikePattern(prefix: String): String = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
@@ -86,6 +88,9 @@ class BufferRepositoryImpl
         ): Long? = bufferDao.byName(networkId, normalizedChannel)?.takeIf { it.joined }?.id
 
         override fun observeBuffer(id: Long): Flow<BufferEntity?> = bufferDao.observe(id)
+
+        // Not a Flow: registering an observer can need the writer (see ChatPageCache's reads).
+        override suspend fun buffer(id: Long): BufferEntity? = withContext(Dispatchers.IO) { bufferDao.canonicalNow(id) }
 
         override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> =
             bufferDao.observe(bufferId).flatMapLatest { room ->

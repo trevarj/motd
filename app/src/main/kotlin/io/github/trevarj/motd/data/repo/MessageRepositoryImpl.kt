@@ -8,7 +8,6 @@ import androidx.paging.PagingSource
 import androidx.paging.PagingState
 import androidx.room.InvalidationTracker
 import androidx.room.RoomRawQuery
-import androidx.room.withTransaction
 import androidx.sqlite.SQLiteStatement
 import androidx.sqlite.db.SimpleSQLiteQuery
 import androidx.sqlite.db.SupportSQLiteProgram
@@ -144,12 +143,9 @@ class MessageRepositoryImpl
                                 if (entry == null) {
                                     resolveParkedIndex(context, visibility, id)
                                 } else {
-                                    // Ordinary DAO calls otherwise inherit Room's database Job too.
-                                    // The small anchor read stays in the caller's writer transaction.
-                                    db.withTransaction {
-                                        entry.requireQueryPermission(source)
-                                        resolveParkedIndex(context, visibility, id)
-                                    }
+                                    // Plain reads on a reader connection, so a busy writer cannot delay an open.
+                                    entry.requireQueryPermission(source)
+                                    resolveParkedIndex(context, visibility, id)
                                 }
                             }
                         source.also { entry?.sourceCreated(it) }
@@ -157,20 +153,31 @@ class MessageRepositoryImpl
                 ).flow
             }
 
+        // Blocking reads on [ioDispatcher]: outside a transaction they use a reader connection and
+        // skip Room's query executor, so neither the writer nor queued Room work delays an open.
         private suspend fun resolveParkedIndex(
+            context: PagingContext,
+            visibility: MessageVisibilitySpec,
+            id: Long,
+        ): Int? =
+            withContext(ioDispatcher) {
+                parkedIndexNow(context, visibility, id)
+            }
+
+        private fun parkedIndexNow(
             context: PagingContext,
             visibility: MessageVisibilitySpec,
             id: Long,
         ): Int? {
             val row =
-                messageDao.rawMessage(
+                messageDao.rawMessageNow(
                     SimpleSQLiteQuery(
                         "SELECT m.* FROM messages m WHERE m.id = ? AND m.bufferId = ? " +
                             "AND ${MessageVisibilitySql(visibility, context.identityRules).timeline()}",
                         arrayOf(id, context.roomId),
                     ),
                 ) ?: return null
-            return messageDao.rawCount(
+            return messageDao.rawCountNow(
                 countTimelineNewerQuery(
                     context.roomId,
                     row.serverTime,
@@ -301,12 +308,15 @@ class MessageRepositoryImpl
                     }
                 }.distinctUntilChanged()
 
-        internal suspend fun resolvePagingContext(bufferId: Long): PagingContext {
+        internal suspend fun resolvePagingContext(bufferId: Long): PagingContext = withContext(ioDispatcher) { pagingContextNow(bufferId) }
+
+        /** Blocking, for a caller already on IO; see [resolveParkedIndex] for why chat-open reads avoid Room's executors. */
+        internal fun pagingContextNow(bufferId: Long): PagingContext {
             val room =
-                bufferDao.observeById(bufferId)
+                bufferDao.canonicalNow(bufferId)
                     ?: return PagingContext(bufferId, IrcIdentityRules())
             val identityRules =
-                networkIdentityDao.byNetwork(room.networkId)?.identityRules
+                networkIdentityDao.byNetworkNow(room.networkId)?.identityRules
                     ?: IrcIdentityRules()
             return PagingContext(room.id, identityRules, room.networkId)
         }

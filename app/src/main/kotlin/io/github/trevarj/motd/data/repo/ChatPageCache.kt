@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.data.repo
 
+import android.database.sqlite.SQLiteException
 import androidx.paging.CombinedLoadStates
 import androidx.paging.ExperimentalPagingApi
 import androidx.paging.ItemSnapshotList
@@ -10,7 +11,6 @@ import androidx.paging.PagingSource
 import androidx.paging.PagingState
 import androidx.paging.RemoteMediator
 import androidx.paging.cachedIn
-import androidx.room.withTransaction
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.prefs.Settings
@@ -105,7 +105,7 @@ class ChatPageCache
             continueLocalRefresh: Boolean = false,
             continuePresentationFrom: Lease? = null,
         ): Lease {
-            val context = withContext(ioDispatcher) { db.withTransaction { repository.resolvePagingContext(bufferId) } }
+            val context = withContext(ioDispatcher) { repository.pagingContextNow(bufferId) }
             val key = Key(context, spec)
             // A canceled reveal/reversal must leave the paused native presenter untouched.
             val stagedIdentity = continuePresentationFrom?.let { synchronized(lock) { "$ownerId:${++nextSlot}" } }
@@ -113,9 +113,7 @@ class ChatPageCache
             try {
                 val stagedVersion =
                     stagedIdentity?.let { identity ->
-                        withContext(ioDispatcher) {
-                            db.withTransaction { readChatPageVersion(db.openHelper.writableDatabase, identity, context.roomId) }
-                        }
+                        withContext(ioDispatcher) { roomVersion(context.roomId) }
                     }
                 val retired = ArrayList<Entry>(MAX_ROOMS)
                 var reused = false
@@ -203,11 +201,6 @@ class ChatPageCache
                 return acquired
             } catch (failure: Throwable) {
                 lease?.release()
-                if (lease == null && stagedIdentity != null) {
-                    withContext(ioDispatcher + NonCancellable) {
-                        db.withTransaction { releaseChatPageVersion(db.openHelper.writableDatabase, stagedIdentity) }
-                    }
-                }
                 throw failure
             }
         }
@@ -218,7 +211,7 @@ class ChatPageCache
             spec: MessageVisibilitySpec,
         ): Lease? {
             if (synchronized(lock) { entries.isEmpty() || !onScreen.value }) return null
-            val context = withContext(ioDispatcher) { db.withTransaction { repository.resolvePagingContext(bufferId) } }
+            val context = withContext(ioDispatcher) { repository.pagingContextNow(bufferId) }
             val key = Key(context, spec)
             val lease =
                 synchronized(lock) {
@@ -250,6 +243,29 @@ class ChatPageCache
                 throw failure
             }
         }
+
+        /**
+         * The room's committed revision. A blocking read outside any transaction, so SQLite's pool
+         * serves it from a reader connection without queuing on Room's executors or the writer.
+         * Repairs missing tracking first.
+         */
+        private suspend fun roomVersion(roomId: Long): ChatPageVersion =
+            withContext(ioDispatcher) {
+                val dao = db.messageDao()
+                val row =
+                    try {
+                        dao.roomRevision(roomId)
+                    } catch (_: SQLiteException) {
+                        null // tracking tables are missing, for example on a database the app did not open
+                    }
+                if (row != null && row.trackingObjects >= ChatRoomRevisions.objectCount) {
+                    ChatPageVersion(row.session, row.revision)
+                } else {
+                    db.runInTransaction { ChatRoomRevisions.reinstall(db.openHelper.writableDatabase) }
+                    val repaired = checkNotNull(dao.roomRevision(roomId)) { "room revision tracking has no session" }
+                    ChatPageVersion(repaired.session, repaired.revision)
+                }
+            }
 
         private fun publishSlots() {
             _slots.value = synchronized(lock) { (entries.values + attached).distinct().filterNot { it.retired } }
@@ -338,10 +354,7 @@ class ChatPageCache
                     }
                 val (context, current) =
                     withContext(ioDispatcher) {
-                        db.withTransaction {
-                            repository.resolvePagingContext(routeBufferId) to
-                                readChatPageVersion(db.openHelper.writableDatabase, entry.identity, entry.key.context.roomId)
-                        }
+                        repository.pagingContextNow(routeBufferId) to roomVersion(entry.key.context.roomId)
                     }
                 if (context != entry.key.context) {
                     entry.contextChanged(context)
@@ -433,7 +446,6 @@ class ChatPageCache
                     } finally {
                         withContext(ioDispatcher + NonCancellable) {
                             synchronized(lock) { source }?.invalidate()
-                            db.withTransaction { releaseChatPageVersion(db.openHelper.writableDatabase, identity) }
                         }
                     }
                 }
@@ -445,14 +457,9 @@ class ChatPageCache
 
             internal suspend fun readVersion(loadedSource: PagingSource<Int, MessageEntity>? = null): ChatPageVersion =
                 withContext(ioDispatcher) {
-                    db
-                        .withTransaction {
-                            if (loadedSource != null) requireQueryPermission(loadedSource)
-                            readChatPageVersion(db.openHelper.writableDatabase, identity, key.context.roomId).also {
-                                // Retirement may have completed its cleanup before this admission read.
-                                if (synchronized(lock) { retired }) releaseChatPageVersion(db.openHelper.writableDatabase, identity)
-                            }
-                        }.also { synchronized(lock) { lastVersion = it } }
+                    if (loadedSource != null) requireQueryPermission(loadedSource)
+                    // A plain read on a reader connection: certifying a page never waits for the writer.
+                    roomVersion(key.context.roomId).also { synchronized(lock) { lastVersion = it } }
                 }
 
             internal fun contextChanged(context: MessageRepositoryImpl.PagingContext) {

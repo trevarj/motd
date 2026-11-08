@@ -318,7 +318,11 @@ flowchart TD
   unread snapshot, hidden reveal, drafts, positioning intent and read permission. Retained list
   state is never measured against an artificial empty generation.
   Admission validates canonical room/network/identity, complete visibility and a committed
-  per-room TEMP revision, session nonce and same-connection `data_version`. Native sources
+  per-room revision with its session token, kept by persistent `messages` triggers. Reads that
+  open or browse a chat never take the writer: they run outside transactions, start with `SELECT`
+  (Android sends any other leading keyword to the writer's connection), and use plain queries
+  rather than one-shot Flows. Every observed table stays tracked for the process lifetime, so no
+  observer has to install triggers while a history write holds the writer. Native sources
   bind pages to one cohort; publication acknowledgment requires actual returned references or
   exact complete-window equality, including placeholders and every entity field. Fresh measured
   placement and a final committed-context barrier precede first visibility.
