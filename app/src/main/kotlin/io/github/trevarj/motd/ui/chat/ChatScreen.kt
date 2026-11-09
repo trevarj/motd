@@ -4294,6 +4294,7 @@ internal fun ChatContent(
 
                                 val stagedVoicePlaybackId = voiceState.staged?.let { "voice:${it.file.toURI()}" }
                                 TimelineTopOverlays(
+                                    modifier = Modifier.padding(top = padding.calculateTopPadding()),
                                     audioPlayer = {
                                         ReadAloudPlayer(
                                             state = readAloudState,
@@ -5203,16 +5204,17 @@ internal fun ChatTitleSyncSpinner(
     }
 }
 
-/** Pins transient timeline chrome below the title bar without allowing the stacked layers to overlap. */
+/** Stacks transient chrome; callers inset it below the title bar when the timeline draws behind it. */
 @Composable
 internal fun BoxScope.TimelineTopOverlays(
     audioPlayer: @Composable () -> Unit,
     historyFailure: @Composable () -> Unit,
     staleChip: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Column(
         modifier =
-            Modifier
+            modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,

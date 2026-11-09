@@ -1103,6 +1103,10 @@ fun Composer(
                                                             if (editorViewportHeightPx > 0) viewportHeight else maxOf(collapsedMinimumHeight, naturalHeight),
                                                         )
                                                     },
+                                                ).effectSurface(
+                                                    io.github.trevarj.motd.data.prefs.EffectSurface.INPUT_BAR,
+                                                    composerFill,
+                                                    RoundedCornerShape(LocalInputCornerStyle.current.cornerRadius(16.dp, roundedRadius = 28.dp)),
                                                 ).testTag("chat_composer_pill"),
                                         shape = RoundedCornerShape(LocalInputCornerStyle.current.cornerRadius(16.dp, roundedRadius = 28.dp)),
                                         color = Color.Transparent,

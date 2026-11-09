@@ -64,7 +64,10 @@ import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.ComposerStyle
+import io.github.trevarj.motd.data.prefs.EffectSurface
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.SurfaceEffect
+import io.github.trevarj.motd.data.prefs.SurfaceEffects
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.irc.format.IRC_BOLD
@@ -164,8 +167,8 @@ class ComposerUiTest {
         val layout = mutableStateOf(LayoutDensity.COMFORTABLE)
         val composerStyle = mutableStateOf(ComposerStyle.COMFORTABLE)
         val corners = mutableStateOf(UiCornerStyle.DEFAULT)
-        // Translucent fill exposes the Large field's mask over its unchanged, same-color host.
-        val fill = Color(0x800000FF)
+        // Explicit translucency exposes the Large field's mask over its same-color host.
+        val fill = Color.Blue.copy(alpha = 0.5f)
         val backing = Color.White
         var pixelsPerDp = 1f
         var sends = 0
@@ -176,6 +179,7 @@ class ComposerUiTest {
                 layoutDensity = layout.value,
                 inputCornerStyle = corners.value,
                 receivedBubbleColor = ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, fill.toArgb()),
+                surfaceEffects = SurfaceEffects(surfaces = mapOf(EffectSurface.INPUT_BAR to SurfaceEffect(50, 0))),
             ) {
                 // Shape snapshots must not include transient interaction ink.
                 CompositionLocalProvider(LocalRippleConfiguration provides null) {

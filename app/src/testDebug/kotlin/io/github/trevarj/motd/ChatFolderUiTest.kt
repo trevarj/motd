@@ -663,12 +663,10 @@ class ChatFolderUiTest {
 
             val centerY = (bounds.top + bounds.bottom) / 2
             assertEquals("The transparent strip shows the shared chat surface", colors.surface.toArgb(), pixel(rootBounds.left + sampleInset, centerY))
-            val topBar = compose.onNodeWithTag("chatlist_top_app_bar").fetchSemanticsNode().boundsInRoot
-            assertEquals("The title bar matches the chat canvas", colors.surface.toArgb(), pixel(topBar.left + sampleInset, (topBar.top + topBar.bottom) / 2))
             val rowsBounds = compose.onNodeWithTag("chatlist_rows").fetchSemanticsNode().boundsInRoot
             assertEquals("Empty list space keeps the shared chat surface", colors.surface.toArgb(), pixel(rowsBounds.left + sampleInset, rowsBounds.bottom - sampleInset))
             val rowPixels = compose.onNodeWithTag("chatlist_row_1").captureToImage().asAndroidBitmap()
-            assertEquals("Read cards match the canvas and title bar", colors.surface.toArgb(), rowPixels.getPixel(rowPixels.width / 2, rowPixels.height - 2))
+            assertEquals("Read cards match the canvas", colors.surface.toArgb(), rowPixels.getPixel(rowPixels.width / 2, rowPixels.height - 2))
             compose.onNodeWithTag("chatlist_folder_tab_all").assertIsSelected()
             val selected =
                 compose

@@ -116,8 +116,9 @@ class SearchScreenUiTest {
             }
         }
         compose.onNodeWithText("Secret account preview").assertDoesNotExist()
-        compose.onNodeWithTag("search_result_account-hit_reveal").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("search_result_account-hit_reveal", useUnmergedTree = true).assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(0, opens) }
+        compose.onNodeWithText("Secret account preview", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag("search_result_account-hit").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(1, opens) }
     }

@@ -313,6 +313,11 @@ class ChatPresentationLifetimeUiTest {
             compose.waitForIdle()
             assertTrue("an exact jump cancels, rather than dispatches, the deferred Restore", owner.expandAllFools.value)
             compose.onNodeWithTag("chat_message_retained-0-899", useUnmergedTree = true).assertIsDisplayed()
+            compose.waitUntil(10_000) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                owner.jumpTarget.value == null
+            }
 
             fixture.toggleFools()
             compose.mainClock.advanceTimeBy(32)
@@ -598,7 +603,12 @@ class ChatPresentationLifetimeUiTest {
             assertEquals(fixture.plans.getValue(room).expectedEventId, changed.measuredId)
             val layout = changed.presentation.listState.layoutInfo
             val row = layout.visibleItemsInfo.first { it.key == changed.measuredId }
-            assertTrue("fresh unread must already be at the viewport top on admission", kotlin.math.abs(layout.viewportEndOffset - row.offset - row.size) <= 1)
+            val headerHeight =
+                compose
+                    .onNodeWithTag("chat_top_app_bar", useUnmergedTree = true)
+                    .fetchSemanticsNode()
+                    .boundsInRoot.height
+            assertTrue("fresh unread must already be at the unobscured viewport top on admission", kotlin.math.abs(layout.viewportEndOffset - headerHeight - row.offset - row.size) <= 1)
             assertEquals(0, changed.reads)
             compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertDoesNotExist()
             compose.onNodeWithTag("chat_message_${fixture.expectedMsgid(room)}", useUnmergedTree = true).assertIsDisplayed()

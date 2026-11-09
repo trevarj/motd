@@ -110,7 +110,7 @@ class FoolCollapseUiTest {
         val fixture = FoolTimelineFixture(defaultMode = FoolsMode.BLUR)
         try {
             compose.setContent { fixture.Content() }
-            compose.onNodeWithTag("chat_fool_reveal_fool-a").assertIsDisplayed().performClick()
+            compose.onNodeWithTag("chat_fool_reveal_fool-a", useUnmergedTree = true).assertIsDisplayed().performClick()
             compose.onNodeWithText("A body").assertIsDisplayed()
             compose.onNodeWithText("B body").assertDoesNotExist()
             val revealedPixels = compose.onRoot().captureToImage()
@@ -128,12 +128,12 @@ class FoolCollapseUiTest {
                 "Restore must repaint the revealed body immediately",
                 revealedPixels.asAndroidBitmap().sameAs(concealedPixels.asAndroidBitmap()),
             )
-            compose.onNodeWithTag("chat_fool_reveal_fool-a").assertIsDisplayed()
+            compose.onNodeWithTag("chat_fool_reveal_fool-a", useUnmergedTree = true).assertIsDisplayed()
             compose.mainClock.autoAdvance = true
             toggleAll()
             compose.onNodeWithText("A body").assertIsDisplayed()
             toggleAll()
-            compose.onNodeWithTag("chat_fool_reveal_fool-a").assertIsDisplayed()
+            compose.onNodeWithTag("chat_fool_reveal_fool-a", useUnmergedTree = true).assertIsDisplayed()
             fixture.assertUnchanged()
         } finally {
             compose.mainClock.autoAdvance = true

@@ -2993,7 +2993,7 @@ class ComposerSendClearUiTest {
             compose.onNodeWithTag("chat_scroll_to_bottom_fab").assertDoesNotExist()
         } else {
             assertTrue("Unread placement must already use history chrome", placedHeight < expandedHeight)
-            assertEquals("The unread boundary must top the final viewport", viewportTop, dividerTop, 1f)
+            assertEquals("The unread boundary must top the unobscured viewport", bar.fetchSemanticsNode().boundsInRoot.bottom, dividerTop, 1f)
         }
         assertTrue(firstTop >= divider.fetchSemanticsNode().boundsInRoot.bottom)
         assertTrue(firstTop < secondTop)
