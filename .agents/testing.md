@@ -199,7 +199,10 @@ root capture's admission gate; `productionFabPreservesShapeAndContentAtZeroFullA
 checks FAB opacity branches, shape, foreground color, and clicks.
 `productionFabUsesRawPageWithoutCapturingItselfAndMasterRestoresPixels` and
 `rootOverlayFabBlursBothPanesWithoutCapturingItself` retain raw-source/root-overlay
-coverage. The `nativeBackdrop_dropdown_crossWindow_static_motion_and_sharp_foreground`,
+coverage. `nativeBackdrop_composerCompletion_parentReplay_motion_and_sharp_rows`
+checks the real nick, command and emoji completion popup against wallpaper and
+timeline sources, including movement, blur, clipping, sharp text and row clicks.
+The `nativeBackdrop_dropdown_crossWindow_static_motion_and_sharp_foreground`,
 `nativeBackdrop_modalSheet_crossWindow_static_and_native_motion`, and
 `nativeBackdrop_menuInsideSheet_parentFallback_and_content_updates` regressions
 retain popup/sheet alignment, sharp foreground, and parent-source fallback.

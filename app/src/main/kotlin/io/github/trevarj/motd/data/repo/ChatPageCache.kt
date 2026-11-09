@@ -268,7 +268,10 @@ class ChatPageCache
             }
 
         private fun publishSlots() {
-            _slots.value = synchronized(lock) { (entries.values + attached).distinct().filterNot { it.retired } }
+            synchronized(lock) {
+                // Publish under the snapshot lock so an older eviction cannot overwrite a newer acquire.
+                _slots.value = (entries.values + attached).distinct().filterNot { it.retired }
+            }
         }
 
         private fun evictDetached(reason: String) {

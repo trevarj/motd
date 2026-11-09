@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,6 +25,9 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import io.github.trevarj.motd.R
+import kotlinx.coroutines.delay
+
+internal const val STARTUP_SPLASH_TIMEOUT_MS = 5_000L
 
 @Composable
 fun StartupSplashGate(
@@ -33,6 +38,14 @@ fun StartupSplashGate(
     content: @Composable () -> Unit,
 ) {
     val isCoveringContent = loading || request != null
+    val finish by rememberUpdatedState(onFinished)
+    LaunchedEffect(isCoveringContent) {
+        if (isCoveringContent) {
+            // ponytail: one deadline spans the platform handoff and the cosmetic animation.
+            delay(STARTUP_SPLASH_TIMEOUT_MS)
+            finish()
+        }
+    }
     Box(Modifier.fillMaxSize()) {
         Box(if (isCoveringContent) Modifier.clearAndSetSemantics { } else Modifier) {
             content()

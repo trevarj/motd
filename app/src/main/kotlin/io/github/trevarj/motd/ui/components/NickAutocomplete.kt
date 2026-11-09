@@ -22,6 +22,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.prefs.EffectSurface
+import io.github.trevarj.motd.ui.theme.LocalSurfaceEffects
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
 /**
@@ -39,12 +41,16 @@ fun AutocompletePanel(
     tagPrefix: String = "autocomplete",
 ) {
     if (candidates.isEmpty()) return
+    val effects = LocalSurfaceEffects.current
+    val opacity = effects[EffectSurface.MENU].opacityPercent.coerceIn(0, 100)
+    val opaque = opacity == 100 || (!effects.enabled && opacity > 0)
     Surface(
-        modifier = modifier.fillMaxWidth().effectSurface(io.github.trevarj.motd.data.prefs.EffectSurface.MENU, MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(18.dp)).testTag("${tagPrefix}_panel"),
+        modifier = modifier.fillMaxWidth().effectSurface(EffectSurface.MENU, MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(18.dp)).testTag("${tagPrefix}_panel"),
         color = androidx.compose.ui.graphics.Color.Transparent,
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         tonalElevation = 3.dp,
-        shadowElevation = 3.dp,
+        // As with translucent FABs, a transparent native Surface must not shadow its glass.
+        shadowElevation = if (opaque) 3.dp else 0.dp,
         shape = RoundedCornerShape(18.dp),
     ) {
         LazyColumn(modifier = Modifier.heightIn(max = 180.dp)) {

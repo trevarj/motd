@@ -21,14 +21,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -58,9 +64,12 @@ import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.prefs.settingsDataStore
@@ -125,6 +134,79 @@ class ChatPresentationLifetimeUiTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun customPresenceKindsOnlyChangeAdmitsAndPaintsMatchingGeneration() =
+        withFixture(temporaryFools = true) { fixture ->
+            runBlocking {
+                fixture.foolSettings.setPresenceMode(PresenceMode.CUSTOM)
+                fixture.foolSettings.setCustomPresenceKinds(emptySet())
+            }
+            compose.runOnIdle {
+                fixture.receivedBubbleColor = ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, android.graphics.Color.GREEN)
+            }
+            fixture.open(fixture.rooms.first().id)
+            val original = fixture.awaitReady()
+            val rowTag = "chat_message_retained-0-900"
+            val root = compose.onNodeWithTag("retained_surface", useUnmergedTree = true)
+            val row = compose.onNodeWithTag(rowTag, useUnmergedTree = true)
+            row.assertIsDisplayed()
+            val longPressSurface = SemanticsMatcher("message long-press surface") { it.config.contains(SemanticsActions.OnLongClick) }
+            val bubble = compose.onNode(hasAnyAncestor(hasTestTag(rowTag)) and longPressSurface, useUnmergedTree = true)
+
+            fun paintedBubble(): Int {
+                val bounds = bubble.fetchSemanticsNode().boundsInRoot
+                val rootBounds = root.fetchSemanticsNode().boundsInRoot
+                val image = root.captureToImage().asAndroidBitmap()
+                // Sample the explicitly green bubble's padding, not glyphs or moving screen bounds.
+                return image.getPixel((bounds.center.x - rootBounds.left).toInt(), (bounds.bottom - rootBounds.top - 4f).toInt())
+            }
+            assertEquals(android.graphics.Color.GREEN, paintedBubble())
+            compose.mainClock.autoAdvance = false
+            compose.runOnIdle { fixture.nativeLoads.pause() }
+            runBlocking { fixture.foolSettings.setCustomPresenceKinds(setOf(MessageKind.JOIN)) }
+            compose.waitUntil(10_000) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                fixture.latestVisit().lease !== original.lease && fixture.nativeLoads.blocked.isCompleted
+            }
+            compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertExists()
+            compose.onAllNodesWithTag(rowTag, useUnmergedTree = true).assertCountEquals(0)
+            val reads = fixture.readCallbacks
+            repeat(4) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                assertEquals("uncertified successor must not acknowledge rows", reads, fixture.readCallbacks)
+            }
+            compose.runOnIdle { fixture.nativeLoads.resume() }
+            compose.waitUntil(10_000) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                compose.onAllNodesWithTag(CHAT_ENTRY_VEIL_TAG).fetchSemanticsNodes().isEmpty() &&
+                    compose.onAllNodesWithTag(rowTag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            val spec =
+                fixture
+                    .latestVisit()
+                    .lease.entry.key.spec
+            assertEquals(PresenceMode.CUSTOM, spec.presenceMode)
+            assertEquals(setOf(MessageKind.JOIN), spec.customPresenceKinds)
+            compose.mainClock.autoAdvance = true
+            compose.waitForIdle()
+            row.assertIsDisplayed()
+            assertEquals("admitted rows paint through the root's visibility layer", android.graphics.Color.GREEN, paintedBubble())
+            bubble.assertIsDisplayed()
+            val bubbleBounds = bubble.fetchSemanticsNode().boundsInRoot
+            val rowBounds = row.fetchSemanticsNode().boundsInRoot
+            row.performTouchInput {
+                longClick(
+                    androidx.compose.ui.geometry
+                        .Offset(bubbleBounds.center.x, bubbleBounds.bottom - 1f) - rowBounds.topLeft,
+                )
+            }
+            compose.waitForIdle()
+            compose.onNodeWithTag("message_action_sheet").assertIsDisplayed()
+        }
 
     @Test
     fun temporaryFoolVisibilityKeepsAdmittedRowsPaintedAcrossHeldRefresh() =
@@ -939,6 +1021,7 @@ class ChatPresentationLifetimeUiTest {
         val ownerJobs = ArrayList<Job>()
         private var mounted by mutableStateOf(true)
         private var realOwners by mutableStateOf(false)
+        var receivedBubbleColor by mutableStateOf(ComfortableBubbleColor())
         private var holdNativeRefresh = false
         val nativeLoads = HoldingDispatcher()
         val cacheReads = HoldingDispatcher()
@@ -1090,7 +1173,7 @@ class ChatPresentationLifetimeUiTest {
                 val controller = rememberNavController()
                 SideEffect { nav = controller }
                 ChatPresentationHost(cache, registry)
-                MotdTheme(dynamicColor = false) {
+                MotdTheme(dynamicColor = false, receivedBubbleColor = receivedBubbleColor) {
                     Box(Modifier.fillMaxSize().testTag("retained_surface")) {
                         NavHost(controller, startDestination = ChatListRoute) {
                             composable<ChatListRoute> {

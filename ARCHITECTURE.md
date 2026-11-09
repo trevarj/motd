@@ -196,6 +196,8 @@ flowchart TD
   Reconcile-only publication never takes the network retirement guard; network sessions retain
   retirement-before-session locking. Syncing broadcasts snapshot their owners so synchronous
   observers can attach another owner without invalidating the current iteration.
+- Startup splash artwork is cosmetic: its handoff and animation share a five-second deadline.
+  Completion removes both launch covers; a late platform callback cannot restart the overlay.
 - Preview-bearing preference choices save immediately and stay open for comparison, with one
   prominent selected sample; per-chat layout samples follow the same override/default/global
   inheritance as chat. Fictional examples reuse production renderers with local data and isolated
@@ -359,6 +361,8 @@ flowchart TD
   bind pages to one cohort; publication acknowledgment requires actual returned references or
   exact complete-window equality, including placeholders and every entity field. Fresh measured
   placement and a final committed-context barrier precede first visibility.
+  Screen visibility policy tracks custom presence kinds as well as the mode, so changing
+  selected kinds cannot leave a fresh matching paging generation behind a stale admission gate.
   Each retained slot is limited to 1500 resident entities and 1,048,576 UTF-16 characters,
   accounting for coexisting native replacement windows rather than cumulative refresh traffic;
   the two-slot logical text bound is 4 MiB, not a total heap cap.
@@ -368,6 +372,8 @@ flowchart TD
   Backgrounding evicts detached slots; attached local refreshes retain their existing allowance,
   while remote history requires foreground. Exclusive lease tokens reject stale disposal and
   viewport callbacks. Owner destruction retires slots and awaits structured observer cleanup.
+  Slot snapshots publish under the cache lock, preventing an older background eviction from
+  overwriting a newly acquired presenter's host list.
   Persistent tracking metadata sits outside Room's versioned entity schema. Native retention reuses
   the existing message renderer and public Room APIs.
   A settled visit may hand its native presenter and viewport to an exact-spec successor for

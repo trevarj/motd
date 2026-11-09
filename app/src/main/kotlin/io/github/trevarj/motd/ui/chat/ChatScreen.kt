@@ -1373,6 +1373,7 @@ internal fun ChatContent(
         val visibleSpec =
             remember(
                 presenceMode,
+                state.conversationPresence.effectiveCustomKinds,
                 fools,
                 foolsMode,
                 foolPreferences,

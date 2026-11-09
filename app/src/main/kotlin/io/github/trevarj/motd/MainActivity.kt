@@ -141,6 +141,7 @@ class MainActivity :
     private var startupSplashIconSizePx: Int? = null
     private var startupSplashIconLocation: IntOffset? = null
     private var startupSplashPlaying = false
+    private var startupSplashFinished = false
 
     private val rootUiState by lazy {
         combine(
@@ -290,11 +291,15 @@ class MainActivity :
 
     private fun configureStartupSplash(isFirstActivityCreation: Boolean) {
         if (!shouldShowStartupSplash(isFirstActivityCreation, areSystemAnimatorsEnabled())) {
-            startupSplashLoading = false
+            finishStartupSplash()
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             splashScreen.setOnExitAnimationListener { splashView ->
+                if (startupSplashFinished) {
+                    splashView.remove()
+                    return@setOnExitAnimationListener
+                }
                 removeStartupPlatformSplash = splashView::remove
                 splashView.iconView?.takeIf { it.width > 0 }?.let { icon ->
                     startupSplashIconSizePx = icon.width
@@ -310,6 +315,7 @@ class MainActivity :
     }
 
     private fun startStartupSplash() {
+        if (startupSplashFinished) return
         if (!areSystemAnimatorsEnabled()) {
             finishStartupSplash()
             return
@@ -327,6 +333,8 @@ class MainActivity :
     }
 
     private fun finishStartupSplash() {
+        startupSplashFinished = true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) splashScreen.clearOnExitAnimationListener()
         removeStartupPlatformSplash?.invoke()
         removeStartupPlatformSplash = null
         startupSplashOverlay = null

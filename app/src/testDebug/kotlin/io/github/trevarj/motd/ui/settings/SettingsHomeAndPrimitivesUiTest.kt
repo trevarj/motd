@@ -1054,6 +1054,190 @@ class SettingsHomeAndPrimitivesUiTest {
 
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp")
+    fun nativeBackdrop_composerCompletion_parentReplay_motion_and_sharp_rows() {
+        val fixture = BackdropFixture()
+        var variant by mutableStateOf(0)
+        var reversed by mutableStateOf(false)
+        var moved by mutableStateOf(false)
+        var picked: String? = null
+        var draft by mutableStateOf(
+            androidx.compose.ui.text.input
+                .TextFieldValue("al"),
+        )
+        compose.setContent {
+            MotdTheme(
+                dynamicColor = false,
+                receivedBubbleColor =
+                    io.github.trevarj.motd.data.prefs.ComfortableBubbleColor(
+                        io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole.CUSTOM,
+                        android.graphics.Color.BLACK,
+                    ),
+                surfaceEffects =
+                    io.github.trevarj.motd.data.prefs.SurfaceEffects(
+                        surfaces =
+                            mapOf(
+                                io.github.trevarj.motd.data.prefs.EffectSurface.MENU to
+                                    io.github.trevarj.motd.data.prefs
+                                        .SurfaceEffect(8, 12),
+                            ),
+                    ),
+            ) {
+                MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(secondaryContainer = Color.Black, onSecondaryContainer = Color.White)) {
+                    val wallpaper = rememberSurfaceBackdropSource()
+                    val timeline = rememberSurfaceBackdropSource(parent = wallpaper)
+                    Box(Modifier.fillMaxSize()) {
+                        BackdropPattern(wallpaper, fixture, { reversed })
+                        // The transparent left half must fall back to wallpaper; the right half
+                        // comes from an independently updated timeline RenderNode.
+                        Box(Modifier.fillMaxSize().captureSurfaceBackdrop(timeline).testTag("completion_timeline")) {
+                            Box(
+                                Modifier.fillMaxSize().graphicsLayer().drawBehind {
+                                    drawRect(if (reversed) Color.Yellow else Color.Green, Offset(size.width / 2, 0f), Size(size.width / 2, size.height))
+                                },
+                            )
+                        }
+                        io.github.trevarj.motd.ui.components.SurfaceBackdropPage(timeline) {
+                            val density = androidx.compose.ui.platform.LocalDensity.current
+                            io.github.trevarj.motd.ui.components.Composer(
+                                value = draft,
+                                onValueChange = { draft = it },
+                                onSend = {},
+                                enabled = true,
+                                modifier =
+                                    Modifier.offset {
+                                        with(density) {
+                                            androidx.compose.ui.unit
+                                                .IntOffset(0, (if (moved) 570.dp else 620.dp).roundToPx())
+                                        }
+                                    },
+                                autocomplete =
+                                    if (variant == 2) {
+                                        null
+                                    } else {
+                                        {
+                                            io.github.trevarj.motd.ui.components.AutocompletePanel(
+                                                candidates = listOf(if (variant == 0) "alice" else "/join"),
+                                                onPick = { picked = it },
+                                                isCommand = variant == 1,
+                                            )
+                                        }
+                                    },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        for (nextVariant in 0..2) {
+            compose.runOnIdle {
+                variant = nextVariant
+                val text = if (nextVariant == 2) ":smile" else "al"
+                draft =
+                    androidx.compose.ui.text.input
+                        .TextFieldValue(
+                            text,
+                            androidx.compose.ui.text
+                                .TextRange(text.length),
+                        )
+                moved = false
+                reversed = false
+            }
+            val tag = if (nextVariant == 2) "chat_composer_emoji_autocomplete" else "autocomplete_panel"
+            var initialOrigin = Offset.Zero
+            for (move in listOf(false, true)) {
+                compose.runOnIdle {
+                    moved = move
+                    reversed = move
+                }
+                compose.waitForIdle()
+                val node = compose.onNodeWithTag(tag).assertIsDisplayed()
+                fixture.consumer = node.fetchSemanticsNode().layoutInfo.coordinates
+                val pixels = backdropPixels(tag)
+                val y = pixels.height - with(compose.density) { 4.dp.roundToPx() }
+                val consumer = fixture.consumer!!
+                val origin = consumer.localToScreen(Offset.Zero)
+                if (move) {
+                    assertTrue("production popup follows its moving composer", (origin - initialOrigin).getDistance() > 20f)
+                } else {
+                    initialOrigin = origin
+                }
+                val source = fixture.source!!
+                var interiors = 0
+                var blurred = 0
+                for (x in pixels.width / 6 until pixels.width / 3) {
+                    val local = source.screenToLocal(consumer.localToScreen(Offset(x.toFloat(), y.toFloat())))
+                    val phase = local.x / fixture.stripeWidth
+                    val fraction = phase - floor(phase)
+                    val pixel = pixels[x, y]
+                    if (fraction in 0.35f..0.65f) {
+                        val red = (floor(phase).toInt() % 2 == 0) != reversed
+                        assertTrue("completion replays screen-aligned wallpaper: $pixel", if (red) pixel.red > 0.75f && pixel.blue < 0.2f else pixel.blue > 0.75f && pixel.red < 0.2f)
+                        interiors++
+                    }
+                    if (pixel.red in 0.12f..0.8f && pixel.blue in 0.12f..0.8f) blurred++
+                }
+                assertTrue("wallpaper interiors sampled", interiors > 5)
+                assertTrue("native completion backing is blurred", blurred > 2)
+                val timelinePixel = pixels[pixels.width * 3 / 4, y]
+                assertEquals("timeline green", 0.92f, timelinePixel.green, 0.05f)
+                assertEquals("updated timeline red", if (reversed) 0.92f else 0f, timelinePixel.red, 0.05f)
+                // Popup capture uses UiAutomation's composited screenshot, not an alpha layer.
+                // Compare its clipped corner with the underlying activity window at that screen
+                // location; the opaque timeline there must remain untinted outside the shape.
+                val underlyingNode = compose.onNodeWithTag("completion_timeline").fetchSemanticsNode()
+                val underlying = backdropPixels("completion_timeline")
+                val cornerX = pixels.width - 1
+                val cornerScreen = consumer.localToScreen(Offset(cornerX.toFloat(), 0f))
+                val underlyingPoint = underlyingNode.layoutInfo.coordinates.screenToLocal(cornerScreen)
+                val expectedCorner = underlying[underlyingPoint.x.roundToInt(), underlyingPoint.y.roundToInt()]
+                val corner = pixels[cornerX, 0]
+                assertTrue("corner reference lies on the opaque timeline", expectedCorner.green > 0.98f)
+                assertEquals("rounded corner leaves underlying red untinted", expectedCorner.red, corner.red, 0.015f)
+                assertEquals("rounded corner leaves underlying green untinted", expectedCorner.green, corner.green, 0.015f)
+                assertEquals("rounded corner leaves underlying blue untinted", expectedCorner.blue, corner.blue, 0.015f)
+                val label =
+                    if (nextVariant == 2) {
+                        // Each emoji row contains the glyph followed by its name. Inspect the
+                        // name, never incidental light pixels in the multicolored emoji glyph.
+                        compose.onAllNodes(
+                            hasAnyAncestor(hasTestTag(tag)) and SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult),
+                            useUnmergedTree = true,
+                        )[1]
+                    } else {
+                        compose.onNodeWithText(if (nextVariant == 0) "alice" else "/join", useUnmergedTree = true)
+                    }
+                val layouts = mutableListOf<TextLayoutResult>()
+                label.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                val ink =
+                    layouts
+                        .single()
+                        .layoutInput.style.color
+                val labelPixels = label.captureToImage().toPixelMap()
+                var closestInk = Float.POSITIVE_INFINITY
+                for (py in 0 until labelPixels.height) {
+                    for (px in 0 until labelPixels.width) {
+                        val pixel = labelPixels[px, py]
+                        val difference = maxOf(abs(pixel.red - ink.red), abs(pixel.green - ink.green), abs(pixel.blue - ink.blue))
+                        closestInk = minOf(closestInk, difference)
+                    }
+                }
+                // Antialiasing changes glyph coverage counts, not the unblurred peak ink color.
+                assertTrue("label retains its resolved foreground outside the blur: $ink, error=$closestInk", closestInk < 0.02f)
+            }
+            if (nextVariant < 2) {
+                compose.onNodeWithTag("autocomplete_item_0").performClick()
+                compose.runOnIdle { assertEquals(if (nextVariant == 0) "alice" else "/join", picked) }
+            } else {
+                // The real emoji row (not a stand-in panel) must still replace the token.
+                compose.onAllNodes(hasClickAction() and hasAnyAncestor(hasTestTag(tag)))[0].performClick()
+                compose.runOnIdle { assertTrue(!draft.text.startsWith(":")) }
+            }
+        }
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp")
     fun nativeBackdrop_dropdown_crossWindow_static_motion_and_sharp_foreground() {
         val fixture = BackdropFixture()
         var moved by mutableStateOf(false)

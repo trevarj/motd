@@ -519,6 +519,7 @@ class ChatPageCacheTest {
             runCurrent()
             assertTrue(checkNotNull(a.entry.source).invalid)
             assertFalse("an attached presenter is not stranded by background eviction", checkNotNull(c.entry.source).invalid)
+            assertEquals(listOf(c.entry), fixture.cache.slots.value)
             val beforeBackgroundHint = fixture.localLoads.get()
             cView.differ.getItem(590)
             advanceUntilIdle()
@@ -527,10 +528,15 @@ class ChatPageCacheTest {
             advanceUntilIdle()
             assertTrue("the same native stream remains usable on resume", fixture.localLoads.get() > beforeBackgroundHint)
             assertEquals("row-280", cView.differ.peek(620)?.text)
+            assertEquals(listOf(c.entry), fixture.cache.slots.value)
             cView.detach()
             fixture.owner.cancel()
             advanceUntilIdle()
             assertTrue(checkNotNull(c.entry.source).invalid)
+            assertTrue(
+                fixture.cache.slots.value
+                    .isEmpty(),
+            )
         }
 
     @Test
