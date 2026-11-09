@@ -190,3 +190,22 @@ version, seed, case, and fixture in that module's
 For focused release visual checks or explicitly debugging CI E2E, follow
 [`../test/e2e/README.md`](../test/e2e/README.md) for setup and owned-session teardown.
 Never point the destructive E2E reset flow at the release application id.
+
+### Surface-effects graphics coverage
+
+`SettingsHomeAndPrimitivesUiTest` owns fixture-free native-graphics regressions:
+`admissionGateIsCapturedBeforeTranslucentConsumersCanReplayMessages` checks the
+root capture's admission gate; `productionFabPreservesShapeAndContentAtZeroFullAndMasterOffOpacity`
+checks FAB opacity branches, shape, foreground color, and clicks.
+`productionFabUsesRawPageWithoutCapturingItselfAndMasterRestoresPixels` and
+`rootOverlayFabBlursBothPanesWithoutCapturingItself` retain raw-source/root-overlay
+coverage. The `nativeBackdrop_dropdown_crossWindow_static_motion_and_sharp_foreground`,
+`nativeBackdrop_modalSheet_crossWindow_static_and_native_motion`, and
+`nativeBackdrop_menuInsideSheet_parentFallback_and_content_updates` regressions
+retain popup/sheet alignment, sharp foreground, and parent-source fallback.
+
+Robolectric native captures do not prove HWUI shadow compositing, autonomous
+producer/consumer window-frame delivery, or physical-display presentation.
+Use focused on-device or release-emulator checks for those hardware-specific
+behaviors; ordinary fixture-free instrumentation tests are not part of this tier.
+

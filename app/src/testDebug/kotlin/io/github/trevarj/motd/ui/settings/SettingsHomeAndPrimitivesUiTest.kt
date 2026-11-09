@@ -967,8 +967,91 @@ class SettingsHomeAndPrimitivesUiTest {
         }
     }
 
-    // Window-driven child-layer updates are exercised by SurfaceBackdropWindowTest on Android:
-    // Robolectric native captures do not dispatch producer/consumer window frame callbacks.
+    // Native captures cover replay pixels, not HWUI shadows or autonomous window-frame delivery.
+    // Those require actual-device visual checks; see .agents/testing.md.
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp")
+    fun admissionGateIsCapturedBeforeTranslucentConsumersCanReplayMessages() {
+        var admitted by mutableStateOf(false)
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                io.github.trevarj.motd.ui.components.SurfaceBackdropRoot(
+                    content = {
+                        Box(Modifier.fillMaxSize().background(Color.Black)) {
+                            Box(Modifier.fillMaxSize().graphicsLayer { alpha = if (admitted) 1f else 0f }.background(Color.Red))
+                        }
+                    },
+                    overlays = {
+                        val source = io.github.trevarj.motd.ui.components.LocalSurfaceBackdrop.current!!
+                        Box(Modifier.size(100.dp).surfaceBackdrop(source, Color.Black, 1, 0).testTag("admission_consumer"))
+                    },
+                )
+            }
+        }
+        for (visible in listOf(false, true, false)) {
+            compose.runOnIdle { admitted = visible }
+            val pixels = backdropPixels("admission_consumer")
+            val center = pixels[pixels.width / 2, pixels.height / 2]
+            assertEquals("captured admission=$visible", if (visible) 0.99f else 0f, center.red, 0.02f)
+            assertTrue(center.green < 0.02f && center.blue < 0.02f)
+        }
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp")
+    fun productionFabPreservesShapeAndContentAtZeroFullAndMasterOffOpacity() {
+        var opacity by mutableStateOf(30)
+        var enabled by mutableStateOf(true)
+        var clicks = 0
+        compose.setContent {
+            MotdTheme(
+                dynamicColor = false,
+                surfaceEffects =
+                    io.github.trevarj.motd.data.prefs.SurfaceEffects(
+                        enabled = enabled,
+                        surfaces =
+                            mapOf(
+                                io.github.trevarj.motd.data.prefs.EffectSurface.FLOATING_BUTTON to
+                                    io.github.trevarj.motd.data.prefs
+                                        .SurfaceEffect(opacity, 0),
+                            ),
+                    ),
+            ) {
+                Box(
+                    Modifier.size(120.dp).background(Color.Red).testTag("fab_paint_scene"),
+                    contentAlignment = androidx.compose.ui.Alignment.Center,
+                ) {
+                    io.github.trevarj.motd.ui.components.EffectFloatingActionButton(
+                        onClick = { clicks++ },
+                        modifier = Modifier.size(100.dp).testTag("paint_fab"),
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        containerColor = Color.Black,
+                        contentColor = Color.White,
+                    ) {
+                        Box(Modifier.size(8.dp).background(androidx.compose.material3.LocalContentColor.current))
+                    }
+                }
+            }
+        }
+        val cases = listOf(Triple(30, true, 0.7f), Triple(0, true, 1f), Triple(100, true, 0f), Triple(30, false, 0f), Triple(0, false, 1f))
+        for ((nextOpacity, nextEnabled, expectedRed) in cases) {
+            compose.runOnIdle {
+                opacity = nextOpacity
+                enabled = nextEnabled
+            }
+            val pixels = backdropPixels("fab_paint_scene")
+            val backing = pixels[pixels.width / 2, pixels.height * 3 / 4]
+            assertEquals("FAB opacity=$opacity enabled=$enabled", expectedRed, backing.red, 0.03f)
+            assertTrue(backing.green < 0.02f && backing.blue < 0.02f)
+            val corner = pixels[pixels.width / 10, pixels.height / 10]
+            assertTrue("circle leaves its external corner unpainted", corner.red > 0.95f)
+            val content = pixels[pixels.width / 2, pixels.height / 2]
+            assertTrue("content stays opaque white", content.red > 0.98f && content.green > 0.98f && content.blue > 0.98f)
+            compose.onNodeWithTag("paint_fab").performClick()
+        }
+        compose.runOnIdle { assertEquals(5, clicks) }
+    }
+
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp")
     fun nativeBackdrop_dropdown_crossWindow_static_motion_and_sharp_foreground() {
