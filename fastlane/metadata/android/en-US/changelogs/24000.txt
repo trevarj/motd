@@ -1,0 +1,5 @@
+- Add grouped transparency and blur controls, independent linking, and per-chat message overrides.
+- Blur fools' message text until tapped, keeping names, avatars and controls clear.
+- Frost chat-list headers and folder tabs; unify mention accent rails.
+- Fix transparent floating-button artifacts.
+- Keep chat opening, history loading and reconnect identity stable during background updates.
