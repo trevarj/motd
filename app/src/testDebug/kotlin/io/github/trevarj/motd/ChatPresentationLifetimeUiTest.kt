@@ -317,7 +317,16 @@ class ChatPresentationLifetimeUiTest {
             fixture.toggleFools()
             compose.mainClock.advanceTimeBy(32)
             compose.waitForIdle()
+            assertTrue("the second Restore is still deferred before the permanent cutover", owner.expandAllFools.value)
+            assertTrue(owner.hiddenFoolsRevealed.value)
             runBlocking { fixture.foolSettings.setFoolPreferences("hidden", FoolPreferences(FoolsMode.COLLAPSE)) }
+            // DataStore publication uses real IO: keep the exit clock frozen until the screen's
+            // settings flow receives the cutover, rather than letting Restore finish while waiting.
+            compose.waitUntil(10_000) {
+                compose.waitForIdle()
+                owner.settings.value.foolPreferences["hidden"]
+                    ?.visibility == FoolsMode.COLLAPSE
+            }
             compose.waitUntil(10_000) {
                 compose.mainClock.advanceTimeByFrame()
                 compose.waitForIdle()
