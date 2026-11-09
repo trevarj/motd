@@ -53,6 +53,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.invite.brandedInviteQrBitmap
+import io.github.trevarj.motd.ui.components.popupEffectSurface
 import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -268,7 +269,7 @@ private fun ContactInviteNetworkSelector(
                         stateDescription = selected.name
                     }.testTag("contact_invite_network_selector"),
         )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, containerColor = androidx.compose.ui.graphics.Color.Transparent, modifier = Modifier.popupEffectSurface(MaterialTheme.colorScheme.surfaceContainerLow)) {
             networks.forEach { network ->
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.contact_invite_network_option, network.name, network.nick)) },

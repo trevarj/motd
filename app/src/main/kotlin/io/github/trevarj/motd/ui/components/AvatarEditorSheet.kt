@@ -21,7 +21,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,6 +42,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.attachment.isLocalMediaUri
 import io.github.trevarj.motd.avatar.validateAvatarUrl
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)

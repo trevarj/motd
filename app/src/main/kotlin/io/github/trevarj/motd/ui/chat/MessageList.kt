@@ -421,6 +421,7 @@ fun MessageList(
     onDismissExternalTranslation: (Long) -> Unit = {},
     // Reserve the overlaid bottom host without truncating the scrollable/drawn viewport.
     bottomContentPadding: PaddingValues? = null,
+    topContentPadding: Dp = 0.dp,
     rowContentMetrics: MutableMap<Long, TimelineRowContentMetrics>? = null,
 ) {
     val dickordEnabled = LocalDickordLabsEnabled.current
@@ -491,15 +492,15 @@ fun MessageList(
         }
     }
     val timelineContentPadding =
-        remember(bottomContentPadding) {
+        remember(bottomContentPadding, topContentPadding) {
             if (bottomContentPadding == null) {
-                PaddingValues(vertical = 8.dp)
+                PaddingValues(top = 8.dp + topContentPadding, bottom = 8.dp)
             } else {
                 // LazyColumn reads this getter during measure, after Scaffold measures the host.
                 object : PaddingValues {
                     override fun calculateLeftPadding(layoutDirection: LayoutDirection): Dp = 0.dp
 
-                    override fun calculateTopPadding(): Dp = 8.dp
+                    override fun calculateTopPadding(): Dp = 8.dp + topContentPadding
 
                     override fun calculateRightPadding(layoutDirection: LayoutDirection): Dp = 0.dp
 
@@ -736,7 +737,7 @@ fun MessageList(
                             .background(highlightColor)
                             .then(if (activeMetrics != null) Modifier.onSizeChanged { activeMetrics.fullHeightPx = it.height } else Modifier),
                 ) {
-                    if (isFool && foolMode != FoolsMode.DIMMED && !renderExpanded) {
+                    if ((foolMode == FoolsMode.COLLAPSE || foolMode == FoolsMode.HIDE) && !renderExpanded) {
                         activeMetrics?.let { metrics -> SideEffect { metrics.leadingGapPx = 0 } }
                         FoolPlaceholderRow(
                             msg = msg,
@@ -845,13 +846,22 @@ fun MessageList(
                 content = { rowModifier ->
                     if (isFool) {
                         val foolContent: @Composable (Modifier) -> Unit = { contentModifier ->
-                            AnimatedContent(
-                                targetState = expanded,
-                                modifier = contentModifier.testTag("chat_fool_content_${msg.msgid ?: msg.id}"),
-                                transitionSpec = { cardPillTransform() },
-                                contentAlignment = Alignment.BottomStart,
-                                label = "fool_content",
-                            ) { renderExpanded -> rowContent(Modifier, renderExpanded) }
+                            if (foolMode == FoolsMode.BLUR) {
+                                io.github.trevarj.motd.ui.components.FoolMessageScope(
+                                    concealed = !expanded,
+                                    onReveal = { onToggleFool(msg.id) },
+                                    modifier = contentModifier.testTag("chat_fool_content_${msg.msgid ?: msg.id}").onSizeChanged { contentMetrics?.fullHeightPx = it.height },
+                                    tag = "chat_fool_reveal_${msg.msgid ?: msg.id}",
+                                ) { rowContent(Modifier, expanded) }
+                            } else {
+                                AnimatedContent(
+                                    targetState = expanded,
+                                    modifier = contentModifier.testTag("chat_fool_content_${msg.msgid ?: msg.id}"),
+                                    transitionSpec = { cardPillTransform() },
+                                    contentAlignment = Alignment.BottomStart,
+                                    label = "fool_content",
+                                ) { renderExpanded -> rowContent(Modifier, renderExpanded) }
+                            }
                         }
                         if (foolMode == FoolsMode.HIDE && hiddenFoolVisibility != null) {
                             // AV removes its layout after exit; retain a bounded, noninteractive slot until SQL catches up.
@@ -2061,7 +2071,7 @@ private fun MessageRow(
             sender = displaySender,
             tag = foolCollapseTag(msg.msgid, msg.id),
             onCollapse = it,
-            showNormally = dimmed,
+            showNormally = dimmed || io.github.trevarj.motd.ui.components.LocalFoolBodyConcealment.current.concealed,
         )
     }
 
@@ -2071,10 +2081,12 @@ private fun MessageRow(
             semanticsTestTag = messageTag(msg)
             mentionDescription?.let { stateDescription = it }
         }
+    val bodyConcealment = io.github.trevarj.motd.ui.components.LocalFoolBodyConcealment.current
+    val sourceSwipeEnabled = swipeToReplyEnabled && !bodyConcealment.concealed
     val translatedSourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? =
         if (translation != null) {
             { content ->
-                SwipeToReplyContainer(modifier = sourceModifier, onReply = { onReply(msg) }, enabled = swipeToReplyEnabled) { rowModifier ->
+                SwipeToReplyContainer(modifier = sourceModifier, onReply = { onReply(msg) }, enabled = sourceSwipeEnabled) { rowModifier ->
                     Column(rowModifier) { content() }
                 }
             }
@@ -2238,7 +2250,7 @@ private fun MessageRow(
                             if (standaloneAudio && index == 0) {
                                 translatedSourceWrapper?.invoke(content)
                             } else {
-                                SwipeToReplyContainer(onReply = { onReply(msg) }, enabled = swipeToReplyEnabled) { audioModifier ->
+                                SwipeToReplyContainer(onReply = { onReply(msg) }, enabled = sourceSwipeEnabled) { audioModifier ->
                                     Column(audioModifier) { content() }
                                 }
                             }
@@ -2250,7 +2262,7 @@ private fun MessageRow(
         }
     }
     if (translation == null) {
-        SwipeToReplyContainer(modifier = sourceModifier, onReply = { onReply(msg) }, enabled = swipeToReplyEnabled, content = source)
+        SwipeToReplyContainer(modifier = sourceModifier, onReply = { onReply(msg) }, enabled = sourceSwipeEnabled, content = source)
     } else {
         source(Modifier)
     }

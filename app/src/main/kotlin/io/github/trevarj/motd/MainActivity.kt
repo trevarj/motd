@@ -234,6 +234,7 @@ class MainActivity :
                     nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
                     messageBackgroundOpacityPercent = appearance.messageBackgroundOpacityPercent,
                     messageBackgroundBlur = appearance.messageBackgroundBlur,
+                    surfaceEffects = appearance.surfaceEffects,
                     sentBubbleColor = appearance.sentBubbleColor,
                     receivedBubbleColor = appearance.receivedBubbleColor,
                 ) {
@@ -261,22 +262,25 @@ class MainActivity :
                             color = MaterialTheme.colorScheme.background,
                         ) {
                             PreloadChatWallpaperTile(appearance.wallpaper)
-                            MotdNavGraph(
-                                appearance = appearance,
-                                showComposerEmoji = settings.showComposerEmoji,
-                                showComposerFormattingTools = settings.showComposerFormattingTools,
-                                navController = navController,
-                                notificationTarget = notificationTarget,
-                                onNotificationTargetHandled = ::consumeNotificationTarget,
-                                pendingShare = pendingShare,
-                                onPendingShareHandled = ::consumePendingShare,
-                                pendingJoinInvite = pendingJoinInvite,
-                                onPendingJoinInviteHandled = ::consumePendingJoinInvite,
-                            )
-                            // Global TOFU cert-trust dialog host, above the whole navigation graph.
-                            CertTrustDialogHost()
-                            // Labs gesture orb, above every destination and inert while the lab is off.
-                            GestureOrbHost(navController)
+                            io.github.trevarj.motd.ui.components.SurfaceBackdropRoot(content = {
+                                MotdNavGraph(
+                                    appearance = appearance,
+                                    showComposerEmoji = settings.showComposerEmoji,
+                                    showComposerFormattingTools = settings.showComposerFormattingTools,
+                                    navController = navController,
+                                    notificationTarget = notificationTarget,
+                                    onNotificationTargetHandled = ::consumeNotificationTarget,
+                                    pendingShare = pendingShare,
+                                    onPendingShareHandled = ::consumePendingShare,
+                                    pendingJoinInvite = pendingJoinInvite,
+                                    onPendingJoinInviteHandled = ::consumePendingJoinInvite,
+                                )
+                            }, overlays = {
+                                // Global TOFU cert-trust dialog host, above the whole navigation graph.
+                                CertTrustDialogHost()
+                                // Labs gesture orb, above every destination and inert while the lab is off.
+                                GestureOrbHost(navController)
+                            })
                         }
                     }
                 }

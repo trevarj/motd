@@ -35,7 +35,7 @@ enum class LayoutDensity { COMPACT, COMFORTABLE, TWO_LINE }
 
 enum class NickColorPalette { THEME, CLASSIC, VIVID }
 
-enum class FoolsMode { DIMMED, COLLAPSE, HIDE }
+enum class FoolsMode { DIMMED, BLUR, COLLAPSE, HIDE }
 
 @Serializable
 data class FoolPreferences(

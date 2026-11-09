@@ -11,8 +11,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -71,6 +73,30 @@ class GlobalFeedScreenTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun optedInBlurredMentionRevealsOnlyBeforeOpeningOrigin() {
+        val original = row(42, sender = "fool", text = "Secret mention", kind = MessageKind.ACTION)
+        val hit = original.copy(message = original.message.copy(normalizedActor = "fool", hasMention = true))
+        val stream = flowOf(PagingData.from(listOf(hit)))
+        setContent(stream, mentions = true, visibilitySpec = {
+            MessageVisibilitySpec(fools = setOf("fool"), foolsMode = FoolsMode.BLUR, foolPreferences = mapOf("fool" to FoolPreferences(notifyMentions = true)))
+        })
+        compose.onNodeWithText("Secret mention", substring = true, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("chat_action_row", useUnmergedTree = true).assertContentDescriptionEquals("* fool")
+        compose
+            .onNodeWithContentDescription(
+                org.robolectric.RuntimeEnvironment
+                    .getApplication()
+                    .getString(io.github.trevarj.motd.R.string.chat_fool_reveal),
+                substring = true,
+                useUnmergedTree = true,
+            ).assertIsDisplayed()
+            .performTouchInput { click() }
+        compose.runOnIdle { assertEquals(null, opened) }
+        compose.onNodeWithText("Secret mention", substring = true).assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(Triple(hit.message.bufferId, 42L, hit.message.serverTime), opened) }
+    }
 
     private var opened: Triple<Long, Long, Long>? = null
     private var navigationListState: LazyListState? = null

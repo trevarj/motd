@@ -22,12 +22,10 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -62,6 +60,8 @@ import io.github.trevarj.motd.audio.ReadAloudVoices
 import io.github.trevarj.motd.audio.readAloudBody
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import kotlin.math.roundToInt
+import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 @Composable
@@ -87,8 +87,8 @@ fun ReadAloudPlayer(
             },
         )
     Surface(
-        modifier = modifier.fillMaxWidth().testTag("read_aloud_player"),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier.fillMaxWidth().effectSurface(io.github.trevarj.motd.data.prefs.EffectSurface.MINI_PLAYER, MaterialTheme.colorScheme.surfaceContainerHigh).testTag("read_aloud_player"),
+        color = androidx.compose.ui.graphics.Color.Transparent,
         tonalElevation = 2.dp,
     ) {
         Column(Modifier.padding(horizontal = 4.dp)) {

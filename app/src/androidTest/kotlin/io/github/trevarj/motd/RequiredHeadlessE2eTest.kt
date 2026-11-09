@@ -19,6 +19,10 @@ import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
@@ -823,6 +827,7 @@ class RequiredHeadlessE2eTest {
         SettingsRobot(compose).selectWallpaperAndIntensity()
         SettingsRobot(compose).selectComfortableBubbleColors()
         SettingsRobot(compose).disableNicknameBackgrounds(opacityPercent = 37, blurIntensity = 63)
+        exerciseSurfaceEffects()
         SettingsRobot(compose).selectSurfaceShapes()
         SettingsRobot(compose).selectLucideIcons()
         // Return from Appearance to Settings, then exercise the category and bouncer routes.
@@ -859,6 +864,97 @@ class RequiredHeadlessE2eTest {
         NetworksRobot(compose).openRoot(network.rootId)
         BouncerRobot(compose).assertPanels()
         milestones.record("settings_bouncer_smoke", "root=${network.rootId}")
+    }
+
+    private fun exerciseSurfaceEffects() {
+        val prefs = AppearancePrefsImpl(InstrumentationRegistry.getInstrumentation().targetContext)
+        val original = runBlocking { prefs.config.first() }
+
+        fun open() {
+            compose.onNodeWithTag("settings_surface_effects").performScrollTo().performClick()
+            compose.onNodeWithTag("surface_effects_page").assertIsDisplayed()
+        }
+
+        fun master() {
+            compose.onNodeWithTag("surface_effects_page").performScrollToNode(hasTestTag("surface_effects_master_row"))
+            compose.onNodeWithTag("surface_effects_master_row").performClick()
+        }
+        try {
+            runBlocking {
+                prefs.setLinkGlobalOpacity(false)
+                prefs.setLinkGlobalBlur(false)
+            }
+            open()
+            compose.onNodeWithTag("surface_effects_page").performScrollToNode(hasTestTag("surface_chat_header_opacity"))
+            compose.onNodeWithTag("surface_chat_header_opacity").performSemanticsAction(SemanticsActions.SetProgress) { it(37f) }
+            compose.onNodeWithTag("surface_chat_header_blur").performSemanticsAction(SemanticsActions.SetProgress) { it(63f) }
+            val expected =
+                original.surfaceEffects.copy(
+                    surfaces =
+                        original.surfaceEffects.surfaces + (
+                            io.github.trevarj.motd.data.prefs.EffectSurface.CHAT_HEADER to
+                                io.github.trevarj.motd.data.prefs
+                                    .SurfaceEffect(37, 63)
+                        ),
+                )
+            compose.waitUntil("surface values persisted", 5_000) { runBlocking { prefs.config.first().surfaceEffects } == expected }
+            master()
+            compose.waitUntil("master persisted without changing controls", 5_000) { runBlocking { prefs.config.first().surfaceEffects } == expected.copy(enabled = !expected.enabled) }
+            master()
+            compose.waitUntil("master restores saved effects", 5_000) { runBlocking { prefs.config.first().surfaceEffects } == expected }
+            scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            open()
+            assertEquals(expected, runBlocking { prefs.config.first().surfaceEffects })
+            compose.onNodeWithTag("surface_effects_page").performScrollToNode(hasTestTag("surface_effects_link_opacity_row"))
+            compose.onNodeWithTag("surface_effects_link_opacity_row").performClick()
+            compose.waitUntil("opacity link persisted without changing values", 5_000) {
+                runBlocking { prefs.config.first().let { it.linkGlobalOpacity && it.surfaceEffects == expected } }
+            }
+            compose.onNodeWithTag("surface_effects_page").performScrollToNode(hasTestTag("settings_message_background_opacity"))
+            compose.onNodeWithTag("settings_message_background_opacity").performSemanticsAction(SemanticsActions.SetProgress) { it(42f) }
+            compose.waitUntil("all opacity controls linked independently", 5_000) {
+                runBlocking {
+                    prefs.config.first().let { config ->
+                        config.messageBackgroundOpacityPercent == 42 &&
+                            io.github.trevarj.motd.data.prefs.EffectSurface.entries
+                                .all { config.surfaceEffects[it].opacityPercent == 42 && config.surfaceEffects[it].blurPercent == expected[it].blurPercent }
+                    }
+                }
+            }
+            compose.onNodeWithTag("surface_effects_page").performScrollToNode(hasTestTag("surface_effects_link_blur_row"))
+            compose.onNodeWithTag("surface_effects_link_blur_row").performClick()
+            compose.waitUntil("blur link also persisted without synchronizing", 5_000) {
+                runBlocking {
+                    prefs.config.first().let { config ->
+                        config.linkGlobalBlur && config.linkGlobalOpacity &&
+                            io.github.trevarj.motd.data.prefs.EffectSurface.entries
+                                .all { config.surfaceEffects[it].blurPercent == expected[it].blurPercent }
+                    }
+                }
+            }
+            compose.onNodeWithTag("surface_effects_page").performScrollToNode(hasTestTag("surface_input_bar_blur"))
+            compose.onNodeWithTag("surface_input_bar_blur").performSemanticsAction(SemanticsActions.SetProgress) { it(29f) }
+            compose.waitUntil("all blur controls linked independently", 5_000) {
+                runBlocking {
+                    prefs.config.first().let { config ->
+                        config.messageBackgroundBlur == 29 && config.messageBackgroundOpacityPercent == 42 &&
+                            io.github.trevarj.motd.data.prefs.EffectSurface.entries
+                                .all {
+                                    config.surfaceEffects[it] ==
+                                        io.github.trevarj.motd.data.prefs
+                                            .SurfaceEffect(42, 29)
+                                }
+                    }
+                }
+            }
+            scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            open()
+            assertEquals(true, runBlocking { prefs.config.first().linkGlobalOpacity })
+            assertEquals(true, runBlocking { prefs.config.first().linkGlobalBlur })
+            scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        } finally {
+            runBlocking { prefs.restoreGlobalEffects(original) }
+        }
     }
 
     private suspend fun awaitMarkerAtLeast(

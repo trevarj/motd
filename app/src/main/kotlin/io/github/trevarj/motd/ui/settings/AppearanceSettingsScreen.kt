@@ -41,7 +41,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHostState
@@ -108,6 +107,7 @@ import io.github.trevarj.motd.ui.chat.ChatWallpaperPicker
 import io.github.trevarj.motd.ui.chatlist.FolderLayoutPreview
 import io.github.trevarj.motd.ui.components.ChatLayoutPreview
 import io.github.trevarj.motd.ui.components.Composer
+import io.github.trevarj.motd.ui.components.captureSurfaceBackdrop
 import io.github.trevarj.motd.ui.components.densityDescription
 import io.github.trevarj.motd.ui.components.densityLabel
 import io.github.trevarj.motd.ui.nav.SettingsTarget
@@ -122,6 +122,7 @@ import io.github.trevarj.motd.ui.theme.rememberAppFontFamily
 import java.io.File
 import kotlin.math.roundToInt
 import android.provider.Settings as AndroidSettings
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Appearance category: theme, dynamic color, layout density, avatar style, nick colors, wallpaper. */
@@ -129,6 +130,7 @@ import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 fun AppearanceSettingsScreen(
     onBack: () -> Unit = {},
     onOpenNickColors: () -> Unit = {},
+    onOpenSurfaceEffects: (SettingsTarget?) -> Unit = {},
     target: SettingsTarget? = null,
     viewModel: AppearanceSettingsViewModel = hiltViewModel(),
 ) {
@@ -164,6 +166,7 @@ fun AppearanceSettingsScreen(
         customFontFile = customFontFile,
         onBack = onBack,
         onOpenNickColors = onOpenNickColors,
+        onOpenSurfaceEffects = onOpenSurfaceEffects,
         onThemePreset = viewModel::setThemePreset,
         onTrueBlack = viewModel::setTrueBlack,
         onFollowSystem = viewModel::setFollowSystem,
@@ -196,8 +199,6 @@ fun AppearanceSettingsScreen(
         onBubbleCornerStyle = viewModel::setBubbleCornerStyle,
         onChatShadowsEnabled = viewModel::setChatShadowsEnabled,
         onNicknameBackgroundsEnabled = viewModel::setNicknameBackgroundsEnabled,
-        onMessageBackgroundOpacity = viewModel::setMessageBackgroundOpacity,
-        onMessageBackgroundBlur = viewModel::setMessageBackgroundBlur,
         onSentBubbleColor = viewModel::setSentBubbleColor,
         onReceivedBubbleColor = viewModel::setReceivedBubbleColor,
         onLauncherIcon = viewModel::setLauncherIcon,
@@ -240,8 +241,7 @@ fun AppearanceSettingsContent(
     onBubbleCornerStyle: (io.github.trevarj.motd.data.prefs.BubbleCornerStyle) -> Unit,
     onChatShadowsEnabled: (Boolean) -> Unit = {},
     onNicknameBackgroundsEnabled: (Boolean) -> Unit = {},
-    onMessageBackgroundOpacity: (Int) -> Unit = {},
-    onMessageBackgroundBlur: (Int) -> Unit = {},
+    onOpenSurfaceEffects: (SettingsTarget?) -> Unit = {},
     onSentBubbleColor: (ComfortableBubbleColor) -> Unit = {},
     onReceivedBubbleColor: (ComfortableBubbleColor) -> Unit = {},
     onLauncherIcon: (LauncherIcon) -> Unit,
@@ -300,7 +300,7 @@ fun AppearanceSettingsContent(
         previewAppearance = appearance.copy(wallpaper = pendingWallpaper ?: appearance.wallpaper)
     }
     LaunchedEffect(target) {
-        if (target == SettingsTarget.MESSAGE_BACKGROUND_OPACITY || target == SettingsTarget.MESSAGE_BACKGROUND_BLUR) choiceSheet = AppearanceChoice.DENSITY
+        if (target == SettingsTarget.MESSAGE_BACKGROUND_OPACITY || target == SettingsTarget.MESSAGE_BACKGROUND_BLUR || target == SettingsTarget.SURFACE_EFFECTS) onOpenSurfaceEffects(target)
     }
     LaunchedEffect(importedWallpaper) {
         importedWallpaper?.let {
@@ -743,6 +743,14 @@ fun AppearanceSettingsContent(
                 )
             }
         }
+        SettingsTarget(target?.name, SettingsTarget.SURFACE_EFFECTS.name) { targetModifier ->
+            SettingsNavigationRow(
+                title = stringResource(R.string.settings_surface_effects),
+                value = stringResource(if (previewAppearance.surfaceEffects.enabled) R.string.settings_surface_effects_on else R.string.settings_surface_effects_off),
+                onClick = { onOpenSurfaceEffects(null) },
+                modifier = targetModifier.testTag("settings_surface_effects"),
+            )
+        }
     }
     if (showThemeSheet) {
         ThemePickerSheet(
@@ -764,7 +772,6 @@ fun AppearanceSettingsContent(
             appearance = previewAppearance,
             deviceUses24Hour = deviceUses24Hour,
             customFontFile = customFontFile,
-            target = target,
             previewDensity = previewDensity,
             previewSpacing = previewSpacing,
             previewCorners = previewCorners,
@@ -776,14 +783,6 @@ fun AppearanceSettingsContent(
             onDensity = {
                 previewDensity = it
                 onLayoutDensity(it)
-            },
-            onMessageBackgroundOpacity = {
-                previewAppearance = previewAppearance.copy(messageBackgroundOpacityPercent = it)
-                onMessageBackgroundOpacity(it)
-            },
-            onMessageBackgroundBlur = {
-                previewAppearance = previewAppearance.copy(messageBackgroundBlur = it)
-                onMessageBackgroundBlur(it)
             },
             onComposerStyle = {
                 previewAppearance = previewAppearance.copy(composerStyle = it)
@@ -876,7 +875,7 @@ fun AppearanceSettingsContent(
 private enum class AppearanceChoice { PALETTE, ICONS, FOLDER_LAYOUT, CHAT_CARD_SHAPE, DENSITY, COMPOSER_STYLE, INPUT_SHAPE, MEDIA_SHAPE, AVATAR, AVATAR_SHAPE, TIME, SPACING, BUBBLES, LAUNCHER }
 
 @Composable
-private fun AppearanceChatLayoutPreview(
+internal fun AppearanceChatLayoutPreview(
     settings: Settings,
     appearance: io.github.trevarj.motd.data.prefs.AppearanceConfig,
     customFontFile: File?,
@@ -918,6 +917,7 @@ private fun AppearanceChatLayoutPreview(
         nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
         messageBackgroundOpacityPercent = appearance.messageBackgroundOpacityPercent,
         messageBackgroundBlur = appearance.messageBackgroundBlur,
+        surfaceEffects = appearance.surfaceEffects,
         sentBubbleColor = appearance.sentBubbleColor,
         receivedBubbleColor = appearance.receivedBubbleColor,
         syncSystemBars = false,
@@ -976,24 +976,37 @@ private fun ComposerStylePreview(
         nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
         messageBackgroundOpacityPercent = appearance.messageBackgroundOpacityPercent,
         messageBackgroundBlur = appearance.messageBackgroundBlur,
+        surfaceEffects = appearance.surfaceEffects,
         sentBubbleColor = appearance.sentBubbleColor,
         receivedBubbleColor = appearance.receivedBubbleColor,
         syncSystemBars = false,
     ) {
-        ConversationTypography(appearance.conversationFontScalePercent) {
-            Composer(
-                value = draft,
-                onValueChange = { draft = it },
-                onSend = {},
-                enabled = true,
-                sendEnabled = false,
-                showEmojiTool = settings.showComposerEmoji,
-                showFormattingTools = settings.showComposerFormattingTools,
-                ircFormattingEnabled = true,
-                composerStyle = appearance.composerStyle,
-                currentNick = "alex",
-                modifier = Modifier.fillMaxWidth().testTag(tag).semantics { stateDescription = styleLabel },
+        val backdrop =
+            io.github.trevarj.motd.ui.components
+                .rememberSurfaceBackdropSource()
+        Box {
+            io.github.trevarj.motd.ui.chat.ChatWallpaperBackground(
+                appearance.wallpaper,
+                Modifier.matchParentSize().captureSurfaceBackdrop(backdrop).background(MaterialTheme.colorScheme.surface),
+                animate = false,
             )
+            CompositionLocalProvider(io.github.trevarj.motd.ui.components.LocalSurfaceBackdrop provides backdrop) {
+                ConversationTypography(appearance.conversationFontScalePercent) {
+                    Composer(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        onSend = {},
+                        enabled = true,
+                        sendEnabled = false,
+                        showEmojiTool = settings.showComposerEmoji,
+                        showFormattingTools = settings.showComposerFormattingTools,
+                        ircFormattingEnabled = true,
+                        composerStyle = appearance.composerStyle,
+                        currentNick = "alex",
+                        modifier = Modifier.fillMaxWidth().testTag(tag).semantics { stateDescription = styleLabel },
+                    )
+                }
+            }
         }
     }
 }
@@ -1011,9 +1024,6 @@ private fun AppearanceChoiceSheet(
     previewShadows: Boolean,
     onPalette: (NickColorPalette) -> Unit,
     onDensity: (LayoutDensity) -> Unit,
-    onMessageBackgroundOpacity: (Int) -> Unit,
-    onMessageBackgroundBlur: (Int) -> Unit,
-    target: SettingsTarget? = null,
     onComposerStyle: (ComposerStyle) -> Unit,
     onInputCornerStyle: (UiCornerStyle) -> Unit,
     onAvatarShape: (AvatarShape) -> Unit,
@@ -1208,7 +1218,6 @@ private fun AppearanceChoiceSheet(
                 onSelect = onDensity,
                 onDismiss = onDismiss,
                 tag = "settings_density_sheet",
-                initiallyShowFooter = target == SettingsTarget.MESSAGE_BACKGROUND_OPACITY || target == SettingsTarget.MESSAGE_BACKGROUND_BLUR,
                 dismissOnSelect = false,
                 preview = {
                     AppearanceChatLayoutPreview(
@@ -1221,22 +1230,6 @@ private fun AppearanceChoiceSheet(
                         previewShadows,
                         "settings_chat_preview_sheet",
                     )
-                },
-                footer = {
-                    SettingsTarget(target?.name, SettingsTarget.MESSAGE_BACKGROUND_OPACITY.name) { targetModifier ->
-                        MessageBackgroundOpacitySlider(
-                            value = appearance.messageBackgroundOpacityPercent,
-                            onValue = onMessageBackgroundOpacity,
-                            modifier = targetModifier,
-                        )
-                    }
-                    SettingsTarget(target?.name, SettingsTarget.MESSAGE_BACKGROUND_BLUR.name) { targetModifier ->
-                        MessageBackgroundBlurSlider(
-                            value = appearance.messageBackgroundBlur,
-                            onValue = onMessageBackgroundBlur,
-                            modifier = targetModifier,
-                        )
-                    }
                 },
             )
         }

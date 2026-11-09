@@ -23,7 +23,6 @@ import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -79,13 +78,18 @@ import io.github.trevarj.motd.ui.chat.FoolPlaceholder
 import io.github.trevarj.motd.ui.chat.messageContentType
 import io.github.trevarj.motd.ui.chat.showsSender
 import io.github.trevarj.motd.ui.components.EmptyState
+import io.github.trevarj.motd.ui.components.LocalSurfaceBackdrop
 import io.github.trevarj.motd.ui.components.MessageBubble
+import io.github.trevarj.motd.ui.components.SurfaceBackdropPage
+import io.github.trevarj.motd.ui.components.captureSurfaceBackdrop
 import io.github.trevarj.motd.ui.components.conversationTag
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
+import io.github.trevarj.motd.ui.components.rememberSurfaceBackdropSource
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import io.github.trevarj.motd.ui.components.EffectFloatingActionButton as FloatingActionButton
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 private const val MENTIONS_NAVIGATION_FAB_HOLD_MS = 450
@@ -124,37 +128,40 @@ fun GlobalFeedScreen(
         onOpenAiSetup,
         onOpenAiSetup,
     )
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-        topBar = {
-            TopAppBar(
-                colors =
-                    androidx.compose.material3.TopAppBarDefaults
-                        .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.action_back),
-                        )
-                    }
-                },
-                title = { Text(stringResource(R.string.feed_title)) },
+    val pageBackdrop = rememberSurfaceBackdropSource()
+    SurfaceBackdropPage(pageBackdrop) {
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+            topBar = {
+                TopAppBar(
+                    colors =
+                        androidx.compose.material3.TopAppBarDefaults
+                            .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.action_back),
+                            )
+                        }
+                    },
+                    title = { Text(stringResource(R.string.feed_title)) },
+                )
+            },
+        ) { padding ->
+            GlobalFeedContent(
+                rows = rows,
+                showNetwork = showNetwork,
+                onOpenMessage = onOpenMessage,
+                onTranslateMessage =
+                    if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures) {
+                        { message -> aiTextViewModel.openStoredMessage(message.bufferId, message.id) }
+                    } else {
+                        null
+                    },
+                modifier = Modifier.padding(padding),
             )
-        },
-    ) { padding ->
-        GlobalFeedContent(
-            rows = rows,
-            showNetwork = showNetwork,
-            onOpenMessage = onOpenMessage,
-            onTranslateMessage =
-                if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures) {
-                    { message -> aiTextViewModel.openStoredMessage(message.bufferId, message.id) }
-                } else {
-                    null
-                },
-            modifier = Modifier.padding(padding),
-        )
+        }
     }
 }
 
@@ -197,43 +204,46 @@ fun MentionsScreen(
         listState = listState,
         onAtNewestChanged = viewModel::reportViewportAtNewest,
     )
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-        topBar = {
-            TopAppBar(
-                colors =
-                    androidx.compose.material3.TopAppBarDefaults
-                        .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                    }
-                },
-                title = { Text(stringResource(R.string.mentions_title)) },
-            )
-        },
-        floatingActionButton = {
-            MentionsNavigationFab(
+    val pageBackdrop = rememberSurfaceBackdropSource()
+    SurfaceBackdropPage(pageBackdrop) {
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+            topBar = {
+                TopAppBar(
+                    colors =
+                        androidx.compose.material3.TopAppBarDefaults
+                            .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                        }
+                    },
+                    title = { Text(stringResource(R.string.mentions_title)) },
+                )
+            },
+            floatingActionButton = {
+                MentionsNavigationFab(
+                    listState = listState,
+                    itemCount = rows.itemCount,
+                )
+            },
+        ) { padding ->
+            GlobalFeedContent(
+                rows = rows,
+                showNetwork = showNetwork,
+                onOpenMessage = onOpenMessage,
+                modifier = Modifier.padding(padding),
+                mentions = true,
+                visibilitySpec = visibilitySpec,
                 listState = listState,
-                itemCount = rows.itemCount,
+                onTranslateMessage =
+                    if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures) {
+                        { message -> aiTextViewModel.openStoredMessage(message.bufferId, message.id) }
+                    } else {
+                        null
+                    },
             )
-        },
-    ) { padding ->
-        GlobalFeedContent(
-            rows = rows,
-            showNetwork = showNetwork,
-            onOpenMessage = onOpenMessage,
-            modifier = Modifier.padding(padding),
-            mentions = true,
-            visibilitySpec = visibilitySpec,
-            listState = listState,
-            onTranslateMessage =
-                if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures) {
-                    { message -> aiTextViewModel.openStoredMessage(message.bufferId, message.id) }
-                } else {
-                    null
-                },
-        )
+        }
     }
 }
 
@@ -327,7 +337,7 @@ private fun GlobalFeedList(
     val formatTime = rememberMessageTimeFormatter()
     LazyColumn(
         state = listState,
-        modifier = modifier.fillMaxSize().testTag(if (mentions) "mentions_list" else "feed_list"),
+        modifier = modifier.fillMaxSize().then(LocalSurfaceBackdrop.current?.let { Modifier.captureSurfaceBackdrop(it) } ?: Modifier).testTag(if (mentions) "mentions_list" else "feed_list"),
     ) {
         items(
             count = rows.itemCount,
@@ -574,29 +584,36 @@ private fun GlobalFeedLineRow(
             FoolPlaceholder(sender = displaySender, onExpand = { onOpenMessage(message.bufferId, message.id, message.serverTime) })
             return@Column
         }
-        MessageBubble(
-            sender = message.sender,
-            displaySender = displaySender,
-            senderAccount = message.senderAccount,
-            // Same rule as MessageList: the stored IRC-formatted body wins when there is one.
-            text = message.ircFormattedText ?: message.text,
-            timeMs = message.serverTime,
-            isSelf = message.isSelf,
-            kind = message.kind,
-            showSender = showSender,
-            isBot = message.isBot,
-            hasMention = if (mentions) policy.mentionAttention(message, row.bufferType == BufferType.QUERY) else message.hasMention,
-            dimmed = foolMode == FoolsMode.DIMMED,
-            // The contentType pool already splits SELF_FAILED out; the row must render it too.
-            failed = message.failed,
-            pending = message.pendingLabel != null,
-            networkId = row.networkId,
-            identityRules = identityRules,
-            formattedTime = remember(message.serverTime, formatTime) { formatTime(message.serverTime) },
-            onClick = { onOpenMessage(message.bufferId, message.id, message.serverTime) },
-            onClickLabel = stringResource(if (mentions) R.string.mentions_open_message else R.string.feed_open_message),
-            onLongPress = { onTranslateMessage?.invoke(message) },
-            onLongPressLabel = onTranslateMessage?.let { stringResource(R.string.ai_text_translate_message) },
-        )
+        val revealed = remember(message.id, foolMode) { androidx.compose.runtime.mutableStateOf(false) }
+        io.github.trevarj.motd.ui.components.FoolMessageScope(
+            concealed = foolMode == FoolsMode.BLUR && !revealed.value,
+            onReveal = { revealed.value = true },
+            tag = "mentions_fool_reveal_${message.id}",
+        ) {
+            MessageBubble(
+                sender = message.sender,
+                displaySender = displaySender,
+                senderAccount = message.senderAccount,
+                // Same rule as MessageList: the stored IRC-formatted body wins when there is one.
+                text = message.ircFormattedText ?: message.text,
+                timeMs = message.serverTime,
+                isSelf = message.isSelf,
+                kind = message.kind,
+                showSender = showSender,
+                isBot = message.isBot,
+                hasMention = if (mentions) policy.mentionAttention(message, row.bufferType == BufferType.QUERY) else message.hasMention,
+                dimmed = foolMode == FoolsMode.DIMMED,
+                // The contentType pool already splits SELF_FAILED out; the row must render it too.
+                failed = message.failed,
+                pending = message.pendingLabel != null,
+                networkId = row.networkId,
+                identityRules = identityRules,
+                formattedTime = remember(message.serverTime, formatTime) { formatTime(message.serverTime) },
+                onClick = { onOpenMessage(message.bufferId, message.id, message.serverTime) },
+                onClickLabel = stringResource(if (mentions) R.string.mentions_open_message else R.string.feed_open_message),
+                onLongPress = { onTranslateMessage?.invoke(message) },
+                onLongPressLabel = onTranslateMessage?.let { stringResource(R.string.ai_text_translate_message) },
+            )
+        }
     }
 }

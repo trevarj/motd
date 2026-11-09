@@ -19,7 +19,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
@@ -68,6 +67,7 @@ import io.github.trevarj.motd.ui.theme.resolveComfortableBubbleColor
 import java.io.File
 import kotlin.math.roundToInt
 import android.graphics.Color as AndroidColor
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 
 private val bubbleColorRoles =
     listOf(
@@ -241,6 +241,7 @@ private fun AppearanceBubblePreview(
         nicknameBackgroundsEnabled = appearance.nicknameBackgroundsEnabled,
         messageBackgroundOpacityPercent = appearance.messageBackgroundOpacityPercent,
         messageBackgroundBlur = appearance.messageBackgroundBlur,
+        surfaceEffects = appearance.surfaceEffects,
         sentBubbleColor = appearance.sentBubbleColor,
         receivedBubbleColor = appearance.receivedBubbleColor,
         syncSystemBars = false,

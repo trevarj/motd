@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
@@ -20,7 +19,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -52,6 +50,7 @@ import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.readingInk
 import kotlinx.coroutines.launch
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 internal data class ExternalTranslationTarget(
@@ -292,9 +291,10 @@ internal fun InlineMessageTranslation(
                 Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.chat_translation_dismiss), tint = accent)
             }
         }
-        SelectionContainer {
-            Text(
+        io.github.trevarj.motd.ui.components.FoolBodySelection {
+            io.github.trevarj.motd.ui.components.FoolBodyText(
                 translation.text,
+                concealment = io.github.trevarj.motd.ui.components.LocalFoolBodyConcealment.current,
                 modifier = Modifier.fillMaxWidth(),
                 style = MaterialTheme.typography.bodySmall,
                 color = bodyColor,

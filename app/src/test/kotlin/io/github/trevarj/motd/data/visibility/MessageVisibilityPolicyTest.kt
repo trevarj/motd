@@ -54,18 +54,19 @@ class MessageVisibilityPolicyTest {
     }
 
     @Test
-    fun `collapsed fool remains unread and anchorable without preview activity`() {
+    fun `blurred and collapsed fools remain unread and anchorable without preview activity`() {
         val fool = message(sender = "Alice")
-        val policy = policy(FoolsMode.COLLAPSE)
-
-        assertTrue(policy.timeline(fool))
-        assertTrue(policy.search(fool))
-        assertTrue(policy.isFool(fool))
-        assertFalse(policy.preview(fool))
-        assertFalse(policy.activity(fool))
-        assertTrue(policy.visibleUnread(fool))
-        assertTrue(policy.anchor(fool))
-        assertTrue(policy.effectiveBottom(fool))
+        for (mode in listOf(FoolsMode.BLUR, FoolsMode.COLLAPSE)) {
+            val policy = policy(mode)
+            assertTrue(policy.timeline(fool))
+            assertTrue(policy.search(fool))
+            assertTrue(policy.isFool(fool))
+            assertFalse(policy.preview(fool))
+            assertFalse(policy.activity(fool))
+            assertTrue(policy.visibleUnread(fool))
+            assertTrue(policy.anchor(fool))
+            assertTrue(policy.effectiveBottom(fool))
+        }
     }
 
     @Test

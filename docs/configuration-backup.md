@@ -29,6 +29,8 @@ export. Envelope metadata is authenticated as associated data.
   upload backend configuration, avatar display, per-network self-avatar setting,
   and delivery mode
 - Global message background opacity and blur, saved independently of each other and message layout
+- The effects master and independent header/input/chat-list/menu/sheet/drawer/mini-player/floating-button opacity and blur pairs
+- Independent global opacity/blur link flags, including mixed values saved before the first linked edit
 - Fool membership, default visibility, and sparse per-fool visibility/notification preferences
 
 ## Excluded
@@ -50,9 +52,13 @@ Unsupported versions, malformed hierarchy, invalid ports, invalid WebSocket
 URLs, oversized files, truncated encrypted payloads, wrong passwords, and
 tampered ciphertext fail without applying the backup.
 
-Global blur is additive appearance data: an older present appearance without it restores Off (0).
-Values are clamped to 0–100 on restore. A backup with no appearance section leaves local appearance,
-including blur and opacity, untouched; no backup-envelope version change is needed.
+Global blur and surface effects are additive appearance data. An older present appearance restores
+message blur Off (0), enables the effects master, and uses each surface's original defaults (chat-list
+60%/100 blur; new surfaces 100%/0 blur). Values are clamped to 0–100 on restore. A backup with no
+appearance section leaves all local appearance untouched; no backup-envelope version change is needed.
+Both link flags default to false in older appearance objects. Restore writes message scalars,
+interface pairs, master and link flags atomically without triggering interactive linking, even when
+the destination has links enabled. An absent appearance object also preserves local link flags.
 
 `MERGE` updates matching networks in place and keeps local-only networks.
 `REPLACE` updates matching networks in place, adds missing networks, and deletes
@@ -61,7 +67,16 @@ cascades.
 
 Importing general settings replaces per-fool overrides, including for retained fools. Older backups
 without per-fool preferences reset them to inherited visibility with both notification permissions
-off; saved `COLLAPSE` and `HIDE` default visibility values remain compatible.
+off; saved `DIMMED`, `BLUR`, `COLLAPSE`, and `HIDE` names retain their meaning.
+`BLUR` is available globally or per fool and conceals body text, including translations and
+transcripts, until its own reveal tap. Authors, avatars, timestamps, replies, media, audio controls
+and reactions remain sharp and usable. Show fools and exact-message jumps remain temporary
+chat-visit reveals; Restore conceals immediately. With effects enabled on Android 12+, body text
+uses thick native blur; Effects Off and older Android use an opaque text-range cover.
+Concealed text and body links remain inaccessible to selection, accessibility and activation until
+reveal. Search previews and opted-in Mentions rows use the same choice; notification permissions
+remain independent. Server search applies account identity tags as well as nicknames; untagged
+results retain nickname matching.
 
 Appearance includes independent input, avatar, chat-card, and media corner presets.
 Older appearance objects without these fields restore all four to `DEFAULT`;

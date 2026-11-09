@@ -10,7 +10,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -30,6 +29,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.gesture.GestureNode
 import io.github.trevarj.motd.gesture.GestureProviderKind
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 
 private fun inspectionEntry(node: GestureNode): RadialEntry =
     radialEntryOf(

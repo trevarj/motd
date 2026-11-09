@@ -41,6 +41,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -90,15 +92,12 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Snackbar
@@ -157,6 +156,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -213,6 +213,7 @@ import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.ComposerStyle
+import io.github.trevarj.motd.data.prefs.EffectSurface
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
@@ -259,13 +260,17 @@ import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
 import io.github.trevarj.motd.ui.components.ReadAloudPlayer
 import io.github.trevarj.motd.ui.components.ReadAloudVoiceOptions
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
+import io.github.trevarj.motd.ui.components.SurfaceBackdropPage
 import io.github.trevarj.motd.ui.components.WaveformScrubber
 import io.github.trevarj.motd.ui.components.avatarsHidden
+import io.github.trevarj.motd.ui.components.captureSurfaceBackdrop
 import io.github.trevarj.motd.ui.components.densityLabel
+import io.github.trevarj.motd.ui.components.effectSurface
 import io.github.trevarj.motd.ui.components.historySyncModeLabel
 import io.github.trevarj.motd.ui.components.notificationIcon
 import io.github.trevarj.motd.ui.components.recordMessageWallpaper
 import io.github.trevarj.motd.ui.components.rememberMessageWallpaperBackdrop
+import io.github.trevarj.motd.ui.components.rememberSurfaceBackdropSource
 import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
@@ -297,6 +302,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
+import io.github.trevarj.motd.ui.components.EffectFloatingActionButton as FloatingActionButton
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Pause after the last keystroke before the nick-autocomplete panel becomes visible, so fast
@@ -1297,3500 +1305,3513 @@ internal fun ChatContent(
     onReadAloudPreview: (ReadAloudSelection) -> Unit = {},
     composerStyle: ComposerStyle = ComposerStyle.COMFORTABLE,
 ) {
-    val dickordEnabled = LocalDickordLabsEnabled.current
-    val buffer = state.buffer
-    val activeDickordChannel =
-        dickordEnabled &&
-            buffer != null &&
-            isDickordPortalConversation(buffer.type, buffer.displayName)
-    val dickordDescriptor =
-        if (activeDickordChannel) {
-            decodeDickordChannelDescriptor(buffer.dickordChannelJson)
-        } else {
-            null
-        }
-    val conversationLabel =
-        when {
-            buffer == null -> {
+    val wallpaperSource = rememberSurfaceBackdropSource()
+    val pageBackdrop = rememberSurfaceBackdropSource(wallpaperSource)
+    // Scope the page before deriving UI state: capturing the entire derived screen exceeds JVM parameter slots.
+    SurfaceBackdropPage(pageBackdrop) {
+        val dickordEnabled = LocalDickordLabsEnabled.current
+        val buffer = state.buffer
+        val activeDickordChannel =
+            dickordEnabled &&
+                buffer != null &&
+                isDickordPortalConversation(buffer.type, buffer.displayName)
+        val dickordDescriptor =
+            if (activeDickordChannel) {
+                decodeDickordChannelDescriptor(buffer.dickordChannelJson)
+            } else {
                 null
             }
-
-            activeDickordChannel -> {
-                dickordDescriptor?.channelName
-                    ?: stringResource(R.string.dickord_portal_conversation_pending, buffer.id)
-            }
-
-            else -> {
-                buffer.displayName
-            }
-        }
-    val listState = presentation?.listState ?: rememberLazyListState()
-    val presentationVisit = presentationLease?.presentationVisitIdentity
-    var restoringHiddenFools by remember(presentationVisit) { mutableStateOf(false) }
-    var restoreDispatched by remember(presentationVisit) { mutableStateOf(false) }
-    var restorePolicy by remember(presentationVisit) { mutableStateOf<MessageVisibilitySpec?>(null) }
-    var restoreIntent by remember(presentationVisit) { mutableLongStateOf(entryPositionIntent) }
-    val hiddenFoolVisibility =
-        if (fools.isNotEmpty()) updateTransition(!restoringHiddenFools, label = "hidden_fools") else null
-    val layoutSnapshot = if (presentationLease != null) items.itemSnapshotList else null
-    val measuredSnapshot =
-        if (presentationLease != null) {
-            remember(presentationLease, items) {
-                mutableStateOf<ItemSnapshotList<MessageEntity>?>(null, referentialEqualityPolicy())
-            }
-        } else {
-            null
-        }
-    var payloadAdmitted by remember(presentationLease) { mutableStateOf(presentationLease == null) }
-    // Keep Scaffold's stable measure-updated padding, not a post-measure height snapshot.
-    var bottomHostPadding by remember { mutableStateOf<PaddingValues?>(null) }
-    val bottomHostDensity by rememberUpdatedState(LocalDensity.current)
-    val readBottomHostHeightPx =
-        remember {
-            { with(bottomHostDensity) { bottomHostPadding?.calculateBottomPadding()?.roundToPx() ?: 0 } }
-        }
-    val rowContentMetrics = remember(items) { mutableStateMapOf<Long, TimelineRowContentMetrics>() }
-    val autoFollow = remember { AutoFollowTracker(items.itemCount) }
-    var liveEntryIds by remember(state.buffer?.id) { mutableStateOf(emptySet<Long>()) }
-    val presenceMode = state.conversationPresence.effective
-    val visibleSpec =
-        remember(
-            presenceMode,
-            fools,
-            foolsMode,
-            foolPreferences,
-            hiddenFoolsRevealed,
-            showRedactedMessages,
-        ) {
-            MessageVisibilitySpec(
-                presenceMode = presenceMode,
-                customPresenceKinds = state.conversationPresence.effectiveCustomKinds,
-                showRedactedMessages = showRedactedMessages,
-                fools = fools,
-                foolsMode = foolsMode,
-                foolPreferences = foolPreferences,
-                revealHiddenFools = hiddenFoolsRevealed,
-            )
-        }
-    val visibilityPolicy = remember(visibleSpec, identityRules) { MessageVisibilityPolicy(visibleSpec, identityRules) }
-    val presentationContextCompatible =
-        presentationLease == null ||
-            (
-                state.buffer?.id == presentationLease.entry.key.context.roomId &&
-                    state.buffer.networkId == presentationLease.entry.key.context.networkId &&
-                    identityRules == presentationLease.entry.key.context.identityRules
-            )
-    val presentationCompatible =
-        presentationContextCompatible && (presentationLease == null || presentedVisibilitySpec == visibleSpec)
-    val currentPresentationCompatible by rememberUpdatedState(presentationCompatible)
-    val payloadAllowed = payloadAdmitted && presentationLease?.isActive != false && presentationCompatible
-    // Scroll-driven paging: the footer reflects the Paging APPEND state at the older end directly.
-    val olderHistoryLoad = items.loadState.append
-    val historyUiState =
-        chatHistoryUiState(
-            bufferType = state.buffer?.type,
-            connectionState = state.connState,
-            availability = historyAvailability,
-            append = olderHistoryLoad,
-            historyComplete = state.buffer?.historyComplete == true,
-        )
-    val unreadEntryLabel =
-        unreadEntrySnapshot?.let { snapshot ->
-            pluralStringResource(
-                R.plurals.chat_new_messages_count,
-                snapshot.loadedCount,
-                if (snapshot.lowerBound) "${snapshot.loadedCount}+" else snapshot.loadedCount.toString(),
-            )
-        }
-    val newerHistoryLoad = items.loadState.prepend
-    val timelineHistoryStatus =
-        timelineHistoryStatus(
-            refresh = items.loadState.refresh,
-            prepend = newerHistoryLoad,
-            itemCount = items.itemCount,
-            syncStatus = historySyncStatus,
-        )
-    val readyRetryGate = remember(items) { HistoryReadyRetryGate() }
-    LaunchedEffect(historyAvailability, olderHistoryLoad) {
-        if (readyRetryGate.update(historyAvailability, olderHistoryLoad)) {
-            items.retry()
-        }
-    }
-    val traceBufferId = state.buffer?.id
-    val traceSessionId =
-        remember(traceBufferId) {
-            traceBufferId?.let { AutoFollowTrace.nextSessionId() }
-        }
-    val scope = rememberCoroutineScope()
-    // Expanded fool rows: keyed by MessageEntity.id, expand-only for the session.
-    // Ephemeral by design (lost on config change; an accepted tradeoff).
-    var expandedFools by remember { mutableStateOf(setOf<Long>()) }
-    val clipboard: Clipboard = LocalClipboard.current
-    val ctx = LocalContext.current
-    val ebooksCache = remember(ctx) { EbooksResultCache(ctx) }
-    val resources = LocalResources.current
-    val snackbarHostState = remember { SnackbarHostState() }
-    val latestExternalTranslationInFlight by rememberUpdatedState(externalTranslationInFlight)
-    val translationLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            val returnedText =
-                if (result.resultCode == Activity.RESULT_OK) {
-                    try {
-                        result.data
-                            ?.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)
-                            ?.toString()
-                            ?.takeUnless(String::isBlank)
-                    } catch (_: BadParcelableException) {
-                        null
-                    } catch (_: ClassCastException) {
-                        null
-                    }
-                } else {
+        val conversationLabel =
+            when {
+                buffer == null -> {
                     null
                 }
-            onCompleteExternalTranslation?.invoke(returnedText)
-        }
-    val eligibleEbooksRoomId =
-        state.buffer?.let { room ->
-            ebooksHelperRoomId?.takeIf {
-                it == room.id && room.type == BufferType.CHANNEL &&
-                    identityRules.normalize(room.displayName) == identityRules.normalize("#ebooks")
-            }
-        }
-    val latestEligibleEbooksRoomId by rememberUpdatedState(eligibleEbooksRoomId)
-    val latestNetworkId by rememberUpdatedState(state.buffer?.networkId)
-    var pendingDccAccept by remember { mutableStateOf<PendingDccAccept?>(null) }
-    val dccDestinationPicker =
-        rememberLauncherForActivityResult(
-            ActivityResultContracts.CreateDocument("application/octet-stream"),
-        ) { uri ->
-            val pending = pendingDccAccept
-            pendingDccAccept = null
-            if (uri != null && pending != null) {
-                val sameRoom =
-                    pending.ebooksRoomId == null ||
-                        (pending.ebooksRoomId == latestEligibleEbooksRoomId && pending.ebooksNetworkId == latestNetworkId)
-                if (sameRoom) onAcceptDccTransfer(pending.transferId, uri, pending.allowPrivateEndpoint)
-            }
-        }
-    LaunchedEffect(voiceState.notice) {
-        val notice = voiceState.notice ?: return@LaunchedEffect
-        snackbarHostState.showSnackbar(notice)
-        onVoiceNoticeDismissed()
-    }
-    LaunchedEffect(avatarEvents, resources) {
-        avatarEvents.collect { outcome ->
-            val message =
-                when (outcome) {
-                    ConversationAvatarOutcome.LocalOnly -> R.string.avatar_result_local_only
-                    ConversationAvatarOutcome.Shared -> R.string.avatar_result_shared
-                    ConversationAvatarOutcome.RequestSent -> R.string.avatar_result_request_sent
-                    ConversationAvatarOutcome.LocalReset -> R.string.avatar_result_reset
-                    ConversationAvatarOutcome.SharedCleared -> R.string.avatar_result_shared_cleared
-                    ConversationAvatarOutcome.Invalid -> R.string.avatar_result_invalid
-                    ConversationAvatarOutcome.Failed -> R.string.avatar_result_failed
+
+                activeDickordChannel -> {
+                    dickordDescriptor?.channelName
+                        ?: stringResource(R.string.dickord_portal_conversation_pending, buffer.id)
                 }
-            snackbarHostState.showSnackbar(resources.getString(message))
-        }
-    }
-    // The ViewModel owns the durable value; this local state only retains cursor/selection details.
-    var composerText by remember(traceBufferId) {
-        mutableStateOf(TextFieldValue(""))
-    }
-    var pendingEbooksRequestRevision by remember(traceBufferId) { mutableStateOf<Long?>(null) }
-    var ebooksHelpOpen by remember(eligibleEbooksRoomId) { mutableStateOf(false) }
-    var ebooksResults by remember(eligibleEbooksRoomId) { mutableStateOf<List<EbooksResult>?>(null) }
-    var ebooksResultsError by remember(eligibleEbooksRoomId) { mutableStateOf<String?>(null) }
-    var ebooksOffersOpen by remember(eligibleEbooksRoomId) { mutableStateOf(false) }
-    val visibleEbooksOffers =
-        if (eligibleEbooksRoomId != null) {
-            ebooksDccOffers.filter {
-                it.networkId == state.buffer.networkId && it.direction == DccDirection.INCOMING &&
-                    it.state != DccTransferState.REMOVED
-            }
-        } else {
-            emptyList()
-        }
-    val latestVisibleEbooksOffers by rememberUpdatedState(visibleEbooksOffers)
 
-    fun showEbooksResults(
-        roomId: Long,
-        uri: Uri,
-    ) {
-        if (roomId != latestEligibleEbooksRoomId) return
-        scope.launch {
-            try {
-                val parsed =
-                    withContext(Dispatchers.IO) {
-                        ctx.contentResolver.openInputStream(uri)?.use(::parseEbooksResults)
-                            ?: throw IllegalArgumentException("Cannot open results ZIP")
-                    }
-                if (roomId == latestEligibleEbooksRoomId) ebooksResults = parsed
-            } catch (e: IllegalArgumentException) {
-                if (roomId == latestEligibleEbooksRoomId) ebooksResultsError = e.message ?: "Invalid results ZIP file"
-            } catch (_: java.io.IOException) {
-                if (roomId == latestEligibleEbooksRoomId) ebooksResultsError = "Could not read results ZIP; choose it again"
-            } catch (_: SecurityException) {
-                if (roomId == latestEligibleEbooksRoomId) ebooksResultsError = "Cannot access results ZIP; choose it again"
-            }
-        }
-    }
-    var pickingEbooksRoomId by remember { mutableStateOf<Long?>(null) }
-    val ebooksResultsPicker =
-        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            val roomId = pickingEbooksRoomId
-            pickingEbooksRoomId = null
-            if (uri != null && roomId != null) showEbooksResults(roomId, uri)
-        }
-
-    fun isEbooksSearchOnly(text: String) = eligibleEbooksRoomId != null && plainIrcText(text).trim() == "@Search"
-
-    // Anchors for the send flight. Held in their own holder so the per-layout writes recompose the
-    // overlay that reads them and nothing else on this surface.
-    val flightAnchors = remember(traceBufferId) { SendFlightAnchors() }
-    // Rows a flight has already delivered. Their entrance was the ghost, so they must never also
-    // play the ordinary live-arrival reveal once the flight is gone.
-    var flownRowIds by remember(traceBufferId) { mutableStateOf(emptySet<Long>()) }
-    val selfNick = (state.connState as? IrcClientState.Ready)?.nick.orEmpty()
-    // The silhouette is decided at launch, before the pending row exists: predict whether the
-    // landing row opens a new group or continues our own burst, against the newest row the flight
-    // is not itself standing in for (its own row may already be in the pager by now).
-    val flightShowSender =
-        remember(outgoingFlight?.token) {
-            val flight = outgoingFlight ?: return@remember true
-            if (selfNick.isEmpty()) return@remember true
-            val newest =
-                (0 until minOf(items.itemCount, MAX_PLACEHOLDER_PROBES))
-                    .asSequence()
-                    .mapNotNull { items.peek(it) }
-                    .firstOrNull { !flight.matches(it) }
-            predictFlightShowsSender(
-                newest = newest,
-                selfNick = selfNick,
-                normalizedSelf = nickNormalizer(selfNick),
-                nowMs = flight.launchedAtMs,
-            )
-        }
-    // One spring per tap, carrying the bubble and opening the gap it lands in.
-    val flightMotion =
-        remember(outgoingFlight?.token) {
-            // Reset here rather than in the effect below: effects are dispatched on the frame clock
-            // and can run after the new tap's first draw, which would then read the previous flight's
-            // landing rect and start the ghost mid-timeline instead of at the composer.
-            if (outgoingFlight != null) flightAnchors.beginFlight()
-            SendFlightMotion(
-                morphEnabled =
-                    outgoingFlight != null &&
-                        outgoingFlight.replyText == null &&
-                        conversationLayout.effective == LayoutDensity.COMFORTABLE,
-            )
-        }
-    val flightProgress = remember(flightMotion) { { flightMotion.progress.value } }
-    // Driven here rather than inside the overlay: the landing row's reveal must complete even if
-    // the ghost never gets a composer rect to launch from, or the row would stay collapsed.
-    LaunchedEffect(outgoingFlight?.token) {
-        val token = outgoingFlight?.token ?: return@LaunchedEffect
-        try {
-            // The lift starts on the tap frame, before the pending row exists: the ghost rises to
-            // its hover line above the composer while persistence runs, so a slow send stays
-            // visibly in flight. The flight spring itself still waits for the landing report,
-            // because the gap must open from zero on the frame the row first composes.
-            val liftJob = launch { flightMotion.lift.animateTo(1f, MotdMotion.sendFlightSpring) }
-            val morphJob =
-                if (flightMotion.morphEnabled) {
-                    launch { flightMotion.morph.animateTo(1f, MotdMotion.sendMorphGrow) }
-                } else {
-                    null
-                }
-            snapshotFlow { flightAnchors.landingRow }.filterNotNull().first()
-            flightMotion.progress.animateTo(1f, MotdMotion.sendFlightSpring)
-            liftJob.join()
-            // A quick Room write must not reveal the row while its body is still leaving the field.
-            morphJob?.join()
-        } finally {
-            // Also runs when this effect dies with the screen. A flight that outlived its UI would
-            // hide its row again and fly a ghost of a minutes-old message on the next visit.
-            onFlightSettled(token)
-        }
-    }
-    var attachmentSheetOpen by rememberSaveable { mutableStateOf(false) }
-    var uploadCurrentDraftDirectly by rememberSaveable { mutableStateOf(false) }
-    // A shared or pasted file opens the same upload confirmation without changing the draft.
-    var sharedFile by remember(traceBufferId) { mutableStateOf<PendingShare.File?>(null) }
-    LaunchedEffect(traceBufferId) {
-        if (traceBufferId == null) return@LaunchedEffect
-        consumeSharedFile()?.let { file ->
-            sharedFile = file
-            uploadCurrentDraftDirectly = false
-            attachmentSheetOpen = true
-        }
-        if (consumeAttachmentRequest()) {
-            sharedFile = null
-            uploadCurrentDraftDirectly = false
-            attachmentSheetOpen = true
-        }
-    }
-    LaunchedEffect(attachmentSheetRequests) {
-        attachmentSheetRequests.collect {
-            sharedFile = null
-            uploadCurrentDraftDirectly = false
-            attachmentSheetOpen = true
-        }
-    }
-    var longDraftPrompt by rememberSaveable { mutableStateOf(false) }
-    var overflowOpen by rememberSaveable { mutableStateOf(false) }
-    var conversationLayoutSheetOpen by rememberSaveable { mutableStateOf(false) }
-    var notificationSheetOpen by rememberSaveable { mutableStateOf(false) }
-    var presenceModeSheetOpen by rememberSaveable { mutableStateOf(false) }
-    var historySyncModeSheetOpen by rememberSaveable { mutableStateOf(false) }
-    var readAloudOptionsOpen by remember(state.buffer?.id) { mutableStateOf(false) }
-    if (readAloudOptionsOpen) {
-        ReadAloudVoiceOptions(
-            config = readAloudConfig,
-            voices = readAloudVoices,
-            onSave = onReadAloudSaveOptions,
-            onPreview = onReadAloudPreview,
-            onDismiss = {
-                readAloudOptionsOpen = false
-                if (!readAloudState.enabled) onReadAloudStop()
-            },
-            onStopPreview = onReadAloudStop,
-            onReloadVoices = onReadAloudOptions,
-            previewing = readAloudState.previewing,
-            error = readAloudState.error,
-        )
-    }
-    var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
-    var highlightEventId by rememberSaveable { mutableStateOf<Long?>(null) }
-    // The visit owns expand-all; row exceptions remain local to this presentation.
-    val latestExpandAllFools by rememberUpdatedState(expandAllFools && !restoringHiddenFools)
-    // Rows the user explicitly re-collapsed while expand-all is on (so a global expand is still
-    // individually reversible). Cleared whenever expand-all is toggled off.
-    var collapsedFools by remember { mutableStateOf(setOf<Long>()) }
-
-    LaunchedEffect(traceBufferId) {
-        if (traceBufferId == null) return@LaunchedEffect
-        withFrameNanos {
-            AutoFollowTrace.record("first_frame", traceBufferId, traceSessionId) {
-                "item_count=${items.itemCount}"
-            }
-            Trace.beginSection("motd chat first frame")
-            try {
-                // Instant-like marker for Perfetto/gfx correlation without spanning suspension.
-            } finally {
-                Trace.endSection()
-            }
-        }
-    }
-
-    // Entry position is resolved once after refresh. Until then do not expose a transient FAB or
-    // advance read state from a default index-0 layout.
-    val entryInitiallySettled = entryState is EntryPositionState.Settled && initialTarget == null && presentationLease == null
-    var initialPositionSettled by remember(presentationVisit, entryInitiallySettled) {
-        mutableStateOf(entryInitiallySettled)
-    }
-    // The first Paging emission after entry settlement reflects data loaded for the target, not a
-    // live arrival. Consume it without auto-follow so an unread target remains on screen.
-    var suppressNextAutoFollow by remember { mutableStateOf(!entryInitiallySettled) }
-    val retainedViewport =
-        remember(presentationLease, entryFallback) {
-            entryFallback?.viewport ?: presentation?.confirmedViewport?.takeIf { entryFallback?.useSharedViewport == true }
-        }
-    var entryTimedOut by remember(presentationLease) { mutableStateOf(false) }
-    var selectingRetainedViewport by remember(presentationLease) { mutableStateOf(false) }
-    var retainedViewportChosen by remember(presentationLease) { mutableStateOf(false) }
-    var supersededAutomaticTarget by remember(presentationLease) { mutableStateOf<ChatPositionTarget?>(null) }
-    val automaticPositionJob = remember(presentationLease) { mutableStateOf<Job?>(null) }
-
-    // Veil over the timeline while entry positioning settles, so the entry frames (the bottom of
-    // the buffer, then the alignment passes) are never shown before the divider lands. One-shot per
-    // composition, and the composition is per-ChatRoute: entering another buffer is a new route, so
-    // nothing that happens within a visit -- a republished post-catch-up repair, a re-resolve -- can
-    // re-engage it. A restored visit that already knows where it landed starts lifted.
-    val latestEntryState by rememberUpdatedState(entryState)
-    val latestUnreadEntrySnapshot by rememberUpdatedState(unreadEntrySnapshot)
-    var entryVeilLifted by remember(presentationVisit) {
-        mutableStateOf(
-            shouldLiftEntryVeil(
-                initialPositionSettled = entryInitiallySettled,
-                entryUnresolved = entryState is EntryPositionState.Unresolved,
-                timedOut = false,
-            ),
-        )
-    }
-    // A temporary reveal preserves drawing, never the successor's read/position/SQL admission.
-    var admittedDrawingSpec by remember(presentationVisit) { mutableStateOf<MessageVisibilitySpec?>(null) }
-    var previousExpandAllFools by remember(presentationVisit) { mutableStateOf(expandAllFools) }
-    var temporaryFoolToggle by remember(presentationVisit) { mutableStateOf(false) }
-    if (previousExpandAllFools != expandAllFools) {
-        if (initialPositionSettled && entryVeilLifted && entryState is EntryPositionState.Settled &&
-            initialTarget == null && jumpTarget == null && admittedDrawingSpec != null
-        ) {
-            temporaryFoolToggle = true
-            suppressNextAutoFollow = true
-        }
-        previousExpandAllFools = expandAllFools
-    }
-    if (payloadAllowed) admittedDrawingSpec = visibleSpec
-    val temporaryFoolMotion =
-        temporaryFoolToggle && presentationContextCompatible &&
-            admittedDrawingSpec?.samePolicyExceptHiddenReveal(visibleSpec) == true
-    val drawingAllowed =
-        payloadAllowed ||
-            (temporaryFoolMotion && initialPositionSettled && entryVeilLifted && entryState is EntryPositionState.Settled && jumpTarget == null)
-    val preserveOutgoingHiddenBodies = restoringHiddenFools || (temporaryFoolMotion && !expandAllFools)
-    val restoreStillValid =
-        presentationContextCompatible && restorePolicy?.samePolicyExceptHiddenReveal(visibleSpec) == true &&
-            restoreIntent == entryPositionIntent && entryState is EntryPositionState.Settled && initialTarget == null && jumpTarget == null
-    val currentRestoreValid by rememberUpdatedState(restoreStillValid)
-    val latestExpandAllFoolsChange by rememberUpdatedState(onExpandAllFoolsChange)
-    LaunchedEffect(restoringHiddenFools, restoreDispatched, restoreStillValid, presentationVisit) {
-        if (!restoringHiddenFools || restoreDispatched) return@LaunchedEffect
-        if (!restoreStillValid) {
-            restoringHiddenFools = false
-            return@LaunchedEffect
-        }
-        hiddenFoolVisibility?.let { transition ->
-            snapshotFlow { !transition.currentState && !transition.targetState && !transition.isRunning }.first { it }
-        }
-        if (restoringHiddenFools && currentRestoreValid) {
-            restoreDispatched = true
-            latestExpandAllFoolsChange(false)
-        }
-    }
-    LaunchedEffect(restoringHiddenFools, payloadAllowed, expandAllFools, presentedVisibilitySpec) {
-        // Keep the old native Hidden hosts exited until the exact false-spec refresh is admitted.
-        if (restoringHiddenFools && !expandAllFools && payloadAllowed && presentedVisibilitySpec?.revealHiddenFools != true) {
-            restoreDispatched = false
-            restoringHiddenFools = false
-        }
-    }
-    LaunchedEffect(temporaryFoolToggle, payloadAllowed, visibleSpec, presentationLease, restoringHiddenFools) {
-        if (temporaryFoolToggle && payloadAllowed && !restoringHiddenFools) {
-            Animatable(0f).animateTo(1f, MotdMotion.microFadeIn)
-            temporaryFoolToggle = false
-        }
-    }
-    LaunchedEffect(presentationLease) {
-        if (entryVeilLifted) return@LaunchedEffect
-        // Bounded wait: a slow or offline entry degrades to today's visible correction rather than
-        // a stuck blank pane.
-        val resolved =
-            withTimeoutOrNull(ENTRY_VEIL_TIMEOUT_MS) {
-                snapshotFlow {
-                    val entry = latestEntryState
-                    // Both statements of settlement: the screen's own flag reveals a frame or two
-                    // earlier, and the entry state carries it when the flag's keyed remember is
-                    // rebuilt by the very transition that settles it.
-                    val settled = initialPositionSettled || (presentationLease == null && entry is EntryPositionState.Settled)
-                    settled to (entry is EntryPositionState.Unresolved)
-                }.first { (settled, unresolved) ->
-                    shouldLiftEntryVeil(settled, unresolved, timedOut = false)
+                else -> {
+                    buffer.displayName
                 }
             }
-        entryTimedOut = resolved == null
-        entryVeilLifted =
-            shouldLiftEntryVeil(
-                initialPositionSettled = resolved?.first == true,
-                entryUnresolved = resolved?.second == true,
-                timedOut = resolved == null,
-            )
-        AutoFollowTrace.record("entry_veil_lifted", traceBufferId, traceSessionId) {
-            val reason =
-                when {
-                    resolved == null -> "timeout"
-                    resolved.first -> "settled"
-                    else -> "unresolved"
+        val listState = presentation?.listState ?: rememberLazyListState()
+        val presentationVisit = presentationLease?.presentationVisitIdentity
+        var restoringHiddenFools by remember(presentationVisit) { mutableStateOf(false) }
+        var restoreDispatched by remember(presentationVisit) { mutableStateOf(false) }
+        var restorePolicy by remember(presentationVisit) { mutableStateOf<MessageVisibilitySpec?>(null) }
+        var restoreIntent by remember(presentationVisit) { mutableLongStateOf(entryPositionIntent) }
+        val hiddenFoolVisibility =
+            if (fools.isNotEmpty()) updateTransition(!restoringHiddenFools, label = "hidden_fools") else null
+        val layoutSnapshot = if (presentationLease != null) items.itemSnapshotList else null
+        val measuredSnapshot =
+            if (presentationLease != null) {
+                remember(presentationLease, items) {
+                    mutableStateOf<ItemSnapshotList<MessageEntity>?>(null, referentialEqualityPolicy())
                 }
-            "reason=$reason item_count=${items.itemCount}"
-        }
-    }
-
-    // Raw ignored tails do not make the user leave the meaningful bottom of the conversation.
-    val atBottom by remember(listState, items, visibilityPolicy) {
-        derivedStateOf {
-            val layout = listState.layoutInfo
-            val bottomHostHeightPx = readBottomHostHeightPx()
-            // A first/stale measure with no host clearance cannot prove that newest is readable.
-            bottomHostHeightPx > 0 &&
-                layout.beforeContentPadding >= bottomHostHeightPx &&
-                layout.viewportEndOffset > layout.viewportStartOffset + bottomHostHeightPx &&
-                isAtEffectiveBottom(
-                    firstVisibleIndex = listState.firstVisibleItemIndex,
-                    firstVisibleOffset = listState.firstVisibleItemScrollOffset,
-                    itemCount = items.itemCount,
-                    peek = items::peek,
-                    policy = visibilityPolicy,
+            } else {
+                null
+            }
+        var payloadAdmitted by remember(presentationLease) { mutableStateOf(presentationLease == null) }
+        // Keep Scaffold's stable measure-updated padding, not a post-measure height snapshot.
+        var bottomHostPadding by remember { mutableStateOf<PaddingValues?>(null) }
+        var topHostPadding by remember { mutableStateOf<PaddingValues?>(null) }
+        val bottomHostDensity by rememberUpdatedState(LocalDensity.current)
+        val readBottomHostHeightPx =
+            remember {
+                { with(bottomHostDensity) { bottomHostPadding?.calculateBottomPadding()?.roundToPx() ?: 0 } }
+            }
+        val readTopHostHeightPx =
+            remember {
+                { with(bottomHostDensity) { topHostPadding?.calculateTopPadding()?.roundToPx() ?: 0 } }
+            }
+        val rowContentMetrics = remember(items) { mutableStateMapOf<Long, TimelineRowContentMetrics>() }
+        val autoFollow = remember { AutoFollowTracker(items.itemCount) }
+        var liveEntryIds by remember(state.buffer?.id) { mutableStateOf(emptySet<Long>()) }
+        val presenceMode = state.conversationPresence.effective
+        val visibleSpec =
+            remember(
+                presenceMode,
+                fools,
+                foolsMode,
+                foolPreferences,
+                hiddenFoolsRevealed,
+                showRedactedMessages,
+            ) {
+                MessageVisibilitySpec(
+                    presenceMode = presenceMode,
+                    customPresenceKinds = state.conversationPresence.effectiveCustomKinds,
+                    showRedactedMessages = showRedactedMessages,
+                    fools = fools,
+                    foolsMode = foolsMode,
+                    foolPreferences = foolPreferences,
+                    revealHiddenFools = hiddenFoolsRevealed,
                 )
-        }
-    }
-
-    // ponytail: top-entry alignment needs the final viewport; settled reader transitions still animate.
-    val placingTopEntry = initialTarget?.let { it.placeAtTop && it.index > 0 } == true
-    var topEntryClampedAtBottom by remember(initialTarget) { mutableStateOf(false) }
-    var laidOutEntryHeaderExpansion by remember(initialTarget) { mutableFloatStateOf(-1f) }
-    val headerExpansion =
-        animateFloatAsState(
-            targetValue =
-                if (placingTopEntry) {
-                    if (topEntryClampedAtBottom) 1f else 0f
-                } else if (presentation != null && !initialPositionSettled && !entryVeilLifted) {
-                    presentation.headerExpansion
-                } else if ((initialPositionSettled || entryVeilLifted) && !atBottom) {
-                    0f
-                } else {
-                    1f
-                },
-            animationSpec = if (placingTopEntry) snap() else MotdMotion.fadeIn,
-            label = "chat_header_expansion",
-        )
-
-    fun currentPlacementReady(target: ChatPositionTarget?): Boolean {
-        if (presentationLease != null && measuredSnapshot?.value !== items.itemSnapshotList) return false
-        if (target?.expectedEventId == null) return true
-        val layout = listState.layoutInfo
-        val row = layout.visibleItemsInfo.firstOrNull { it.key == target.expectedEventId } ?: return false
-        val hostHeight = readBottomHostHeightPx()
-        if (hostHeight <= 0 || layout.beforeContentPadding < hostHeight) return false
-        if (target.placeAtTop && placingTopEntry) {
-            val expansion = if (topEntryClampedAtBottom) 1f else 0f
-            return laidOutEntryHeaderExpansion == expansion &&
+            }
+        val visibilityPolicy = remember(visibleSpec, identityRules) { MessageVisibilityPolicy(visibleSpec, identityRules) }
+        val presentationContextCompatible =
+            presentationLease == null ||
                 (
-                    topEntryClampedAtBottom ||
-                        kotlin.math.abs(reverseItemTopAlignmentCorrection(row.offset, row.size, layout.viewportEndOffset)) <= TOP_ALIGNMENT_TOLERANCE_PX
+                    state.buffer?.id == presentationLease.entry.key.context.roomId &&
+                        state.buffer.networkId == presentationLease.entry.key.context.networkId &&
+                        identityRules == presentationLease.entry.key.context.identityRules
                 )
-        }
-        val snapshot = items.itemSnapshotList
-        return exactTargetPlacement(
-            loadedStart = snapshot.placeholdersBefore,
-            loadedItems = snapshot.items,
-            visibleItems = layout.visibleItemsInfo.map { it.key to it.index },
-            firstVisibleIndex = listState.firstVisibleItemIndex,
-            firstVisibleOffset = listState.firstVisibleItemScrollOffset,
-            targetOffset = target.offset,
-            canScrollForward = listState.canScrollForward,
-            targetFullyVisible =
-                row.size > 0 && row.offset >= layout.viewportStartOffset + hostHeight &&
-                    row.offset + row.size <= layout.viewportEndOffset,
-            eventId = target.expectedEventId,
-        ) is ExactTargetPlacement.Positioned
-    }
-
-    suspend fun admitPayload(target: ChatPositionTarget? = null) {
-        val lease = presentationLease ?: return
-        snapshotFlow {
-            if (lease.isActive && currentPresentationCompatible &&
-                lease.hasPublishedWindow(items.itemSnapshotList) && currentPlacementReady(target)
-            ) {
-                items.itemSnapshotList
-            } else {
-                null
-            }
-        }.filterNotNull().first { snapshot ->
-            lease.admit(snapshot) && items.itemSnapshotList === snapshot && lease.isActive &&
-                currentPresentationCompatible && currentPlacementReady(target)
-        }
-        payloadAdmitted = true
-    }
-    LaunchedEffect(presentationLease, initialTarget, presentationRevision) {
-        if (presentationLease?.continuesPresentation == true && initialPositionSettled && initialTarget == null && !payloadAdmitted) {
-            admitPayload()
-        }
-    }
-
-    // Capture only entry-stage boundaries, through the already opt-in structural journal.
-    fun recordEntryStage(
-        event: String,
-        target: ChatPositionTarget?,
-        outcome: String? = null,
-    ) {
-        diagnostics.record("chat_entry", event) {
-            val frozen = latestUnreadEntrySnapshot
-            val load = items.loadState
-            val snapshot = items.itemSnapshotList
-            val layout = listState.layoutInfo
-            val targetEventId =
-                target?.expectedEventId ?: target?.expectedMsgid?.let { msgid ->
-                    snapshot.items.firstOrNull { it.msgid == msgid }?.id
-                }
-            val measured = targetEventId?.let { key -> layout.visibleItemsInfo.firstOrNull { it.key == key } }
-            mapOf(
-                "room_id" to traceBufferId,
-                "session_id" to traceSessionId,
-                "outcome" to outcome,
-                "entry_state" to latestEntryState.journalName,
-                "position_settled" to initialPositionSettled,
-                "target_present" to (target != null),
-                "target_index" to target?.index,
-                "target_offset" to target?.offset,
-                "target_event_id" to target?.expectedEventId,
-                "target_msgid_hash" to diagnostics.fingerprint(target?.expectedMsgid),
-                "target_place_at_top" to target?.placeAtTop,
-                "target_saved" to target?.fromSavedPosition,
-                "frozen_present" to (frozen != null),
-                "frozen_marker_time" to frozen?.marker?.serverTime,
-                "frozen_marker_event_id" to frozen?.marker?.eventId,
-                "frozen_marker_order" to frozen?.marker?.timelineOrder,
-                "frozen_loaded_count" to frozen?.loadedCount,
-                "frozen_lower_bound" to frozen?.lowerBound,
-                "refresh" to loadStateName(load.refresh),
-                "prepend" to loadStateName(load.prepend),
-                "append" to loadStateName(load.append),
-                "source_refresh" to loadStateName(load.source.refresh),
-                "source_prepend" to loadStateName(load.source.prepend),
-                "source_append" to loadStateName(load.source.append),
-                "mediator_present" to (load.mediator != null),
-                "mediator_refresh" to load.mediator?.refresh?.let(::loadStateName),
-                "mediator_prepend" to load.mediator?.prepend?.let(::loadStateName),
-                "mediator_append" to load.mediator?.append?.let(::loadStateName),
-                "page" to initialPagingPage(items.itemCount, load.append).name,
-                "item_count" to items.itemCount,
-                "loaded_count" to snapshot.items.size,
-                "loaded_start" to snapshot.placeholdersBefore,
-                "placing_top_entry" to placingTopEntry,
-                "clamped_at_bottom" to topEntryClampedAtBottom,
-                "header_expansion" to headerExpansion.value,
-                "laid_out_header_expansion" to laidOutEntryHeaderExpansion,
-                "viewport_index" to listState.firstVisibleItemIndex,
-                "viewport_offset" to listState.firstVisibleItemScrollOffset,
-                "viewport_start" to layout.viewportStartOffset,
-                "viewport_end" to layout.viewportEndOffset,
-                "target_loaded_index" to
-                    targetEventId?.let {
-                        materializedTargetSnapshotIndex(snapshot.placeholdersBefore, snapshot.items, it)
-                    },
-                "target_measured" to (measured != null),
-                "target_measured_key" to (measured?.key as? Long),
-                "target_measured_index" to measured?.index,
-                "target_measured_offset" to measured?.offset,
-                "target_measured_size" to measured?.size,
+        val presentationCompatible =
+            presentationContextCompatible && (presentationLease == null || presentedVisibilitySpec == visibleSpec)
+        val currentPresentationCompatible by rememberUpdatedState(presentationCompatible)
+        val payloadAllowed = payloadAdmitted && presentationLease?.isActive != false && presentationCompatible
+        // Scroll-driven paging: the footer reflects the Paging APPEND state at the older end directly.
+        val olderHistoryLoad = items.loadState.append
+        val historyUiState =
+            chatHistoryUiState(
+                bufferType = state.buffer?.type,
+                connectionState = state.connState,
+                availability = historyAvailability,
+                append = olderHistoryLoad,
+                historyComplete = state.buffer?.historyComplete == true,
             )
-        }
-    }
-
-    var prefillConsumed by remember(traceBufferId) { mutableStateOf(false) }
-
-    // Apply hydration/accepted-send clears without re-saving the same value from the screen.
-    LaunchedEffect(traceBufferId, composerDraft.hydrated, composerDraft.revision) {
-        if (traceBufferId == null || !composerDraft.hydrated) return@LaunchedEffect
-        // Saving a Request immediately before submitting creates a draft revision that must not
-        // rehydrate the optimistically cleared field. A rejection republishes a newer revision.
-        if (composerDraft.revision == pendingEbooksRequestRevision) return@LaunchedEffect
-        pendingEbooksRequestRevision = null
-        if (composerText.text != composerDraft.text) {
-            composerText =
-                TextFieldValue(
-                    composerDraft.text,
-                    TextRange(composerDraft.text.length),
+        val unreadEntryLabel =
+            unreadEntrySnapshot?.let { snapshot ->
+                pluralStringResource(
+                    R.plurals.chat_new_messages_count,
+                    snapshot.loadedCount,
+                    if (snapshot.lowerBound) "${snapshot.loadedCount}+" else snapshot.loadedCount.toString(),
                 )
-        }
-        if (!prefillConsumed) {
-            prefillConsumed = true
-            consumePrefill()?.let { prefill ->
-                composerText = appendPrefill(composerText, prefill)
-                onDraftChanged(composerText.text)
             }
-        }
-    }
-    LaunchedEffect(mentionPrefill) {
-        mentionPrefill?.second?.let {
-            composerText = appendPrefill(composerText, it)
-            onDraftChanged(composerText.text)
-        }
-    }
-    // An eligibility/reply change must not rehydrate an optimistic send's old draft. Only the
-    // accepted empty revision (or initial hydration) offers another search, after share/mention prefills.
-    LaunchedEffect(
-        eligibleEbooksRoomId,
-        composerDraft.hydrated,
-        composerDraft.revision,
-        prefillConsumed,
-        state.replyTo,
-    ) {
-        if (
-            eligibleEbooksRoomId != null &&
-            composerDraft.hydrated &&
-            prefillConsumed &&
-            composerDraft.text.isEmpty() &&
-            composerText.text.isEmpty() &&
-            state.replyTo == null
-        ) {
-            composerText = TextFieldValue("@Search ", selection = TextRange(8))
-            onDraftChanged("@Search ")
-        }
-    }
-    val latestComposerText by rememberUpdatedState(composerText)
-    val latestBufferType by rememberUpdatedState(state.buffer?.type)
-    val latestVisibleReplyPrefix by rememberUpdatedState(visibleReplyPrefix)
-    val timelineReply =
-        remember(onSetReply, onDraftChanged) {
-            { target: MessageEntity ->
-                onSetReply(target)
-                composerText =
-                    composerTextForReply(
-                        value = latestComposerText,
-                        sender = target.sender,
-                        bufferType = latestBufferType,
-                        visibleReplyPrefix = latestVisibleReplyPrefix,
-                    )
-                onDraftChanged(composerText.text)
-            }
-        }
-
-    val jumpNotLoaded = stringResource(R.string.chat_jump_not_loaded)
-    // Only an explicit message destination reports failure; normal entry positioning is silent.
-    LaunchedEffect(entryState) {
-        if (shouldPresentUnresolvedEntrySnackbar(entryState)) {
-            snackbarHostState.showSnackbar(jumpNotLoaded)
-        }
-    }
-
-    val eventText =
-        uiEvent?.value?.let { event ->
-            when (event) {
-                ChatUiEvent.InvalidCommand -> {
-                    stringResource(R.string.chat_server_invalid_command)
-                }
-
-                ChatUiEvent.ReactionBlocked -> {
-                    stringResource(R.string.chat_reaction_blocked)
-                }
-
-                ChatUiEvent.ReactionTargetUnavailable -> {
-                    stringResource(R.string.chat_react_failed)
-                }
-
-                ChatUiEvent.ReactionSendFailed -> {
-                    stringResource(R.string.chat_reaction_send_failed)
-                }
-
-                ChatUiEvent.RedactionSendFailed -> {
-                    stringResource(R.string.chat_redaction_send_failed)
-                }
-
-                ChatUiEvent.SendRejected -> {
-                    stringResource(R.string.chat_send_rejected)
-                }
-
-                ChatUiEvent.SendDropped -> {
-                    stringResource(R.string.chat_send_dropped)
-                }
-
-                ChatUiEvent.NotInChannel -> {
-                    stringResource(R.string.chat_not_in_channel)
-                }
-
-                is ChatUiEvent.InviteRequestSent -> {
-                    stringResource(R.string.irc_invite_request_sent, event.nick, event.channel)
-                }
-
-                ChatUiEvent.InviteSendFailed -> {
-                    stringResource(R.string.irc_invite_send_failed)
-                }
-
-                ChatUiEvent.ConversationLayoutWriteFailed -> {
-                    stringResource(R.string.chat_layout_write_failed)
-                }
-
-                ChatUiEvent.PresenceModeWriteFailed -> {
-                    stringResource(R.string.chat_presence_write_failed)
-                }
-
-                ChatUiEvent.HistorySyncModeWriteFailed -> {
-                    stringResource(R.string.settings_history_sync_write_failed)
-                }
-
-                ChatUiEvent.NotificationSettingsWriteFailed -> {
-                    stringResource(R.string.notification_settings_save_failed)
-                }
-
-                is ChatUiEvent.ReplyJumpUnavailable -> {
-                    jumpNotLoaded
-                }
-            }
-        }
-    val retryLabel = stringResource(R.string.chat_retry)
-    LaunchedEffect(uiEvent?.id) {
-        val pending = uiEvent ?: return@LaunchedEffect
-        val text = eventText ?: return@LaunchedEffect
-        val actionLabel = retryLabel.takeIf { pending.value.hasRetryAction() }
-        val result =
-            snackbarHostState.showSnackbar(
-                message = text,
-                actionLabel = actionLabel,
-            )
-        handleChatUiEventResult(
-            event = pending,
-            actionPerformed = result == SnackbarResult.ActionPerformed,
-            retryReplyJump = onRetryReplyJump,
-            acknowledge = onUiEventAcknowledged,
-        )
-    }
-
-    val currentPresentedVisibilitySpec by rememberUpdatedState(presentedVisibilitySpec)
-
-    suspend fun materializeTarget(
-        target: ChatPositionTarget,
-        scroll: Boolean,
-    ): MaterializedChatTarget? {
-        target.requiredVisibilitySpec?.let { required ->
-            val matched =
-                withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
-                    snapshotFlow { currentPresentedVisibilitySpec }.first { it == required }
-                }
-            if (matched == null) return null
-        }
-        // itemCount is used only to establish that the position is addressable. A non-null peek is
-        // the sole proof that the target placeholder has materialized.
-        val pageReady =
-            withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
-                snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
-                    .first { (refresh, append, count) ->
-                        (refresh is LoadState.NotLoading || presentationLease?.hasPublishedWindow(items.itemSnapshotList) == true) &&
-                            initialPagingPage(count, append) != InitialPagingPage.Pending
-                    }
-            } != null
-        if (!pageReady) {
-            AutoFollowTrace.record("materialize_page_not_ready", traceBufferId, traceSessionId) {
-                "target_index=${target.index} refresh=${items.loadState.refresh} " +
-                    "append=${items.loadState.append} item_count=${items.itemCount}"
-            }
-            return null
-        }
-
-        // JOIN/PART commits can change the raw rank after the entry snapshot was resolved.
-        // A loaded exact row is authoritative; the old index is only a load hint while absent.
-        fun currentIndex(): Int? {
-            val snapshot = items.itemSnapshotList
-            val loaded =
-                target.expectedEventId?.let {
-                    materializedTargetSnapshotIndex(snapshot.placeholdersBefore, snapshot.items, it)
-                }
-            return materializableTargetIndex(
-                requestedIndex = loaded ?: target.index,
+        val newerHistoryLoad = items.loadState.prepend
+        val timelineHistoryStatus =
+            timelineHistoryStatus(
+                refresh = items.loadState.refresh,
+                prepend = newerHistoryLoad,
                 itemCount = items.itemCount,
-                hasExactIdentity = target.expectedEventId != null || target.expectedMsgid != null,
+                syncStatus = historySyncStatus,
             )
-        }
-        val materializedIndex = currentIndex()
-        if (materializedIndex == null) {
-            AutoFollowTrace.record("materialize_index_unaddressable", traceBufferId, traceSessionId) {
-                "target_index=${target.index} item_count=${items.itemCount}"
+        val readyRetryGate = remember(items) { HistoryReadyRetryGate() }
+        LaunchedEffect(historyAvailability, olderHistoryLoad) {
+            if (readyRetryGate.update(historyAvailability, olderHistoryLoad)) {
+                items.retry()
             }
-            return null
         }
-        val row =
-            requestAndAwaitTarget(
-                index = materializedIndex,
-                request = { _ ->
-                    val index = currentIndex()
-                    if (index == null) {
-                        false
-                    } else {
+        val traceBufferId = state.buffer?.id
+        val traceSessionId =
+            remember(traceBufferId) {
+                traceBufferId?.let { AutoFollowTrace.nextSessionId() }
+            }
+        val scope = rememberCoroutineScope()
+        // Expanded fool rows: keyed by MessageEntity.id, expand-only for the session.
+        // Ephemeral by design (lost on config change; an accepted tradeoff).
+        var expandedFools by remember { mutableStateOf(setOf<Long>()) }
+        val clipboard: Clipboard = LocalClipboard.current
+        val ctx = LocalContext.current
+        val ebooksCache = remember(ctx) { EbooksResultCache(ctx) }
+        val resources = LocalResources.current
+        val snackbarHostState = remember { SnackbarHostState() }
+        val latestExternalTranslationInFlight by rememberUpdatedState(externalTranslationInFlight)
+        val translationLauncher =
+            rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                val returnedText =
+                    if (result.resultCode == Activity.RESULT_OK) {
                         try {
-                            if (scroll && (listState.firstVisibleItemIndex != index || listState.firstVisibleItemScrollOffset != target.offset)) {
-                                listState.requestScrollToItem(index, target.offset)
-                            }
-                            // This is the only item access: it sends Paging a load hint for the exact target.
-                            items[index]
-                            true
-                        } catch (_: IndexOutOfBoundsException) {
-                            // A new Paging generation replaced the snapshot between the bound and access.
-                            false
+                            result.data
+                                ?.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)
+                                ?.toString()
+                                ?.takeUnless(String::isBlank)
+                        } catch (_: BadParcelableException) {
+                            null
+                        } catch (_: ClassCastException) {
+                            null
                         }
+                    } else {
+                        null
                     }
-                },
-                snapshots =
-                    snapshotFlow {
-                        val index = currentIndex() ?: materializedIndex
-                        targetMaterialization(items, index).let { snapshot ->
-                            if (target.expectedEventId != null && snapshot.item?.id != target.expectedEventId) {
-                                snapshot.copy(item = null)
-                            } else {
-                                snapshot
-                            }
-                        }
-                    },
-            )
-        if (row == null) {
-            AutoFollowTrace.record("materialize_target_missing", traceBufferId, traceSessionId) {
-                "target_index=$materializedIndex refresh=${items.loadState.refresh} " +
-                    "prepend=${items.loadState.prepend} append=${items.loadState.append} " +
-                    "item_count=${items.itemCount} " +
-                    "loaded_start=${items.itemSnapshotList.placeholdersBefore} " +
-                    "loaded_count=${items.itemSnapshotList.items.size}"
+                onCompleteExternalTranslation?.invoke(returnedText)
             }
-        }
-        return row?.let { targetRow ->
-            if (positionTargetMatches(target, targetRow) &&
-                (target.requestToken != 0L || target.highlightMsgid != null || target.highlightEventId != null) &&
-                visibilityPolicy.isFool(targetRow)
-            ) {
-                expandedFools += targetRow.id
-                collapsedFools -= targetRow.id
-            }
-            if (!scroll || target.expectedEventId != targetRow.id) {
-                return@let MaterializedChatTarget(targetRow, currentIndex() ?: materializedIndex)
-            }
-            // `scrollToItem` ran before Paging loaded this placeholder. An arriving message can
-            // shift the exact row in a replacement snapshot while entry positioning is unsettled,
-            // before the normal viewport pin is allowed to run. Keep correcting that exact event
-            // across presentation changes, and settle only after LazyColumn has laid out its key.
-
-            fun exactPlacement(): ExactTargetPlacement {
-                val snapshot = items.itemSnapshotList
-                val layout = listState.layoutInfo
-                val measured = layout.visibleItemsInfo.firstOrNull { it.key == targetRow.id }
-                val bottomHostHeightPx = readBottomHostHeightPx()
-                return exactTargetPlacement(
-                    loadedStart = snapshot.placeholdersBefore,
-                    loadedItems = snapshot.items,
-                    visibleItems = layout.visibleItemsInfo.map { it.key to it.index },
-                    firstVisibleIndex = listState.firstVisibleItemIndex,
-                    firstVisibleOffset = listState.firstVisibleItemScrollOffset,
-                    targetOffset = target.offset,
-                    canScrollForward = listState.canScrollForward,
-                    targetFullyVisible =
-                        measured != null && measured.size > 0 &&
-                            bottomHostHeightPx > 0 && layout.beforeContentPadding >= bottomHostHeightPx &&
-                            measured.offset >= layout.viewportStartOffset + bottomHostHeightPx &&
-                            measured.offset + measured.size <= layout.viewportEndOffset,
-                    eventId = targetRow.id,
-                )
-            }
-            withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
-                var placement = exactPlacement()
-                while (true) {
-                    when (placement) {
-                        ExactTargetPlacement.Missing -> {
-                            // A replacement may temporarily drop the old loaded window. Wait for its
-                            // Parked(id) refresh instead of settling on whichever row took the old slot.
-                            placement = snapshotFlow { exactPlacement() }.first { it !is ExactTargetPlacement.Missing }
-                        }
-
-                        is ExactTargetPlacement.Positioned -> {
-                            return@withTimeoutOrNull MaterializedChatTarget(targetRow, placement.index)
-                        }
-
-                        is ExactTargetPlacement.NeedsScroll -> {
-                            val requestedIndex = placement.index
-                            listState.requestScrollToItem(requestedIndex, target.offset)
-                            placement =
-                                snapshotFlow { exactPlacement() }.first { next ->
-                                    next !is ExactTargetPlacement.NeedsScroll || next.index != requestedIndex
-                                }
-                        }
-                    }
+        val eligibleEbooksRoomId =
+            state.buffer?.let { room ->
+                ebooksHelperRoomId?.takeIf {
+                    it == room.id && room.type == BufferType.CHANNEL &&
+                        identityRules.normalize(room.displayName) == identityRules.normalize("#ebooks")
                 }
-                @Suppress("UNREACHABLE_CODE")
-                null
+            }
+        val latestEligibleEbooksRoomId by rememberUpdatedState(eligibleEbooksRoomId)
+        val latestNetworkId by rememberUpdatedState(state.buffer?.networkId)
+        var pendingDccAccept by remember { mutableStateOf<PendingDccAccept?>(null) }
+        val dccDestinationPicker =
+            rememberLauncherForActivityResult(
+                ActivityResultContracts.CreateDocument("application/octet-stream"),
+            ) { uri ->
+                val pending = pendingDccAccept
+                pendingDccAccept = null
+                if (uri != null && pending != null) {
+                    val sameRoom =
+                        pending.ebooksRoomId == null ||
+                            (pending.ebooksRoomId == latestEligibleEbooksRoomId && pending.ebooksNetworkId == latestNetworkId)
+                    if (sameRoom) onAcceptDccTransfer(pending.transferId, uri, pending.allowPrivateEndpoint)
+                }
+            }
+        LaunchedEffect(voiceState.notice) {
+            val notice = voiceState.notice ?: return@LaunchedEffect
+            snackbarHostState.showSnackbar(notice)
+            onVoiceNoticeDismissed()
+        }
+        LaunchedEffect(avatarEvents, resources) {
+            avatarEvents.collect { outcome ->
+                val message =
+                    when (outcome) {
+                        ConversationAvatarOutcome.LocalOnly -> R.string.avatar_result_local_only
+                        ConversationAvatarOutcome.Shared -> R.string.avatar_result_shared
+                        ConversationAvatarOutcome.RequestSent -> R.string.avatar_result_request_sent
+                        ConversationAvatarOutcome.LocalReset -> R.string.avatar_result_reset
+                        ConversationAvatarOutcome.SharedCleared -> R.string.avatar_result_shared_cleared
+                        ConversationAvatarOutcome.Invalid -> R.string.avatar_result_invalid
+                        ConversationAvatarOutcome.Failed -> R.string.avatar_result_failed
+                    }
+                snackbarHostState.showSnackbar(resources.getString(message))
             }
         }
-    }
-
-    // Only the existing target timeout selects a retained viewport. Explicit jumps remain separate.
-    LaunchedEffect(
-        entryVeilLifted,
-        entryTimedOut,
-        initialPositionSettled,
-        presentationLease,
-        presentationRevision,
-        measuredSnapshot?.value,
-        visibleSpec,
-        presentationCompatible,
-        entryPositionIntent,
-    ) {
-        if (!entryVeilLifted || payloadAdmitted || initialPositionSettled) return@LaunchedEffect
-        val lease = presentationLease
-        val fallback = entryFallback
-        val saved = retainedViewport
-        val snapshot = items.itemSnapshotList
-        val index = saved?.let { materializedTargetSnapshotIndex(snapshot.placeholdersBefore, snapshot.items, it.rowId) }
-        val target =
-            if (saved != null && index != null) {
-                ChatPositionTarget(
-                    index = index,
-                    offset = saved.offset,
-                    expectedEventId = saved.rowId,
-                    expectedMsgid = saved.msgid,
-                    serverTime = saved.serverTime,
-                    fromSavedPosition = true,
-                )
+        // The ViewModel owns the durable value; this local state only retains cursor/selection details.
+        var composerText by remember(traceBufferId) {
+            mutableStateOf(TextFieldValue(""))
+        }
+        var pendingEbooksRequestRevision by remember(traceBufferId) { mutableStateOf<Long?>(null) }
+        var ebooksHelpOpen by remember(eligibleEbooksRoomId) { mutableStateOf(false) }
+        var ebooksResults by remember(eligibleEbooksRoomId) { mutableStateOf<List<EbooksResult>?>(null) }
+        var ebooksResultsError by remember(eligibleEbooksRoomId) { mutableStateOf<String?>(null) }
+        var ebooksOffersOpen by remember(eligibleEbooksRoomId) { mutableStateOf(false) }
+        val visibleEbooksOffers =
+            if (eligibleEbooksRoomId != null) {
+                ebooksDccOffers.filter {
+                    it.networkId == state.buffer.networkId && it.direction == DccDirection.INCOMING &&
+                        it.state != DccTransferState.REMOVED
+                }
             } else {
-                null
+                emptyList()
             }
-        if (!entryTimedOut || lease == null || fallback == null || target == null ||
-            fallback.intent != entryPositionIntent || canAdoptRetainedFallback?.invoke(fallback.intent) != true ||
-            !positionTargetMatches(target, items.peek(target.index))
+        val latestVisibleEbooksOffers by rememberUpdatedState(visibleEbooksOffers)
+
+        fun showEbooksResults(
+            roomId: Long,
+            uri: Uri,
         ) {
-            // Cold, unavailable and explicit-jump fallbacks retain their prior behavior, but never
-            // bypass the independent committed-payload admission barrier.
-            if (!payloadAdmitted) admitPayload()
-            return@LaunchedEffect
-        }
-        if (!currentPresentationCompatible || !lease.admit(snapshot) || items.itemSnapshotList !== snapshot) return@LaunchedEffect
-        if (canAdoptRetainedFallback.invoke(fallback.intent) != true) return@LaunchedEffect
-        selectingRetainedViewport = true
-        try {
-            automaticPositionJob.value?.cancelAndJoin()
-            if (canAdoptRetainedFallback.invoke(fallback.intent) != true) return@LaunchedEffect
-            lease.prepareTarget(
-                target.index,
-                target.expectedEventId,
-                io.github.trevarj.motd.data.repo
-                    .entryAnchorPagingKey(target.index),
-                ViewportRefreshAnchor.Parked(checkNotNull(target.expectedEventId)),
-            )
-            val placed = materializeTarget(target, scroll = true) ?: return@LaunchedEffect
-            if (!currentPlacementReady(target) || listState.firstVisibleItemIndex != placed.index ||
-                listState.firstVisibleItemScrollOffset != target.offset
-            ) {
-                return@LaunchedEffect
+            if (roomId != latestEligibleEbooksRoomId) return
+            scope.launch {
+                try {
+                    val parsed =
+                        withContext(Dispatchers.IO) {
+                            ctx.contentResolver.openInputStream(uri)?.use(::parseEbooksResults)
+                                ?: throw IllegalArgumentException("Cannot open results ZIP")
+                        }
+                    if (roomId == latestEligibleEbooksRoomId) ebooksResults = parsed
+                } catch (e: IllegalArgumentException) {
+                    if (roomId == latestEligibleEbooksRoomId) ebooksResultsError = e.message ?: "Invalid results ZIP file"
+                } catch (_: java.io.IOException) {
+                    if (roomId == latestEligibleEbooksRoomId) ebooksResultsError = "Could not read results ZIP; choose it again"
+                } catch (_: SecurityException) {
+                    if (roomId == latestEligibleEbooksRoomId) ebooksResultsError = "Cannot access results ZIP; choose it again"
+                }
             }
-            val presented = items.itemSnapshotList
-            if (!lease.admit(presented) || items.itemSnapshotList !== presented || !currentPlacementReady(target)) return@LaunchedEffect
-            val position =
-                ChatScrollPosition(
-                    index = placed.index,
-                    offset = target.offset,
-                    msgid = placed.row.msgid,
-                    serverTime = placed.row.serverTime,
-                    rowId = placed.row.id,
+        }
+        var pickingEbooksRoomId by remember { mutableStateOf<Long?>(null) }
+        val ebooksResultsPicker =
+            rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                val roomId = pickingEbooksRoomId
+                pickingEbooksRoomId = null
+                if (uri != null && roomId != null) showEbooksResults(roomId, uri)
+            }
+
+        fun isEbooksSearchOnly(text: String) = eligibleEbooksRoomId != null && plainIrcText(text).trim() == "@Search"
+
+        // Anchors for the send flight. Held in their own holder so the per-layout writes recompose the
+        // overlay that reads them and nothing else on this surface.
+        val flightAnchors = remember(traceBufferId) { SendFlightAnchors() }
+        // Rows a flight has already delivered. Their entrance was the ghost, so they must never also
+        // play the ordinary live-arrival reveal once the flight is gone.
+        var flownRowIds by remember(traceBufferId) { mutableStateOf(emptySet<Long>()) }
+        val selfNick = (state.connState as? IrcClientState.Ready)?.nick.orEmpty()
+        // The silhouette is decided at launch, before the pending row exists: predict whether the
+        // landing row opens a new group or continues our own burst, against the newest row the flight
+        // is not itself standing in for (its own row may already be in the pager by now).
+        val flightShowSender =
+            remember(outgoingFlight?.token) {
+                val flight = outgoingFlight ?: return@remember true
+                if (selfNick.isEmpty()) return@remember true
+                val newest =
+                    (0 until minOf(items.itemCount, MAX_PLACEHOLDER_PROBES))
+                        .asSequence()
+                        .mapNotNull { items.peek(it) }
+                        .firstOrNull { !flight.matches(it) }
+                predictFlightShowsSender(
+                    newest = newest,
+                    selfNick = selfNick,
+                    normalizedSelf = nickNormalizer(selfNick),
+                    nowMs = flight.launchedAtMs,
                 )
-            if (onAdoptRetainedFallback?.invoke(position, fallback.intent) == true) {
-                supersededAutomaticTarget = initialTarget
-                retainedViewportChosen = true
-                presentation?.confirmedViewport = position
-                payloadAdmitted = true
-                initialPositionSettled = true
+            }
+        // One spring per tap, carrying the bubble and opening the gap it lands in.
+        val flightMotion =
+            remember(outgoingFlight?.token) {
+                // Reset here rather than in the effect below: effects are dispatched on the frame clock
+                // and can run after the new tap's first draw, which would then read the previous flight's
+                // landing rect and start the ghost mid-timeline instead of at the composer.
+                if (outgoingFlight != null) flightAnchors.beginFlight()
+                SendFlightMotion(
+                    morphEnabled =
+                        outgoingFlight != null &&
+                            outgoingFlight.replyText == null &&
+                            conversationLayout.effective == LayoutDensity.COMFORTABLE,
+                )
+            }
+        val flightProgress = remember(flightMotion) { { flightMotion.progress.value } }
+        // Driven here rather than inside the overlay: the landing row's reveal must complete even if
+        // the ghost never gets a composer rect to launch from, or the row would stay collapsed.
+        LaunchedEffect(outgoingFlight?.token) {
+            val token = outgoingFlight?.token ?: return@LaunchedEffect
+            try {
+                // The lift starts on the tap frame, before the pending row exists: the ghost rises to
+                // its hover line above the composer while persistence runs, so a slow send stays
+                // visibly in flight. The flight spring itself still waits for the landing report,
+                // because the gap must open from zero on the frame the row first composes.
+                val liftJob = launch { flightMotion.lift.animateTo(1f, MotdMotion.sendFlightSpring) }
+                val morphJob =
+                    if (flightMotion.morphEnabled) {
+                        launch { flightMotion.morph.animateTo(1f, MotdMotion.sendMorphGrow) }
+                    } else {
+                        null
+                    }
+                snapshotFlow { flightAnchors.landingRow }.filterNotNull().first()
+                flightMotion.progress.animateTo(1f, MotdMotion.sendFlightSpring)
+                liftJob.join()
+                // A quick Room write must not reveal the row while its body is still leaving the field.
+                morphJob?.join()
+            } finally {
+                // Also runs when this effect dies with the screen. A flight that outlived its UI would
+                // hide its row again and fly a ghost of a minutes-old message on the next visit.
+                onFlightSettled(token)
+            }
+        }
+        var attachmentSheetOpen by rememberSaveable { mutableStateOf(false) }
+        var uploadCurrentDraftDirectly by rememberSaveable { mutableStateOf(false) }
+        // A shared or pasted file opens the same upload confirmation without changing the draft.
+        var sharedFile by remember(traceBufferId) { mutableStateOf<PendingShare.File?>(null) }
+        LaunchedEffect(traceBufferId) {
+            if (traceBufferId == null) return@LaunchedEffect
+            consumeSharedFile()?.let { file ->
+                sharedFile = file
+                uploadCurrentDraftDirectly = false
+                attachmentSheetOpen = true
+            }
+            if (consumeAttachmentRequest()) {
+                sharedFile = null
+                uploadCurrentDraftDirectly = false
+                attachmentSheetOpen = true
+            }
+        }
+        LaunchedEffect(attachmentSheetRequests) {
+            attachmentSheetRequests.collect {
+                sharedFile = null
+                uploadCurrentDraftDirectly = false
+                attachmentSheetOpen = true
+            }
+        }
+        var longDraftPrompt by rememberSaveable { mutableStateOf(false) }
+        var overflowOpen by rememberSaveable { mutableStateOf(false) }
+        var conversationLayoutSheetOpen by rememberSaveable { mutableStateOf(false) }
+        var notificationSheetOpen by rememberSaveable { mutableStateOf(false) }
+        var presenceModeSheetOpen by rememberSaveable { mutableStateOf(false) }
+        var historySyncModeSheetOpen by rememberSaveable { mutableStateOf(false) }
+        var readAloudOptionsOpen by remember(state.buffer?.id) { mutableStateOf(false) }
+        if (readAloudOptionsOpen) {
+            ReadAloudVoiceOptions(
+                config = readAloudConfig,
+                voices = readAloudVoices,
+                onSave = onReadAloudSaveOptions,
+                onPreview = onReadAloudPreview,
+                onDismiss = {
+                    readAloudOptionsOpen = false
+                    if (!readAloudState.enabled) onReadAloudStop()
+                },
+                onStopPreview = onReadAloudStop,
+                onReloadVoices = onReadAloudOptions,
+                previewing = readAloudState.previewing,
+                error = readAloudState.error,
+            )
+        }
+        var highlightMsgid by rememberSaveable { mutableStateOf<String?>(null) }
+        var highlightEventId by rememberSaveable { mutableStateOf<Long?>(null) }
+        // The visit owns expand-all; row exceptions remain local to this presentation.
+        val latestExpandAllFools by rememberUpdatedState(expandAllFools && !restoringHiddenFools)
+        // Rows the user explicitly re-collapsed while expand-all is on (so a global expand is still
+        // individually reversible). Cleared whenever expand-all is toggled off.
+        var collapsedFools by remember { mutableStateOf(setOf<Long>()) }
+
+        LaunchedEffect(traceBufferId) {
+            if (traceBufferId == null) return@LaunchedEffect
+            withFrameNanos {
+                AutoFollowTrace.record("first_frame", traceBufferId, traceSessionId) {
+                    "item_count=${items.itemCount}"
+                }
+                Trace.beginSection("motd chat first frame")
+                try {
+                    // Instant-like marker for Perfetto/gfx correlation without spanning suspension.
+                } finally {
+                    Trace.endSection()
+                }
+            }
+        }
+
+        // Entry position is resolved once after refresh. Until then do not expose a transient FAB or
+        // advance read state from a default index-0 layout.
+        val entryInitiallySettled = entryState is EntryPositionState.Settled && initialTarget == null && presentationLease == null
+        var initialPositionSettled by remember(presentationVisit, entryInitiallySettled) {
+            mutableStateOf(entryInitiallySettled)
+        }
+        // The first Paging emission after entry settlement reflects data loaded for the target, not a
+        // live arrival. Consume it without auto-follow so an unread target remains on screen.
+        var suppressNextAutoFollow by remember { mutableStateOf(!entryInitiallySettled) }
+        val retainedViewport =
+            remember(presentationLease, entryFallback) {
+                entryFallback?.viewport ?: presentation?.confirmedViewport?.takeIf { entryFallback?.useSharedViewport == true }
+            }
+        var entryTimedOut by remember(presentationLease) { mutableStateOf(false) }
+        var selectingRetainedViewport by remember(presentationLease) { mutableStateOf(false) }
+        var retainedViewportChosen by remember(presentationLease) { mutableStateOf(false) }
+        var supersededAutomaticTarget by remember(presentationLease) { mutableStateOf<ChatPositionTarget?>(null) }
+        val automaticPositionJob = remember(presentationLease) { mutableStateOf<Job?>(null) }
+
+        // Veil over the timeline while entry positioning settles, so the entry frames (the bottom of
+        // the buffer, then the alignment passes) are never shown before the divider lands. One-shot per
+        // composition, and the composition is per-ChatRoute: entering another buffer is a new route, so
+        // nothing that happens within a visit -- a republished post-catch-up repair, a re-resolve -- can
+        // re-engage it. A restored visit that already knows where it landed starts lifted.
+        val latestEntryState by rememberUpdatedState(entryState)
+        val latestUnreadEntrySnapshot by rememberUpdatedState(unreadEntrySnapshot)
+        var entryVeilLifted by remember(presentationVisit) {
+            mutableStateOf(
+                shouldLiftEntryVeil(
+                    initialPositionSettled = entryInitiallySettled,
+                    entryUnresolved = entryState is EntryPositionState.Unresolved,
+                    timedOut = false,
+                ),
+            )
+        }
+        // A temporary reveal preserves drawing, never the successor's read/position/SQL admission.
+        var admittedDrawingSpec by remember(presentationVisit) { mutableStateOf<MessageVisibilitySpec?>(null) }
+        var previousExpandAllFools by remember(presentationVisit) { mutableStateOf(expandAllFools) }
+        var temporaryFoolToggle by remember(presentationVisit) { mutableStateOf(false) }
+        if (previousExpandAllFools != expandAllFools) {
+            if (initialPositionSettled && entryVeilLifted && entryState is EntryPositionState.Settled &&
+                initialTarget == null && jumpTarget == null && admittedDrawingSpec != null
+            ) {
+                temporaryFoolToggle = true
                 suppressNextAutoFollow = true
             }
-        } finally {
-            selectingRetainedViewport = false
+            previousExpandAllFools = expandAllFools
         }
-    }
+        if (payloadAllowed) admittedDrawingSpec = visibleSpec
+        val temporaryFoolMotion =
+            temporaryFoolToggle && presentationContextCompatible &&
+                admittedDrawingSpec?.samePolicyExceptHiddenReveal(visibleSpec) == true
+        val drawingAllowed =
+            payloadAllowed ||
+                (temporaryFoolMotion && initialPositionSettled && entryVeilLifted && entryState is EntryPositionState.Settled && jumpTarget == null)
+        val preserveOutgoingHiddenBodies = restoringHiddenFools || (temporaryFoolMotion && !expandAllFools)
+        val restoreStillValid =
+            presentationContextCompatible && restorePolicy?.samePolicyExceptHiddenReveal(visibleSpec) == true &&
+                restoreIntent == entryPositionIntent && entryState is EntryPositionState.Settled && initialTarget == null && jumpTarget == null
+        val currentRestoreValid by rememberUpdatedState(restoreStillValid)
+        val latestExpandAllFoolsChange by rememberUpdatedState(onExpandAllFoolsChange)
+        LaunchedEffect(restoringHiddenFools, restoreDispatched, restoreStillValid, presentationVisit) {
+            if (!restoringHiddenFools || restoreDispatched) return@LaunchedEffect
+            if (!restoreStillValid) {
+                restoringHiddenFools = false
+                return@LaunchedEffect
+            }
+            hiddenFoolVisibility?.let { transition ->
+                snapshotFlow { !transition.currentState && !transition.targetState && !transition.isRunning }.first { it }
+            }
+            if (restoringHiddenFools && currentRestoreValid) {
+                restoreDispatched = true
+                latestExpandAllFoolsChange(false)
+            }
+        }
+        LaunchedEffect(restoringHiddenFools, payloadAllowed, expandAllFools, presentedVisibilitySpec) {
+            // Keep the old native Hidden hosts exited until the exact false-spec refresh is admitted.
+            if (restoringHiddenFools && !expandAllFools && payloadAllowed && presentedVisibilitySpec?.revealHiddenFools != true) {
+                restoreDispatched = false
+                restoringHiddenFools = false
+            }
+        }
+        LaunchedEffect(temporaryFoolToggle, payloadAllowed, visibleSpec, presentationLease, restoringHiddenFools) {
+            if (temporaryFoolToggle && payloadAllowed && !restoringHiddenFools) {
+                Animatable(0f).animateTo(1f, MotdMotion.microFadeIn)
+                temporaryFoolToggle = false
+            }
+        }
+        LaunchedEffect(presentationLease) {
+            if (entryVeilLifted) return@LaunchedEffect
+            // Bounded wait: a slow or offline entry degrades to today's visible correction rather than
+            // a stuck blank pane.
+            val resolved =
+                withTimeoutOrNull(ENTRY_VEIL_TIMEOUT_MS) {
+                    snapshotFlow {
+                        val entry = latestEntryState
+                        // Both statements of settlement: the screen's own flag reveals a frame or two
+                        // earlier, and the entry state carries it when the flag's keyed remember is
+                        // rebuilt by the very transition that settles it.
+                        val settled = initialPositionSettled || (presentationLease == null && entry is EntryPositionState.Settled)
+                        settled to (entry is EntryPositionState.Unresolved)
+                    }.first { (settled, unresolved) ->
+                        shouldLiftEntryVeil(settled, unresolved, timedOut = false)
+                    }
+                }
+            entryTimedOut = resolved == null
+            entryVeilLifted =
+                shouldLiftEntryVeil(
+                    initialPositionSettled = resolved?.first == true,
+                    entryUnresolved = resolved?.second == true,
+                    timedOut = resolved == null,
+                )
+            AutoFollowTrace.record("entry_veil_lifted", traceBufferId, traceSessionId) {
+                val reason =
+                    when {
+                        resolved == null -> "timeout"
+                        resolved.first -> "settled"
+                        else -> "unresolved"
+                    }
+                "reason=$reason item_count=${items.itemCount}"
+            }
+        }
 
-    // Deep jumps request one resolved placeholder, then validate both of its exact identities.
-    LaunchedEffect(jumpTarget, items, presentationLease, presentationRevision, visibleSpec) {
-        val j = jumpTarget ?: return@LaunchedEffect
-        onViewportRefreshAnchor(null)
-        AutoFollowTrace.record("deep_jump_start", traceBufferId, traceSessionId) {
-            "target_index=${j.index} item_count=${items.itemCount}"
+        // Raw ignored tails do not make the user leave the meaningful bottom of the conversation.
+        val atBottom by remember(listState, items, visibilityPolicy) {
+            derivedStateOf {
+                val layout = listState.layoutInfo
+                val bottomHostHeightPx = readBottomHostHeightPx()
+                // A first/stale measure with no host clearance cannot prove that newest is readable.
+                bottomHostHeightPx > 0 &&
+                    layout.beforeContentPadding >= bottomHostHeightPx &&
+                    layout.viewportEndOffset > layout.viewportStartOffset + bottomHostHeightPx &&
+                    isAtEffectiveBottom(
+                        firstVisibleIndex = listState.firstVisibleItemIndex,
+                        firstVisibleOffset = listState.firstVisibleItemScrollOffset,
+                        itemCount = items.itemCount,
+                        peek = items::peek,
+                        policy = visibilityPolicy,
+                    )
+            }
         }
-        val targetRow =
+
+        // ponytail: top-entry alignment needs the final viewport; settled reader transitions still animate.
+        val placingTopEntry = initialTarget?.let { it.placeAtTop && it.index > 0 } == true
+        var topEntryClampedAtBottom by remember(initialTarget) { mutableStateOf(false) }
+        var laidOutEntryHeaderExpansion by remember(initialTarget) { mutableFloatStateOf(-1f) }
+        val headerExpansion =
+            animateFloatAsState(
+                targetValue =
+                    if (placingTopEntry) {
+                        if (topEntryClampedAtBottom) 1f else 0f
+                    } else if (presentation != null && !initialPositionSettled && !entryVeilLifted) {
+                        presentation.headerExpansion
+                    } else if ((initialPositionSettled || entryVeilLifted) && !atBottom) {
+                        0f
+                    } else {
+                        1f
+                    },
+                animationSpec = if (placingTopEntry) snap() else MotdMotion.fadeIn,
+                label = "chat_header_expansion",
+            )
+
+        fun currentPlacementReady(target: ChatPositionTarget?): Boolean {
+            if (presentationLease != null && measuredSnapshot?.value !== items.itemSnapshotList) return false
+            if (target?.expectedEventId == null) return true
+            val layout = listState.layoutInfo
+            val row = layout.visibleItemsInfo.firstOrNull { it.key == target.expectedEventId } ?: return false
+            val hostHeight = readBottomHostHeightPx()
+            if (hostHeight <= 0 || layout.beforeContentPadding < hostHeight) return false
+            if (target.placeAtTop && placingTopEntry) {
+                val expansion = if (topEntryClampedAtBottom) 1f else 0f
+                return laidOutEntryHeaderExpansion == expansion &&
+                    (
+                        topEntryClampedAtBottom ||
+                            kotlin.math.abs(reverseItemTopAlignmentCorrection(row.offset, row.size, layout.viewportEndOffset - readTopHostHeightPx())) <= TOP_ALIGNMENT_TOLERANCE_PX
+                    )
+            }
+            val snapshot = items.itemSnapshotList
+            return exactTargetPlacement(
+                loadedStart = snapshot.placeholdersBefore,
+                loadedItems = snapshot.items,
+                visibleItems = layout.visibleItemsInfo.map { it.key to it.index },
+                firstVisibleIndex = listState.firstVisibleItemIndex,
+                firstVisibleOffset = listState.firstVisibleItemScrollOffset,
+                targetOffset = target.offset,
+                canScrollForward = listState.canScrollForward,
+                targetFullyVisible =
+                    row.size > 0 && row.offset >= layout.viewportStartOffset + hostHeight &&
+                        row.offset + row.size <= layout.viewportEndOffset - readTopHostHeightPx(),
+                eventId = target.expectedEventId,
+            ) is ExactTargetPlacement.Positioned
+        }
+
+        suspend fun admitPayload(target: ChatPositionTarget? = null) {
+            val lease = presentationLease ?: return
+            snapshotFlow {
+                if (lease.isActive && currentPresentationCompatible &&
+                    lease.hasPublishedWindow(items.itemSnapshotList) && currentPlacementReady(target)
+                ) {
+                    items.itemSnapshotList
+                } else {
+                    null
+                }
+            }.filterNotNull().first { snapshot ->
+                lease.admit(snapshot) && items.itemSnapshotList === snapshot && lease.isActive &&
+                    currentPresentationCompatible && currentPlacementReady(target)
+            }
+            payloadAdmitted = true
+        }
+        LaunchedEffect(presentationLease, initialTarget, presentationRevision) {
+            if (presentationLease?.continuesPresentation == true && initialPositionSettled && initialTarget == null && !payloadAdmitted) {
+                admitPayload()
+            }
+        }
+
+        // Capture only entry-stage boundaries, through the already opt-in structural journal.
+        fun recordEntryStage(
+            event: String,
+            target: ChatPositionTarget?,
+            outcome: String? = null,
+        ) {
+            diagnostics.record("chat_entry", event) {
+                val frozen = latestUnreadEntrySnapshot
+                val load = items.loadState
+                val snapshot = items.itemSnapshotList
+                val layout = listState.layoutInfo
+                val targetEventId =
+                    target?.expectedEventId ?: target?.expectedMsgid?.let { msgid ->
+                        snapshot.items.firstOrNull { it.msgid == msgid }?.id
+                    }
+                val measured = targetEventId?.let { key -> layout.visibleItemsInfo.firstOrNull { it.key == key } }
+                mapOf(
+                    "room_id" to traceBufferId,
+                    "session_id" to traceSessionId,
+                    "outcome" to outcome,
+                    "entry_state" to latestEntryState.journalName,
+                    "position_settled" to initialPositionSettled,
+                    "target_present" to (target != null),
+                    "target_index" to target?.index,
+                    "target_offset" to target?.offset,
+                    "target_event_id" to target?.expectedEventId,
+                    "target_msgid_hash" to diagnostics.fingerprint(target?.expectedMsgid),
+                    "target_place_at_top" to target?.placeAtTop,
+                    "target_saved" to target?.fromSavedPosition,
+                    "frozen_present" to (frozen != null),
+                    "frozen_marker_time" to frozen?.marker?.serverTime,
+                    "frozen_marker_event_id" to frozen?.marker?.eventId,
+                    "frozen_marker_order" to frozen?.marker?.timelineOrder,
+                    "frozen_loaded_count" to frozen?.loadedCount,
+                    "frozen_lower_bound" to frozen?.lowerBound,
+                    "refresh" to loadStateName(load.refresh),
+                    "prepend" to loadStateName(load.prepend),
+                    "append" to loadStateName(load.append),
+                    "source_refresh" to loadStateName(load.source.refresh),
+                    "source_prepend" to loadStateName(load.source.prepend),
+                    "source_append" to loadStateName(load.source.append),
+                    "mediator_present" to (load.mediator != null),
+                    "mediator_refresh" to load.mediator?.refresh?.let(::loadStateName),
+                    "mediator_prepend" to load.mediator?.prepend?.let(::loadStateName),
+                    "mediator_append" to load.mediator?.append?.let(::loadStateName),
+                    "page" to initialPagingPage(items.itemCount, load.append).name,
+                    "item_count" to items.itemCount,
+                    "loaded_count" to snapshot.items.size,
+                    "loaded_start" to snapshot.placeholdersBefore,
+                    "placing_top_entry" to placingTopEntry,
+                    "clamped_at_bottom" to topEntryClampedAtBottom,
+                    "header_expansion" to headerExpansion.value,
+                    "laid_out_header_expansion" to laidOutEntryHeaderExpansion,
+                    "viewport_index" to listState.firstVisibleItemIndex,
+                    "viewport_offset" to listState.firstVisibleItemScrollOffset,
+                    "viewport_start" to layout.viewportStartOffset,
+                    "viewport_end" to layout.viewportEndOffset,
+                    "target_loaded_index" to
+                        targetEventId?.let {
+                            materializedTargetSnapshotIndex(snapshot.placeholdersBefore, snapshot.items, it)
+                        },
+                    "target_measured" to (measured != null),
+                    "target_measured_key" to (measured?.key as? Long),
+                    "target_measured_index" to measured?.index,
+                    "target_measured_offset" to measured?.offset,
+                    "target_measured_size" to measured?.size,
+                )
+            }
+        }
+
+        var prefillConsumed by remember(traceBufferId) { mutableStateOf(false) }
+
+        // Apply hydration/accepted-send clears without re-saving the same value from the screen.
+        LaunchedEffect(traceBufferId, composerDraft.hydrated, composerDraft.revision) {
+            if (traceBufferId == null || !composerDraft.hydrated) return@LaunchedEffect
+            // Saving a Request immediately before submitting creates a draft revision that must not
+            // rehydrate the optimistically cleared field. A rejection republishes a newer revision.
+            if (composerDraft.revision == pendingEbooksRequestRevision) return@LaunchedEffect
+            pendingEbooksRequestRevision = null
+            if (composerText.text != composerDraft.text) {
+                composerText =
+                    TextFieldValue(
+                        composerDraft.text,
+                        TextRange(composerDraft.text.length),
+                    )
+            }
+            if (!prefillConsumed) {
+                prefillConsumed = true
+                consumePrefill()?.let { prefill ->
+                    composerText = appendPrefill(composerText, prefill)
+                    onDraftChanged(composerText.text)
+                }
+            }
+        }
+        LaunchedEffect(mentionPrefill) {
+            mentionPrefill?.second?.let {
+                composerText = appendPrefill(composerText, it)
+                onDraftChanged(composerText.text)
+            }
+        }
+        // An eligibility/reply change must not rehydrate an optimistic send's old draft. Only the
+        // accepted empty revision (or initial hydration) offers another search, after share/mention prefills.
+        LaunchedEffect(
+            eligibleEbooksRoomId,
+            composerDraft.hydrated,
+            composerDraft.revision,
+            prefillConsumed,
+            state.replyTo,
+        ) {
+            if (
+                eligibleEbooksRoomId != null &&
+                composerDraft.hydrated &&
+                prefillConsumed &&
+                composerDraft.text.isEmpty() &&
+                composerText.text.isEmpty() &&
+                state.replyTo == null
+            ) {
+                composerText = TextFieldValue("@Search ", selection = TextRange(8))
+                onDraftChanged("@Search ")
+            }
+        }
+        val latestComposerText by rememberUpdatedState(composerText)
+        val latestBufferType by rememberUpdatedState(state.buffer?.type)
+        val latestVisibleReplyPrefix by rememberUpdatedState(visibleReplyPrefix)
+        val timelineReply =
+            remember(onSetReply, onDraftChanged) {
+                { target: MessageEntity ->
+                    onSetReply(target)
+                    composerText =
+                        composerTextForReply(
+                            value = latestComposerText,
+                            sender = target.sender,
+                            bufferType = latestBufferType,
+                            visibleReplyPrefix = latestVisibleReplyPrefix,
+                        )
+                    onDraftChanged(composerText.text)
+                }
+            }
+
+        val jumpNotLoaded = stringResource(R.string.chat_jump_not_loaded)
+        // Only an explicit message destination reports failure; normal entry positioning is silent.
+        LaunchedEffect(entryState) {
+            if (shouldPresentUnresolvedEntrySnackbar(entryState)) {
+                snackbarHostState.showSnackbar(jumpNotLoaded)
+            }
+        }
+
+        val eventText =
+            uiEvent?.value?.let { event ->
+                when (event) {
+                    ChatUiEvent.InvalidCommand -> {
+                        stringResource(R.string.chat_server_invalid_command)
+                    }
+
+                    ChatUiEvent.ReactionBlocked -> {
+                        stringResource(R.string.chat_reaction_blocked)
+                    }
+
+                    ChatUiEvent.ReactionTargetUnavailable -> {
+                        stringResource(R.string.chat_react_failed)
+                    }
+
+                    ChatUiEvent.ReactionSendFailed -> {
+                        stringResource(R.string.chat_reaction_send_failed)
+                    }
+
+                    ChatUiEvent.RedactionSendFailed -> {
+                        stringResource(R.string.chat_redaction_send_failed)
+                    }
+
+                    ChatUiEvent.SendRejected -> {
+                        stringResource(R.string.chat_send_rejected)
+                    }
+
+                    ChatUiEvent.SendDropped -> {
+                        stringResource(R.string.chat_send_dropped)
+                    }
+
+                    ChatUiEvent.NotInChannel -> {
+                        stringResource(R.string.chat_not_in_channel)
+                    }
+
+                    is ChatUiEvent.InviteRequestSent -> {
+                        stringResource(R.string.irc_invite_request_sent, event.nick, event.channel)
+                    }
+
+                    ChatUiEvent.InviteSendFailed -> {
+                        stringResource(R.string.irc_invite_send_failed)
+                    }
+
+                    ChatUiEvent.ConversationLayoutWriteFailed -> {
+                        stringResource(R.string.chat_layout_write_failed)
+                    }
+
+                    ChatUiEvent.PresenceModeWriteFailed -> {
+                        stringResource(R.string.chat_presence_write_failed)
+                    }
+
+                    ChatUiEvent.HistorySyncModeWriteFailed -> {
+                        stringResource(R.string.settings_history_sync_write_failed)
+                    }
+
+                    ChatUiEvent.NotificationSettingsWriteFailed -> {
+                        stringResource(R.string.notification_settings_save_failed)
+                    }
+
+                    is ChatUiEvent.ReplyJumpUnavailable -> {
+                        jumpNotLoaded
+                    }
+                }
+            }
+        val retryLabel = stringResource(R.string.chat_retry)
+        LaunchedEffect(uiEvent?.id) {
+            val pending = uiEvent ?: return@LaunchedEffect
+            val text = eventText ?: return@LaunchedEffect
+            val actionLabel = retryLabel.takeIf { pending.value.hasRetryAction() }
+            val result =
+                snackbarHostState.showSnackbar(
+                    message = text,
+                    actionLabel = actionLabel,
+                )
+            handleChatUiEventResult(
+                event = pending,
+                actionPerformed = result == SnackbarResult.ActionPerformed,
+                retryReplyJump = onRetryReplyJump,
+                acknowledge = onUiEventAcknowledged,
+            )
+        }
+
+        val currentPresentedVisibilitySpec by rememberUpdatedState(presentedVisibilitySpec)
+
+        suspend fun materializeTarget(
+            target: ChatPositionTarget,
+            scroll: Boolean,
+        ): MaterializedChatTarget? {
+            target.requiredVisibilitySpec?.let { required ->
+                val matched =
+                    withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
+                        snapshotFlow { currentPresentedVisibilitySpec }.first { it == required }
+                    }
+                if (matched == null) return null
+            }
+            // itemCount is used only to establish that the position is addressable. A non-null peek is
+            // the sole proof that the target placeholder has materialized.
+            val pageReady =
+                withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
+                    snapshotFlow { Triple(items.loadState.refresh, items.loadState.append, items.itemCount) }
+                        .first { (refresh, append, count) ->
+                            (refresh is LoadState.NotLoading || presentationLease?.hasPublishedWindow(items.itemSnapshotList) == true) &&
+                                initialPagingPage(count, append) != InitialPagingPage.Pending
+                        }
+                } != null
+            if (!pageReady) {
+                AutoFollowTrace.record("materialize_page_not_ready", traceBufferId, traceSessionId) {
+                    "target_index=${target.index} refresh=${items.loadState.refresh} " +
+                        "append=${items.loadState.append} item_count=${items.itemCount}"
+                }
+                return null
+            }
+
+            // JOIN/PART commits can change the raw rank after the entry snapshot was resolved.
+            // A loaded exact row is authoritative; the old index is only a load hint while absent.
+            fun currentIndex(): Int? {
+                val snapshot = items.itemSnapshotList
+                val loaded =
+                    target.expectedEventId?.let {
+                        materializedTargetSnapshotIndex(snapshot.placeholdersBefore, snapshot.items, it)
+                    }
+                return materializableTargetIndex(
+                    requestedIndex = loaded ?: target.index,
+                    itemCount = items.itemCount,
+                    hasExactIdentity = target.expectedEventId != null || target.expectedMsgid != null,
+                )
+            }
+            val materializedIndex = currentIndex()
+            if (materializedIndex == null) {
+                AutoFollowTrace.record("materialize_index_unaddressable", traceBufferId, traceSessionId) {
+                    "target_index=${target.index} item_count=${items.itemCount}"
+                }
+                return null
+            }
+            val row =
+                requestAndAwaitTarget(
+                    index = materializedIndex,
+                    request = { _ ->
+                        val index = currentIndex()
+                        if (index == null) {
+                            false
+                        } else {
+                            try {
+                                if (scroll && (listState.firstVisibleItemIndex != index || listState.firstVisibleItemScrollOffset != target.offset)) {
+                                    listState.requestScrollToItem(index, target.offset)
+                                }
+                                // This is the only item access: it sends Paging a load hint for the exact target.
+                                items[index]
+                                true
+                            } catch (_: IndexOutOfBoundsException) {
+                                // A new Paging generation replaced the snapshot between the bound and access.
+                                false
+                            }
+                        }
+                    },
+                    snapshots =
+                        snapshotFlow {
+                            val index = currentIndex() ?: materializedIndex
+                            targetMaterialization(items, index).let { snapshot ->
+                                if (target.expectedEventId != null && snapshot.item?.id != target.expectedEventId) {
+                                    snapshot.copy(item = null)
+                                } else {
+                                    snapshot
+                                }
+                            }
+                        },
+                )
+            if (row == null) {
+                AutoFollowTrace.record("materialize_target_missing", traceBufferId, traceSessionId) {
+                    "target_index=$materializedIndex refresh=${items.loadState.refresh} " +
+                        "prepend=${items.loadState.prepend} append=${items.loadState.append} " +
+                        "item_count=${items.itemCount} " +
+                        "loaded_start=${items.itemSnapshotList.placeholdersBefore} " +
+                        "loaded_count=${items.itemSnapshotList.items.size}"
+                }
+            }
+            return row?.let { targetRow ->
+                if (positionTargetMatches(target, targetRow) &&
+                    (target.requestToken != 0L || target.highlightMsgid != null || target.highlightEventId != null) &&
+                    visibilityPolicy.isFool(targetRow)
+                ) {
+                    expandedFools += targetRow.id
+                    collapsedFools -= targetRow.id
+                }
+                if (!scroll || target.expectedEventId != targetRow.id) {
+                    return@let MaterializedChatTarget(targetRow, currentIndex() ?: materializedIndex)
+                }
+                // `scrollToItem` ran before Paging loaded this placeholder. An arriving message can
+                // shift the exact row in a replacement snapshot while entry positioning is unsettled,
+                // before the normal viewport pin is allowed to run. Keep correcting that exact event
+                // across presentation changes, and settle only after LazyColumn has laid out its key.
+
+                fun exactPlacement(): ExactTargetPlacement {
+                    val snapshot = items.itemSnapshotList
+                    val layout = listState.layoutInfo
+                    val measured = layout.visibleItemsInfo.firstOrNull { it.key == targetRow.id }
+                    val bottomHostHeightPx = readBottomHostHeightPx()
+                    return exactTargetPlacement(
+                        loadedStart = snapshot.placeholdersBefore,
+                        loadedItems = snapshot.items,
+                        visibleItems = layout.visibleItemsInfo.map { it.key to it.index },
+                        firstVisibleIndex = listState.firstVisibleItemIndex,
+                        firstVisibleOffset = listState.firstVisibleItemScrollOffset,
+                        targetOffset = target.offset,
+                        canScrollForward = listState.canScrollForward,
+                        targetFullyVisible =
+                            measured != null && measured.size > 0 &&
+                                bottomHostHeightPx > 0 && layout.beforeContentPadding >= bottomHostHeightPx &&
+                                measured.offset >= layout.viewportStartOffset + bottomHostHeightPx &&
+                                measured.offset + measured.size <= layout.viewportEndOffset - readTopHostHeightPx(),
+                        eventId = targetRow.id,
+                    )
+                }
+                withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
+                    var placement = exactPlacement()
+                    while (true) {
+                        when (placement) {
+                            ExactTargetPlacement.Missing -> {
+                                // A replacement may temporarily drop the old loaded window. Wait for its
+                                // Parked(id) refresh instead of settling on whichever row took the old slot.
+                                placement = snapshotFlow { exactPlacement() }.first { it !is ExactTargetPlacement.Missing }
+                            }
+
+                            is ExactTargetPlacement.Positioned -> {
+                                return@withTimeoutOrNull MaterializedChatTarget(targetRow, placement.index)
+                            }
+
+                            is ExactTargetPlacement.NeedsScroll -> {
+                                val requestedIndex = placement.index
+                                listState.requestScrollToItem(requestedIndex, target.offset)
+                                placement =
+                                    snapshotFlow { exactPlacement() }.first { next ->
+                                        next !is ExactTargetPlacement.NeedsScroll || next.index != requestedIndex
+                                    }
+                            }
+                        }
+                    }
+                    @Suppress("UNREACHABLE_CODE")
+                    null
+                }
+            }
+        }
+
+        // Only the existing target timeout selects a retained viewport. Explicit jumps remain separate.
+        LaunchedEffect(
+            entryVeilLifted,
+            entryTimedOut,
+            initialPositionSettled,
+            presentationLease,
+            presentationRevision,
+            measuredSnapshot?.value,
+            visibleSpec,
+            presentationCompatible,
+            entryPositionIntent,
+        ) {
+            if (!entryVeilLifted || payloadAdmitted || initialPositionSettled) return@LaunchedEffect
+            val lease = presentationLease
+            val fallback = entryFallback
+            val saved = retainedViewport
+            val snapshot = items.itemSnapshotList
+            val index = saved?.let { materializedTargetSnapshotIndex(snapshot.placeholdersBefore, snapshot.items, it.rowId) }
+            val target =
+                if (saved != null && index != null) {
+                    ChatPositionTarget(
+                        index = index,
+                        offset = saved.offset,
+                        expectedEventId = saved.rowId,
+                        expectedMsgid = saved.msgid,
+                        serverTime = saved.serverTime,
+                        fromSavedPosition = true,
+                    )
+                } else {
+                    null
+                }
+            if (!entryTimedOut || lease == null || fallback == null || target == null ||
+                fallback.intent != entryPositionIntent || canAdoptRetainedFallback?.invoke(fallback.intent) != true ||
+                !positionTargetMatches(target, items.peek(target.index))
+            ) {
+                // Cold, unavailable and explicit-jump fallbacks retain their prior behavior, but never
+                // bypass the independent committed-payload admission barrier.
+                if (!payloadAdmitted) admitPayload()
+                return@LaunchedEffect
+            }
+            if (!currentPresentationCompatible || !lease.admit(snapshot) || items.itemSnapshotList !== snapshot) return@LaunchedEffect
+            if (canAdoptRetainedFallback.invoke(fallback.intent) != true) return@LaunchedEffect
+            selectingRetainedViewport = true
             try {
-                materializeTarget(j, scroll = true)?.row
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                throw cancelled
-            } catch (_: RuntimeException) {
-                null
+                automaticPositionJob.value?.cancelAndJoin()
+                if (canAdoptRetainedFallback.invoke(fallback.intent) != true) return@LaunchedEffect
+                lease.prepareTarget(
+                    target.index,
+                    target.expectedEventId,
+                    io.github.trevarj.motd.data.repo
+                        .entryAnchorPagingKey(target.index),
+                    ViewportRefreshAnchor.Parked(checkNotNull(target.expectedEventId)),
+                )
+                val placed = materializeTarget(target, scroll = true) ?: return@LaunchedEffect
+                if (!currentPlacementReady(target) || listState.firstVisibleItemIndex != placed.index ||
+                    listState.firstVisibleItemScrollOffset != target.offset
+                ) {
+                    return@LaunchedEffect
+                }
+                val presented = items.itemSnapshotList
+                if (!lease.admit(presented) || items.itemSnapshotList !== presented || !currentPlacementReady(target)) return@LaunchedEffect
+                val position =
+                    ChatScrollPosition(
+                        index = placed.index,
+                        offset = target.offset,
+                        msgid = placed.row.msgid,
+                        serverTime = placed.row.serverTime,
+                        rowId = placed.row.id,
+                    )
+                if (onAdoptRetainedFallback?.invoke(position, fallback.intent) == true) {
+                    supersededAutomaticTarget = initialTarget
+                    retainedViewportChosen = true
+                    presentation?.confirmedViewport = position
+                    payloadAdmitted = true
+                    initialPositionSettled = true
+                    suppressNextAutoFollow = true
+                }
+            } finally {
+                selectingRetainedViewport = false
             }
-        if (targetRow == null) {
-            if (j.expectedEventId != null || j.expectedMsgid != null) {
-                onReresolveJump(j.requestToken)
-            } else {
-                onJumpUnresolved(j.requestToken)
-            }
-        } else if (!positionTargetMatches(j, targetRow)) {
-            onReresolveJump(j.requestToken)
-        } else {
-            admitPayload(j)
-            AutoFollowTrace.record("deep_jump_settled", traceBufferId, traceSessionId) {
+        }
+
+        // Deep jumps request one resolved placeholder, then validate both of its exact identities.
+        LaunchedEffect(jumpTarget, items, presentationLease, presentationRevision, visibleSpec) {
+            val j = jumpTarget ?: return@LaunchedEffect
+            onViewportRefreshAnchor(null)
+            AutoFollowTrace.record("deep_jump_start", traceBufferId, traceSessionId) {
                 "target_index=${j.index} item_count=${items.itemCount}"
             }
-            highlightMsgid = j.highlightMsgid
-            highlightEventId = j.highlightEventId
-            initialPositionSettled = true
-            suppressNextAutoFollow = true
-            onJumpHandled(j.requestToken)
-        }
-    }
-
-    // Normal entry shares the deep-link paging mechanics but has no highlight. It is separate so
-    // a deep link always wins and so a completed normal entry cannot be replayed on recomposition.
-    LaunchedEffect(initialTarget, items, presentationLease, presentationRevision, visibleSpec, selectingRetainedViewport) {
-        if (selectingRetainedViewport || (retainedViewportChosen && initialTarget == supersededAutomaticTarget)) return@LaunchedEffect
-        recordEntryStage("initial_position_start", initialTarget, if (initialTarget == null) "no_target" else "waiting")
-        val target = initialTarget ?: return@LaunchedEffect
-        automaticPositionJob.value = currentCoroutineContext()[Job]
-        AutoFollowTrace.record("initial_position_start", traceBufferId, traceSessionId) {
-            "target_index=${target.index} target_offset=${target.offset} " +
-                "saved=${target.fromSavedPosition} item_count=${items.itemCount}"
-        }
-        val pageReady =
-            withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
-                snapshotFlow {
-                    (items.loadState.refresh is LoadState.NotLoading || presentationLease?.hasPublishedWindow(items.itemSnapshotList) == true) &&
-                        initialPagingPage(items.itemCount, items.loadState.append) != InitialPagingPage.Pending &&
-                        (!placingTopEntry || laidOutEntryHeaderExpansion == 0f)
-                }.first { it }
-            } != null
-        if (!pageReady) {
-            AutoFollowTrace.record("initial_position_page_not_ready", traceBufferId, traceSessionId) {
-                "target_index=${target.index} refresh=${items.loadState.refresh} " +
-                    "append=${items.loadState.append} item_count=${items.itemCount}"
+            val targetRow =
+                try {
+                    materializeTarget(j, scroll = true)?.row
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: RuntimeException) {
+                    null
+                }
+            if (targetRow == null) {
+                if (j.expectedEventId != null || j.expectedMsgid != null) {
+                    onReresolveJump(j.requestToken)
+                } else {
+                    onJumpUnresolved(j.requestToken)
+                }
+            } else if (!positionTargetMatches(j, targetRow)) {
+                onReresolveJump(j.requestToken)
+            } else {
+                admitPayload(j)
+                AutoFollowTrace.record("deep_jump_settled", traceBufferId, traceSessionId) {
+                    "target_index=${j.index} item_count=${items.itemCount}"
+                }
+                highlightMsgid = j.highlightMsgid
+                highlightEventId = j.highlightEventId
+                initialPositionSettled = true
+                suppressNextAutoFollow = true
+                onJumpHandled(j.requestToken)
             }
-            recordEntryStage(
-                "initial_position_page_not_ready",
-                target,
-                when {
-                    items.loadState.refresh !is LoadState.NotLoading -> "refresh_not_ready"
-                    initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.Pending -> "page_pending"
-                    else -> "header_layout_pending"
-                },
-            )
-            onInitialPositionUnresolved()
-            return@LaunchedEffect
         }
-        recordEntryStage("initial_position_page_ready", target)
-        val currentlyAtBottom =
-            listState.firstVisibleItemIndex == 0 &&
-                listState.firstVisibleItemScrollOffset <= AUTOSCROLL_BOTTOM_TOLERANCE_PX
-        val terminalEmpty =
-            target.index == 0 && target.expectedEventId == null &&
-                target.expectedMsgid == null &&
-                initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.TerminalEmpty
-        if (!terminalEmpty) recordEntryStage("initial_position_materializing", target)
-        val targetRow =
-            if (terminalEmpty) {
-                null
-            } else if (target.placeAtTop) {
-                // Open-at-first-unread: scroll to the target placeholder so Paging receives a viewport
-                // load hint even from an empty cold generation, then snap it to the top with the
-                // remaining unread below. This all runs before settlement, so it cannot advance read
-                // state or be misclassified as a user drag.
-                val materialized =
-                    try {
-                        materializeTarget(target, scroll = true)
-                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                        throw cancelled
-                    } catch (_: RuntimeException) {
-                        null
-                    }
-                if (materialized != null) {
-                    val row = materialized.row
-                    recordEntryStage("initial_position_materialized", target)
-                    // The materialization scroll places the target at the reversed viewport start
-                    // (visually the bottom). Align that measured row directly instead of estimating a
-                    // second index from placeholder row counts: cold Paging swaps those placeholders
-                    // for variable-height messages and can otherwise move the target outside layout.
-                    val item =
-                        withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
-                            snapshotFlow {
+
+        // Normal entry shares the deep-link paging mechanics but has no highlight. It is separate so
+        // a deep link always wins and so a completed normal entry cannot be replayed on recomposition.
+        LaunchedEffect(initialTarget, items, presentationLease, presentationRevision, visibleSpec, selectingRetainedViewport) {
+            if (selectingRetainedViewport || (retainedViewportChosen && initialTarget == supersededAutomaticTarget)) return@LaunchedEffect
+            recordEntryStage("initial_position_start", initialTarget, if (initialTarget == null) "no_target" else "waiting")
+            val target = initialTarget ?: return@LaunchedEffect
+            automaticPositionJob.value = currentCoroutineContext()[Job]
+            AutoFollowTrace.record("initial_position_start", traceBufferId, traceSessionId) {
+                "target_index=${target.index} target_offset=${target.offset} " +
+                    "saved=${target.fromSavedPosition} item_count=${items.itemCount}"
+            }
+            val pageReady =
+                withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
+                    snapshotFlow {
+                        (items.loadState.refresh is LoadState.NotLoading || presentationLease?.hasPublishedWindow(items.itemSnapshotList) == true) &&
+                            initialPagingPage(items.itemCount, items.loadState.append) != InitialPagingPage.Pending &&
+                            (!placingTopEntry || laidOutEntryHeaderExpansion == 0f)
+                    }.first { it }
+                } != null
+            if (!pageReady) {
+                AutoFollowTrace.record("initial_position_page_not_ready", traceBufferId, traceSessionId) {
+                    "target_index=${target.index} refresh=${items.loadState.refresh} " +
+                        "append=${items.loadState.append} item_count=${items.itemCount}"
+                }
+                recordEntryStage(
+                    "initial_position_page_not_ready",
+                    target,
+                    when {
+                        items.loadState.refresh !is LoadState.NotLoading -> "refresh_not_ready"
+                        initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.Pending -> "page_pending"
+                        else -> "header_layout_pending"
+                    },
+                )
+                onInitialPositionUnresolved()
+                return@LaunchedEffect
+            }
+            recordEntryStage("initial_position_page_ready", target)
+            val currentlyAtBottom =
+                listState.firstVisibleItemIndex == 0 &&
+                    listState.firstVisibleItemScrollOffset <= AUTOSCROLL_BOTTOM_TOLERANCE_PX
+            val terminalEmpty =
+                target.index == 0 && target.expectedEventId == null &&
+                    target.expectedMsgid == null &&
+                    initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.TerminalEmpty
+            if (!terminalEmpty) recordEntryStage("initial_position_materializing", target)
+            val targetRow =
+                if (terminalEmpty) {
+                    null
+                } else if (target.placeAtTop) {
+                    // Open-at-first-unread: scroll to the target placeholder so Paging receives a viewport
+                    // load hint even from an empty cold generation, then snap it to the top with the
+                    // remaining unread below. This all runs before settlement, so it cannot advance read
+                    // state or be misclassified as a user drag.
+                    val materialized =
+                        try {
+                            materializeTarget(target, scroll = true)
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (_: RuntimeException) {
+                            null
+                        }
+                    if (materialized != null) {
+                        val row = materialized.row
+                        recordEntryStage("initial_position_materialized", target)
+                        // The materialization scroll places the target at the reversed viewport start
+                        // (visually the bottom). Align that measured row directly instead of estimating a
+                        // second index from placeholder row counts: cold Paging swaps those placeholders
+                        // for variable-height messages and can otherwise move the target outside layout.
+                        val item =
+                            withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
+                                snapshotFlow {
+                                    val visible = listState.layoutInfo.visibleItemsInfo
+                                    val currentIndex =
+                                        materializedTargetVisibleIndex(
+                                            visible.map { it.key to it.index },
+                                            row.id,
+                                        )
+                                    visible.firstOrNull { it.index == currentIndex }
+                                }.first { it != null }
+                            }
+                        if (item != null) {
+                            recordEntryStage("initial_position_align", target)
+                            // A single fire-and-forget correction can race a Paging generation swap (the
+                            // reopen backfill deletes the history gap milliseconds after materialization,
+                            // regenerating the Pager): the lazy layout clamps the scroll mid-presentation
+                            // and silently discards the remainder, leaving the entry row at the reversed
+                            // viewport start (visual bottom) with the unread run below it uncomposed.
+                            // Re-measure and re-correct across frames until the row rests at the top. A
+                            // layout that legitimately cannot align (content shorter than the viewport)
+                            // stops moving and exits through the pass cap with the single-shot behavior.
+                            var pass = 0
+                            var unconsumedPasses = 0
+                            while (pass < TOP_ALIGNMENT_MAX_PASSES) {
                                 val visible = listState.layoutInfo.visibleItemsInfo
                                 val currentIndex =
                                     materializedTargetVisibleIndex(
                                         visible.map { it.key to it.index },
                                         row.id,
                                     )
-                                visible.firstOrNull { it.index == currentIndex }
-                            }.first { it != null }
-                        }
-                    if (item != null) {
-                        recordEntryStage("initial_position_align", target)
-                        // A single fire-and-forget correction can race a Paging generation swap (the
-                        // reopen backfill deletes the history gap milliseconds after materialization,
-                        // regenerating the Pager): the lazy layout clamps the scroll mid-presentation
-                        // and silently discards the remainder, leaving the entry row at the reversed
-                        // viewport start (visual bottom) with the unread run below it uncomposed.
-                        // Re-measure and re-correct across frames until the row rests at the top. A
-                        // layout that legitimately cannot align (content shorter than the viewport)
-                        // stops moving and exits through the pass cap with the single-shot behavior.
-                        var pass = 0
-                        var unconsumedPasses = 0
-                        while (pass < TOP_ALIGNMENT_MAX_PASSES) {
-                            val visible = listState.layoutInfo.visibleItemsInfo
-                            val currentIndex =
-                                materializedTargetVisibleIndex(
-                                    visible.map { it.key to it.index },
-                                    row.id,
-                                )
-                            val current = visible.firstOrNull { it.index == currentIndex }
-                            if (current == null) {
-                                // A generation presentation can hide the row for a frame; observe the
-                                // settled layout before concluding it left the viewport.
+                                val current = visible.firstOrNull { it.index == currentIndex }
+                                if (current == null) {
+                                    // A generation presentation can hide the row for a frame; observe the
+                                    // settled layout before concluding it left the viewport.
+                                    pass++
+                                    withFrameNanos { }
+                                    continue
+                                }
+                                val layout = listState.layoutInfo
+                                val correction =
+                                    reverseItemTopAlignmentCorrection(
+                                        itemOffset = current.offset,
+                                        itemSize = current.size,
+                                        viewportEndOffset = layout.viewportEndOffset - readTopHostHeightPx(),
+                                    )
+                                AutoFollowTrace.record("initial_position_align", traceBufferId, traceSessionId) {
+                                    "target_index=${current.index} item_offset=${current.offset} " +
+                                        "item_size=${current.size} " +
+                                        "viewport_start=${layout.viewportStartOffset} " +
+                                        "viewport_end=${layout.viewportEndOffset} " +
+                                        "correction=$correction pass=$pass"
+                                }
+                                if (kotlin.math.abs(correction) <= TOP_ALIGNMENT_TOLERANCE_PX) break
+                                val consumed = listState.scrollBy(correction.toFloat())
                                 pass++
+                                // Let the pending layout (and any racing generation presentation) apply
+                                // before re-measuring, so a clamped scroll is observed rather than trusted.
                                 withFrameNanos { }
-                                continue
+                                // Two consecutive fully unconsumed scrolls mean the list is legitimately
+                                // clamped (fewer unread than fit the viewport keep the newest row pinned at
+                                // the bottom, as firstUnreadTopAnchorIndex documents) — the rest position is
+                                // final. A single one may just be a racing presentation frame; retry.
+                                unconsumedPasses = if (consumed == 0f) unconsumedPasses + 1 else 0
+                                if (unconsumedPasses >= 2) break
                             }
-                            val layout = listState.layoutInfo
-                            val correction =
-                                reverseItemTopAlignmentCorrection(
-                                    itemOffset = current.offset,
-                                    itemSize = current.size,
-                                    viewportEndOffset = layout.viewportEndOffset,
-                                )
-                            AutoFollowTrace.record("initial_position_align", traceBufferId, traceSessionId) {
-                                "target_index=${current.index} item_offset=${current.offset} " +
-                                    "item_size=${current.size} " +
-                                    "viewport_start=${layout.viewportStartOffset} " +
-                                    "viewport_end=${layout.viewportEndOffset} " +
-                                    "correction=$correction pass=$pass"
+                            if (placingTopEntry && atBottom) {
+                                // A short unread run clamps at newest. Restore its expanded viewport
+                                // under the veil, and wait for that layout before consuming the target.
+                                topEntryClampedAtBottom = true
+                                recordEntryStage("initial_position_waiting_expanded_header", target)
+                                snapshotFlow { laidOutEntryHeaderExpansion }.first { it == 1f }
+                                recordEntryStage("initial_position_expanded_header_ready", target)
                             }
-                            if (kotlin.math.abs(correction) <= TOP_ALIGNMENT_TOLERANCE_PX) break
-                            val consumed = listState.scrollBy(correction.toFloat())
-                            pass++
-                            // Let the pending layout (and any racing generation presentation) apply
-                            // before re-measuring, so a clamped scroll is observed rather than trusted.
-                            withFrameNanos { }
-                            // Two consecutive fully unconsumed scrolls mean the list is legitimately
-                            // clamped (fewer unread than fit the viewport keep the newest row pinned at
-                            // the bottom, as firstUnreadTopAnchorIndex documents) — the rest position is
-                            // final. A single one may just be a racing presentation frame; retry.
-                            unconsumedPasses = if (consumed == 0f) unconsumedPasses + 1 else 0
-                            if (unconsumedPasses >= 2) break
+                            row
+                        } else {
+                            AutoFollowTrace.record("initial_position_align_missing", traceBufferId, traceSessionId) {
+                                "target_index=${target.index} item_count=${items.itemCount}"
+                            }
+                            recordEntryStage("initial_position_align_missing", target, "target_not_measured")
+                            null
                         }
-                        if (placingTopEntry && atBottom) {
-                            // A short unread run clamps at newest. Restore its expanded viewport
-                            // under the veil, and wait for that layout before consuming the target.
-                            topEntryClampedAtBottom = true
-                            recordEntryStage("initial_position_waiting_expanded_header", target)
-                            snapshotFlow { laidOutEntryHeaderExpansion }.first { it == 1f }
-                            recordEntryStage("initial_position_expanded_header_ready", target)
-                        }
-                        row
                     } else {
-                        AutoFollowTrace.record("initial_position_align_missing", traceBufferId, traceSessionId) {
-                            "target_index=${target.index} item_count=${items.itemCount}"
-                        }
-                        recordEntryStage("initial_position_align_missing", target, "target_not_measured")
                         null
                     }
                 } else {
-                    null
+                    try {
+                        materializeTarget(
+                            target,
+                            scroll = shouldScrollToInitialTarget(target, currentlyAtBottom),
+                        )?.row
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (_: RuntimeException) {
+                        null
+                    }
                 }
+            if (terminalEmpty) {
+                admitPayload(target)
+                initialPositionSettled = true
+                suppressNextAutoFollow = true
+                recordEntryStage("initial_position_settled", target, "terminal_empty")
+                onInitialPositionHandled()
+            } else if (targetRow != null && positionTargetMatches(target, targetRow)) {
+                admitPayload(target)
+                AutoFollowTrace.record("initial_position_settled", traceBufferId, traceSessionId) {
+                    "target_index=${target.index} index=${listState.firstVisibleItemIndex} " +
+                        "offset=${listState.firstVisibleItemScrollOffset} at_bottom=$currentlyAtBottom " +
+                        "place_at_top=${target.placeAtTop}"
+                }
+                initialPositionSettled = true
+                suppressNextAutoFollow = true
+                recordEntryStage("initial_position_settled", target, "identity_matched")
+                onInitialPositionHandled()
+            } else if (targetRow != null) {
+                AutoFollowTrace.record("initial_position_reresolve", traceBufferId, traceSessionId) {
+                    "target_index=${target.index} reason=identity_mismatch item_count=${items.itemCount}"
+                }
+                recordEntryStage("initial_position_reresolve", target, "identity_mismatch")
+                onReresolveInitial(target)
+            } else if (target.expectedEventId != null || target.expectedMsgid != null) {
+                AutoFollowTrace.record("initial_position_reresolve", traceBufferId, traceSessionId) {
+                    "target_index=${target.index} reason=target_missing item_count=${items.itemCount}"
+                }
+                recordEntryStage("initial_position_reresolve", target, "target_missing")
+                onReresolveInitial(target)
             } else {
-                try {
-                    materializeTarget(
-                        target,
-                        scroll = shouldScrollToInitialTarget(target, currentlyAtBottom),
-                    )?.row
-                } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                    throw cancelled
-                } catch (_: RuntimeException) {
-                    null
+                AutoFollowTrace.record("initial_position_unresolved", traceBufferId, traceSessionId) {
+                    "target_index=${target.index} item_count=${items.itemCount} " +
+                        "append=${loadStateName(items.loadState.append)}"
+                }
+                recordEntryStage("initial_position_unresolved", target, "target_missing")
+                onInitialPositionUnresolved()
+            }
+        }
+
+        // Clear both identities together after the pulse settles (~1.6s).
+        LaunchedEffect(highlightMsgid, highlightEventId) {
+            if (highlightMsgid != null || highlightEventId != null) {
+                kotlinx.coroutines.delay(1_600)
+                highlightMsgid = null
+                highlightEventId = null
+            }
+        }
+
+        fun saveCurrentScrollPosition() {
+            if (!initialPositionSettled || !entryVeilLifted || !payloadAllowed || !currentPresentationCompatible ||
+                presentationLease?.isActive == false || presentationLease?.ownsSlot() == false ||
+                (presentationLease != null && measuredSnapshot?.value !== items.itemSnapshotList)
+            ) {
+                return
+            }
+            val index = listState.firstVisibleItemIndex
+            // Clearing the saved position ASSERTS "resume at the live bottom next time", so only a
+            // provable bottom may clear it — [isAtEffectiveBottom] is that proof, and a viewport parked
+            // in history (a deep jump's destination, say) has unloaded rows below it so it does not
+            // qualify. An indeterminate snapshot — empty because Paging swapped in the incoming
+            // buffer's QUERY snapshot before onDispose (the previous direct peek crashed DM
+            // navigation), or one with no anchorable row in probe reach — proves neither a bottom nor
+            // a place to save, so it only forgets; see [scrollPositionOutcome].
+            when (
+                val outcome =
+                    scrollPositionOutcome(
+                        firstVisibleIndex = index,
+                        firstVisibleOffset = listState.firstVisibleItemScrollOffset,
+                        itemCount = items.itemCount,
+                        peek = items::peek,
+                        policy = visibilityPolicy,
+                    )
+            ) {
+                ScrollPositionOutcome.ParkAtBottom -> {
+                    val position =
+                        nearestAnchorRow(index, items.itemCount, items::peek, visibilityPolicy)?.let { (anchorIndex, row) ->
+                            ChatScrollPosition(
+                                index = anchorIndex,
+                                offset = listState.firstVisibleItemScrollOffset.takeIf { anchorIndex == index } ?: 0,
+                                msgid = row.msgid,
+                                serverTime = row.serverTime,
+                                rowId = row.id,
+                            )
+                        }
+                    if (position != null) presentation?.confirmedViewport = position
+                    onClearScrollPosition(position)
+                }
+
+                ScrollPositionOutcome.Forget -> {
+                    onForgetScrollPosition()
+                }
+
+                is ScrollPositionOutcome.Save -> {
+                    AutoFollowTrace.record("position_saved", traceBufferId, traceSessionId) {
+                        "index=$index anchor_index=${outcome.anchorIndex} " +
+                            "offset=${listState.firstVisibleItemScrollOffset} " +
+                            "row=${outcome.row.id} at_bottom=false following=${autoFollow.following}"
+                    }
+                    val position =
+                        ChatScrollPosition(
+                            index = outcome.anchorIndex,
+                            offset =
+                                listState.firstVisibleItemScrollOffset
+                                    .takeIf { outcome.anchorIndex == index } ?: 0,
+                            msgid = outcome.row.msgid,
+                            serverTime = outcome.row.serverTime,
+                            rowId = outcome.row.id,
+                        )
+                    presentation?.confirmedViewport = position
+                    onScrollPositionChanged(position)
                 }
             }
-        if (terminalEmpty) {
-            admitPayload(target)
-            initialPositionSettled = true
-            suppressNextAutoFollow = true
-            recordEntryStage("initial_position_settled", target, "terminal_empty")
-            onInitialPositionHandled()
-        } else if (targetRow != null && positionTargetMatches(target, targetRow)) {
-            admitPayload(target)
-            AutoFollowTrace.record("initial_position_settled", traceBufferId, traceSessionId) {
-                "target_index=${target.index} index=${listState.firstVisibleItemIndex} " +
-                    "offset=${listState.firstVisibleItemScrollOffset} at_bottom=$currentlyAtBottom " +
-                    "place_at_top=${target.placeAtTop}"
-            }
-            initialPositionSettled = true
-            suppressNextAutoFollow = true
-            recordEntryStage("initial_position_settled", target, "identity_matched")
-            onInitialPositionHandled()
-        } else if (targetRow != null) {
-            AutoFollowTrace.record("initial_position_reresolve", traceBufferId, traceSessionId) {
-                "target_index=${target.index} reason=identity_mismatch item_count=${items.itemCount}"
-            }
-            recordEntryStage("initial_position_reresolve", target, "identity_mismatch")
-            onReresolveInitial(target)
-        } else if (target.expectedEventId != null || target.expectedMsgid != null) {
-            AutoFollowTrace.record("initial_position_reresolve", traceBufferId, traceSessionId) {
-                "target_index=${target.index} reason=target_missing item_count=${items.itemCount}"
-            }
-            recordEntryStage("initial_position_reresolve", target, "target_missing")
-            onReresolveInitial(target)
-        } else {
-            AutoFollowTrace.record("initial_position_unresolved", traceBufferId, traceSessionId) {
-                "target_index=${target.index} item_count=${items.itemCount} " +
-                    "append=${loadStateName(items.loadState.append)}"
-            }
-            recordEntryStage("initial_position_unresolved", target, "target_missing")
-            onInitialPositionUnresolved()
         }
-    }
-
-    // Clear both identities together after the pulse settles (~1.6s).
-    LaunchedEffect(highlightMsgid, highlightEventId) {
-        if (highlightMsgid != null || highlightEventId != null) {
-            kotlinx.coroutines.delay(1_600)
-            highlightMsgid = null
-            highlightEventId = null
+        // The previous collector allocated and wrote to the position cache for nearly every pixel of a
+        // fling. We only need the final anchor: persist when scrolling settles, plus once on disposal so
+        // a back gesture during an active fling still retains the current location.
+        LaunchedEffect(initialPositionSettled, entryVeilLifted, payloadAllowed, listState, visibilityPolicy, items) {
+            if (!initialPositionSettled) return@LaunchedEffect
+            snapshotFlow { listState.isScrollInProgress }
+                .distinctUntilChanged()
+                .collect { scrolling -> if (!scrolling) saveCurrentScrollPosition() }
         }
-    }
+        DisposableEffect(initialPositionSettled, entryVeilLifted, payloadAllowed, listState, visibilityPolicy, items) {
+            onDispose { saveCurrentScrollPosition() }
+        }
 
-    fun saveCurrentScrollPosition() {
-        if (!initialPositionSettled || !entryVeilLifted || !payloadAllowed || !currentPresentationCompatible ||
-            presentationLease?.isActive == false || presentationLease?.ownsSlot() == false ||
-            (presentationLease != null && measuredSnapshot?.value !== items.itemSnapshotList)
+        // How far back into history this visit actually got, which is a different question from where
+        // the reader stopped: a reader who enters at the unread divider and works FORWARD leaves a park
+        // that is newer than the divider, and only this watermark distinguishes that from a backfill
+        // landing unread history older than the park. [preferredEntryTarget] is its only consumer.
+        //
+        // Read state is not involved and must not become involved. The reverse-layout mirror of this
+        // (renderedNewestAnchor, above) is what clamps a resumed viewport MARKREAD; this one goes to a
+        // process-local map and never to the wire.
+        //
+        // Cost is kept at the same edges as the saved position — scroll start/stop plus disposal —
+        // rather than on every measure pass. Recording at scroll START is what captures the depth a
+        // reader entered at before they fling away from it; a single drag that goes deep and returns
+        // without settling can still under-report, which degrades to the depth-only rule and never to a
+        // wrong "already seen".
+        fun recordFurthestDisplayed() {
+            if (!initialPositionSettled || !payloadAllowed || !currentPresentationCompatible ||
+                presentationLease?.isActive == false || presentationLease?.ownsSlot() == false ||
+                (presentationLease != null && measuredSnapshot?.value !== items.itemSnapshotList)
+            ) {
+                return
+            }
+            val layout = listState.layoutInfo
+            val bottomHostHeightPx = readBottomHostHeightPx()
+            val deepest =
+                layout.visibleItemsInfo
+                    .lastOrNull {
+                        timelineItemIsVisible(it, layout, bottomHostHeightPx, rowContentMetrics, readTopHostHeightPx())
+                    }?.index ?: return
+            val anchor =
+                displayedDepthAnchor(
+                    deepestVisibleIndex = deepest,
+                    itemCount = items.itemCount,
+                    peek = items::peek,
+                    policy = visibilityPolicy,
+                ) ?: return
+            onFurthestDisplayedChanged(anchor)
+        }
+        LaunchedEffect(initialPositionSettled, listState, visibilityPolicy, items, presentationLease, payloadAllowed) {
+            if (!initialPositionSettled) return@LaunchedEffect
+            snapshotFlow { listState.isScrollInProgress }
+                .distinctUntilChanged()
+                .collect { recordFurthestDisplayed() }
+        }
+        DisposableEffect(initialPositionSettled, listState, visibilityPolicy, items, presentationLease, payloadAllowed) {
+            onDispose { recordFurthestDisplayed() }
+        }
+
+        LaunchedEffect(initialPositionSettled, listState, items, presentationLease, payloadAllowed) {
+            snapshotFlow {
+                // While scrolling, deliberately stop observing itemCount/index. snapshotFlow then
+                // unregisters those hot reads until the idle edge, preventing a DB query restart for
+                // every row crossed by a fling while keeping the last reaction map on screen.
+                if (!initialPositionSettled || listState.isScrollInProgress) {
+                    null
+                } else {
+                    Triple(
+                        items.itemCount,
+                        listState.firstVisibleItemIndex,
+                        listState.layoutInfo.visibleItemsInfo
+                            .lastOrNull { it.index >= 0 && it.index < items.itemCount }
+                            ?.index ?: -1,
+                    )
+                }
+            }.distinctUntilChanged()
+                .collect { idleWindow ->
+                    if (idleWindow != null) {
+                        onVisibleMsgidsChanged(visibleReactionMsgids(items, listState))
+                    }
+                }
+        }
+
+        // The viewport's demand for history, for the ViewModel's "a seam is the end of the list" rule.
+        //
+        // Keyed on the SEAM LIST rather than on the whole TimelineSeamState: the in-flight and failed
+        // sets change around every load, and restarting for those would re-report a viewport whose load
+        // is already running. Seam POSITIONS do move as a load recedes them, and recomputing on that
+        // edge is the point — a seam a page pushed past the prefetch reach must stop being reported.
+        @OptIn(FlowPreview::class)
+        LaunchedEffect(items, listState, timelineSeams.seams) {
+            // Report the viewport's demand, and journal every report — including the two that say
+            // "nothing". This effect is the ONLY producer of the rule's demand signal and it is
+            // edge-triggered, so from the ViewModel's side an empty answer and never answering at all
+            // are the same shape. Naming the SOURCE separates them, and pairs with `chat_history
+            // seam_rule_evaluated` to show the report actually crossed the setSeamPrefetch hop.
+            fun reportDemand(
+                source: String,
+                firstIndex: Int,
+                lastIndex: Int,
+                anchor: io.github.trevarj.motd.data.db.TimelineAnchor?,
+                gapIds: Set<Long>,
+            ) {
+                onSeamPrefetchChanged(anchor, lastIndex, gapIds)
+                diagnostics.record("chat_timeline", "seam_demand_reported") {
+                    mapOf(
+                        "room_id" to traceBufferId,
+                        "source" to source,
+                        "first_index" to firstIndex,
+                        // Renamed from `last_visible_index`: it is the older EDGE, never a depth. The
+                        // rule does not read it; it is here because its movement under a pinned newer
+                        // edge is the evidence that an index was the wrong unit.
+                        "older_edge_index" to lastIndex,
+                        "viewport_event_id" to anchor?.eventId,
+                        "item_count" to items.itemCount,
+                        "seam_count" to timelineSeams.seams.size,
+                        "demand_count" to gapIds.size,
+                        "settled" to initialPositionSettled,
+                    )
+                }
+            }
+            // Rooms without a single stored gap are the overwhelming majority, and they have nothing to
+            // demand. Return before observing `layoutInfo` at all rather than deriving a reach that can
+            // only ever be empty: this effect would otherwise re-read that snapshot state on every
+            // measure pass of every timeline in the app, competing with scrolling and paging for the
+            // main thread in exactly the rooms that can never use the answer.
+            if (timelineSeams.seams.isEmpty()) {
+                reportDemand("no_seams", firstIndex = -1, lastIndex = -1, anchor = null, gapIds = emptySet())
+                return@LaunchedEffect
+            }
+            snapshotFlow {
+                val layout = listState.layoutInfo
+                val bottomHostHeightPx = readBottomHostHeightPx()
+                val first =
+                    layout.visibleItemsInfo.firstOrNull {
+                        timelineItemIsVisible(it, layout, bottomHostHeightPx, rowContentMetrics, readTopHostHeightPx())
+                    }
+                val last =
+                    layout.visibleItemsInfo.lastOrNull {
+                        timelineItemIsVisible(it, layout, bottomHostHeightPx, rowContentMetrics, readTopHostHeightPx())
+                    }
+                if (first == null || last == null) {
+                    null
+                } else {
+                    val newestIndex = first.index
+                    // Peek the newer edge INSIDE the snapshot read, not after it. The reader's position
+                    // is that row's IDENTITY, and a placeholder resolving under a stationary viewport
+                    // changes the identity without changing any index — this effect is edge-triggered,
+                    // so an identity that is not a snapshot dependency would never be re-reported and a
+                    // seam the viewport could not name would wait forever.
+                    Triple(
+                        newestIndex,
+                        last.index,
+                        viewportAnchorAt(newestIndex, items.itemCount, items::peek),
+                    )
+                }
+            }.distinctUntilChanged()
+                .debounce(SEAM_PREFETCH_SETTLE_MS)
+                .collect { range ->
+                    val (newestIndex, oldestIndex, anchor) =
+                        range ?: return@collect reportDemand(
+                            "empty_range",
+                            firstIndex = -1,
+                            lastIndex = -1,
+                            anchor = null,
+                            gapIds = emptySet(),
+                        )
+                    reportDemand(
+                        "range",
+                        firstIndex = newestIndex,
+                        lastIndex = oldestIndex,
+                        anchor = anchor,
+                        gapIds =
+                            seamsWithinPrefetch(
+                                firstVisibleIndex = newestIndex,
+                                lastVisibleIndex = oldestIndex,
+                                itemCount = items.itemCount,
+                                peek = items::peek,
+                                seams = timelineSeams.seams,
+                            ),
+                    )
+                }
+        }
+
+        // Long-press action sheet target.
+        var sheetTarget by remember { mutableStateOf<MessageEntity?>(null) }
+        var redactionTarget by remember { mutableStateOf<MessageEntity?>(null) }
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        var reactionPickerTarget by remember { mutableStateOf<MessageEntity?>(null) }
+        val reactionPickerState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        var translationTarget by remember { mutableStateOf<MessageEntity?>(null) }
+        var translationTargets by remember { mutableStateOf(emptyList<ExternalTranslationTarget>()) }
+        var otherTranslationAvailable by remember { mutableStateOf(false) }
+
+        fun openTranslationPicker(message: MessageEntity) {
+            if (externalTranslationText(message) == null) return
+            translationTargets = externalTranslationTargets(ctx.packageManager)
+            otherTranslationAvailable = externalTranslationAvailable(ctx.packageManager, null)
+            translationTarget = message
+        }
+
+        fun launchTranslation(
+            message: MessageEntity,
+            target: ExternalTranslationTarget?,
         ) {
-            return
+            scope.launch {
+                if (!externalTranslationAvailable(ctx.packageManager, target)) {
+                    snackbarHostState.showSnackbar(resources.getString(R.string.chat_translation_open_failed))
+                    return@launch
+                }
+                val begin = onBeginExternalTranslation
+                val abort = onAbortExternalTranslationLaunch
+                if (begin == null || onCompleteExternalTranslation == null || abort == null) {
+                    snackbarHostState.showSnackbar(resources.getString(R.string.chat_translation_source_unavailable))
+                    return@launch
+                }
+                val request = begin(message)
+                if (request == null) {
+                    snackbarHostState.showSnackbar(
+                        resources.getString(
+                            if (latestExternalTranslationInFlight) R.string.chat_translation_busy else R.string.chat_translation_source_unavailable,
+                        ),
+                    )
+                    return@launch
+                }
+                val intent = externalTranslationIntent(request.plainText, target, resources.getString(R.string.chat_translation_picker_title))
+                try {
+                    if (target?.action == Intent.ACTION_SEND) {
+                        // SEND is an external-only handoff; release the native-result reservation first.
+                        abort()
+                        ctx.startActivity(intent)
+                    } else {
+                        translationLauncher.launch(intent)
+                    }
+                } catch (_: ActivityNotFoundException) {
+                    abort()
+                    snackbarHostState.showSnackbar(resources.getString(R.string.chat_translation_open_failed))
+                } catch (_: SecurityException) {
+                    abort()
+                    snackbarHostState.showSnackbar(resources.getString(R.string.chat_translation_open_failed))
+                }
+            }
         }
-        val index = listState.firstVisibleItemIndex
-        // Clearing the saved position ASSERTS "resume at the live bottom next time", so only a
-        // provable bottom may clear it — [isAtEffectiveBottom] is that proof, and a viewport parked
-        // in history (a deep jump's destination, say) has unloaded rows below it so it does not
-        // qualify. An indeterminate snapshot — empty because Paging swapped in the incoming
-        // buffer's QUERY snapshot before onDispose (the previous direct peek crashed DM
-        // navigation), or one with no anchorable row in probe reach — proves neither a bottom nor
-        // a place to save, so it only forgets; see [scrollPositionOutcome].
-        when (
-            val outcome =
-                scrollPositionOutcome(
-                    firstVisibleIndex = index,
-                    firstVisibleOffset = listState.firstVisibleItemScrollOffset,
+
+        fun reactionEnabled(
+            target: MessageEntity,
+            emoji: String,
+        ): Boolean {
+            val ready = state.connState as? IrcClientState.Ready
+            val mine =
+                target.msgid?.let { msgid ->
+                    reactionChips(msgid).firstOrNull { it.emoji == emoji }?.mine
+                } == true
+            return ready != null && canSendReactionTags(ready.caps, ready.isupport, remove = mine)
+        }
+
+        ReportMessageViewport(
+            items = items,
+            listState = listState,
+            policy = visibilityPolicy,
+            enabled = initialPositionSettled && payloadAllowed,
+            scopeId = state.buffer?.id,
+            followingAtBottom = autoFollow.following && atBottom,
+            onAnchor = onViewportRefreshAnchor,
+            bottomContentPadding = bottomHostPadding,
+            topContentPadding = topHostPadding,
+            rowContentMetrics = rowContentMetrics,
+        )
+
+        // Newest row the timeline has actually placed on screen. Neither rawNewestAnchor (the room's
+        // newest stored row) nor the Paging snapshot proves display — both keep advancing while the
+        // screen is paused — but a measure pass does. Monotonic, so scrolling back through history
+        // never retracts what was already seen. Reverse layout: the first visible item is the newest.
+        var renderedNewestAnchor by remember(items, listState, visibilityPolicy) {
+            mutableStateOf<io.github.trevarj.motd.data.db.TimelineAnchor?>(null)
+        }
+        LaunchedEffect(items, listState, visibilityPolicy) {
+            snapshotFlow {
+                val layout = listState.layoutInfo
+                val bottomHostHeightPx = readBottomHostHeightPx()
+                val laidOut =
+                    layout.visibleItemsInfo.firstOrNull {
+                        timelineItemIsVisible(it, layout, bottomHostHeightPx, rowContentMetrics, readTopHostHeightPx())
+                    }
+                renderedBottomAnchor(
+                    renderedIndex = laidOut?.index ?: -1,
+                    renderedKey = laidOut?.key,
                     itemCount = items.itemCount,
                     peek = items::peek,
                     policy = visibilityPolicy,
                 )
+            }.distinctUntilChanged()
+                .collect { anchor ->
+                    val seen = renderedNewestAnchor
+                    if (anchor != null && (seen == null || anchor > seen)) renderedNewestAnchor = anchor
+                }
+        }
+
+        // Count nested programmatic scrolls rather than using a Boolean: an incoming pin may supersede
+        // an explicit animation, and the cancelled animation must not briefly masquerade as a user drag.
+        var programmaticScrolls by remember { mutableIntStateOf(0) }
+        val autoScrolling = programmaticScrolls > 0
+
+        suspend fun scrollToNewest(
+            animate: Boolean,
+            reason: String,
         ) {
-            ScrollPositionOutcome.ParkAtBottom -> {
-                val position =
-                    nearestAnchorRow(index, items.itemCount, items::peek, visibilityPolicy)?.let { (anchorIndex, row) ->
-                        ChatScrollPosition(
-                            index = anchorIndex,
-                            offset = listState.firstVisibleItemScrollOffset.takeIf { anchorIndex == index } ?: 0,
-                            msgid = row.msgid,
-                            serverTime = row.serverTime,
-                            rowId = row.id,
-                        )
-                    }
-                if (position != null) presentation?.confirmedViewport = position
-                onClearScrollPosition(position)
+            AutoFollowTrace.record("scroll_start", traceBufferId, traceSessionId) {
+                "reason=$reason animate=$animate index=${listState.firstVisibleItemIndex} " +
+                    "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
             }
-
-            ScrollPositionOutcome.Forget -> {
-                onForgetScrollPosition()
-            }
-
-            is ScrollPositionOutcome.Save -> {
-                AutoFollowTrace.record("position_saved", traceBufferId, traceSessionId) {
-                    "index=$index anchor_index=${outcome.anchorIndex} " +
-                        "offset=${listState.firstVisibleItemScrollOffset} " +
-                        "row=${outcome.row.id} at_bottom=false following=${autoFollow.following}"
-                }
-                val position =
-                    ChatScrollPosition(
-                        index = outcome.anchorIndex,
-                        offset =
-                            listState.firstVisibleItemScrollOffset
-                                .takeIf { outcome.anchorIndex == index } ?: 0,
-                        msgid = outcome.row.msgid,
-                        serverTime = outcome.row.serverTime,
-                        rowId = outcome.row.id,
-                    )
-                presentation?.confirmedViewport = position
-                onScrollPositionChanged(position)
-            }
-        }
-    }
-
-    // The previous collector allocated and wrote to the position cache for nearly every pixel of a
-    // fling. We only need the final anchor: persist when scrolling settles, plus once on disposal so
-    // a back gesture during an active fling still retains the current location.
-    LaunchedEffect(initialPositionSettled, entryVeilLifted, payloadAllowed, listState, visibilityPolicy, items) {
-        if (!initialPositionSettled) return@LaunchedEffect
-        snapshotFlow { listState.isScrollInProgress }
-            .distinctUntilChanged()
-            .collect { scrolling -> if (!scrolling) saveCurrentScrollPosition() }
-    }
-    DisposableEffect(initialPositionSettled, entryVeilLifted, payloadAllowed, listState, visibilityPolicy, items) {
-        onDispose { saveCurrentScrollPosition() }
-    }
-
-    // How far back into history this visit actually got, which is a different question from where
-    // the reader stopped: a reader who enters at the unread divider and works FORWARD leaves a park
-    // that is newer than the divider, and only this watermark distinguishes that from a backfill
-    // landing unread history older than the park. [preferredEntryTarget] is its only consumer.
-    //
-    // Read state is not involved and must not become involved. The reverse-layout mirror of this
-    // (renderedNewestAnchor, above) is what clamps a resumed viewport MARKREAD; this one goes to a
-    // process-local map and never to the wire.
-    //
-    // Cost is kept at the same edges as the saved position — scroll start/stop plus disposal —
-    // rather than on every measure pass. Recording at scroll START is what captures the depth a
-    // reader entered at before they fling away from it; a single drag that goes deep and returns
-    // without settling can still under-report, which degrades to the depth-only rule and never to a
-    // wrong "already seen".
-    fun recordFurthestDisplayed() {
-        if (!initialPositionSettled || !payloadAllowed || !currentPresentationCompatible ||
-            presentationLease?.isActive == false || presentationLease?.ownsSlot() == false ||
-            (presentationLease != null && measuredSnapshot?.value !== items.itemSnapshotList)
-        ) {
-            return
-        }
-        val layout = listState.layoutInfo
-        val bottomHostHeightPx = readBottomHostHeightPx()
-        val deepest =
-            layout.visibleItemsInfo
-                .lastOrNull {
-                    timelineItemIsVisible(it, layout, bottomHostHeightPx, rowContentMetrics)
-                }?.index ?: return
-        val anchor =
-            displayedDepthAnchor(
-                deepestVisibleIndex = deepest,
-                itemCount = items.itemCount,
-                peek = items::peek,
-                policy = visibilityPolicy,
-            ) ?: return
-        onFurthestDisplayedChanged(anchor)
-    }
-    LaunchedEffect(initialPositionSettled, listState, visibilityPolicy, items, presentationLease, payloadAllowed) {
-        if (!initialPositionSettled) return@LaunchedEffect
-        snapshotFlow { listState.isScrollInProgress }
-            .distinctUntilChanged()
-            .collect { recordFurthestDisplayed() }
-    }
-    DisposableEffect(initialPositionSettled, listState, visibilityPolicy, items, presentationLease, payloadAllowed) {
-        onDispose { recordFurthestDisplayed() }
-    }
-
-    LaunchedEffect(initialPositionSettled, listState, items, presentationLease, payloadAllowed) {
-        snapshotFlow {
-            // While scrolling, deliberately stop observing itemCount/index. snapshotFlow then
-            // unregisters those hot reads until the idle edge, preventing a DB query restart for
-            // every row crossed by a fling while keeping the last reaction map on screen.
-            if (!initialPositionSettled || listState.isScrollInProgress) {
-                null
-            } else {
-                Triple(
-                    items.itemCount,
-                    listState.firstVisibleItemIndex,
-                    listState.layoutInfo.visibleItemsInfo
-                        .lastOrNull { it.index >= 0 && it.index < items.itemCount }
-                        ?.index ?: -1,
-                )
-            }
-        }.distinctUntilChanged()
-            .collect { idleWindow ->
-                if (idleWindow != null) {
-                    onVisibleMsgidsChanged(visibleReactionMsgids(items, listState))
-                }
-            }
-    }
-
-    // The viewport's demand for history, for the ViewModel's "a seam is the end of the list" rule.
-    //
-    // Keyed on the SEAM LIST rather than on the whole TimelineSeamState: the in-flight and failed
-    // sets change around every load, and restarting for those would re-report a viewport whose load
-    // is already running. Seam POSITIONS do move as a load recedes them, and recomputing on that
-    // edge is the point — a seam a page pushed past the prefetch reach must stop being reported.
-    @OptIn(FlowPreview::class)
-    LaunchedEffect(items, listState, timelineSeams.seams) {
-        // Report the viewport's demand, and journal every report — including the two that say
-        // "nothing". This effect is the ONLY producer of the rule's demand signal and it is
-        // edge-triggered, so from the ViewModel's side an empty answer and never answering at all
-        // are the same shape. Naming the SOURCE separates them, and pairs with `chat_history
-        // seam_rule_evaluated` to show the report actually crossed the setSeamPrefetch hop.
-        fun reportDemand(
-            source: String,
-            firstIndex: Int,
-            lastIndex: Int,
-            anchor: io.github.trevarj.motd.data.db.TimelineAnchor?,
-            gapIds: Set<Long>,
-        ) {
-            onSeamPrefetchChanged(anchor, lastIndex, gapIds)
-            diagnostics.record("chat_timeline", "seam_demand_reported") {
-                mapOf(
-                    "room_id" to traceBufferId,
-                    "source" to source,
-                    "first_index" to firstIndex,
-                    // Renamed from `last_visible_index`: it is the older EDGE, never a depth. The
-                    // rule does not read it; it is here because its movement under a pinned newer
-                    // edge is the evidence that an index was the wrong unit.
-                    "older_edge_index" to lastIndex,
-                    "viewport_event_id" to anchor?.eventId,
-                    "item_count" to items.itemCount,
-                    "seam_count" to timelineSeams.seams.size,
-                    "demand_count" to gapIds.size,
-                    "settled" to initialPositionSettled,
-                )
-            }
-        }
-        // Rooms without a single stored gap are the overwhelming majority, and they have nothing to
-        // demand. Return before observing `layoutInfo` at all rather than deriving a reach that can
-        // only ever be empty: this effect would otherwise re-read that snapshot state on every
-        // measure pass of every timeline in the app, competing with scrolling and paging for the
-        // main thread in exactly the rooms that can never use the answer.
-        if (timelineSeams.seams.isEmpty()) {
-            reportDemand("no_seams", firstIndex = -1, lastIndex = -1, anchor = null, gapIds = emptySet())
-            return@LaunchedEffect
-        }
-        snapshotFlow {
-            val layout = listState.layoutInfo
-            val bottomHostHeightPx = readBottomHostHeightPx()
-            val first =
-                layout.visibleItemsInfo.firstOrNull {
-                    timelineItemIsVisible(it, layout, bottomHostHeightPx, rowContentMetrics)
-                }
-            val last =
-                layout.visibleItemsInfo.lastOrNull {
-                    timelineItemIsVisible(it, layout, bottomHostHeightPx, rowContentMetrics)
-                }
-            if (first == null || last == null) {
-                null
-            } else {
-                val newestIndex = first.index
-                // Peek the newer edge INSIDE the snapshot read, not after it. The reader's position
-                // is that row's IDENTITY, and a placeholder resolving under a stationary viewport
-                // changes the identity without changing any index — this effect is edge-triggered,
-                // so an identity that is not a snapshot dependency would never be re-reported and a
-                // seam the viewport could not name would wait forever.
-                Triple(
-                    newestIndex,
-                    last.index,
-                    viewportAnchorAt(newestIndex, items.itemCount, items::peek),
-                )
-            }
-        }.distinctUntilChanged()
-            .debounce(SEAM_PREFETCH_SETTLE_MS)
-            .collect { range ->
-                val (newestIndex, oldestIndex, anchor) =
-                    range ?: return@collect reportDemand(
-                        "empty_range",
-                        firstIndex = -1,
-                        lastIndex = -1,
-                        anchor = null,
-                        gapIds = emptySet(),
-                    )
-                reportDemand(
-                    "range",
-                    firstIndex = newestIndex,
-                    lastIndex = oldestIndex,
-                    anchor = anchor,
-                    gapIds =
-                        seamsWithinPrefetch(
-                            firstVisibleIndex = newestIndex,
-                            lastVisibleIndex = oldestIndex,
-                            itemCount = items.itemCount,
-                            peek = items::peek,
-                            seams = timelineSeams.seams,
-                        ),
-                )
-            }
-    }
-
-    // Long-press action sheet target.
-    var sheetTarget by remember { mutableStateOf<MessageEntity?>(null) }
-    var redactionTarget by remember { mutableStateOf<MessageEntity?>(null) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var reactionPickerTarget by remember { mutableStateOf<MessageEntity?>(null) }
-    val reactionPickerState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var translationTarget by remember { mutableStateOf<MessageEntity?>(null) }
-    var translationTargets by remember { mutableStateOf(emptyList<ExternalTranslationTarget>()) }
-    var otherTranslationAvailable by remember { mutableStateOf(false) }
-
-    fun openTranslationPicker(message: MessageEntity) {
-        if (externalTranslationText(message) == null) return
-        translationTargets = externalTranslationTargets(ctx.packageManager)
-        otherTranslationAvailable = externalTranslationAvailable(ctx.packageManager, null)
-        translationTarget = message
-    }
-
-    fun launchTranslation(
-        message: MessageEntity,
-        target: ExternalTranslationTarget?,
-    ) {
-        scope.launch {
-            if (!externalTranslationAvailable(ctx.packageManager, target)) {
-                snackbarHostState.showSnackbar(resources.getString(R.string.chat_translation_open_failed))
-                return@launch
-            }
-            val begin = onBeginExternalTranslation
-            val abort = onAbortExternalTranslationLaunch
-            if (begin == null || onCompleteExternalTranslation == null || abort == null) {
-                snackbarHostState.showSnackbar(resources.getString(R.string.chat_translation_source_unavailable))
-                return@launch
-            }
-            val request = begin(message)
-            if (request == null) {
-                snackbarHostState.showSnackbar(
-                    resources.getString(
-                        if (latestExternalTranslationInFlight) R.string.chat_translation_busy else R.string.chat_translation_source_unavailable,
-                    ),
-                )
-                return@launch
-            }
-            val intent = externalTranslationIntent(request.plainText, target, resources.getString(R.string.chat_translation_picker_title))
+            onViewportRefreshAnchor(if (presentationLease != null) ViewportRefreshAnchor.Newest else null)
+            autoFollow.requestFollow()
+            programmaticScrolls++
             try {
-                if (target?.action == Intent.ACTION_SEND) {
-                    // SEND is an external-only handoff; release the native-result reservation first.
-                    abort()
-                    ctx.startActivity(intent)
-                } else {
-                    translationLauncher.launch(intent)
+                val settlingAdoption = presentationLease != null && !initialPositionSettled
+                if (settlingAdoption) {
+                    // An explicit newest/send action owns this demand even while automatic hints are
+                    // still gated. The old retained window may not contain index zero.
+                    if (items.itemCount == 0 || items.peek(0) == null) items.refresh()
+                    snapshotFlow {
+                        items.itemCount > 0 ||
+                            initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.TerminalEmpty
+                    }.first { it }
+                    if (items.itemCount > 0) items[0]
                 }
-            } catch (_: ActivityNotFoundException) {
-                abort()
-                snackbarHostState.showSnackbar(resources.getString(R.string.chat_translation_open_failed))
-            } catch (_: SecurityException) {
-                abort()
-                snackbarHostState.showSnackbar(resources.getString(R.string.chat_translation_open_failed))
+                if (animate) listState.animateScrollToItem(0) else listState.scrollToItem(0)
+                if (settlingAdoption && !initialPositionSettled) {
+                    snapshotFlow {
+                        latestEntryState is EntryPositionState.Settled && atBottom && !listState.isScrollInProgress
+                    }.first { it }
+                    admitPayload()
+                    initialPositionSettled = true
+                    suppressNextAutoFollow = true
+                }
+            } finally {
+                programmaticScrolls--
+                AutoFollowTrace.record("scroll_end", traceBufferId, traceSessionId) {
+                    "reason=$reason index=${listState.firstVisibleItemIndex} " +
+                        "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
+                }
             }
         }
-    }
 
-    fun reactionEnabled(
-        target: MessageEntity,
-        emoji: String,
-    ): Boolean {
-        val ready = state.connState as? IrcClientState.Ready
-        val mine =
-            target.msgid?.let { msgid ->
-                reactionChips(msgid).firstOrNull { it.emoji == emoji }?.mine
-            } == true
-        return ready != null && canSendReactionTags(ready.caps, ready.isupport, remove = mine)
-    }
-
-    ReportMessageViewport(
-        items = items,
-        listState = listState,
-        policy = visibilityPolicy,
-        enabled = initialPositionSettled && payloadAllowed,
-        scopeId = state.buffer?.id,
-        followingAtBottom = autoFollow.following && atBottom,
-        onAnchor = onViewportRefreshAnchor,
-        bottomContentPadding = bottomHostPadding,
-        rowContentMetrics = rowContentMetrics,
-    )
-
-    // Newest row the timeline has actually placed on screen. Neither rawNewestAnchor (the room's
-    // newest stored row) nor the Paging snapshot proves display — both keep advancing while the
-    // screen is paused — but a measure pass does. Monotonic, so scrolling back through history
-    // never retracts what was already seen. Reverse layout: the first visible item is the newest.
-    var renderedNewestAnchor by remember(items, listState, visibilityPolicy) {
-        mutableStateOf<io.github.trevarj.motd.data.db.TimelineAnchor?>(null)
-    }
-    LaunchedEffect(items, listState, visibilityPolicy) {
-        snapshotFlow {
-            val layout = listState.layoutInfo
-            val bottomHostHeightPx = readBottomHostHeightPx()
-            val laidOut =
-                layout.visibleItemsInfo.firstOrNull {
-                    timelineItemIsVisible(it, layout, bottomHostHeightPx, rowContentMetrics)
-                }
-            renderedBottomAnchor(
-                renderedIndex = laidOut?.index ?: -1,
-                renderedKey = laidOut?.key,
-                itemCount = items.itemCount,
-                peek = items::peek,
-                policy = visibilityPolicy,
-            )
-        }.distinctUntilChanged()
-            .collect { anchor ->
-                val seen = renderedNewestAnchor
-                if (anchor != null && (seen == null || anchor > seen)) renderedNewestAnchor = anchor
-            }
-    }
-
-    // Count nested programmatic scrolls rather than using a Boolean: an incoming pin may supersede
-    // an explicit animation, and the cancelled animation must not briefly masquerade as a user drag.
-    var programmaticScrolls by remember { mutableIntStateOf(0) }
-    val autoScrolling = programmaticScrolls > 0
-
-    suspend fun scrollToNewest(
-        animate: Boolean,
-        reason: String,
-    ) {
-        AutoFollowTrace.record("scroll_start", traceBufferId, traceSessionId) {
-            "reason=$reason animate=$animate index=${listState.firstVisibleItemIndex} " +
-                "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
-        }
-        onViewportRefreshAnchor(if (presentationLease != null) ViewportRefreshAnchor.Newest else null)
-        autoFollow.requestFollow()
-        programmaticScrolls++
-        try {
-            val settlingAdoption = presentationLease != null && !initialPositionSettled
-            if (settlingAdoption) {
-                // An explicit newest/send action owns this demand even while automatic hints are
-                // still gated. The old retained window may not contain index zero.
-                if (items.itemCount == 0 || items.peek(0) == null) items.refresh()
-                snapshotFlow {
-                    items.itemCount > 0 ||
-                        initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.TerminalEmpty
-                }.first { it }
-                if (items.itemCount > 0) items[0]
-            }
-            if (animate) listState.animateScrollToItem(0) else listState.scrollToItem(0)
-            if (settlingAdoption && !initialPositionSettled) {
-                snapshotFlow {
-                    latestEntryState is EntryPositionState.Settled && atBottom && !listState.isScrollInProgress
-                }.first { it }
-                admitPayload()
-                initialPositionSettled = true
-                suppressNextAutoFollow = true
-            }
-        } finally {
-            programmaticScrolls--
-            AutoFollowTrace.record("scroll_end", traceBufferId, traceSessionId) {
-                "reason=$reason index=${listState.firstVisibleItemIndex} " +
+        // Jump to a mid-list row (e.g. the nearest unread @mention) without arming auto-follow: a live
+        // arrival must not yank the viewport away from the mention the user just navigated to.
+        suspend fun scrollToIndex(
+            index: Int,
+            animate: Boolean,
+            reason: String,
+        ) {
+            AutoFollowTrace.record("scroll_start", traceBufferId, traceSessionId) {
+                "reason=$reason animate=$animate target=$index index=${listState.firstVisibleItemIndex} " +
                     "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
             }
-        }
-    }
-
-    // Jump to a mid-list row (e.g. the nearest unread @mention) without arming auto-follow: a live
-    // arrival must not yank the viewport away from the mention the user just navigated to.
-    suspend fun scrollToIndex(
-        index: Int,
-        animate: Boolean,
-        reason: String,
-    ) {
-        AutoFollowTrace.record("scroll_start", traceBufferId, traceSessionId) {
-            "reason=$reason animate=$animate target=$index index=${listState.firstVisibleItemIndex} " +
-                "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
-        }
-        onViewportRefreshAnchor(null)
-        programmaticScrolls++
-        try {
-            if (animate) listState.animateScrollToItem(index) else listState.scrollToItem(index)
-        } finally {
-            programmaticScrolls--
-            AutoFollowTrace.record("scroll_end", traceBufferId, traceSessionId) {
-                "reason=$reason index=${listState.firstVisibleItemIndex} " +
-                    "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
+            onViewportRefreshAnchor(null)
+            programmaticScrolls++
+            try {
+                if (animate) listState.animateScrollToItem(index) else listState.scrollToItem(index)
+            } finally {
+                programmaticScrolls--
+                AutoFollowTrace.record("scroll_end", traceBufferId, traceSessionId) {
+                    "reason=$reason index=${listState.firstVisibleItemIndex} " +
+                        "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
+                }
             }
         }
-    }
 
-    // Record only actual scroll-state/programmatic edges. An index/offset change caused by a Paging
-    // prepend does not emit here, so it cannot be mistaken for the user leaving the bottom.
-    LaunchedEffect(listState, initialPositionSettled) {
-        if (!initialPositionSettled) return@LaunchedEffect
-        snapshotFlow { listState.isScrollInProgress to (programmaticScrolls > 0) }
-            .distinctUntilChanged()
-            .collect { (scrolling, programmatic) ->
-                // The same edge auto-follow reads as "the user is taking over", reported to the
-                // ViewModel so its one post-catch-up entry correction stands down. Programmatic
-                // scrolls (entry placement, the newest FAB, a send) are excluded here; the actions
-                // that issue them retire the correction themselves.
-                if (scrolling && !programmatic) {
-                    onTimelineInteraction()
-                    onViewportRefreshAnchor(null)
-                }
-                val before = autoFollow.following
-                autoFollow.onScrollStateChanged(scrolling, programmatic, atBottom)
-                AutoFollowTrace.record("scroll_intent", traceBufferId, traceSessionId) {
-                    "scrolling=$scrolling programmatic=$programmatic at_bottom=$atBottom " +
-                        "following_before=$before following_after=${autoFollow.following} " +
-                        "index=${listState.firstVisibleItemIndex} offset=${listState.firstVisibleItemScrollOffset}"
-                }
-                if (!scrolling) {
-                    AutoFollowTrace.record("viewport_settled", traceBufferId, traceSessionId) {
-                        "at_bottom=$atBottom following=${autoFollow.following} " +
+        // Record only actual scroll-state/programmatic edges. An index/offset change caused by a Paging
+        // prepend does not emit here, so it cannot be mistaken for the user leaving the bottom.
+        LaunchedEffect(listState, initialPositionSettled) {
+            if (!initialPositionSettled) return@LaunchedEffect
+            snapshotFlow { listState.isScrollInProgress to (programmaticScrolls > 0) }
+                .distinctUntilChanged()
+                .collect { (scrolling, programmatic) ->
+                    // The same edge auto-follow reads as "the user is taking over", reported to the
+                    // ViewModel so its one post-catch-up entry correction stands down. Programmatic
+                    // scrolls (entry placement, the newest FAB, a send) are excluded here; the actions
+                    // that issue them retire the correction themselves.
+                    if (scrolling && !programmatic) {
+                        onTimelineInteraction()
+                        onViewportRefreshAnchor(null)
+                    }
+                    val before = autoFollow.following
+                    autoFollow.onScrollStateChanged(scrolling, programmatic, atBottom)
+                    AutoFollowTrace.record("scroll_intent", traceBufferId, traceSessionId) {
+                        "scrolling=$scrolling programmatic=$programmatic at_bottom=$atBottom " +
+                            "following_before=$before following_after=${autoFollow.following} " +
                             "index=${listState.firstVisibleItemIndex} offset=${listState.firstVisibleItemScrollOffset}"
                     }
-                }
-            }
-    }
-
-    // Keep one collector alive for the whole settled entry. Keying a LaunchedEffect directly on
-    // itemCount cancelled an in-flight animateScrollToItem when the next message arrived; because
-    // that animation also set isScrollInProgress, the replacement effect believed the user had
-    // scrolled away and permanently stopped following a burst. Live arrivals snap to index zero;
-    // animation is reserved for explicit send/FAB actions.
-    LaunchedEffect(items, initialPositionSettled, visibilityPolicy, payloadAllowed) {
-        if (!initialPositionSettled) return@LaunchedEffect
-        snapshotFlow {
-            items.itemCount to newestEffectiveMessageId(items.itemCount, items::peek, visibilityPolicy)
-        }.distinctUntilChanged()
-            .collect { (newCount, newestEffectiveId) ->
-                val oldCount = autoFollow.presentedItemCount
-                val followingBefore = autoFollow.following
-                if (suppressNextAutoFollow || (temporaryFoolMotion && !payloadAllowed)) {
-                    autoFollow.reset(newCount, atBottom, newestEffectiveId)
-                    liveEntryIds = emptySet()
-                    suppressNextAutoFollow = temporaryFoolMotion && !payloadAllowed
-                    AutoFollowTrace.record("paging_initial", traceBufferId, traceSessionId) {
-                        "old_count=$oldCount new_count=$newCount at_bottom=$atBottom " +
-                            "following=${autoFollow.following} refresh=${loadStateName(items.loadState.refresh)} " +
-                            "append=${loadStateName(items.loadState.append)}"
-                    }
-                } else {
-                    val change = autoFollow.onTimelineChangedWithEntry(newCount, newestEffectiveId)
-                    val animatedEntryId =
-                        change.liveEntryId?.takeUnless {
-                            extendsSystemRun(it, newCount, items::peek)
+                    if (!scrolling) {
+                        AutoFollowTrace.record("viewport_settled", traceBufferId, traceSessionId) {
+                            "at_bottom=$atBottom following=${autoFollow.following} " +
+                                "index=${listState.firstVisibleItemIndex} offset=${listState.firstVisibleItemScrollOffset}"
                         }
-                    liveEntryIds = appendLiveEntryId(liveEntryIds, animatedEntryId)
-                    val newest = if (newCount > 0) items.peek(0) else null
-                    AutoFollowTrace.record("follow_decision", traceBufferId, traceSessionId) {
-                        "old_count=$oldCount new_count=$newCount at_bottom=$atBottom " +
-                            "following_before=$followingBefore following_after=${autoFollow.following} " +
-                            "follow=${change.shouldFollow} live_entry=${change.liveEntryId ?: -1} " +
-                            "newest_row=${newest?.id ?: -1} " +
-                            "newest_kind=${newest?.kind?.name ?: "NONE"} " +
-                            "refresh=${loadStateName(items.loadState.refresh)} " +
-                            "append=${loadStateName(items.loadState.append)}"
-                    }
-                    if (change.shouldFollow) {
-                        // Apply the new index-zero anchor to the same remeasure that presents the
-                        // Paging update. A suspending scroll can expose the old anchor for one frame.
-                        autoFollow.requestFollow()
-                        listState.requestScrollToItem(0)
                     }
                 }
-            }
-    }
+        }
 
-    // Viewport pin. A Paging presentation whose loaded window no longer covers the viewport turns
-    // the anchor row into a placeholder, and a placeholder carries a private positional key rather
-    // than the row's id — so LazyListState's key-based re-anchoring fails at exactly the moment it
-    // is needed, and the viewport keeps a raw index that the same presentation may have moved every
-    // row away from. [timelinePresentationPin] restores that index from a row conserved across both
-    // presentations, or declines; see its documentation for why every uncertain case declines.
-    //
-    // Guards, in order, and all of them mandatory:
-    //   * initialPositionSettled — entry positioning owns the viewport until it says otherwise, and
-    //     it deliberately scrolls through unloaded rows to get there.
-    //   * not scrolling and not mid-programmatic-scroll — a pin landing inside a drag or a fling
-    //     would itself be the jump this exists to prevent.
-    //   * not following, and not at the bottom — the auto-follow effect above issues its own
-    //     requestScrollToItem(0) for the same presentation and must win; two requests in one frame
-    //     resolve to the last one issued, and it must not be this.
-    //
-    // The collector never suspends, so it keeps up with the conflated presentation flow and the
-    // request reaches the same remeasure that presents the update.
-    LaunchedEffect(items, listState, initialPositionSettled) {
-        if (!initialPositionSettled) return@LaunchedEffect
-        var previous: ItemSnapshotList<MessageEntity>? = null
-        snapshotFlow { items.itemSnapshotList }.collect { snapshot ->
-            val prior = previous
-            previous = snapshot
-            if (prior == null) return@collect
-            if (listState.isScrollInProgress || programmaticScrolls > 0) return@collect
-            if (autoFollow.following || atBottom) return@collect
-            val index = listState.firstVisibleItemIndex
-            val key = prior.getOrNull(index)?.id ?: return@collect
-            // Fast path, and the same answer timelinePresentationPin gives: a key the presentation
-            // still loads is one Compose re-anchors natively. Checked here without materializing
-            // either window so an ordinary live arrival allocates nothing.
-            if (snapshot.items.any { it.id == key }) return@collect
-            val pin =
-                timelinePresentationPin(
-                    anchor =
-                        TimelineViewportAnchor(
-                            index = index,
-                            offset = listState.firstVisibleItemScrollOffset,
-                            key = key,
-                        ),
-                    previous = prior.toTimelineWindow(),
-                    current = snapshot.toTimelineWindow(),
-                ) ?: return@collect
-            listState.requestScrollToItem(pin.index, pin.offset)
-            val fields =
-                mapOf(
-                    "anchor_key" to key,
-                    "from_index" to index,
-                    "to_index" to pin.index,
-                    "offset" to pin.offset,
-                    "item_count" to snapshot.size,
-                    "placeholders_before" to snapshot.placeholdersBefore,
-                    "loaded_count" to snapshot.items.size,
-                )
-            diagnostics.record("chat_timeline", "presentation_pin") { fields }
-            AutoFollowTrace.record("presentation_pin", traceBufferId, traceSessionId) {
-                formatTimelineGenerationFields(fields)
-            }
-        }
-    }
-
-    // Generation watch. Nothing in this app can currently see a Paging GENERATION change from the
-    // UI side — the timeline reports counts and nothing else — and that is why the visible churn
-    // after a catch-up run has stayed un-arbitrated. Every fetched page persists in its own Room
-    // transaction, so one catch-up produces several invalidations in a second, and each
-    // regeneration re-places a bounded loaded window under a viewport that never moved.
-    //
-    // Journal ONE line per PRESENTATION (never per frame) carrying the three quantities that
-    // separate the competing explanations: where the loaded window landed, what became of the
-    // viewport's anchor row, and whether the snapshot was momentarily empty. Reading guide lives on
-    // [timelineGenerationFields].
-    //
-    // Started only while the journal is armed, so an ordinary device pays nothing at all: the
-    // collector does not exist, and the per-presentation id list it reads is never built.
-    val journalArmed by diagnostics.enabled.collectAsStateWithLifecycle()
-    LaunchedEffect(items, listState, journalArmed, traceBufferId) {
-        if (!journalArmed) return@LaunchedEffect
-        var previous: TimelineWindow? = null
-        var generation = 0L
-        snapshotFlow { items.itemSnapshotList.toTimelineWindow() }.collect { current ->
-            generation++
-            val prior = previous
-            previous = current
-            // Read before the frame: the lazy list has not remeasured against this presentation
-            // yet, so index/offset still describe the layout `prior` was measured into.
-            val beforeIndex = listState.firstVisibleItemIndex
-            val before =
-                TimelineViewportAnchor(
-                    index = beforeIndex,
-                    offset = listState.firstVisibleItemScrollOffset,
-                    key = prior?.idAt(beforeIndex),
-                )
-            withFrameNanos { }
-            val afterIndex = listState.firstVisibleItemIndex
-            val after =
-                TimelineViewportAnchor(
-                    index = afterIndex,
-                    offset = listState.firstVisibleItemScrollOffset,
-                    key = current.idAt(afterIndex),
-                )
-            val fields =
-                timelineGenerationFields(
-                    generation = generation,
-                    previous = prior,
-                    current = current,
-                    before = before,
-                    after = after,
-                    settled = initialPositionSettled,
-                    scrolling = listState.isScrollInProgress,
-                    following = autoFollow.following,
-                )
-            diagnostics.record("chat_timeline", "generation_presented") { fields }
-            AutoFollowTrace.record("generation_presented", traceBufferId, traceSessionId) {
-                formatTimelineGenerationFields(fields)
-            }
-        }
-    }
-    val titleTarget = chatTitleTarget(buffer?.type)
-    val titleClickLabel =
-        when (titleTarget) {
-            ChatTitleTarget.CHANNEL_INFO -> stringResource(R.string.chat_open_channel_info)
-            ChatTitleTarget.NICK_DETAILS -> stringResource(R.string.chat_open_nick_details)
-            ChatTitleTarget.NONE -> null
-        }
-    // Mark read on new-message-while-at-bottom only: syncing while scrolled up
-    // reading history would clear unread on other clients and destroy the local unread UX. What
-    // "at bottom" is allowed to mean is therefore load-bearing, and `atBottom` is the only thing
-    // standing between a viewport parked in history and a room-wide MARKREAD: see isAtEffectiveBottom.
-    //
-    // viewportReadEnabled is a key here, so the pause/resume flip restarts the effect. Arrivals
-    // while paused correctly do not acknowledge, but the restart used to acknowledge them anyway
-    // the instant the screen came back, before a single one had been measured. Remembering that a
-    // pause happened lets the first run back clamp to what was actually rendered; every later run
-    // is steady state again. The flag is consumed by the first enabled run whether or not it
-    // acknowledges, so a clamp can never leak into a genuinely live viewport.
-    val pausedSinceLastRun = remember { mutableStateOf(false) }
-    LaunchedEffect(
-        rawNewestAnchor,
-        renderedNewestAnchor,
-        atBottom,
-        initialPositionSettled,
-        viewportReadEnabled,
-        payloadAllowed,
-    ) {
-        if (!viewportReadEnabled || !payloadAllowed || !currentPresentationCompatible || presentationLease?.isActive == false) {
-            pausedSinceLastRun.value = true
-            return@LaunchedEffect
-        }
-        val resumed = pausedSinceLastRun.value
-        pausedSinceLastRun.value = false
-        val newest =
-            viewportMarkReadAnchor(
-                rawNewest = rawNewestAnchor,
-                renderedNewest = renderedNewestAnchor,
-                resumed = resumed,
-            ) ?: return@LaunchedEffect
-        val ackable =
-            shouldMarkReadFromViewport(
-                atBottom = atBottom,
-                initialPositionSettled = initialPositionSettled,
-                viewportReadEnabled = viewportReadEnabled && payloadAllowed,
-            )
-        if (ackable && newest.serverTime > 0) {
-            AutoFollowTrace.record("viewport_markread", traceBufferId, traceSessionId) {
-                "marker=${newest.serverTime}:${newest.eventId} item_count=${items.itemCount}"
-            }
-            onMarkRead(newest)
-        }
-    }
-    val recentSpeakers =
-        remember(items.itemCount) {
-            // Exclude system-event senders and self so recency ranking reflects real conversation
-            // partners. Only the newest rows matter for recency, so cap the scan (the list
-            // is reverse-laid-out, so index 0.. are the newest) to stay cheap on large loaded windows.
-            (0 until minOf(items.itemCount, 60))
-                .mapNotNull { items.peek(it) }
-                .filterNot { isSystemKind(it.kind) || it.isSelf }
-                .map { it.sender }
-        }
-    val compactHeader by remember {
-        derivedStateOf {
-            // Keep 48dp controls out until the animated bar can contain them without jumping.
-            36.dp + (TopAppBarDefaults.TopAppBarExpandedHeight - 36.dp) * headerExpansion.value < 48.dp
-        }
-    }
-    val conversationActionsMenu: @Composable () -> Unit = {
-        DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.testTag("chat_overflow_menu")) {
-            if (compactHeader) {
-                if (titleClickLabel != null) {
-                    DropdownMenuItem(
-                        modifier = Modifier.testTag("chat_compact_details"),
-                        text = { Text(titleClickLabel) },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null) },
-                        onClick = {
-                            overflowOpen = false
-                            buffer?.let { onOpenChannelInfo(it.id) }
-                        },
-                    )
-                }
-                onOpenConversationList?.let { openConversationList ->
-                    DropdownMenuItem(
-                        modifier = Modifier.testTag("chat_open_conversation_list"),
-                        text = { Text(stringResource(R.string.dickord_portal_channels)) },
-                        onClick = {
-                            overflowOpen = false
-                            openConversationList()
-                        },
-                    )
-                }
-                DropdownMenuItem(
-                    modifier = Modifier.testTag("chat_compact_search"),
-                    text = { Text(stringResource(R.string.chat_search)) },
-                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                    onClick = {
-                        overflowOpen = false
-                        buffer?.let { onOpenSearch(it.id) }
-                    },
-                )
-                HorizontalDivider()
-            }
-            if (buffer?.type == BufferType.CHANNEL && buffer.joined) {
-                val inviteEnabled = state.connState is IrcClientState.Ready
-                DropdownMenuItem(
-                    modifier = Modifier.testTag("chat_invite_user"),
-                    text = {
-                        Column {
-                            Text(stringResource(R.string.irc_invite_user_title))
-                            if (!inviteEnabled) {
-                                Text(
-                                    stringResource(R.string.irc_invite_disconnected),
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
+        // Keep one collector alive for the whole settled entry. Keying a LaunchedEffect directly on
+        // itemCount cancelled an in-flight animateScrollToItem when the next message arrived; because
+        // that animation also set isScrollInProgress, the replacement effect believed the user had
+        // scrolled away and permanently stopped following a burst. Live arrivals snap to index zero;
+        // animation is reserved for explicit send/FAB actions.
+        LaunchedEffect(items, initialPositionSettled, visibilityPolicy, payloadAllowed) {
+            if (!initialPositionSettled) return@LaunchedEffect
+            snapshotFlow {
+                items.itemCount to newestEffectiveMessageId(items.itemCount, items::peek, visibilityPolicy)
+            }.distinctUntilChanged()
+                .collect { (newCount, newestEffectiveId) ->
+                    val oldCount = autoFollow.presentedItemCount
+                    val followingBefore = autoFollow.following
+                    if (suppressNextAutoFollow || (temporaryFoolMotion && !payloadAllowed)) {
+                        autoFollow.reset(newCount, atBottom, newestEffectiveId)
+                        liveEntryIds = emptySet()
+                        suppressNextAutoFollow = temporaryFoolMotion && !payloadAllowed
+                        AutoFollowTrace.record("paging_initial", traceBufferId, traceSessionId) {
+                            "old_count=$oldCount new_count=$newCount at_bottom=$atBottom " +
+                                "following=${autoFollow.following} refresh=${loadStateName(items.loadState.refresh)} " +
+                                "append=${loadStateName(items.loadState.append)}"
+                        }
+                    } else {
+                        val change = autoFollow.onTimelineChangedWithEntry(newCount, newestEffectiveId)
+                        val animatedEntryId =
+                            change.liveEntryId?.takeUnless {
+                                extendsSystemRun(it, newCount, items::peek)
                             }
+                        liveEntryIds = appendLiveEntryId(liveEntryIds, animatedEntryId)
+                        val newest = if (newCount > 0) items.peek(0) else null
+                        AutoFollowTrace.record("follow_decision", traceBufferId, traceSessionId) {
+                            "old_count=$oldCount new_count=$newCount at_bottom=$atBottom " +
+                                "following_before=$followingBefore following_after=${autoFollow.following} " +
+                                "follow=${change.shouldFollow} live_entry=${change.liveEntryId ?: -1} " +
+                                "newest_row=${newest?.id ?: -1} " +
+                                "newest_kind=${newest?.kind?.name ?: "NONE"} " +
+                                "refresh=${loadStateName(items.loadState.refresh)} " +
+                                "append=${loadStateName(items.loadState.append)}"
                         }
-                    },
-                    leadingIcon = { Icon(Icons.Outlined.GroupAdd, contentDescription = null) },
-                    enabled = inviteEnabled,
-                    onClick = {
-                        overflowOpen = false
-                        onInviteUser()
-                    },
-                )
-            }
-            if (canPrepareCatchUpContext(agentwireEnabled, isServerBuffer, unreadEntrySnapshot)) {
-                DropdownMenuItem(
-                    modifier = Modifier.testTag("chat_catch_up"),
-                    text = { Text(stringResource(R.string.agent_context_catch_up)) },
-                    leadingIcon = { Icon(Icons.Outlined.AutoAwesome, contentDescription = null) },
-                    enabled = !contextPreparing,
-                    onClick = {
-                        overflowOpen = false
-                        onPrepareCatchUpContext()
-                    },
-                )
-            }
-            if (buffer?.type == BufferType.CHANNEL) {
-                DropdownMenuItem(
-                    modifier = Modifier.testTag("chat_watch").semantics { selected = !channelNotifications.loading && channelNotifications.available && channelNotifications.watch != null },
-                    text = {
-                        Column {
-                            Text(stringResource(R.string.channelinfo_notifications))
-                            Text(channelNotifications.summary(), style = MaterialTheme.typography.bodySmall)
+                        if (change.shouldFollow) {
+                            // Apply the new index-zero anchor to the same remeasure that presents the
+                            // Paging update. A suspending scroll can expose the old anchor for one frame.
+                            autoFollow.requestFollow()
+                            listState.requestScrollToItem(0)
                         }
-                    },
-                    leadingIcon = {
-                        Icon(
-                            channelNotifications.notificationIcon(),
-                            contentDescription = null,
-                        )
-                    },
-                    onClick = {
-                        overflowOpen = false
-                        notificationSheetOpen = true
-                    },
-                )
-            }
-            DropdownMenuItem(
-                modifier = Modifier.testTag("chat_layout_menu"),
-                text = {
-                    Column {
-                        Text(stringResource(R.string.chat_layout_title))
-                        Text(
-                            stringResource(
-                                when {
-                                    conversationLayout.override != null -> R.string.chat_layout_overflow_override
-                                    conversationLayout.bufferDefault != null -> R.string.chat_layout_overflow_server
-                                    else -> R.string.chat_layout_overflow_global
-                                },
-                                densityLabel(conversationLayout.effective),
+                    }
+                }
+        }
+
+        // Viewport pin. A Paging presentation whose loaded window no longer covers the viewport turns
+        // the anchor row into a placeholder, and a placeholder carries a private positional key rather
+        // than the row's id — so LazyListState's key-based re-anchoring fails at exactly the moment it
+        // is needed, and the viewport keeps a raw index that the same presentation may have moved every
+        // row away from. [timelinePresentationPin] restores that index from a row conserved across both
+        // presentations, or declines; see its documentation for why every uncertain case declines.
+        //
+        // Guards, in order, and all of them mandatory:
+        //   * initialPositionSettled — entry positioning owns the viewport until it says otherwise, and
+        //     it deliberately scrolls through unloaded rows to get there.
+        //   * not scrolling and not mid-programmatic-scroll — a pin landing inside a drag or a fling
+        //     would itself be the jump this exists to prevent.
+        //   * not following, and not at the bottom — the auto-follow effect above issues its own
+        //     requestScrollToItem(0) for the same presentation and must win; two requests in one frame
+        //     resolve to the last one issued, and it must not be this.
+        //
+        // The collector never suspends, so it keeps up with the conflated presentation flow and the
+        // request reaches the same remeasure that presents the update.
+        LaunchedEffect(items, listState, initialPositionSettled) {
+            if (!initialPositionSettled) return@LaunchedEffect
+            var previous: ItemSnapshotList<MessageEntity>? = null
+            snapshotFlow { items.itemSnapshotList }.collect { snapshot ->
+                val prior = previous
+                previous = snapshot
+                if (prior == null) return@collect
+                if (listState.isScrollInProgress || programmaticScrolls > 0) return@collect
+                if (autoFollow.following || atBottom) return@collect
+                val index = listState.firstVisibleItemIndex
+                val key = prior.getOrNull(index)?.id ?: return@collect
+                // Fast path, and the same answer timelinePresentationPin gives: a key the presentation
+                // still loads is one Compose re-anchors natively. Checked here without materializing
+                // either window so an ordinary live arrival allocates nothing.
+                if (snapshot.items.any { it.id == key }) return@collect
+                val pin =
+                    timelinePresentationPin(
+                        anchor =
+                            TimelineViewportAnchor(
+                                index = index,
+                                offset = listState.firstVisibleItemScrollOffset,
+                                key = key,
                             ),
-                            style = MaterialTheme.typography.bodySmall,
+                        previous = prior.toTimelineWindow(),
+                        current = snapshot.toTimelineWindow(),
+                    ) ?: return@collect
+                listState.requestScrollToItem(pin.index, pin.offset)
+                val fields =
+                    mapOf(
+                        "anchor_key" to key,
+                        "from_index" to index,
+                        "to_index" to pin.index,
+                        "offset" to pin.offset,
+                        "item_count" to snapshot.size,
+                        "placeholders_before" to snapshot.placeholdersBefore,
+                        "loaded_count" to snapshot.items.size,
+                    )
+                diagnostics.record("chat_timeline", "presentation_pin") { fields }
+                AutoFollowTrace.record("presentation_pin", traceBufferId, traceSessionId) {
+                    formatTimelineGenerationFields(fields)
+                }
+            }
+        }
+
+        // Generation watch. Nothing in this app can currently see a Paging GENERATION change from the
+        // UI side — the timeline reports counts and nothing else — and that is why the visible churn
+        // after a catch-up run has stayed un-arbitrated. Every fetched page persists in its own Room
+        // transaction, so one catch-up produces several invalidations in a second, and each
+        // regeneration re-places a bounded loaded window under a viewport that never moved.
+        //
+        // Journal ONE line per PRESENTATION (never per frame) carrying the three quantities that
+        // separate the competing explanations: where the loaded window landed, what became of the
+        // viewport's anchor row, and whether the snapshot was momentarily empty. Reading guide lives on
+        // [timelineGenerationFields].
+        //
+        // Started only while the journal is armed, so an ordinary device pays nothing at all: the
+        // collector does not exist, and the per-presentation id list it reads is never built.
+        val journalArmed by diagnostics.enabled.collectAsStateWithLifecycle()
+        LaunchedEffect(items, listState, journalArmed, traceBufferId) {
+            if (!journalArmed) return@LaunchedEffect
+            var previous: TimelineWindow? = null
+            var generation = 0L
+            snapshotFlow { items.itemSnapshotList.toTimelineWindow() }.collect { current ->
+                generation++
+                val prior = previous
+                previous = current
+                // Read before the frame: the lazy list has not remeasured against this presentation
+                // yet, so index/offset still describe the layout `prior` was measured into.
+                val beforeIndex = listState.firstVisibleItemIndex
+                val before =
+                    TimelineViewportAnchor(
+                        index = beforeIndex,
+                        offset = listState.firstVisibleItemScrollOffset,
+                        key = prior?.idAt(beforeIndex),
+                    )
+                withFrameNanos { }
+                val afterIndex = listState.firstVisibleItemIndex
+                val after =
+                    TimelineViewportAnchor(
+                        index = afterIndex,
+                        offset = listState.firstVisibleItemScrollOffset,
+                        key = current.idAt(afterIndex),
+                    )
+                val fields =
+                    timelineGenerationFields(
+                        generation = generation,
+                        previous = prior,
+                        current = current,
+                        before = before,
+                        after = after,
+                        settled = initialPositionSettled,
+                        scrolling = listState.isScrollInProgress,
+                        following = autoFollow.following,
+                    )
+                diagnostics.record("chat_timeline", "generation_presented") { fields }
+                AutoFollowTrace.record("generation_presented", traceBufferId, traceSessionId) {
+                    formatTimelineGenerationFields(fields)
+                }
+            }
+        }
+        val titleTarget = chatTitleTarget(buffer?.type)
+        val titleClickLabel =
+            when (titleTarget) {
+                ChatTitleTarget.CHANNEL_INFO -> stringResource(R.string.chat_open_channel_info)
+                ChatTitleTarget.NICK_DETAILS -> stringResource(R.string.chat_open_nick_details)
+                ChatTitleTarget.NONE -> null
+            }
+        // Mark read on new-message-while-at-bottom only: syncing while scrolled up
+        // reading history would clear unread on other clients and destroy the local unread UX. What
+        // "at bottom" is allowed to mean is therefore load-bearing, and `atBottom` is the only thing
+        // standing between a viewport parked in history and a room-wide MARKREAD: see isAtEffectiveBottom.
+        //
+        // viewportReadEnabled is a key here, so the pause/resume flip restarts the effect. Arrivals
+        // while paused correctly do not acknowledge, but the restart used to acknowledge them anyway
+        // the instant the screen came back, before a single one had been measured. Remembering that a
+        // pause happened lets the first run back clamp to what was actually rendered; every later run
+        // is steady state again. The flag is consumed by the first enabled run whether or not it
+        // acknowledges, so a clamp can never leak into a genuinely live viewport.
+        val pausedSinceLastRun = remember { mutableStateOf(false) }
+        LaunchedEffect(
+            rawNewestAnchor,
+            renderedNewestAnchor,
+            atBottom,
+            initialPositionSettled,
+            viewportReadEnabled,
+            payloadAllowed,
+        ) {
+            if (!viewportReadEnabled || !payloadAllowed || !currentPresentationCompatible || presentationLease?.isActive == false) {
+                pausedSinceLastRun.value = true
+                return@LaunchedEffect
+            }
+            val resumed = pausedSinceLastRun.value
+            pausedSinceLastRun.value = false
+            val newest =
+                viewportMarkReadAnchor(
+                    rawNewest = rawNewestAnchor,
+                    renderedNewest = renderedNewestAnchor,
+                    resumed = resumed,
+                ) ?: return@LaunchedEffect
+            val ackable =
+                shouldMarkReadFromViewport(
+                    atBottom = atBottom,
+                    initialPositionSettled = initialPositionSettled,
+                    viewportReadEnabled = viewportReadEnabled && payloadAllowed,
+                )
+            if (ackable && newest.serverTime > 0) {
+                AutoFollowTrace.record("viewport_markread", traceBufferId, traceSessionId) {
+                    "marker=${newest.serverTime}:${newest.eventId} item_count=${items.itemCount}"
+                }
+                onMarkRead(newest)
+            }
+        }
+        val recentSpeakers =
+            remember(items.itemCount) {
+                // Exclude system-event senders and self so recency ranking reflects real conversation
+                // partners. Only the newest rows matter for recency, so cap the scan (the list
+                // is reverse-laid-out, so index 0.. are the newest) to stay cheap on large loaded windows.
+                (0 until minOf(items.itemCount, 60))
+                    .mapNotNull { items.peek(it) }
+                    .filterNot { isSystemKind(it.kind) || it.isSelf }
+                    .map { it.sender }
+            }
+        val compactHeader by remember {
+            derivedStateOf {
+                // Keep 48dp controls out until the animated bar can contain them without jumping.
+                36.dp + (TopAppBarDefaults.TopAppBarExpandedHeight - 36.dp) * headerExpansion.value < 48.dp
+            }
+        }
+        val conversationActionsMenu: @Composable () -> Unit = {
+            DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.testTag("chat_overflow_menu")) {
+                if (compactHeader) {
+                    if (titleClickLabel != null) {
+                        DropdownMenuItem(
+                            modifier = Modifier.testTag("chat_compact_details"),
+                            text = { Text(titleClickLabel) },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null) },
+                            onClick = {
+                                overflowOpen = false
+                                buffer?.let { onOpenChannelInfo(it.id) }
+                            },
                         )
                     }
-                },
-                leadingIcon = { Icon(Icons.Outlined.ViewAgenda, contentDescription = null) },
-                onClick = {
-                    overflowOpen = false
-                    conversationLayoutSheetOpen = true
-                },
-            )
-            if (buffer?.type == BufferType.CHANNEL || buffer?.type == BufferType.QUERY) {
-                DropdownMenuItem(
-                    modifier = Modifier.testTag("chat_read_aloud_toggle").semantics { selected = readAloudState.enabled },
-                    text = {
-                        Column {
-                            Text(stringResource(if (readAloudState.enabled) R.string.read_aloud_stop else R.string.read_aloud_start))
-                            Text(stringResource(R.string.settings_chat_visit_scope), style = MaterialTheme.typography.bodySmall)
-                        }
-                    },
-                    leadingIcon = { Icon(Icons.Outlined.RecordVoiceOver, null) },
-                    onClick = {
-                        overflowOpen = false
-                        onReadAloudToggle()
-                    },
-                )
-                DropdownMenuItem(
-                    modifier = Modifier.testTag("chat_read_aloud_options"),
-                    text = { Text(stringResource(R.string.read_aloud_options)) },
-                    leadingIcon = { Icon(Icons.Outlined.Tune, contentDescription = null) },
-                    onClick = {
-                        overflowOpen = false
-                        onReadAloudOptions()
-                        readAloudOptionsOpen = true
-                    },
-                )
-                val historySync = state.conversationHistorySync
-                DropdownMenuItem(
-                    modifier = Modifier.testTag("chat_history_sync_menu"),
-                    text = {
-                        Column {
-                            Text(stringResource(R.string.settings_history_sync_mode))
-                            Text(
-                                if (historySync.override == null) {
-                                    stringResource(
-                                        R.string.chat_history_sync_inherit,
-                                        stringResource(historySyncModeLabel(historySync.global)),
+                    onOpenConversationList?.let { openConversationList ->
+                        DropdownMenuItem(
+                            modifier = Modifier.testTag("chat_open_conversation_list"),
+                            text = { Text(stringResource(R.string.dickord_portal_channels)) },
+                            onClick = {
+                                overflowOpen = false
+                                openConversationList()
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_compact_search"),
+                        text = { Text(stringResource(R.string.chat_search)) },
+                        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                        onClick = {
+                            overflowOpen = false
+                            buffer?.let { onOpenSearch(it.id) }
+                        },
+                    )
+                    HorizontalDivider()
+                }
+                if (buffer?.type == BufferType.CHANNEL && buffer.joined) {
+                    val inviteEnabled = state.connState is IrcClientState.Ready
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_invite_user"),
+                        text = {
+                            Column {
+                                Text(stringResource(R.string.irc_invite_user_title))
+                                if (!inviteEnabled) {
+                                    Text(
+                                        stringResource(R.string.irc_invite_disconnected),
+                                        style = MaterialTheme.typography.bodySmall,
                                     )
-                                } else {
-                                    stringResource(historySyncModeLabel(historySync.effective))
-                                },
+                                }
+                            }
+                        },
+                        leadingIcon = { Icon(Icons.Outlined.GroupAdd, contentDescription = null) },
+                        enabled = inviteEnabled,
+                        onClick = {
+                            overflowOpen = false
+                            onInviteUser()
+                        },
+                    )
+                }
+                if (canPrepareCatchUpContext(agentwireEnabled, isServerBuffer, unreadEntrySnapshot)) {
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_catch_up"),
+                        text = { Text(stringResource(R.string.agent_context_catch_up)) },
+                        leadingIcon = { Icon(Icons.Outlined.AutoAwesome, contentDescription = null) },
+                        enabled = !contextPreparing,
+                        onClick = {
+                            overflowOpen = false
+                            onPrepareCatchUpContext()
+                        },
+                    )
+                }
+                if (buffer?.type == BufferType.CHANNEL) {
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_watch").semantics { selected = !channelNotifications.loading && channelNotifications.available && channelNotifications.watch != null },
+                        text = {
+                            Column {
+                                Text(stringResource(R.string.channelinfo_notifications))
+                                Text(channelNotifications.summary(), style = MaterialTheme.typography.bodySmall)
+                            }
+                        },
+                        leadingIcon = {
+                            Icon(
+                                channelNotifications.notificationIcon(),
+                                contentDescription = null,
+                            )
+                        },
+                        onClick = {
+                            overflowOpen = false
+                            notificationSheetOpen = true
+                        },
+                    )
+                }
+                DropdownMenuItem(
+                    modifier = Modifier.testTag("chat_layout_menu"),
+                    text = {
+                        Column {
+                            Text(stringResource(R.string.chat_layout_title))
+                            Text(
+                                stringResource(
+                                    when {
+                                        conversationLayout.override != null -> R.string.chat_layout_overflow_override
+                                        conversationLayout.bufferDefault != null -> R.string.chat_layout_overflow_server
+                                        else -> R.string.chat_layout_overflow_global
+                                    },
+                                    densityLabel(conversationLayout.effective),
+                                ),
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
                     },
-                    leadingIcon = { Icon(Icons.Outlined.Sync, contentDescription = null) },
+                    leadingIcon = { Icon(Icons.Outlined.ViewAgenda, contentDescription = null) },
                     onClick = {
                         overflowOpen = false
-                        historySyncModeSheetOpen = true
+                        conversationLayoutSheetOpen = true
                     },
                 )
-            }
-            DropdownMenuItem(
-                modifier = Modifier.testTag("chat_presence_menu"),
-                text = {
-                    Column {
-                        Text(stringResource(R.string.chat_presence_title))
-                        Text(
-                            stringResource(
-                                R.string.chat_presence_overflow_summary,
-                                stringResource(presenceModeLabel(presenceMode)),
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                },
-                leadingIcon = { Icon(Icons.Outlined.PeopleOutline, contentDescription = null) },
-                onClick = {
-                    overflowOpen = false
-                    presenceModeSheetOpen = true
-                },
-            )
-            if (fools.isNotEmpty()) {
-                val foolsShown = expandAllFools && !restoringHiddenFools
-                DropdownMenuItem(
-                    modifier = Modifier.testTag("chat_toggle_fools_visibility"),
-                    text = {
-                        Column {
-                            Text(stringResource(if (foolsShown) R.string.chat_fool_collapse_all else R.string.chat_fool_expand_all))
-                            Text(stringResource(R.string.settings_chat_visit_scope), style = MaterialTheme.typography.bodySmall)
-                        }
-                    },
-                    onClick = {
-                        overflowOpen = false
-                        if (!foolsShown) {
-                            restoreDispatched = false
-                            restoringHiddenFools = false
-                            onExpandAllFoolsChange(true)
-                        } else if (initialPositionSettled && entryVeilLifted && entryState is EntryPositionState.Settled &&
-                            initialTarget == null && jumpTarget == null && admittedDrawingSpec != null && presentationContextCompatible
-                        ) {
-                            restorePolicy = visibleSpec
-                            restoreIntent = entryPositionIntent
-                            temporaryFoolToggle = true
-                            restoreDispatched = false
-                            restoringHiddenFools = true
-                        } else {
-                            onExpandAllFoolsChange(false)
-                        }
-                        expandedFools = emptySet()
-                        collapsedFools = emptySet()
-                    },
-                    leadingIcon = {
-                        Icon(
-                            if (foolsShown) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                            contentDescription = null,
-                        )
-                    },
-                )
-            }
-        }
-    }
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
-        topBar = {
-            Column {
-                val expansion = headerExpansion.value
-                TopAppBar(
-                    modifier =
-                        Modifier.testTag("chat_top_app_bar").onGloballyPositioned {
-                            if (presentationLease?.ownsSlot() != false) {
-                                if (placingTopEntry) laidOutEntryHeaderExpansion = expansion
-                                if (payloadAllowed) presentation?.headerExpansion = expansion
+                if (buffer?.type == BufferType.CHANNEL || buffer?.type == BufferType.QUERY) {
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_read_aloud_toggle").semantics { selected = readAloudState.enabled },
+                        text = {
+                            Column {
+                                Text(stringResource(if (readAloudState.enabled) R.string.read_aloud_stop else R.string.read_aloud_start))
+                                Text(stringResource(R.string.settings_chat_visit_scope), style = MaterialTheme.typography.bodySmall)
                             }
                         },
-                    // Material grows beyond this minimum when accessibility text needs more room.
-                    expandedHeight = 36.dp + (TopAppBarDefaults.TopAppBarExpandedHeight - 36.dp) * expansion,
-                    colors =
-                        TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                            scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                        ),
-                    title = {
-                        Row(
-                            modifier =
-                                Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = if (compactHeader) 36.dp else 48.dp)
-                                    .then(
-                                        if (!compactHeader && titleClickLabel != null) {
-                                            Modifier.clickable(onClickLabel = titleClickLabel) {
-                                                buffer?.let { onOpenChannelInfo(it.id) }
-                                            }
-                                        } else {
-                                            Modifier
-                                        },
-                                    ).testTag("chat_title"),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            val hideAvatar = avatarsHidden()
-                            if (!hideAvatar) {
-                                val remoteAvatars = LocalRemoteAvatars.current
-                                val dickordDirectMessage =
-                                    dickordDescriptor?.let { isDiscordDirectMessage(it.channelType) } == true
-                                CompositionLocalProvider(
-                                    LocalRemoteAvatars provides
-                                        if (dickordDirectMessage) RemoteAvatarState() else remoteAvatars,
-                                ) {
-                                    Avatar(
-                                        name = if (dickordDirectMessage) conversationLabel.orEmpty() else buffer?.displayName.orEmpty(),
-                                        modifier = Modifier.testTag("chat_header_avatar"),
-                                        size = 20.dp + (MotdSizes.headerAvatar - 20.dp) * headerExpansion.value,
-                                        isChannel = !dickordDirectMessage && buffer?.type == BufferType.CHANNEL,
-                                        networkId = buffer?.networkId,
-                                        conversationModel =
-                                            if (dickordDirectMessage) {
-                                                dickordDescriptor.channelIconUrl.takeIf { remoteAvatars.enabled }
-                                            } else {
-                                                buffer?.avatarOverrideModel
-                                            },
-                                    )
-                                }
-                            }
-                            // The 10dp gap only separates the title from the avatar beside it.
-                            val subtitleModel = chatSubtitleModel(state, ctx, dickordEnabled)
-                            Column(modifier = Modifier.padding(start = if (hideAvatar) 0.dp else 10.dp).weight(1f)) {
-                                if (compactHeader && subtitleModel is ChatSubtitleModel.Text && subtitleModel.isMemberCount) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Text(
-                                            text = conversationLabel.orEmpty(),
-                                            modifier = Modifier.weight(1f, fill = false),
-                                            style = MaterialTheme.typography.titleSmall,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
+                        leadingIcon = { Icon(Icons.Outlined.RecordVoiceOver, null) },
+                        onClick = {
+                            overflowOpen = false
+                            onReadAloudToggle()
+                        },
+                    )
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_read_aloud_options"),
+                        text = { Text(stringResource(R.string.read_aloud_options)) },
+                        leadingIcon = { Icon(Icons.Outlined.Tune, contentDescription = null) },
+                        onClick = {
+                            overflowOpen = false
+                            onReadAloudOptions()
+                            readAloudOptionsOpen = true
+                        },
+                    )
+                    val historySync = state.conversationHistorySync
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_history_sync_menu"),
+                        text = {
+                            Column {
+                                Text(stringResource(R.string.settings_history_sync_mode))
+                                Text(
+                                    if (historySync.override == null) {
+                                        stringResource(
+                                            R.string.chat_history_sync_inherit,
+                                            stringResource(historySyncModeLabel(historySync.global)),
                                         )
-                                        Text(
-                                            text = subtitleModel.value,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                        )
-                                    }
-                                } else {
-                                    Text(
-                                        text = conversationLabel.orEmpty(),
-                                        style = if (compactHeader) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    AnimatedContent(
-                                        targetState = subtitleModel,
-                                        transitionSpec = {
-                                            fadeIn(MotdMotion.microFadeIn) togetherWith
-                                                fadeOut(MotdMotion.microFadeOut)
-                                        },
-                                        label = "chat_subtitle",
-                                    ) { subtitle ->
-                                        when (subtitle) {
-                                            is ChatSubtitleModel.Text -> {
-                                                Text(
-                                                    text = subtitle.value,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                            }
-
-                                            null -> {}
-                                        }
-                                    }
-                                }
-                            }
-                            ChatTitleSyncSpinner(timelineHistoryStatus)
-                            if (!compactHeader && titleTarget != ChatTitleTarget.NONE) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    } else {
+                                        stringResource(historySyncModeLabel(historySync.effective))
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
                                 )
                             }
+                        },
+                        leadingIcon = { Icon(Icons.Outlined.Sync, contentDescription = null) },
+                        onClick = {
+                            overflowOpen = false
+                            historySyncModeSheetOpen = true
+                        },
+                    )
+                }
+                DropdownMenuItem(
+                    modifier = Modifier.testTag("chat_presence_menu"),
+                    text = {
+                        Column {
+                            Text(stringResource(R.string.chat_presence_title))
+                            Text(
+                                stringResource(
+                                    R.string.chat_presence_overflow_summary,
+                                    stringResource(presenceModeLabel(presenceMode)),
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                         }
                     },
-                    navigationIcon = {
-                        if (!compactHeader && showBack) {
-                            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = stringResource(R.string.chat_back),
-                                )
-                            }
-                        }
-                    },
-                    actions = {
-                        if (!compactHeader) {
-                            onOpenConversationList?.let { openConversationList ->
-                                TextButton(
-                                    onClick = openConversationList,
-                                    modifier = Modifier.heightIn(min = 48.dp).testTag("chat_open_conversation_list"),
-                                ) {
-                                    Text(stringResource(R.string.dickord_portal_channels))
-                                }
-                            }
-                            IconButton(onClick = { buffer?.let { onOpenSearch(it.id) } }, modifier = Modifier.size(48.dp)) {
-                                Icon(
-                                    Icons.Outlined.Search,
-                                    contentDescription = stringResource(R.string.chat_search),
-                                )
-                            }
-                            IconButton(
-                                onClick = { overflowOpen = true },
-                                modifier = Modifier.size(48.dp).testTag("chat_overflow"),
-                            ) {
-                                Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
-                            }
-                            conversationActionsMenu()
-                        }
+                    leadingIcon = { Icon(Icons.Outlined.PeopleOutline, contentDescription = null) },
+                    onClick = {
+                        overflowOpen = false
+                        presenceModeSheetOpen = true
                     },
                 )
-                if (accountSetupReminder) {
-                    Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Text(stringResource(R.string.account_reminder_message), modifier = Modifier.weight(1f))
-                            TextButton(onClick = onDismissAccountSetup) { Text(stringResource(R.string.account_reminder_not_now)) }
-                            Button(onClick = onAccountSetup, modifier = Modifier.testTag("chat_account_setup")) {
-                                Text(stringResource(R.string.account_setup_title))
+                if (fools.isNotEmpty()) {
+                    val foolsShown = expandAllFools && !restoringHiddenFools
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_toggle_fools_visibility"),
+                        text = {
+                            Column {
+                                Text(stringResource(if (foolsShown) R.string.chat_fool_collapse_all else R.string.chat_fool_expand_all))
+                                Text(stringResource(R.string.settings_chat_visit_scope), style = MaterialTheme.typography.bodySmall)
                             }
-                        }
-                    }
+                        },
+                        onClick = {
+                            overflowOpen = false
+                            if (!foolsShown) {
+                                restoreDispatched = false
+                                restoringHiddenFools = false
+                                onExpandAllFoolsChange(true)
+                            } else if (initialPositionSettled && entryVeilLifted && entryState is EntryPositionState.Settled &&
+                                initialTarget == null && jumpTarget == null && admittedDrawingSpec != null && presentationContextCompatible
+                            ) {
+                                restorePolicy = visibleSpec
+                                restoreIntent = entryPositionIntent
+                                temporaryFoolToggle = true
+                                restoreDispatched = false
+                                restoringHiddenFools = true
+                            } else {
+                                onExpandAllFoolsChange(false)
+                            }
+                            expandedFools = emptySet()
+                            collapsedFools = emptySet()
+                        },
+                        leadingIcon = {
+                            Icon(
+                                if (foolsShown) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = null,
+                            )
+                        },
+                    )
                 }
             }
-        },
-    ) { padding ->
-        Box(modifier = Modifier.fillMaxSize()) {
-            val effectiveBlur = conversationLayout.effectiveMessageBackgroundBlur(LocalMessageBackgroundBlur.current)
-            val wallpaperBackdrop = rememberMessageWallpaperBackdrop(effectiveBlur)
-            ChatWallpaperBackground(
-                chatWallpaper,
-                modifier = Modifier.matchParentSize().recordMessageWallpaper(wallpaperBackdrop, MaterialTheme.colorScheme.surface),
-            )
-            // No composition-phase IME read here on purpose: the composer samples the animated inset
-            // in its own measure phase, so the whole timeline stays skippable while the keyboard
-            // animates instead of recomposing once per frame.
-            val conversationSpacing =
-                remember(conversationLayout.effective, messageSpacing, bubbleCornerStyle) {
-                    spacingFor(conversationLayout.effective, messageSpacing, bubbleCornerStyle)
-                }
-            // The runway: how far the whole timeline slides up while a flight is airborne, so
-            // vacated space exists under the ghost from the tap frame onward. Hoisted to this
-            // scope because both the timeline (deep in the pane) and the ghost overlay (a
-            // sibling drawn over the composer) read it. Deferred lambda: read only in the
-            // list's layer and the ghost's, never composed.
-            val density = LocalDensity.current
-            val flightListShift =
-                remember(
-                    outgoingFlight?.token,
-                    conversationSpacing,
-                    density,
-                ) {
-                    val active = outgoingFlight != null
-                    val gapPx =
-                        with(density) {
-                            bubbleGap(flightShowSender, items.itemCount > 0, conversationSpacing).toPx()
-                        }
-                    val shift: () -> Float = shift@{
-                        if (!active) return@shift 0f
-                        val revealed = flightAnchors.landingRow?.second?.height ?: 0f
-                        sendFlightListShift(
-                            runwayHeight = flightAnchors.ghostHeight + gapPx,
-                            liftFraction = flightMotion.lift.value,
-                            revealedGap = revealed,
-                            footDrop = flightAnchors.composerShrink(),
-                        )
-                    }
-                    shift
-                }
-            ConversationTypography(conversationFontScalePercent) {
-                // TopAppBar owns the status-bar inset. Only the foreground follows Scaffold padding;
-                // the wallpaper keeps a fixed origin and size while the header and IME animate.
-                // Consuming navigation/IME insets keeps the composer clear without double-padding.
-                Box(
-                    modifier =
-                        Modifier
-                            .fillMaxSize()
-                            .padding(padding)
-                            .navigationBarsPadding()
-                            .imePadding(),
-                ) {
-                    Scaffold(
-                        modifier = Modifier.fillMaxSize(),
-                        contentWindowInsets = WindowInsets(0),
-                        containerColor = Color.Transparent,
-                        bottomBar = {
-                            Column(
+        }
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
+            topBar = {
+                Column {
+                    val expansion = headerExpansion.value
+                    TopAppBar(
+                        modifier =
+                            Modifier.effectSurface(EffectSurface.CHAT_HEADER, MaterialTheme.colorScheme.surfaceContainerLow).testTag("chat_top_app_bar").onGloballyPositioned {
+                                if (presentationLease?.ownsSlot() != false) {
+                                    if (placingTopEntry) laidOutEntryHeaderExpansion = expansion
+                                    if (payloadAllowed) presentation?.headerExpansion = expansion
+                                }
+                            },
+                        // Material grows beyond this minimum when accessibility text needs more room.
+                        expandedHeight = 36.dp + (TopAppBarDefaults.TopAppBarExpandedHeight - 36.dp) * expansion,
+                        colors =
+                            TopAppBarDefaults.topAppBarColors(
+                                containerColor = Color.Transparent,
+                                scrolledContainerColor = Color.Transparent,
+                            ),
+                        title = {
+                            Row(
                                 modifier =
                                     Modifier
                                         .fillMaxWidth()
-                                        .testTag("chat_bottom_host"),
+                                        .heightIn(min = if (compactHeader) 36.dp else 48.dp)
+                                        .then(
+                                            if (!compactHeader && titleClickLabel != null) {
+                                                Modifier.clickable(onClickLabel = titleClickLabel) {
+                                                    buffer?.let { onOpenChannelInfo(it.id) }
+                                                }
+                                            } else {
+                                                Modifier
+                                            },
+                                        ).testTag("chat_title"),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                val isChannelBuffer = state.buffer?.type == BufferType.CHANNEL
-                                val completions =
-                                    remember(composerText, memberNicks, recentSpeakers, isChannelBuffer) {
-                                        autocompleteFor(
-                                            composerText,
-                                            memberNicks,
-                                            recentSpeakers,
-                                            nickNormalizer,
-                                            isChannel = isChannelBuffer,
-                                        )
-                                    }
-                                val needsMemberCompletion =
-                                    remember(composerText) {
-                                        composerNeedsMemberNicks(composerText)
-                                    }
-                                LaunchedEffect(needsMemberCompletion) {
-                                    if (needsMemberCompletion) onNeedMembers()
-                                }
-                                // Debounce the SHOW so fast typing doesn't flash the suggestion panel on every
-                                // keystroke: only reveal completions after a brief pause. Hiding stays immediate
-                                // (an empty result clears the panel at once) so the panel never lingers stale.
-                                var showAutocomplete by remember { mutableStateOf(false) }
-                                LaunchedEffect(completions) {
-                                    if (completions.isEmpty()) {
-                                        showAutocomplete = false
-                                    } else {
-                                        kotlinx.coroutines.delay(AUTOCOMPLETE_SHOW_DEBOUNCE_MS)
-                                        showAutocomplete = true
-                                    }
-                                }
-                                // Keyed on the buffer like the sibling composer state so the panel's held exit
-                                // content never leaks across a buffer switch.
-                                key(traceBufferId) {
-                                    VoiceComposerPanel(
-                                        state = voiceState,
-                                        playbackState = audioPlaybackState,
-                                        onDelete = onVoiceDelete,
-                                        onCancelRecording = onVoiceHoldCancel,
-                                        onStopRecording = onVoiceHoldStop,
-                                        onSend = onVoiceSend,
-                                        onPreview = { attachment -> onAudioToggle(AudioPlaybackRequest(attachment, null)) },
-                                        onPreviewSeek = { attachment, positionMs -> onAudioSeek(attachment, positionMs) },
-                                        onToggleEncryption = onVoiceToggleEncryption,
-                                        onDestinationSelected = onVoiceDestinationSelected,
-                                        onErrorDismissed = onVoiceErrorDismissed,
-                                    )
-                                }
-                                // The buffer stays non-null while a rejoin animates the banner out, so the exiting
-                                // content can keep reading it without snapshotting.
-                                AnimatedVisibility(
-                                    visible = state.parted,
-                                    enter = expandVertically(animationSpec = MotdMotion.contentSize) + fadeIn(MotdMotion.fadeIn),
-                                    exit = shrinkVertically(animationSpec = MotdMotion.contentSize) + fadeOut(MotdMotion.microFadeOut),
-                                ) {
-                                    PartedChannelBanner(
-                                        channel = conversationLabel.orEmpty(),
-                                        onRejoin = onRejoin,
-                                    )
-                                }
-                                if (eligibleEbooksRoomId != null) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        TextButton(
-                                            onClick = { ebooksHelpOpen = true },
-                                            modifier = Modifier.weight(1f).testTag("chat_ebooks_help"),
-                                        ) { Text("Book search · How it works") }
-                                        TextButton(
-                                            onClick = {
-                                                pickingEbooksRoomId = eligibleEbooksRoomId
-                                                ebooksResultsPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
-                                            },
-                                            modifier = Modifier.testTag("chat_ebooks_open_results"),
-                                        ) { Text("Open results ZIP") }
-                                    }
-                                    TextButton(
-                                        onClick = { ebooksOffersOpen = true },
-                                        modifier = Modifier.fillMaxWidth().testTag("chat_ebooks_dcc_offers"),
+                                val hideAvatar = avatarsHidden()
+                                if (!hideAvatar) {
+                                    val remoteAvatars = LocalRemoteAvatars.current
+                                    val dickordDirectMessage =
+                                        dickordDescriptor?.let { isDiscordDirectMessage(it.channelType) } == true
+                                    CompositionLocalProvider(
+                                        LocalRemoteAvatars provides
+                                            if (dickordDirectMessage) RemoteAvatarState() else remoteAvatars,
                                     ) {
-                                        Text(
-                                            if (visibleEbooksOffers.isEmpty()) {
-                                                "DCC offers (0) · No offers yet"
-                                            } else {
-                                                "DCC offers (${visibleEbooksOffers.size})"
-                                            },
+                                        Avatar(
+                                            name = if (dickordDirectMessage) conversationLabel.orEmpty() else buffer?.displayName.orEmpty(),
+                                            modifier = Modifier.testTag("chat_header_avatar"),
+                                            size = 20.dp + (MotdSizes.headerAvatar - 20.dp) * headerExpansion.value,
+                                            isChannel = !dickordDirectMessage && buffer?.type == BufferType.CHANNEL,
+                                            networkId = buffer?.networkId,
+                                            conversationModel =
+                                                if (dickordDirectMessage) {
+                                                    dickordDescriptor.channelIconUrl.takeIf { remoteAvatars.enabled }
+                                                } else {
+                                                    buffer?.avatarOverrideModel
+                                                },
                                         )
                                     }
                                 }
-                                Composer(
-                                    value = composerText,
-                                    onAi = if (aiTextEnabled && plainIrcText(composerText.text).isNotBlank()) onAiComposer else null,
-                                    onValueChange = {
-                                        val wasBlank = composerText.text.isBlank()
-                                        composerText = it
-                                        onDraftChanged(it.text)
-                                        if (it.text.isNotBlank()) {
-                                            onTyping(true)
-                                        } else if (!wasBlank) {
-                                            onTyping(false)
+                                // The 10dp gap only separates the title from the avatar beside it.
+                                val subtitleModel = chatSubtitleModel(state, ctx, dickordEnabled)
+                                Column(modifier = Modifier.padding(start = if (hideAvatar) 0.dp else 10.dp).weight(1f)) {
+                                    if (compactHeader && subtitleModel is ChatSubtitleModel.Text && subtitleModel.isMemberCount) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Text(
+                                                text = conversationLabel.orEmpty(),
+                                                modifier = Modifier.weight(1f, fill = false),
+                                                style = MaterialTheme.typography.titleSmall,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                text = subtitleModel.value,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                            )
                                         }
-                                    },
-                                    onSend = {
-                                        val text = composerText.text
-                                        if (plainIrcText(text).isNotBlank() && !isEbooksSearchOnly(text)) {
-                                            if (isLongDraft(text)) {
-                                                AutoFollowTrace.record("long_draft_prompt_open", traceBufferId, traceSessionId)
-                                                longDraftPrompt = true
-                                            } else {
-                                                AutoFollowTrace.record("composer_submit", traceBufferId, traceSessionId) {
-                                                    "long_draft=false"
-                                                }
-                                                flightAnchors.captureLaunch()
-                                                // Empty the field on the tap frame. The ViewModel still owns the
-                                                // durable draft and republishes it if the send never lands, so this
-                                                // is presentation only -- notifying onDraftChanged here would count
-                                                // as an edit and make the submission itself stale.
-                                                composerText = TextFieldValue("")
-                                                onSubmit(text)
-                                                scope.launch {
-                                                    scrollToNewest(animate = true, reason = "composer_send_action")
-                                                }
-                                            }
-                                        }
-                                    },
-                                    enabled = composerEnabled,
-                                    sendEnabled = !isEbooksSearchOnly(composerText.text),
-                                    composerStyle = composerStyle,
-                                    currentNick = state.composerNick,
-                                    onFieldPositioned = { flightAnchors.composerField = it },
-                                    onFieldTextPositioned = { flightAnchors.composerTextOrigin = it },
-                                    // Keep the reply content mounted while its banner exits, but start that exit on
-                                    // the send tap rather than after persistence clears the durable draft.
-                                    reply =
-                                        outgoingFlight?.let { flight ->
-                                            flight.replyText?.let {
-                                                ComposerReply(
-                                                    dickordNickLabel(flight.replySender.orEmpty(), activeDickordChannel),
-                                                    it,
-                                                )
-                                            }
-                                        } ?: state.replyTo?.let {
-                                            ComposerReply(dickordNickLabel(it.sender, activeDickordChannel), it.text)
-                                        },
-                                    replyVisible = outgoingFlight?.replyText == null,
-                                    replyWarning =
-                                        state.replyTo
-                                            ?.takeIf { state.replySenderNotInChannel && outgoingFlight == null }
-                                            ?.let {
-                                                stringResource(
-                                                    R.string.chat_reply_sender_not_in_channel,
-                                                    dickordNickLabel(it.sender, activeDickordChannel),
-                                                )
+                                    } else {
+                                        Text(
+                                            text = conversationLabel.orEmpty(),
+                                            style = if (compactHeader) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        AnimatedContent(
+                                            targetState = subtitleModel,
+                                            transitionSpec = {
+                                                fadeIn(MotdMotion.microFadeIn) togetherWith
+                                                    fadeOut(MotdMotion.microFadeOut)
                                             },
-                                    onCancelReply = { onSetReply(null) },
-                                    // SERVER buffers send raw commands; hint that in the placeholder.
-                                    // Held blank while a flight is airborne: the ghost is born over the input box
-                                    // at exactly the field-text origin, and the placeholder appearing beneath the
-                                    // departing line read as two texts fighting for the same spot.
-                                    placeholder =
-                                        when {
-                                            outgoingFlight != null -> ""
-                                            isServerBuffer -> stringResource(R.string.chat_server_composer_hint)
-                                            else -> stringResource(R.string.chat_composer_placeholder)
-                                        },
-                                    showEmojiTool = showComposerEmoji,
-                                    showFormattingTools = showComposerFormattingTools,
-                                    knownNicks = knownNicks,
-                                    identityRules = identityRules,
-                                    ircFormattingEnabled =
-                                        !isServerBuffer &&
-                                            !state.buffer?.displayName.equals("BouncerServ", ignoreCase = true),
-                                    onAttachment = {
-                                        uploadCurrentDraftDirectly = false
-                                        attachmentSheetOpen = true
-                                    },
-                                    onImageContent = { uri, mime ->
-                                        if (attachmentSheetOpen) {
-                                            false
-                                        } else {
-                                            sharedFile = PendingShare.File(uri, mime)
-                                            uploadCurrentDraftDirectly = false
-                                            attachmentSheetOpen = true
-                                            true
-                                        }
-                                    },
-                                    onUploadDraft = {
-                                        uploadCurrentDraftDirectly = true
-                                        attachmentSheetOpen = true
-                                    },
-                                    voiceEnabled = voiceEnabled && voiceState.staged == null && composerText.text.isBlank(),
-                                    voiceRecording = voiceState.recording != null,
-                                    onVoiceHoldStart = onVoiceHoldStart,
-                                    onVoiceAccessibilityStart = onVoiceAccessibilityStart,
-                                    onVoiceHoldStop = onVoiceHoldStop,
-                                    onVoiceHoldCancel = onVoiceHoldCancel,
-                                    onVoiceLock = onVoiceLock,
-                                    autocomplete =
-                                        if (showAutocomplete && completions.isNotEmpty()) {
-                                            {
-                                                AutocompletePanel(
-                                                    candidates = completions.map { it.display },
-                                                    isCommand = completions.firstOrNull()?.isCommand == true,
-                                                    networkId = state.buffer?.networkId,
-                                                    onPick = { picked ->
-                                                        composerText = applyPick(composerText, picked)
-                                                        onDraftChanged(composerText.text)
-                                                    },
-                                                )
+                                            label = "chat_subtitle",
+                                        ) { subtitle ->
+                                            when (subtitle) {
+                                                is ChatSubtitleModel.Text -> {
+                                                    Text(
+                                                        text = subtitle.value,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                    )
+                                                }
+
+                                                null -> {}
                                             }
-                                        } else {
-                                            null
-                                        },
-                                )
+                                        }
+                                    }
+                                }
+                                ChatTitleSyncSpinner(timelineHistoryStatus)
+                                if (!compactHeader && titleTarget != ChatTitleTarget.NONE) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         },
-                    ) { innerPadding ->
-                        // Scaffold measures the host before the full-area timeline in this same pass.
-                        if (bottomHostPadding !== innerPadding) bottomHostPadding = innerPadding
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            CompositionLocalProvider(
-                                LocalSpacing provides conversationSpacing,
-                                LocalMessageBackgroundOpacityPercent provides conversationLayout.effectiveMessageBackgroundOpacity(LocalMessageBackgroundOpacityPercent.current),
-                                LocalMessageBackgroundBlur provides effectiveBlur,
-                                LocalMessageWallpaperBackdrop provides wallpaperBackdrop,
+                        navigationIcon = {
+                            if (!compactHeader && showBack) {
+                                IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = stringResource(R.string.chat_back),
+                                    )
+                                }
+                            }
+                        },
+                        actions = {
+                            if (!compactHeader) {
+                                onOpenConversationList?.let { openConversationList ->
+                                    TextButton(
+                                        onClick = openConversationList,
+                                        modifier = Modifier.heightIn(min = 48.dp).testTag("chat_open_conversation_list"),
+                                    ) {
+                                        Text(stringResource(R.string.dickord_portal_channels))
+                                    }
+                                }
+                                IconButton(onClick = { buffer?.let { onOpenSearch(it.id) } }, modifier = Modifier.size(48.dp)) {
+                                    Icon(
+                                        Icons.Outlined.Search,
+                                        contentDescription = stringResource(R.string.chat_search),
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { overflowOpen = true },
+                                    modifier = Modifier.size(48.dp).testTag("chat_overflow"),
+                                ) {
+                                    Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
+                                }
+                                conversationActionsMenu()
+                            }
+                        },
+                    )
+                    if (accountSetupReminder) {
+                        Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                Box(
+                                Text(stringResource(R.string.account_reminder_message), modifier = Modifier.weight(1f))
+                                TextButton(onClick = onDismissAccountSetup) { Text(stringResource(R.string.account_reminder_not_now)) }
+                                Button(onClick = onAccountSetup, modifier = Modifier.testTag("chat_account_setup")) {
+                                    Text(stringResource(R.string.account_setup_title))
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        ) { padding ->
+            if (topHostPadding !== padding) topHostPadding = padding
+            Box(modifier = Modifier.fillMaxSize()) {
+                val effectiveBlur = conversationLayout.effectiveMessageBackgroundBlur(LocalMessageBackgroundBlur.current)
+                val wallpaperBackdrop = rememberMessageWallpaperBackdrop(effectiveBlur)
+                ChatWallpaperBackground(
+                    chatWallpaper,
+                    modifier = Modifier.matchParentSize().captureSurfaceBackdrop(wallpaperSource).recordMessageWallpaper(wallpaperBackdrop, MaterialTheme.colorScheme.surface),
+                )
+                // No composition-phase IME read here on purpose: the composer samples the animated inset
+                // in its own measure phase, so the whole timeline stays skippable while the keyboard
+                // animates instead of recomposing once per frame.
+                val conversationSpacing =
+                    remember(conversationLayout.effective, messageSpacing, bubbleCornerStyle) {
+                        spacingFor(conversationLayout.effective, messageSpacing, bubbleCornerStyle)
+                    }
+                // The runway: how far the whole timeline slides up while a flight is airborne, so
+                // vacated space exists under the ghost from the tap frame onward. Hoisted to this
+                // scope because both the timeline (deep in the pane) and the ghost overlay (a
+                // sibling drawn over the composer) read it. Deferred lambda: read only in the
+                // list's layer and the ghost's, never composed.
+                val density = LocalDensity.current
+                val flightListShift =
+                    remember(
+                        outgoingFlight?.token,
+                        conversationSpacing,
+                        density,
+                    ) {
+                        val active = outgoingFlight != null
+                        val gapPx =
+                            with(density) {
+                                bubbleGap(flightShowSender, items.itemCount > 0, conversationSpacing).toPx()
+                            }
+                        val shift: () -> Float = shift@{
+                            if (!active) return@shift 0f
+                            val revealed = flightAnchors.landingRow?.second?.height ?: 0f
+                            sendFlightListShift(
+                                runwayHeight = flightAnchors.ghostHeight + gapPx,
+                                liftFraction = flightMotion.lift.value,
+                                revealedGap = revealed,
+                                footDrop = flightAnchors.composerShrink(),
+                            )
+                        }
+                        shift
+                    }
+                ConversationTypography(conversationFontScalePercent) {
+                    // TopAppBar owns the status-bar inset. Only the foreground follows Scaffold padding;
+                    // the wallpaper keeps a fixed origin and size while the header and IME animate.
+                    // Consuming navigation/IME insets keeps the composer clear without double-padding.
+                    Box(
+                        modifier =
+                            Modifier
+                                .fillMaxSize()
+                                .padding(start = padding.calculateStartPadding(LocalLayoutDirection.current), end = padding.calculateEndPadding(LocalLayoutDirection.current), bottom = padding.calculateBottomPadding())
+                                .navigationBarsPadding()
+                                .imePadding(),
+                    ) {
+                        Scaffold(
+                            modifier = Modifier.fillMaxSize(),
+                            contentWindowInsets = WindowInsets(0),
+                            containerColor = Color.Transparent,
+                            bottomBar = {
+                                Column(
                                     modifier =
                                         Modifier
-                                            .fillMaxSize()
-                                            // The runway slides the whole timeline up past this pane's top edge;
-                                            // without the clip those rows would paint over the app bar.
-                                            .clipToBounds()
-                                            .testTag("chat_layout_effective_${conversationLayout.effective.name.lowercase()}"),
+                                            .fillMaxWidth()
+                                            .testTag("chat_bottom_host"),
                                 ) {
-                                    // Keep the timeline's callbacks stable. A freshly allocated lambda on every
-                                    // recomposition of this scope defeats MessageList's skipping, which is what
-                                    // turned any surrounding state change into a full timeline recomposition.
-                                    // Keyed like `liveEntryIds` itself, which is re-remembered per buffer.
-                                    val onLiveEntryConsumed =
-                                        remember(state.buffer?.id) {
-                                            { id: Long -> liveEntryIds = consumeLiveEntryId(liveEntryIds, id) }
+                                    val isChannelBuffer = state.buffer?.type == BufferType.CHANNEL
+                                    val completions =
+                                        remember(composerText, memberNicks, recentSpeakers, isChannelBuffer) {
+                                            autocompleteFor(
+                                                composerText,
+                                                memberNicks,
+                                                recentSpeakers,
+                                                nickNormalizer,
+                                                isChannel = isChannelBuffer,
+                                            )
                                         }
-                                    val onFlightRowPositioned =
-                                        remember(flightAnchors) {
-                                            { id: Long, bounds: Rect ->
-                                                flightAnchors.reportLandingRow(id, bounds)
-                                                // Recorded here rather than from the flight's event ids: this fires on
-                                                // the row's first layout, before any accept could have named it. The
-                                                // guard matters -- this runs on every frame of the reveal.
-                                                if (id !in flownRowIds) flownRowIds = flownRowIds + id
-                                            }
+                                    val needsMemberCompletion =
+                                        remember(composerText) {
+                                            composerNeedsMemberNicks(composerText)
                                         }
-                                    val onTimelineLongPress =
-                                        remember {
-                                            { message: MessageEntity -> sheetTarget = message }
+                                    LaunchedEffect(needsMemberCompletion) {
+                                        if (needsMemberCompletion) onNeedMembers()
+                                    }
+                                    // Debounce the SHOW so fast typing doesn't flash the suggestion panel on every
+                                    // keystroke: only reveal completions after a brief pause. Hiding stays immediate
+                                    // (an empty result clears the panel at once) so the panel never lingers stale.
+                                    var showAutocomplete by remember { mutableStateOf(false) }
+                                    LaunchedEffect(completions) {
+                                        if (completions.isEmpty()) {
+                                            showAutocomplete = false
+                                        } else {
+                                            kotlinx.coroutines.delay(AUTOCOMPLETE_SHOW_DEBOUNCE_MS)
+                                            showAutocomplete = true
                                         }
-                                    val canRetryMessage =
-                                        remember(state.buffer) {
-                                            { message: MessageEntity ->
-                                                state.buffer?.let { buffer ->
-                                                    io.github.trevarj.motd.service
-                                                        .isGenericRetryEligible(buffer, message)
-                                                } == true
-                                            }
+                                    }
+                                    // Keyed on the buffer like the sibling composer state so the panel's held exit
+                                    // content never leaks across a buffer switch.
+                                    key(traceBufferId) {
+                                        VoiceComposerPanel(
+                                            state = voiceState,
+                                            playbackState = audioPlaybackState,
+                                            onDelete = onVoiceDelete,
+                                            onCancelRecording = onVoiceHoldCancel,
+                                            onStopRecording = onVoiceHoldStop,
+                                            onSend = onVoiceSend,
+                                            onPreview = { attachment -> onAudioToggle(AudioPlaybackRequest(attachment, null)) },
+                                            onPreviewSeek = { attachment, positionMs -> onAudioSeek(attachment, positionMs) },
+                                            onToggleEncryption = onVoiceToggleEncryption,
+                                            onDestinationSelected = onVoiceDestinationSelected,
+                                            onErrorDismissed = onVoiceErrorDismissed,
+                                        )
+                                    }
+                                    // The buffer stays non-null while a rejoin animates the banner out, so the exiting
+                                    // content can keep reading it without snapshotting.
+                                    AnimatedVisibility(
+                                        visible = state.parted,
+                                        enter = expandVertically(animationSpec = MotdMotion.contentSize) + fadeIn(MotdMotion.fadeIn),
+                                        exit = shrinkVertically(animationSpec = MotdMotion.contentSize) + fadeOut(MotdMotion.microFadeOut),
+                                    ) {
+                                        PartedChannelBanner(
+                                            channel = conversationLabel.orEmpty(),
+                                            onRejoin = onRejoin,
+                                        )
+                                    }
+                                    if (eligibleEbooksRoomId != null) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            TextButton(
+                                                onClick = { ebooksHelpOpen = true },
+                                                modifier = Modifier.weight(1f).testTag("chat_ebooks_help"),
+                                            ) { Text("Book search · How it works") }
+                                            TextButton(
+                                                onClick = {
+                                                    pickingEbooksRoomId = eligibleEbooksRoomId
+                                                    ebooksResultsPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+                                                },
+                                                modifier = Modifier.testTag("chat_ebooks_open_results"),
+                                            ) { Text("Open results ZIP") }
                                         }
-                                    val onAcceptDccTransferRequest =
-                                        remember(dccDestinationPicker) {
-                                            { transferId: Long, filename: String, allowPrivate: Boolean ->
-                                                pendingDccAccept = PendingDccAccept(transferId, allowPrivate)
-                                                dccDestinationPicker.launch(filename)
-                                            }
-                                        }
-                                    // Link-preview tap opens the URL in the system browser.
-                                    val onOpenLink =
-                                        remember(ctx) {
-                                            { url: String -> ctx.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
-                                        }
-                                    // Effective expansion: global expand-all default, minus rows the user
-                                    // re-collapsed; otherwise only individually expanded rows show (bug #9).
-                                    val foolExpanded =
-                                        remember {
-                                            { id: Long ->
-                                                if (latestExpandAllFools) id !in collapsedFools else id in expandedFools
-                                            }
-                                        }
-                                    // Bidirectional per-row toggle, respecting the global default.
-                                    val onToggleFool =
-                                        remember {
-                                            { id: Long ->
-                                                if (latestExpandAllFools) {
-                                                    collapsedFools =
-                                                        if (id in collapsedFools) collapsedFools - id else collapsedFools + id
+                                        TextButton(
+                                            onClick = { ebooksOffersOpen = true },
+                                            modifier = Modifier.fillMaxWidth().testTag("chat_ebooks_dcc_offers"),
+                                        ) {
+                                            Text(
+                                                if (visibleEbooksOffers.isEmpty()) {
+                                                    "DCC offers (0) · No offers yet"
                                                 } else {
-                                                    expandedFools =
-                                                        if (id in expandedFools) expandedFools - id else expandedFools + id
+                                                    "DCC offers (${visibleEbooksOffers.size})"
+                                                },
+                                            )
+                                        }
+                                    }
+                                    Composer(
+                                        value = composerText,
+                                        onAi = if (aiTextEnabled && plainIrcText(composerText.text).isNotBlank()) onAiComposer else null,
+                                        onValueChange = {
+                                            val wasBlank = composerText.text.isBlank()
+                                            composerText = it
+                                            onDraftChanged(it.text)
+                                            if (it.text.isNotBlank()) {
+                                                onTyping(true)
+                                            } else if (!wasBlank) {
+                                                onTyping(false)
+                                            }
+                                        },
+                                        onSend = {
+                                            val text = composerText.text
+                                            if (plainIrcText(text).isNotBlank() && !isEbooksSearchOnly(text)) {
+                                                if (isLongDraft(text)) {
+                                                    AutoFollowTrace.record("long_draft_prompt_open", traceBufferId, traceSessionId)
+                                                    longDraftPrompt = true
+                                                } else {
+                                                    AutoFollowTrace.record("composer_submit", traceBufferId, traceSessionId) {
+                                                        "long_draft=false"
+                                                    }
+                                                    flightAnchors.captureLaunch()
+                                                    // Empty the field on the tap frame. The ViewModel still owns the
+                                                    // durable draft and republishes it if the send never lands, so this
+                                                    // is presentation only -- notifying onDraftChanged here would count
+                                                    // as an edit and make the submission itself stale.
+                                                    composerText = TextFieldValue("")
+                                                    onSubmit(text)
+                                                    scope.launch {
+                                                        scrollToNewest(animate = true, reason = "composer_send_action")
+                                                    }
                                                 }
                                             }
-                                        }
-                                    // Keep positioning hidden, then paint and release input together on
-                                    // readiness; a post-placement fade only delays already-available rows.
+                                        },
+                                        enabled = composerEnabled,
+                                        sendEnabled = !isEbooksSearchOnly(composerText.text),
+                                        composerStyle = composerStyle,
+                                        currentNick = state.composerNick,
+                                        onFieldPositioned = { flightAnchors.composerField = it },
+                                        onFieldTextPositioned = { flightAnchors.composerTextOrigin = it },
+                                        // Keep the reply content mounted while its banner exits, but start that exit on
+                                        // the send tap rather than after persistence clears the durable draft.
+                                        reply =
+                                            outgoingFlight?.let { flight ->
+                                                flight.replyText?.let {
+                                                    ComposerReply(
+                                                        dickordNickLabel(flight.replySender.orEmpty(), activeDickordChannel),
+                                                        it,
+                                                    )
+                                                }
+                                            } ?: state.replyTo?.let {
+                                                ComposerReply(dickordNickLabel(it.sender, activeDickordChannel), it.text)
+                                            },
+                                        replyVisible = outgoingFlight?.replyText == null,
+                                        replyWarning =
+                                            state.replyTo
+                                                ?.takeIf { state.replySenderNotInChannel && outgoingFlight == null }
+                                                ?.let {
+                                                    stringResource(
+                                                        R.string.chat_reply_sender_not_in_channel,
+                                                        dickordNickLabel(it.sender, activeDickordChannel),
+                                                    )
+                                                },
+                                        onCancelReply = { onSetReply(null) },
+                                        // SERVER buffers send raw commands; hint that in the placeholder.
+                                        // Held blank while a flight is airborne: the ghost is born over the input box
+                                        // at exactly the field-text origin, and the placeholder appearing beneath the
+                                        // departing line read as two texts fighting for the same spot.
+                                        placeholder =
+                                            when {
+                                                outgoingFlight != null -> ""
+                                                isServerBuffer -> stringResource(R.string.chat_server_composer_hint)
+                                                else -> stringResource(R.string.chat_composer_placeholder)
+                                            },
+                                        showEmojiTool = showComposerEmoji,
+                                        showFormattingTools = showComposerFormattingTools,
+                                        knownNicks = knownNicks,
+                                        identityRules = identityRules,
+                                        ircFormattingEnabled =
+                                            !isServerBuffer &&
+                                                !state.buffer?.displayName.equals("BouncerServ", ignoreCase = true),
+                                        onAttachment = {
+                                            uploadCurrentDraftDirectly = false
+                                            attachmentSheetOpen = true
+                                        },
+                                        onImageContent = { uri, mime ->
+                                            if (attachmentSheetOpen) {
+                                                false
+                                            } else {
+                                                sharedFile = PendingShare.File(uri, mime)
+                                                uploadCurrentDraftDirectly = false
+                                                attachmentSheetOpen = true
+                                                true
+                                            }
+                                        },
+                                        onUploadDraft = {
+                                            uploadCurrentDraftDirectly = true
+                                            attachmentSheetOpen = true
+                                        },
+                                        voiceEnabled = voiceEnabled && voiceState.staged == null && composerText.text.isBlank(),
+                                        voiceRecording = voiceState.recording != null,
+                                        onVoiceHoldStart = onVoiceHoldStart,
+                                        onVoiceAccessibilityStart = onVoiceAccessibilityStart,
+                                        onVoiceHoldStop = onVoiceHoldStop,
+                                        onVoiceHoldCancel = onVoiceHoldCancel,
+                                        onVoiceLock = onVoiceLock,
+                                        autocomplete =
+                                            if (showAutocomplete && completions.isNotEmpty()) {
+                                                {
+                                                    AutocompletePanel(
+                                                        candidates = completions.map { it.display },
+                                                        isCommand = completions.firstOrNull()?.isCommand == true,
+                                                        networkId = state.buffer?.networkId,
+                                                        onPick = { picked ->
+                                                            composerText = applyPick(composerText, picked)
+                                                            onDraftChanged(composerText.text)
+                                                        },
+                                                    )
+                                                }
+                                            } else {
+                                                null
+                                            },
+                                    )
+                                }
+                            },
+                        ) { innerPadding ->
+                            // Scaffold measures the host before the full-area timeline in this same pass.
+                            if (bottomHostPadding !== innerPadding) bottomHostPadding = innerPadding
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                CompositionLocalProvider(
+                                    LocalSpacing provides conversationSpacing,
+                                    LocalMessageBackgroundOpacityPercent provides conversationLayout.effectiveMessageBackgroundOpacity(LocalMessageBackgroundOpacityPercent.current),
+                                    LocalMessageBackgroundBlur provides effectiveBlur,
+                                    LocalMessageWallpaperBackdrop provides wallpaperBackdrop,
+                                ) {
                                     Box(
                                         modifier =
                                             Modifier
                                                 .fillMaxSize()
-                                                .graphicsLayer { alpha = if (entryVeilLifted && drawingAllowed) 1f else 0f }
-                                                .then(if (entryVeilLifted && drawingAllowed) Modifier else Modifier.clearAndSetSemantics {}),
+                                                // The runway slides the whole timeline up past this pane's top edge;
+                                                // without the clip those rows would paint over the app bar.
+                                                .clipToBounds()
+                                                .testTag("chat_layout_effective_${conversationLayout.effective.name.lowercase()}"),
                                     ) {
-                                        MessageList(
-                                            items = items,
-                                            listState = listState,
-                                            modifier =
-                                                Modifier.onGloballyPositioned {
-                                                    if (presentationLease?.ownsSlot() == true) measuredSnapshot?.value = layoutSnapshot
-                                                },
-                                            pagingHintsEnabled = initialPositionSettled && payloadAllowed && entryPreparationReady,
-                                            temporaryFoolVisibilityMotion = temporaryFoolMotion,
-                                            hiddenFoolVisibility = hiddenFoolVisibility,
-                                            preserveOutgoingHiddenBodies = preserveOutgoingHiddenBodies,
-                                            bottomContentPadding = innerPadding,
-                                            rowContentMetrics = rowContentMetrics,
-                                            onTranslateMessage = ::openTranslationPicker,
-                                            externalTranslations = externalTranslations,
-                                            onDismissExternalTranslation = onDismissExternalTranslation,
-                                            liveEntryIds = liveEntryIds,
-                                            onLiveEntryConsumed = onLiveEntryConsumed,
-                                            outgoingFlight = outgoingFlight,
-                                            flownRowIds = flownRowIds,
-                                            flightProgress = flightProgress,
-                                            onFlightRowPositioned = onFlightRowPositioned,
-                                            listShift = flightListShift,
-                                            networkId = state.buffer?.networkId,
-                                            bufferId = state.buffer?.id,
-                                            ebooksQuietFeed = eligibleEbooksRoomId != null,
-                                            conversationName = conversationLabel,
-                                            hideInlineAudioLinks = activeDickordChannel,
-                                            directMessage = state.buffer?.type == BufferType.QUERY,
-                                            collapseSystemEvents = !isServerBuffer,
-                                            // Frozen read-marker so the "New messages" divider stays put.
-                                            readMarkerTime = unreadEntrySnapshot?.marker,
-                                            readMarkerLabel = unreadEntryLabel,
-                                            timelineSeams = timelineSeams,
-                                            onLoadGap = onLoadGap,
-                                            reactionChips = reactionChips,
-                                            replyPreview = replyPreview,
-                                            onReplyPreviewClick = onReplyPreviewClick,
-                                            onLongPress = onTimelineLongPress,
-                                            onReadMessage =
-                                                onReadAloudMessage.takeIf {
-                                                    readAloudState.enabled && !readAloudState.previewing &&
-                                                        readAloudState.roomId == buffer?.id
-                                                },
-                                            onReply = timelineReply,
-                                            swipeToReplyEnabled = swipeToReplyEnabled,
-                                            onReact = onReact,
-                                            onImageClick = onOpenImage,
-                                            onRetry = onRetry,
-                                            canRetry = canRetryMessage,
-                                            onDelete = onDelete,
-                                            onAcceptInvite = onAcceptInvite,
-                                            onDismissInvite = onDismissInvite,
-                                            dccTransfer = dccTransfer,
-                                            onAcceptDccTransfer = onAcceptDccTransferRequest,
-                                            onRejectDccTransfer = onRejectDccTransfer,
-                                            onRemoveDccTransfer = onRemoveDccTransfer,
-                                            onSaveDccToDownloads = onSaveDccToDownloads,
-                                            loadPreview = loadPreview,
-                                            // A visible fallback entry can remain unresolved indefinitely.
-                                            richContentReady = drawingAllowed && (initialPositionSettled || entryVeilLifted),
-                                            showImages = showImages,
-                                            showLinkPreviews = showLinkPreviews,
-                                            cachedPreview = cachedPreview,
-                                            loadAudioMetadata = loadAudioMetadata,
-                                            cachedAudioMetadata = cachedAudioMetadata,
-                                            audioPlaybackState = audioPlaybackState,
-                                            audioWaveforms = audioWaveforms,
-                                            audioCacheStatuses = audioCacheStatuses,
-                                            onAudioToggle = onAudioToggle,
-                                            onAudioCacheInspect = onAudioCacheInspect,
-                                            onAudioSeek = onAudioSeek,
-                                            voiceTranscripts = voiceState.transcripts,
-                                            voiceTranscriptionEnabled = voiceState.transcriptionEnabled,
-                                            voiceTranscriptionReady = voiceState.transcriptionReady,
-                                            onVoiceTranscribe = onVoiceTranscribe,
-                                            onVoiceTranscriptionCancel = onVoiceTranscriptionCancel,
-                                            onOpenLink = onOpenLink,
-                                            highlightMsgid = highlightMsgid,
-                                            highlightEventId = highlightEventId,
-                                            knownNicks = knownNicks,
-                                            friends = friends,
-                                            fools = fools,
-                                            foolsMode = foolsMode,
-                                            foolPreferences = foolPreferences,
-                                            identityRules = identityRules,
-                                            historyUiState = historyUiState,
-                                            foolExpanded = foolExpanded,
-                                            onToggleFool = onToggleFool,
-                                            onSenderClick = onSenderClick,
-                                        )
-                                    }
-                                    // Hidden rows cannot receive input; readiness removes this immediately.
-                                    if (!entryVeilLifted || !drawingAllowed) {
+                                        // Keep the timeline's callbacks stable. A freshly allocated lambda on every
+                                        // recomposition of this scope defeats MessageList's skipping, which is what
+                                        // turned any surrounding state change into a full timeline recomposition.
+                                        // Keyed like `liveEntryIds` itself, which is re-remembered per buffer.
+                                        val onLiveEntryConsumed =
+                                            remember(state.buffer?.id) {
+                                                { id: Long -> liveEntryIds = consumeLiveEntryId(liveEntryIds, id) }
+                                            }
+                                        val onFlightRowPositioned =
+                                            remember(flightAnchors) {
+                                                { id: Long, bounds: Rect ->
+                                                    flightAnchors.reportLandingRow(id, bounds)
+                                                    // Recorded here rather than from the flight's event ids: this fires on
+                                                    // the row's first layout, before any accept could have named it. The
+                                                    // guard matters -- this runs on every frame of the reveal.
+                                                    if (id !in flownRowIds) flownRowIds = flownRowIds + id
+                                                }
+                                            }
+                                        val onTimelineLongPress =
+                                            remember {
+                                                { message: MessageEntity -> sheetTarget = message }
+                                            }
+                                        val canRetryMessage =
+                                            remember(state.buffer) {
+                                                { message: MessageEntity ->
+                                                    state.buffer?.let { buffer ->
+                                                        io.github.trevarj.motd.service
+                                                            .isGenericRetryEligible(buffer, message)
+                                                    } == true
+                                                }
+                                            }
+                                        val onAcceptDccTransferRequest =
+                                            remember(dccDestinationPicker) {
+                                                { transferId: Long, filename: String, allowPrivate: Boolean ->
+                                                    pendingDccAccept = PendingDccAccept(transferId, allowPrivate)
+                                                    dccDestinationPicker.launch(filename)
+                                                }
+                                            }
+                                        // Link-preview tap opens the URL in the system browser.
+                                        val onOpenLink =
+                                            remember(ctx) {
+                                                { url: String -> ctx.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
+                                            }
+                                        // Effective expansion: global expand-all default, minus rows the user
+                                        // re-collapsed; otherwise only individually expanded rows show (bug #9).
+                                        val foolExpanded =
+                                            remember {
+                                                { id: Long ->
+                                                    if (latestExpandAllFools) id !in collapsedFools else id in expandedFools
+                                                }
+                                            }
+                                        // Bidirectional per-row toggle, respecting the global default.
+                                        val onToggleFool =
+                                            remember {
+                                                { id: Long ->
+                                                    if (latestExpandAllFools) {
+                                                        collapsedFools =
+                                                            if (id in collapsedFools) collapsedFools - id else collapsedFools + id
+                                                    } else {
+                                                        expandedFools =
+                                                            if (id in expandedFools) expandedFools - id else expandedFools + id
+                                                    }
+                                                }
+                                            }
+                                        // Keep positioning hidden, then paint and release input together on
+                                        // readiness; a post-placement fade only delays already-available rows.
                                         Box(
                                             modifier =
                                                 Modifier
-                                                    .matchParentSize()
-                                                    .testTag(CHAT_ENTRY_VEIL_TAG)
-                                                    .pointerInput(Unit) {
-                                                        awaitPointerEventScope {
-                                                            while (true) {
-                                                                awaitPointerEvent(PointerEventPass.Initial)
-                                                                    .changes
-                                                                    .forEach { it.consume() }
-                                                            }
-                                                        }
+                                                    .fillMaxSize()
+                                                    .captureSurfaceBackdrop(pageBackdrop)
+                                                    .graphicsLayer { alpha = if (entryVeilLifted && drawingAllowed) 1f else 0f }
+                                                    .then(if (entryVeilLifted && drawingAllowed) Modifier else Modifier.clearAndSetSemantics {}),
+                                        ) {
+                                            MessageList(
+                                                items = items,
+                                                listState = listState,
+                                                modifier =
+                                                    Modifier.onGloballyPositioned {
+                                                        if (presentationLease?.ownsSlot() == true) measuredSnapshot?.value = layoutSnapshot
                                                     },
-                                        )
-                                    }
-                                }
-                            }
-
-                            // Paging begins with a transient empty refresh before Room delivers its first
-                            // page. Only show the empty state once APPEND proves the buffer is terminally
-                            // empty; otherwise the large placeholder flashes during every chat entry.
-                            if (items.loadState.refresh is LoadState.NotLoading &&
-                                initialPagingPage(items.itemCount, items.loadState.append) ==
-                                InitialPagingPage.TerminalEmpty &&
-                                !historySyncStatus.isActive
-                            ) {
-                                io.github.trevarj.motd.ui.components.EmptyState(
-                                    icon = Icons.Outlined.Forum,
-                                    title = stringResource(R.string.chat_empty_title),
-                                    message = stringResource(R.string.chat_empty_message),
-                                    modifier = Modifier.padding(innerPadding),
-                                    ghostRows = true,
-                                )
-                            }
-
-                            // Keep the hot firstVisibleItemIndex read inside the FAB subtree. Reading it in
-                            // ChatContent made every row boundary re-run the entire Scaffold/list/composer.
-                            ViewportScrollToBottomFab(
-                                listState = listState,
-                                readMarker = readMarkerLive,
-                                visibilityPolicy = visibilityPolicy,
-                                countUnreadBelowViewport = countUnreadBelowViewport,
-                                nearestUnreadMentionBelow = nearestUnreadMentionBelow,
-                                visible = shouldShowNewestFab(atBottom, autoScrolling),
-                                onJumpMention = onFocusRecentMention,
-                                onJumpNewest = {
-                                    onJumpToNewest()
-                                    scope.launch { scrollToNewest(animate = true, reason = "jump_fab") }
-                                },
-                                modifier = Modifier.align(Alignment.BottomEnd).padding(innerPadding).padding(end = 16.dp, bottom = 16.dp),
-                            )
-
-                            if (compactHeader) {
-                                Column(
-                                    modifier =
-                                        Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .padding(innerPadding)
-                                            .padding(end = 16.dp, bottom = 16.dp + MotdSizes.floatingActionButton + 8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Box {
-                                        FloatingActionButton(
-                                            onClick = { overflowOpen = true },
-                                            modifier = Modifier.size(MotdSizes.floatingActionButton).testTag("chat_compact_actions"),
-                                        ) {
-                                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
+                                                pagingHintsEnabled = initialPositionSettled && payloadAllowed && entryPreparationReady,
+                                                temporaryFoolVisibilityMotion = temporaryFoolMotion,
+                                                hiddenFoolVisibility = hiddenFoolVisibility,
+                                                preserveOutgoingHiddenBodies = preserveOutgoingHiddenBodies,
+                                                bottomContentPadding = innerPadding,
+                                                topContentPadding = padding.calculateTopPadding(),
+                                                rowContentMetrics = rowContentMetrics,
+                                                onTranslateMessage = ::openTranslationPicker,
+                                                externalTranslations = externalTranslations,
+                                                onDismissExternalTranslation = onDismissExternalTranslation,
+                                                liveEntryIds = liveEntryIds,
+                                                onLiveEntryConsumed = onLiveEntryConsumed,
+                                                outgoingFlight = outgoingFlight,
+                                                flownRowIds = flownRowIds,
+                                                flightProgress = flightProgress,
+                                                onFlightRowPositioned = onFlightRowPositioned,
+                                                listShift = flightListShift,
+                                                networkId = state.buffer?.networkId,
+                                                bufferId = state.buffer?.id,
+                                                ebooksQuietFeed = eligibleEbooksRoomId != null,
+                                                conversationName = conversationLabel,
+                                                hideInlineAudioLinks = activeDickordChannel,
+                                                directMessage = state.buffer?.type == BufferType.QUERY,
+                                                collapseSystemEvents = !isServerBuffer,
+                                                // Frozen read-marker so the "New messages" divider stays put.
+                                                readMarkerTime = unreadEntrySnapshot?.marker,
+                                                readMarkerLabel = unreadEntryLabel,
+                                                timelineSeams = timelineSeams,
+                                                onLoadGap = onLoadGap,
+                                                reactionChips = reactionChips,
+                                                replyPreview = replyPreview,
+                                                onReplyPreviewClick = onReplyPreviewClick,
+                                                onLongPress = onTimelineLongPress,
+                                                onReadMessage =
+                                                    onReadAloudMessage.takeIf {
+                                                        readAloudState.enabled && !readAloudState.previewing &&
+                                                            readAloudState.roomId == buffer?.id
+                                                    },
+                                                onReply = timelineReply,
+                                                swipeToReplyEnabled = swipeToReplyEnabled,
+                                                onReact = onReact,
+                                                onImageClick = onOpenImage,
+                                                onRetry = onRetry,
+                                                canRetry = canRetryMessage,
+                                                onDelete = onDelete,
+                                                onAcceptInvite = onAcceptInvite,
+                                                onDismissInvite = onDismissInvite,
+                                                dccTransfer = dccTransfer,
+                                                onAcceptDccTransfer = onAcceptDccTransferRequest,
+                                                onRejectDccTransfer = onRejectDccTransfer,
+                                                onRemoveDccTransfer = onRemoveDccTransfer,
+                                                onSaveDccToDownloads = onSaveDccToDownloads,
+                                                loadPreview = loadPreview,
+                                                // A visible fallback entry can remain unresolved indefinitely.
+                                                richContentReady = drawingAllowed && (initialPositionSettled || entryVeilLifted),
+                                                showImages = showImages,
+                                                showLinkPreviews = showLinkPreviews,
+                                                cachedPreview = cachedPreview,
+                                                loadAudioMetadata = loadAudioMetadata,
+                                                cachedAudioMetadata = cachedAudioMetadata,
+                                                audioPlaybackState = audioPlaybackState,
+                                                audioWaveforms = audioWaveforms,
+                                                audioCacheStatuses = audioCacheStatuses,
+                                                onAudioToggle = onAudioToggle,
+                                                onAudioCacheInspect = onAudioCacheInspect,
+                                                onAudioSeek = onAudioSeek,
+                                                voiceTranscripts = voiceState.transcripts,
+                                                voiceTranscriptionEnabled = voiceState.transcriptionEnabled,
+                                                voiceTranscriptionReady = voiceState.transcriptionReady,
+                                                onVoiceTranscribe = onVoiceTranscribe,
+                                                onVoiceTranscriptionCancel = onVoiceTranscriptionCancel,
+                                                onOpenLink = onOpenLink,
+                                                highlightMsgid = highlightMsgid,
+                                                highlightEventId = highlightEventId,
+                                                knownNicks = knownNicks,
+                                                friends = friends,
+                                                fools = fools,
+                                                foolsMode = foolsMode,
+                                                foolPreferences = foolPreferences,
+                                                identityRules = identityRules,
+                                                historyUiState = historyUiState,
+                                                foolExpanded = foolExpanded,
+                                                onToggleFool = onToggleFool,
+                                                onSenderClick = onSenderClick,
+                                            )
                                         }
-                                        conversationActionsMenu()
-                                    }
-                                    if (showBack) {
-                                        FloatingActionButton(
-                                            onClick = onBack,
-                                            modifier = Modifier.size(MotdSizes.floatingActionButton).testTag("chat_compact_back"),
-                                        ) {
-                                            Icon(
-                                                Icons.AutoMirrored.Filled.ArrowBack,
-                                                contentDescription = stringResource(R.string.chat_back),
+                                        // Hidden rows cannot receive input; readiness removes this immediately.
+                                        if (!entryVeilLifted || !drawingAllowed) {
+                                            Box(
+                                                modifier =
+                                                    Modifier
+                                                        .matchParentSize()
+                                                        .testTag(CHAT_ENTRY_VEIL_TAG)
+                                                        .pointerInput(Unit) {
+                                                            awaitPointerEventScope {
+                                                                while (true) {
+                                                                    awaitPointerEvent(PointerEventPass.Initial)
+                                                                        .changes
+                                                                        .forEach { it.consume() }
+                                                                }
+                                                            }
+                                                        },
                                             )
                                         }
                                     }
                                 }
-                            }
 
-                            val stagedVoicePlaybackId = voiceState.staged?.let { "voice:${it.file.toURI()}" }
-                            TimelineTopOverlays(
-                                audioPlayer = {
-                                    ReadAloudPlayer(
-                                        state = readAloudState,
-                                        onPrevious = onReadAloudPrevious,
-                                        onPauseResume = onReadAloudPauseResume,
-                                        onSkip = onReadAloudSkip,
-                                        onLatest = onReadAloudLatest,
-                                        onStop = onReadAloudStop,
-                                        onOptions = {
-                                            onReadAloudOptions()
-                                            readAloudOptionsOpen = true
-                                        },
+                                // Paging begins with a transient empty refresh before Room delivers its first
+                                // page. Only show the empty state once APPEND proves the buffer is terminally
+                                // empty; otherwise the large placeholder flashes during every chat entry.
+                                if (items.loadState.refresh is LoadState.NotLoading &&
+                                    initialPagingPage(items.itemCount, items.loadState.append) ==
+                                    InitialPagingPage.TerminalEmpty &&
+                                    !historySyncStatus.isActive
+                                ) {
+                                    io.github.trevarj.motd.ui.components.EmptyState(
+                                        icon = Icons.Outlined.Forum,
+                                        title = stringResource(R.string.chat_empty_title),
+                                        message = stringResource(R.string.chat_empty_message),
+                                        modifier = Modifier.padding(innerPadding),
+                                        ghostRows = true,
                                     )
-                                    if (audioPlaybackState.activeId != stagedVoicePlaybackId) {
-                                        AudioMiniPlayer(
-                                            state = audioPlaybackState,
-                                            onToggle = onAudioToggleActive,
-                                            onCancelLoading = onAudioCancelLoading,
-                                            onRetry = onAudioRetry,
-                                            onDismiss = onAudioDismiss,
-                                            onSeek = { positionMs ->
-                                                audioPlaybackState.attachment?.let { onAudioSeek(it, positionMs) }
+                                }
+
+                                // Keep the hot firstVisibleItemIndex read inside the FAB subtree. Reading it in
+                                // ChatContent made every row boundary re-run the entire Scaffold/list/composer.
+                                ViewportScrollToBottomFab(
+                                    listState = listState,
+                                    readMarker = readMarkerLive,
+                                    visibilityPolicy = visibilityPolicy,
+                                    countUnreadBelowViewport = countUnreadBelowViewport,
+                                    nearestUnreadMentionBelow = nearestUnreadMentionBelow,
+                                    visible = shouldShowNewestFab(atBottom, autoScrolling),
+                                    onJumpMention = onFocusRecentMention,
+                                    onJumpNewest = {
+                                        onJumpToNewest()
+                                        scope.launch { scrollToNewest(animate = true, reason = "jump_fab") }
+                                    },
+                                    modifier = Modifier.align(Alignment.BottomEnd).padding(innerPadding).padding(end = 16.dp, bottom = 16.dp),
+                                )
+
+                                if (compactHeader) {
+                                    Column(
+                                        modifier =
+                                            Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(innerPadding)
+                                                .padding(end = 16.dp, bottom = 16.dp + MotdSizes.floatingActionButton + 8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Box {
+                                            FloatingActionButton(
+                                                onClick = { overflowOpen = true },
+                                                modifier = Modifier.size(MotdSizes.floatingActionButton).testTag("chat_compact_actions"),
+                                            ) {
+                                                Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more))
+                                            }
+                                            conversationActionsMenu()
+                                        }
+                                        if (showBack) {
+                                            FloatingActionButton(
+                                                onClick = onBack,
+                                                modifier = Modifier.size(MotdSizes.floatingActionButton).testTag("chat_compact_back"),
+                                            ) {
+                                                Icon(
+                                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                                    contentDescription = stringResource(R.string.chat_back),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                val stagedVoicePlaybackId = voiceState.staged?.let { "voice:${it.file.toURI()}" }
+                                TimelineTopOverlays(
+                                    audioPlayer = {
+                                        ReadAloudPlayer(
+                                            state = readAloudState,
+                                            onPrevious = onReadAloudPrevious,
+                                            onPauseResume = onReadAloudPauseResume,
+                                            onSkip = onReadAloudSkip,
+                                            onLatest = onReadAloudLatest,
+                                            onStop = onReadAloudStop,
+                                            onOptions = {
+                                                onReadAloudOptions()
+                                                readAloudOptionsOpen = true
                                             },
-                                            onOpenOrigin = onOpenAudioOrigin,
-                                            onSpeed = { speed ->
-                                                audioPlaybackState.attachment?.let { onAudioSpeed(it, speed) }
-                                            },
-                                            includeNetwork =
-                                                audioPlaybackState.origin?.networkId != state.buffer?.networkId,
                                         )
-                                    }
-                                },
-                                historyFailure = {
-                                    TimelineHistorySyncFailure(
-                                        status = timelineHistoryStatus,
-                                        retryEnabled = state.connState is IrcClientState.Ready,
-                                        // Both halves of history recovery: the coordinator re-runs the
-                                        // reconciliation pass (coalescing onto any in-flight one) while
-                                        // Paging re-attempts the failed newer/older fetch.
-                                        onRetry = {
-                                            onHistorySyncRetry()
-                                            items.retry()
-                                        },
-                                    )
-                                },
-                                staleChip = {
-                                    TimelineHistoryStaleChip(
-                                        status = timelineHistoryStatus,
-                                        timelineEmpty = items.itemCount == 0,
-                                        onDismiss = onHistorySyncDismiss,
-                                    )
-                                },
-                            )
-                        }
-                    }
-                    // The ghost overlay draws ABOVE the composer layer: a sent bubble materializes over
-                    // the input box -- the morph pins its real body to the still-warm field text --
-                    // and then rides up into the timeline, instead of being born occluded behind the
-                    // input bar. The clip and the coordinate origin sit on this stationary wrapper:
-                    // clipping the ghost itself would clip nothing, since its layer translation carries
-                    // its bounds along with its pixels. The spacing provider mirrors the timeline
-                    // pane's, so the replica renders under exactly the tokens the rows use.
-                    CompositionLocalProvider(
-                        LocalSpacing provides conversationSpacing,
-                        LocalMessageBackgroundOpacityPercent provides conversationLayout.effectiveMessageBackgroundOpacity(LocalMessageBackgroundOpacityPercent.current),
-                        LocalMessageBackgroundBlur provides effectiveBlur,
-                        LocalMessageWallpaperBackdrop provides wallpaperBackdrop,
-                    ) {
-                        Box(
-                            modifier =
-                                Modifier
-                                    .matchParentSize()
-                                    .clipToBounds()
-                                    // Layout-phase write only: the flight resolves the composer's and the
-                                    // landing row's window rects against this origin.
-                                    .onGloballyPositioned {
-                                        flightAnchors.hostOrigin = it.positionInWindow()
+                                        if (audioPlaybackState.activeId != stagedVoicePlaybackId) {
+                                            AudioMiniPlayer(
+                                                state = audioPlaybackState,
+                                                onToggle = onAudioToggleActive,
+                                                onCancelLoading = onAudioCancelLoading,
+                                                onRetry = onAudioRetry,
+                                                onDismiss = onAudioDismiss,
+                                                onSeek = { positionMs ->
+                                                    audioPlaybackState.attachment?.let { onAudioSeek(it, positionMs) }
+                                                },
+                                                onOpenOrigin = onOpenAudioOrigin,
+                                                onSpeed = { speed ->
+                                                    audioPlaybackState.attachment?.let { onAudioSpeed(it, speed) }
+                                                },
+                                                includeNetwork =
+                                                    audioPlaybackState.origin?.networkId != state.buffer?.networkId,
+                                            )
+                                        }
                                     },
+                                    historyFailure = {
+                                        TimelineHistorySyncFailure(
+                                            status = timelineHistoryStatus,
+                                            retryEnabled = state.connState is IrcClientState.Ready,
+                                            // Both halves of history recovery: the coordinator re-runs the
+                                            // reconciliation pass (coalescing onto any in-flight one) while
+                                            // Paging re-attempts the failed newer/older fetch.
+                                            onRetry = {
+                                                onHistorySyncRetry()
+                                                items.retry()
+                                            },
+                                        )
+                                    },
+                                    staleChip = {
+                                        TimelineHistoryStaleChip(
+                                            status = timelineHistoryStatus,
+                                            timelineEmpty = items.itemCount == 0,
+                                            onDismiss = onHistorySyncDismiss,
+                                        )
+                                    },
+                                )
+                            }
+                        }
+                        // The ghost overlay draws ABOVE the composer layer: a sent bubble materializes over
+                        // the input box -- the morph pins its real body to the still-warm field text --
+                        // and then rides up into the timeline, instead of being born occluded behind the
+                        // input bar. The clip and the coordinate origin sit on this stationary wrapper:
+                        // clipping the ghost itself would clip nothing, since its layer translation carries
+                        // its bounds along with its pixels. The spacing provider mirrors the timeline
+                        // pane's, so the replica renders under exactly the tokens the rows use.
+                        CompositionLocalProvider(
+                            LocalSpacing provides conversationSpacing,
+                            LocalMessageBackgroundOpacityPercent provides conversationLayout.effectiveMessageBackgroundOpacity(LocalMessageBackgroundOpacityPercent.current),
+                            LocalMessageBackgroundBlur provides effectiveBlur,
+                            LocalMessageWallpaperBackdrop provides wallpaperBackdrop,
                         ) {
-                            val flightMessage =
-                                outgoingFlight?.let { flight ->
-                                    val landingId = flightAnchors.landingRow?.first
-                                    items.itemSnapshotList.items.firstOrNull { row ->
-                                        if (flight.eventIds.isEmpty() && landingId != null) {
-                                            row.id == landingId
-                                        } else {
-                                            flight.matches(row)
-                                        }
-                                    }
-                                }
-                            SendFlightOverlay(
-                                flight = outgoingFlight,
-                                pending = flightMessage == null || flightMessage.pendingLabel != null,
-                                failed = flightMessage?.failed == true,
-                                anchors = flightAnchors,
-                                motion = flightMotion,
-                                listShift = flightListShift,
-                                selfNick = selfNick,
-                                showSender = flightShowSender,
-                                networkId = state.buffer?.networkId,
-                                knownNicks = knownNicks,
-                                identityRules = identityRules,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (eligibleEbooksRoomId != null && ebooksOffersOpen) {
-        ModalBottomSheet(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            onDismissRequest = { ebooksOffersOpen = false },
-            modifier = Modifier.testTag("chat_ebooks_dcc_sheet"),
-        ) {
-            SheetSystemBars()
-            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-                Text(
-                    "DCC offers (${visibleEbooksOffers.size})",
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                )
-                Text(
-                    "Incoming offers on this network; they are not matched to a search. Review the sender and endpoint before saving.",
-                    modifier = Modifier.padding(horizontal = 20.dp),
-                )
-                if (visibleEbooksOffers.isEmpty()) {
-                    Text(
-                        "No offers yet. Send a search or request in #ebooks, then check here. Offers may arrive later.",
-                        modifier = Modifier.padding(20.dp).testTag("chat_ebooks_dcc_empty"),
-                    )
-                } else {
-                    LazyColumn(modifier = Modifier.heightIn(max = 480.dp)) {
-                        items(visibleEbooksOffers, key = { it.id }) { transfer ->
-                            Text("From ${transfer.peerNick}", modifier = Modifier.padding(start = 28.dp, top = 12.dp))
-                            ActiveDccTransferCard(
-                                transfer = transfer,
-                                onAccept = { id, filename, allowPrivate ->
-                                    pendingDccAccept =
-                                        PendingDccAccept(id, allowPrivate, eligibleEbooksRoomId, transfer.networkId)
-                                    dccDestinationPicker.launch(filename)
-                                },
-                                onReceiveResultsPrivately = { offered, allowPrivate ->
-                                    val canReceive =
-                                        offered.state == DccTransferState.OFFERED ||
-                                            offered.state == DccTransferState.PARTIAL ||
-                                            offered.state == DccTransferState.FAILED
-                                    if (eligibleEbooksRoomId == latestEligibleEbooksRoomId &&
-                                        offered in latestVisibleEbooksOffers && canReceive &&
-                                        offered.displayFilename.endsWith(".zip", ignoreCase = true)
-                                    ) {
-                                        onAcceptDccTransfer(offered.id, ebooksCache.uriFor(offered.id), allowPrivate)
-                                    }
-                                },
-                                onReject = onRejectDccTransfer,
-                                onRemove = onRemoveDccTransfer,
-                                onSaveToDownloads = onSaveDccToDownloads,
-                                onViewResults = { completed ->
-                                    val uri = completed.destinationUri
-                                    if (completed in visibleEbooksOffers && completed.state == DccTransferState.COMPLETED &&
-                                        uri != null && completed.displayFilename.endsWith(".zip", ignoreCase = true)
-                                    ) {
-                                        ebooksOffersOpen = false
-                                        showEbooksResults(eligibleEbooksRoomId, uri.toUri())
-                                    }
-                                },
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (eligibleEbooksRoomId != null && ebooksHelpOpen) {
-        AlertDialog(
-            onDismissRequest = { ebooksHelpOpen = false },
-            modifier = Modifier.testTag("chat_ebooks_dialog"),
-            title = { Text("Book search in #ebooks") },
-            text = {
-                Text(
-                    "An empty draft starts with @Search; add title/author and tap send yourself.\n" +
-                        "@Search or @Searchook plus title/author is ordinary channel text.\n" +
-                        "@TEXTBOOKS points to the channel's textbook instructions.\n" +
-                        "@Oatmeal is the new-book route.\n" +
-                        "@sbclient is mIRC help. DCC is required for files.\n\n" +
-                        "Read the current topic by tapping #ebooks above.\n\n" +
-                        "Tap DCC offers here to review incoming network offers (not linked to a search). " +
-                        "Choose Receive results privately on a ZIP offer to use temporary app-private storage " +
-                        "(16 MiB limit); private/local endpoints still require Allow once. " +
-                        "Other Save actions pick a destination. The sender's conversation still has the same offer.\n\n" +
-                        "After receiving a results ZIP, tap View results on its completed offer, or use Open results ZIP " +
-                        "to choose one manually. Request sends this channel message immediately. " +
-                        "Save the later book DCC from DCC offers here too.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { ebooksHelpOpen = false }) { Text("Close") }
-            },
-        )
-    }
-
-    val selectedEbooksResults = ebooksResults
-    if (eligibleEbooksRoomId != null && selectedEbooksResults != null) {
-        fun canRequest() =
-            eligibleEbooksRoomId == state.buffer.id &&
-                composerDraft.hydrated && composerDraft.text == "@Search " && composerText.text == "@Search " &&
-                state.replyTo == null && state.buffer.joined == true && !state.parted &&
-                state.connState is IrcClientState.Ready
-        AlertDialog(
-            onDismissRequest = { ebooksResults = null },
-            modifier = Modifier.testTag("chat_ebooks_results"),
-            title = { Text("Book results") },
-            text = {
-                Column {
-                    Text("Incoming offers are in DCC offers here and in the sender's conversation; no offer is matched to this search. Request sends this channel message immediately.")
-                    LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
-                        items(selectedEbooksResults) { result ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                            Box(
+                                modifier =
+                                    Modifier
+                                        .matchParentSize()
+                                        .clipToBounds()
+                                        // Layout-phase write only: the flight resolves the composer's and the
+                                        // landing row's window rects against this origin.
+                                        .onGloballyPositioned {
+                                            flightAnchors.hostOrigin = it.positionInWindow()
+                                        },
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(result.filename, style = MaterialTheme.typography.bodyMedium)
-                                    Text(result.size, style = MaterialTheme.typography.bodySmall)
-                                }
-                                TextButton(
-                                    onClick = {
-                                        if (ebooksResults === selectedEbooksResults && canRequest()) {
-                                            ebooksResults = null
-                                            pendingEbooksRequestRevision = composerDraft.revision + 1
-                                            onDraftChanged(result.request)
-                                            flightAnchors.captureLaunch()
-                                            onSubmit(result.request)
-                                            // Only the ViewModel clears the durable draft after acceptance;
-                                            // a rejected send republishes it to restore this optimistic clear.
-                                            composerText = TextFieldValue("")
+                                val flightMessage =
+                                    outgoingFlight?.let { flight ->
+                                        val landingId = flightAnchors.landingRow?.first
+                                        items.itemSnapshotList.items.firstOrNull { row ->
+                                            if (flight.eventIds.isEmpty() && landingId != null) {
+                                                row.id == landingId
+                                            } else {
+                                                flight.matches(row)
+                                            }
                                         }
-                                    },
-                                    enabled = canRequest(),
-                                    modifier = Modifier.testTag("chat_ebooks_request"),
-                                ) { Text("Request") }
+                                    }
+                                SendFlightOverlay(
+                                    flight = outgoingFlight,
+                                    pending = flightMessage == null || flightMessage.pendingLabel != null,
+                                    failed = flightMessage?.failed == true,
+                                    anchors = flightAnchors,
+                                    motion = flightMotion,
+                                    listShift = flightListShift,
+                                    selfNick = selfNick,
+                                    showSender = flightShowSender,
+                                    networkId = state.buffer?.networkId,
+                                    knownNicks = knownNicks,
+                                    identityRules = identityRules,
+                                )
                             }
                         }
                     }
                 }
-            },
-            confirmButton = { TextButton(onClick = { ebooksResults = null }) { Text("Close") } },
-        )
-    }
-    val selectedEbooksError = ebooksResultsError
-    if (eligibleEbooksRoomId != null && selectedEbooksError != null) {
-        AlertDialog(
-            onDismissRequest = { ebooksResultsError = null },
-            modifier = Modifier.testTag("chat_ebooks_results_error"),
-            title = { Text("Cannot open results ZIP") },
-            text = { Text(selectedEbooksError) },
-            confirmButton = { TextButton(onClick = { ebooksResultsError = null }) { Text("Close") } },
-        )
-    }
-
-    if (attachmentSheetOpen) {
-        AttachmentSheets(
-            open = true,
-            currentDraft = composerText.text,
-            networkId = state.buffer?.networkId,
-            // Offer-only. The upload path binds the advertised endpoint to the connected network's own
-            // host and refuses an off-host one there, where the credential is actually attached.
-            sojuFileHostAvailable =
-                (state.connState as? IrcClientState.Ready)
-                    ?.isupport
-                    ?.let(::sojuFileHostAdvertised) == true,
-            preferSojuFileHost = activeDickordChannel,
-            startWithCurrentDraft = uploadCurrentDraftDirectly,
-            sharedFile = sharedFile,
-            directFileTransferAvailable =
-                state.buffer?.type == BufferType.QUERY &&
-                    state.connState is IrcClientState.Ready,
-            onDismiss = {
-                attachmentSheetOpen = false
-                uploadCurrentDraftDirectly = false
-                sharedFile = null
-            },
-            onOpenNetworkSettings = onOpenNetworkSettings,
-            onInsertUrl = {
-                composerText =
-                    io.github.trevarj.motd.ui.components
-                        .insertAtCursor(composerText, it)
-                onDraftChanged(composerText.text)
-            },
-            onReplaceDraft = {
-                composerText =
-                    TextFieldValue(
-                        it,
-                        androidx.compose.ui.text
-                            .TextRange(it.length),
-                    )
-                onDraftChanged(composerText.text)
-            },
-            onDirectFile = onSendDccFile,
-        )
-    }
-    if (longDraftPrompt) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = {
-                AutoFollowTrace.record("long_draft_dismiss", traceBufferId, traceSessionId)
-                longDraftPrompt = false
-            },
-            title = { Text("Long draft") },
-            text = { Text("Upload the draft as a paste, or send it as ordinary IRC messages?") },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = {
-                    AutoFollowTrace.record("long_draft_upload", traceBufferId, traceSessionId)
-                    longDraftPrompt = false
-                    uploadCurrentDraftDirectly = true
-                    attachmentSheetOpen = true
-                }) { Text("Upload as paste") }
-            },
-            dismissButton = {
-                Row {
-                    androidx.compose.material3.TextButton(onClick = {
-                        AutoFollowTrace.record("long_draft_send_messages", traceBufferId, traceSessionId)
-                        if (!isEbooksSearchOnly(composerText.text)) {
-                            flightAnchors.captureLaunch()
-                            onSubmit(composerText.text)
-                            composerText = TextFieldValue("")
-                            scope.launch { scrollToNewest(animate = true, reason = "long_draft_send") }
-                        }
-                    }) { Text("Send as messages") }
-                    androidx.compose.material3.TextButton(onClick = {
-                        AutoFollowTrace.record("long_draft_cancel", traceBufferId, traceSessionId)
-                        longDraftPrompt = false
-                    }) { Text("Cancel") }
-                }
-            },
-        )
-    }
-
-    sheetTarget?.let { target ->
-        // Dismiss with the M3 hide animation, clearing the target only once it settles.
-        val hideThen: (() -> Unit) -> Unit = { after ->
-            scope.launch { sheetState.hide() }.invokeOnCompletion {
-                sheetTarget = null
-                after()
             }
         }
-        MessageActionSheet(
-            sheetState = sheetState,
-            isServerBuffer = isServerBuffer,
-            onDismiss = { sheetTarget = null },
-            onTranslate =
-                if (externalTranslationText(target) != null) {
-                    { hideThen { openTranslationPicker(target) } }
-                } else {
-                    null
-                },
-            onForward =
-                if (onOpenForward != null && canForwardMessage(target, state.buffer?.type)) {
-                    { hideThen { onOpenForward(target) } }
-                } else {
-                    null
-                },
-            onReply = {
-                hideThen {
-                    onSetReply(target)
-                    composerText =
-                        composerTextForReply(
-                            value = composerText,
-                            sender = target.sender,
-                            bufferType = state.buffer?.type,
-                            visibleReplyPrefix = visibleReplyPrefix,
+
+        if (eligibleEbooksRoomId != null && ebooksOffersOpen) {
+            ModalBottomSheet(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                onDismissRequest = { ebooksOffersOpen = false },
+                modifier = Modifier.testTag("chat_ebooks_dcc_sheet"),
+            ) {
+                SheetSystemBars()
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                    Text(
+                        "DCC offers (${visibleEbooksOffers.size})",
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                    )
+                    Text(
+                        "Incoming offers on this network; they are not matched to a search. Review the sender and endpoint before saving.",
+                        modifier = Modifier.padding(horizontal = 20.dp),
+                    )
+                    if (visibleEbooksOffers.isEmpty()) {
+                        Text(
+                            "No offers yet. Send a search or request in #ebooks, then check here. Offers may arrive later.",
+                            modifier = Modifier.padding(20.dp).testTag("chat_ebooks_dcc_empty"),
                         )
-                    onDraftChanged(composerText.text)
-                }
-            },
-            // Pass the whole target: the VM queues the react when target.msgid is still null (own
-            // pending message) instead of silently dropping it.
-            onReact = { emoji -> hideThen { onReact(target, emoji) } },
-            onMoreReactions = { hideThen { reactionPickerTarget = target } },
-            reactions = target.msgid?.let(reactionChips).orEmpty(),
-            reactionEnabled = { emoji -> reactionEnabled(target, emoji) },
-            canPrepareThreadContext =
-                !contextPreparing &&
-                    canPrepareThreadContext(
-                        agentwireEnabled = agentwireEnabled,
-                        isServerBuffer = isServerBuffer,
-                        message = target,
-                        visibilityPolicy = visibilityPolicy,
-                    ),
-            onPrepareThreadContext = { hideThen { onPrepareThreadContext(target.id) } },
-            onCopy = {
-                hideThen {
-                    scope.launch {
-                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("message", target.text)))
+                    } else {
+                        LazyColumn(modifier = Modifier.heightIn(max = 480.dp)) {
+                            items(visibleEbooksOffers, key = { it.id }) { transfer ->
+                                Text("From ${transfer.peerNick}", modifier = Modifier.padding(start = 28.dp, top = 12.dp))
+                                ActiveDccTransferCard(
+                                    transfer = transfer,
+                                    onAccept = { id, filename, allowPrivate ->
+                                        pendingDccAccept =
+                                            PendingDccAccept(id, allowPrivate, eligibleEbooksRoomId, transfer.networkId)
+                                        dccDestinationPicker.launch(filename)
+                                    },
+                                    onReceiveResultsPrivately = { offered, allowPrivate ->
+                                        val canReceive =
+                                            offered.state == DccTransferState.OFFERED ||
+                                                offered.state == DccTransferState.PARTIAL ||
+                                                offered.state == DccTransferState.FAILED
+                                        if (eligibleEbooksRoomId == latestEligibleEbooksRoomId &&
+                                            offered in latestVisibleEbooksOffers && canReceive &&
+                                            offered.displayFilename.endsWith(".zip", ignoreCase = true)
+                                        ) {
+                                            onAcceptDccTransfer(offered.id, ebooksCache.uriFor(offered.id), allowPrivate)
+                                        }
+                                    },
+                                    onReject = onRejectDccTransfer,
+                                    onRemove = onRemoveDccTransfer,
+                                    onSaveToDownloads = onSaveDccToDownloads,
+                                    onViewResults = { completed ->
+                                        val uri = completed.destinationUri
+                                        if (completed in visibleEbooksOffers && completed.state == DccTransferState.COMPLETED &&
+                                            uri != null && completed.displayFilename.endsWith(".zip", ignoreCase = true)
+                                        ) {
+                                            ebooksOffersOpen = false
+                                            showEbooksResults(eligibleEbooksRoomId, uri.toUri())
+                                        }
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
-            },
-            onQuote = {
-                // Append the quote to the existing draft with the cursor at the end.
-                hideThen {
-                    composerText = appendPrefill(composerText, "> ${target.text}\n")
-                    onDraftChanged(composerText.text)
-                }
-            },
-            canRedact = canRedactMessage(target, state.buffer?.type, state.connState),
-            onRedact = { hideThen { redactionTarget = target } },
-            // Outbound share: the raw message text, no formatting or attribution.
-            onShare = { hideThen { shareMessageText(ctx, target.text) } },
-        )
-    }
+            }
+        }
 
-    if (sheetTarget == null) {
-        forwardState?.let { request ->
-            MessageForwardSheet(
-                state = request,
-                targets = forwardTargets,
-                onSelectDestination = onSelectForwardDestination,
-                onChangeDestination = onChangeForwardDestination,
-                onIncludeSenderChanged = onForwardIncludeSenderChanged,
-                onConfirm = onConfirmForward,
-                onDismiss = onDismissForward,
+        if (eligibleEbooksRoomId != null && ebooksHelpOpen) {
+            AlertDialog(
+                onDismissRequest = { ebooksHelpOpen = false },
+                modifier = Modifier.testTag("chat_ebooks_dialog"),
+                title = { Text("Book search in #ebooks") },
+                text = {
+                    Text(
+                        "An empty draft starts with @Search; add title/author and tap send yourself.\n" +
+                            "@Search or @Searchook plus title/author is ordinary channel text.\n" +
+                            "@TEXTBOOKS points to the channel's textbook instructions.\n" +
+                            "@Oatmeal is the new-book route.\n" +
+                            "@sbclient is mIRC help. DCC is required for files.\n\n" +
+                            "Read the current topic by tapping #ebooks above.\n\n" +
+                            "Tap DCC offers here to review incoming network offers (not linked to a search). " +
+                            "Choose Receive results privately on a ZIP offer to use temporary app-private storage " +
+                            "(16 MiB limit); private/local endpoints still require Allow once. " +
+                            "Other Save actions pick a destination. The sender's conversation still has the same offer.\n\n" +
+                            "After receiving a results ZIP, tap View results on its completed offer, or use Open results ZIP " +
+                            "to choose one manually. Request sends this channel message immediately. " +
+                            "Save the later book DCC from DCC offers here too.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { ebooksHelpOpen = false }) { Text("Close") }
+                },
             )
         }
-    }
 
-    reactionPickerTarget?.let { target ->
-        MessageReactionPicker(
-            sheetState = reactionPickerState,
-            onDismiss = { reactionPickerTarget = null },
-            onReact = { emoji -> onReact(target, emoji) },
-            reactionEnabled = { emoji -> reactionEnabled(target, emoji) },
-        )
-    }
+        val selectedEbooksResults = ebooksResults
+        if (eligibleEbooksRoomId != null && selectedEbooksResults != null) {
+            fun canRequest() =
+                eligibleEbooksRoomId == state.buffer.id &&
+                    composerDraft.hydrated && composerDraft.text == "@Search " && composerText.text == "@Search " &&
+                    state.replyTo == null && state.buffer.joined == true && !state.parted &&
+                    state.connState is IrcClientState.Ready
+            AlertDialog(
+                onDismissRequest = { ebooksResults = null },
+                modifier = Modifier.testTag("chat_ebooks_results"),
+                title = { Text("Book results") },
+                text = {
+                    Column {
+                        Text("Incoming offers are in DCC offers here and in the sender's conversation; no offer is matched to this search. Request sends this channel message immediately.")
+                        LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
+                            items(selectedEbooksResults) { result ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(result.filename, style = MaterialTheme.typography.bodyMedium)
+                                        Text(result.size, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            if (ebooksResults === selectedEbooksResults && canRequest()) {
+                                                ebooksResults = null
+                                                pendingEbooksRequestRevision = composerDraft.revision + 1
+                                                onDraftChanged(result.request)
+                                                flightAnchors.captureLaunch()
+                                                onSubmit(result.request)
+                                                // Only the ViewModel clears the durable draft after acceptance;
+                                                // a rejected send republishes it to restore this optimistic clear.
+                                                composerText = TextFieldValue("")
+                                            }
+                                        },
+                                        enabled = canRequest(),
+                                        modifier = Modifier.testTag("chat_ebooks_request"),
+                                    ) { Text("Request") }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { ebooksResults = null }) { Text("Close") } },
+            )
+        }
+        val selectedEbooksError = ebooksResultsError
+        if (eligibleEbooksRoomId != null && selectedEbooksError != null) {
+            AlertDialog(
+                onDismissRequest = { ebooksResultsError = null },
+                modifier = Modifier.testTag("chat_ebooks_results_error"),
+                title = { Text("Cannot open results ZIP") },
+                text = { Text(selectedEbooksError) },
+                confirmButton = { TextButton(onClick = { ebooksResultsError = null }) { Text("Close") } },
+            )
+        }
 
-    translationTarget?.let { target ->
-        MessageTranslationPicker(
-            targets = translationTargets,
-            localAvailable = onTranslateMessage != null,
-            otherAvailable = otherTranslationAvailable,
-            onLocal = { onTranslateMessage?.invoke(target) },
-            onTarget = { launchTranslation(target, it) },
-            onOther = { launchTranslation(target, null) },
-            onDismiss = { translationTarget = null },
-        )
-    }
+        if (attachmentSheetOpen) {
+            AttachmentSheets(
+                open = true,
+                currentDraft = composerText.text,
+                networkId = state.buffer?.networkId,
+                // Offer-only. The upload path binds the advertised endpoint to the connected network's own
+                // host and refuses an off-host one there, where the credential is actually attached.
+                sojuFileHostAvailable =
+                    (state.connState as? IrcClientState.Ready)
+                        ?.isupport
+                        ?.let(::sojuFileHostAdvertised) == true,
+                preferSojuFileHost = activeDickordChannel,
+                startWithCurrentDraft = uploadCurrentDraftDirectly,
+                sharedFile = sharedFile,
+                directFileTransferAvailable =
+                    state.buffer?.type == BufferType.QUERY &&
+                        state.connState is IrcClientState.Ready,
+                onDismiss = {
+                    attachmentSheetOpen = false
+                    uploadCurrentDraftDirectly = false
+                    sharedFile = null
+                },
+                onOpenNetworkSettings = onOpenNetworkSettings,
+                onInsertUrl = {
+                    composerText =
+                        io.github.trevarj.motd.ui.components
+                            .insertAtCursor(composerText, it)
+                    onDraftChanged(composerText.text)
+                },
+                onReplaceDraft = {
+                    composerText =
+                        TextFieldValue(
+                            it,
+                            androidx.compose.ui.text
+                                .TextRange(it.length),
+                        )
+                    onDraftChanged(composerText.text)
+                },
+                onDirectFile = onSendDccFile,
+            )
+        }
+        if (longDraftPrompt) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = {
+                    AutoFollowTrace.record("long_draft_dismiss", traceBufferId, traceSessionId)
+                    longDraftPrompt = false
+                },
+                title = { Text("Long draft") },
+                text = { Text("Upload the draft as a paste, or send it as ordinary IRC messages?") },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        AutoFollowTrace.record("long_draft_upload", traceBufferId, traceSessionId)
+                        longDraftPrompt = false
+                        uploadCurrentDraftDirectly = true
+                        attachmentSheetOpen = true
+                    }) { Text("Upload as paste") }
+                },
+                dismissButton = {
+                    Row {
+                        androidx.compose.material3.TextButton(onClick = {
+                            AutoFollowTrace.record("long_draft_send_messages", traceBufferId, traceSessionId)
+                            if (!isEbooksSearchOnly(composerText.text)) {
+                                flightAnchors.captureLaunch()
+                                onSubmit(composerText.text)
+                                composerText = TextFieldValue("")
+                                scope.launch { scrollToNewest(animate = true, reason = "long_draft_send") }
+                            }
+                        }) { Text("Send as messages") }
+                        androidx.compose.material3.TextButton(onClick = {
+                            AutoFollowTrace.record("long_draft_cancel", traceBufferId, traceSessionId)
+                            longDraftPrompt = false
+                        }) { Text("Cancel") }
+                    }
+                },
+            )
+        }
 
-    redactionTarget?.let { target ->
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { redactionTarget = null },
-            title = { Text(stringResource(R.string.chat_redaction_confirm_title)) },
-            text = { Text(stringResource(R.string.chat_redaction_confirm_body)) },
-            confirmButton = {
-                androidx.compose.material3.TextButton(
-                    onClick = {
-                        redactionTarget = null
-                        onRedact(target)
+        sheetTarget?.let { target ->
+            // Dismiss with the M3 hide animation, clearing the target only once it settles.
+            val hideThen: (() -> Unit) -> Unit = { after ->
+                scope.launch { sheetState.hide() }.invokeOnCompletion {
+                    sheetTarget = null
+                    after()
+                }
+            }
+            MessageActionSheet(
+                sheetState = sheetState,
+                isServerBuffer = isServerBuffer,
+                onDismiss = { sheetTarget = null },
+                onTranslate =
+                    if (externalTranslationText(target) != null) {
+                        { hideThen { openTranslationPicker(target) } }
+                    } else {
+                        null
                     },
-                    modifier = Modifier.testTag("message_redact_confirm"),
-                ) {
-                    Text(stringResource(R.string.action_delete))
-                }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { redactionTarget = null }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
-            modifier = Modifier.testTag("message_redact_dialog"),
-        )
-    }
+                onForward =
+                    if (onOpenForward != null && canForwardMessage(target, state.buffer?.type)) {
+                        { hideThen { onOpenForward(target) } }
+                    } else {
+                        null
+                    },
+                onReply = {
+                    hideThen {
+                        onSetReply(target)
+                        composerText =
+                            composerTextForReply(
+                                value = composerText,
+                                sender = target.sender,
+                                bufferType = state.buffer?.type,
+                                visibleReplyPrefix = visibleReplyPrefix,
+                            )
+                        onDraftChanged(composerText.text)
+                    }
+                },
+                // Pass the whole target: the VM queues the react when target.msgid is still null (own
+                // pending message) instead of silently dropping it.
+                onReact = { emoji -> hideThen { onReact(target, emoji) } },
+                onMoreReactions = { hideThen { reactionPickerTarget = target } },
+                reactions = target.msgid?.let(reactionChips).orEmpty(),
+                reactionEnabled = { emoji -> reactionEnabled(target, emoji) },
+                canPrepareThreadContext =
+                    !contextPreparing &&
+                        canPrepareThreadContext(
+                            agentwireEnabled = agentwireEnabled,
+                            isServerBuffer = isServerBuffer,
+                            message = target,
+                            visibilityPolicy = visibilityPolicy,
+                        ),
+                onPrepareThreadContext = { hideThen { onPrepareThreadContext(target.id) } },
+                onCopy = {
+                    hideThen {
+                        scope.launch {
+                            clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("message", target.text)))
+                        }
+                    }
+                },
+                onQuote = {
+                    // Append the quote to the existing draft with the cursor at the end.
+                    hideThen {
+                        composerText = appendPrefill(composerText, "> ${target.text}\n")
+                        onDraftChanged(composerText.text)
+                    }
+                },
+                canRedact = canRedactMessage(target, state.buffer?.type, state.connState),
+                onRedact = { hideThen { redactionTarget = target } },
+                // Outbound share: the raw message text, no formatting or attribution.
+                onShare = { hideThen { shareMessageText(ctx, target.text) } },
+            )
+        }
 
-    if (historySyncModeSheetOpen) {
-        HistorySyncModeSheet(
-            selected = state.conversationHistorySync.override,
-            global = state.conversationHistorySync.global,
-            includeInherit = true,
-            unsupported = historyAvailability == HistoryAvailability.Unsupported,
-            onSelect = onHistorySyncModeSelected,
-            onDismiss = { historySyncModeSheetOpen = false },
-            tag = "chat_history_sync_sheet",
-        )
-    }
+        if (sheetTarget == null) {
+            forwardState?.let { request ->
+                MessageForwardSheet(
+                    state = request,
+                    targets = forwardTargets,
+                    onSelectDestination = onSelectForwardDestination,
+                    onChangeDestination = onChangeForwardDestination,
+                    onIncludeSenderChanged = onForwardIncludeSenderChanged,
+                    onConfirm = onConfirmForward,
+                    onDismiss = onDismissForward,
+                )
+            }
+        }
 
-    if (presenceModeSheetOpen) {
-        PresenceModeSheet(
-            state = state.conversationPresence,
-            onSelect = onPresenceModeSelected,
-            onCustomKindSelected = onPresenceCustomKindSelected,
-            onDismiss = { presenceModeSheetOpen = false },
-        )
-    }
-    if (conversationLayoutSheetOpen) {
-        ConversationLayoutSheet(
-            state = conversationLayout,
-            onSelect = onConversationLayoutSelected,
-            onOpacity = onConversationMessageBackgroundOpacitySelected,
-            globalOpacity = LocalMessageBackgroundOpacityPercent.current,
-            onBlur = onConversationMessageBackgroundBlurSelected,
-            globalBlur = LocalMessageBackgroundBlur.current,
-            onDismiss = { conversationLayoutSheetOpen = false },
-            wallpaper = chatWallpaper,
-            conversationFontScalePercent = conversationFontScalePercent,
-            messageSpacing = messageSpacing,
-            bubbleCorners = bubbleCornerStyle,
-        )
-    }
-    if (notificationSheetOpen && buffer?.type == BufferType.CHANNEL) {
-        ChannelNotificationSheet(
-            presentation = channelNotifications,
-            onMode = onChannelNotificationMode,
-            onStart = onStartWatch,
-            onStop = onStopWatch,
-            onDismiss = { notificationSheetOpen = false },
-            tagPrefix = "chat",
-        )
+        reactionPickerTarget?.let { target ->
+            MessageReactionPicker(
+                sheetState = reactionPickerState,
+                onDismiss = { reactionPickerTarget = null },
+                onReact = { emoji -> onReact(target, emoji) },
+                reactionEnabled = { emoji -> reactionEnabled(target, emoji) },
+            )
+        }
+
+        translationTarget?.let { target ->
+            MessageTranslationPicker(
+                targets = translationTargets,
+                localAvailable = onTranslateMessage != null,
+                otherAvailable = otherTranslationAvailable,
+                onLocal = { onTranslateMessage?.invoke(target) },
+                onTarget = { launchTranslation(target, it) },
+                onOther = { launchTranslation(target, null) },
+                onDismiss = { translationTarget = null },
+            )
+        }
+
+        redactionTarget?.let { target ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { redactionTarget = null },
+                title = { Text(stringResource(R.string.chat_redaction_confirm_title)) },
+                text = { Text(stringResource(R.string.chat_redaction_confirm_body)) },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            redactionTarget = null
+                            onRedact(target)
+                        },
+                        modifier = Modifier.testTag("message_redact_confirm"),
+                    ) {
+                        Text(stringResource(R.string.action_delete))
+                    }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { redactionTarget = null }) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
+                },
+                modifier = Modifier.testTag("message_redact_dialog"),
+            )
+        }
+
+        if (historySyncModeSheetOpen) {
+            HistorySyncModeSheet(
+                selected = state.conversationHistorySync.override,
+                global = state.conversationHistorySync.global,
+                includeInherit = true,
+                unsupported = historyAvailability == HistoryAvailability.Unsupported,
+                onSelect = onHistorySyncModeSelected,
+                onDismiss = { historySyncModeSheetOpen = false },
+                tag = "chat_history_sync_sheet",
+            )
+        }
+
+        if (presenceModeSheetOpen) {
+            PresenceModeSheet(
+                state = state.conversationPresence,
+                onSelect = onPresenceModeSelected,
+                onCustomKindSelected = onPresenceCustomKindSelected,
+                onDismiss = { presenceModeSheetOpen = false },
+            )
+        }
+        if (conversationLayoutSheetOpen) {
+            ConversationLayoutSheet(
+                state = conversationLayout,
+                onSelect = onConversationLayoutSelected,
+                onOpacity = onConversationMessageBackgroundOpacitySelected,
+                globalOpacity = LocalMessageBackgroundOpacityPercent.current,
+                onBlur = onConversationMessageBackgroundBlurSelected,
+                globalBlur = LocalMessageBackgroundBlur.current,
+                onDismiss = { conversationLayoutSheetOpen = false },
+                wallpaper = chatWallpaper,
+                conversationFontScalePercent = conversationFontScalePercent,
+                messageSpacing = messageSpacing,
+                bubbleCorners = bubbleCornerStyle,
+            )
+        }
+        if (notificationSheetOpen && buffer?.type == BufferType.CHANNEL) {
+            ChannelNotificationSheet(
+                presentation = channelNotifications,
+                onMode = onChannelNotificationMode,
+                onStart = onStartWatch,
+                onStop = onStopWatch,
+                onDismiss = { notificationSheetOpen = false },
+                tagPrefix = "chat",
+            )
+        }
     }
 }
 
@@ -4805,23 +4826,26 @@ internal fun ReportMessageViewport(
     followingAtBottom: Boolean,
     onAnchor: (ViewportRefreshAnchor?) -> Unit,
     bottomContentPadding: PaddingValues? = null,
+    topContentPadding: PaddingValues? = null,
     rowContentMetrics: Map<Long, TimelineRowContentMetrics> = emptyMap(),
 ) {
     val latestOnAnchor by rememberUpdatedState(onAnchor)
     var lastVisibleIndex by remember(items, listState, scopeId) { mutableStateOf<Int?>(null) }
     var lastItemCount by remember(items, listState, scopeId) { mutableIntStateOf(-1) }
     val latestBottomPadding by rememberUpdatedState(bottomContentPadding)
+    val latestTopPadding by rememberUpdatedState(topContentPadding)
     val latestDensity by rememberUpdatedState(LocalDensity.current)
     LaunchedEffect(items, listState, policy, followingAtBottom, enabled, scopeId, rowContentMetrics) {
         if (!enabled) return@LaunchedEffect
         snapshotFlow {
             val layout = listState.layoutInfo
             val bottomOcclusionPx = latestBottomPadding?.let { with(latestDensity) { it.calculateBottomPadding().roundToPx() } } ?: 0
+            val topOcclusionPx = latestTopPadding?.let { with(latestDensity) { it.calculateTopPadding().roundToPx() } } ?: 0
             val snapshot = items.itemSnapshotList
             var newestVisible = false
             var row: MessageEntity? = null
             for (visible in layout.visibleItemsInfo) {
-                if (!timelineItemIsVisible(visible, layout, bottomOcclusionPx, rowContentMetrics)) {
+                if (!timelineItemIsVisible(visible, layout, bottomOcclusionPx, rowContentMetrics, topOcclusionPx)) {
                     continue
                 }
                 if (visible.index == 0) newestVisible = true
@@ -4842,7 +4866,7 @@ internal fun ReportMessageViewport(
                 }
             val firstVisible =
                 layout.visibleItemsInfo.firstOrNull {
-                    timelineItemIsVisible(it, layout, bottomOcclusionPx, rowContentMetrics)
+                    timelineItemIsVisible(it, layout, bottomOcclusionPx, rowContentMetrics, topOcclusionPx)
                 }
             Triple(firstVisible?.index, anchor, items.itemCount)
         }.distinctUntilChanged().collect { (index, anchor, count) ->
@@ -4860,13 +4884,14 @@ private fun timelineItemIsVisible(
     layout: LazyListLayoutInfo,
     bottomOcclusionPx: Int,
     rowContentMetrics: Map<Long, TimelineRowContentMetrics>,
+    topOcclusionPx: Int = 0,
 ): Boolean {
     val metrics = (item.key as? Long)?.let { rowContentMetrics[it] }
     return timelineItemIsVisible(
         item.offset,
         item.size,
         layout.viewportStartOffset,
-        layout.viewportEndOffset,
+        layout.viewportEndOffset - topOcclusionPx,
         bottomOcclusionPx,
         leadingGapPx = metrics?.leadingGapPx ?: 0,
         fullItemSize = metrics?.fullHeightPx ?: item.size,

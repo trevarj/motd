@@ -20,6 +20,99 @@ class AppearancePrefsTest {
     private val prefs: AppearancePrefs = AppearancePrefsImpl(ApplicationProvider.getApplicationContext<Context>())
     private val jsonWithDefaults = Json { encodeDefaults = true }
 
+    @Test fun linkedGlobalEditsBroadcastOnlyTheirDimensionFromEveryEntryPoint() =
+        runTest {
+            val original = prefs.config.first()
+            val mixed = AppearanceConfig(surfaceEffects = SurfaceEffects(surfaces = EffectSurface.entries.associateWith { SurfaceEffect(it.ordinal * 10, 100 - it.ordinal * 10) }), messageBackgroundOpacityPercent = 31, messageBackgroundBlur = 17)
+            try {
+                prefs.restoreGlobalEffects(mixed)
+                prefs.setLinkGlobalOpacity(true)
+                assertEquals(mixed.copy(linkGlobalOpacity = true).surfaceEffects, prefs.config.first().surfaceEffects)
+                assertEquals(31, prefs.config.first().messageBackgroundOpacityPercent)
+                for (surface in EffectSurface.entries) {
+                    prefs.setSurfaceOpacity(surface, 42 + surface.ordinal)
+                    val saved = prefs.config.first()
+                    assertEquals(42 + surface.ordinal, saved.messageBackgroundOpacityPercent)
+                    for (other in EffectSurface.entries) assertEquals(SurfaceEffect(42 + surface.ordinal, mixed.surfaceEffects[other].blurPercent), saved.surfaceEffects[other])
+                }
+                prefs.setMessageBackgroundOpacity(25)
+                assertEquals(
+                    List(8) { 25 },
+                    EffectSurface.entries.map {
+                        prefs.config
+                            .first()
+                            .surfaceEffects[it]
+                            .opacityPercent
+                    },
+                )
+                prefs.setLinkGlobalOpacity(false)
+                prefs.setLinkGlobalBlur(true)
+                for (surface in EffectSurface.entries) {
+                    prefs.setSurfaceBlur(surface, surface.ordinal)
+                    val saved = prefs.config.first()
+                    assertEquals(surface.ordinal, saved.messageBackgroundBlur)
+                    for (other in EffectSurface.entries) assertEquals(SurfaceEffect(25, surface.ordinal), saved.surfaceEffects[other])
+                }
+                prefs.setMessageBackgroundBlur(68)
+                assertEquals(
+                    List(8) { 68 },
+                    EffectSurface.entries.map {
+                        prefs.config
+                            .first()
+                            .surfaceEffects[it]
+                            .blurPercent
+                    },
+                )
+                prefs.setLinkGlobalBlur(false)
+                prefs.setSurfaceOpacity(EffectSurface.MENU, 9)
+                prefs.setSurfaceBlur(EffectSurface.MENU, 7)
+                assertEquals(SurfaceEffect(9, 7), prefs.config.first().surfaceEffects[EffectSurface.MENU])
+                assertEquals(SurfaceEffect(25, 68), prefs.config.first().surfaceEffects[EffectSurface.SHEET])
+                prefs.setSurfaceEffectsEnabled(false)
+                assertEquals(SurfaceEffect(9, 7), prefs.config.first().surfaceEffects[EffectSurface.MENU])
+                prefs.setSurfaceEffectsEnabled(true)
+                assertEquals(SurfaceEffect(9, 7), prefs.config.first().surfaceEffects[EffectSurface.MENU])
+                val linkedMixed = mixed.copy(linkGlobalOpacity = true, linkGlobalBlur = true)
+                prefs.restoreGlobalEffects(linkedMixed)
+                val reloaded = AppearancePrefsImpl(ApplicationProvider.getApplicationContext<Context>()).config.first()
+                assertEquals(linkedMixed.surfaceEffects, reloaded.surfaceEffects)
+                assertEquals(31, reloaded.messageBackgroundOpacityPercent)
+                assertEquals(17, reloaded.messageBackgroundBlur)
+                assertEquals(true, reloaded.linkGlobalOpacity)
+                assertEquals(true, reloaded.linkGlobalBlur)
+                assertEquals(false, Json.decodeFromString<AppearanceConfig>("{}").linkGlobalOpacity)
+                assertEquals(false, Json.decodeFromString<AppearanceConfig>("{}").linkGlobalBlur)
+            } finally {
+                prefs.restoreGlobalEffects(original)
+            }
+        }
+
+    @Test fun surfaceEffectsPersistIndependentlyAndMasterPreservesSavedValues() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val original = prefs.config.first()
+            try {
+                val saved = SurfaceEffects(surfaces = EffectSurface.entries.associateWith { SurfaceEffect(it.ordinal * 10, 100 - it.ordinal * 10) })
+                prefs.restoreGlobalEffects(original.copy(surfaceEffects = saved, linkGlobalOpacity = false, linkGlobalBlur = false))
+                prefs.setMessageBackgroundOpacity(37)
+                prefs.setMessageBackgroundBlur(63)
+                assertEquals(saved, AppearancePrefsImpl(context).config.first().surfaceEffects)
+                prefs.setSurfaceEffectsEnabled(false)
+                val off = AppearancePrefsImpl(context).config.first()
+                assertEquals(saved.surfaces, off.surfaceEffects.surfaces)
+                assertEquals(37, off.messageBackgroundOpacityPercent)
+                assertEquals(63, off.messageBackgroundBlur)
+                prefs.setSurfaceEffectsEnabled(true)
+                assertEquals(saved, prefs.config.first().surfaceEffects)
+                assertEquals(SurfaceEffect(60, 100), Json.decodeFromString<AppearanceConfig>("""{}""").surfaceEffects[EffectSurface.CHAT_LIST])
+                assertEquals(SurfaceEffect(), SurfaceEffects()[EffectSurface.SHEET])
+                prefs.restoreGlobalEffects(prefs.config.first().copy(surfaceEffects = SurfaceEffects(surfaces = mapOf(EffectSurface.MENU to SurfaceEffect(-1, 101)))))
+                assertEquals(SurfaceEffect(0, 100), prefs.config.first().surfaceEffects[EffectSurface.MENU])
+            } finally {
+                prefs.restoreGlobalEffects(original)
+            }
+        }
+
     @Test fun defaults_areSystemAndMotdAtFifty() {
         assertEquals(
             AppearanceConfig(

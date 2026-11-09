@@ -97,6 +97,15 @@ internal fun FoolVisibilityExample(mode: FoolsMode) {
                 MessageBubble("Alex", stringResource(R.string.settings_chat_preview_message), presenceExample[0].serverTime, false, MessageKind.PRIVMSG, true, dimmed = true)
             }
 
+            FoolsMode.BLUR -> {
+                if (expanded) {
+                    FoolCollapseChip("Alex", "fool_example_collapse_again") { expanded = false }
+                }
+                FoolMessageScope(!expanded, { expanded = true }, tag = "fool_example_reveal") {
+                    MessageBubble("Alex", stringResource(R.string.settings_chat_preview_message), presenceExample[0].serverTime, false, MessageKind.PRIVMSG, true)
+                }
+            }
+
             FoolsMode.COLLAPSE -> {
                 if (expanded) {
                     FoolCollapseChip("Alex", "fool_example_collapse_again", modifier = Modifier.heightIn(min = 48.dp)) { expanded = false }

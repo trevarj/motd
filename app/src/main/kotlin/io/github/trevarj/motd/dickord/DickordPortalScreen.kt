@@ -37,7 +37,6 @@ import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Unarchive
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -100,6 +99,7 @@ import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.readingInk
+import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 private val noRemoteAvatars = RemoteAvatarState()

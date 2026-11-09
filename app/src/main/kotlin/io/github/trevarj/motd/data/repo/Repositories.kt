@@ -371,6 +371,8 @@ sealed interface SearchCoverage {
 }
 
 interface SearchRepository {
+    val visibility: Flow<MessageVisibilitySpec>
+
     fun search(
         query: String,
         bufferId: Long?,

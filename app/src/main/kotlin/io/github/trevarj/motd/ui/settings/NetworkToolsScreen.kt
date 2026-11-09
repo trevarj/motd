@@ -65,6 +65,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.ReasonPresetChips
+import io.github.trevarj.motd.ui.components.popupEffectSurface
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -343,7 +344,8 @@ private fun OperatorSection(
                                 .testTag("network_tools_mode_target"),
                     )
                     ExposedDropdownMenu(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                        modifier = Modifier.popupEffectSurface(MaterialTheme.colorScheme.surfaceContainerLow),
                         expanded = modeTargetExpanded,
                         onDismissRequest = { modeTargetExpanded = false },
                     ) {

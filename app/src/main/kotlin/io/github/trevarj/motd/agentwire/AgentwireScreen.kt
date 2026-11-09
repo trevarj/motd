@@ -52,7 +52,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -60,8 +59,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -138,7 +135,10 @@ import io.github.trevarj.motd.ui.chat.VoiceRecordingPermissionGate
 import io.github.trevarj.motd.ui.chat.shouldShowNewestFab
 import io.github.trevarj.motd.ui.components.Composer
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
+import io.github.trevarj.motd.ui.components.SurfaceBackdropPage
+import io.github.trevarj.motd.ui.components.captureSurfaceBackdrop
 import io.github.trevarj.motd.ui.components.mircFormattedText
+import io.github.trevarj.motd.ui.components.rememberSurfaceBackdropSource
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.ensureContrast
@@ -147,6 +147,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
+import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
+import io.github.trevarj.motd.ui.components.EffectModalDrawerSheet as ModalDrawerSheet
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 @Composable
@@ -518,327 +521,330 @@ private fun AgentwireScreen(
     BackHandler(enabled = contextReview?.destination != null && !drawerState.isOpen) {
         viewModel.keepContextForLater()
     }
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        modifier = Modifier.testTag("agentwire_drawer"),
-        drawerContent = {
-            AgentwireSessionDrawer(
-                rows = sessionRows,
-                attached = state.activeSid != null,
-                actions = state.actions,
-                onSelect = { row ->
-                    viewModel.attachSession(row.sid, row.cwd)
-                    scope.launch { drawerState.close() }
-                },
-                onDetach = {
-                    viewModel.detachSession()
-                    scope.launch { drawerState.close() }
-                },
-                onNewSession = {
-                    sheet = AgentwireSheet.STATUS
-                    scope.launch { drawerState.close() }
-                },
-            )
-        },
-    ) {
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
-            topBar = {
-                Column {
-                    TopAppBar(
-                        colors =
-                            androidx.compose.material3.TopAppBarDefaults
-                                .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
-                        title = {
-                            Column {
-                                Text(state.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(
-                                    "${state.backend.orEmpty()}  ${state.activeSid?.take(12) ?: "detached"}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                )
-                            }
-                        },
-                        navigationIcon = {
-                            Row {
-                                if (showBack) {
-                                    IconButton(onClick = { if (contextReview?.destination != null) viewModel.keepContextForLater() else onBack() }) {
-                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                                    }
-                                }
-                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                    Icon(Icons.Default.Menu, contentDescription = "Sessions")
-                                }
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { overflow = true }) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "More")
-                            }
-                            DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-                                DropdownMenuItem(
-                                    text = { Text("Session log") },
-                                    leadingIcon = { Icon(Icons.Outlined.History, contentDescription = null) },
-                                    onClick = {
-                                        overflow = false
-                                        sheet = AgentwireSheet.LOG
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("View IRC transcript") },
-                                    leadingIcon = { Icon(Icons.Outlined.Terminal, contentDescription = null) },
-                                    onClick = {
-                                        overflow = false
-                                        viewModel.viewTranscript()
-                                    },
-                                )
-                            }
-                        },
-                    )
-                    AgentwireStatusStrip(state) { sheet = AgentwireSheet.STATUS }
-                }
+    val pageBackdrop = rememberSurfaceBackdropSource()
+    SurfaceBackdropPage(pageBackdrop) {
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            modifier = Modifier.testTag("agentwire_drawer"),
+            drawerContent = {
+                AgentwireSessionDrawer(
+                    rows = sessionRows,
+                    attached = state.activeSid != null,
+                    actions = state.actions,
+                    onSelect = { row ->
+                        viewModel.attachSession(row.sid, row.cwd)
+                        scope.launch { drawerState.close() }
+                    },
+                    onDetach = {
+                        viewModel.detachSession()
+                        scope.launch { drawerState.close() }
+                    },
+                    onNewSession = {
+                        sheet = AgentwireSheet.STATUS
+                        scope.launch { drawerState.close() }
+                    },
+                )
             },
-        ) { padding ->
-            // Match the regular chat layout: consume overlapping navigation and animated IME
-            // insets around the whole content column so the composer remains above the keyboard.
-            Box(
-                modifier =
-                    Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                        .navigationBarsPadding()
-                        .imePadding(),
-            ) {
-                if (state.gate == AgentwireGate.INVALID_TOPIC) {
-                    AgentwireInvalidTopic(state)
-                } else if (state.gate == AgentwireGate.BLOCKED) {
-                    AgentwireBlocked(state)
-                } else {
-                    Column(Modifier.fillMaxSize()) {
-                        // Mirrors the pi-subagents TUI widget: a compact fleet header pinned above
-                        // the transcript. Outside the LazyColumn, so auto-follow never measures it.
-                        if (state.subagents.isNotEmpty()) AgentwireSubagentsCard(state.subagents)
-                        Box(Modifier.fillMaxWidth().weight(1f)) {
-                            LazyColumn(
-                                state = listState,
-                                modifier = Modifier.fillMaxSize().testTag("agentwire_timeline"),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                when (val sync = state.sync) {
-                                    is AgentwireSyncState.Syncing -> {
-                                        item {
-                                            LinearProgressIndicator(Modifier.fillMaxWidth())
-                                        }
-                                    }
-
-                                    is AgentwireSyncState.Failed -> {
-                                        item {
-                                            AgentwireSyncFailureCard(
-                                                sync = sync,
-                                                channel = state.channel,
-                                                onRetry = viewModel::retrySync,
-                                            )
-                                        }
-                                    }
-
-                                    is AgentwireSyncState.NotJoined -> {
-                                        item {
-                                            AgentwireNotJoinedCard(state.channel, viewModel::joinAgentwireChannel)
-                                        }
-                                    }
-
-                                    else -> {}
+        ) {
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+                contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
+                topBar = {
+                    Column {
+                        TopAppBar(
+                            colors =
+                                androidx.compose.material3.TopAppBarDefaults
+                                    .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+                            title = {
+                                Column {
+                                    Text(state.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(
+                                        "${state.backend.orEmpty()}  ${state.activeSid?.take(12) ?: "detached"}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                    )
                                 }
-                                if (!state.connected && state.timeline.isEmpty()) {
-                                    item {
-                                        Card(Modifier.fillMaxWidth().padding(16.dp)) {
-                                            Column(Modifier.padding(16.dp)) {
-                                                Text("Agentwire is offline", style = MaterialTheme.typography.titleMedium)
-                                                Text("Structured state will be rebuilt after reconnecting.")
-                                                TextButton(onClick = viewModel::viewTranscript) { Text("View IRC transcript") }
+                            },
+                            navigationIcon = {
+                                Row {
+                                    if (showBack) {
+                                        IconButton(onClick = { if (contextReview?.destination != null) viewModel.keepContextForLater() else onBack() }) {
+                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                                        }
+                                    }
+                                    IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                        Icon(Icons.Default.Menu, contentDescription = "Sessions")
+                                    }
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { overflow = true }) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = "More")
+                                }
+                                DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+                                    DropdownMenuItem(
+                                        text = { Text("Session log") },
+                                        leadingIcon = { Icon(Icons.Outlined.History, contentDescription = null) },
+                                        onClick = {
+                                            overflow = false
+                                            sheet = AgentwireSheet.LOG
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("View IRC transcript") },
+                                        leadingIcon = { Icon(Icons.Outlined.Terminal, contentDescription = null) },
+                                        onClick = {
+                                            overflow = false
+                                            viewModel.viewTranscript()
+                                        },
+                                    )
+                                }
+                            },
+                        )
+                        AgentwireStatusStrip(state) { sheet = AgentwireSheet.STATUS }
+                    }
+                },
+            ) { padding ->
+                // Match the regular chat layout: consume overlapping navigation and animated IME
+                // insets around the whole content column so the composer remains above the keyboard.
+                Box(
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .padding(padding)
+                            .navigationBarsPadding()
+                            .imePadding(),
+                ) {
+                    if (state.gate == AgentwireGate.INVALID_TOPIC) {
+                        AgentwireInvalidTopic(state)
+                    } else if (state.gate == AgentwireGate.BLOCKED) {
+                        AgentwireBlocked(state)
+                    } else {
+                        Column(Modifier.fillMaxSize()) {
+                            // Mirrors the pi-subagents TUI widget: a compact fleet header pinned above
+                            // the transcript. Outside the LazyColumn, so auto-follow never measures it.
+                            if (state.subagents.isNotEmpty()) AgentwireSubagentsCard(state.subagents)
+                            Box(Modifier.fillMaxWidth().weight(1f)) {
+                                LazyColumn(
+                                    state = listState,
+                                    modifier = Modifier.fillMaxSize().captureSurfaceBackdrop(pageBackdrop).testTag("agentwire_timeline"),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    when (val sync = state.sync) {
+                                        is AgentwireSyncState.Syncing -> {
+                                            item {
+                                                LinearProgressIndicator(Modifier.fillMaxWidth())
+                                            }
+                                        }
+
+                                        is AgentwireSyncState.Failed -> {
+                                            item {
+                                                AgentwireSyncFailureCard(
+                                                    sync = sync,
+                                                    channel = state.channel,
+                                                    onRetry = viewModel::retrySync,
+                                                )
+                                            }
+                                        }
+
+                                        is AgentwireSyncState.NotJoined -> {
+                                            item {
+                                                AgentwireNotJoinedCard(state.channel, viewModel::joinAgentwireChannel)
+                                            }
+                                        }
+
+                                        else -> {}
+                                    }
+                                    if (!state.connected && state.timeline.isEmpty()) {
+                                        item {
+                                            Card(Modifier.fillMaxWidth().padding(16.dp)) {
+                                                Column(Modifier.padding(16.dp)) {
+                                                    Text("Agentwire is offline", style = MaterialTheme.typography.titleMedium)
+                                                    Text("Structured state will be rebuilt after reconnecting.")
+                                                    TextButton(onClick = viewModel::viewTranscript) { Text("View IRC transcript") }
+                                                }
                                             }
                                         }
                                     }
-                                }
-                                if (state.error != null) {
-                                    item {
-                                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            Text(state.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-                                            TextButton(onClick = viewModel::clearError) { Text("Dismiss") }
+                                    if (state.error != null) {
+                                        item {
+                                            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                Text(state.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                                                TextButton(onClick = viewModel::clearError) { Text("Dismiss") }
+                                            }
                                         }
                                     }
-                                }
-                                if (state.historyLoading || state.olderHistoryAvailable) {
-                                    item {
-                                        TextButton(
-                                            onClick = viewModel::loadOlderHistory,
-                                            enabled = !state.historyLoading,
-                                            modifier = Modifier.fillMaxWidth(),
-                                        ) {
-                                            Text(if (state.historyLoading) "Loading history…" else "Load older history")
+                                    if (state.historyLoading || state.olderHistoryAvailable) {
+                                        item {
+                                            TextButton(
+                                                onClick = viewModel::loadOlderHistory,
+                                                enabled = !state.historyLoading,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            ) {
+                                                Text(if (state.historyLoading) "Loading history…" else "Load older history")
+                                            }
                                         }
                                     }
-                                }
-                                items(rows, key = AgentwireDisplayRow::key) { row ->
-                                    when (row) {
-                                        is AgentwireDisplayRow.Card -> {
-                                            AgentwireTimelineCard(
-                                                item = row.item,
-                                                actionStatus = state.actionStatus[row.item.id],
-                                                expandedOverride = expandedKeys[row.key],
-                                                onToggleExpanded = { expandedKeys[row.key] = it },
-                                                onTranslateBody =
-                                                    if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures && !row.item.body.isNullOrBlank() && (row.item.kind == "user.prompt" || row.item.kind.startsWith("assistant."))) {
-                                                        {
-                                                            selectedKind = row.item.kind
-                                                            selectedSession = state.activeSid
-                                                            selectedBody = row.item.body
-                                                            aiTextViewModel.openTransientMessage(
-                                                                AiTextSource.TransientMessage("agentwire:${state.epoch}:${row.item.timelineKey()}", row.item.translationBody()!!),
-                                                            )
-                                                        }
-                                                    } else {
-                                                        null
-                                                    },
-                                                activity =
-                                                    if (row.item.kind in setOf("turn.started", "turn.completed", "turn.failed")) {
-                                                        row.item.sid?.let { sid -> row.item.tid?.let { tid -> turnActivity[sid to tid] } }
-                                                    } else {
-                                                        null
-                                                    },
-                                            )
-                                        }
+                                    items(rows, key = AgentwireDisplayRow::key) { row ->
+                                        when (row) {
+                                            is AgentwireDisplayRow.Card -> {
+                                                AgentwireTimelineCard(
+                                                    item = row.item,
+                                                    actionStatus = state.actionStatus[row.item.id],
+                                                    expandedOverride = expandedKeys[row.key],
+                                                    onToggleExpanded = { expandedKeys[row.key] = it },
+                                                    onTranslateBody =
+                                                        if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures && !row.item.body.isNullOrBlank() && (row.item.kind == "user.prompt" || row.item.kind.startsWith("assistant."))) {
+                                                            {
+                                                                selectedKind = row.item.kind
+                                                                selectedSession = state.activeSid
+                                                                selectedBody = row.item.body
+                                                                aiTextViewModel.openTransientMessage(
+                                                                    AiTextSource.TransientMessage("agentwire:${state.epoch}:${row.item.timelineKey()}", row.item.translationBody()!!),
+                                                                )
+                                                            }
+                                                        } else {
+                                                            null
+                                                        },
+                                                    activity =
+                                                        if (row.item.kind in setOf("turn.started", "turn.completed", "turn.failed")) {
+                                                            row.item.sid?.let { sid -> row.item.tid?.let { tid -> turnActivity[sid to tid] } }
+                                                        } else {
+                                                            null
+                                                        },
+                                                )
+                                            }
 
-                                        is AgentwireDisplayRow.Tool -> {
-                                            AgentwireToolCard(row.item, row.key, expandedKeys)
-                                        }
+                                            is AgentwireDisplayRow.Tool -> {
+                                                AgentwireToolCard(row.item, row.key, expandedKeys)
+                                            }
 
-                                        is AgentwireDisplayRow.ToolRun -> {
-                                            AgentwireToolRunCard(row, expandedKeys)
+                                            is AgentwireDisplayRow.ToolRun -> {
+                                                AgentwireToolRunCard(row, expandedKeys)
+                                            }
                                         }
                                     }
-                                }
-                                items(state.requests, key = AgentwireRequest::rid) { request ->
-                                    AgentwireRequestCard(
-                                        request,
-                                        request.sid == null || request.sid == state.activeSid,
-                                        "session.attach" in state.actions,
-                                        viewModel,
-                                    ) {
-                                        questionRequestId = request.rid
-                                        sheet = AgentwireSheet.QUESTION
-                                    }
-                                }
-                                if (state.queue.isNotEmpty()) {
-                                    item {
-                                        Surface(
-                                            color = MaterialTheme.colorScheme.secondaryContainer,
-                                            modifier = Modifier.fillMaxWidth().clickable { sheet = AgentwireSheet.QUEUE },
+                                    items(state.requests, key = AgentwireRequest::rid) { request ->
+                                        AgentwireRequestCard(
+                                            request,
+                                            request.sid == null || request.sid == state.activeSid,
+                                            "session.attach" in state.actions,
+                                            viewModel,
                                         ) {
-                                            Text(
-                                                "${state.queue.size} queued  •  tap to edit",
-                                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                                style = MaterialTheme.typography.labelLarge,
-                                            )
+                                            questionRequestId = request.rid
+                                            sheet = AgentwireSheet.QUESTION
                                         }
                                     }
+                                    if (state.queue.isNotEmpty()) {
+                                        item {
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                                modifier = Modifier.fillMaxWidth().clickable { sheet = AgentwireSheet.QUEUE },
+                                            ) {
+                                                Text(
+                                                    "${state.queue.size} queued  •  tap to edit",
+                                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                )
+                                            }
+                                        }
+                                    }
+                                    item { Spacer(Modifier.height(8.dp)) }
                                 }
-                                item { Spacer(Modifier.height(8.dp)) }
-                            }
-                            AgentwireTimelineFab(
-                                listState = listState,
-                                autoScrolling = programmaticScrolls > 0,
-                                newItems = newItems,
-                                onJump = { scope.launch { scrollToTimelineBottom(animate = true) } },
-                                modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
-                            )
-                        }
-                        if (state.gate == AgentwireGate.ACTIVE) {
-                            contextReview?.let { review ->
-                                AgentwireContextCard(
-                                    review = review,
-                                    state = state,
-                                    sessionName = sessionRows.firstOrNull { it.attached }?.title,
-                                    canReview = viewModel.canReviewContext(),
-                                    voiceRecording = voiceState.recording != null,
-                                    onReview = viewModel::reviewContext,
-                                    onKeep = viewModel::keepContextForLater,
-                                    onDiscard = viewModel::discardContext,
-                                    onSessions = { scope.launch { drawerState.open() } },
+                                AgentwireTimelineFab(
+                                    listState = listState,
+                                    autoScrolling = programmaticScrolls > 0,
+                                    newItems = newItems,
+                                    onJump = { scope.launch { scrollToTimelineBottom(animate = true) } },
+                                    modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
                                 )
                             }
-                            val reviewedContext = contextReview?.takeIf { it.destination != null }
-                            if (reviewedContext != null) {
-                                // Context stays process-local, including the shared field's internal saver.
-                                CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
-                                    AgentwireContextComposer(
-                                        review = reviewedContext,
-                                        onEdit = viewModel::editContext,
-                                        onSend = viewModel::submitContext,
-                                        showComposerEmoji = showComposerEmoji,
-                                        showComposerFormattingTools = showComposerFormattingTools,
+                            if (state.gate == AgentwireGate.ACTIVE) {
+                                contextReview?.let { review ->
+                                    AgentwireContextCard(
+                                        review = review,
+                                        state = state,
+                                        sessionName = sessionRows.firstOrNull { it.attached }?.title,
+                                        canReview = viewModel.canReviewContext(),
+                                        voiceRecording = voiceState.recording != null,
+                                        onReview = viewModel::reviewContext,
+                                        onKeep = viewModel::keepContextForLater,
+                                        onDiscard = viewModel::discardContext,
+                                        onSessions = { scope.launch { drawerState.open() } },
                                     )
                                 }
-                            } else {
-                                AgentwireComposer(
-                                    value = composer,
-                                    state = state,
-                                    showComposerEmoji = showComposerEmoji,
-                                    showComposerFormattingTools = showComposerFormattingTools,
-                                    onValueChange = onComposerChange,
-                                    voiceState = voiceState,
-                                    playbackState = playbackState,
-                                    onVoiceHoldStart = onVoiceHoldStart,
-                                    onVoiceAccessibilityStart = onVoiceAccessibilityStart,
-                                    onVoiceHoldStop = onVoiceHoldStop,
-                                    onVoiceHoldCancel = onVoiceHoldCancel,
-                                    onVoiceLock = onVoiceLock,
-                                    onVoiceDelete = onVoiceDelete,
-                                    onVoiceSend = onVoiceSend,
-                                    onVoicePreview = onVoicePreview,
-                                    onVoicePreviewSeek = onVoicePreviewSeek,
-                                    onVoiceDestinationSelected = onVoiceDestinationSelected,
-                                    onVoiceErrorDismissed = onVoiceErrorDismissed,
-                                    onSend = {
-                                        viewModel.submit(composer.text) {
-                                            onComposerAccepted(composer)
-                                            scope.launch { scrollToTimelineBottom(animate = true) }
-                                        }
-                                    },
-                                    onCancel = viewModel::cancelTurn,
-                                )
+                                val reviewedContext = contextReview?.takeIf { it.destination != null }
+                                if (reviewedContext != null) {
+                                    // Context stays process-local, including the shared field's internal saver.
+                                    CompositionLocalProvider(LocalSaveableStateRegistry provides null) {
+                                        AgentwireContextComposer(
+                                            review = reviewedContext,
+                                            onEdit = viewModel::editContext,
+                                            onSend = viewModel::submitContext,
+                                            showComposerEmoji = showComposerEmoji,
+                                            showComposerFormattingTools = showComposerFormattingTools,
+                                        )
+                                    }
+                                } else {
+                                    AgentwireComposer(
+                                        value = composer,
+                                        state = state,
+                                        showComposerEmoji = showComposerEmoji,
+                                        showComposerFormattingTools = showComposerFormattingTools,
+                                        onValueChange = onComposerChange,
+                                        voiceState = voiceState,
+                                        playbackState = playbackState,
+                                        onVoiceHoldStart = onVoiceHoldStart,
+                                        onVoiceAccessibilityStart = onVoiceAccessibilityStart,
+                                        onVoiceHoldStop = onVoiceHoldStop,
+                                        onVoiceHoldCancel = onVoiceHoldCancel,
+                                        onVoiceLock = onVoiceLock,
+                                        onVoiceDelete = onVoiceDelete,
+                                        onVoiceSend = onVoiceSend,
+                                        onVoicePreview = onVoicePreview,
+                                        onVoicePreviewSeek = onVoicePreviewSeek,
+                                        onVoiceDestinationSelected = onVoiceDestinationSelected,
+                                        onVoiceErrorDismissed = onVoiceErrorDismissed,
+                                        onSend = {
+                                            viewModel.submit(composer.text) {
+                                                onComposerAccepted(composer)
+                                                scope.launch { scrollToTimelineBottom(animate = true) }
+                                            }
+                                        },
+                                        onCancel = viewModel::cancelTurn,
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
         }
-    }
 
-    when (sheet) {
-        AgentwireSheet.STATUS -> {
-            AgentwireStatusSheet(state, viewModel) { sheet = null }
-        }
-
-        AgentwireSheet.QUEUE -> {
-            AgentwireQueueSheet(state, viewModel) { sheet = null }
-        }
-
-        AgentwireSheet.QUESTION -> {
-            state.requests.firstOrNull { it.rid == questionRequestId }?.let {
-                AgentwireQuestionSheet(it, viewModel) { sheet = null }
+        when (sheet) {
+            AgentwireSheet.STATUS -> {
+                AgentwireStatusSheet(state, viewModel) { sheet = null }
             }
-        }
 
-        AgentwireSheet.LOG -> {
-            AgentwireLogSheet(viewModel) { sheet = null }
-        }
+            AgentwireSheet.QUEUE -> {
+                AgentwireQueueSheet(state, viewModel) { sheet = null }
+            }
 
-        null -> {}
+            AgentwireSheet.QUESTION -> {
+                state.requests.firstOrNull { it.rid == questionRequestId }?.let {
+                    AgentwireQuestionSheet(it, viewModel) { sheet = null }
+                }
+            }
+
+            AgentwireSheet.LOG -> {
+                AgentwireLogSheet(viewModel) { sheet = null }
+            }
+
+            null -> {}
+        }
     }
 }
 

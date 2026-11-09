@@ -31,6 +31,8 @@ class SearchRepositoryImpl
         private val historyGapDao: HistoryGapDao,
         private val settings: SettingsRepository,
     ) : SearchRepository {
+        override val visibility: Flow<MessageVisibilitySpec> = settings.settings.map(MessageVisibilitySpec::from).distinctUntilChanged()
+
         override fun search(
             query: String,
             bufferId: Long?,
@@ -47,7 +49,7 @@ class SearchRepositoryImpl
                 }
             return combine(
                 hits,
-                settings.settings.map(MessageVisibilitySpec::from).distinctUntilChanged(),
+                visibility,
             ) { hits, spec ->
                 // Truncation is a property of the SQL page, not of what survives visibility rules:
                 // a fully hidden 200-row page still means older matches exist beyond the cap.

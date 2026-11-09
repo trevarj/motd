@@ -97,6 +97,12 @@ class SearchViewModelTest {
         private val truncated: Boolean = false,
         private val coverage: SearchCoverage = SearchCoverage.DeviceOnly,
     ) : SearchRepository {
+        override val visibility =
+            flowOf(
+                io.github.trevarj.motd.data.visibility
+                    .MessageVisibilitySpec(),
+            )
+
         override fun search(
             query: String,
             bufferId: Long?,
@@ -117,6 +123,11 @@ class SearchViewModelTest {
     private class ControlledSearchRepository(
         private val coverageByScope: Map<Long?, SearchCoverage> = emptyMap(),
     ) : SearchRepository {
+        override val visibility =
+            flowOf(
+                io.github.trevarj.motd.data.visibility
+                    .MessageVisibilitySpec(),
+            )
         private val flows = mutableMapOf<SearchRequest, MutableSharedFlow<LocalSearchResult>>()
         val calls = mutableListOf<SearchRequest>()
 

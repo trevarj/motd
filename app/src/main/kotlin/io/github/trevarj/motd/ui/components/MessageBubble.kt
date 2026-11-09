@@ -280,14 +280,15 @@ internal fun Modifier.messageRowClicks(
     onLongPressLabel: String,
 ): Modifier {
     if (!LocalMessageActionsEnabled.current) return this
+    val concealment = LocalFoolBodyConcealment.current
     return combinedClickable(
         // Null lazily avoids an interaction object until something actually needs one.
         interactionSource = null,
         indication = if (onClick != null) LocalIndication.current else null,
-        onClick = onClick ?: {},
-        onClickLabel = onClickLabel,
-        onLongClick = onLongPress,
-        onLongClickLabel = onLongPressLabel,
+        onClick = if (concealment.concealed) concealment.onReveal else onClick ?: {},
+        onClickLabel = if (concealment.concealed) stringResource(R.string.chat_fool_reveal) else onClickLabel,
+        onLongClick = if (concealment.concealed) concealment.onReveal else onLongPress,
+        onLongClickLabel = if (concealment.concealed) stringResource(R.string.chat_fool_reveal) else onLongPressLabel,
     )
 }
 
@@ -414,8 +415,8 @@ fun MessageBubble(
     // or legacy row cannot style an own message as an incoming highlight.
     val mentionHighlighted = hasMention && !isSelf
     val renderedModifier =
-        if (mentionHighlighted && kind != MessageKind.ACTION) {
-            modifier.mentionHighlight(accent = LocalMotdSemanticColors.current.warning)
+        if (mentionHighlighted && (kind != MessageKind.ACTION || (!spacing.compact && !spacing.twoLine))) {
+            modifier.mentionHighlight(accent = MaterialTheme.colorScheme.primary)
         } else {
             modifier
         }
@@ -637,7 +638,12 @@ fun MessageBubble(
             )
         }
     val backgroundAlpha = if (mentionHighlighted) 1f else LocalMessageBackgroundOpacityPercent.current / 100f
-    val bubbleFill = bubbleRoles.container.copy(alpha = bubbleRoles.container.alpha * backgroundAlpha)
+    val bubbleFill =
+        bubbleRoles.container.copy(
+            alpha =
+                io.github.trevarj.motd.ui.theme
+                    .effectBackingAlpha(bubbleRoles.container.alpha * backgroundAlpha),
+        )
     val bubbleColor = bubbleFill.compositeOver(scheme.background)
     val textColor = messageContentColor(bubbleRoles.normalContent, bubbleColor, dimmed, bubbleRoles.normalContainer)
     val bodyInk = readingInk(scheme)
@@ -804,8 +810,9 @@ fun MessageBubble(
                         ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
                     }
                 if (body.isNotBlank()) {
-                    Text(
+                    FoolBodyText(
                         text = body,
+                        concealment = LocalFoolBodyConcealment.current,
                         color = bodyColor,
                         style = MaterialTheme.typography.bodyLarge,
                         modifier = bodyModifier,
@@ -942,15 +949,20 @@ private fun ComfortableActionBubble(
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val actionDescription = stringResource(R.string.chat_action_message)
-    val actionLabel = remember(displaySender, text) { actionAccessibilityLabel(displaySender, text) }
+    val actionLabel = if (LocalFoolBodyConcealment.current.concealed) actionAccessibilityLabel(displaySender, "") else actionAccessibilityLabel(displaySender, text)
     val scheme = MaterialTheme.colorScheme
     val semanticColors = LocalMotdSemanticColors.current
     val roles =
         remember(scheme.tertiaryContainer, scheme.onTertiaryContainer, scheme.background, semanticColors.warningContainer, semanticColors.onWarningContainer, isSelf, hasMention, dimmed) {
             messageBubbleRoleColors(scheme, isSelf, hasMention, MessageKind.ACTION, semanticColors, dimmed)
         }
-    val backgroundAlpha = if (hasMention && !isSelf) 1f else LocalMessageBackgroundOpacityPercent.current / 100f
-    val rowFill = roles.container.copy(alpha = roles.container.alpha * backgroundAlpha)
+    val backgroundAlpha = LocalMessageBackgroundOpacityPercent.current / 100f
+    val rowFill =
+        roles.container.copy(
+            alpha =
+                io.github.trevarj.motd.ui.theme
+                    .effectBackingAlpha(roles.container.alpha * backgroundAlpha),
+        )
     val rowColor = rowFill.compositeOver(scheme.background)
     val bodyInk = readingInk(scheme)
     val bodyColor = remember(bodyInk, rowColor, roles, dimmed) { messageContentColor(bodyInk, rowColor, dimmed, roles.normalContainer) }
@@ -1084,8 +1096,10 @@ private fun ComfortableActionBubble(
                         account = senderAccount,
                     )
                 }
-                Text(
+                FoolBodyText(
                     text = actionLine,
+                    concealment = LocalFoolBodyConcealment.current,
+                    inlineBody = true,
                     style =
                         MaterialTheme.typography.bodyLarge.copy(
                             fontStyle = FontStyle.Italic,
@@ -1201,7 +1215,7 @@ private fun ActionMessageRow(
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val actionDescription = stringResource(R.string.chat_action_message)
-    val actionLabel = remember(displaySender, text) { actionAccessibilityLabel(displaySender, text) }
+    val actionLabel = if (LocalFoolBodyConcealment.current.concealed) actionAccessibilityLabel(displaySender, "") else actionAccessibilityLabel(displaySender, text)
     val spacing = LocalSpacing.current
     val semanticColors = LocalMotdSemanticColors.current
     val accent =
@@ -1219,8 +1233,13 @@ private fun ActionMessageRow(
     val normalPaintedRow = rowColor.compositeOver(MaterialTheme.colorScheme.background)
     val paintedRow = messageContainerColor(normalPaintedRow, MaterialTheme.colorScheme.background, dimmed)
     val baselineFill = if (spacing.twoLine && !dimmed) twoLineContrastFill(paintedRow) else paintedRow
-    val backgroundAlpha = if (hasMention && !isSelf) 1f else LocalMessageBackgroundOpacityPercent.current / 100f
-    val drawFill = baselineFill.copy(alpha = baselineFill.alpha * backgroundAlpha)
+    val backgroundAlpha = LocalMessageBackgroundOpacityPercent.current / 100f
+    val drawFill =
+        baselineFill.copy(
+            alpha =
+                io.github.trevarj.motd.ui.theme
+                    .effectBackingAlpha(baselineFill.alpha * backgroundAlpha),
+        )
     val contrastRow = drawFill.compositeOver(MaterialTheme.colorScheme.background)
     val bodyInk = readingInk(MaterialTheme.colorScheme)
     val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
@@ -1291,8 +1310,8 @@ private fun ActionMessageRow(
             modifier =
                 Modifier
                     .fillMaxWidth()
-                    .messageBacking(drawFill, blurEnabled = !hasMention)
-                    .actionAccentRail(accent)
+                    .messageBacking(drawFill)
+                    .actionAccentRail(if (hasMention) MaterialTheme.colorScheme.primary else accent)
                     .then(containerModifier),
             sourceModifier =
                 Modifier
@@ -1316,8 +1335,10 @@ private fun ActionMessageRow(
             }
 
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(
+                FoolBodyText(
                     text = actionLine,
+                    concealment = LocalFoolBodyConcealment.current,
+                    inlineBody = true,
                     style =
                         MaterialTheme.typography.bodyLarge.copy(
                             fontStyle = FontStyle.Italic,
@@ -1474,6 +1495,7 @@ internal fun buildActionLine(
             withStyle(senderStyle) { append(sender) }
         }
         append(" ")
+        pushStringAnnotation(FOOL_BODY_RANGE, "")
         append(
             buildActionBody(
                 text = text,
@@ -1488,6 +1510,7 @@ internal fun buildActionLine(
                 normalContainerColor = normalContainerColor,
             ),
         )
+        pop()
     }
 
 /** Theme-aware leading rail shared by ordinary and mention-highlighted ACTION rows. */
@@ -1588,7 +1611,12 @@ private fun TwoLineMessageRow(
             paintedRow
         }
     val backgroundAlpha = if (hasMention) 1f else LocalMessageBackgroundOpacityPercent.current / 100f
-    val drawFill = baselineFill.copy(alpha = baselineFill.alpha * backgroundAlpha)
+    val drawFill =
+        baselineFill.copy(
+            alpha =
+                io.github.trevarj.motd.ui.theme
+                    .effectBackingAlpha(baselineFill.alpha * backgroundAlpha),
+        )
     val contrastRow = drawFill.compositeOver(canvas)
     val bodyInk = codeColor
     val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
@@ -1750,8 +1778,9 @@ private fun TwoLineMessageRow(
                         ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
                     }
                 if (richBody.isNotBlank()) {
-                    Text(
+                    FoolBodyText(
                         text = richBody,
+                        concealment = LocalFoolBodyConcealment.current,
                         color = bodyColor,
                         style = MaterialTheme.typography.bodyLarge,
                     )

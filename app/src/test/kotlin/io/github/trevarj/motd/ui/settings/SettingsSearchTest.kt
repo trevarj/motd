@@ -45,6 +45,7 @@ class SettingsSearchTest {
             "replies feed" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.MENTIONS),
             "mentions drawer" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.MENTIONS_LOCATION),
             "ircv3 typing" to SettingsSearchDestination.Page(SettingsSearchPage.SECURITY, SettingsTarget.SEND_TYPING),
+            "blur reveal" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.FOOLS_MODE),
         ).forEach { (query, destination) ->
             assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
         }
@@ -74,6 +75,15 @@ class SettingsSearchTest {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
         val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.MESSAGE_BACKGROUND_BLUR)
         for (query in listOf("message background blur", "wallpaper backdrop", "blur intensity", "compact blur", "two line blur")) {
+            assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
+        }
+    }
+
+    @Test
+    fun linkedGlobalSlidersQueriesOpenEffectsSubcategory() {
+        val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
+        val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.SURFACE_EFFECTS)
+        for (query in listOf("link all opacity sliders", "link all blur sliders", "global transparency", "floating buttons blur")) {
             assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
         }
     }

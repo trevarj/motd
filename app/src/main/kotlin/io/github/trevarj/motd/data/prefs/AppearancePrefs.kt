@@ -253,6 +253,39 @@ data class WallpaperSelection(
 }
 
 @Serializable
+data class SurfaceEffect(
+    val opacityPercent: Int = 100,
+    val blurPercent: Int = 0,
+) {
+    fun normalized() = copy(opacityPercent = opacityPercent.coerceIn(0, 100), blurPercent = blurPercent.coerceIn(0, 100))
+}
+
+private val OpaqueSurfaceEffect = SurfaceEffect()
+private val ChatListSurfaceEffect = SurfaceEffect(60, 100)
+
+@Serializable
+enum class EffectSurface {
+    CHAT_HEADER,
+    INPUT_BAR,
+    CHAT_LIST,
+    MENU,
+    SHEET,
+    DRAWER,
+    MINI_PLAYER,
+    FLOATING_BUTTON,
+}
+
+@Serializable
+data class SurfaceEffects(
+    val enabled: Boolean = true,
+    val surfaces: Map<EffectSurface, SurfaceEffect> = emptyMap(),
+) {
+    operator fun get(surface: EffectSurface): SurfaceEffect = surfaces[surface] ?: if (surface == EffectSurface.CHAT_LIST) ChatListSurfaceEffect else OpaqueSurfaceEffect
+
+    fun normalized() = copy(surfaces = surfaces.mapValues { it.value.normalized() })
+}
+
+@Serializable
 data class AppearanceConfig(
     val theme: ColorThemePreset = ColorThemePreset.SYSTEM,
     val wallpaper: WallpaperSelection = WallpaperSelection(),
@@ -271,6 +304,9 @@ data class AppearanceConfig(
     val nicknameBackgroundsEnabled: Boolean = true,
     val messageBackgroundOpacityPercent: Int = 100,
     val messageBackgroundBlur: Int = 0,
+    val surfaceEffects: SurfaceEffects = SurfaceEffects(),
+    val linkGlobalOpacity: Boolean = false,
+    val linkGlobalBlur: Boolean = false,
     val sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     val receivedBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     val launcherIcon: LauncherIcon = LauncherIcon.DEFAULT,
@@ -335,6 +371,25 @@ interface AppearancePrefs {
     suspend fun setMessageBackgroundOpacity(percent: Int)
 
     suspend fun setMessageBackgroundBlur(intensity: Int)
+
+    suspend fun setSurfaceEffectsEnabled(enabled: Boolean)
+
+    suspend fun setSurfaceOpacity(
+        surface: EffectSurface,
+        percent: Int,
+    )
+
+    suspend fun setSurfaceBlur(
+        surface: EffectSurface,
+        percent: Int,
+    )
+
+    suspend fun setLinkGlobalOpacity(enabled: Boolean)
+
+    suspend fun setLinkGlobalBlur(enabled: Boolean)
+
+    /** Restore exact values, without applying interactive slider links. */
+    suspend fun restoreGlobalEffects(config: AppearanceConfig)
 
     suspend fun setSentBubbleColor(color: ComfortableBubbleColor)
 

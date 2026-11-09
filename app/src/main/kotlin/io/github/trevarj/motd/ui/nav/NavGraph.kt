@@ -79,6 +79,7 @@ import io.github.trevarj.motd.ui.settings.SecuritySettingsScreen
 import io.github.trevarj.motd.ui.settings.SettingsScreen
 import io.github.trevarj.motd.ui.settings.SettingsSearchDestination
 import io.github.trevarj.motd.ui.settings.SettingsSearchPage
+import io.github.trevarj.motd.ui.settings.SurfaceEffectsSettingsScreen
 import io.github.trevarj.motd.ui.settings.UploadsSettingsScreen
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkScreen
 import io.github.trevarj.motd.ui.settings.bouncer.BouncerNetworksScreen
@@ -417,11 +418,19 @@ fun MotdNavGraph(
         }
         composable<AppearanceSettingsRoute> { entry ->
             val route = entry.toRoute<AppearanceSettingsRoute>()
+            var openedEffectsTarget by rememberSaveable { mutableStateOf(false) }
             AppearanceSettingsScreen(
-                target = route.target,
+                target = if (openedEffectsTarget && route.target in listOf(SettingsTarget.SURFACE_EFFECTS, SettingsTarget.MESSAGE_BACKGROUND_OPACITY, SettingsTarget.MESSAGE_BACKGROUND_BLUR)) null else route.target,
                 onBack = { navController.popBackStack() },
                 onOpenNickColors = { navController.navigate(NickColorsRoute) },
+                onOpenSurfaceEffects = {
+                    openedEffectsTarget = true
+                    navController.navigate(SurfaceEffectsRoute(it))
+                },
             )
+        }
+        composable<SurfaceEffectsRoute> { entry ->
+            SurfaceEffectsSettingsScreen(onBack = { navController.popBackStack() }, target = entry.toRoute<SurfaceEffectsRoute>().target)
         }
         composable<ChatSettingsRoute> { entry ->
             val route = entry.toRoute<ChatSettingsRoute>()

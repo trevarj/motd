@@ -15,7 +15,6 @@ import androidx.compose.material.icons.outlined.FolderOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,6 +30,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.ChatFolderEntity
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.ui.components.FolderIcon
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 @OptIn(ExperimentalMaterial3Api::class)

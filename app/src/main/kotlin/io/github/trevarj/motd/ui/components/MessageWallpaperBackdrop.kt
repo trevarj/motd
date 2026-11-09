@@ -57,7 +57,7 @@ internal val LocalMessageWallpaperBackdrop = staticCompositionLocalOf<MessageWal
 @Composable
 internal fun rememberMessageWallpaperBackdrop(intensity: Int): MessageWallpaperBackdrop? {
     // ponytail: Android 8–11 keep the existing tint; no software copies or idle frame loop.
-    if (intensity <= 0 || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+    if (!io.github.trevarj.motd.ui.theme.LocalSurfaceEffects.current.enabled || intensity <= 0 || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
     val raw = rememberGraphicsLayer()
     val blurred = rememberGraphicsLayer()
     val backdrop = remember(raw, blurred) { MessageWallpaperBackdrop(raw, blurred, intensity.coerceIn(0, 100)) }
@@ -107,7 +107,7 @@ internal fun Modifier.messageBacking(
     val backdrop = LocalMessageWallpaperBackdrop.current
     // Opaque tint already covers the wallpaper. Keep its original single-paint clipped edge,
     // especially for incoming mention highlights; a second replay would compound edge coverage.
-    if (!blurEnabled || backdrop == null || tint.alpha == 1f) {
+    if (!io.github.trevarj.motd.ui.theme.LocalSurfaceEffects.current.enabled || !blurEnabled || backdrop == null || tint.alpha == 1f) {
         if (morphProgress == null) return background(tint)
         return drawWithCache {
             val outline = shape.createOutline(size, layoutDirection, this)

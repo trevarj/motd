@@ -118,6 +118,16 @@ class SearchCommandsTest {
     }
 
     @Test
+    fun preservesAccountIdentityAcrossNickChangesAndTreatsLoggedOutTagsAsAbsent() {
+        val hit = parseSearchResult(IrcMessage.parse("@account=stable-account :different-nick!u@h PRIVMSG #chan :hit"))!!
+        assertEquals("different-nick", hit.sender)
+        assertEquals("stable-account", hit.senderAccount)
+        for (tags in listOf("", "@account= ", "@account=* ")) {
+            assertNull(parseSearchResult(IrcMessage.parse("$tags:nick!u@h PRIVMSG #chan :hit"))!!.senderAccount)
+        }
+    }
+
+    @Test
     fun toleratesMissingTags() {
         val untagged = parseSearchResult(IrcMessage.parse(":alice!u@h PRIVMSG #chan :hit"))!!
         assertNull(untagged.serverTime)

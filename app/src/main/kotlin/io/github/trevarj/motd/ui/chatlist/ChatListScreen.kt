@@ -1,6 +1,5 @@
 package io.github.trevarj.motd.ui.chatlist
 
-import android.os.Build
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
@@ -37,6 +36,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -93,11 +94,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -136,21 +135,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.TileMode
-import androidx.compose.ui.graphics.addOutline
-import androidx.compose.ui.graphics.drawscope.ContentDrawScope
-import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.layer.GraphicsLayer
-import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -160,8 +150,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -181,7 +171,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -214,7 +203,12 @@ import io.github.trevarj.motd.ui.components.HistoryIncompleteBadge
 import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.SenderLabel
+import io.github.trevarj.motd.ui.components.SurfaceBackdropPage
+import io.github.trevarj.motd.ui.components.SurfaceBackdropSource
 import io.github.trevarj.motd.ui.components.UnreadBadge
+import io.github.trevarj.motd.ui.components.captureSurfaceBackdrop
+import io.github.trevarj.motd.ui.components.rememberSurfaceBackdropSource
+import io.github.trevarj.motd.ui.components.surfaceBackdrop
 import io.github.trevarj.motd.ui.theme.LocalChatCardCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
@@ -229,6 +223,8 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
+import io.github.trevarj.motd.ui.components.EffectFloatingActionButton as FloatingActionButton
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Stateful entry: wires the ViewModel and drives navigation/empty-state. */
@@ -573,440 +569,439 @@ fun ChatListContent(
         }
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            ServerDrawerContent(
-                drawerRows = state.drawerRows,
-                selectedNetworkId = state.selectedNetworkId,
-                allMentions = state.allMentions,
-                allMentionsIncomplete = state.allMentionsIncomplete,
-                scopedUnreadCount = state.scopedUnreadCount,
-                allOffline = state.allOffline,
-                onSelectNetwork = { id ->
-                    onSelectNetwork(id)
-                    scope.launch { drawerState.close() }
-                },
-                onConnect = onConnect,
-                onDisconnect = onDisconnect,
-                onServerMessages = { id ->
-                    onServerMessages(id)
-                    scope.launch { drawerState.close() }
-                },
-                onOpenNetworkSettings = { id ->
-                    onOpenNetworkSettings(id)
-                    scope.launch { drawerState.close() }
-                },
-                onOpenBouncerSettings = { id ->
-                    onOpenBouncerSettings(id)
-                    scope.launch { drawerState.close() }
-                },
-                onAddNetwork = {
-                    onOpenAddNetwork()
-                    scope.launch { drawerState.close() }
-                },
-                onCreateContactInvite = { preferredNetworkId ->
-                    onCreateContactInvite(preferredNetworkId)
-                    scope.launch { drawerState.close() }
-                },
-                onScanInvite = {
-                    onScanInvite()
-                    scope.launch { drawerState.close() }
-                },
-                onToggleOffline = { if (state.allOffline) onGoOnline() else onGoOffline() },
-                onOpenSettings = {
-                    onOpenSettings()
-                    scope.launch { drawerState.close() }
-                },
-                onOpenFeed = {
-                    scope.launch { drawerState.close() }
-                    onOpenFeed()
-                },
-                onOpenMentions = {
-                    scope.launch { drawerState.close() }
-                    onOpenMentions()
-                },
-                mentionsEnabled = state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.DRAWER,
-                globalFeedEnabled = state.globalFeedEnabled,
-                onMarkAllRead = {
-                    scope.launch { drawerState.close() }
-                    showMarkAllReadDialog = true
-                },
-                onMoveNetwork = onMoveNetwork,
-                onCommitNetworkOrder = onCommitNetworkOrder,
-            )
-        },
-    ) {
-        Scaffold(
-            modifier = Modifier.testTag("screen_chat_list"),
-            containerColor = MaterialTheme.colorScheme.surface,
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            topBar = {
-                ChatListTopBar(
-                    modifier = Modifier.testTag(if (selectionActive) "chatlist_selection_top_app_bar" else "chatlist_top_app_bar"),
-                    title = {
-                        Box(Modifier.fillMaxWidth().testTag("chatlist_header")) {
-                            Column {
-                                AnimatedContent(
-                                    targetState = topBarMode,
-                                    transitionSpec = {
-                                        // Only contextual mode changes cross-fade; title hosts retain their geometry.
-                                        (fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)).using(null)
-                                    },
-                                    label = "chatlist_top_bar_title",
-                                ) { mode ->
-                                    when (mode) {
-                                        ChatListTopBarMode.SELECTION -> {
-                                            // Keep the count on one line even when the action row grows.
-                                            Text(
-                                                pluralStringResource(R.plurals.chatlist_selected_count, lastSelectedRows.size, lastSelectedRows.size),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                autoSize = TextAutoSize.StepBased(minFontSize = 14.sp, maxFontSize = 22.sp),
-                                                modifier = Modifier.testTag("chatlist_selection_title"),
-                                            )
-                                        }
+    val pageBackdrop = rememberSurfaceBackdropSource()
+    SurfaceBackdropPage(pageBackdrop) {
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            drawerContent = {
+                ServerDrawerContent(
+                    drawerRows = state.drawerRows,
+                    selectedNetworkId = state.selectedNetworkId,
+                    allMentions = state.allMentions,
+                    allMentionsIncomplete = state.allMentionsIncomplete,
+                    scopedUnreadCount = state.scopedUnreadCount,
+                    allOffline = state.allOffline,
+                    onSelectNetwork = { id ->
+                        onSelectNetwork(id)
+                        scope.launch { drawerState.close() }
+                    },
+                    onConnect = onConnect,
+                    onDisconnect = onDisconnect,
+                    onServerMessages = { id ->
+                        onServerMessages(id)
+                        scope.launch { drawerState.close() }
+                    },
+                    onOpenNetworkSettings = { id ->
+                        onOpenNetworkSettings(id)
+                        scope.launch { drawerState.close() }
+                    },
+                    onOpenBouncerSettings = { id ->
+                        onOpenBouncerSettings(id)
+                        scope.launch { drawerState.close() }
+                    },
+                    onAddNetwork = {
+                        onOpenAddNetwork()
+                        scope.launch { drawerState.close() }
+                    },
+                    onCreateContactInvite = { preferredNetworkId ->
+                        onCreateContactInvite(preferredNetworkId)
+                        scope.launch { drawerState.close() }
+                    },
+                    onScanInvite = {
+                        onScanInvite()
+                        scope.launch { drawerState.close() }
+                    },
+                    onToggleOffline = { if (state.allOffline) onGoOnline() else onGoOffline() },
+                    onOpenSettings = {
+                        onOpenSettings()
+                        scope.launch { drawerState.close() }
+                    },
+                    onOpenFeed = {
+                        scope.launch { drawerState.close() }
+                        onOpenFeed()
+                    },
+                    onOpenMentions = {
+                        scope.launch { drawerState.close() }
+                        onOpenMentions()
+                    },
+                    mentionsEnabled = state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.DRAWER,
+                    globalFeedEnabled = state.globalFeedEnabled,
+                    onMarkAllRead = {
+                        scope.launch { drawerState.close() }
+                        showMarkAllReadDialog = true
+                    },
+                    onMoveNetwork = onMoveNetwork,
+                    onCommitNetworkOrder = onCommitNetworkOrder,
+                )
+            },
+        ) {
+            val folderTabsVisible = !archiveMode && !invitationMode && (folderTabs.isNotEmpty() || state.dickordEnabled || mentionsAsTab)
+            val pinnedMentionsVisible =
+                !archiveMode && !invitationMode && state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.CHAT_LIST
+            val hasInvitationRoute = state.invitations.any(ChatListInvitation::actionable)
+            val portalOnly =
+                !archiveMode &&
+                    state.dickordEnabled &&
+                    (state.dickordUnreadSummary?.visibleCount ?: 0) > 0
+            val showEmptyState =
+                !invitationMode && !shouldRenderChatList(archiveMode, state.rows, state.archivedRows) && !hasInvitationRoute && !state.loading
+            // The source lives exactly as long as the mounted scrolling list, including archive/no-folder modes.
+            val folderBackdrop = pageBackdrop.takeUnless { showEmptyState }
+            Scaffold(
+                modifier = Modifier.testTag("screen_chat_list"),
+                containerColor = MaterialTheme.colorScheme.surface,
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+                topBar = {
+                    ChatListTopBar(
+                        modifier = Modifier.testTag(if (selectionActive) "chatlist_selection_top_app_bar" else "chatlist_top_app_bar"),
+                        backdrop = folderBackdrop,
+                        title = {
+                            Box(Modifier.fillMaxWidth().testTag("chatlist_header")) {
+                                Column {
+                                    AnimatedContent(
+                                        targetState = topBarMode,
+                                        transitionSpec = {
+                                            // Only contextual mode changes cross-fade; title hosts retain their geometry.
+                                            (fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)).using(null)
+                                        },
+                                        label = "chatlist_top_bar_title",
+                                    ) { mode ->
+                                        when (mode) {
+                                            ChatListTopBarMode.SELECTION -> {
+                                                // Keep the count on one line even when the action row grows.
+                                                Text(
+                                                    pluralStringResource(R.plurals.chatlist_selected_count, lastSelectedRows.size, lastSelectedRows.size),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    autoSize = TextAutoSize.StepBased(minFontSize = 14.sp, maxFontSize = 22.sp),
+                                                    modifier = Modifier.testTag("chatlist_selection_title"),
+                                                )
+                                            }
 
-                                        ChatListTopBarMode.INVITATIONS -> {
-                                            Text(text = stringResource(R.string.chatlist_invitations), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        }
+                                            ChatListTopBarMode.INVITATIONS -> {
+                                                Text(text = stringResource(R.string.chatlist_invitations), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            }
 
-                                        ChatListTopBarMode.ARCHIVE -> {
-                                            Text(text = stringResource(R.string.chatlist_archived_chats), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        }
+                                            ChatListTopBarMode.ARCHIVE -> {
+                                                Text(text = stringResource(R.string.chatlist_archived_chats), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            }
 
-                                        ChatListTopBarMode.SCOPED -> {
-                                            Text(text = lastScopeName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("chatlist_title"))
-                                        }
+                                            ChatListTopBarMode.SCOPED -> {
+                                                Text(text = lastScopeName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("chatlist_title"))
+                                            }
 
-                                        ChatListTopBarMode.DEFAULT -> {
-                                            // ponytail: measure the full title even while its visible glyphs move/compact.
-                                            Text(
-                                                text = stringResource(R.string.app_name),
-                                                style = MaterialTheme.typography.titleLarge,
-                                                fontWeight = FontWeight.Bold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.alpha(0f).clearAndSetSemantics {},
-                                            )
+                                            ChatListTopBarMode.DEFAULT -> {
+                                                // ponytail: measure the full title even while its visible glyphs move/compact.
+                                                Text(
+                                                    text = stringResource(R.string.app_name),
+                                                    style = MaterialTheme.typography.titleLarge,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.alpha(0f).clearAndSetSemantics {},
+                                                )
+                                            }
                                         }
                                     }
+                                    ChatListTitleActivityStatus(
+                                        connecting = titleConnecting,
+                                        syncing = titleSyncing,
+                                        issueCount = titleIssueCount,
+                                        compact = selectionActive,
+                                        visibilityState = titleActivityVisibility,
+                                    )
                                 }
-                                ChatListTitleActivityStatus(
-                                    connecting = titleConnecting,
-                                    syncing = titleSyncing,
-                                    issueCount = titleIssueCount,
-                                    compact = selectionActive,
-                                    visibilityState = titleActivityVisibility,
-                                )
-                            }
-                            if (topBarMode == ChatListTopBarMode.DEFAULT) {
-                                // Keep the compact title above outgoing status until its native fade has finished.
-                                ChatListDefaultTitle(
-                                    showStatus = compactDefaultTitle,
-                                    modifier = Modifier.align(if (compactDefaultTitle) Alignment.TopStart else Alignment.CenterStart),
-                                )
-                            }
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(
-                            onClick = {
-                                when {
-                                    selectionActive -> selectedIds = emptyList()
-                                    invitationMode -> invitationMode = false
-                                    archiveMode -> archiveMode = false
-                                    else -> scope.launch { drawerState.open() }
+                                if (topBarMode == ChatListTopBarMode.DEFAULT) {
+                                    // Keep the compact title above outgoing status until its native fade has finished.
+                                    ChatListDefaultTitle(
+                                        showStatus = compactDefaultTitle,
+                                        modifier = Modifier.align(if (compactDefaultTitle) Alignment.TopStart else Alignment.CenterStart),
+                                    )
                                 }
-                            },
-                            modifier = Modifier.testTag("chatlist_selection_close"),
-                        ) {
-                            // One IconButton across every mode (it owns the close/back/menu tag);
-                            // only the glyph cross-fades when the mode changes what it means.
-                            Crossfade(
-                                targetState = if (selectionActive || archiveMode || invitationMode) Icons.AutoMirrored.Filled.ArrowBack else Icons.Filled.Menu,
-                                animationSpec = MotdMotion.microFadeIn,
-                                label = "chatlist_nav_icon",
-                            ) { icon ->
-                                Icon(
-                                    icon,
-                                    contentDescription =
-                                        stringResource(
-                                            if (selectionActive) {
-                                                R.string.chatlist_selection_close
-                                            } else if (archiveMode || invitationMode) {
-                                                R.string.action_back
-                                            } else {
-                                                R.string.drawer_open
-                                            },
-                                        ),
-                                )
                             }
-                        }
-                    },
-                    actions = {
-                        AnimatedContent(
-                            targetState = topBarMode,
-                            transitionSpec = {
-                                // Cross-fade only; using(null) drops the default SizeTransform so
-                                // the bar never pumps when the action set changes width.
-                                (fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)).using(null)
-                            },
-                            label = "chatlist_top_bar_actions",
-                        ) { mode ->
-                            Row {
-                                when (mode) {
-                                    ChatListTopBarMode.SELECTION -> {
-                                        // Glyph targets read the exit latch; the actions themselves
-                                        // still apply to the live selection.
-                                        val pinTarget = aggregateToggleTarget(lastSelectedRows) { it.pinned }
-                                        val muteTarget = aggregateToggleTarget(lastSelectedRows) { it.muted }
-                                        var overflowOpen by remember { mutableStateOf(false) }
-                                        // Only the three most-reached-for actions stay inline; pin and
-                                        // archive move behind "more" so a growing action set never
-                                        // starves the title (the autoSize/ellipsis fallback above is
-                                        // the last resort, not the primary fix) or forces icons to
-                                        // shrink/wrap on narrower phones.
-                                        IconButton(
-                                            onClick = {
-                                                onMarkSelectedRead(selectedRows.map(ChatListRow::bufferId))
-                                                selectedIds = emptyList()
-                                            },
-                                            modifier = Modifier.testTag("chatlist_selection_mark_read"),
-                                        ) { Icon(Icons.Outlined.DoneAll, stringResource(R.string.chatlist_mark_read)) }
-                                        IconButton(
-                                            onClick = {
-                                                onSetMuted(selectedRows.map(ChatListRow::bufferId), muteTarget)
-                                                selectedIds = emptyList()
-                                            },
-                                            modifier = Modifier.testTag("chatlist_selection_mute"),
-                                        ) { Icon(if (muteTarget) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications, stringResource(if (muteTarget) R.string.chatlist_mute else R.string.chatlist_unmute)) }
-                                        IconButton(onClick = { confirmRemoval = true }, modifier = Modifier.testTag("chatlist_selection_remove")) {
-                                            Icon(Icons.Outlined.Delete, stringResource(R.string.chatlist_remove))
-                                        }
-                                        Box {
+                        },
+                        navigationIcon = {
+                            IconButton(
+                                onClick = {
+                                    when {
+                                        selectionActive -> selectedIds = emptyList()
+                                        invitationMode -> invitationMode = false
+                                        archiveMode -> archiveMode = false
+                                        else -> scope.launch { drawerState.open() }
+                                    }
+                                },
+                                modifier = Modifier.testTag("chatlist_selection_close"),
+                            ) {
+                                // One IconButton across every mode (it owns the close/back/menu tag);
+                                // only the glyph cross-fades when the mode changes what it means.
+                                Crossfade(
+                                    targetState = if (selectionActive || archiveMode || invitationMode) Icons.AutoMirrored.Filled.ArrowBack else Icons.Filled.Menu,
+                                    animationSpec = MotdMotion.microFadeIn,
+                                    label = "chatlist_nav_icon",
+                                ) { icon ->
+                                    Icon(
+                                        icon,
+                                        contentDescription =
+                                            stringResource(
+                                                if (selectionActive) {
+                                                    R.string.chatlist_selection_close
+                                                } else if (archiveMode || invitationMode) {
+                                                    R.string.action_back
+                                                } else {
+                                                    R.string.drawer_open
+                                                },
+                                            ),
+                                    )
+                                }
+                            }
+                        },
+                        actions = {
+                            AnimatedContent(
+                                targetState = topBarMode,
+                                transitionSpec = {
+                                    // Cross-fade only; using(null) drops the default SizeTransform so
+                                    // the bar never pumps when the action set changes width.
+                                    (fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut)).using(null)
+                                },
+                                label = "chatlist_top_bar_actions",
+                            ) { mode ->
+                                Row {
+                                    when (mode) {
+                                        ChatListTopBarMode.SELECTION -> {
+                                            // Glyph targets read the exit latch; the actions themselves
+                                            // still apply to the live selection.
+                                            val pinTarget = aggregateToggleTarget(lastSelectedRows) { it.pinned }
+                                            val muteTarget = aggregateToggleTarget(lastSelectedRows) { it.muted }
+                                            var overflowOpen by remember { mutableStateOf(false) }
+                                            // Only the three most-reached-for actions stay inline; pin and
+                                            // archive move behind "more" so a growing action set never
+                                            // starves the title (the autoSize/ellipsis fallback above is
+                                            // the last resort, not the primary fix) or forces icons to
+                                            // shrink/wrap on narrower phones.
                                             IconButton(
-                                                onClick = { overflowOpen = true },
-                                                modifier =
-                                                    Modifier.testTag("chatlist_selection_more").semantics {
-                                                        if (!archiveMode && showNewNetworkActivity) stateDescription = newNetworkActivityDescription
-                                                    },
-                                            ) {
-                                                BadgedBox(badge = {
-                                                    if (!archiveMode && showNewNetworkActivity) {
-                                                        Badge(
-                                                            containerColor = MaterialTheme.colorScheme.primary,
-                                                            modifier = Modifier.testTag("chatlist_selection_network_activity_new_dot"),
+                                                onClick = {
+                                                    onMarkSelectedRead(selectedRows.map(ChatListRow::bufferId))
+                                                    selectedIds = emptyList()
+                                                },
+                                                modifier = Modifier.testTag("chatlist_selection_mark_read"),
+                                            ) { Icon(Icons.Outlined.DoneAll, stringResource(R.string.chatlist_mark_read)) }
+                                            IconButton(
+                                                onClick = {
+                                                    onSetMuted(selectedRows.map(ChatListRow::bufferId), muteTarget)
+                                                    selectedIds = emptyList()
+                                                },
+                                                modifier = Modifier.testTag("chatlist_selection_mute"),
+                                            ) { Icon(if (muteTarget) Icons.Outlined.NotificationsOff else Icons.Outlined.Notifications, stringResource(if (muteTarget) R.string.chatlist_mute else R.string.chatlist_unmute)) }
+                                            IconButton(onClick = { confirmRemoval = true }, modifier = Modifier.testTag("chatlist_selection_remove")) {
+                                                Icon(Icons.Outlined.Delete, stringResource(R.string.chatlist_remove))
+                                            }
+                                            Box {
+                                                IconButton(
+                                                    onClick = { overflowOpen = true },
+                                                    modifier =
+                                                        Modifier.testTag("chatlist_selection_more").semantics {
+                                                            if (!archiveMode && showNewNetworkActivity) stateDescription = newNetworkActivityDescription
+                                                        },
+                                                ) {
+                                                    BadgedBox(badge = {
+                                                        if (!archiveMode && showNewNetworkActivity) {
+                                                            Badge(
+                                                                containerColor = MaterialTheme.colorScheme.primary,
+                                                                modifier = Modifier.testTag("chatlist_selection_network_activity_new_dot"),
+                                                            )
+                                                        }
+                                                    }) {
+                                                        Icon(Icons.Filled.MoreVert, stringResource(R.string.chatlist_more_actions))
+                                                    }
+                                                }
+                                                DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+                                                    if (!archiveMode) {
+                                                        DropdownMenuItem(
+                                                            text = { Text(networkActivityMenuTitle) },
+                                                            leadingIcon = { Icon(Icons.Outlined.Lan, contentDescription = null, modifier = Modifier.testTag("chatlist_network_activity_icon")) },
+                                                            modifier = Modifier.testTag("chatlist_network_activity"),
+                                                            onClick = {
+                                                                overflowOpen = false
+                                                                inspectNetworkActivity()
+                                                            },
                                                         )
                                                     }
-                                                }) {
-                                                    Icon(Icons.Filled.MoreVert, stringResource(R.string.chatlist_more_actions))
+                                                    if (dottedSelectedRows.isNotEmpty()) {
+                                                        DropdownMenuItem(
+                                                            text = {
+                                                                Column {
+                                                                    Text(stringResource(R.string.chatlist_clear_activity_dot))
+                                                                    Text(
+                                                                        stringResource(R.string.chatlist_clear_activity_dot_supporting),
+                                                                        style = MaterialTheme.typography.bodySmall,
+                                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                    )
+                                                                }
+                                                            },
+                                                            leadingIcon = { Icon(Icons.Outlined.History, contentDescription = null) },
+                                                            modifier = Modifier.testTag("chatlist_selection_clear_dot"),
+                                                            onClick = {
+                                                                onClearActivityDots(dottedSelectedRows.map(ChatListRow::bufferId))
+                                                                overflowOpen = false
+                                                                selectedIds = emptyList()
+                                                            },
+                                                        )
+                                                    }
+                                                    DropdownMenuItem(
+                                                        text = { Text(stringResource(R.string.folders_add_to)) },
+                                                        leadingIcon = { Icon(Icons.Outlined.Forum, contentDescription = null) },
+                                                        modifier = Modifier.testTag("chatlist_selection_add_folder"),
+                                                        onClick = {
+                                                            showFolderAssignment = true
+                                                            overflowOpen = false
+                                                        },
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text(stringResource(if (pinTarget) R.string.chatlist_pin else R.string.chatlist_unpin)) },
+                                                        leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
+                                                        modifier = Modifier.testTag("chatlist_selection_pin"),
+                                                        onClick = {
+                                                            onSetPinned(selectedRows.map(ChatListRow::bufferId), pinTarget)
+                                                            selectedIds = emptyList()
+                                                            overflowOpen = false
+                                                        },
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = {
+                                                            Text(
+                                                                stringResource(
+                                                                    if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive,
+                                                                ),
+                                                            )
+                                                        },
+                                                        leadingIcon = { Icon(archiveActionIcon(archiveMode), contentDescription = null) },
+                                                        modifier = Modifier.testTag("chatlist_selection_archive"),
+                                                        onClick = {
+                                                            setArchivedWithReveal(selectedRows.map(ChatListRow::bufferId), !archiveMode)
+                                                            selectedIds = emptyList()
+                                                            overflowOpen = false
+                                                        },
+                                                    )
                                                 }
                                             }
-                                            DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-                                                if (!archiveMode) {
+                                        }
+
+                                        ChatListTopBarMode.DEFAULT, ChatListTopBarMode.SCOPED -> {
+                                            IconButton(onClick = onOpenSearch) {
+                                                Icon(
+                                                    Icons.Outlined.Search,
+                                                    contentDescription = stringResource(R.string.chatlist_search),
+                                                )
+                                            }
+                                            var moreOpen by remember { mutableStateOf(false) }
+                                            Box {
+                                                IconButton(
+                                                    onClick = { moreOpen = true },
+                                                    modifier =
+                                                        Modifier.testTag("chatlist_more").semantics {
+                                                            if (showNewNetworkActivity) stateDescription = newNetworkActivityDescription
+                                                        },
+                                                ) {
+                                                    BadgedBox(badge = {
+                                                        if (showNewNetworkActivity) {
+                                                            Badge(
+                                                                containerColor = MaterialTheme.colorScheme.primary,
+                                                                modifier = Modifier.testTag("chatlist_more_network_activity_new_dot"),
+                                                            )
+                                                        }
+                                                    }) {
+                                                        Icon(Icons.Filled.MoreVert, stringResource(R.string.chatlist_more_actions))
+                                                    }
+                                                }
+                                                DropdownMenu(moreOpen, { moreOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.testTag("chatlist_more_menu")) {
                                                     DropdownMenuItem(
                                                         text = { Text(networkActivityMenuTitle) },
                                                         leadingIcon = { Icon(Icons.Outlined.Lan, contentDescription = null, modifier = Modifier.testTag("chatlist_network_activity_icon")) },
                                                         modifier = Modifier.testTag("chatlist_network_activity"),
                                                         onClick = {
-                                                            overflowOpen = false
+                                                            moreOpen = false
                                                             inspectNetworkActivity()
                                                         },
                                                     )
-                                                }
-                                                if (dottedSelectedRows.isNotEmpty()) {
                                                     DropdownMenuItem(
-                                                        text = {
-                                                            Column {
-                                                                Text(stringResource(R.string.chatlist_clear_activity_dot))
-                                                                Text(
-                                                                    stringResource(R.string.chatlist_clear_activity_dot_supporting),
-                                                                    style = MaterialTheme.typography.bodySmall,
-                                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                                )
-                                                            }
-                                                        },
-                                                        leadingIcon = { Icon(Icons.Outlined.History, contentDescription = null) },
-                                                        modifier = Modifier.testTag("chatlist_selection_clear_dot"),
-                                                        onClick = {
-                                                            onClearActivityDots(dottedSelectedRows.map(ChatListRow::bufferId))
-                                                            overflowOpen = false
-                                                            selectedIds = emptyList()
-                                                        },
-                                                    )
-                                                }
-                                                DropdownMenuItem(
-                                                    text = { Text(stringResource(R.string.folders_add_to)) },
-                                                    leadingIcon = { Icon(Icons.Outlined.Forum, contentDescription = null) },
-                                                    modifier = Modifier.testTag("chatlist_selection_add_folder"),
-                                                    onClick = {
-                                                        showFolderAssignment = true
-                                                        overflowOpen = false
-                                                    },
-                                                )
-                                                DropdownMenuItem(
-                                                    text = { Text(stringResource(if (pinTarget) R.string.chatlist_pin else R.string.chatlist_unpin)) },
-                                                    leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
-                                                    modifier = Modifier.testTag("chatlist_selection_pin"),
-                                                    onClick = {
-                                                        onSetPinned(selectedRows.map(ChatListRow::bufferId), pinTarget)
-                                                        selectedIds = emptyList()
-                                                        overflowOpen = false
-                                                    },
-                                                )
-                                                DropdownMenuItem(
-                                                    text = {
-                                                        Text(
-                                                            stringResource(
-                                                                if (archiveMode) R.string.chatlist_unarchive else R.string.chatlist_archive,
-                                                            ),
-                                                        )
-                                                    },
-                                                    leadingIcon = { Icon(archiveActionIcon(archiveMode), contentDescription = null) },
-                                                    modifier = Modifier.testTag("chatlist_selection_archive"),
-                                                    onClick = {
-                                                        setArchivedWithReveal(selectedRows.map(ChatListRow::bufferId), !archiveMode)
-                                                        selectedIds = emptyList()
-                                                        overflowOpen = false
-                                                    },
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    ChatListTopBarMode.DEFAULT, ChatListTopBarMode.SCOPED -> {
-                                        IconButton(onClick = onOpenSearch) {
-                                            Icon(
-                                                Icons.Outlined.Search,
-                                                contentDescription = stringResource(R.string.chatlist_search),
-                                            )
-                                        }
-                                        var moreOpen by remember { mutableStateOf(false) }
-                                        Box {
-                                            IconButton(
-                                                onClick = { moreOpen = true },
-                                                modifier =
-                                                    Modifier.testTag("chatlist_more").semantics {
-                                                        if (showNewNetworkActivity) stateDescription = newNetworkActivityDescription
-                                                    },
-                                            ) {
-                                                BadgedBox(badge = {
-                                                    if (showNewNetworkActivity) {
-                                                        Badge(
-                                                            containerColor = MaterialTheme.colorScheme.primary,
-                                                            modifier = Modifier.testTag("chatlist_more_network_activity_new_dot"),
-                                                        )
-                                                    }
-                                                }) {
-                                                    Icon(Icons.Filled.MoreVert, stringResource(R.string.chatlist_more_actions))
-                                                }
-                                            }
-                                            DropdownMenu(moreOpen, { moreOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.testTag("chatlist_more_menu")) {
-                                                DropdownMenuItem(
-                                                    text = { Text(networkActivityMenuTitle) },
-                                                    leadingIcon = { Icon(Icons.Outlined.Lan, contentDescription = null, modifier = Modifier.testTag("chatlist_network_activity_icon")) },
-                                                    modifier = Modifier.testTag("chatlist_network_activity"),
-                                                    onClick = {
-                                                        moreOpen = false
-                                                        inspectNetworkActivity()
-                                                    },
-                                                )
-                                                DropdownMenuItem(
-                                                    text = { Text(stringResource(R.string.folders_manage)) },
-                                                    leadingIcon = { Icon(Icons.Outlined.FolderOpen, contentDescription = null) },
-                                                    onClick = {
-                                                        moreOpen = false
-                                                        onOpenManageFolders(state.selectedNetworkId)
-                                                    },
-                                                    modifier = Modifier.testTag("chatlist_manage_folders"),
-                                                )
-                                                if (state.globalFeedEnabled) {
-                                                    DropdownMenuItem(
-                                                        text = { Text(stringResource(R.string.chatlist_feed)) },
-                                                        leadingIcon = { Icon(Icons.Outlined.DynamicFeed, contentDescription = null) },
+                                                        text = { Text(stringResource(R.string.folders_manage)) },
+                                                        leadingIcon = { Icon(Icons.Outlined.FolderOpen, contentDescription = null) },
                                                         onClick = {
                                                             moreOpen = false
-                                                            onOpenFeed()
+                                                            onOpenManageFolders(state.selectedNetworkId)
                                                         },
-                                                        modifier = Modifier.testTag("chatlist_open_feed"),
+                                                        modifier = Modifier.testTag("chatlist_manage_folders"),
+                                                    )
+                                                    if (state.globalFeedEnabled) {
+                                                        DropdownMenuItem(
+                                                            text = { Text(stringResource(R.string.chatlist_feed)) },
+                                                            leadingIcon = { Icon(Icons.Outlined.DynamicFeed, contentDescription = null) },
+                                                            onClick = {
+                                                                moreOpen = false
+                                                                onOpenFeed()
+                                                            },
+                                                            modifier = Modifier.testTag("chatlist_open_feed"),
+                                                        )
+                                                    }
+                                                    DropdownMenuItem(
+                                                        text = { Text(stringResource(R.string.chatlist_settings)) },
+                                                        leadingIcon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
+                                                        onClick = {
+                                                            moreOpen = false
+                                                            onOpenSettings()
+                                                        },
+                                                        modifier = Modifier.testTag("chatlist_open_settings"),
                                                     )
                                                 }
-                                                DropdownMenuItem(
-                                                    text = { Text(stringResource(R.string.chatlist_settings)) },
-                                                    leadingIcon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
-                                                    onClick = {
-                                                        moreOpen = false
-                                                        onOpenSettings()
-                                                    },
-                                                    modifier = Modifier.testTag("chatlist_open_settings"),
-                                                )
                                             }
                                         }
-                                    }
 
-                                    ChatListTopBarMode.ARCHIVE -> {}
+                                        ChatListTopBarMode.ARCHIVE -> {}
 
-                                    ChatListTopBarMode.INVITATIONS -> {
-                                        TextButton(
-                                            onClick = ::inspectNetworkActivity,
-                                            modifier = Modifier.heightIn(min = 48.dp).testTag("chatlist_network_activity"),
-                                        ) { Text(stringResource(R.string.network_activity_title)) }
+                                        ChatListTopBarMode.INVITATIONS -> {
+                                            TextButton(
+                                                onClick = ::inspectNetworkActivity,
+                                                modifier = Modifier.heightIn(min = 48.dp).testTag("chatlist_network_activity"),
+                                            ) { Text(stringResource(R.string.network_activity_title)) }
+                                        }
                                     }
                                 }
                             }
-                        }
-                    },
-                )
-            },
-            floatingActionButton = {
-                AnimatedVisibility(
-                    visible = !selectionActive && !archiveMode && !invitationMode,
-                    enter = scaleIn(initialScale = 0.85f, animationSpec = MotdMotion.softSpring) + fadeIn(MotdMotion.microFadeIn),
-                    exit = scaleOut(targetScale = 0.85f, animationSpec = MotdMotion.softSpring) + fadeOut(MotdMotion.microFadeOut),
-                ) {
-                    FloatingActionButton(onClick = { showSheet = true }, modifier = Modifier.testTag("chatlist_new_conversation")) {
-                        Icon(
-                            Icons.Filled.Add,
-                            contentDescription = stringResource(R.string.chatlist_new_conversation),
-                        )
-                    }
-                }
-            },
-        ) { padding ->
-            Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    // Active-scope chip: keeps the filter discoverable/escapable without the drawer.
+                        },
+                    )
+                },
+                floatingActionButton = {
                     AnimatedVisibility(
-                        visible = state.selectedNetworkId != null,
-                        enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
-                        exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+                        visible = !selectionActive && !archiveMode && !invitationMode,
+                        enter = scaleIn(initialScale = 0.85f, animationSpec = MotdMotion.softSpring) + fadeIn(MotdMotion.microFadeIn),
+                        exit = scaleOut(targetScale = 0.85f, animationSpec = MotdMotion.softSpring) + fadeOut(MotdMotion.microFadeOut),
                     ) {
-                        // The latched name keeps the chip's text through its exit animation.
-                        ScopeChip(
-                            name = lastScopeName,
-                            onClear = { onSelectNetwork(null) },
-                        )
+                        FloatingActionButton(onClick = { showSheet = true }, modifier = Modifier.testTag("chatlist_new_conversation")) {
+                            Icon(
+                                Icons.Filled.Add,
+                                contentDescription = stringResource(R.string.chatlist_new_conversation),
+                            )
+                        }
                     }
-
-                    val folderTabsVisible = !archiveMode && !invitationMode && (folderTabs.isNotEmpty() || state.dickordEnabled || mentionsAsTab)
-                    val pinnedMentionsVisible =
-                        !archiveMode && !invitationMode && state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.CHAT_LIST
-                    val hasInvitationRoute = state.invitations.any(ChatListInvitation::actionable)
-                    val portalOnly =
-                        !archiveMode &&
-                            state.dickordEnabled &&
-                            (state.dickordUnreadSummary?.visibleCount ?: 0) > 0
-                    val showEmptyState =
-                        !invitationMode && !shouldRenderChatList(archiveMode, state.rows, state.archivedRows) && !hasInvitationRoute && !state.loading
-                    var folderHeaderHeightPx by remember { mutableIntStateOf(0) }
-                    val folderHeaderHeight = with(LocalDensity.current) { folderHeaderHeightPx.toDp() }
-                    val folderBackdrop = if (folderTabsVisible && !showEmptyState) rememberFolderTabBackdrop() else null
-
-                    if (!folderTabsVisible && pinnedMentionsVisible) {
-                        MentionsPinnedRow(state.allMentions, state.allMentionsIncomplete, onOpenMentions)
-                    }
-
+                },
+            ) { padding ->
+                val density = LocalDensity.current
+                val layoutDirection = LocalLayoutDirection.current
+                val topBarPadding = padding.calculateTopPadding()
+                var stationaryHeaderHeightPx by remember { mutableIntStateOf(0) }
+                var folderHeaderHeightPx by remember { mutableIntStateOf(0) }
+                val stationaryHeaderHeight = with(density) { stationaryHeaderHeightPx.toDp() }
+                val folderHeaderHeight = with(density) { folderHeaderHeightPx.toDp() }
+                val headerOffset = topBarPadding + stationaryHeaderHeight
+                val listTopPaddingPx = with(density) { headerOffset.roundToPx() } + if (folderTabsVisible) folderHeaderHeightPx else 0
+                Box(
+                    modifier =
+                        Modifier.fillMaxSize().padding(
+                            start = padding.calculateStartPadding(layoutDirection),
+                            end = padding.calculateEndPadding(layoutDirection),
+                            bottom = padding.calculateBottomPadding(),
+                        ),
+                ) {
                     Box(modifier = Modifier.fillMaxSize()) {
                         if (showEmptyState) {
                             EmptyState(
@@ -1028,7 +1023,7 @@ fun ChatListContent(
                                         state.selectedNetworkId != null -> stringResource(R.string.chatlist_scoped_empty_message)
                                         else -> stringResource(R.string.chatlist_empty_message)
                                     },
-                                modifier = Modifier.padding(top = if (folderTabsVisible) folderHeaderHeight else 0.dp),
+                                modifier = Modifier.padding(top = headerOffset + if (folderTabsVisible) folderHeaderHeight else 0.dp),
                                 actionLabel = if (!archiveMode && state.networks.isEmpty()) stringResource(R.string.drawer_add_network) else null,
                                 onAction = if (!archiveMode && state.networks.isEmpty()) onOpenAddNetwork else null,
                                 // The list that has no rows is exactly what the ghost rows stand in for.
@@ -1075,7 +1070,7 @@ fun ChatListContent(
                                 onStartSelection = { id -> selectedIds = addSelectedId(selectedIds, id) },
                                 onRemoveSelection = { ids -> selectedIds = selectedIds.filterNot(ids::contains) },
                                 scrollToTopSignal = tabChangeSignal,
-                                topContentPaddingPx = if (folderTabsVisible) folderHeaderHeightPx else 0,
+                                topContentPaddingPx = listTopPaddingPx,
                                 folderBackdrop = folderBackdrop,
                             )
                         }
@@ -1086,6 +1081,7 @@ fun ChatListContent(
                                     Modifier
                                         .fillMaxWidth()
                                         .align(Alignment.TopStart)
+                                        .padding(top = headerOffset)
                                         .onSizeChanged { folderHeaderHeightPx = it.height }
                                         .testTag("chatlist_folder_overlay"),
                             ) {
@@ -1119,167 +1115,186 @@ fun ChatListContent(
                             }
                         }
                     }
+                    Column(
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(top = topBarPadding)
+                                .onSizeChanged { stationaryHeaderHeightPx = it.height },
+                    ) {
+                        // These headers remain sharp at their original coordinates; only rows scroll behind them.
+                        AnimatedVisibility(
+                            visible = state.selectedNetworkId != null,
+                            enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+                            exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+                        ) {
+                            ScopeChip(name = lastScopeName, onClear = { onSelectNetwork(null) })
+                        }
+                        if (!folderTabsVisible && pinnedMentionsVisible) {
+                            MentionsPinnedRow(state.allMentions, state.allMentionsIncomplete, onOpenMentions)
+                        }
+                    }
+                    AudioMiniPlayer(
+                        state = audioPlaybackState,
+                        onToggle = onAudioToggle,
+                        onCancelLoading = onAudioCancelLoading,
+                        onRetry = onAudioRetry,
+                        onDismiss = onAudioDismiss,
+                        onSeek = onAudioSeek,
+                        onOpenOrigin = onOpenAudioOrigin,
+                        onSpeed = onAudioSpeed,
+                        includeNetwork = state.networks.size > 1,
+                        modifier = Modifier.align(Alignment.TopCenter).padding(top = topBarPadding),
+                    )
                 }
-                AudioMiniPlayer(
-                    state = audioPlaybackState,
-                    onToggle = onAudioToggle,
-                    onCancelLoading = onAudioCancelLoading,
-                    onRetry = onAudioRetry,
-                    onDismiss = onAudioDismiss,
-                    onSeek = onAudioSeek,
-                    onOpenOrigin = onOpenAudioOrigin,
-                    onSpeed = onAudioSpeed,
-                    includeNetwork = state.networks.size > 1,
-                    modifier = Modifier.align(Alignment.TopCenter),
-                )
             }
         }
-    }
 
-    if (showActivitySheet) {
-        fun closeActivityThen(action: () -> Unit) {
-            scope.launch {
-                activitySheetState.hide()
-                showActivitySheet = false
-                action()
+        if (showActivitySheet) {
+            fun closeActivityThen(action: () -> Unit) {
+                scope.launch {
+                    activitySheetState.hide()
+                    showActivitySheet = false
+                    action()
+                }
             }
-        }
-        NetworkActivitySheet(
-            activity = networkActivity,
-            syncChrome = syncChrome,
-            sheetState = activitySheetState,
-            onDismiss = { showActivitySheet = false },
-            onIssueAction = { issue, action ->
-                if (action == NetworkActivityAction.ACKNOWLEDGE) {
-                    onActivityAction(issue, action)
-                } else {
-                    closeActivityThen { onActivityAction(issue, action) }
-                }
-            },
-            onConnect = { id -> closeActivityThen { onActivityNetworkAction(id, NetworkActivityAction.CONNECT) } },
-            onSettings = { id -> closeActivityThen { onActivityNetworkAction(id, NetworkActivityAction.SETTINGS) } },
-            onServerMessages = { id -> closeActivityThen { onActivityNetworkAction(id, NetworkActivityAction.SERVER_MESSAGES) } },
-            onClearRecent = onClearNetworkActivityHistory,
-        )
-    }
-
-    if (showFolderAssignment && selectedRows.isNotEmpty()) {
-        val ids = selectedRows.map(ChatListRow::bufferId)
-        FolderAssignmentSheet(
-            folders = state.folders,
-            onAssign = { folderId, result ->
-                onAssignFolder(ids, folderId) { success ->
-                    if (success) {
-                        selectedIds = emptyList()
-                        showFolderAssignment = false
-                    }
-                    result(success)
-                }
-            },
-            onCreate = { name, icon, result ->
-                onCreateFolderAndAssign(name, icon, ids) { success ->
-                    if (success) {
-                        selectedIds = emptyList()
-                        showFolderAssignment = false
-                    }
-                    result(success)
-                }
-            },
-            onDismiss = { showFolderAssignment = false },
-        )
-    }
-
-    if (showSheet) {
-        NewConversationSheet(
-            networks = state.networks,
-            preselectedNetworkId = state.selectedNetworkId,
-            sheetState = sheetState,
-            onDismiss = { showSheet = false },
-            onJoinChannel = { networkId, channel, key ->
-                onJoinChannel(networkId, channel, key)
-                scope.launch { sheetState.hide() }.invokeOnCompletion { showSheet = false }
-            },
-            onMessageUser = { networkId, nick ->
-                onMessageUser(networkId, nick)
-                scope.launch { sheetState.hide() }.invokeOnCompletion { showSheet = false }
-            },
-            onBrowseChannels = { networkId ->
-                onOpenChannelList(networkId)
-                scope.launch { sheetState.hide() }.invokeOnCompletion { showSheet = false }
-            },
-            nickSuggestions = nickSuggestions,
-            onNickSuggestionQuery = onNickSuggestionQuery,
-        )
-    }
-
-    if (showMarkAllReadDialog) {
-        val networkName = state.selectedNetworkName
-        AlertDialog(
-            onDismissRequest = { showMarkAllReadDialog = false },
-            title = {
-                Text(
-                    if (networkName == null) {
-                        stringResource(R.string.mark_all_read_dialog_title_all)
+            NetworkActivitySheet(
+                activity = networkActivity,
+                syncChrome = syncChrome,
+                sheetState = activitySheetState,
+                onDismiss = { showActivitySheet = false },
+                onIssueAction = { issue, action ->
+                    if (action == NetworkActivityAction.ACKNOWLEDGE) {
+                        onActivityAction(issue, action)
                     } else {
-                        stringResource(R.string.mark_all_read_dialog_title_network, networkName)
-                    },
-                )
-            },
-            text = {
-                Text(
-                    pluralStringResource(
-                        R.plurals.mark_all_read_dialog_message,
-                        state.scopedUnreadCount,
-                        state.scopedUnreadCount,
-                    ),
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showMarkAllReadDialog = false
-                        onMarkAllRead()
-                    },
-                    modifier = Modifier.testTag("drawer_mark_all_read_confirm"),
-                ) {
-                    Text(stringResource(R.string.mark_all_read_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showMarkAllReadDialog = false }) {
-                    Text(stringResource(android.R.string.cancel))
-                }
-            },
-        )
-    }
-
-    if (confirmRemoval && selectedRows.isNotEmpty()) {
-        val onConfirmRemoval = {
-            onDeleteBuffers(selectedRows)
-            confirmRemoval = false
-            selectedIds = emptyList()
-        }
-        if (selectedRows.size == 1) {
-            DeleteConfirmDialog(
-                row = selectedRows.single(),
-                onConfirm = onConfirmRemoval,
-                onDismiss = { confirmRemoval = false },
+                        closeActivityThen { onActivityAction(issue, action) }
+                    }
+                },
+                onConnect = { id -> closeActivityThen { onActivityNetworkAction(id, NetworkActivityAction.CONNECT) } },
+                onSettings = { id -> closeActivityThen { onActivityNetworkAction(id, NetworkActivityAction.SETTINGS) } },
+                onServerMessages = { id -> closeActivityThen { onActivityNetworkAction(id, NetworkActivityAction.SERVER_MESSAGES) } },
+                onClearRecent = onClearNetworkActivityHistory,
             )
-        } else {
-            MultiDeleteConfirmDialog(selectedRows, onConfirmRemoval) { confirmRemoval = false }
         }
-    }
-    swipeRemoval?.let { row ->
-        DeleteConfirmDialog(
-            row = row,
-            onConfirm = {
-                swipeRemoval?.let {
-                    swipeRemoval = null
-                    onDeleteBuffers(listOf(it))
-                }
-            },
-            onDismiss = { swipeRemoval = null },
-        )
+
+        if (showFolderAssignment && selectedRows.isNotEmpty()) {
+            val ids = selectedRows.map(ChatListRow::bufferId)
+            FolderAssignmentSheet(
+                folders = state.folders,
+                onAssign = { folderId, result ->
+                    onAssignFolder(ids, folderId) { success ->
+                        if (success) {
+                            selectedIds = emptyList()
+                            showFolderAssignment = false
+                        }
+                        result(success)
+                    }
+                },
+                onCreate = { name, icon, result ->
+                    onCreateFolderAndAssign(name, icon, ids) { success ->
+                        if (success) {
+                            selectedIds = emptyList()
+                            showFolderAssignment = false
+                        }
+                        result(success)
+                    }
+                },
+                onDismiss = { showFolderAssignment = false },
+            )
+        }
+
+        if (showSheet) {
+            NewConversationSheet(
+                networks = state.networks,
+                preselectedNetworkId = state.selectedNetworkId,
+                sheetState = sheetState,
+                onDismiss = { showSheet = false },
+                onJoinChannel = { networkId, channel, key ->
+                    onJoinChannel(networkId, channel, key)
+                    scope.launch { sheetState.hide() }.invokeOnCompletion { showSheet = false }
+                },
+                onMessageUser = { networkId, nick ->
+                    onMessageUser(networkId, nick)
+                    scope.launch { sheetState.hide() }.invokeOnCompletion { showSheet = false }
+                },
+                onBrowseChannels = { networkId ->
+                    onOpenChannelList(networkId)
+                    scope.launch { sheetState.hide() }.invokeOnCompletion { showSheet = false }
+                },
+                nickSuggestions = nickSuggestions,
+                onNickSuggestionQuery = onNickSuggestionQuery,
+            )
+        }
+
+        if (showMarkAllReadDialog) {
+            val networkName = state.selectedNetworkName
+            AlertDialog(
+                onDismissRequest = { showMarkAllReadDialog = false },
+                title = {
+                    Text(
+                        if (networkName == null) {
+                            stringResource(R.string.mark_all_read_dialog_title_all)
+                        } else {
+                            stringResource(R.string.mark_all_read_dialog_title_network, networkName)
+                        },
+                    )
+                },
+                text = {
+                    Text(
+                        pluralStringResource(
+                            R.plurals.mark_all_read_dialog_message,
+                            state.scopedUnreadCount,
+                            state.scopedUnreadCount,
+                        ),
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showMarkAllReadDialog = false
+                            onMarkAllRead()
+                        },
+                        modifier = Modifier.testTag("drawer_mark_all_read_confirm"),
+                    ) {
+                        Text(stringResource(R.string.mark_all_read_confirm))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showMarkAllReadDialog = false }) {
+                        Text(stringResource(android.R.string.cancel))
+                    }
+                },
+            )
+        }
+
+        if (confirmRemoval && selectedRows.isNotEmpty()) {
+            val onConfirmRemoval = {
+                onDeleteBuffers(selectedRows)
+                confirmRemoval = false
+                selectedIds = emptyList()
+            }
+            if (selectedRows.size == 1) {
+                DeleteConfirmDialog(
+                    row = selectedRows.single(),
+                    onConfirm = onConfirmRemoval,
+                    onDismiss = { confirmRemoval = false },
+                )
+            } else {
+                MultiDeleteConfirmDialog(selectedRows, onConfirmRemoval) { confirmRemoval = false }
+            }
+        }
+        swipeRemoval?.let { row ->
+            DeleteConfirmDialog(
+                row = row,
+                onConfirm = {
+                    swipeRemoval?.let {
+                        swipeRemoval = null
+                        onDeleteBuffers(listOf(it))
+                    }
+                },
+                onDismiss = { swipeRemoval = null },
+            )
+        }
     }
 }
 
@@ -1308,75 +1323,25 @@ private fun ScopeChip(
     }
 }
 
-// Only the scrolling viewport is recorded; no folder, pinned-Mentions, or archive overlays.
-internal class FolderTabBackdrop(
-    val layer: GraphicsLayer,
-) {
-    var origin by mutableStateOf(Offset.Zero)
-    var size by mutableStateOf(IntSize.Zero)
-}
-
 @Composable
-internal fun rememberFolderTabBackdrop(): FolderTabBackdrop? {
-    // ponytail: API 26–30 use the same tint without a software blur/copy loop.
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
-    val layer = rememberGraphicsLayer()
-    return remember(layer) { FolderTabBackdrop(layer) }
-}
-
-internal fun Modifier.recordFolderTabBackdrop(
-    backdrop: FolderTabBackdrop?,
-    canvasColor: Color,
+private fun Modifier.folderCapsuleBackdrop(
+    backdrop: SurfaceBackdropSource?,
+    shape: Shape = MotdShapes.channelAvatar,
 ): Modifier {
-    if (backdrop == null) return this
-    return this
-        .onGloballyPositioned {
-            backdrop.origin = it.positionInRoot()
-            backdrop.size = it.size
-        }.drawWithCache {
-            val recordContent: ContentDrawScope.() -> Unit = {
-                drawRect(canvasColor)
-                drawContent()
-            }
-            onDrawWithContent {
-                backdrop.layer.record(block = recordContent)
-                drawLayer(backdrop.layer)
-            }
-        }
-}
-
-@Composable
-private fun Modifier.folderCapsuleBackdrop(backdrop: FolderTabBackdrop?): Modifier {
-    val tint = chatListRowContainer(ChatListRowVisualState.UNREAD, MaterialTheme.colorScheme).copy(alpha = 0.60f)
-    if (backdrop == null) return background(tint, MotdShapes.channelAvatar)
-    val canvasColor = MaterialTheme.colorScheme.surface
-    var origin by remember(backdrop) { mutableStateOf(Offset.Zero) }
-    return this
-        .onGloballyPositioned { origin = it.positionInRoot() }
-        .drawWithCache {
-            val capsule = Path().apply { addOutline(MotdShapes.channelAvatar.createOutline(size, layoutDirection, this@drawWithCache)) }
-            val radius = 32.dp.toPx()
-            // Keep Gaussian sampling outside the capsule, but never allocate a viewport-sized blur.
-            val margin = kotlin.math.ceil(radius * 2).toInt()
-            val offset = backdrop.origin - origin
-            val sourceSize = backdrop.size
-            val blurred = obtainGraphicsLayer()
-            blurred.renderEffect = BlurEffect(radius, radius, TileMode.Clamp)
-            blurred.record(size = IntSize(kotlin.math.ceil(size.width).toInt() + margin * 2, kotlin.math.ceil(size.height).toInt() + margin * 2)) {
-                drawRect(canvasColor)
-                translate(offset.x + margin, offset.y + margin) {
-                    drawLayer(backdrop.layer)
-                }
-            }
-            onDrawBehind {
-                clipPath(capsule) {
-                    if (sourceSize != IntSize.Zero) {
-                        translate(-margin.toFloat(), -margin.toFloat()) { drawLayer(blurred) }
-                    }
-                    drawRect(tint)
-                }
-            }
-        }
+    val effects = io.github.trevarj.motd.ui.theme.LocalSurfaceEffects.current
+    val settings = effects[io.github.trevarj.motd.data.prefs.EffectSurface.CHAT_LIST]
+    val tint = chatListRowContainer(ChatListRowVisualState.UNREAD, MaterialTheme.colorScheme)
+    if (backdrop == null) {
+        return background(
+            tint.copy(
+                alpha =
+                    io.github.trevarj.motd.ui.theme
+                        .backingAlpha(settings.opacityPercent / 100f, effects.enabled),
+            ),
+            shape,
+        )
+    }
+    return surfaceBackdrop(backdrop, tint, settings.opacityPercent, settings.blurPercent, effects.enabled, shape)
 }
 
 @Composable
@@ -1393,7 +1358,7 @@ internal fun FolderTabStrip(
     onOpenDickord: () -> Unit,
     onOpenMentions: () -> Unit,
     mentionsSelected: Boolean = false,
-    backdrop: FolderTabBackdrop? = null,
+    backdrop: SurfaceBackdropSource? = null,
 ) {
     Box(
         modifier =
@@ -1728,7 +1693,7 @@ private fun ChatList(
     onRemoveSelection: (Collection<Long>) -> Unit,
     scrollToTopSignal: Int,
     topContentPaddingPx: Int,
-    folderBackdrop: FolderTabBackdrop?,
+    folderBackdrop: SurfaceBackdropSource?,
 ) {
     // Pinned rows escape folders; non-empty folders follow in manual order, then legacy tiers.
     val presentation =
@@ -2070,7 +2035,7 @@ private fun ChatList(
         ArchiveAccessibilityAnnouncement(archiveAnnouncement)
 
         Box(
-            modifier = Modifier.fillMaxSize().recordFolderTabBackdrop(folderBackdrop, MaterialTheme.colorScheme.surface),
+            modifier = Modifier.fillMaxSize().then(folderBackdrop?.let { Modifier.captureSurfaceBackdrop(it).background(MaterialTheme.colorScheme.surface) } ?: Modifier),
         ) {
             LazyColumn(
                 state = listState,
@@ -3108,20 +3073,21 @@ internal fun ChatListTitleActivityStatus(
 @Composable
 private fun ChatListTopBar(
     modifier: Modifier = Modifier,
+    backdrop: SurfaceBackdropSource?,
     title: @Composable () -> Unit,
     navigationIcon: @Composable () -> Unit,
     actions: @Composable RowScope.() -> Unit,
 ) {
     val colors =
         TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            containerColor = Color.Transparent,
+            scrolledContainerColor = Color.Transparent,
         )
     var titleHeightPx by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
     val expandedHeight = maxOf(TopAppBarDefaults.TopAppBarExpandedHeight, with(density) { titleHeightPx.toDp() } + 16.dp)
     TopAppBar(
-        modifier = modifier,
+        modifier = modifier.folderCapsuleBackdrop(backdrop, RectangleShape),
         title = {
             // Measure natural font/wrapping height independently of the app bar's current height.
             Box(Modifier.wrapContentHeight(unbounded = true).onSizeChanged { titleHeightPx = it.height }) {

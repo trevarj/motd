@@ -38,7 +38,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
@@ -89,6 +88,7 @@ import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Shared Material 3 shell for settings-style pages. */
@@ -474,7 +474,7 @@ internal fun MessageBackgroundOpacitySlider(
     onValue: (Int) -> Unit,
     modifier: Modifier = Modifier,
     tag: String = "settings_message_background_opacity",
-) = MessageBackgroundSlider(
+) = BackingSlider(
     value,
     onValue,
     stringResource(R.string.settings_message_background_opacity),
@@ -491,7 +491,7 @@ internal fun MessageBackgroundBlurSlider(
     tag: String = "settings_message_background_blur",
 ) {
     Column(modifier) {
-        MessageBackgroundSlider(
+        BackingSlider(
             value,
             onValue,
             stringResource(R.string.settings_message_background_blur),
@@ -511,20 +511,21 @@ internal fun MessageBackgroundBlurSlider(
 /** Keep the native touch/semantics target; only the visible track is slimmed down. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MessageBackgroundSlider(
+internal fun BackingSlider(
     value: Int,
     onValue: (Int) -> Unit,
     title: String,
     offLabel: String,
     modifier: Modifier,
     tag: String,
+    accessibilityLabel: String = title,
 ) {
     val bounded = value.coerceIn(0, 100)
     val interactionSource = remember { MutableInteractionSource() }
     val percent =
         if (bounded == 0) offLabel else stringResource(R.string.settings_font_size_percent, bounded)
     Column(modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
             Text(percent, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -549,7 +550,7 @@ private fun MessageBackgroundSlider(
             },
             modifier =
                 Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(tag).semantics {
-                    contentDescription = title
+                    contentDescription = accessibilityLabel
                     stateDescription = percent
                 },
         )

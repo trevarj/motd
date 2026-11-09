@@ -10,13 +10,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertWidthIsEqualTo
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
@@ -24,6 +27,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
@@ -100,6 +104,42 @@ class FoolCollapseUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun blurRevealAndRestoreAreStableIdLocalAndImmediate() {
+        val fixture = FoolTimelineFixture(defaultMode = FoolsMode.BLUR)
+        try {
+            compose.setContent { fixture.Content() }
+            compose.onNodeWithTag("chat_fool_reveal_fool-a").assertIsDisplayed().performClick()
+            compose.onNodeWithText("A body").assertIsDisplayed()
+            compose.onNodeWithText("B body").assertDoesNotExist()
+            val revealedPixels = compose.onRoot().captureToImage()
+            compose.mainClock.autoAdvance = false
+            compose.onNodeWithTag("chat_fool_collapse_fool-a").performClick()
+            // Deliver the click's snapshot invalidation before committing the first UI frame.
+            compose.runOnIdle { Snapshot.sendApplyNotifications() }
+            compose.mainClock.advanceTimeByFrame()
+            compose.onNodeWithText("A body").assertDoesNotExist()
+            // The Compose clock does not drive Android's native draw pass. Observe that first
+            // concealed frame without advancing an animation before checking the new cover's bounds.
+            compose.waitForIdle()
+            val concealedPixels = compose.onRoot().captureToImage()
+            assertFalse(
+                "Restore must repaint the revealed body immediately",
+                revealedPixels.asAndroidBitmap().sameAs(concealedPixels.asAndroidBitmap()),
+            )
+            compose.onNodeWithTag("chat_fool_reveal_fool-a").assertIsDisplayed()
+            compose.mainClock.autoAdvance = true
+            toggleAll()
+            compose.onNodeWithText("A body").assertIsDisplayed()
+            toggleAll()
+            compose.onNodeWithTag("chat_fool_reveal_fool-a").assertIsDisplayed()
+            fixture.assertUnchanged()
+        } finally {
+            compose.mainClock.autoAdvance = true
+            fixture.close()
+        }
+    }
 
     @Test fun collapse_affordance_fills_its_timeline_width_and_remains_tappable() {
         var collapsed = false
@@ -644,7 +684,9 @@ class FoolCollapseUiTest {
 }
 
 /** Real Room paging and persisted preferences; also used by the temporary rendered smoke. */
-internal class FoolTimelineFixture {
+internal class FoolTimelineFixture(
+    defaultMode: FoolsMode = FoolsMode.DIMMED,
+) {
     val repo = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())
     private val db = inMemoryDb(directCommit = true)
     private val room =
@@ -672,7 +714,7 @@ internal class FoolTimelineFixture {
         }
     val initialSettings: Settings =
         runBlocking {
-            repo.setFoolsMode(FoolsMode.DIMMED)
+            repo.setFoolsMode(defaultMode)
             repo.setPresenceMode(PresenceMode.ALL)
             for (nick in listOf("a", "b", "c", "d")) repo.setFool(nick, true)
             repo.setFoolPreferences("b", FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true))

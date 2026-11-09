@@ -62,21 +62,26 @@ flowchart TD
   Selected utility rows/tabs use `secondaryContainer`/`onSecondaryContainer` and retain native
   indicators and selection semantics. Tertiary utility fills are reserved for settings-search targets;
   content swatches and conversation colors are not utility chrome.
-- The chat-list canvas, section headers, chat rows and unscrolled top bar share theme `surface`;
-  the top bar's scrolled color remains `surfaceContainerLow`. Other utility canvases keep
-  `surfaceContainerLowest`. After the active-scope chip, folder tabs overlay the scrolling
-  chat viewport on an unpainted strip; the measured header is reserved only for the initial position.
-  Only a mounted scrolling viewport owns the cached Compose capture layer; removing the list
-  for an empty state releases its source even if folder tabs remain. Folder, pinned-Mentions
-  and archive overlays are never captured. The rounded capsule replays the live source at its
-  actual viewport-relative offset through a bounded 32dp native blur on API 31+, then adds
-  the unread chat-card tint at 60% opacity, leaving 40% of the blurred source visible.
-  API 26–30 and source-free Appearance previews use the same translucent tint without blur.
-  Sampling extends beyond the capsule before
-  the final rounded clip; external gutters stay unpainted. No bitmap copies, redraw loop,
-  or foreground blur are involved. Selected pills, coverage glyphs and activity dots use
-  the secondary-container pair; text, icons and badges stay sharp. Unread and mention
-  badges retain their independent semantic colors.
+- The chat-list canvas, section headers and chat rows share theme `surface`; other utility
+  canvases keep `surfaceContainerLowest`. The scrolling viewport extends to the Scaffold's
+  window top, including the status area. Its initial content padding reserves the measured
+  top bar (status inset included exactly once), active-scope chip and complete folder/pinned
+  header, preserving resting row and archive-pull positions. Those headers remain sharp,
+  stationary overlays at their original coordinates; scrolling cards genuinely pass beneath
+  both the title/status area and the folder strip.
+  Only a mounted scrolling viewport owns the cached Compose capture layer, including archive
+  and no-folder modes; removing the list for an empty state releases its source even if
+  folder tabs remain. Title, scope, folder, pinned-Mentions, archive, mini-player and FAB
+  overlays are never captured. The transparent top bar's rectangular backing covers its
+  full bounds, including the status inset; the folder backing retains its rounded capsule
+  and unpainted external gutters. Both replay the same live source at their actual root-relative
+  offsets through bounded native blur on API 31+, then add the unread chat-card tint.
+  Defaults remain 32dp blur and 60% opacity; Appearance saves independent chat-list opacity/blur.
+  API 26–30 keeps the same unblurred tint.
+  Sampling extends beyond each backing before its final shape clip. No bitmap copies, redraw loop or foreground
+  blur are involved. Title, icons, system status glyphs, tab text and badges stay sharp.
+  Selected pills, coverage glyphs and activity dots use the secondary-container pair;
+  unread and mention badges retain their independent semantic colors.
 - Archive pull hints, the revealed folder and the archive-only route share the chat-card
   8dp horizontal/2dp vertical gutters, 16dp shape, 12dp inner inset and density-scaled
   avatar host/vertical padding. `titleMedium` labels may wrap at accessible font scales;
@@ -213,14 +218,21 @@ flowchart TD
   heterogeneous geometry, while visible values name the resolved geometry (including the input
   layout's current radius). Theme/time inheritance also names the device's resolved mode;
   notification policy retains effective policy and its global/server source. Notification avatars remain circular.
-  Message layout owns continuous 0–100 controls for ordinary PRIVMSG, NOTICE, and ACTION
+  Appearance → Transparency and blur owns continuous 0–100 controls for ordinary PRIVMSG, NOTICE, and ACTION
   backings in every layout, with or without nickname tint: opacity defaults to 100%, and independent
   wallpaper blur defaults to Off (0), mapping linearly to 32dp at 100. Zero opacity removes tint,
   not blur; content, child surfaces, incoming mention fills, and semantic rails remain sharp.
   Dimming precedes tint alpha, and contrast uses the fill composited over the known theme canvas,
   not arbitrary wallpaper pixels. Two-line tinted/ACTION fills retain their existing 90%/opaque
   baseline before multiplying opacity; zero tint keeps the existing no-elevation rule.
-  Incoming mentions keep their exact existing fill/alpha and do not sample backdrop blur.
+  Ordinary incoming mentions keep their existing fill/alpha and do not sample backdrop blur;
+  ACTION mentions retain their layout's ordinary opacity/blur controls. The existing UI
+  `mentionAttention` decision adds one persistent, RTL-aware 3dp theme-primary rail to
+  PRIVMSG, NOTICE, and ACTION in all three layouts, without moving content. Nonmention
+  ACTION rails retain tertiary; mention tints and text colors remain independent of the rail.
+  No arrival pulse is implemented: `EventOrigin.LIVE` identifies socket delivery, not
+  genuinely live traffic when a bouncer sends unmarked reconnect backlog. A strict
+  never-history/catch-up pulse needs an authoritative provenance boundary absent today.
   Android 12+ records only the rendered wallpaper and its actual canvas into one raw GPU layer
   and one full-screen blurred layer per chat/preview intensity, shared by timeline and send flight.
   Backings sample that layer in live draw coordinates and retain their grouped/morph outlines;
@@ -228,9 +240,28 @@ flowchart TD
   not a permanent frame loop. Layers leave with composition; Off and Android 8–11 do no capture
   or blur work. Older Android keeps the explicitly labeled unblurred-tint fallback.
   Global choices preview immediately; each durable chat independently inherits or overrides
-  opacity and blur through accepted Room state, separately from density. Search opens the
-  dismissable layout sheet and highlights the requested footer slider. Room 49 adds nullable blur;
+  opacity and blur through accepted Room state, separately from density. Search opens the nested
+  Transparency and blur page and highlights the requested slider. Room 49 adds nullable blur;
   canonical merges retain each winner's non-null override, including explicit zero.
+  Appearance's effects master preserves all saved choices. Off disables blur and forces every nonzero
+  final backing alpha to one, after the Two-line baseline; explicit zero remains absent. Independent
+  opacity/blur pairs cover chat header/title, input, chat-list chrome, menus/suggestions, sheets,
+  both drawers, mini-players and floating buttons/orb. Defaults preserve existing paints.
+  The submenu is the last Appearance entry. It groups global message controls with one actual chat
+  preview and eight interface pairs with one sticky preview following group selection/focus/edits.
+  Independent opacity and blur link flags are UI preferences, not paint fields. Enabling a link
+  preserves mixed values until the next edit; each linked edit updates its message scalar and all
+  eight surfaces atomically from the latest DataStore state. Unlinking retains current values.
+  Chat overrides and fool concealment are never linked. Backup restore writes the exact global
+  values and link flags together, bypassing interactive broadcasting.
+  `SurfaceBackdrop` records raw page/viewport layers; consumers and native popup windows are outside
+  their own sources. Chat headers/input sample the wallpaper plus the live full-height timeline;
+  header and bottom-host padding reserve resting content without clipping the scrolling backdrop.
+  Visible/read and top-entry alignment exclude the header's occluded area.
+  Native sheet/drawer adapters capture their host for nested menus, with parent-page fallback.
+  A zero-height sheet marker resolves the native moving Surface so backing includes handle/insets,
+  while M3 retains all placement, IME, focus, scrim and gesture behavior. Cross-window consumers
+  invalidate only after producer frame commits; no idle redraw loop or bitmap copies are used.
   Appearance also selects Material (the exact existing Filled/Outlined/AutoMirrored
   variants) or Lucide UI icons. The shared native `UiIcon` leaf resolves cached vectors
   at composition time, so remembered action descriptors and persisted gesture icon
@@ -318,8 +349,10 @@ flowchart TD
   unread snapshot, hidden reveal, drafts, positioning intent and read permission. Retained list
   state is never measured against an artificial empty generation.
   Admission validates canonical room/network/identity, complete visibility and a committed
-  per-room revision with its session token, kept by persistent `messages` triggers. Reads that
-  open or browse a chat never take the writer: they run outside transactions, start with `SELECT`
+  per-room revision with its session token, kept by persistent `messages` triggers. The production
+  database-open callback installs tracking on existing databases, after migrations and after dev-only
+  destructive downgrades; closing and reopening preserves committed revisions and their session.
+  Reads that open or browse a chat never take the writer: they run outside transactions, start with `SELECT`
   (Android sends any other leading keyword to the writer's connection), and use plain queries
   rather than one-shot Flows. Every observed table stays tracked for the process lifetime, so no
   observer has to install triggers while a history write holds the writer. Native sources
@@ -335,7 +368,8 @@ flowchart TD
   Backgrounding evicts detached slots; attached local refreshes retain their existing allowance,
   while remote history requires foreground. Exclusive lease tokens reject stale disposal and
   viewport callbacks. Owner destruction retires slots and awaits structured observer cleanup.
-  There is no persistent schema change, reconstructed message renderer or Room-internal API dependency.
+  Persistent tracking metadata sits outside Room's versioned entity schema. Native retention reuses
+  the existing message renderer and public Room APIs.
   A settled visit may hand its native presenter and viewport to an exact-spec successor for
   a temporary Hidden-fool reveal change. The predecessor loses query/effect authority;
   its current native window counts toward successor residency but never grants publication
@@ -357,7 +391,7 @@ flowchart TD
   recent speech is a subset of that grace window. Exact counts still traverse room
   candidates, but each evidence seek excludes presence churn before its time range.
 - Fool membership stays global; sparse preferences independently inherit or override
-  Dimmed/Collapsed/Hidden visibility and opt into mention/reply or DM notifications.
+  Dimmed/Blurred/Collapsed/Hidden visibility and opt into mention/reply or DM notifications.
   Fresh lists default to Dimmed; legacy populated lists retain implicit Collapsed.
   Shared Kotlin/SQL policy merges matching account/nick entries conservatively.
   Dimmed messages and Collapsed placeholders count as ordinary unread; Hidden never
@@ -367,6 +401,20 @@ flowchart TD
   paging generation. Show fools and per-row expansion are session-local, not preferences.
   Show fools survives presenter replacement within a chat visit; toggling it off clears
   row exceptions and restores each fool's current explicit or inherited visibility.
+  Blurred conceals only original body text, translations and transcripts: authors/avatars,
+  timestamps, reply cards, media, audio controls and reactions keep their native rendering/actions.
+  Each text renderer uses the row's stable reveal owner. Inline Compact/ACTION paragraphs retain
+  one rich-text layout, with the body boundary annotated during construction and native range
+  paths handling wraps and bidirectional text. Android 12+ applies bounded 40dp native body blur;
+  effects Off and Android 8–11 use an opaque body-range mask, never readable unblurred text.
+  Range paths are built only for the matching native paragraph; text/preview changes cannot reuse
+  an old layout's offsets. Media-only inline rows retain an explicit empty body instead of masking
+  their remaining prefix.
+  Concealed body links/selection/semantics are unavailable; the first body tap reveals without
+  running its link or row action. Visible sender links remain native, including accessible sender
+  actions. Search parent keyboard/accessibility/hold actions also reveal first; independent sharp
+  author/avatar/time targets retain origin navigation. Restore conceals immediately without
+  outgoing text pixels or remounting media/transcripts.
   Exact jumps still expand only their target, independently of the show-all toggle.
   Show/Restore keeps unaffected rows painted while native fool-only fades and size transitions
   run. Hidden rows finish their visibility exit before Restore changes the SQL filter;

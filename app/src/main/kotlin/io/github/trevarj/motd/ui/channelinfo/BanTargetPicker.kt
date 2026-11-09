@@ -35,6 +35,7 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.components.popupEffectSurface
 import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
 
 /**
@@ -101,7 +102,8 @@ fun BanTargetPicker(
                         .testTag("${tagPrefix}_member_dropdown"),
             )
             ExposedDropdownMenu(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                modifier = Modifier.popupEffectSurface(MaterialTheme.colorScheme.surfaceContainerLow),
                 expanded = membersExpanded && !locked,
                 onDismissRequest = { membersExpanded = false },
             ) {

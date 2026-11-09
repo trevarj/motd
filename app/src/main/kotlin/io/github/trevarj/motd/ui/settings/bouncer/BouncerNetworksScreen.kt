@@ -24,7 +24,6 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
@@ -65,6 +64,7 @@ import io.github.trevarj.motd.ui.settings.SettingsNavigationRow
 import io.github.trevarj.motd.ui.settings.SettingsScaffold
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 data class BouncerControlCallbacks(

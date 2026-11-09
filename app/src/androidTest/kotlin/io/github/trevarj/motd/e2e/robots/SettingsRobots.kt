@@ -65,10 +65,10 @@ internal class SettingsRobot(
             .assertIsOn()
             .performClick()
             .assertIsOff()
-        scrollToAndClick("settings_density_picker")
+        scrollToAndClick("settings_surface_effects")
         setMessageBackgroundOpacity(opacityPercent)
         setMessageBackgroundBlur(blurIntensity)
-        dismissChoiceSheet("settings_density_sheet")
+        click("settings_back")
     }
 
     fun restoreNicknameBackgrounds(
@@ -78,23 +78,21 @@ internal class SettingsRobot(
         originalBlurIntensity: Int,
         originalLayout: LayoutDensity,
     ) {
-        scrollToAndClick("settings_density_picker")
-        scrollContainerTo("settings_density_sheet_options", "settings_density_compact")
-        compose.onNodeWithTag("settings_density_compact").assertIsSelected()
-        scrollContainerTo("settings_density_sheet_options", "settings_message_background_opacity")
+        scrollToAndClick("settings_surface_effects")
+        scrollContainerTo("surface_effects_page", "settings_message_background_opacity")
         compose.onNodeWithTag("settings_message_background_opacity").assert(
             SemanticsMatcher("Persisted message background opacity") {
                 it.config[SemanticsProperties.ProgressBarRangeInfo].current == expectedOpacityPercent.toFloat()
             },
         )
-        scrollContainerTo("settings_density_sheet_options", "settings_message_background_blur")
+        scrollContainerTo("surface_effects_page", "settings_message_background_blur")
         compose.onNodeWithTag("settings_message_background_blur").assert(
             SemanticsMatcher("Persisted message background blur") {
                 it.config[SemanticsProperties.ProgressBarRangeInfo].current == expectedBlurIntensity.toFloat()
             },
         )
         setMessageBackgroundOpacity(0)
-        scrollContainerTo("settings_density_sheet_options", "settings_message_background_blur")
+        scrollContainerTo("surface_effects_page", "settings_message_background_blur")
         compose.onNodeWithTag("settings_message_background_blur").assert(
             SemanticsMatcher("Opacity does not reset blur") {
                 it.config[SemanticsProperties.ProgressBarRangeInfo].current == expectedBlurIntensity.toFloat()
@@ -103,7 +101,7 @@ internal class SettingsRobot(
         setMessageBackgroundBlur(0)
         setMessageBackgroundOpacity(originalOpacityPercent)
         setMessageBackgroundBlur(originalBlurIntensity)
-        dismissChoiceSheet("settings_density_sheet")
+        click("settings_back")
         awaitTag("settings_switch_nickname_backgrounds_row")
         compose
             .onNodeWithTag("settings_switch_nickname_backgrounds_row", useUnmergedTree = true)
@@ -111,15 +109,15 @@ internal class SettingsRobot(
             .assertIsOff()
             .performClick()
             .assertIsOn()
-        scrollToAndClick("settings_density_picker")
-        scrollContainerTo("settings_density_sheet_options", "settings_message_background_opacity")
+        scrollToAndClick("settings_surface_effects")
+        scrollContainerTo("surface_effects_page", "settings_message_background_opacity")
         compose.onNodeWithTag("settings_message_background_opacity").assertExists()
-        dismissChoiceSheet("settings_density_sheet")
+        click("settings_back")
         selectMessageLayout(originalLayout)
     }
 
     private fun setMessageBackgroundOpacity(percent: Int) {
-        scrollContainerTo("settings_density_sheet_options", "settings_message_background_opacity")
+        scrollContainerTo("surface_effects_page", "settings_message_background_opacity")
         compose.onNodeWithTag("settings_message_background_opacity").performSemanticsAction(SemanticsActions.SetProgress) { it(percent.toFloat()) }
         compose.onNodeWithTag("settings_message_background_opacity").assert(
             SemanticsMatcher("Message background opacity $percent") {
@@ -129,7 +127,7 @@ internal class SettingsRobot(
     }
 
     private fun setMessageBackgroundBlur(intensity: Int) {
-        scrollContainerTo("settings_density_sheet_options", "settings_message_background_blur")
+        scrollContainerTo("surface_effects_page", "settings_message_background_blur")
         compose.onNodeWithTag("settings_message_background_blur").performSemanticsAction(SemanticsActions.SetProgress) { it(intensity.toFloat()) }
         compose.onNodeWithTag("settings_message_background_blur").assert(
             SemanticsMatcher("Message background blur $intensity") {
@@ -385,7 +383,7 @@ internal class SettingsRobot(
     fun exerciseFoolSettings(nick: String) {
         chat()
         scrollToAndClick("settings_fools_mode_picker")
-        val modes = listOf("dimmed", "collapse", "hide")
+        val modes = listOf("dimmed", "blur", "collapse", "hide")
         val original =
             modes.single { mode ->
                 scrollContainerTo("settings_fools_mode_sheet_options", "settings_fools_mode_$mode")
@@ -404,14 +402,14 @@ internal class SettingsRobot(
         click("manage_nick_add")
         click("manage_nick_$nick")
         compose.onNodeWithTag("fool_visibility_inherit", useUnmergedTree = true).assertIsSelected()
-        click("fool_visibility_collapse")
-        awaitFoolSelection("fool_visibility_collapse")
+        click("fool_visibility_blur")
+        awaitFoolSelection("fool_visibility_blur")
         scrollToAndClick("fool_notify_mentions")
         awaitFoolSwitch("fool_notify_mentions", true)
         compose.onNodeWithTag("fool_notify_direct_messages", useUnmergedTree = true).assertIsOff()
         dismissFoolSettings()
         click("manage_nick_$nick")
-        awaitFoolSelection("fool_visibility_collapse")
+        awaitFoolSelection("fool_visibility_blur")
         awaitFoolSwitch("fool_notify_mentions", true)
         scrollToAndClick("fool_notify_direct_messages")
         awaitFoolSwitch("fool_notify_direct_messages", true)
@@ -421,11 +419,11 @@ internal class SettingsRobot(
         awaitFoolSelection("fool_visibility_inherit")
         dismissFoolSettings()
         click("settings_back")
-        selectDefaultFoolVisibility("hide")
+        selectDefaultFoolVisibility("blur")
         scrollToAndClick("settings_fools")
         click("manage_nick_$nick")
         awaitFoolSelection("fool_visibility_inherit")
-        compose.onNodeWithText("Follow global (Hidden)", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("Follow global (Blurred until tapped)", useUnmergedTree = true).assertExists()
         awaitFoolSwitch("fool_notify_mentions", false)
         awaitFoolSwitch("fool_notify_direct_messages", true)
         dismissFoolSettings()

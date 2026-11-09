@@ -21,7 +21,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -51,6 +50,7 @@ import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /**
@@ -278,6 +278,7 @@ fun ManageNicksContent(
 internal fun foolVisibilityLabel(mode: FoolsMode): Int =
     when (mode) {
         FoolsMode.DIMMED -> R.string.settings_fools_dimmed
+        FoolsMode.BLUR -> R.string.settings_fools_blur
         FoolsMode.COLLAPSE -> R.string.settings_fools_collapse
         FoolsMode.HIDE -> R.string.settings_fools_hide
     }

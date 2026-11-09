@@ -38,6 +38,7 @@ import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
+import io.github.trevarj.motd.data.prefs.SurfaceEffects
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
@@ -162,6 +163,17 @@ val LocalMessageBackgroundOpacityPercent: ProvidableCompositionLocal<Int> = stat
 /** Native wallpaper blur intensity, independent of ordinary message tint opacity. */
 val LocalMessageBackgroundBlur: ProvidableCompositionLocal<Int> = staticCompositionLocalOf { 0 }
 
+val LocalSurfaceEffects: ProvidableCompositionLocal<SurfaceEffects> = staticCompositionLocalOf { SurfaceEffects() }
+
+/** Apply the master at the final draw alpha, after layout-specific baselines. */
+internal fun backingAlpha(
+    alpha: Float,
+    enabled: Boolean,
+): Float = if (!enabled && alpha > 0f) 1f else alpha
+
+@Composable
+internal fun effectBackingAlpha(alpha: Float): Float = backingAlpha(alpha, LocalSurfaceEffects.current.enabled)
+
 /** Resolved fills for ordinary Comfortable PRIVMSG bubbles; null preserves the theme default. */
 data class ComfortableBubbleColors(
     val sent: Color? = null,
@@ -262,6 +274,7 @@ fun MotdTheme(
     nicknameBackgroundsEnabled: Boolean = true,
     messageBackgroundOpacityPercent: Int = 100,
     messageBackgroundBlur: Int = 0,
+    surfaceEffects: SurfaceEffects = LocalSurfaceEffects.current,
     sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     receivedBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     // Nested previews can render a different palette from the app shell without restyling its bars.
@@ -368,6 +381,7 @@ fun MotdTheme(
             LocalChatShadowsEnabled provides chatShadowsEnabled,
             LocalNicknameBackgroundsEnabled provides nicknameBackgroundsEnabled,
             LocalMessageBackgroundOpacityPercent provides messageBackgroundOpacityPercent.coerceIn(0, 100),
+            LocalSurfaceEffects provides surfaceEffects,
             LocalMessageBackgroundBlur provides messageBackgroundBlur.coerceIn(0, 100),
             LocalComfortableBubbleColors provides comfortableBubbleColors,
             LocalMotdDark provides dark,

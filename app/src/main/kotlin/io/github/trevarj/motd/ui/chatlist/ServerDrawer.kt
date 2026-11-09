@@ -37,11 +37,9 @@ import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -113,6 +111,8 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ceramicLogoColorMatrix
 import io.github.trevarj.motd.ui.theme.shape
 import kotlin.math.roundToInt
+import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
+import io.github.trevarj.motd.ui.components.EffectModalDrawerSheet as ModalDrawerSheet
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /**

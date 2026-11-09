@@ -50,10 +50,11 @@ Unread previews keep the stronger reading ink in both text-color modes.
 Flattened rows retain their nick/attention tint over the theme canvas. At 100% message opacity,
 normal tinted Two-line rows and ACTION rows admit wallpaper through their existing 90%-opaque
 baseline only when contrast is safe; Dimmed rows and contrast fallbacks use an opaque baseline.
-The Message layout opacity control multiplies that baseline in all layouts, including Comfortable
+The Transparency and blur message opacity control multiplies that baseline in all layouts, including Comfortable
 and nickname-tinted rows; contrast and dimming never override the chosen percentage. Zero removes
-ordinary tint, not independently selected wallpaper blur. Incoming mention fills retain their exact
-baseline alpha and do not sample blur; semantic rails are preserved. Text contrast uses the effective
+ordinary tint, not independently selected wallpaper blur. Incoming PRIVMSG/NOTICE mention fills retain
+their exact baseline alpha and do not sample blur. ACTIONs, including mentions, follow the chosen
+opacity and blur while retaining their attention colors and semantic rails. Text contrast uses the effective
 tint over the known theme canvas; arbitrary wallpaper pixels cannot guarantee the same contrast. Content and child
 surfaces do not fade or blur.
 
@@ -68,6 +69,39 @@ unchanged. Source frames and current draw coordinates keep sampling aligned duri
 keyboard/runway movement and send flight; composition owns layer lifetime. At Off no capture or
 effect is created. Android 8–11 use the labeled existing unblurred-tint fallback, with no software
 bitmap-copy loop. Wallpaper intensity separately controls builtin ink or full-color image opacity.
+
+**Transparency and blur**, the final submenu in Appearance, groups the global message pair and
+independently saved opacity/blur pairs for chat headers, input
+bars, chat-list title/folder chrome, menus/suggestions, bottom sheets, drawers, mini-players,
+and floating buttons/orb. New surfaces default to their existing opaque tint with blur Off;
+chat-list chrome retains its 60% tint and 32dp blur. The global master also governs the existing
+message controls: Off disables all blur and makes every nonzero final backing alpha opaque,
+including the Two-line 90% baseline. Explicit 0% remains absent. On restores saved values unchanged.
+Foreground ink, artwork, disabled states, native window scrims and transition/idle fades are untouched.
+The message group shares one real chat preview. Interface groups share a sticky preview; selecting
+a group header, focusing or editing its sliders changes the previewed surface without moving values.
+**Link all opacity sliders** and **Link all blur sliders** persist independently. Enabling either
+does not synchronize existing values: the next edit to any global slider broadcasts that dimension
+to global message backgrounds and all eight interface groups. Unlinking retains the current values.
+Per-chat overrides remain independent; fool concealment blur is not a linked slider.
+
+Fool **Blurred** is separate from background styling and linked sliders. It conceals only message
+body text (including translations/transcripts), not the bubble backing, sender/avatar, timestamp,
+reply card, media, audio controls or reactions. Compact/ACTION retain one paragraph and its exact
+rich-text wrapping; only the annotated body range receives 40dp native blur on Android 12+.
+Effects Off and Android 8–11 paint that text range opaquely instead. A concealed body tap reveals
+without opening its link or invoking the row action; visible independent controls remain usable.
+Concealed body text and links are absent from accessibility/selection until reveal.
+
+Header/input backdrops combine wallpaper with the actual scrolling message viewport. Menus
+hosted by native sheets/drawers sample that host and fall back to the page outside it. Raw captures
+never contain their own consumers. Sheets retain M3's own moving Surface, handle, insets, focus,
+gestures and dismissal; a zero-height content marker aligns the backing with that full Surface
+instead of the public modifier's pre-drag coordinates. Search opens the controls with live previews.
+Global floating controls sample the whole navigation scene across panes, excluding their own
+sibling overlay layer. Translucent FABs and the orb use flat native surfaces so elevated transparent
+shadows cannot composite over the sampled backing; opaque controls retain native fill and elevation.
+
 
 Two-line headers keep sender names on one ellipsized line, reserving room for the avatar, friend
 indicator, delivery status, and timestamp even in narrow panes with large system fonts.

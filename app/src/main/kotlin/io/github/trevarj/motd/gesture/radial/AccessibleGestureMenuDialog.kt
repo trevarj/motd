@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.gesture.GestureAction
 import io.github.trevarj.motd.gesture.vector
+import io.github.trevarj.motd.ui.components.effectSurface
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Test tag for the list form of the gesture menu. */
@@ -51,10 +52,10 @@ internal fun AccessibleGestureMenuDialog(
     var path by remember(root) { mutableStateOf(listOf(root)) }
     val current = path.last()
     AlertDialog(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor = Color.Transparent,
         titleContentColor = MaterialTheme.colorScheme.primary,
         onDismissRequest = onDismiss,
-        modifier = Modifier.testTag(GESTURE_MENU_A11Y_DIALOG_TAG),
+        modifier = Modifier.effectSurface(io.github.trevarj.motd.data.prefs.EffectSurface.MENU, MaterialTheme.colorScheme.surfaceContainerLow, MaterialTheme.shapes.extraLarge).testTag(GESTURE_MENU_A11Y_DIALOG_TAG),
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (path.size > 1) {

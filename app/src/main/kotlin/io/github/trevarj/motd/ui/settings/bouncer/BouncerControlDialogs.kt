@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.bouncer.NetworkCommandFields
 import io.github.trevarj.motd.bouncer.UserCommandFields
+import io.github.trevarj.motd.ui.components.popupEffectSurface
 import io.github.trevarj.motd.ui.settings.addnetwork.SOJU_NETWORK_PRESET_CHOICES
 import io.github.trevarj.motd.ui.settings.addnetwork.applySojuNetworkPreset
 import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
@@ -102,7 +103,8 @@ fun NetworkEditorDialog(
                             modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
                         )
                         ExposedDropdownMenu(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                            modifier = Modifier.popupEffectSurface(MaterialTheme.colorScheme.surfaceContainerLow),
                             expanded = presetsExpanded,
                             onDismissRequest = { presetsExpanded = false },
                         ) {
@@ -477,7 +479,7 @@ fun TriStateField(
                     .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                     .fillMaxWidth(),
         )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, containerColor = androidx.compose.ui.graphics.Color.Transparent, modifier = Modifier.popupEffectSurface(MaterialTheme.colorScheme.surfaceContainerLow)) {
             listOf<Boolean?>(null, true, false).forEach { option ->
                 DropdownMenuItem(
                     colors =

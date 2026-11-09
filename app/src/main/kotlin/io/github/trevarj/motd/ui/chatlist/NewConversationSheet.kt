@@ -31,7 +31,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
@@ -71,10 +70,12 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.components.AutocompletePanel
+import io.github.trevarj.motd.ui.components.popupEffectSurface
 import io.github.trevarj.motd.ui.settings.PasswordField
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Local-only entry sheet; callbacks keep connection/protocol ownership outside UI. */
@@ -463,7 +464,7 @@ private fun NetworkSelector(
                         stateDescription = current.name
                     }.testTag("new_conversation_network_selector"),
         )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { onExpandedChange(false) }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { onExpandedChange(false) }, containerColor = androidx.compose.ui.graphics.Color.Transparent, modifier = Modifier.popupEffectSurface(MaterialTheme.colorScheme.surfaceContainerLow)) {
             networks.forEach { network ->
                 val isSelected = network.id == current.id
                 DropdownMenuItem(

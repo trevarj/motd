@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
@@ -47,7 +46,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -87,6 +85,7 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdSizes
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.cornerRadius
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 private const val MAX_COLLAPSED_AUDIO_PLAYERS = 3
@@ -704,9 +703,10 @@ private fun VoiceTranscriptionDetails(
                     } else {
                         transcript.text
                     }
-                SelectionContainer {
-                    Text(
+                FoolBodySelection {
+                    FoolBodyText(
                         text = displayedTranscript,
+                        concealment = LocalFoolBodyConcealment.current,
                         modifier = Modifier.fillMaxWidth().testTag("audio_transcription_text"),
                         style = MaterialTheme.typography.bodyLarge,
                     )

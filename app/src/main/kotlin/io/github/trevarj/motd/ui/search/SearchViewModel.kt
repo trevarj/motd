@@ -52,6 +52,12 @@ data class ServerHitUi(
     /** 0 when the line carried no time tag; such a hit jumps by msgid alone. */
     val serverTime: Long,
     val msgid: String?,
+    val identityRules: io.github.trevarj.motd.irc.proto.IrcIdentityRules =
+        io.github.trevarj.motd.irc.proto
+            .IrcIdentityRules(),
+    val normalizedActor: String = identityRules.normalize(sender),
+    val isSelf: Boolean = false,
+    val senderAccount: String? = null,
 )
 
 enum class ServerSearchError { REJECTED, UNAVAILABLE }
@@ -103,6 +109,9 @@ data class SearchUiState(
     /** True when this buffer's network can run a server-side SEARCH right now. */
     val serverSearchAvailable: Boolean = false,
     val server: ServerSearchState = ServerSearchState.Idle,
+    val visibility: io.github.trevarj.motd.data.visibility.MessageVisibilitySpec =
+        io.github.trevarj.motd.data.visibility
+            .MessageVisibilitySpec(),
 )
 
 /**
@@ -252,7 +261,7 @@ class SearchViewModel
                                         from = parsed.fromNick,
                                         limit = SOJU_SEARCH_MAX_LIMIT,
                                     ),
-                                )?.let { raw -> raw.toResults(buffer.id, generation) }
+                                )?.let { raw -> raw.toResults(buffer, generation) }
                                 ?: ServerSearchState.Failed(ServerSearchError.UNAVAILABLE)
                         } catch (cancelled: CancellationException) {
                             throw cancelled
@@ -270,16 +279,24 @@ class SearchViewModel
         }
 
         private fun List<SearchResultMessage>.toResults(
-            bufferId: Long,
+            buffer: BufferEntity,
             generation: Long,
-        ): ServerSearchState.Results =
-            ServerSearchState.Results(
+        ): ServerSearchState.Results {
+            val rules =
+                connectionManager.clientFor(buffer.networkId)?.isupport?.identityRules ?: io.github.trevarj.motd.irc.proto
+                    .IrcIdentityRules()
+            val self = (connectionManager.connectionStates.value[buffer.networkId] as? io.github.trevarj.motd.irc.event.IrcClientState.Ready)?.nick?.let(rules::normalize)
+            return ServerSearchState.Results(
                 generation = generation,
                 hits =
                     map { hit ->
                         ServerHitUi(
-                            bufferId = bufferId,
+                            bufferId = buffer.id,
+                            normalizedActor = rules.normalize(hit.sender),
+                            identityRules = rules,
+                            isSelf = self != null && self == rules.normalize(hit.sender),
                             sender = hit.sender,
+                            senderAccount = hit.senderAccount,
                             text = hit.text,
                             kind = hit.kind,
                             serverTime = hit.serverTime ?: 0L,
@@ -288,6 +305,7 @@ class SearchViewModel
                     }.sortedByDescending { it.serverTime },
                 truncated = size >= SOJU_SEARCH_MAX_LIMIT,
             )
+        }
 
         private fun cancelServerSearch() {
             serverGeneration++
@@ -358,7 +376,7 @@ class SearchViewModel
             }
 
         val state: StateFlow<SearchUiState> =
-            combine(localState, serverSection, bufferMatches, searchKey) { keyed, server, match, current ->
+            combine(localState, serverSection, bufferMatches, searchKey, searchRepository.visibility) { keyed, server, match, current, visibility ->
                 val (matchKey, matches) = match
                 val local =
                     if (keyed.key == current) {
@@ -373,6 +391,7 @@ class SearchViewModel
                         } else {
                             emptyList()
                         },
+                    visibility = visibility,
                     serverSearchAvailable = server.available,
                     server = if (local.scope == SearchScope.SERVER) server.state else ServerSearchState.Idle,
                 )

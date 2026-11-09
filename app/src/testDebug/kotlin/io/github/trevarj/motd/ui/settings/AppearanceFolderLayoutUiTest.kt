@@ -7,6 +7,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalRippleConfiguration
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
@@ -35,6 +36,7 @@ import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -365,34 +367,25 @@ class AppearanceFolderLayoutUiTest {
     }
 
     @Test
-    @Config(sdk = [35], qualifiers = "w411dp-h891dp")
-    fun messageLayoutBlurSearchHighlightsIndependentLiveDraftAndRestoresOff() =
+    @Config(sdk = [35], qualifiers = "w411dp-h1600dp")
+    fun effectsMessagePreviewKeepsOpacityAndBlurIndependentAcrossLayouts() =
         withStripedMessageWallpaper { wallpaper ->
-            val persisted = AppearanceConfig(theme = ColorThemePreset.AYU_LIGHT, wallpaper = wallpaper, messageBackgroundOpacityPercent = 0)
-            val settings = Settings(layoutDensity = LayoutDensity.COMFORTABLE, dynamicColor = false, avatarStyle = AvatarStyle.NONE)
-            val calls = mutableListOf<Int>()
-            setContent(
-                settings = settings,
-                appearance = persisted,
-                onMessageBackgroundBlur = calls::add,
-                targetProvider = { SettingsTarget.MESSAGE_BACKGROUND_BLUR },
-            )
-            val sheet = "settings_density_sheet"
-            compose.onNodeWithTag(sheet).assertIsDisplayed()
-            compose.onNodeWithTag("settings_target_highlight_MESSAGE_BACKGROUND_BLUR").assertIsDisplayed()
-            val initial = scrollToSheetNode(sheet, "settings_message_background_blur").assertIsEnabled()
-            initial.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Off"))
+            val appearance = mutableStateOf(AppearanceConfig(theme = ColorThemePreset.AYU_LIGHT, wallpaper = wallpaper, messageBackgroundOpacityPercent = 0))
+            val settings = mutableStateOf(Settings(layoutDensity = LayoutDensity.COMFORTABLE, dynamicColor = false, avatarStyle = AvatarStyle.NONE))
+            val opacityCalls = mutableListOf<Int>()
+            val blurCalls = mutableListOf<Int>()
+            setEffectsContent(appearance, settings, onMessageOpacity = opacityCalls::add, onMessageBlur = blurCalls::add)
+            val page = compose.onNodeWithTag("surface_effects_page")
 
             fun pixels(): android.graphics.Bitmap {
-                val options = compose.onNodeWithTag("${sheet}_options")
-                options.performScrollToIndex(0)
-                val incoming = compose.onNodeWithTag("settings_chat_preview_sheet_incoming").assertIsDisplayed()
-                val viewport = options.fetchSemanticsNode().boundsInRoot
-                val bounds = incoming.fetchSemanticsNode().boundsInRoot
-                val unclipped = incoming.getUnclippedBoundsInRoot()
-                assertTrue(bounds.top >= viewport.top && bounds.bottom <= viewport.bottom)
-                assertEquals(with(compose.density) { (unclipped.bottom - unclipped.top).toPx() }, bounds.height, 1f)
-                return incoming.captureToImage().asAndroidBitmap()
+                // Keep the complete preview visible; a clipped incoming row is not a pixel baseline.
+                page.performScrollToNode(hasTestTag("settings_effects_message_preview_configuration"))
+                compose.onNodeWithTag("settings_effects_message_preview_configuration").performScrollTo()
+                return compose
+                    .onNodeWithTag("settings_effects_message_preview_incoming")
+                    .assertIsDisplayed()
+                    .captureToImage()
+                    .asAndroidBitmap()
             }
             compose.waitUntil(10_000) {
                 val image = pixels()
@@ -407,137 +400,171 @@ class AppearanceFolderLayoutUiTest {
                 black > image.width * image.height / 8 && white > image.width * image.height / 8
             }
             for (layout in LayoutDensity.entries) {
-                scrollToSheetNode(sheet, "settings_density_${layout.name.lowercase()}").performClick().assertIsSelected()
+                compose.runOnIdle { settings.value = settings.value.copy(layoutDensity = layout) }
                 val baseline = pixels()
                 var medium: android.graphics.Bitmap? = null
                 for (intensity in listOf(25, 75, 0)) {
-                    val slider = scrollToSheetNode(sheet, "settings_message_background_blur")
-                    slider.performSemanticsAction(SemanticsActions.SetProgress) { it(intensity.toFloat()) }
+                    page.performScrollToNode(hasTestTag("settings_message_background_blur"))
+                    val slider = compose.onNodeWithTag("settings_message_background_blur")
+                    slider.assertIsEnabled().performSemanticsAction(SemanticsActions.SetProgress) { it(intensity.toFloat()) }
                     slider.assert(SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(intensity.toFloat(), 0f..100f, 0)))
-                    compose.onNodeWithTag(sheet).assertIsDisplayed()
                     val image = pixels()
                     if (intensity == 0) {
                         assertTrue("$layout Off restores exact preview pixels", baseline.sameAs(image))
                     } else {
-                        assertTrue("$layout draft blur changes the real wallpaper preview before persistence", !baseline.sameAs(image))
-                        if (medium != null) assertTrue("$layout intensities have different native pixels", !medium.sameAs(image))
+                        assertTrue("$layout blur changes the real wallpaper preview at zero opacity", !baseline.sameAs(image))
+                        if (medium != null) assertTrue("$layout blur intensities differ", !medium.sameAs(image))
                         medium = image
                     }
-                    assertEquals(0, persisted.messageBackgroundBlur)
-                    assertEquals(0, persisted.messageBackgroundOpacityPercent)
-                    assertEquals(LayoutDensity.COMFORTABLE, settings.layoutDensity)
+                    assertEquals(0, appearance.value.messageBackgroundOpacityPercent)
+                    assertEquals("preview edits do not require an emitted saved value", 0, appearance.value.messageBackgroundBlur)
                 }
+                compose.runOnIdle { appearance.value = appearance.value.copy(messageBackgroundOpacityPercent = 100) }
+                val opaque = pixels()
+                for (opacity in listOf(37, 0, 100)) {
+                    page.performScrollToNode(hasTestTag("settings_message_background_opacity"))
+                    val slider = compose.onNodeWithTag("settings_message_background_opacity")
+                    slider.performSemanticsAction(SemanticsActions.SetProgress) { it(opacity.toFloat()) }
+                    assertTrue(slider.fetchSemanticsNode().boundsInRoot.height >= with(compose.density) { 48.dp.toPx() })
+                    assertEquals(0, appearance.value.messageBackgroundBlur)
+                    val image = pixels()
+                    assertEquals("$layout opacity restores exact preview", opacity == 100, opaque.sameAs(image))
+                }
+                compose.runOnIdle { appearance.value = appearance.value.copy(messageBackgroundOpacityPercent = 0) }
             }
-            assertEquals(List(3) { listOf(25, 75, 0) }.flatten(), calls)
-            dismissSheet(sheet)
+            assertEquals(List(3) { listOf(25, 75, 0) }.flatten(), blurCalls)
+            assertEquals(List(3) { listOf(37, 0, 100) }.flatten(), opacityCalls)
         }
 
     @Test
-    fun messageLayoutOpacityIsAlwaysAvailableAndPreviewsDraftBeforePersistence() {
-        val persisted = AppearanceConfig(theme = ColorThemePreset.AYU_LIGHT, wallpaper = WallpaperSelection(ChatWallpaperPreset.NONE))
-        val settings = Settings(layoutDensity = LayoutDensity.COMFORTABLE, dynamicColor = false, avatarStyle = AvatarStyle.NONE)
-        var selectedOpacity: Int? = null
-        var selectedLayout: LayoutDensity? = null
-        setContent(
-            settings = settings,
-            appearance = persisted,
-            onLayoutDensity = { selectedLayout = it },
-            onMessageBackgroundOpacity = { selectedOpacity = it },
+    fun effectsSearchHighlightsMessageSliderAndSharedPreviewFollowsSelectedSurface() {
+        val appearance = mutableStateOf(AppearanceConfig(messageBackgroundOpacityPercent = 37))
+        val settings = mutableStateOf(Settings())
+        setEffectsContent(appearance, settings, SettingsTarget.MESSAGE_BACKGROUND_OPACITY)
+        val page = compose.onNodeWithTag("surface_effects_page")
+        page.performScrollToNode(hasTestTag("settings_message_background_opacity"))
+        compose.onNodeWithTag("settings_target_highlight_MESSAGE_BACKGROUND_OPACITY").assertIsDisplayed()
+        compose.onNodeWithTag("settings_message_background_opacity").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(37f, 0f..100f, 0)),
         )
-        compose.onNodeWithTag("settings_message_background_opacity").assertDoesNotExist()
-        compose.onNodeWithTag("settings_density_picker").performScrollTo().performClick()
-        val options = compose.onNodeWithTag("settings_density_sheet_options")
-
-        fun previewPixels(layout: LayoutDensity): android.graphics.Bitmap {
-            options.performScrollToIndex(0)
-            compose.onNodeWithTag("settings_chat_preview_sheet_${layout.name.lowercase()}_default_rounded").assertExists()
-            val incoming = compose.onNodeWithTag("settings_chat_preview_sheet_incoming").assertIsDisplayed()
-            val viewport = options.fetchSemanticsNode().boundsInRoot
-            val bounds = incoming.fetchSemanticsNode().boundsInRoot
-            val unclipped = incoming.getUnclippedBoundsInRoot()
-            assertTrue("native preview must be fully inside its lazy viewport", bounds.top >= viewport.top && bounds.bottom <= viewport.bottom)
-            assertEquals(with(compose.density) { (unclipped.right - unclipped.left).toPx() }, bounds.width, 1f)
-            assertEquals(with(compose.density) { (unclipped.bottom - unclipped.top).toPx() }, bounds.height, 1f)
-            return incoming.captureToImage().asAndroidBitmap()
-        }
-        for (layout in LayoutDensity.entries) {
-            val option = "settings_density_${layout.name.lowercase()}"
-            scrollToSheetNode("settings_density_sheet", option).performClick()
-            scrollToSheetNode("settings_density_sheet", option).assertIsSelected()
-            assertEquals(layout, selectedLayout)
-            val baseline = previewPixels(layout)
-            var intermediate: android.graphics.Bitmap? = null
-            for (percent in listOf(37, 0, 100)) {
-                val slider = scrollToSheetNode("settings_density_sheet", "settings_message_background_opacity")
-                slider.assertIsEnabled().performSemanticsAction(SemanticsActions.SetProgress) { it(percent.toFloat()) }
-                slider.assert(
-                    SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(percent.toFloat(), 0f..100f, 0)),
-                )
-                assertTrue(slider.fetchSemanticsNode().boundsInRoot.height >= with(compose.density) { 48.dp.toPx() })
-                assertEquals(percent, selectedOpacity)
-                assertEquals(100, persisted.messageBackgroundOpacityPercent)
-                val pixels = previewPixels(layout)
-                when (percent) {
-                    37 -> {
-                        intermediate = pixels
-                        assertTrue("$layout preview changes immediately", !baseline.sameAs(pixels))
-                    }
-
-                    0 -> {
-                        assertTrue("$layout has continuous backing opacity", !requireNotNull(intermediate).sameAs(pixels))
-                        assertTrue("$layout zero differs from baseline", !baseline.sameAs(pixels))
-                    }
-
-                    100 -> {
-                        assertTrue("$layout resets exactly", baseline.sameAs(pixels))
-                    }
-                }
-            }
-        }
-        dismissSheet("settings_density_sheet")
-        compose
-            .onNodeWithTag("settings_switch_nickname_backgrounds_row", useUnmergedTree = true)
-            .performScrollTo()
-            .performClick()
-            .assertIsOff()
-        compose.onNodeWithTag("settings_density_picker").performScrollTo().performClick()
-        scrollToSheetNode("settings_density_sheet", "settings_message_background_opacity").assertIsEnabled()
-        assertEquals(true, persisted.nicknameBackgroundsEnabled)
-        assertEquals(LayoutDensity.COMFORTABLE, settings.layoutDensity)
+        page.performScrollToNode(hasTestTag("surface_floating_button_select"))
+        compose.onNodeWithTag("surface_floating_button_select").performClick()
+        compose.onNodeWithTag("surface_effects_preview").assertIsDisplayed()
+        compose.onNode(hasText(RuntimeEnvironment.getApplication().getString(io.github.trevarj.motd.R.string.settings_surface_floating_button)) and hasAnyAncestor(hasTestTag("surface_effects_preview")), useUnmergedTree = true).assertExists()
+        page.performScrollToNode(hasTestTag("surface_floating_button_blur"))
+        compose.onNodeWithTag("surface_floating_button_blur").performSemanticsAction(SemanticsActions.SetProgress) { it(73f) }
+        assertEquals(73, appearance.value.surfaceEffects[io.github.trevarj.motd.data.prefs.EffectSurface.FLOATING_BUTTON].blurPercent)
+        assertEquals(37, appearance.value.messageBackgroundOpacityPercent)
     }
 
     @Test
-    fun opacitySearchOpensMessageLayoutHighlightsFooterAndCanBeDismissed() {
-        val persisted = AppearanceConfig(messageBackgroundOpacityPercent = 37)
-        val target = mutableStateOf<SettingsTarget?>(SettingsTarget.MESSAGE_BACKGROUND_OPACITY)
-        var selectedOpacity: Int? = null
-        setContent(
-            appearance = persisted,
-            targetProvider = { target.value },
-            onMessageBackgroundOpacity = { selectedOpacity = it },
+    fun groupedEffectsSlidersKeepTheirSurfaceIdentityForAccessibility() {
+        setEffectsContent(mutableStateOf(AppearanceConfig()), mutableStateOf(Settings()))
+        val page = compose.onNodeWithTag("surface_effects_page")
+        val resources = RuntimeEnvironment.getApplication().resources
+        for (surface in io.github.trevarj.motd.data.prefs.EffectSurface.entries) {
+            val surfaceTitle = resources.getString(surfaceEffectTitle(surface))
+            for (effect in listOf("opacity", "blur")) {
+                val tag = "surface_${surface.name.lowercase()}_$effect"
+                page.performScrollToNode(hasTestTag(tag))
+                compose.onNodeWithTag(tag).assert(
+                    SemanticsMatcher("slider identifies $surface independently of its group header") {
+                        it.config[SemanticsProperties.ContentDescription].any { label -> label.contains(surfaceTitle) }
+                    },
+                )
+            }
+        }
+    }
+
+    @Test
+    fun effectsSearchRestoresScrolledSurfaceAndSelectedPreview() {
+        val appearance = mutableStateOf(AppearanceConfig(messageBackgroundOpacityPercent = 37))
+        val restoration = StateRestorationTester(compose)
+        setEffectsContent(
+            appearance,
+            mutableStateOf(Settings()),
+            SettingsTarget.MESSAGE_BACKGROUND_OPACITY,
+            setContent = restoration::setContent,
         )
-        compose.onNodeWithTag("settings_density_sheet").assertIsDisplayed()
-        compose.onNodeWithTag("settings_target_highlight_MESSAGE_BACKGROUND_OPACITY").assertIsDisplayed()
-        val slider = scrollToSheetNode("settings_density_sheet", "settings_message_background_opacity")
-        slider.assertIsEnabled().assert(
-            SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(37f, 0f..100f, 0)),
+        compose.onNodeWithTag("settings_message_background_opacity").assertIsDisplayed()
+        val page = compose.onNodeWithTag("surface_effects_page")
+        page.performScrollToNode(hasTestTag("surface_floating_button_select"))
+        compose.onNodeWithTag("surface_floating_button_select").performClick()
+        page.performScrollToNode(hasTestTag("surface_floating_button_blur"))
+        val slider = compose.onNodeWithTag("surface_floating_button_blur")
+        slider.performSemanticsAction(SemanticsActions.SetProgress) { it(73f) }
+        val position =
+            slider
+                .assertIsDisplayed()
+                .fetchSemanticsNode()
+                .boundsInRoot.top
+        restoration.emulateSavedInstanceStateRestore()
+        assertEquals(
+            position,
+            slider
+                .assertIsDisplayed()
+                .fetchSemanticsNode()
+                .boundsInRoot.top,
+            1f,
         )
-        slider.performSemanticsAction(SemanticsActions.SetProgress) { it(0f) }
-        slider.assert(
-            SemanticsMatcher.expectValue(
-                SemanticsProperties.StateDescription,
-                RuntimeEnvironment.getApplication().getString(io.github.trevarj.motd.R.string.settings_message_background_opacity_off),
-            ),
-        )
-        assertEquals(0, selectedOpacity)
+        slider.assert(SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(73f, 0f..100f, 0)))
+        compose.onNodeWithTag("surface_effects_preview").assertIsDisplayed()
+        compose
+            .onNode(
+                hasText(RuntimeEnvironment.getApplication().getString(io.github.trevarj.motd.R.string.settings_surface_floating_button)) and
+                    hasAnyAncestor(hasTestTag("surface_effects_preview")),
+                useUnmergedTree = true,
+            ).assertIsDisplayed()
+        assertEquals(37, appearance.value.messageBackgroundOpacityPercent)
+    }
+
+    @Test
+    fun effectsSubmenuIsLastAndDensityContainsOnlyLayoutChoices() {
+        var opened = false
+        setContent(onOpenSurfaceEffects = { opened = true })
+        compose.onNodeWithTag("settings_density_picker").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_message_background_opacity").assertDoesNotExist()
+        compose.onNodeWithTag("settings_message_background_blur").assertDoesNotExist()
         dismissSheet("settings_density_sheet")
-        compose.waitForIdle()
-        compose.onNodeWithTag("settings_density_sheet").assertDoesNotExist()
-        compose.runOnIdle { target.value = null }
-        compose.runOnIdle { target.value = SettingsTarget.MESSAGE_BACKGROUND_OPACITY }
-        compose.onNodeWithTag("settings_density_sheet").assertIsDisplayed()
-        scrollToSheetNode("settings_density_sheet", "settings_message_background_opacity").assertIsEnabled()
-        assertEquals(37, persisted.messageBackgroundOpacityPercent)
+        compose.onNodeWithTag("settings_surface_effects").performScrollTo().performClick()
+        assertTrue(opened)
+        val effects = compose.onNodeWithTag("settings_surface_effects").fetchSemanticsNode().boundsInRoot
+        compose.onNodeWithTag("settings_app_icon_picker").assertIsDisplayed()
+        val icon = compose.onNodeWithTag("settings_app_icon_picker").fetchSemanticsNode().boundsInRoot
+        assertTrue("effects submenu follows the last existing appearance group", effects.top >= icon.bottom)
+    }
+
+    private fun setEffectsContent(
+        appearance: androidx.compose.runtime.MutableState<AppearanceConfig>,
+        settings: androidx.compose.runtime.MutableState<Settings>,
+        target: SettingsTarget? = null,
+        onMessageOpacity: (Int) -> Unit = { appearance.value = appearance.value.copy(messageBackgroundOpacityPercent = it) },
+        onMessageBlur: (Int) -> Unit = { appearance.value = appearance.value.copy(messageBackgroundBlur = it) },
+        setContent: (@Composable () -> Unit) -> Unit = { compose.setContent(it) },
+    ) {
+        setContent {
+            MotdTheme(dynamicColor = false) {
+                SurfaceEffectsSettingsContent(
+                    appearance.value,
+                    settings.value,
+                    {},
+                    { appearance.value = appearance.value.copy(surfaceEffects = appearance.value.surfaceEffects.copy(enabled = it)) },
+                    { appearance.value = appearance.value.copy(linkGlobalOpacity = it) },
+                    { appearance.value = appearance.value.copy(linkGlobalBlur = it) },
+                    onMessageOpacity,
+                    onMessageBlur,
+                    { surface, value ->
+                        val effects = appearance.value.surfaceEffects
+                        appearance.value = appearance.value.copy(surfaceEffects = effects.copy(surfaces = effects.surfaces + (surface to effects[surface].copy(opacityPercent = value))))
+                    },
+                    { surface, value ->
+                        val effects = appearance.value.surfaceEffects
+                        appearance.value = appearance.value.copy(surfaceEffects = effects.copy(surfaces = effects.surfaces + (surface to effects[surface].copy(blurPercent = value))))
+                    },
+                    target,
+                )
+            }
+        }
     }
 
     @Test
@@ -1257,9 +1284,8 @@ class AppearanceFolderLayoutUiTest {
         onBubbleCornerStyle: (BubbleCornerStyle) -> Unit = {},
         onChatShadowsEnabled: (Boolean) -> Unit = {},
         onNicknameBackgroundsEnabled: (Boolean) -> Unit = {},
-        onMessageBackgroundOpacity: (Int) -> Unit = {},
-        onMessageBackgroundBlur: (Int) -> Unit = {},
         onUseThemeTextColors: (Boolean) -> Unit = {},
+        onOpenSurfaceEffects: (SettingsTarget?) -> Unit = {},
         onWallpaper: (WallpaperSelection) -> Unit = {},
         importedWallpaperProvider: () -> WallpaperSelection? = { null },
         targetProvider: () -> SettingsTarget? = { null },
@@ -1313,8 +1339,7 @@ class AppearanceFolderLayoutUiTest {
                         onBubbleCornerStyle = onBubbleCornerStyle,
                         onChatShadowsEnabled = onChatShadowsEnabled,
                         onNicknameBackgroundsEnabled = onNicknameBackgroundsEnabled,
-                        onMessageBackgroundOpacity = onMessageBackgroundOpacity,
-                        onMessageBackgroundBlur = onMessageBackgroundBlur,
+                        onOpenSurfaceEffects = onOpenSurfaceEffects,
                         onLauncherIcon = {},
                         target = targetProvider(),
                     )

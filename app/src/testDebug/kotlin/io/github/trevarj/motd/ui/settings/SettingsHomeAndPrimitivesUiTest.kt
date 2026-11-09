@@ -1,24 +1,44 @@
 package io.github.trevarj.motd.ui.settings
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PixelMap
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -52,6 +72,8 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.NetworkEntity
@@ -63,6 +85,10 @@ import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.chat.ConversationLayoutSheet
 import io.github.trevarj.motd.ui.chat.ConversationLayoutState
+import io.github.trevarj.motd.ui.components.SurfaceBackdropSource
+import io.github.trevarj.motd.ui.components.captureSurfaceBackdrop
+import io.github.trevarj.motd.ui.components.rememberSurfaceBackdropSource
+import io.github.trevarj.motd.ui.components.surfaceBackdrop
 import io.github.trevarj.motd.ui.components.withStripedMessageWallpaper
 import io.github.trevarj.motd.ui.nav.NetworkSettingsTarget
 import io.github.trevarj.motd.ui.nav.SettingsTarget
@@ -80,6 +106,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import kotlin.math.abs
+import kotlin.math.floor
 import kotlin.math.roundToInt
 
 @RunWith(RobolectricTestRunner::class)
@@ -937,6 +965,523 @@ class SettingsHomeAndPrimitivesUiTest {
                 assertEquals("$theme disabled switch", scheme.onSurface.copy(alpha = 0.38f), inkOf("Disabled switch"))
             }
         }
+    }
+
+    // Window-driven child-layer updates are exercised by SurfaceBackdropWindowTest on Android:
+    // Robolectric native captures do not dispatch producer/consumer window frame callbacks.
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp")
+    fun nativeBackdrop_dropdown_crossWindow_static_motion_and_sharp_foreground() {
+        val fixture = BackdropFixture()
+        var moved by mutableStateOf(false)
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                val source = rememberSurfaceBackdropSource()
+                BackdropPattern(source, fixture, { false }, affine = moved)
+                Box(Modifier.offset(52.dp, 120.dp).size(40.dp)) {
+                    DropdownMenu(
+                        expanded = true,
+                        onDismissRequest = {},
+                        offset = DpOffset(if (moved) 53.dp else 0.dp, if (moved) 37.dp else 0.dp),
+                        containerColor = Color.Transparent,
+                        modifier =
+                            Modifier
+                                .surfaceBackdrop(source, Color.Black, 8, 12)
+                                .onGloballyPositioned { fixture.consumer = it }
+                                .testTag("backdrop_menu"),
+                    ) {
+                        DropdownMenuItem(text = { Text("Native menu action") }, onClick = {})
+                        BackdropSharpForeground()
+                        Spacer(Modifier.height(72.dp))
+                    }
+                }
+            }
+        }
+        assertNativeBackdrop("backdrop_menu", fixture, reversed = false)
+        compose.onNodeWithText("Native menu action").assert(hasClickAction())
+        val before = fixture.consumer!!.localToScreen(Offset.Zero)
+        compose.runOnIdle { moved = true }
+        assertNativeBackdrop("backdrop_menu", fixture, reversed = false)
+        val after = fixture.consumer!!.localToScreen(Offset.Zero)
+        assertTrue("native popup actually moved", (after - before).getDistance() > 20f)
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp")
+    fun nativeBackdrop_modalSheet_crossWindow_static_and_native_motion() {
+        val fixture = BackdropFixture()
+        var taller by mutableStateOf(false)
+        var showSheet by mutableStateOf(false)
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                val source = rememberSurfaceBackdropSource()
+                BackdropPattern(source, fixture, { false })
+                // Prime a real page-chrome consumer before opening another Android window.
+                Box(Modifier.fillMaxWidth().height(48.dp).surfaceBackdrop(source, Color.Black, 8, 12))
+                if (showSheet) {
+                    ModalBottomSheet(
+                        onDismissRequest = {},
+                        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                        containerColor = Color.Transparent,
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(if (taller) 330.dp else 220.dp)
+                                .surfaceBackdrop(source, Color.Black, 8, 12)
+                                .onGloballyPositioned { fixture.consumer = it }
+                                .testTag("backdrop_sheet"),
+                        ) {
+                            Column {
+                                Text("Native sheet content")
+                                BackdropSharpForeground()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assertUnderlyingSourceDrawn()
+        compose.runOnIdle { showSheet = true }
+        assertNativeBackdrop("backdrop_sheet", fixture, reversed = false)
+        val before = fixture.consumer!!.localToScreen(Offset.Zero)
+        compose.runOnIdle { taller = true }
+        assertNativeBackdrop("backdrop_sheet", fixture, reversed = false)
+        val after = fixture.consumer!!.localToScreen(Offset.Zero)
+        assertTrue("native sheet anchor moves with content height", abs(after.y - before.y) > 50f)
+        compose.onNodeWithText("Native sheet content").assertIsDisplayed()
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp")
+    fun nativeBackdrop_menuInsideSheet_parentFallback_and_content_updates() {
+        val fixture = BackdropFixture()
+        var reversed by mutableStateOf(false)
+        var sheetColor by mutableStateOf(Color.Green)
+        var showSheet by mutableStateOf(false)
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                val page = rememberSurfaceBackdropSource()
+                val sheet = rememberSurfaceBackdropSource(parent = page)
+                BackdropPattern(page, fixture, { reversed })
+                if (showSheet) {
+                    ModalBottomSheet(
+                        onDismissRequest = {},
+                        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                        containerColor = Color.Transparent,
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(180.dp)
+                                .captureSurfaceBackdrop(sheet)
+                                .background(sheetColor)
+                                .onGloballyPositioned { fixture.sheet = it },
+                        ) {
+                            Text("Native sheet anchor")
+                            // A tall real popup is placed above its anchor and crosses the sheet edge.
+                            DropdownMenu(
+                                expanded = true,
+                                onDismissRequest = {},
+                                offset = DpOffset(0.dp, 90.dp),
+                                containerColor = Color.Transparent,
+                                modifier =
+                                    Modifier
+                                        .width(240.dp)
+                                        .height(420.dp)
+                                        .surfaceBackdrop(sheet, Color.Black, 8, 12)
+                                        .onGloballyPositioned { fixture.consumer = it }
+                                        .testTag("backdrop_nested"),
+                            ) {
+                                DropdownMenuItem(text = { Text("Nested native action") }, onClick = {})
+                                BackdropSharpForeground()
+                                Spacer(Modifier.height(330.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assertUnderlyingSourceDrawn()
+        compose.runOnIdle { showSheet = true }
+        assertNestedBackdrop(fixture, Color.Green, reversed = false)
+        compose.runOnIdle {
+            reversed = true
+            sheetColor = Color.Yellow
+        }
+        assertNestedBackdrop(fixture, Color.Yellow, reversed = true)
+        compose.onNodeWithText("Nested native action").assert(hasClickAction())
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp")
+    fun productionFabUsesRawPageWithoutCapturingItselfAndMasterRestoresPixels() {
+        val fixture = BackdropFixture()
+        val initial =
+            io.github.trevarj.motd.data.prefs.SurfaceEffects(
+                surfaces =
+                    mapOf(
+                        io.github.trevarj.motd.data.prefs.EffectSurface.FLOATING_BUTTON to
+                            io.github.trevarj.motd.data.prefs
+                                .SurfaceEffect(8, 12),
+                    ),
+            )
+        var effects by mutableStateOf(initial)
+        var source: SurfaceBackdropSource? = null
+        compose.setContent {
+            MotdTheme(dynamicColor = false, surfaceEffects = effects) {
+                io.github.trevarj.motd.ui.components.SurfaceBackdropRoot(
+                    content = {
+                        val page = rememberSurfaceBackdropSource()
+                        source = page
+                        io.github.trevarj.motd.ui.components.SurfaceBackdropPage(page) {
+                            BackdropPattern(page, fixture, { false })
+                            io.github.trevarj.motd.ui.components.EffectFloatingActionButton(
+                                onClick = {},
+                                modifier =
+                                    Modifier
+                                        .offset(20.dp, 90.dp)
+                                        .size(240.dp, 180.dp)
+                                        .onGloballyPositioned { fixture.consumer = it }
+                                        .testTag("production_fab"),
+                                shape = androidx.compose.ui.graphics.RectangleShape,
+                                containerColor = Color.Black,
+                            ) { Text("Sharp floating action") }
+                        }
+                    },
+                    overlays = {},
+                )
+            }
+        }
+        compose.waitForIdle()
+        val identity = source
+        val original = compose.onNodeWithTag("production_fab").captureToImage().asAndroidBitmap()
+        val pixels = original.asImageBitmap().toPixelMap()
+        assertPatternScan(pixels, pixels.height - 24, fixture, reversed = false)
+        compose.onNodeWithTag("production_fab").assert(hasClickAction())
+        compose.runOnIdle { effects = effects.copy(enabled = false) }
+        val off = backdropPixels("production_fab")
+        assertTrue(off[off.width / 2, off.height - 24].red < 0.02f)
+        compose.runOnIdle {
+            assertTrue(identity === source)
+            assertEquals(0, source!!.users)
+            effects = effects.copy(enabled = true)
+        }
+        compose.waitForIdle()
+        assertTrue(original.sameAs(compose.onNodeWithTag("production_fab").captureToImage().asAndroidBitmap()))
+        assertEquals(initial, effects)
+        assertEquals(
+            1f,
+            io.github.trevarj.motd.ui.theme
+                .backingAlpha(0.9f, false),
+        )
+        assertEquals(
+            0f,
+            io.github.trevarj.motd.ui.theme
+                .backingAlpha(0f, false),
+        )
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp")
+    fun rootOverlayFabBlursBothPanesWithoutCapturingItself() {
+        val left = BackdropFixture()
+        val right = BackdropFixture()
+        var onRight by mutableStateOf(false)
+        var rootSource: SurfaceBackdropSource? = null
+        val effects =
+            io.github.trevarj.motd.data.prefs.SurfaceEffects(
+                surfaces =
+                    mapOf(
+                        io.github.trevarj.motd.data.prefs.EffectSurface.FLOATING_BUTTON to
+                            io.github.trevarj.motd.data.prefs
+                                .SurfaceEffect(8, 12),
+                    ),
+            )
+        compose.setContent {
+            MotdTheme(dynamicColor = false, surfaceEffects = effects) {
+                io.github.trevarj.motd.ui.components.SurfaceBackdropRoot(
+                    content = {
+                        Box(Modifier.fillMaxSize()) {
+                            Box(Modifier.size(200.dp, 600.dp)) {
+                                val page = rememberSurfaceBackdropSource()
+                                io.github.trevarj.motd.ui.components.SurfaceBackdropPage(page) {
+                                    BackdropPattern(page, left, { false })
+                                }
+                            }
+                            // Mount the bounded right page last, regardless of the overlay position.
+                            Box(Modifier.offset(x = 200.dp).size(200.dp, 600.dp)) {
+                                val page = rememberSurfaceBackdropSource()
+                                io.github.trevarj.motd.ui.components.SurfaceBackdropPage(page) {
+                                    BackdropPattern(page, right, { true })
+                                }
+                            }
+                        }
+                    },
+                    overlays = {
+                        rootSource = io.github.trevarj.motd.ui.components.LocalSurfaceBackdrop.current
+                        io.github.trevarj.motd.ui.components.EffectFloatingActionButton(
+                            onClick = {},
+                            modifier =
+                                Modifier
+                                    .offset { IntOffset((if (onRight) 220.dp else 20.dp).roundToPx(), 90.dp.roundToPx()) }
+                                    .size(160.dp, 180.dp)
+                                    .onGloballyPositioned {
+                                        left.consumer = it
+                                        right.consumer = it
+                                    }.testTag("root_overlay_fab"),
+                            shape = androidx.compose.ui.graphics.RectangleShape,
+                            containerColor = Color.Black,
+                        ) {
+                            Column {
+                                Text("Sharp floating action")
+                                BackdropSharpForeground()
+                            }
+                        }
+                    },
+                )
+            }
+        }
+        assertNativeBackdrop("root_overlay_fab", left, reversed = false)
+        compose.runOnIdle { onRight = true }
+        assertNativeBackdrop("root_overlay_fab", right, reversed = true)
+        compose.runOnIdle { onRight = false }
+        assertNativeBackdrop("root_overlay_fab", left, reversed = false)
+        val settled = compose.onNodeWithTag("root_overlay_fab").captureToImage().asAndroidBitmap()
+        val revision = compose.runOnIdle { rootSource!!.revision }
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.waitForIdle()
+        assertTrue("the overlay never feeds its own backdrop", settled.sameAs(compose.onNodeWithTag("root_overlay_fab").captureToImage().asAndroidBitmap()))
+        compose.runOnIdle {
+            assertEquals("an idle overlay must not redraw the root capture", revision, rootSource!!.revision)
+        }
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp")
+    fun nativeBackdrop_masterOff_opaque_and_explicitOff_restore_without_recreating_host() {
+        var enabled by mutableStateOf(true)
+        var opacity by mutableStateOf(8)
+        val fixture = BackdropFixture()
+        var source: SurfaceBackdropSource? = null
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                val current = rememberSurfaceBackdropSource()
+                source = current
+                val hostIdentity = remember { Any() }
+                if (fixture.identity == null) fixture.identity = hostIdentity
+                fixture.currentIdentity = hostIdentity
+                BackdropPattern(current, fixture, reversed = { false })
+                Box(
+                    Modifier
+                        .offset(20.dp, 90.dp)
+                        .size(240.dp, 180.dp)
+                        .surfaceBackdrop(current, Color.White, opacity, 12, effectsEnabled = enabled)
+                        .onGloballyPositioned { fixture.consumer = it }
+                        .testTag("backdrop_master"),
+                )
+            }
+        }
+        val initialSource = source
+        val original = backdropPixels("backdrop_master")
+        compose.runOnIdle { enabled = false }
+        val opaque = backdropPixels("backdrop_master")
+        assertTrue(opaque[opaque.width / 2, opaque.height / 2].red > 0.98f)
+        assertTrue(opaque[opaque.width / 2, opaque.height / 2].blue > 0.98f)
+        compose.runOnIdle { assertEquals("disabled effects release capture", 0, source!!.users) }
+        compose.runOnIdle { enabled = true }
+        val restored = backdropPixels("backdrop_master")
+        for (x in 12 until restored.width - 12 step 17) {
+            assertEquals(original[x, original.height / 2].red, restored[x, restored.height / 2].red, 0.03f)
+            assertEquals(original[x, original.height / 2].blue, restored[x, restored.height / 2].blue, 0.03f)
+        }
+        compose.runOnIdle {
+            assertTrue("stable source across master toggles", initialSource === source)
+            assertTrue("stable composition host", fixture.identity === fixture.currentIdentity)
+            assertEquals(8, opacity)
+        }
+        compose.runOnIdle {
+            enabled = false
+            opacity = 0
+        }
+        val absent = backdropPixels("backdrop_master")
+        val center = absent[absent.width / 2, absent.height / 2]
+        assertTrue("explicit Off still exposes source with master Off", center.green < 0.05f && (center.red > 0.95f || center.blue > 0.95f))
+        compose.runOnIdle {
+            enabled = true
+            opacity = 100
+        }
+        val configuredOpaque = backdropPixels("backdrop_master")
+        assertTrue("configured opaque bypass stays opaque", configuredOpaque[configuredOpaque.width / 2, configuredOpaque.height / 2].green > 0.98f)
+        compose.runOnIdle { assertEquals("opaque effects release capture", 0, source!!.users) }
+    }
+
+    @Test
+    @Config(sdk = [30], qualifiers = "w411dp-h891dp")
+    fun nativeBackdrop_android11_tintOnly_without_source_capture() {
+        val fixture = BackdropFixture()
+        var source: SurfaceBackdropSource? = null
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                val current = rememberSurfaceBackdropSource()
+                source = current
+                BackdropPattern(current, fixture, reversed = { false })
+                Box(
+                    Modifier
+                        .offset(20.dp, 90.dp)
+                        .size(240.dp, 180.dp)
+                        .surfaceBackdrop(current, Color.White, 25, 100)
+                        .testTag("backdrop_fallback"),
+                )
+            }
+        }
+        val pixels = backdropPixels("backdrop_fallback")
+        val center = pixels[pixels.width / 2, pixels.height / 2]
+        assertEquals("native tint alpha remains on Android 11", 0.25f, center.green, 0.03f)
+        assertTrue("no software blur of source", center.red > 0.95f || center.blue > 0.95f)
+        compose.runOnIdle { assertEquals("fallback does not request GPU capture", 0, source!!.users) }
+    }
+
+    private class BackdropFixture {
+        var source: LayoutCoordinates? = null
+        var consumer: LayoutCoordinates? = null
+        var sheet: LayoutCoordinates? = null
+        var stripeWidth = 0f
+        var identity: Any? = null
+        var currentIdentity: Any? = null
+    }
+
+    @Composable
+    private fun BackdropPattern(
+        source: SurfaceBackdropSource,
+        fixture: BackdropFixture,
+        reversed: () -> Boolean,
+        affine: Boolean = false,
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = if (affine) 0.91f else 1f
+                    scaleY = if (affine) 0.95f else 1f
+                    translationX = if (affine) 9.dp.toPx() else 0f
+                }.captureSurfaceBackdrop(source)
+                .onGloballyPositioned { fixture.source = it }
+                .testTag("backdrop_source"),
+        ) {
+            // Read mutable content only in this child RenderNode. The capture display list stays
+            // cached when it changes, matching a real timeline row with its own graphics layer.
+            Box(
+                Modifier.fillMaxSize().graphicsLayer().drawBehind {
+                    val stripe = 40.dp.toPx()
+                    fixture.stripeWidth = stripe
+                    val reverse = reversed()
+                    var x = 0f
+                    var index = 0
+                    while (x < size.width) {
+                        val red = (index % 2 == 0) != reverse
+                        drawRect(if (red) Color.Red else Color.Blue, Offset(x, 0f), Size(stripe, size.height))
+                        x += stripe
+                        index++
+                    }
+                },
+            )
+        }
+    }
+
+    private fun assertUnderlyingSourceDrawn() {
+        val pixels = backdropPixels("backdrop_source")
+        val sample = pixels[pixels.width / 2, pixels.height / 2]
+        assertTrue("underlying window must actually paint before opening the modal", sample.alpha > 0.98f && (sample.red > 0.98f || sample.blue > 0.98f))
+    }
+
+    @Composable
+    private fun BackdropSharpForeground() {
+        // Production foreground stays outside the effect: these adjacent bars must not blend.
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(24.dp)
+                .testTag("backdrop_sharp")
+                .drawBehind {
+                    drawRect(Color.White, Offset(20.dp.toPx(), 0f), Size(8.dp.toPx(), size.height))
+                    drawRect(Color.Black, Offset(28.dp.toPx(), 0f), Size(8.dp.toPx(), size.height))
+                },
+        )
+    }
+
+    private fun assertNativeBackdrop(
+        tag: String,
+        fixture: BackdropFixture,
+        reversed: Boolean,
+    ) {
+        compose.waitForIdle()
+        val pixels = backdropPixels(tag)
+        assertPatternScan(pixels, pixels.height - 20, fixture, reversed)
+        val foreground = compose.onNodeWithTag("backdrop_sharp", useUnmergedTree = true).captureToImage().toPixelMap()
+        val density = fixture.stripeWidth / 40f
+        val y = foreground.height / 2
+        assertTrue("white foreground remains sharp", foreground[(26f * density).roundToInt(), y].red > 0.98f)
+        assertTrue("black foreground remains sharp", foreground[(30f * density).roundToInt(), y].red < 0.02f)
+    }
+
+    private fun assertPatternScan(
+        pixels: PixelMap,
+        y: Int,
+        fixture: BackdropFixture,
+        reversed: Boolean,
+    ) {
+        val source = fixture.source!!
+        val consumer = fixture.consumer!!
+        var interiors = 0
+        var softenedEdges = 0
+        for (x in 8 until pixels.width - 8) {
+            val local = source.screenToLocal(consumer.localToScreen(Offset(x.toFloat(), y.toFloat())))
+            val phase = local.x / fixture.stripeWidth
+            val fraction = phase - floor(phase)
+            val pixel = pixels[x, y]
+            if (fraction in 0.35f..0.65f) {
+                val red = (floor(phase).toInt() % 2 == 0) != reversed
+                assertTrue("screen-aligned source interior x=$x phase=$phase pixel=$pixel", if (red) pixel.red > 0.75f && pixel.blue < 0.2f else pixel.blue > 0.75f && pixel.red < 0.2f)
+                interiors++
+            }
+            if ((fraction < 0.025f || fraction > 0.975f) && pixel.red in 0.12f..0.8f && pixel.blue in 0.12f..0.8f) softenedEdges++
+        }
+        assertTrue("sampled actual source interiors", interiors > 10)
+        assertTrue("native blur smooths source color edges", softenedEdges > 2)
+    }
+
+    private fun assertNestedBackdrop(
+        fixture: BackdropFixture,
+        sheetColor: Color,
+        reversed: Boolean,
+    ) {
+        compose.waitForIdle()
+        val pixels = backdropPixels("backdrop_nested")
+        val consumer = fixture.consumer!!
+        val sheet = fixture.sheet!!
+        val sheetTop = consumer.screenToLocal(sheet.localToScreen(Offset.Zero)).y
+        assertTrue("popup actually extends beyond sheet", sheetTop > 50 && sheetTop < pixels.height - 20)
+        val upperY = (sheetTop - 24).roundToInt()
+        assertPatternScan(pixels, upperY, fixture, reversed)
+        // Sample below actual source text; the blur must include that text, not erase it.
+        val lower = pixels[pixels.width / 2, (sheetTop + 48).roundToInt()]
+        assertEquals("nested menu includes current sheet green", sheetColor.green * 0.92f, lower.green, 0.08f)
+        assertEquals("nested menu includes current sheet red", sheetColor.red * 0.92f, lower.red, 0.08f)
+    }
+
+    private fun backdropPixels(tag: String): PixelMap {
+        val image = compose.onNodeWithTag(tag).captureToImage()
+        // Optional native-only inspection artifact; no software capture or production dependency.
+        System.getenv("MOTD_SURFACE_BACKDROP_PNG_DIR")?.let { directory ->
+            val output = java.io.File(directory).apply { mkdirs() }
+            java.io.File(output, "${tag}_${System.nanoTime()}.png").outputStream().use {
+                image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+            }
+        }
+        return image.toPixelMap()
     }
 
     private fun network(

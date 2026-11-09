@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.gesture.vector
+import io.github.trevarj.motd.ui.components.effectSurface
 import kotlin.math.roundToInt
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
@@ -193,7 +194,7 @@ private fun RadialSliceLabel(
                 .testTag(gestureMenuSliceTag(entry.id))
                 .widthIn(max = 112.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(container)
+                .effectSurface(io.github.trevarj.motd.data.prefs.EffectSurface.MENU, container, RoundedCornerShape(12.dp))
                 .then(if (focused) Modifier.border(2.dp, content, RoundedCornerShape(12.dp)) else Modifier)
                 .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {

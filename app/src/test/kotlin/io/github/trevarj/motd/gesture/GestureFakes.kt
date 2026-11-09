@@ -312,10 +312,48 @@ internal class FakeAppearance(
 
     override suspend fun setMessageBackgroundOpacity(percent: Int) {
         state.value = state.value.copy(messageBackgroundOpacityPercent = percent.coerceIn(0, 100))
+        if (state.value.linkGlobalOpacity) setSurfaceOpacity(io.github.trevarj.motd.data.prefs.EffectSurface.CHAT_HEADER, percent)
     }
 
     override suspend fun setMessageBackgroundBlur(intensity: Int) {
         state.value = state.value.copy(messageBackgroundBlur = intensity.coerceIn(0, 100))
+        if (state.value.linkGlobalBlur) setSurfaceBlur(io.github.trevarj.motd.data.prefs.EffectSurface.CHAT_HEADER, intensity)
+    }
+
+    override suspend fun setSurfaceEffectsEnabled(enabled: Boolean) {
+        state.value = state.value.copy(surfaceEffects = state.value.surfaceEffects.copy(enabled = enabled))
+    }
+
+    override suspend fun setLinkGlobalOpacity(enabled: Boolean) {
+        state.value = state.value.copy(linkGlobalOpacity = enabled)
+    }
+
+    override suspend fun setLinkGlobalBlur(enabled: Boolean) {
+        state.value = state.value.copy(linkGlobalBlur = enabled)
+    }
+
+    override suspend fun restoreGlobalEffects(config: AppearanceConfig) {
+        state.value = state.value.copy(surfaceEffects = config.surfaceEffects, messageBackgroundOpacityPercent = config.messageBackgroundOpacityPercent, messageBackgroundBlur = config.messageBackgroundBlur, linkGlobalOpacity = config.linkGlobalOpacity, linkGlobalBlur = config.linkGlobalBlur)
+    }
+
+    override suspend fun setSurfaceOpacity(
+        surface: io.github.trevarj.motd.data.prefs.EffectSurface,
+        percent: Int,
+    ) {
+        val effects = state.value.surfaceEffects
+        val targets = if (state.value.linkGlobalOpacity) io.github.trevarj.motd.data.prefs.EffectSurface.entries else listOf(surface)
+        state.value = state.value.copy(surfaceEffects = effects.copy(surfaces = effects.surfaces + targets.associateWith { effects[it].copy(opacityPercent = percent.coerceIn(0, 100)) }))
+        if (state.value.linkGlobalOpacity) state.value = state.value.copy(messageBackgroundOpacityPercent = percent.coerceIn(0, 100))
+    }
+
+    override suspend fun setSurfaceBlur(
+        surface: io.github.trevarj.motd.data.prefs.EffectSurface,
+        percent: Int,
+    ) {
+        val effects = state.value.surfaceEffects
+        val targets = if (state.value.linkGlobalBlur) io.github.trevarj.motd.data.prefs.EffectSurface.entries else listOf(surface)
+        state.value = state.value.copy(surfaceEffects = effects.copy(surfaces = effects.surfaces + targets.associateWith { effects[it].copy(blurPercent = percent.coerceIn(0, 100)) }))
+        if (state.value.linkGlobalBlur) state.value = state.value.copy(messageBackgroundBlur = percent.coerceIn(0, 100))
     }
 
     override suspend fun setSentBubbleColor(color: ComfortableBubbleColor) {

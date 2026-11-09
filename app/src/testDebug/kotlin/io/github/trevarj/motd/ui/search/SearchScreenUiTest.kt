@@ -9,6 +9,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.InputModeManager
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -16,15 +20,19 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
@@ -71,6 +79,175 @@ class SearchScreenUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun accountOnlyServerFoolWithDifferentNickStaysConcealedUntilReveal() {
+        var opens = 0
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                SearchContent(
+                    state =
+                        SearchUiState(
+                            rawQuery = "Secret",
+                            scope = SearchScope.SERVER,
+                            visibility =
+                                io.github.trevarj.motd.data.visibility.MessageVisibilitySpec(
+                                    fools = setOf("account-owner"),
+                                    foolPreferences =
+                                        mapOf(
+                                            "account-owner" to
+                                                io.github.trevarj.motd.data.prefs
+                                                    .FoolPreferences(io.github.trevarj.motd.data.prefs.FoolsMode.BLUR),
+                                        ),
+                                ),
+                            server =
+                                ServerSearchState.Results(
+                                    listOf(ServerHitUi(1, "different-nick", "Secret account preview", SearchResultKind.PRIVMSG, 1000L, "account-hit", senderAccount = "account-owner")),
+                                    false,
+                                    1,
+                                ),
+                        ),
+                    onQueryChange = {},
+                    onScopeChange = {},
+                    onBack = {},
+                    onOpenHit = {},
+                    onOpenServerHit = { opens++ },
+                )
+            }
+        }
+        compose.onNodeWithText("Secret account preview").assertDoesNotExist()
+        compose.onNodeWithTag("search_result_account-hit_reveal").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(0, opens) }
+        compose.onNodeWithTag("search_result_account-hit").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(1, opens) }
+    }
+
+    @Test
+    fun blurLocalAndServerBodiesRequireRevealWhileAuthorNavigationStaysNative() {
+        val server = mutableStateOf(false)
+        var opens = 0
+        val local = hit(1, "blur", "Secret preview")
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                SearchContent(
+                    state =
+                        SearchUiState(
+                            rawQuery = "Secret",
+                            scope = if (server.value) SearchScope.SERVER else SearchScope.ALL,
+                            groups = listOf(group(local.copy(message = local.message.copy(normalizedActor = "alice")))),
+                            visibility =
+                                io.github.trevarj.motd.data.visibility
+                                    .MessageVisibilitySpec(fools = setOf("alice"), foolsMode = io.github.trevarj.motd.data.prefs.FoolsMode.BLUR),
+                            server = ServerSearchState.Results(listOf(ServerHitUi(1, "alice", "Secret preview", SearchResultKind.PRIVMSG, 1000L, "blur")), false, 1),
+                        ),
+                    onQueryChange = {},
+                    onScopeChange = {},
+                    onBack = {},
+                    onOpenHit = { opens++ },
+                    onOpenServerHit = { opens++ },
+                )
+            }
+        }
+        for (remote in listOf(false, true)) {
+            compose.runOnIdle { server.value = remote }
+            compose.onNodeWithText("alice", useUnmergedTree = true).assertIsDisplayed().performTouchInput { click() }
+            compose.runOnIdle { assertEquals(1, opens) }
+            compose.onNodeWithText("Secret preview", useUnmergedTree = true).assertDoesNotExist()
+            compose.onNodeWithTag("search_result_blur_reveal", useUnmergedTree = true).assertIsDisplayed().performTouchInput { click() }
+            compose.runOnIdle { assertEquals(1, opens) }
+            compose.onNodeWithText("Secret preview", useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithTag("search_result_blur").assertIsDisplayed().performClick()
+            compose.runOnIdle {
+                assertEquals(2, opens)
+                opens = 0
+            }
+        }
+    }
+
+    @Test
+    fun concealedSearchParentAccessibilityHoldAndKeyboardRevealBeforeReadingActions() {
+        val remote = mutableStateOf(false)
+        val id = mutableStateOf(1L)
+        val body = "Secret complete message beyond the three-line preview.\nSecond paragraph.\nThird.\nFourth."
+        var opens = 0
+        val translated = mutableListOf<String>()
+        lateinit var inputMode: InputModeManager
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                inputMode = LocalInputModeManager.current
+                val local = hit(id.value, "blur-${id.value}", body)
+                SearchContent(
+                    state =
+                        SearchUiState(
+                            rawQuery = "Secret",
+                            scope = if (remote.value) SearchScope.SERVER else SearchScope.ALL,
+                            groups = listOf(group(local.copy(message = local.message.copy(normalizedActor = "alice")))),
+                            visibility =
+                                io.github.trevarj.motd.data.visibility
+                                    .MessageVisibilitySpec(fools = setOf("alice"), foolsMode = io.github.trevarj.motd.data.prefs.FoolsMode.BLUR),
+                            server =
+                                ServerSearchState.Results(listOf(ServerHitUi(1, "alice", body, SearchResultKind.PRIVMSG, 1000L, "blur-${id.value}")), false, id.value),
+                        ),
+                    onQueryChange = {},
+                    onScopeChange = {},
+                    onBack = {},
+                    onOpenHit = { opens++ },
+                    onOpenServerHit = { opens++ },
+                    onTranslateLocalHit = { translated += it.message.text },
+                    onTranslateServerHit = { hit, _, _ -> translated += hit.text },
+                )
+            }
+        }
+        for (server in listOf(false, true)) {
+            for (activation in listOf("accessibility", "hold", "keyboard")) {
+                compose.runOnIdle {
+                    remote.value = server
+                    id.value++
+                    opens = 0
+                    translated.clear()
+                    inputMode.requestInputMode(InputMode.Keyboard)
+                }
+                val row = compose.onNodeWithTag("search_result_blur-${id.value}")
+                compose.onNodeWithText(body, useUnmergedTree = true).assertDoesNotExist()
+
+                fun activate() {
+                    when (activation) {
+                        "accessibility" -> {
+                            row.performClick()
+                        }
+
+                        "hold" -> {
+                            row.performSemanticsAction(SemanticsActions.OnLongClick)
+                        }
+
+                        else -> {
+                            row.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+                            compose.onRoot().performKeyInput {
+                                keyDown(Key.Enter)
+                                keyUp(Key.Enter)
+                            }
+                        }
+                    }
+                }
+                activate()
+                compose.runOnIdle {
+                    assertEquals(0, opens)
+                    assertTrue(translated.isEmpty())
+                }
+                compose.onNodeWithText(body, useUnmergedTree = true).assertIsDisplayed()
+                activate()
+                compose.runOnIdle {
+                    if (activation == "hold") {
+                        assertEquals(listOf(body), translated)
+                        assertEquals(0, opens)
+                    } else {
+                        assertEquals(1, opens)
+                        assertTrue(translated.isEmpty())
+                    }
+                }
+            }
+        }
+    }
 
     @Test
     fun blankCoverageNoticeRemainsHonestWhileCoverageLoads() {

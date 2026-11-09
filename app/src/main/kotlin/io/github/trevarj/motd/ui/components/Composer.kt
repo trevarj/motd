@@ -89,7 +89,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -199,6 +198,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.ceil
 import androidx.compose.foundation.lazy.items as lazyItems
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 data class ComposerReply(
@@ -983,8 +983,8 @@ fun Composer(
         },
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = if (floatingPill) Color.Transparent else composerFill,
+            modifier = Modifier.fillMaxWidth().then(if (floatingPill) Modifier else Modifier.effectSurface(io.github.trevarj.motd.data.prefs.EffectSurface.INPUT_BAR, composerFill)),
+            color = Color.Transparent,
             contentColor = composerInk,
             tonalElevation = if (floatingPill || receivedBubbleColor != null) 0.dp else 3.dp,
         ) {
@@ -1028,9 +1028,9 @@ fun Composer(
                 ) {
                     if (floatingPill) {
                         Surface(
-                            modifier = Modifier.matchParentSize().testTag("chat_composer_pill"),
+                            modifier = Modifier.matchParentSize().effectSurface(io.github.trevarj.motd.data.prefs.EffectSurface.INPUT_BAR, composerFill, RoundedCornerShape(LocalInputCornerStyle.current.cornerRadius(28.dp, roundedRadius = 28.dp))).testTag("chat_composer_pill"),
                             shape = RoundedCornerShape(LocalInputCornerStyle.current.cornerRadius(28.dp, roundedRadius = 28.dp)),
-                            color = composerFill,
+                            color = Color.Transparent,
                         ) {}
                     }
                     Column {
@@ -1105,7 +1105,7 @@ fun Composer(
                                                     },
                                                 ).testTag("chat_composer_pill"),
                                         shape = RoundedCornerShape(LocalInputCornerStyle.current.cornerRadius(16.dp, roundedRadius = 28.dp)),
-                                        color = composerFill,
+                                        color = Color.Transparent,
                                     ) {}
                                 }
                                 Row(
@@ -2266,8 +2266,8 @@ private fun EmojiAutocompletePanel(
     tonalElevation: Dp,
 ) {
     Surface(
-        modifier = Modifier.fillMaxWidth().testTag("chat_composer_emoji_autocomplete"),
-        color = color,
+        modifier = Modifier.fillMaxWidth().effectSurface(io.github.trevarj.motd.data.prefs.EffectSurface.MENU, color, MotdShapes.card).testTag("chat_composer_emoji_autocomplete"),
+        color = Color.Transparent,
         contentColor = contentColor,
         shape = MotdShapes.card,
         tonalElevation = tonalElevation,

@@ -64,9 +64,9 @@ import io.github.trevarj.motd.ui.chatlist.ChatListState
 import io.github.trevarj.motd.ui.chatlist.FolderTabStrip
 import io.github.trevarj.motd.ui.chatlist.ordinaryChatListRows
 import io.github.trevarj.motd.ui.chatlist.partitionArchivedRows
-import io.github.trevarj.motd.ui.chatlist.recordFolderTabBackdrop
-import io.github.trevarj.motd.ui.chatlist.rememberFolderTabBackdrop
 import io.github.trevarj.motd.ui.chatlist.summarizeFolder
+import io.github.trevarj.motd.ui.components.captureSurfaceBackdrop
+import io.github.trevarj.motd.ui.components.rememberSurfaceBackdropSource
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
@@ -380,6 +380,10 @@ class ChatFolderUiTest {
                 .fetchSemanticsNode()
                 .boundsInRoot
         assertTrue("The first row starts below the complete measured folder header", firstRow.top >= overlay.bottom)
+        val toolbar = compose.onNodeWithTag("chatlist_top_app_bar").fetchSemanticsNode().boundsInRoot
+        val viewport = compose.onNodeWithTag("chatlist_rows").fetchSemanticsNode().boundsInRoot
+        assertEquals("The recorded viewport reaches the window top, not merely the folder strip", rootBounds.top, viewport.top, 0.5f)
+        assertEquals("The folder header keeps its original position below the app bar", toolbar.bottom, overlay.top, 0.5f)
 
         val scrollBy = overlay.height - with(compose.density) { 24.dp.toPx() }
         compose.onNodeWithTag("chatlist_rows").performSemanticsAction(SemanticsActions.ScrollBy) {
@@ -822,6 +826,72 @@ class ChatFolderUiTest {
     }
 
     @Test
+    @Config(sdk = [31, 35], qualifiers = "w411dp-h891dp")
+    fun title_backdrop_has_live_rows_beneath_it_without_folders_and_releases_empty_source() {
+        val colors = lightColorScheme(surface = Color.Black, primaryContainer = Color.White)
+        val rows = (1L..20L).map { row(it, "#room$it", folderId = null).copy(unreadCount = 1) }
+        val state = mutableStateOf(ChatListState(rows = rows, loading = false))
+        setContent(state, colorScheme = colors)
+        val root = compose.onRoot()
+        val rootBounds = root.fetchSemanticsNode().boundsInRoot
+        val bar = compose.onNodeWithTag("chatlist_top_app_bar").fetchSemanticsNode().boundsInRoot
+        val viewport = compose.onNodeWithTag("chatlist_rows").fetchSemanticsNode().boundsInRoot
+        val first = compose.onNodeWithTag("chatlist_row_surface_1").fetchSemanticsNode().boundsInRoot
+        assertEquals("The source reaches the status/title area even without folder tabs", rootBounds.top, viewport.top, 0.5f)
+        assertEquals("Removing body top padding must not move the resting first card", bar.bottom, first.top, 0.5f)
+        val tintOnly = lerp(colors.surface, colors.primaryContainer, 0.20f).copy(alpha = 0.60f).compositeOver(colors.surface).toArgb()
+
+        // Sample inside the card width, not its 8dp external gutter: the native blur also
+        // samples the black canvas beyond the viewport edge. Stay above toolbar foreground ink.
+        fun headerPixel(): Int =
+            root.captureToImage().asAndroidBitmap().getPixel(
+                (bar.center.x - rootBounds.left).toInt(),
+                (bar.top - rootBounds.top + with(compose.density) { 8.dp.toPx() }).toInt(),
+            )
+        assertColorNear("The resting rectangular header uses the shared 60% tint", tintOnly, headerPixel())
+
+        fun overlapHeader() {
+            val currentBar = compose.onNodeWithTag("chatlist_top_app_bar").fetchSemanticsNode().boundsInRoot
+            val initial = compose.onNodeWithTag("chatlist_row_surface_1").fetchSemanticsNode().boundsInRoot
+            compose.onNodeWithTag("chatlist_rows").performSemanticsAction(SemanticsActions.ScrollBy) {
+                assertTrue(it(0f, initial.top - currentBar.top))
+            }
+            compose.waitForIdle()
+            val shifted = compose.onNodeWithTag("chatlist_row_surface_1").fetchSemanticsNode().boundsInRoot
+            assertTrue("A real card occupies the title/status region, not a viewport clipped below it", shifted.top < currentBar.bottom && shifted.bottom > currentBar.top)
+            val sampledRed = android.graphics.Color.red(headerPixel())
+            val tintRed = android.graphics.Color.red(tintOnly)
+            assertTrue("The title backing samples live cards, not a permanently tinted canvas (sample=$sampledRed, tint=$tintRed)", sampledRed - tintRed >= 5)
+            assertEquals("Scrolling cannot move toolbar foreground", currentBar, compose.onNodeWithTag("chatlist_top_app_bar").fetchSemanticsNode().boundsInRoot)
+        }
+        overlapHeader()
+        compose.runOnIdle { state.value = state.value.copy(rows = emptyList()) }
+        compose.onAllNodesWithTag("chatlist_rows").assertCountEquals(0)
+        assertColorNear("An empty title never replays the disposed capture", tintOnly, headerPixel())
+        compose.runOnIdle { state.value = state.value.copy(rows = rows) }
+        overlapHeader()
+        compose.runOnIdle {
+            state.value = state.value.copy(rows = emptyList(), archivedRows = rows.map { it.copy(archived = true) })
+        }
+        val archiveCard = compose.onNodeWithTag("chatlist_archived_folder")
+        val archiveBounds = archiveCard.fetchSemanticsNode().boundsInRoot
+        val currentBar = compose.onNodeWithTag("chatlist_top_app_bar").fetchSemanticsNode().boundsInRoot
+        assertEquals("The archive-only card retains its original resting offset", currentBar.bottom + with(compose.density) { 2.dp.toPx() }, archiveBounds.top, 0.5f)
+        archiveCard.performClick()
+        val archiveBar = compose.onNodeWithTag("chatlist_top_app_bar").fetchSemanticsNode().boundsInRoot
+        assertEquals(
+            "Archive route rows retain the same initial header reservation",
+            archiveBar.bottom,
+            compose
+                .onNodeWithTag("chatlist_row_surface_1")
+                .fetchSemanticsNode()
+                .boundsInRoot.top,
+            0.5f,
+        )
+        overlapHeader()
+    }
+
+    @Test
     fun folder_tabs_keep_content_sized_pills_with_4dp_gaps_and_48dp_targets() {
         val folders = listOf(folder(7, "First"), folder(8, "Second"))
         val state =
@@ -1226,12 +1296,12 @@ class ChatFolderUiTest {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 MaterialTheme(colorScheme = backdropColors) {
-                    val backdrop = if (attachSource) rememberFolderTabBackdrop() else null
+                    val backdrop = if (attachSource) rememberSurfaceBackdropSource() else null
                     Box(Modifier.fillMaxSize().background(Color.Magenta).padding(start = 24.dp, top = 40.dp, end = 12.dp, bottom = 12.dp)) {
                         Box(
                             Modifier
                                 .fillMaxSize()
-                                .recordFolderTabBackdrop(backdrop, backdropColors.surface)
+                                .then(backdrop?.let { Modifier.captureSurfaceBackdrop(it).background(backdropColors.surface) } ?: Modifier)
                                 .verticalScroll(rememberScrollState())
                                 .testTag("folder_backdrop_source"),
                         ) {

@@ -88,6 +88,7 @@ enum class SettingsTarget {
     NICKNAME_BACKGROUNDS,
     MESSAGE_BACKGROUND_OPACITY,
     MESSAGE_BACKGROUND_BLUR,
+    SURFACE_EFFECTS,
     TIME_FORMAT,
     MESSAGE_SPACING,
     BUBBLE_CORNERS,
@@ -151,6 +152,10 @@ enum class NetworkSettingsTarget { CONNECTION, AUTHENTICATION, OBFUSCATION, AVAT
 
 // Settings category sub-screens (reached from the top-level Settings list).
 @Serializable data class AppearanceSettingsRoute(
+    val target: SettingsTarget? = null,
+)
+
+@Serializable data class SurfaceEffectsRoute(
     val target: SettingsTarget? = null,
 )
 

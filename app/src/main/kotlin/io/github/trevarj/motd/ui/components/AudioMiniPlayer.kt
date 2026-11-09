@@ -22,7 +22,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,6 +40,7 @@ import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.audio.contextLabel
 import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -78,8 +78,13 @@ fun AudioMiniPlayer(
         }
 
     Surface(
-        modifier = modifier.fillMaxWidth().height(MINI_PLAYER_HEIGHT).testTag("audio_mini_player"),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .height(MINI_PLAYER_HEIGHT)
+                .effectSurface(io.github.trevarj.motd.data.prefs.EffectSurface.MINI_PLAYER, MaterialTheme.colorScheme.surfaceContainerHigh)
+                .testTag("audio_mini_player"),
+        color = androidx.compose.ui.graphics.Color.Transparent,
         tonalElevation = 2.dp,
     ) {
         Row(

@@ -32,6 +32,13 @@ class FoolsRepositoryTest {
         }
 
     @Test
+    fun blurMergeStaysBetweenDimmedAndCollapsedAndKeepsNotificationPermissionsIndependent() {
+        val blurred = FoolPreferences(FoolsMode.BLUR, notifyMentions = true)
+        assertEquals(FoolPreferences(FoolsMode.BLUR), blurred.merge(FoolPreferences(FoolsMode.DIMMED), FoolsMode.DIMMED))
+        assertEquals(FoolPreferences(FoolsMode.COLLAPSE), blurred.merge(FoolPreferences(FoolsMode.COLLAPSE), FoolsMode.DIMMED))
+    }
+
+    @Test
     fun freshDefaultsAndFirstAddedFoolUseDimmed() =
         runTest {
             assertEquals(FoolsMode.DIMMED, Settings().foolsMode)
@@ -46,7 +53,7 @@ class FoolsRepositoryTest {
     fun legacyPopulatedFallbackAndValidSavedModesSurvive() =
         runTest {
             val store = ApplicationProvider.getApplicationContext<Context>().settingsDataStore
-            for (saved in listOf(null, "broken", "COLLAPSE", "HIDE", "DIMMED")) {
+            for (saved in listOf(null, "broken", "COLLAPSE", "HIDE", "DIMMED", "BLUR")) {
                 store.edit {
                     it[PrefKeys.FOOL_NICKS] = encodeNickSet(setOf("alice"))
                     if (saved == null) it.remove(PrefKeys.FOOLS_MODE) else it[PrefKeys.FOOLS_MODE] = saved
@@ -66,7 +73,7 @@ class FoolsRepositoryTest {
     @Test
     fun preferencesAreSparseIndependentAndMembershipOwned() =
         runTest {
-            val selected = FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true)
+            val selected = FoolPreferences(FoolsMode.BLUR, notifyMentions = true)
             repo.setFoolPreferences("missing", selected)
             assertTrue(
                 repo.settings

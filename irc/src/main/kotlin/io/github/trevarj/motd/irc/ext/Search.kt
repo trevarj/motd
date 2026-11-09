@@ -40,6 +40,8 @@ data class SearchResultMessage(
     /** Null when the line carried no `time` tag; the hit is then msgid-only. */
     val serverTime: Long?,
     val msgid: String?,
+    /** IRCv3 account identity; missing, empty and logged-out (`*`) tags are absent. */
+    val senderAccount: String? = null,
 )
 
 /**
@@ -94,5 +96,6 @@ internal fun parseSearchResult(message: IrcMessage): SearchResultMessage? {
                 runCatching { Instant.parse(encoded).toEpochMilli() }.getOrNull()
             },
         msgid = message.tags["msgid"]?.takeIf(String::isNotEmpty),
+        senderAccount = message.tags["account"]?.takeIf { it.isNotBlank() && it != "*" },
     )
 }

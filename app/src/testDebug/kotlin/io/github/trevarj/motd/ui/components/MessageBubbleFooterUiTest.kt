@@ -83,6 +83,7 @@ import io.github.trevarj.motd.ui.theme.TimestampConfig
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.fixedThemeScheme
+import io.github.trevarj.motd.ui.theme.semanticColors
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -296,36 +297,54 @@ class MessageBubbleFooterUiTest {
 
     @Test
     @Config(sdk = [35])
-    fun nativeBlurPreservesOpaqueMentionsRailsAndReplyAudioSurfacesAcrossLayouts() {
+    fun nativeBlurPreservesOrdinaryMentionsAndBlursActionMentionsWithoutChangingRailsOrReplyAudio() {
         val layout = mutableStateOf(LayoutDensity.COMFORTABLE)
         val kind = mutableStateOf(MessageKind.PRIVMSG)
         val blur = mutableStateOf(0)
         val mention = mutableStateOf(true)
+        val opacity = mutableStateOf(0)
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(1f)) {
-                BlurSample(layout.value, kind.value, true, 0, blur.value, mention = mention.value, reply = ReplyPreviewData("quoted", "Quoted reply"), audio = true, viewportHeight = 360)
+                BlurSample(layout.value, kind.value, true, opacity.value, blur.value, mention = mention.value, reply = ReplyPreviewData("quoted", "Quoted reply"), audio = true, viewportHeight = 360)
             }
         }
         for (density in LayoutDensity.entries) {
-            for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)) {
+            val roles = listOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)
+            for ((messageKind, percent) in roles.flatMap { kind -> listOf(0, 37).map { kind to it } }) {
                 compose.runOnIdle {
                     layout.value = density
                     kind.value = messageKind
                     mention.value = true
                     blur.value = 0
+                    opacity.value = percent
                 }
                 val sample = compose.onNodeWithTag("blur_sample")
                 val highlighted = sample.captureToImage().asAndroidBitmap()
                 val reply = compose.onNodeWithText("Quoted reply", useUnmergedTree = true)
                 val originalReply = reply.captureToImage().asAndroidBitmap()
                 compose.runOnIdle { blur.value = 100 }
-                assertTrue("$density $messageKind incoming opaque mention remains exact", highlighted.sameAs(sample.captureToImage().asAndroidBitmap()))
+                val highlightedBlur = sample.captureToImage().asAndroidBitmap()
+                val primary = requireNotNull(fixedThemeScheme(ColorThemePreset.AYU_LIGHT)).primary.toArgb()
+                val mentionRailPixels = mutableListOf<Pair<Int, Int>>()
+                for (x in 0 until 3) {
+                    for (y in 0 until highlighted.height) {
+                        if (highlighted.getPixel(x, y) == primary) mentionRailPixels += x to y
+                    }
+                }
+                assertTrue("$density $messageKind mention has a primary leading rail", mentionRailPixels.isNotEmpty())
+                assertTrue("$density $messageKind mention rail stays sharp at opacity=$percent", mentionRailPixels.all { (x, y) -> highlightedBlur.getPixel(x, y) == primary })
+                if (messageKind == MessageKind.ACTION) {
+                    assertTrue("$density ACTION mention opacity=$percent samples wallpaper blur", !highlighted.sameAs(highlightedBlur))
+                } else {
+                    assertTrue("$density $messageKind incoming opaque mention remains exact", highlighted.sameAs(highlightedBlur))
+                }
                 assertTrue("$density $messageKind reply stays sharp and opaque", originalReply.sameAs(reply.captureToImage().asAndroidBitmap()))
                 compose.runOnIdle {
                     mention.value = false
                     blur.value = 0
                 }
                 val ordinary = sample.captureToImage().asAndroidBitmap()
+                assertTrue("$density $messageKind nonmention has no primary attention rail", mentionRailPixels.none { (x, y) -> ordinary.getPixel(x, y) == primary })
                 val ordinaryReply = reply.captureToImage().asAndroidBitmap()
                 val audio = compose.onNodeWithTag("audio_player", useUnmergedTree = true).captureToImage().asAndroidBitmap()
                 val railColor =
@@ -1298,7 +1317,7 @@ class MessageBubbleFooterUiTest {
     }
 
     @Test
-    fun opacityControlsEveryOrdinaryLayoutTintAndActionButPreservesMentionFills() {
+    fun opacityControlsEveryLayoutTintAndActionButPreservesOrdinaryMentionFills() {
         data class Row(
             val density: LayoutDensity,
             val enabled: Boolean,
@@ -1359,7 +1378,7 @@ class MessageBubbleFooterUiTest {
             for (percent in listOf(37, 0, 100)) {
                 compose.runOnIdle { opacity.value = percent }
                 val pixels = canvas.captureToImage().asAndroidBitmap()
-                if (sample.mention || percent == 100) {
+                if (sample.mention && sample.kind != MessageKind.ACTION || percent == 100) {
                     assertTrue("$sample opacity=$percent preserves highlights or restores baseline", original.sameAs(pixels))
                 } else {
                     val expected = Color(backing).copy(alpha = percent / 100f).compositeOver(Color.Magenta).toArgb()

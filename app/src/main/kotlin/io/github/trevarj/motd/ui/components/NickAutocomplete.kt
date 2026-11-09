@@ -40,8 +40,8 @@ fun AutocompletePanel(
 ) {
     if (candidates.isEmpty()) return
     Surface(
-        modifier = modifier.fillMaxWidth().testTag("${tagPrefix}_panel"),
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = modifier.fillMaxWidth().effectSurface(io.github.trevarj.motd.data.prefs.EffectSurface.MENU, MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(18.dp)).testTag("${tagPrefix}_panel"),
+        color = androidx.compose.ui.graphics.Color.Transparent,
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         tonalElevation = 3.dp,
         shadowElevation = 3.dp,

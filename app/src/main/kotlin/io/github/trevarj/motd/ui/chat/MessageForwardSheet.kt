@@ -19,7 +19,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
@@ -51,6 +50,7 @@ import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
 import io.github.trevarj.motd.ui.share.filterShareTargets
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 
 internal enum class MessageForwardError {
     SOURCE_UNAVAILABLE,

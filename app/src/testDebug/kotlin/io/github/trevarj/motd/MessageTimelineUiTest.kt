@@ -31,6 +31,7 @@ import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
@@ -1272,6 +1273,44 @@ class MessageTimelineUiTest {
                         .boundsInRoot
                 assertTrue("two-line result must follow the actual body indent", abs(body.left - bounds("message_translation_2").left) <= 1f)
             }
+        }
+    }
+
+    @Test
+    fun blurredAudioTranslationAndReplyAreCoveredUntilFirstTapAcrossDensities() {
+        val source = message(1, 100, MessageKind.PRIVMSG, "<https://files.example/clip.mp3>").copy(replyToMsgid = "parent")
+        var expanded by mutableStateOf(false)
+        var density by mutableStateOf(LayoutDensity.COMFORTABLE)
+        var played: AudioPlaybackRequest? = null
+        render(
+            flowOf(PagingData.from(listOf(source))),
+            externalTranslations = { mapOf(1L to InlineTranslation(1, 1, source.text, "Concealed translation")) },
+            dickordEnabled = true,
+            conversationName = "Alice",
+            hideInlineAudioLinks = true,
+            richContentReady = true,
+            fools = setOf(source.sender),
+            foolsMode = FoolsMode.BLUR,
+            foolExpanded = { expanded },
+            onToggleFool = { expanded = !expanded },
+            onAudioToggle = { played = it },
+            layoutDensity = { density },
+        )
+        for (mode in LayoutDensity.entries) {
+            compose.runOnIdle {
+                density = mode
+                expanded = false
+                played = null
+            }
+            scrollTo("chat_fool_reveal_${source.msgid ?: source.id}")
+            compose.onNodeWithText("Concealed translation").assertDoesNotExist()
+            compose.onNodeWithTag("chat_fool_reveal_${source.msgid ?: source.id}").performTouchInput { click() }
+            compose.runOnIdle { assertEquals(null, played) }
+            compose.onNodeWithText("Concealed translation").assertIsDisplayed()
+            compose.onNodeWithTag("audio_player_toggle", useUnmergedTree = true).performTouchInput { click() }
+            compose.runOnIdle { assertEquals(1L, played?.origin?.eventId) }
+            compose.onNodeWithTag("chat_fool_collapse_${source.msgid ?: source.id}").performClick()
+            compose.onNodeWithText("Concealed translation").assertDoesNotExist()
         }
     }
 

@@ -105,10 +105,10 @@ class ConfigurationBackupRepositoryTest {
                 val backup = repository(db)
                 val selected =
                     mapOf(
-                        "b" to FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true),
+                        "b" to FoolPreferences(FoolsMode.BLUR, notifyMentions = true),
                         "c" to FoolPreferences(FoolsMode.HIDE, notifyDirectMessages = true),
                     )
-                for (mode in listOf(FoolsMode.COLLAPSE, FoolsMode.HIDE)) {
+                for (mode in listOf(FoolsMode.BLUR, FoolsMode.COLLAPSE, FoolsMode.HIDE)) {
                     for (nick in listOf("a", "b", "c")) settings.setFool(nick, true)
                     settings.setFoolsMode(mode)
                     settings.setFoolPreferences("a", FoolPreferences())
@@ -516,6 +516,19 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setNicknameBackgroundsEnabled(false)
             appearancePrefs.setMessageBackgroundOpacity(37)
             appearancePrefs.setMessageBackgroundBlur(63)
+            val effects =
+                io.github.trevarj.motd.data.prefs.SurfaceEffects(
+                    enabled = false,
+                    surfaces =
+                        io.github.trevarj.motd.data.prefs.EffectSurface.entries
+                            .associateWith {
+                                io.github.trevarj.motd.data.prefs
+                                    .SurfaceEffect(it.ordinal * 10, 100 - it.ordinal * 10)
+                            },
+                )
+            appearancePrefs.restoreGlobalEffects(appearancePrefs.config.first().copy(surfaceEffects = effects))
+            appearancePrefs.setLinkGlobalOpacity(true)
+            appearancePrefs.setLinkGlobalBlur(true)
             appearancePrefs.setSentBubbleColor(ComfortableBubbleColor(ComfortableBubbleColorRole.PRIMARY))
             appearancePrefs.setReceivedBubbleColor(ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, 0xff12ab34.toInt()))
             appearancePrefs.setUseThemeTextColors(true)
@@ -543,6 +556,13 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setNicknameBackgroundsEnabled(true)
             appearancePrefs.setMessageBackgroundOpacity(100)
             appearancePrefs.setMessageBackgroundBlur(0)
+            appearancePrefs.restoreGlobalEffects(
+                appearancePrefs.config.first().copy(
+                    surfaceEffects =
+                        io.github.trevarj.motd.data.prefs
+                            .SurfaceEffects(),
+                ),
+            )
             appearancePrefs.setSentBubbleColor(ComfortableBubbleColor())
             appearancePrefs.setReceivedBubbleColor(ComfortableBubbleColor())
             appearancePrefs.setUseThemeTextColors(false)
@@ -565,6 +585,11 @@ class ConfigurationBackupRepositoryTest {
             assertEquals(false, config.nicknameBackgroundsEnabled)
             assertEquals(37, config.messageBackgroundOpacityPercent)
             assertEquals(63, config.messageBackgroundBlur)
+            assertEquals(effects, config.surfaceEffects)
+            assertEquals(true, config.linkGlobalOpacity)
+            assertEquals(true, config.linkGlobalBlur)
+            appearancePrefs.setLinkGlobalOpacity(false)
+            appearancePrefs.setLinkGlobalBlur(false)
             assertEquals(ComfortableBubbleColor(ComfortableBubbleColorRole.PRIMARY), config.sentBubbleColor)
             assertEquals(ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, 0xff12ab34.toInt()), config.receivedBubbleColor)
             assertEquals(true, config.useThemeTextColors)
@@ -604,20 +629,38 @@ class ConfigurationBackupRepositoryTest {
                         .replace(Regex(""",\s*"messageBackgroundBlur"\s*:\s*63"""), "")
                         .replace(Regex(""",\s*"splashScreenAnimation"\s*:\s*"TRAVELING_PULSE""""), "")
                         .replace(Regex(""",\s*"outlineColor"\s*:\s*-?\d+"""), "")
+                        .let { document ->
+                            val envelope = Json.parseToJsonElement(document).jsonObject
+                            val payload = envelope.getValue("payload").jsonObject
+                            val settings = payload.getValue("settings").jsonObject
+                            val appearance = settings.getValue("appearance").jsonObject
+                            JsonObject(envelope + ("payload" to JsonObject(payload + ("settings" to JsonObject(settings + ("appearance" to JsonObject(appearance - "surfaceEffects" - "linkGlobalOpacity" - "linkGlobalBlur"))))))).toString()
+                        }
                 assertFalse(oldRaw.contains("composerStyle"))
                 assertFalse(oldRaw.contains("useThemeTextColors"))
                 assertFalse(oldRaw.contains("nicknameBackgroundsEnabled"))
                 assertFalse(oldRaw.contains("messageBackgroundOpacityPercent"))
                 assertFalse(oldRaw.contains("messageBackgroundBlur"))
+                assertFalse(oldRaw.contains("surfaceEffects"))
                 assertFalse(oldRaw.contains("splashScreenAnimation"))
                 assertFalse(oldRaw.contains("outlineColor"))
 
+                appearancePrefs.setLinkGlobalOpacity(true)
+                appearancePrefs.setLinkGlobalBlur(true)
+                appearancePrefs.setSurfaceEffectsEnabled(false)
                 backup.import(oldRaw, importMode = BackupImportMode.MERGE)
                 assertEquals(ComposerStyle.COMFORTABLE, appearancePrefs.config.first().composerStyle)
                 assertEquals(false, appearancePrefs.config.first().useThemeTextColors)
                 assertEquals(true, appearancePrefs.config.first().nicknameBackgroundsEnabled)
                 assertEquals(100, AppearancePrefsImpl(context).config.first().messageBackgroundOpacityPercent)
                 assertEquals(0, AppearancePrefsImpl(context).config.first().messageBackgroundBlur)
+                assertEquals(false, appearancePrefs.config.first().linkGlobalOpacity)
+                assertEquals(false, appearancePrefs.config.first().linkGlobalBlur)
+                assertEquals(
+                    io.github.trevarj.motd.data.prefs
+                        .SurfaceEffects(),
+                    appearancePrefs.config.first().surfaceEffects,
+                )
                 assertEquals(SplashScreenAnimation.EDGE_TRACE, appearancePrefs.config.first().splashScreenAnimation)
                 assertEquals(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80), appearancePrefs.config.first().wallpaper)
                 for (percent in listOf(-12, 130)) {
@@ -645,19 +688,37 @@ class ConfigurationBackupRepositoryTest {
                 appearancePrefs.setMessageBackgroundOpacity(27)
                 appearancePrefs.setMessageBackgroundBlur(41)
                 appearancePrefs.setSplashScreenAnimation(SplashScreenAnimation.STATIC)
+                val preservedEffects =
+                    io.github.trevarj.motd.data.prefs
+                        .SurfaceEffects(enabled = false)
+                appearancePrefs.restoreGlobalEffects(appearancePrefs.config.first().copy(surfaceEffects = preservedEffects))
+                appearancePrefs.setLinkGlobalOpacity(true)
+                appearancePrefs.setLinkGlobalBlur(true)
                 backup.import(withoutAppearance, importMode = BackupImportMode.MERGE)
                 assertEquals(ComposerStyle.LARGE, appearancePrefs.config.first().composerStyle)
                 assertEquals(true, appearancePrefs.config.first().useThemeTextColors)
                 assertEquals(false, appearancePrefs.config.first().nicknameBackgroundsEnabled)
                 assertEquals(27, AppearancePrefsImpl(context).config.first().messageBackgroundOpacityPercent)
                 assertEquals(41, AppearancePrefsImpl(context).config.first().messageBackgroundBlur)
+                assertEquals(preservedEffects, appearancePrefs.config.first().surfaceEffects)
+                assertEquals(true, appearancePrefs.config.first().linkGlobalOpacity)
+                assertEquals(true, appearancePrefs.config.first().linkGlobalBlur)
                 assertEquals(SplashScreenAnimation.STATIC, appearancePrefs.config.first().splashScreenAnimation)
             } finally {
+                appearancePrefs.setLinkGlobalOpacity(false)
+                appearancePrefs.setLinkGlobalBlur(false)
                 appearancePrefs.setComposerStyle(ComposerStyle.COMFORTABLE)
                 appearancePrefs.setUseThemeTextColors(false)
                 appearancePrefs.setNicknameBackgroundsEnabled(true)
                 appearancePrefs.setMessageBackgroundOpacity(100)
                 appearancePrefs.setMessageBackgroundBlur(0)
+                appearancePrefs.restoreGlobalEffects(
+                    appearancePrefs.config.first().copy(
+                        surfaceEffects =
+                            io.github.trevarj.motd.data.prefs
+                                .SurfaceEffects(),
+                    ),
+                )
                 appearancePrefs.setSplashScreenAnimation(SplashScreenAnimation.EDGE_TRACE)
                 appearancePrefs.setWallpaper(WallpaperSelection())
                 db.close()

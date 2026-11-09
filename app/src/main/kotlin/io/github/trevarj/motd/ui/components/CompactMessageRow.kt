@@ -129,7 +129,12 @@ internal fun CompactMessageRow(
     val normalPaintedRow = rowTint.compositeOver(canvas)
     val paintedRow = messageContainerColor(normalPaintedRow, canvas, dimmed)
     val backgroundAlpha = if (hasMention) 1f else LocalMessageBackgroundOpacityPercent.current / 100f
-    val drawFill = paintedRow.copy(alpha = paintedRow.alpha * backgroundAlpha)
+    val drawFill =
+        paintedRow.copy(
+            alpha =
+                io.github.trevarj.motd.ui.theme
+                    .effectBackingAlpha(paintedRow.alpha * backgroundAlpha),
+        )
     val contrastRow = drawFill.compositeOver(canvas)
     val bodyInk = codeColor
     val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
@@ -204,8 +209,10 @@ internal fun CompactMessageRow(
         }
 
         Row(verticalAlignment = Alignment.Top) {
-            Text(
+            FoolBodyText(
                 text = line,
+                concealment = LocalFoolBodyConcealment.current,
+                inlineBody = true,
                 style = MaterialTheme.typography.bodyLarge,
                 color = bodyColor,
                 modifier =
@@ -311,6 +318,7 @@ internal fun buildCompactLine(
                 }
             }
         }
+        pushStringAnnotation(FOOL_BODY_RANGE, "")
         appendRichText(
             text = text,
             plainStyle = SpanStyle(color = bodyColor),
@@ -328,6 +336,7 @@ internal fun buildCompactLine(
             minimumContrast = minimumContrast,
             normalContainerColor = normalContainerColor,
         )
+        pop()
     }
 
 @Preview

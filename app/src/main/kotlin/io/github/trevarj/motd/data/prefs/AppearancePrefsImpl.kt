@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.prefs
 
 import android.content.Context
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -9,6 +10,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -41,6 +44,9 @@ private val CHAT_SHADOWS_ENABLED = booleanPreferencesKey("chat_shadows_enabled_v
 private val NICKNAME_BACKGROUNDS_ENABLED = booleanPreferencesKey("nickname_backgrounds_enabled_v1")
 private val MESSAGE_BACKGROUND_OPACITY = intPreferencesKey("message_background_opacity_v1")
 private val MESSAGE_BACKGROUND_BLUR = intPreferencesKey("message_background_blur_v1")
+private val SURFACE_EFFECTS = stringPreferencesKey("surface_effects_v1")
+private val LINK_GLOBAL_OPACITY = booleanPreferencesKey("link_global_opacity_v1")
+private val LINK_GLOBAL_BLUR = booleanPreferencesKey("link_global_blur_v1")
 private val SENT_BUBBLE_COLOR_ROLE = stringPreferencesKey("sent_bubble_color_role_v1")
 private val SENT_BUBBLE_COLOR_CUSTOM = intPreferencesKey("sent_bubble_color_custom_v1")
 private val RECEIVED_BUBBLE_COLOR_ROLE = stringPreferencesKey("received_bubble_color_role_v1")
@@ -141,6 +147,9 @@ class AppearancePrefsImpl
                     nicknameBackgroundsEnabled = prefs[NICKNAME_BACKGROUNDS_ENABLED] ?: true,
                     messageBackgroundOpacityPercent = (prefs[MESSAGE_BACKGROUND_OPACITY] ?: 100).coerceIn(0, 100),
                     messageBackgroundBlur = (prefs[MESSAGE_BACKGROUND_BLUR] ?: 0).coerceIn(0, 100),
+                    surfaceEffects = prefs[SURFACE_EFFECTS]?.let { runCatching { Json.decodeFromString<SurfaceEffects>(it).normalized() }.getOrNull() } ?: SurfaceEffects(),
+                    linkGlobalOpacity = prefs[LINK_GLOBAL_OPACITY] ?: false,
+                    linkGlobalBlur = prefs[LINK_GLOBAL_BLUR] ?: false,
                     sentBubbleColor = storedComfortableBubbleColor(prefs[SENT_BUBBLE_COLOR_ROLE], prefs[SENT_BUBBLE_COLOR_CUSTOM]),
                     receivedBubbleColor = storedComfortableBubbleColor(prefs[RECEIVED_BUBBLE_COLOR_ROLE], prefs[RECEIVED_BUBBLE_COLOR_CUSTOM]),
                     launcherIcon =
@@ -255,12 +264,63 @@ class AppearancePrefsImpl
             store.edit { it[NICKNAME_BACKGROUNDS_ENABLED] = enabled }
         }
 
-        override suspend fun setMessageBackgroundOpacity(percent: Int) {
-            store.edit { it[MESSAGE_BACKGROUND_OPACITY] = percent.coerceIn(0, 100) }
+        override suspend fun setMessageBackgroundOpacity(percent: Int) = editGlobalEffect(null, percent, opacity = true)
+
+        override suspend fun setMessageBackgroundBlur(intensity: Int) = editGlobalEffect(null, intensity, opacity = false)
+
+        override suspend fun setSurfaceOpacity(
+            surface: EffectSurface,
+            percent: Int,
+        ) = editGlobalEffect(surface, percent, opacity = true)
+
+        override suspend fun setSurfaceBlur(
+            surface: EffectSurface,
+            percent: Int,
+        ) = editGlobalEffect(surface, percent, opacity = false)
+
+        private fun storedEffects(prefs: Preferences): SurfaceEffects = prefs[SURFACE_EFFECTS]?.let { runCatching { Json.decodeFromString<SurfaceEffects>(it).normalized() }.getOrNull() } ?: SurfaceEffects()
+
+        private suspend fun editGlobalEffect(
+            surface: EffectSurface?,
+            percent: Int,
+            opacity: Boolean,
+        ) {
+            val value = percent.coerceIn(0, 100)
+            store.edit { prefs ->
+                val linked = prefs[if (opacity) LINK_GLOBAL_OPACITY else LINK_GLOBAL_BLUR] ?: false
+                if (surface == null || linked) prefs[if (opacity) MESSAGE_BACKGROUND_OPACITY else MESSAGE_BACKGROUND_BLUR] = value
+                if (surface != null || linked) {
+                    val effects = storedEffects(prefs)
+                    val surfaces = effects.surfaces.toMutableMap()
+                    for (target in if (linked) EffectSurface.entries else listOfNotNull(surface)) {
+                        val old = effects[target]
+                        surfaces[target] = if (opacity) old.copy(opacityPercent = value) else old.copy(blurPercent = value)
+                    }
+                    prefs[SURFACE_EFFECTS] = Json.encodeToString(effects.copy(surfaces = surfaces))
+                }
+            }
         }
 
-        override suspend fun setMessageBackgroundBlur(intensity: Int) {
-            store.edit { it[MESSAGE_BACKGROUND_BLUR] = intensity.coerceIn(0, 100) }
+        override suspend fun setSurfaceEffectsEnabled(enabled: Boolean) {
+            store.edit { it[SURFACE_EFFECTS] = Json.encodeToString(storedEffects(it).copy(enabled = enabled)) }
+        }
+
+        override suspend fun setLinkGlobalOpacity(enabled: Boolean) {
+            store.edit { it[LINK_GLOBAL_OPACITY] = enabled }
+        }
+
+        override suspend fun setLinkGlobalBlur(enabled: Boolean) {
+            store.edit { it[LINK_GLOBAL_BLUR] = enabled }
+        }
+
+        override suspend fun restoreGlobalEffects(config: AppearanceConfig) {
+            store.edit {
+                it[MESSAGE_BACKGROUND_OPACITY] = config.messageBackgroundOpacityPercent.coerceIn(0, 100)
+                it[MESSAGE_BACKGROUND_BLUR] = config.messageBackgroundBlur.coerceIn(0, 100)
+                it[SURFACE_EFFECTS] = Json.encodeToString(config.surfaceEffects.normalized())
+                it[LINK_GLOBAL_OPACITY] = config.linkGlobalOpacity
+                it[LINK_GLOBAL_BLUR] = config.linkGlobalBlur
+            }
         }
 
         override suspend fun setSentBubbleColor(color: ComfortableBubbleColor) {

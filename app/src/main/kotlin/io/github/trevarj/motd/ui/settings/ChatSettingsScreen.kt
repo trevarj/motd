@@ -552,6 +552,7 @@ fun ChatSettingsContent(
             options =
                 listOf(
                     ChoiceOption(FoolsMode.DIMMED, stringResource(R.string.settings_fools_dimmed), stringResource(R.string.settings_fools_dimmed_desc), "settings_fools_mode_dimmed"),
+                    ChoiceOption(FoolsMode.BLUR, stringResource(R.string.settings_fools_blur), stringResource(R.string.settings_fools_blur_desc), "settings_fools_mode_blur"),
                     ChoiceOption(FoolsMode.COLLAPSE, stringResource(R.string.settings_fools_collapse), stringResource(R.string.settings_fools_collapse_desc), "settings_fools_mode_collapse"),
                     ChoiceOption(FoolsMode.HIDE, stringResource(R.string.settings_fools_hide), stringResource(R.string.settings_fools_hide_desc), "settings_fools_mode_hide"),
                 ),

@@ -84,6 +84,22 @@ class AppearanceSettingsViewModel
 
         fun setUseThemeTextColors(value: Boolean) = launch { appearancePrefs.setUseThemeTextColors(value) }
 
+        fun setSurfaceEffectsEnabled(value: Boolean) = launch { appearancePrefs.setSurfaceEffectsEnabled(value) }
+
+        fun setLinkGlobalOpacity(value: Boolean) = launch { appearancePrefs.setLinkGlobalOpacity(value) }
+
+        fun setLinkGlobalBlur(value: Boolean) = launch { appearancePrefs.setLinkGlobalBlur(value) }
+
+        fun setSurfaceOpacity(
+            surface: io.github.trevarj.motd.data.prefs.EffectSurface,
+            value: Int,
+        ) = launch { appearancePrefs.setSurfaceOpacity(surface, value) }
+
+        fun setSurfaceBlur(
+            surface: io.github.trevarj.motd.data.prefs.EffectSurface,
+            value: Int,
+        ) = launch { appearancePrefs.setSurfaceBlur(surface, value) }
+
         fun setDynamicColor(value: Boolean) = launch { settingsRepository.setDynamicColor(value) }
 
         fun setLayoutDensity(value: LayoutDensity) = launch { settingsRepository.setLayoutDensity(value) }

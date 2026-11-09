@@ -374,6 +374,7 @@ fun SearchContent(
                     SearchPane.SERVER -> {
                         ServerSearchSection(
                             server = visibleState.server,
+                            visibility = visibleState.visibility,
                             query = parseSearchQuery(visibleState.rawQuery).text,
                             onRetry = onServerSearchSubmit,
                             onOpenHit = onOpenServerHit,
@@ -410,6 +411,7 @@ fun SearchContent(
                     SearchPane.RESULTS -> {
                         SearchResults(
                             bufferMatches = visibleState.bufferMatches,
+                            visibility = visibleState.visibility,
                             groups = visibleState.groups,
                             query = parseSearchQuery(visibleState.rawQuery).text,
                             truncated = visibleState.truncated,
@@ -478,6 +480,7 @@ private fun emptyMessage(state: SearchUiState): Int =
 @Composable
 private fun SearchResults(
     bufferMatches: List<ChatListRow>,
+    visibility: io.github.trevarj.motd.data.visibility.MessageVisibilitySpec,
     groups: List<SearchGroup>,
     query: String,
     truncated: Boolean,
@@ -543,6 +546,16 @@ private fun SearchResults(
             items(group.hits, key = { it.message.id }) { hit ->
                 SearchHitRow(
                     hit = hit,
+                    blurred =
+                        remember(hit, visibility) {
+                            io.github.trevarj.motd.data.visibility
+                                .MessageVisibilityPolicy(
+                                    visibility,
+                                    io.github.trevarj.motd.irc.proto.IrcIdentityRules
+                                        .from(hit.caseMapping, hit.chanTypes),
+                                ).foolPreferences(hit.message)
+                                ?.visibility == io.github.trevarj.motd.data.prefs.FoolsMode.BLUR
+                        },
                     query = query,
                     onClick = { onOpenHit(hit) },
                     onLongPress = onTranslateHit?.let { { it(hit) } },
@@ -605,10 +618,12 @@ private fun BufferMatchChip(
 @Composable
 private fun SearchHitRow(
     hit: SearchHit,
+    blurred: Boolean,
     query: String,
     onClick: () -> Unit,
     onLongPress: (() -> Unit)? = null,
 ) = SearchRow(
+    blurred = blurred,
     sender = hit.message.sender,
     text = hit.message.text,
     serverTime = hit.message.serverTime,
@@ -623,10 +638,12 @@ private fun SearchHitRow(
 @Composable
 private fun ServerHitRow(
     hit: ServerHitUi,
+    blurred: Boolean,
     query: String,
     onClick: () -> Unit,
     onLongPress: (() -> Unit)? = null,
 ) = SearchRow(
+    blurred = blurred,
     sender = hit.sender,
     text = hit.text,
     serverTime = hit.serverTime,
@@ -640,6 +657,7 @@ private fun ServerHitRow(
 /** Shared visual row for a local or a server hit. */
 @Composable
 private fun SearchRow(
+    blurred: Boolean,
     sender: String,
     text: String,
     serverTime: Long,
@@ -663,56 +681,67 @@ private fun SearchRow(
     val readingInk = ensureContrast(readingInk(scheme), listOf(rowFill), MESSAGE_TEXT_CONTRAST)
     val highlightColor = LocalMotdSemanticColors.current.warningContainer
     val highlightInk = ensureContrast(readingInk(scheme), listOf(highlightColor.compositeOver(rowFill)), MESSAGE_TEXT_CONTRAST)
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp)
-                .clip(MotdShapes.card)
-                .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                .testTag(tag)
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = onLongPress,
-                    onLongClickLabel = stringResource(R.string.ai_text_translate_message),
-                ).padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    val revealed = remember(tag, blurred) { androidx.compose.runtime.mutableStateOf(false) }
+    val concealed = blurred && !revealed.value
+    val reveal = { revealed.value = true }
+    io.github.trevarj.motd.ui.components.FoolMessageScope(
+        concealed = concealed,
+        onReveal = reveal,
+        tag = "${tag}_reveal",
     ) {
-        Avatar(
-            name = sender,
-            networkId = networkId,
-            // Matched to labelMedium's line height so the avatar reads as part of the nick line,
-            // not as its own bigger element.
-            size = 16.dp,
-            modifier = Modifier.align(Alignment.Top),
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            val nickColors = LocalNickColors.current
-            Text(
-                text = displaySender,
-                style = MaterialTheme.typography.labelMedium,
-                color = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant),
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .clip(MotdShapes.card)
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .testTag(tag)
+                    .combinedClickable(
+                        onClick = if (concealed) reveal else onClick,
+                        onLongClick = if (concealed) reveal else onLongPress,
+                        onLongClickLabel = stringResource(if (concealed) R.string.chat_fool_reveal else R.string.ai_text_translate_message),
+                    ).padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Avatar(
+                name = sender,
+                networkId = networkId,
+                // Matched to labelMedium's line height so the avatar reads as part of the nick line,
+                // not as its own bigger element.
+                size = 16.dp,
+                modifier = Modifier.align(Alignment.Top).clickable(onClick = onClick),
             )
-            Text(
-                text = highlightSnippet(text, query, highlightColor, highlightInk),
-                style = MaterialTheme.typography.bodyMedium,
-                color = readingInk,
-                maxLines = 3,
-            )
-        }
-        // A server hit without a time tag carries 0; render nothing rather than the epoch.
-        if (serverTime > 0) {
-            Text(
-                text =
-                    if (timestampConfig.format == TimeFormat.CUSTOM) {
-                        formatTimestamp(serverTime)
-                    } else {
-                        relativeChatTime(serverTime, is24Hour = is24Hour)
-                    },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.Top),
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                val nickColors = LocalNickColors.current
+                Text(
+                    text = displaySender,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant),
+                    modifier = Modifier.clickable(onClick = onClick),
+                )
+                io.github.trevarj.motd.ui.components.FoolBodyText(
+                    text = highlightSnippet(text, query, highlightColor, highlightInk),
+                    concealment = io.github.trevarj.motd.ui.components.LocalFoolBodyConcealment.current,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = readingInk,
+                    maxLines = 3,
+                )
+            }
+            // A server hit without a time tag carries 0; render nothing rather than the epoch.
+            if (serverTime > 0) {
+                Text(
+                    text =
+                        if (timestampConfig.format == TimeFormat.CUSTOM) {
+                            formatTimestamp(serverTime)
+                        } else {
+                            relativeChatTime(serverTime, is24Hour = is24Hour)
+                        },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.Top).clickable(onClick = onClick),
+                )
+            }
         }
     }
 }
@@ -721,6 +750,7 @@ private fun SearchRow(
 @Composable
 private fun ServerSearchSection(
     server: ServerSearchState,
+    visibility: io.github.trevarj.motd.data.visibility.MessageVisibilitySpec,
     query: String,
     onRetry: () -> Unit,
     onOpenHit: (ServerHitUi) -> Unit,
@@ -795,6 +825,13 @@ private fun ServerSearchSection(
                     ) { index, hit ->
                         ServerHitRow(
                             hit = hit,
+                            blurred =
+                                remember(hit, visibility) {
+                                    !hit.isSelf && io.github.trevarj.motd.data.visibility
+                                        .MessageVisibilityPolicy(visibility, hit.identityRules)
+                                        .foolPreferences(hit.senderAccount, hit.normalizedActor)
+                                        ?.visibility == io.github.trevarj.motd.data.prefs.FoolsMode.BLUR
+                                },
                             query = query,
                             onClick = { onOpenHit(hit) },
                             onLongPress = onTranslateHit?.let { { it(hit, server.generation, index) } },

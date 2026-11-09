@@ -29,6 +29,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import io.github.trevarj.motd.data.prefs.EffectSurface
+import io.github.trevarj.motd.ui.components.effectSurface
+import io.github.trevarj.motd.ui.theme.LocalSurfaceEffects
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -50,15 +53,19 @@ internal fun OrbTab(
         } else {
             RoundedCornerShape(topStartPercent = 100, bottomStartPercent = 100)
         }
+    val effects = LocalSurfaceEffects.current
+    val opacity = effects[EffectSurface.FLOATING_BUTTON].opacityPercent.coerceIn(0, 100)
+    val opaque = opacity == 100 || (!effects.enabled && opacity > 0)
     Surface(
         modifier =
             modifier
                 .size(RadialDimens.OrbWidth, RadialDimens.OrbHeight)
-                .graphicsLayer { this.alpha = alpha },
+                .graphicsLayer { this.alpha = alpha }
+                .then(if (opaque) Modifier else Modifier.effectSurface(EffectSurface.FLOATING_BUTTON, MaterialTheme.colorScheme.primaryContainer, shape)),
         shape = shape,
-        color = MaterialTheme.colorScheme.primaryContainer,
+        color = if (opaque) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 1f) else androidx.compose.ui.graphics.Color.Transparent,
         tonalElevation = 3.dp,
-        shadowElevation = 2.dp,
+        shadowElevation = if (opaque) 2.dp else 0.dp,
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
