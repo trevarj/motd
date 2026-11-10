@@ -26,6 +26,8 @@ import io.github.trevarj.motd.data.prefs.EffectSurface
 import io.github.trevarj.motd.ui.theme.LocalSurfaceEffects
 import io.github.trevarj.motd.ui.theme.MotdTheme
 
+private val AutocompletePanelShape = RoundedCornerShape(18.dp)
+
 /**
  * Popup shown above the composer while a nick token or `/` command is being completed. Renders a
  * short candidate list; tapping one calls [onPick]. The parent decides visibility/anchoring; this
@@ -44,14 +46,18 @@ fun AutocompletePanel(
     val effects = LocalSurfaceEffects.current
     val opacity = effects[EffectSurface.MENU].opacityPercent.coerceIn(0, 100)
     val opaque = opacity == 100 || (!effects.enabled && opacity > 0)
+    val containerColor = MaterialTheme.colorScheme.secondaryContainer
+    val panelModifier = modifier.fillMaxWidth()
     Surface(
-        modifier = modifier.fillMaxWidth().effectSurface(EffectSurface.MENU, MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(18.dp)).testTag("${tagPrefix}_panel"),
-        color = androidx.compose.ui.graphics.Color.Transparent,
+        modifier =
+            (if (opaque) panelModifier else panelModifier.effectSurface(EffectSurface.MENU, containerColor, AutocompletePanelShape))
+                .testTag("${tagPrefix}_panel"),
+        color = if (opaque) containerColor.copy(alpha = 1f) else androidx.compose.ui.graphics.Color.Transparent,
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         tonalElevation = 3.dp,
-        // As with translucent FABs, a transparent native Surface must not shadow its glass.
+        // Only a natively filled Surface may cast a shadow without shading through its backing.
         shadowElevation = if (opaque) 3.dp else 0.dp,
-        shape = RoundedCornerShape(18.dp),
+        shape = AutocompletePanelShape,
     ) {
         LazyColumn(modifier = Modifier.heightIn(max = 180.dp)) {
             items(candidates.size, key = { candidates[it] }) { index ->

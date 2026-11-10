@@ -1053,6 +1053,107 @@ class SettingsHomeAndPrimitivesUiTest {
     }
 
     @Test
+    @Config(sdk = [30, 34], qualifiers = "w411dp-h891dp")
+    fun nativeBackdrop_autocomplete_opaque_glass_zero_and_tintFallback_preserve_shape_foreground_and_clicks() {
+        var opacity by mutableStateOf(100)
+        var enabled by mutableStateOf(true)
+        var captured by mutableStateOf(true)
+        var clicks = 0
+        val fixture = BackdropFixture()
+        compose.setContent {
+            MotdTheme(
+                dynamicColor = false,
+                surfaceEffects =
+                    io.github.trevarj.motd.data.prefs.SurfaceEffects(
+                        enabled = enabled,
+                        surfaces =
+                            mapOf(
+                                io.github.trevarj.motd.data.prefs.EffectSurface.MENU to
+                                    io.github.trevarj.motd.data.prefs
+                                        .SurfaceEffect(opacity, 12),
+                            ),
+                    ),
+            ) {
+                MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(secondaryContainer = Color.Black.copy(alpha = 0.4f), onSecondaryContainer = Color.White)) {
+                    val source = rememberSurfaceBackdropSource()
+                    Box(Modifier.fillMaxSize().testTag("completion_paint_scene")) {
+                        BackdropPattern(source, fixture, { false })
+                        androidx.compose.runtime.CompositionLocalProvider(
+                            io.github.trevarj.motd.ui.components.LocalSurfaceBackdrop provides if (captured) source else null,
+                            // Assert resting backing pixels, independently of native click ripple animations.
+                            androidx.compose.material3.LocalRippleConfiguration provides null,
+                        ) {
+                            io.github.trevarj.motd.ui.components.AutocompletePanel(
+                                candidates = listOf("/join"),
+                                onPick = {
+                                    assertEquals("/join", it)
+                                    clicks++
+                                },
+                                isCommand = true,
+                                modifier = Modifier.offset(20.dp, 90.dp).width(240.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        val cases = listOf(Triple(100, true, 0f), Triple(50, false, 0f), Triple(0, true, 1f), Triple(0, false, 1f), Triple(50, true, 0.5f))
+        for (withCapture in listOf(true, false)) {
+            for ((nextOpacity, nextEnabled, expectedChannel) in cases) {
+                compose.runOnIdle {
+                    captured = withCapture
+                    opacity = nextOpacity
+                    enabled = nextEnabled
+                }
+                val panel = compose.onNodeWithTag("autocomplete_panel").assertIsDisplayed()
+                val row = compose.onNodeWithTag("autocomplete_item_0")
+                val rowBounds = row.getUnclippedBoundsInRoot()
+                assertTrue("row retains its touch target", rowBounds.bottom - rowBounds.top >= 48.dp)
+                val pixels = backdropPixels("completion_paint_scene")
+                val panelHeight =
+                    panel
+                        .fetchSemanticsNode()
+                        .layoutInfo.coordinates.size.height
+                val left = with(compose.density) { 20.dp.roundToPx() }
+                val top = with(compose.density) { 90.dp.roundToPx() }
+                val y = top + panelHeight - with(compose.density) { 4.dp.roundToPx() }
+                val blue = pixels[left + with(compose.density) { 40.dp.roundToPx() }, y]
+                val red = pixels[left + with(compose.density) { 80.dp.roundToPx() }, y]
+                assertEquals("blue backing opacity=$opacity enabled=$enabled capture=$captured", expectedChannel, blue.blue, 0.03f)
+                assertEquals("red backing opacity=$opacity enabled=$enabled capture=$captured", expectedChannel, red.red, 0.03f)
+                assertTrue("opaque fill has no source leakage", blue.red < 0.03f && red.blue < 0.03f && blue.green < 0.03f && red.green < 0.03f)
+                val corner = pixels[left, top]
+                assertTrue("18dp rounded corner exposes wallpaper, not rectangular fill", corner.red > 0.8f && corner.green < 0.03f && corner.blue < 0.03f)
+                if (nextOpacity == 50 && nextEnabled) {
+                    val edge = pixels[left + with(compose.density) { 20.dp.roundToPx() }, y]
+                    if (withCapture && android.os.Build.VERSION.SDK_INT >= 31) {
+                        assertTrue("native glass blurs the captured stripe boundary", edge.red in 0.1f..0.4f && edge.blue in 0.1f..0.4f)
+                    } else {
+                        assertTrue("missing capture and Android 11 fall back to tint, not fabricated blur", minOf(edge.red, edge.blue) < 0.03f && maxOf(edge.red, edge.blue) > 0.47f)
+                    }
+                }
+                val label =
+                    compose
+                        .onNodeWithText("/join", useUnmergedTree = true)
+                        .assertIsDisplayed()
+                        .captureToImage()
+                        .toPixelMap()
+                var closestWhite = Float.POSITIVE_INFINITY
+                for (py in 0 until label.height) {
+                    for (px in 0 until label.width) {
+                        val pixel = label[px, py]
+                        closestWhite = minOf(closestWhite, maxOf(1f - pixel.red, 1f - pixel.green, 1f - pixel.blue))
+                    }
+                }
+                assertTrue("foreground stays opaque white outside the backing effect", closestWhite < 0.02f)
+                row.performClick()
+            }
+        }
+        compose.runOnIdle { assertEquals(10, clicks) }
+        // Native-graphics pixels cover fill/replay/fallback, not device HWUI shadow compositing.
+    }
+
+    @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp")
     fun nativeBackdrop_composerCompletion_parentReplay_motion_and_sharp_rows() {
         val fixture = BackdropFixture()

@@ -438,14 +438,13 @@ class AppearanceFolderLayoutUiTest {
 
     @Test
     fun effectsSearchHighlightsMessageSliderAndSharedPreviewFollowsSelectedSurface() {
-        val appearance = mutableStateOf(AppearanceConfig(messageBackgroundOpacityPercent = 37))
+        val appearance = mutableStateOf(AppearanceConfig(messageBackgroundOpacityPercent = 37, messageBackgroundBlur = 23))
         val settings = mutableStateOf(Settings())
-        setEffectsContent(appearance, settings, SettingsTarget.MESSAGE_BACKGROUND_OPACITY)
+        setEffectsContent(appearance, settings, SettingsTarget.MESSAGE_BACKGROUND_BLUR)
         val page = compose.onNodeWithTag("surface_effects_page")
-        page.performScrollToNode(hasTestTag("settings_message_background_opacity"))
-        compose.onNodeWithTag("settings_target_highlight_MESSAGE_BACKGROUND_OPACITY").assertIsDisplayed()
-        compose.onNodeWithTag("settings_message_background_opacity").assert(
-            SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(37f, 0f..100f, 0)),
+        compose.onNodeWithTag("settings_target_highlight_MESSAGE_BACKGROUND_BLUR").assertIsDisplayed()
+        compose.onNodeWithTag("settings_message_background_blur").assertIsDisplayed().assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(23f, 0f..100f, 0)),
         )
         page.performScrollToNode(hasTestTag("surface_floating_button_select"))
         compose.onNodeWithTag("surface_floating_button_select").performClick()

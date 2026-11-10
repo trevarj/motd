@@ -202,6 +202,11 @@ checks FAB opacity branches, shape, foreground color, and clicks.
 coverage. `nativeBackdrop_composerCompletion_parentReplay_motion_and_sharp_rows`
 checks the real nick, command and emoji completion popup against wallpaper and
 timeline sources, including movement, blur, clipping, sharp text and row clicks.
+`nativeBackdrop_autocomplete_opaque_glass_zero_and_tintFallback_preserve_shape_foreground_and_clicks`
+checks native opaque fills, glass, zero opacity, and missing-capture/API 30 tint fallbacks,
+including shape, foreground and clicks on API 30/34.
+Use a trailing `*` when filtering multi-SDK methods so Robolectric's `[SDK]`
+variants run alongside the unsuffixed default SDK.
 The `nativeBackdrop_dropdown_crossWindow_static_motion_and_sharp_foreground`,
 `nativeBackdrop_modalSheet_crossWindow_static_and_native_motion`, and
 `nativeBackdrop_menuInsideSheet_parentFallback_and_content_updates` regressions

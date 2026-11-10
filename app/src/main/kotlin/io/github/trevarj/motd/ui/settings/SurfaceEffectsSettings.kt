@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.settings
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -95,8 +96,10 @@ internal fun SurfaceEffectsSettingsContent(
     LaunchedEffect(appearance) { draft = appearance }
     val targetIndex =
         when (target) {
-            SettingsTarget.MESSAGE_BACKGROUND_OPACITY -> 4
-            SettingsTarget.MESSAGE_BACKGROUND_BLUR -> 5
+            SettingsTarget.MESSAGE_BACKGROUND_OPACITY,
+            SettingsTarget.MESSAGE_BACKGROUND_BLUR,
+            -> 1
+
             else -> 0
         }
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = targetIndex)
@@ -130,39 +133,40 @@ internal fun SurfaceEffectsSettingsContent(
     }
     CompositionLocalProvider(LocalSurfaceEffects provides draft.surfaceEffects) {
         SettingsScaffold(stringResource(R.string.settings_surface_effects), onBack, scroll = false) {
-            LazyColumn(Modifier.fillMaxWidth().testTag("surface_effects_page"), state = listState) {
+            LazyColumn(
+                Modifier.fillMaxWidth().testTag("surface_effects_page"),
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 item {
-                    SettingsTarget(target?.name, SettingsTarget.SURFACE_EFFECTS.name) { modifier ->
-                        SwitchRow(stringResource(R.string.settings_surface_effects_master), stringResource(R.string.settings_surface_effects_desc), draft.surfaceEffects.enabled, {
-                            draft = draft.copy(surfaceEffects = draft.surfaceEffects.copy(enabled = it))
-                            onEnabled(it)
-                        }, modifier = modifier, switchTag = "surface_effects_master")
+                    SettingsGroup {
+                        SettingsTarget(target?.name, SettingsTarget.SURFACE_EFFECTS.name) { modifier ->
+                            SwitchRow(stringResource(R.string.settings_surface_effects_master), stringResource(R.string.settings_surface_effects_desc), draft.surfaceEffects.enabled, {
+                                draft = draft.copy(surfaceEffects = draft.surfaceEffects.copy(enabled = it))
+                                onEnabled(it)
+                            }, modifier = modifier, switchTag = "surface_effects_master")
+                        }
+                        SettingsDivider()
+                        SwitchRow(stringResource(R.string.settings_link_global_opacity), stringResource(R.string.settings_link_global_effects_desc), draft.linkGlobalOpacity, {
+                            draft = draft.copy(linkGlobalOpacity = it)
+                            onLinkOpacity(it)
+                        }, switchTag = "surface_effects_link_opacity")
+                        SettingsDivider()
+                        SwitchRow(stringResource(R.string.settings_link_global_blur), stringResource(R.string.settings_link_global_effects_desc), draft.linkGlobalBlur, {
+                            draft = draft.copy(linkGlobalBlur = it)
+                            onLinkBlur(it)
+                        }, switchTag = "surface_effects_link_blur")
                     }
                 }
                 item {
-                    SwitchRow(stringResource(R.string.settings_link_global_opacity), stringResource(R.string.settings_link_global_effects_desc), draft.linkGlobalOpacity, {
-                        draft = draft.copy(linkGlobalOpacity = it)
-                        onLinkOpacity(it)
-                    }, switchTag = "surface_effects_link_opacity")
-                }
-                item {
-                    SwitchRow(stringResource(R.string.settings_link_global_blur), stringResource(R.string.settings_link_global_effects_desc), draft.linkGlobalBlur, {
-                        draft = draft.copy(linkGlobalBlur = it)
-                        onLinkBlur(it)
-                    }, switchTag = "surface_effects_link_blur")
-                }
-                item {
-                    Text(stringResource(R.string.settings_appearance_messages_section), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(16.dp))
-                    AppearanceChatLayoutPreview(settings, draft, customFontFile, settings.layoutDensity, draft.messageSpacing, draft.bubbleCornerStyle, draft.chatShadowsEnabled, "settings_effects_message_preview")
-                }
-                item {
-                    SettingsTarget(target?.name, SettingsTarget.MESSAGE_BACKGROUND_OPACITY.name) { modifier ->
-                        MessageBackgroundOpacitySlider(draft.messageBackgroundOpacityPercent, { editOpacity(null, it) }, modifier)
-                    }
-                }
-                item {
-                    SettingsTarget(target?.name, SettingsTarget.MESSAGE_BACKGROUND_BLUR.name) { modifier ->
-                        MessageBackgroundBlurSlider(draft.messageBackgroundBlur, { editBlur(null, it) }, modifier)
+                    SettingsGroup(title = stringResource(R.string.settings_appearance_messages_section)) {
+                        AppearanceChatLayoutPreview(settings, draft, customFontFile, settings.layoutDensity, draft.messageSpacing, draft.bubbleCornerStyle, draft.chatShadowsEnabled, "settings_effects_message_preview")
+                        SettingsTarget(target?.name, SettingsTarget.MESSAGE_BACKGROUND_OPACITY.name) { modifier ->
+                            MessageBackgroundOpacitySlider(draft.messageBackgroundOpacityPercent, { editOpacity(null, it) }, modifier)
+                        }
+                        SettingsTarget(target?.name, SettingsTarget.MESSAGE_BACKGROUND_BLUR.name) { modifier ->
+                            MessageBackgroundBlurSlider(draft.messageBackgroundBlur, { editBlur(null, it) }, modifier)
+                        }
                     }
                 }
                 stickyHeader {
@@ -173,24 +177,25 @@ internal fun SurfaceEffectsSettingsContent(
                 items(EffectSurface.entries, key = { it.name }) { surface ->
                     val title = stringResource(surfaceEffectTitle(surface))
                     val value = draft.surfaceEffects[surface]
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier =
+                    SettingsGroup {
+                        Box(
                             Modifier
                                 .fillMaxWidth()
                                 .clickable { selected = surface }
-                                .padding(16.dp)
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
                                 .testTag("surface_${surface.name.lowercase()}_select"),
-                    )
-                    BackingSlider(value.opacityPercent, {
-                        selected = surface
-                        editOpacity(surface, it)
-                    }, stringResource(R.string.settings_surface_opacity), stringResource(R.string.settings_surface_effects_off), Modifier.onFocusChanged { if (it.hasFocus) selected = surface }, "surface_${surface.name.lowercase()}_opacity", accessibilityLabel = "$title: ${stringResource(R.string.settings_surface_opacity)}")
-                    BackingSlider(value.blurPercent, {
-                        selected = surface
-                        editBlur(surface, it)
-                    }, stringResource(R.string.settings_surface_blur), stringResource(R.string.settings_surface_effects_off), Modifier.onFocusChanged { if (it.hasFocus) selected = surface }, "surface_${surface.name.lowercase()}_blur", accessibilityLabel = "$title: ${stringResource(R.string.settings_surface_blur)}")
+                        ) {
+                            SectionHeader(title)
+                        }
+                        BackingSlider(value.opacityPercent, {
+                            selected = surface
+                            editOpacity(surface, it)
+                        }, stringResource(R.string.settings_surface_opacity), stringResource(R.string.settings_surface_effects_off), Modifier.onFocusChanged { if (it.hasFocus) selected = surface }, "surface_${surface.name.lowercase()}_opacity", accessibilityLabel = "$title: ${stringResource(R.string.settings_surface_opacity)}")
+                        BackingSlider(value.blurPercent, {
+                            selected = surface
+                            editBlur(surface, it)
+                        }, stringResource(R.string.settings_surface_blur), stringResource(R.string.settings_surface_effects_off), Modifier.onFocusChanged { if (it.hasFocus) selected = surface }, "surface_${surface.name.lowercase()}_blur", accessibilityLabel = "$title: ${stringResource(R.string.settings_surface_blur)}")
+                    }
                 }
             }
         }

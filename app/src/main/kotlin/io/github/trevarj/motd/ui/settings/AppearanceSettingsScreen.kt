@@ -744,12 +744,14 @@ fun AppearanceSettingsContent(
             }
         }
         SettingsTarget(target?.name, SettingsTarget.SURFACE_EFFECTS.name) { targetModifier ->
-            SettingsNavigationRow(
-                title = stringResource(R.string.settings_surface_effects),
-                value = stringResource(if (previewAppearance.surfaceEffects.enabled) R.string.settings_surface_effects_on else R.string.settings_surface_effects_off),
-                onClick = { onOpenSurfaceEffects(null) },
-                modifier = targetModifier.testTag("settings_surface_effects"),
-            )
+            SettingsGroup {
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_surface_effects),
+                    value = stringResource(if (previewAppearance.surfaceEffects.enabled) R.string.settings_surface_effects_on else R.string.settings_surface_effects_off),
+                    onClick = { onOpenSurfaceEffects(null) },
+                    modifier = targetModifier.testTag("settings_surface_effects"),
+                )
+            }
         }
     }
     if (showThemeSheet) {
