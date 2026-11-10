@@ -1,0 +1,4 @@
+- Fix translucent completion popup rendering.
+- Bound the startup splash handoff to five seconds.
+- Keep messages visible after changing custom presence filters.
+- Keep retained chat presenters available during background updates.
