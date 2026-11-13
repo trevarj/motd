@@ -9,14 +9,20 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -39,8 +45,11 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.components.LocalMessageWallpaperBackdrop
 import io.github.trevarj.motd.ui.components.MessageBubble
+import io.github.trevarj.motd.ui.components.captureSurfaceBackdrop
 import io.github.trevarj.motd.ui.components.recordMessageWallpaper
 import io.github.trevarj.motd.ui.components.rememberMessageWallpaperBackdrop
+import io.github.trevarj.motd.ui.components.rememberSurfaceBackdropSource
+import io.github.trevarj.motd.ui.components.surfaceBackdrop
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
@@ -51,6 +60,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
@@ -209,6 +219,145 @@ class ScenicWallpaperUiTest {
         } finally {
             compose.mainClock.autoAdvance = true
             expected.recycle()
+        }
+    }
+
+    @Test
+    @Config(sdk = [35])
+    fun pageWallpaperEdgesFadeToCanvasAndReachSharedCaptures() {
+        var theme by mutableStateOf(ColorThemePreset.LIGHT)
+        var height by mutableStateOf(448)
+        var faded by mutableStateOf(false)
+        var replay by mutableStateOf("page")
+        var canvas = Color.Unspecified
+        val selection = WallpaperSelection(ChatWallpaperPreset.MIDNIGHT_TERMINAL, 100, scenicFollowSystem = false, scenicAnimationEnabled = false)
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(1f)) {
+                MotdTheme(themePreset = theme, dynamicColor = false, syncSystemBars = false) {
+                    val background = MaterialTheme.colorScheme.background
+                    SideEffect { canvas = background }
+                    val surfaceSource = rememberSurfaceBackdropSource()
+                    val messageSource = requireNotNull(rememberMessageWallpaperBackdrop(1))
+                    Box(Modifier.size(128.dp, height.dp).background(background).testTag("edge_fade")) {
+                        ChatWallpaperBackground(
+                            selection,
+                            Modifier
+                                .matchParentSize()
+                                .captureSurfaceBackdrop(surfaceSource)
+                                .recordMessageWallpaper(messageSource, MaterialTheme.colorScheme.surface)
+                                .then(if (faded) Modifier.fadeChatEdges(background) else Modifier),
+                            animate = false,
+                        )
+                        Box(
+                            Modifier
+                                .matchParentSize()
+                                .graphicsLayer { alpha = if (replay == "surface") 1f else 0f }
+                                .surfaceBackdrop(surfaceSource, background, opacityPercent = 1, blurPercent = 0),
+                        )
+                        Box(
+                            Modifier.matchParentSize().drawBehind {
+                                if (replay == "message") {
+                                    messageSource.revision
+                                    drawLayer(messageSource.raw)
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        fun capture(mode: String = "page"): Bitmap {
+            compose.runOnIdle { replay = mode }
+            return compose.onNodeWithTag("edge_fade").captureToImage().asAndroidBitmap()
+        }
+
+        fun assertNear(
+            label: String,
+            expected: Int,
+            actual: Int,
+            tolerance: Int = 3,
+        ) {
+            for (shift in listOf(16, 8, 0)) {
+                val difference = ((expected shr shift) and 255) - ((actual shr shift) and 255)
+                assertTrue("$label channel $shift: expected ${expected.toUInt().toString(16)}, got ${actual.toUInt().toString(16)}", kotlin.math.abs(difference) <= tolerance)
+            }
+        }
+        val proofs = File("build/reports/wallpaper-edge-fade").apply { mkdirs() }
+        for ((preset, mode) in listOf(ColorThemePreset.LIGHT to "light", ColorThemePreset.DARK to "dark")) {
+            val artwork = artwork(mode)
+            try {
+                compose.runOnIdle {
+                    theme = preset
+                    height = 448
+                    faded = false
+                    replay = "page"
+                }
+                compose.waitUntil(10_000) {
+                    val image = capture()
+                    try {
+                        image.getPixel(64, 224) == artwork.getPixel(128, 224)
+                    } finally {
+                        image.recycle()
+                    }
+                }
+                for (viewport in listOf(448, 256, 128)) {
+                    compose.runOnIdle {
+                        height = viewport
+                        faded = false
+                        replay = "page"
+                    }
+                    val original = capture()
+                    compose.runOnIdle { faded = true }
+                    val page = capture()
+                    val message = capture("message")
+                    val surface = capture("surface")
+                    try {
+                        for ((name, bitmap) in listOf("page" to page, "message" to message, "surface" to surface)) {
+                            File(proofs, "$mode-$viewport-$name.png").outputStream().use {
+                                assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+                            }
+                        }
+                        assertEquals(128, page.width)
+                        assertEquals(viewport, page.height)
+                        assertTrue("the scenic source must contrast with the canvas", original.getPixel(64, 0) != canvas.toArgb())
+                        val topExtent = minOf(192f, viewport / 2f)
+                        val bottomExtent = minOf(96f, viewport / 2f)
+                        for (x in listOf(16, 64, 112)) {
+                            for (y in 0 until viewport) {
+                                val opacity =
+                                    maxOf(
+                                        1f - (y + 0.5f) / topExtent,
+                                        1f - (viewport - y - 0.5f) / bottomExtent,
+                                        0f,
+                                    )
+                                val source = original.getPixel(x, y)
+                                var expected = 0xff000000.toInt()
+                                for (shift in listOf(16, 8, 0)) {
+                                    val ink = (source shr shift) and 255
+                                    val base = (canvas.toArgb() shr shift) and 255
+                                    expected = expected or ((ink * (1f - opacity) + base * opacity).toInt() shl shift)
+                                }
+                                assertNear("$mode/$viewport fade at $x,$y", expected, page.getPixel(x, y))
+                                if (y + 0.5f >= topExtent && y + 0.5f <= viewport - bottomExtent) {
+                                    assertEquals("interior art is unchanged at $x,$y", source, page.getPixel(x, y))
+                                }
+                                assertNear("message raw replay at $x,$y", page.getPixel(x, y), message.getPixel(x, y), 1)
+                                assertNear("surface replay at $x,$y", page.getPixel(x, y), surface.getPixel(x, y))
+                            }
+                            assertNear("top reaches theme canvas", canvas.toArgb(), page.getPixel(x, 0))
+                            assertNear("bottom reaches theme canvas", canvas.toArgb(), page.getPixel(x, viewport - 1))
+                        }
+                    } finally {
+                        original.recycle()
+                        page.recycle()
+                        message.recycle()
+                        surface.recycle()
+                    }
+                }
+            } finally {
+                artwork.recycle()
+            }
         }
     }
 

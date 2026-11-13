@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
@@ -44,6 +45,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
@@ -100,6 +102,9 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityOptionsCompat
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewModelScope
 import androidx.paging.LoadState
@@ -2642,6 +2647,193 @@ class ComposerSendClearUiTest {
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
         }
         compose.runOnIdle { assertEquals(3, submitted.size) }
+    }
+
+    @Test
+    @Config(sdk = [35])
+    fun nativeTimelineScrollsUnderNavigationHandleWithoutDoublePaddingIme() {
+        var sendColor = 0
+        var fabColor = 0
+        setContent(
+            draft = { ComposerDraftState("hello", hydrated = true, revision = 1) },
+            pages = flowOf(PagingData.from(headerHistory())),
+            chatWallpaper = WallpaperSelection(ChatWallpaperPreset.NONE),
+            aiSheet = {
+                val primary = MaterialTheme.colorScheme.primary.toArgb()
+                val fab = FloatingActionButtonDefaults.containerColor.toArgb()
+                SideEffect {
+                    sendColor = primary
+                    fabColor = fab
+                }
+            },
+            onSubmit = {},
+        )
+        val root = compose.onNodeWithTag("chat_surface_root")
+        val timeline = compose.onNodeWithTag("chat_timeline")
+        val host = compose.onNodeWithTag("chat_bottom_host")
+        val pill = compose.onNodeWithTag("chat_composer_pill")
+        val rootNode = root.fetchSemanticsNode()
+        val view = (checkNotNull(rootNode.root) as ViewRootForTest).view
+        val rootBounds = root.getUnclippedBoundsInRoot()
+        val density = rootNode.boundsInRoot.width / (rootBounds.right - rootBounds.left).value
+        val navigationDp = 24f
+        val navigationPx = (navigationDp * density).toInt()
+
+        fun dispatchInsets(
+            imeDp: Int,
+            navPx: Int = navigationPx,
+        ) {
+            compose.runOnIdle {
+                ViewCompat.dispatchApplyWindowInsets(
+                    view,
+                    WindowInsetsCompat
+                        .Builder()
+                        .setInsets(WindowInsetsCompat.Type.navigationBars(), Insets.of(0, 0, 0, navPx))
+                        .setVisible(WindowInsetsCompat.Type.navigationBars(), true)
+                        .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, (imeDp * density).toInt()))
+                        .setVisible(WindowInsetsCompat.Type.ime(), imeDp > 0)
+                        .build(),
+                )
+            }
+            compose.waitForIdle()
+        }
+        dispatchInsets(0, navPx = 0)
+        val originalPill = pill.getUnclippedBoundsInRoot()
+        dispatchInsets(0)
+        timeline.performScrollToIndex(0)
+        compose.waitForIdle()
+        val restingHost = host.getUnclippedBoundsInRoot()
+        val restingPill = pill.getUnclippedBoundsInRoot()
+        assertEquals("The actual timeline must reach the window bottom", rootBounds.bottom.value, timeline.getUnclippedBoundsInRoot().bottom.value, 0.5f)
+        assertEquals("The measured host includes the navigation band", rootBounds.bottom.value, restingHost.bottom.value, 0.5f)
+        assertEquals("Only the composer moves above navigation", navigationDp, (originalPill.bottom - restingPill.bottom).value, 1f)
+        assertTrue("Composer touch targets stay above navigation", compose.onNodeWithTag("chat_composer_send").getUnclippedBoundsInRoot().bottom <= rootBounds.bottom - navigationDp.dp)
+
+        fun assertNewestClearsHost() {
+            val newest = compose.onNodeWithTag("chat_message_header-100", useUnmergedTree = true).getUnclippedBoundsInRoot()
+            assertEquals("Newest retains ordinary breathing room above the measured host", 8f, (host.getUnclippedBoundsInRoot().top - newest.bottom).value, 1f)
+        }
+        assertNewestClearsHost()
+
+        timeline.performScrollToIndex(50)
+        compose.waitForIdle()
+        val crossingRow = compose.onNodeWithTag("chat_message_header-50", useUnmergedTree = true)
+
+        fun moveRowTo(centerDp: Float) {
+            val row = crossingRow.getUnclippedBoundsInRoot()
+            val delta = centerDp - (row.top.value + row.bottom.value) / 2f
+            val slop =
+                android.view.ViewConfiguration
+                    .get(view.context)
+                    .scaledTouchSlop
+                    .toFloat()
+            timeline.performTouchInput {
+                down(center)
+                moveBy(Offset(0f, delta.dp.toPx() + if (delta > 0) slop else -slop))
+                advanceEventTime(200)
+                up()
+            }
+            compose.waitForIdle()
+        }
+
+        fun rowInk(
+            screen: Bitmap,
+            minimumYDp: Float = rootBounds.top.value,
+        ): Int {
+            val row = crossingRow.getUnclippedBoundsInRoot()
+            val x0 = ((row.left - rootBounds.left).value * density).toInt().coerceAtLeast(0)
+            val x1 = ((row.right - rootBounds.left).value * density).toInt().coerceAtMost(screen.width)
+            val y0 = ((maxOf(row.top.value, minimumYDp) - rootBounds.top.value) * density).toInt().coerceAtLeast(0)
+            val y1 = ((row.bottom - rootBounds.top).value * density).toInt().coerceAtMost(screen.height)
+            var ink = 0
+            for (y in y0 until y1) {
+                val background = screen.getPixel(screen.width - 1, y)
+                for (x in x0 until minOf(x1, screen.width / 2)) {
+                    val pixel = screen.getPixel(x, y)
+                    val contrast =
+                        kotlin.math.abs(android.graphics.Color.red(pixel) - android.graphics.Color.red(background)) +
+                            kotlin.math.abs(android.graphics.Color.green(pixel) - android.graphics.Color.green(background)) +
+                            kotlin.math.abs(android.graphics.Color.blue(pixel) - android.graphics.Color.blue(background))
+                    ink = maxOf(ink, contrast)
+                }
+            }
+            return ink
+        }
+
+        fun assertOpaqueControl(
+            screen: Bitmap,
+            tag: String,
+            color: Int,
+        ) {
+            val bounds = compose.onNodeWithTag(tag).getUnclippedBoundsInRoot()
+            val left = ((bounds.left - rootBounds.left).value * density).toInt().coerceAtLeast(0)
+            val right = ((bounds.right - rootBounds.left).value * density).toInt().coerceAtMost(screen.width)
+            val top = ((bounds.top - rootBounds.top).value * density).toInt().coerceAtLeast(0)
+            val bottom = ((bounds.bottom - rootBounds.top).value * density).toInt().coerceAtMost(screen.height)
+            var opaquePixels = 0
+            for (y in top until bottom) {
+                for (x in left until right) {
+                    if (screen.getPixel(x, y) == color) opaquePixels++
+                }
+            }
+            assertTrue("$tag must retain its opaque native container color", opaquePixels > (right - left) * (bottom - top) / 8)
+        }
+
+        moveRowTo((rootBounds.top.value + rootBounds.bottom.value) / 2f)
+        val center = root.captureToImage().asAndroidBitmap()
+        val centerInk = rowInk(center)
+        assertTrue("Center messages must retain visible ink", centerInk > 128)
+        val centerBackground = center.getPixel(center.width - 1, center.height / 2)
+        assertOpaqueControl(center, "chat_composer_send", sendColor)
+        assertOpaqueControl(center, "chat_scroll_to_bottom_fab", fabColor)
+        moveRowTo(rootBounds.top.value + 104f)
+        val fadedTop = root.captureToImage().asAndroidBitmap()
+        val topInk = rowInk(fadedTop)
+        assertTrue("Real scrolling message ink must attenuate at the top: top=$topInk center=$centerInk", topInk in 1 until centerInk * 4 / 5)
+        assertEquals("The message mask must not erase the backing surface", centerBackground, fadedTop.getPixel(fadedTop.width - 1, (104f * density).toInt()))
+        center.recycle()
+        fadedTop.recycle()
+        moveRowTo((rootBounds.top.value + rootBounds.bottom.value) / 2f)
+        val before = root.captureToImage().asAndroidBitmap()
+        assertTrue("Scrolling back to the center must restore unchanged message ink", kotlin.math.abs(centerInk - rowInk(before)) <= 2)
+        moveRowTo(rootBounds.bottom.value - navigationDp / 2f)
+        val crossed = crossingRow.getUnclippedBoundsInRoot()
+        val navigationTop = rootBounds.bottom - navigationDp.dp
+        assertTrue("A real older row must cross the navigation band: $crossed", crossed.bottom > navigationTop && crossed.top < rootBounds.bottom)
+        val after = root.captureToImage().asAndroidBitmap()
+        val bottomInk = rowInk(after, navigationTop.value)
+        assertTrue("Real scrolling message ink must attenuate at the bottom: bottom=$bottomInk center=$centerInk", bottomInk in 1 until centerInk / 2)
+        assertEquals("The bottom mask must preserve the backing surface", centerBackground, after.getPixel(after.width - 1, after.height - 2))
+        assertOpaqueControl(after, "chat_composer_send", sendColor)
+        assertOpaqueControl(after, "chat_scroll_to_bottom_fab", fabColor)
+        val left = ((crossed.left - rootBounds.left).value * density).toInt().coerceIn(0, after.width - 1)
+        val right = ((crossed.right - rootBounds.left).value * density).toInt().coerceIn(left + 1, after.width)
+        val top = ((maxOf(crossed.top, navigationTop) - rootBounds.top).value * density).toInt().coerceIn(0, after.height - 1)
+        val bottom = ((minOf(crossed.bottom, rootBounds.bottom) - rootBounds.top).value * density).toInt().coerceIn(top + 1, after.height)
+        var paintedPixels = 0
+        for (y in top until bottom) {
+            for (x in left until right) {
+                if (before.getPixel(x, y) != after.getPixel(x, y)) paintedPixels++
+            }
+        }
+        assertTrue("The real row must paint pixels beneath the gesture handle, not merely report unclipped bounds", paintedPixels > 16)
+        val proof = File("build/reports/ui/gesture-navigation-scroll.png")
+        requireNotNull(proof.parentFile).mkdirs()
+        proof.outputStream().use { after.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        before.recycle()
+        after.recycle()
+
+        timeline.performScrollToIndex(0)
+        for (imeDp in listOf(120, 240, 120, 0)) {
+            dispatchInsets(imeDp)
+            val keyboardHost = host.getUnclippedBoundsInRoot()
+            val expectedBottom = rootBounds.bottom.value - imeDp
+            assertEquals("Timeline follows only the IME inset", expectedBottom, timeline.getUnclippedBoundsInRoot().bottom.value, 1f)
+            assertEquals("Host follows the same IME viewport", expectedBottom, keyboardHost.bottom.value, 1f)
+            assertEquals("Consumed IME must not leave extra navigation padding", (restingHost.bottom - restingHost.top).value - if (imeDp > 0) navigationDp else 0f, (keyboardHost.bottom - keyboardHost.top).value, 1f)
+            assertEquals("Composer window position subtracts keyboard but never both keyboard and navigation", restingPill.bottom.value - if (imeDp > 0) imeDp - navigationDp else 0f, pill.getUnclippedBoundsInRoot().bottom.value, 1f)
+            assertNewestClearsHost()
+        }
     }
 
     @Test

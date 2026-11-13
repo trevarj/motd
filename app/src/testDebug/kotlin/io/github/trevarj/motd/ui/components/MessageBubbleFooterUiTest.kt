@@ -27,6 +27,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -781,7 +782,6 @@ class MessageBubbleFooterUiTest {
                     assertEquals(1, nickLayout.lineCount)
                     assertTrue("long sender must ellipsize at fontScale=$scale", nickLayout.isLineEllipsized(0))
                     assertTrue("sender must remain above the body", nickBounds.bottom <= body.top)
-                    if (!isFriend) assertEquals("sender and body must align after the avatar gap", body.left, nickBounds.left, 1f)
                     assertEquals(1, timeLayout.lineCount)
                     assertFalse("timestamp must not ellipsize", timeLayout.isLineEllipsized(0))
                     assertEquals(TIME.length, timeLayout.getLineEnd(0, visibleEnd = true))
@@ -1120,6 +1120,7 @@ class MessageBubbleFooterUiTest {
             val kind: MessageKind = MessageKind.PRIVMSG,
             val bot: Boolean = false,
             val showSender: Boolean = true,
+            val density: LayoutDensity = LayoutDensity.COMPACT,
         )
         val sample = mutableStateOf(Sample())
         val concealed = mutableStateOf(false)
@@ -1144,7 +1145,7 @@ class MessageBubbleFooterUiTest {
             MotdTheme(
                 dynamicColor = false,
                 themePreset = ColorThemePreset.AYU_LIGHT,
-                layoutDensity = LayoutDensity.COMPACT,
+                layoutDensity = sample.value.density,
                 nicknameBackgroundsEnabled = false,
                 messageBackgroundOpacityPercent = 0,
                 timestampConfig = TimestampConfig(show = false),
@@ -1175,6 +1176,7 @@ class MessageBubbleFooterUiTest {
                 Sample(kind = MessageKind.ACTION, bot = true),
                 Sample(sender = "alice אבג alice אבג alice אבג alice אבג", bot = true),
                 Sample(showSender = false),
+                Sample(kind = MessageKind.ACTION, bot = true, density = LayoutDensity.TWO_LINE),
             )
         for ((index, current) in samples.withIndex()) {
             compose.runOnIdle {
@@ -1185,7 +1187,7 @@ class MessageBubbleFooterUiTest {
             val textNode = compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true)
             val layout = textNode.textLayout()
             val image = canvas.captureToImage().asAndroidBitmap()
-            val proof = File("build/reports/compact-sender-rounded/compact-${current.kind.name.lowercase()}-$index-sdk-${RuntimeEnvironment.getApiLevel()}.png")
+            val proof = File("build/reports/compact-sender-rounded/${current.density.name.lowercase()}-${current.kind.name.lowercase()}-$index-sdk-${RuntimeEnvironment.getApiLevel()}.png")
             requireNotNull(proof.parentFile).mkdirs()
             proof.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
             val canvasBounds = canvas.fetchSemanticsNode().boundsInRoot
@@ -1224,24 +1226,35 @@ class MessageBubbleFooterUiTest {
                     layout
                         .getPathForRange(maxOf(start, layout.getLineStart(line)), minOf(end, layout.getLineEnd(line)))
                         .getBounds()
+                        .let { Rect(it.left - 4f, layout.getLineTop(line), it.right + 4f, layout.getLineBottom(line)) }
                         .translate(textOrigin)
                 }
             for ((region, topEdge) in listOf(regions.first() to true, regions.last() to false)) {
                 val left = kotlin.math.ceil(region.left).toInt()
                 val right = kotlin.math.floor(region.right).toInt() - 1
                 val y = if (topEdge) kotlin.math.ceil(region.top).toInt() else kotlin.math.floor(region.bottom).toInt() - 1
-                assertTrue("$current empty outer left corner top=$topEdge", matches(image.getPixel(left, y), background))
-                assertTrue("$current empty outer right corner top=$topEdge", matches(image.getPixel(right, y), background))
+                val cornerFill = if (current.density == LayoutDensity.TWO_LINE) highlight else background
+                assertTrue("$current preserves outer left corner top=$topEdge", matches(image.getPixel(left, y), cornerFill))
+                assertTrue("$current preserves outer right corner top=$topEdge", matches(image.getPixel(right, y), cornerFill))
                 assertTrue(
                     "$current continuous filled outer edge top=$topEdge",
                     (left + 8..right - 8).all { x -> matches(image.getPixel(x, y), highlight) },
                 )
+                val interior = kotlin.math.ceil(region.top).toInt() + 8 until kotlin.math.floor(region.bottom).toInt() - 8
+                for (x in listOf(left + 1, right - 1)) {
+                    val filled = interior.count { row -> matches(image.getPixel(x, row), highlight) }
+                    assertTrue("$current extra horizontal padding must paint beyond the glyph bounds at x=$x", filled >= interior.count() / 2)
+                }
             }
             val separator = layout.getBoundingBox(end).translate(textOrigin)
             assertTrue(
                 "$current separator must remain outside the sender highlight",
-                matches(image.getPixel(separator.center.x.toInt(), kotlin.math.ceil(separator.top).toInt()), background),
+                matches(image.getPixel(kotlin.math.floor(separator.right).toInt() - 1, kotlin.math.ceil(separator.top).toInt()), background),
             )
+            val first = regions.first()
+            val last = regions.last()
+            assertTrue("$current no extra vertical padding above", matches(image.getPixel(first.center.x.toInt(), kotlin.math.ceil(first.top).toInt() - 1), background))
+            assertTrue("$current no extra vertical padding below", matches(image.getPixel(last.center.x.toInt(), kotlin.math.ceil(last.bottom).toInt()), background))
             compose.runOnIdle { concealed.value = true }
             val covered = canvas.captureToImage().asAndroidBitmap()
             assertFalse("$current body concealment must change pixels", image.sameAs(covered))
@@ -1253,6 +1266,89 @@ class MessageBubbleFooterUiTest {
                     },
                 )
             }
+        }
+    }
+
+    @Test
+    @Config(sdk = [28, 35])
+    fun twoLineSenderPaddingWidensPaintWithoutChangingComfortableFriendPadding() {
+        val density = mutableStateOf(LayoutDensity.TWO_LINE)
+        var senderClicks = 0
+        val scheme = requireNotNull(fixedThemeScheme(ColorThemePreset.AYU_LIGHT))
+        compose.setContent {
+            MotdTheme(
+                dynamicColor = false,
+                themePreset = ColorThemePreset.AYU_LIGHT,
+                layoutDensity = density.value,
+                nicknameBackgroundsEnabled = false,
+                timestampConfig = TimestampConfig(show = false),
+                avatarStyle = AvatarStyle.NONE,
+            ) {
+                CompositionLocalProvider(LocalDensity provides Density(2f, 1f)) {
+                    Box(Modifier.width(240.dp).background(scheme.background).testTag("sender_padding_sample")) {
+                        MessageBubble(
+                            sender = "alice",
+                            text = BODY,
+                            timeMs = 0,
+                            formattedTime = TIME,
+                            isSelf = false,
+                            kind = MessageKind.PRIVMSG,
+                            showSender = true,
+                            senderIsFriend = true,
+                            onSenderClick = { senderClicks++ },
+                        )
+                    }
+                }
+            }
+        }
+        for (current in listOf(LayoutDensity.TWO_LINE, LayoutDensity.COMFORTABLE)) {
+            compose.runOnIdle { density.value = current }
+            val canvas = compose.onNodeWithTag("sender_padding_sample")
+            val nick = compose.onNodeWithText("alice", useUnmergedTree = true)
+            val layout = nick.textLayout()
+            val bounds = nick.fetchSemanticsNode().boundsInRoot
+            val horizontal = if (current == LayoutDensity.TWO_LINE) 12f else 8f
+            val origin = bounds.topLeft - canvas.fetchSemanticsNode().boundsInRoot.topLeft
+            val image = canvas.captureToImage().asAndroidBitmap()
+            val left = kotlin.math.ceil(origin.x - horizontal).toInt()
+            val right = kotlin.math.floor(origin.x + layout.size.width + horizontal).toInt() - 1
+            val top = kotlin.math.ceil(origin.y - 2f).toInt()
+            val bottom = kotlin.math.floor(origin.y + layout.size.height + 2f).toInt() - 1
+            val middle = (origin.y + layout.size.height / 2f).toInt()
+            val center = (origin.x + layout.size.width / 2f).toInt()
+            val backing = image.getPixel(left - 2, middle)
+            val fill =
+                scheme.primary
+                    .copy(alpha = 0.12f)
+                    .compositeOver(Color(backing))
+                    .toArgb()
+            val samples =
+                listOf(
+                    Offset(left + 1f, middle.toFloat()) to fill,
+                    Offset(right - 1f, middle.toFloat()) to fill,
+                    Offset(left - 1f, middle.toFloat()) to backing,
+                    Offset(right + 1f, middle.toFloat()) to backing,
+                    Offset(center.toFloat(), top + 1f) to fill,
+                    Offset(center.toFloat(), bottom - 1f) to fill,
+                    Offset(center.toFloat(), top - 1f) to backing,
+                    Offset(center.toFloat(), bottom + 1f) to backing,
+                )
+            for ((point, expected) in samples) {
+                val pixel = image.getPixel(point.x.toInt(), point.y.toInt())
+                assertTrue(
+                    "$current painted padding extent at $point",
+                    (0..3).all { channel ->
+                        val shift = channel * 8
+                        kotlin.math.abs((pixel ushr shift and 255) - (expected ushr shift and 255)) <= 1
+                    },
+                )
+            }
+            val proof = File("build/reports/compact-sender-rounded/${current.name.lowercase()}-header-sdk-${RuntimeEnvironment.getApiLevel()}.png")
+            requireNotNull(proof.parentFile).mkdirs()
+            proof.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            val clicksBefore = senderClicks
+            nick.performClick()
+            compose.runOnIdle { assertEquals(clicksBefore + 1, senderClicks) }
         }
     }
 

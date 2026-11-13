@@ -302,8 +302,8 @@ flowchart TD
   chat-list visibility policy and entry's paging spec rather than awaiting the whole list.
   Fresh anchor reads run sequentially on IO rather than returning through Main after
   each query; the caller retains entry-snapshot and target publication.
-  The timeline paints at full opacity once fresh payload admission and measured entry placement
-  permit it; there is no post-placement fade. At the existing 1.5-second timeout, an ordinary
+  The timeline becomes visible once fresh payload admission and measured entry placement
+  permit it; there is no post-placement entry fade. At the existing 1.5-second timeout, an ordinary
   retained return can restore its freshly certified last confirmed viewport. That visit ignores
   late automatic targets, but explicit jumps remain available and reading still waits for fresh metadata.
   Once placed, surviving keyed timeline rows ease history reflow with native placement-only
@@ -321,8 +321,12 @@ flowchart TD
   Normal Two-line message and action fills admit subtle wallpaper while retaining their
   speaker/mention tint. Opaque ink is contrast-normalized for wallpaper extremes;
   Dimmed and contrast-limited fills remain opaque.
-  The transparent foreground alone consumes Scaffold, navigation-bar and IME
-  padding; the send-flight overlay keeps its existing foreground coordinate origin.
+  The transparent foreground consumes Scaffold and IME padding; only the measured
+  composer host reserves the bottom navigation inset. The timeline extends beneath
+  the gesture handle while resting messages clear the complete composer host.
+  A stationary alpha mask fades scrolling messages at the page edges without fading
+  the header, composer, floating controls, or send-flight overlay.
+  The send-flight overlay keeps its existing foreground coordinate origin.
   Its status comes from the matching loaded canonical row, preferring accepted event IDs
   over an established landing ID; without a known row it stays pending rather than
   claiming a historical same-text confirmation. Echo/failure updates change the airborne

@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
@@ -30,6 +31,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.layer.drawLayer
@@ -55,6 +57,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.LocalSurfaceEffects
@@ -107,6 +110,7 @@ internal fun FoolBodyText(
     overflow: TextOverflow = TextOverflow.Clip,
     concealment: FoolBodyConcealment,
     inlineBody: Boolean = false,
+    senderCornerRadius: Dp = 4.dp,
 ) {
     val ranges = remember(text) { text.getStringAnnotations(FOOL_BODY_RANGE, 0, text.length) }
     val senderRange = remember(text) { text.getStringAnnotations(COMPACT_SENDER_RANGE, 0, text.length).firstOrNull() }
@@ -159,15 +163,42 @@ internal fun FoolBodyText(
                             val result = layout
                             val senderPath =
                                 if (result != null && result.layoutInput.text.text == displayed.text) {
-                                    val path = result.getPathForRange(senderRange.start, senderRange.end)
-                                    Path.combine(PathOperation.Union, path, path)
+                                    val path = Path()
+                                    val rectangle = Path()
+                                    val padding = 2.dp.toPx()
+                                    val points = result.getPathForRange(senderRange.start, senderRange.end).asAndroidPath().approximate(0.5f)
+                                    var left = 0f
+                                    var top = 0f
+                                    var right = 0f
+                                    var bottom = 0f
+                                    for (index in 0..points.size step 3) {
+                                        if (index == 0 || index == points.size || points[index] == points[index - 3]) {
+                                            if (left < right && top < bottom) {
+                                                rectangle.rewind()
+                                                rectangle.addRect(Rect(left - padding, top, right + padding, bottom))
+                                                check(path.op(path, rectangle, PathOperation.Union))
+                                            }
+                                            if (index < points.size) {
+                                                left = points[index + 1]
+                                                right = left
+                                                top = points[index + 2]
+                                                bottom = top
+                                            }
+                                        } else {
+                                            left = minOf(left, points[index + 1])
+                                            right = maxOf(right, points[index + 1])
+                                            top = minOf(top, points[index + 2])
+                                            bottom = maxOf(bottom, points[index + 2])
+                                        }
+                                    }
+                                    path
                                 } else {
                                     null
                                 }
                             val paint =
                                 Paint().apply {
                                     this.color = senderFill
-                                    pathEffect = PathEffect.cornerPathEffect(4.dp.toPx())
+                                    pathEffect = if (senderCornerRadius > 0.dp) PathEffect.cornerPathEffect(senderCornerRadius.toPx()) else null
                                 }
                             onDrawWithContent {
                                 senderPath?.let { path ->

@@ -48,12 +48,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListLayoutInfo
@@ -140,7 +141,9 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -212,6 +215,7 @@ import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
+import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.EffectSurface
 import io.github.trevarj.motd.data.prefs.FoolPreferences
@@ -3746,7 +3750,18 @@ internal fun ChatContent(
                 val wallpaperBackdrop = rememberMessageWallpaperBackdrop(effectiveBlur)
                 ChatWallpaperBackground(
                     chatWallpaper,
-                    modifier = Modifier.matchParentSize().captureSurfaceBackdrop(wallpaperSource).recordMessageWallpaper(wallpaperBackdrop, MaterialTheme.colorScheme.surface),
+                    modifier =
+                        Modifier
+                            .matchParentSize()
+                            .captureSurfaceBackdrop(wallpaperSource)
+                            .recordMessageWallpaper(wallpaperBackdrop, MaterialTheme.colorScheme.surface)
+                            .then(
+                                if (chatWallpaper.preset != ChatWallpaperPreset.NONE || chatWallpaper.localImageName != null) {
+                                    Modifier.fadeChatEdges(MaterialTheme.colorScheme.background)
+                                } else {
+                                    Modifier
+                                },
+                            ),
                 )
                 // No composition-phase IME read here on purpose: the composer samples the animated inset
                 // in its own measure phase, so the whole timeline stays skippable while the keyboard
@@ -3787,13 +3802,12 @@ internal fun ChatContent(
                 ConversationTypography(conversationFontScalePercent) {
                     // TopAppBar owns the status-bar inset. Only the foreground follows Scaffold padding;
                     // the wallpaper keeps a fixed origin and size while the header and IME animate.
-                    // Consuming navigation/IME insets keeps the composer clear without double-padding.
+                    // Only the bottom host consumes navigation padding, so messages scroll under the gesture handle.
                     Box(
                         modifier =
                             Modifier
                                 .fillMaxSize()
                                 .padding(start = padding.calculateStartPadding(LocalLayoutDirection.current), end = padding.calculateEndPadding(LocalLayoutDirection.current), bottom = padding.calculateBottomPadding())
-                                .navigationBarsPadding()
                                 .imePadding(),
                     ) {
                         Scaffold(
@@ -3805,7 +3819,8 @@ internal fun ChatContent(
                                     modifier =
                                         Modifier
                                             .fillMaxWidth()
-                                            .testTag("chat_bottom_host"),
+                                            .testTag("chat_bottom_host")
+                                            .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)),
                                 ) {
                                     val isChannelBuffer = state.buffer?.type == BufferType.CHANNEL
                                     val completions =
@@ -4110,7 +4125,10 @@ internal fun ChatContent(
                                                 Modifier
                                                     .fillMaxSize()
                                                     .captureSurfaceBackdrop(pageBackdrop)
-                                                    .graphicsLayer { alpha = if (entryVeilLifted && drawingAllowed) 1f else 0f }
+                                                    .graphicsLayer {
+                                                        alpha = if (entryVeilLifted && drawingAllowed) 1f else 0f
+                                                        compositingStrategy = CompositingStrategy.Offscreen
+                                                    }.fadeChatEdges(Color.Black, BlendMode.DstOut)
                                                     .then(if (entryVeilLifted && drawingAllowed) Modifier else Modifier.clearAndSetSemantics {}),
                                         ) {
                                             MessageList(

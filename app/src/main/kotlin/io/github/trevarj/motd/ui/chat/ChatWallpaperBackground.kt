@@ -23,6 +23,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -33,6 +35,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import androidx.core.graphics.scale
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -159,6 +162,27 @@ fun ChatWallpaperBackground(
             },
     )
 }
+
+internal fun Modifier.fadeChatEdges(
+    color: Color,
+    blendMode: BlendMode = BlendMode.SrcOver,
+): Modifier =
+    drawWithCache {
+        val topFraction = if (size.height > 0f) (192.dp.toPx() / size.height).coerceAtMost(0.5f) else 0.5f
+        val bottomFraction = if (size.height > 0f) (96.dp.toPx() / size.height).coerceAtMost(0.5f) else 0.5f
+        val transparent = color.copy(alpha = 0f)
+        val fade =
+            Brush.verticalGradient(
+                0f to color,
+                topFraction to transparent,
+                (1f - bottomFraction) to transparent,
+                1f to color,
+            )
+        onDrawWithContent {
+            drawContent()
+            drawRect(fade, blendMode = blendMode)
+        }
+    }
 
 /** Warm the selected full-size motif before a chat destination needs to draw it. */
 @Composable

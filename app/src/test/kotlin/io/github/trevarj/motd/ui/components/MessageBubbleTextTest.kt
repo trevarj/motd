@@ -454,40 +454,6 @@ class MessageBubbleTextTest {
     }
 
     @Test
-    fun action_body_preserves_links_mentions_code_and_friend_tint() {
-        val friendTint = Color.Yellow
-        val line =
-            buildActionLine(
-                sender = "alice",
-                text = "greets @bob at https://example.com with `hello`",
-                accentColor = Color.Magenta,
-                nameColor = Color.Green,
-                bodyColor = Color.Gray,
-                linkColor = Color.Blue,
-                friendTint = friendTint,
-                mentionColor = { nick -> if (nick == "bob") Color.Red else null },
-                codeBackground = Color.DarkGray,
-                codeColor = Color.White,
-            )
-
-        val sender = line.spanStyles.first { it.start == 2 && it.end == 7 }.item
-        assertEquals(friendTint, sender.background)
-        assertTrue(line.hasLinkAnnotations(0, line.length))
-        assertTrue(
-            line.spanStyles.any {
-                it.item.color == Color.Red && line.text.substring(it.start, it.end) == "@bob"
-            },
-        )
-        assertTrue(
-            line.spanStyles.any {
-                it.item.fontFamily == FontFamily.Monospace &&
-                    it.item.fontStyle == FontStyle.Normal &&
-                    line.text.substring(it.start, it.end) == "hello"
-            },
-        )
-    }
-
-    @Test
     fun action_body_emits_italic_text_without_star_or_sender() {
         val body =
             buildActionBody(

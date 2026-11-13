@@ -1275,7 +1275,6 @@ private fun ActionMessageRow(
             senderLink,
             contrastRow,
             dimmed,
-            spacing.compact,
         ) {
             buildActionLine(
                 sender = botDisplayName(displaySender, isBot),
@@ -1293,7 +1292,7 @@ private fun ActionMessageRow(
                 containerColor = contrastRow,
                 minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                 normalContainerColor = normalPaintedRow,
-                roundedSender = spacing.compact,
+                roundedSender = true,
             ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
         }
 
@@ -1333,6 +1332,7 @@ private fun ActionMessageRow(
                     text = actionLine,
                     concealment = LocalFoolBodyConcealment.current,
                     inlineBody = true,
+                    senderCornerRadius = if (spacing.twoLine) 0.dp else 4.dp,
                     style =
                         MaterialTheme.typography.bodyLarge.copy(
                             fontStyle = FontStyle.Italic,
@@ -1680,7 +1680,7 @@ private fun TwoLineMessageRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier =
                         Modifier
-                            .senderNickTint()
+                            .senderNickTint(horizontalPadding = 6.dp)
                             .weight(1f, fill = false)
                             .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it },
                 )
@@ -2395,11 +2395,11 @@ internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendMentionColor
  * not to fight the nick color or the bubble background.
  */
 @Composable
-internal fun Modifier.senderNickTint(): Modifier =
+internal fun Modifier.senderNickTint(horizontalPadding: Dp = 4.dp): Modifier =
     this
         .clip(RoundedCornerShape(4.dp))
         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-        .padding(horizontal = 4.dp, vertical = 1.dp)
+        .padding(horizontal = horizontalPadding, vertical = 1.dp)
 
 /** Resolved reply target for the quoted mini-bubble. */
 data class ReplyPreviewData(

@@ -106,7 +106,8 @@ shadows cannot composite over the sampled backing; opaque controls retain native
 Two-line headers keep sender names on one ellipsized line, reserving room for the avatar, friend
 indicator, delivery status, and timestamp even in narrow panes with large system fonts.
 Compact (classic IRC) sender prefixes and Two-line sender headers retain the subtle theme-primary
-nickname background used for friends, with matching 4dp rounded corners, distinguishing senders from bold, colored mentions even when
+nickname background used for friends, with matching 4dp rounded corners and extra horizontal room
+around the name. These highlights distinguish senders from bold, colored mentions even when
 consecutive messages omit the sender. Two-line's star remains friend-only; Comfortable friend styling
 is unchanged. The nickname-background toggle controls the row wash, not these sender highlights.
 
@@ -144,3 +145,10 @@ Images keep their colors, crop to fill the chat and settings previews, and blend
 background at the selected intensity. Imports are validated and copied to private app storage
 (up to 20 MiB, 32,768 pixels per side and 100 megapixels); cancelling or a failed import keeps the
 current image. Image files and their local references are excluded from configuration backups.
+
+On the chat page only, wallpaper fades into the theme canvas over 192dp at the top and 96dp at the
+bottom (each independently capped at half the viewport height). Scrolling messages fade to transparent
+over the same edge distances, including when no wallpaper is selected. Header, composer, and floating
+controls remain unaffected. Messages can scroll behind the Android gesture area; the composer stays
+safely above it. Shared page and wallpaper captures include their respective fades; settings thumbnails
+and layout previews retain the original art.
