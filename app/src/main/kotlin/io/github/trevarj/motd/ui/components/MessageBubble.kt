@@ -1275,6 +1275,7 @@ private fun ActionMessageRow(
             senderLink,
             contrastRow,
             dimmed,
+            spacing.compact,
         ) {
             buildActionLine(
                 sender = botDisplayName(displaySender, isBot),
@@ -1292,6 +1293,7 @@ private fun ActionMessageRow(
                 containerColor = contrastRow,
                 minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                 normalContainerColor = normalPaintedRow,
+                roundedSender = spacing.compact,
             ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
         }
 
@@ -1463,6 +1465,7 @@ internal fun buildActionLine(
     containerColor: Color = Color.Unspecified,
     minimumContrast: Double = MESSAGE_TEXT_CONTRAST,
     normalContainerColor: Color = containerColor,
+    roundedSender: Boolean = false,
 ): AnnotatedString =
     buildAnnotatedString {
         if (includeStar) {
@@ -1479,13 +1482,15 @@ internal fun buildActionLine(
                 color = if (nameBackground == Color.Unspecified) nameColor else messageContentColor(nameColor, nameBackground, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalNameBackground),
                 fontWeight = FontWeight.Bold,
                 fontStyle = FontStyle.Normal,
-                background = friendTint,
+                background = if (roundedSender) Color.Unspecified else friendTint,
             )
+        val senderStart = length
         if (senderLink != null) {
             withLink(senderLink) { withStyle(senderStyle) { append(sender) } }
         } else {
             withStyle(senderStyle) { append(sender) }
         }
+        if (roundedSender) addStringAnnotation(COMPACT_SENDER_RANGE, "", senderStart, length)
         append(" ")
         pushStringAnnotation(FOOL_BODY_RANGE, "")
         append(

@@ -106,7 +106,7 @@ shadows cannot composite over the sampled backing; opaque controls retain native
 Two-line headers keep sender names on one ellipsized line, reserving room for the avatar, friend
 indicator, delivery status, and timestamp even in narrow panes with large system fonts.
 Compact (classic IRC) sender prefixes and Two-line sender headers retain the subtle theme-primary
-nickname background used for friends, distinguishing senders from bold, colored mentions even when
+nickname background used for friends, with matching 4dp rounded corners, distinguishing senders from bold, colored mentions even when
 consecutive messages omit the sender. Two-line's star remains friend-only; Comfortable friend styling
 is unchanged. The nickname-background toggle controls the row wash, not these sender highlights.
 

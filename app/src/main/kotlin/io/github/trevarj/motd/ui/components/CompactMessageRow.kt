@@ -298,19 +298,21 @@ internal fun buildCompactLine(
                 color = if (nameBackground == Color.Unspecified) nameColor else messageContentColor(nameColor, nameBackground, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalNameBackground),
                 fontSize = nickFontSize,
                 fontWeight = FontWeight.Bold,
-                background = senderTint,
             )
         // Continuation lines omit the sender prefix entirely.
         if (showSender) {
+            val senderStart = length
             when (kind) {
                 MessageKind.NOTICE -> {
                     // irssi-style notice marker: `-nick-`.
                     withStyle(nickStyle) { append("-${botDisplayName(sender, isBot)}-") }
+                    addStringAnnotation(COMPACT_SENDER_RANGE, "", senderStart, length)
                     append(" ")
                 }
 
                 else -> {
                     withStyle(nickStyle) { append(botDisplayName(sender, isBot)) }
+                    addStringAnnotation(COMPACT_SENDER_RANGE, "", senderStart, length)
                     withStyle(SpanStyle(color = bodyColor)) { append(": ") }
                 }
             }

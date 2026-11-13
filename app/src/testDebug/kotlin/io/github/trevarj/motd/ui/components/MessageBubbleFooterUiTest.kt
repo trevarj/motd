@@ -1113,6 +1113,150 @@ class MessageBubbleFooterUiTest {
     }
 
     @Test
+    @Config(sdk = [28, 35])
+    fun compactSenderHighlightHasRoundedEmptyCornersAcrossWrappingAndConcealment() {
+        data class Sample(
+            val sender: String = "alice",
+            val kind: MessageKind = MessageKind.PRIVMSG,
+            val bot: Boolean = false,
+            val showSender: Boolean = true,
+        )
+        val sample = mutableStateOf(Sample())
+        val concealed = mutableStateOf(false)
+        val body = "Reading https://example.com `code`"
+        val scheme = requireNotNull(fixedThemeScheme(ColorThemePreset.AYU_LIGHT))
+        val background = scheme.background.toArgb()
+        val highlight =
+            scheme.primary
+                .copy(alpha = 0.12f)
+                .compositeOver(scheme.background)
+                .toArgb()
+
+        fun matches(
+            actual: Int,
+            expected: Int,
+        ): Boolean =
+            (0..3).all { channel ->
+                val shift = channel * 8
+                kotlin.math.abs((actual ushr shift and 255) - (expected ushr shift and 255)) <= 1
+            }
+        compose.setContent {
+            MotdTheme(
+                dynamicColor = false,
+                themePreset = ColorThemePreset.AYU_LIGHT,
+                layoutDensity = LayoutDensity.COMPACT,
+                nicknameBackgroundsEnabled = false,
+                messageBackgroundOpacityPercent = 0,
+                timestampConfig = TimestampConfig(show = false),
+            ) {
+                CompositionLocalProvider(LocalDensity provides Density(2f, 1f)) {
+                    Box(Modifier.width(190.dp).background(MaterialTheme.colorScheme.background).testTag("rounded_sender_sample")) {
+                        FoolMessageScope(concealed.value, onReveal = {}) {
+                            MessageBubble(
+                                sender = sample.value.sender,
+                                text = body,
+                                timeMs = 0,
+                                formattedTime = TIME,
+                                isSelf = false,
+                                isBot = sample.value.bot,
+                                kind = sample.value.kind,
+                                showSender = sample.value.showSender,
+                                onSenderClick = {},
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        val samples =
+            listOf(
+                Sample(),
+                Sample(kind = MessageKind.NOTICE, bot = true),
+                Sample(kind = MessageKind.ACTION, bot = true),
+                Sample(sender = "alice אבג alice אבג alice אבג alice אבג", bot = true),
+                Sample(showSender = false),
+            )
+        for ((index, current) in samples.withIndex()) {
+            compose.runOnIdle {
+                sample.value = current
+                concealed.value = false
+            }
+            val canvas = compose.onNodeWithTag("rounded_sender_sample")
+            val textNode = compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true)
+            val layout = textNode.textLayout()
+            val image = canvas.captureToImage().asAndroidBitmap()
+            val proof = File("build/reports/compact-sender-rounded/compact-${current.kind.name.lowercase()}-$index-sdk-${RuntimeEnvironment.getApiLevel()}.png")
+            requireNotNull(proof.parentFile).mkdirs()
+            proof.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            val canvasBounds = canvas.fetchSemanticsNode().boundsInRoot
+            val textBounds = textNode.fetchSemanticsNode().boundsInRoot
+            val textOrigin = textBounds.topLeft - canvasBounds.topLeft
+            val codeOffset = layout.layoutInput.text.indexOf("code")
+            val codeRegion = layout.getPathForRange(codeOffset, codeOffset + 4).getBounds().translate(textOrigin)
+            val codeFill =
+                (if (current.kind == MessageKind.ACTION) scheme.surfaceVariant else scheme.surfaceVariant.copy(alpha = 0.72f))
+                    .compositeOver(scheme.background)
+                    .toArgb()
+            assertTrue(
+                "$current body code keeps its own background",
+                (codeRegion.left.toInt() until codeRegion.right.toInt()).any { x ->
+                    (codeRegion.top.toInt() until codeRegion.bottom.toInt()).any { y -> matches(image.getPixel(x, y), codeFill) }
+                },
+            )
+            if (!current.showSender) {
+                assertTrue(
+                    "elided sender leaves only the body",
+                    layout.layoutInput.text.text
+                        .startsWith("Reading "),
+                )
+                val top = kotlin.math.ceil(textOrigin.y).toInt()
+                assertTrue("elided sender must not paint a highlight", (0 until image.width).all { x -> matches(image.getPixel(x, top), background) })
+                continue
+            }
+            val nick = botDisplayName(current.sender, current.bot).let { if (current.kind == MessageKind.NOTICE) "-$it-" else it }
+            val start = layout.layoutInput.text.indexOf(nick)
+            val end = start + nick.length
+            val firstLine = layout.getLineForOffset(start)
+            val lastLine = layout.getLineForOffset(end - 1)
+            if (index == 3) assertTrue("mixed-direction sender must wrap", lastLine > firstLine)
+            val regions =
+                (firstLine..lastLine).map { line ->
+                    layout
+                        .getPathForRange(maxOf(start, layout.getLineStart(line)), minOf(end, layout.getLineEnd(line)))
+                        .getBounds()
+                        .translate(textOrigin)
+                }
+            for ((region, topEdge) in listOf(regions.first() to true, regions.last() to false)) {
+                val left = kotlin.math.ceil(region.left).toInt()
+                val right = kotlin.math.floor(region.right).toInt() - 1
+                val y = if (topEdge) kotlin.math.ceil(region.top).toInt() else kotlin.math.floor(region.bottom).toInt() - 1
+                assertTrue("$current empty outer left corner top=$topEdge", matches(image.getPixel(left, y), background))
+                assertTrue("$current empty outer right corner top=$topEdge", matches(image.getPixel(right, y), background))
+                assertTrue(
+                    "$current continuous filled outer edge top=$topEdge",
+                    (left + 8..right - 8).all { x -> matches(image.getPixel(x, y), highlight) },
+                )
+            }
+            val separator = layout.getBoundingBox(end).translate(textOrigin)
+            assertTrue(
+                "$current separator must remain outside the sender highlight",
+                matches(image.getPixel(separator.center.x.toInt(), kotlin.math.ceil(separator.top).toInt()), background),
+            )
+            compose.runOnIdle { concealed.value = true }
+            val covered = canvas.captureToImage().asAndroidBitmap()
+            assertFalse("$current body concealment must change pixels", image.sameAs(covered))
+            for (region in regions) {
+                assertTrue(
+                    "$current concealment must preserve the entire author",
+                    (kotlin.math.ceil(region.left).toInt() until region.right.toInt()).all { x ->
+                        (kotlin.math.ceil(region.top).toInt() until region.bottom.toInt()).all { y -> image.getPixel(x, y) == covered.getPixel(x, y) }
+                    },
+                )
+            }
+        }
+    }
+
+    @Test
     fun nicknameBackgroundToggleChangesOnlyOrdinaryDenseRowPixels() {
         data class Row(
             val self: Boolean = false,
@@ -1221,23 +1365,6 @@ class MessageBubbleFooterUiTest {
                         assertPaintedTextContrast("$label OFF", compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true), if (sample.dimmed) 4.5 else 7.0)
                     } else {
                         assertTrue("$label mentions, ACTION, and Comfortable must be unchanged", tinted.sameAs(plain))
-                    }
-                    val bodyText =
-                        compose
-                            .onNodeWithText("Reading", substring = true, useUnmergedTree = true)
-                            .textLayout()
-                            .layoutInput.text
-                    val mentionOffset = bodyText.indexOf("@bob")
-                    assertTrue(
-                        "$label mentions must not acquire a sender background",
-                        bodyText.spanStyles.none { mentionOffset in it.start until it.end && it.item.background != Color.Unspecified },
-                    )
-                    if (layout != LayoutDensity.COMFORTABLE && (layout == LayoutDensity.COMPACT && sample.sender || sample.kind == MessageKind.ACTION)) {
-                        val senderOffset = bodyText.indexOf("alice")
-                        assertTrue(
-                            "$label inline senders must retain their background",
-                            bodyText.spanStyles.any { senderOffset in it.start until it.end && it.item.background == scheme.primary.copy(alpha = 0.12f) },
-                        )
                     }
                     if (layout == LayoutDensity.TWO_LINE && sample.kind != MessageKind.ACTION) {
                         compose

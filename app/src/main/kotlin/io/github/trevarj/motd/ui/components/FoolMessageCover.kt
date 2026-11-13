@@ -19,13 +19,19 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.key.Key
@@ -54,6 +60,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.LocalSurfaceEffects
 
 internal const val FOOL_BODY_RANGE = "fool_body"
+internal const val COMPACT_SENDER_RANGE = "compact_sender"
 
 internal data class FoolBodyConcealment(
     val concealed: Boolean = false,
@@ -102,11 +109,13 @@ internal fun FoolBodyText(
     inlineBody: Boolean = false,
 ) {
     val ranges = remember(text) { text.getStringAnnotations(FOOL_BODY_RANGE, 0, text.length) }
+    val senderRange = remember(text) { text.getStringAnnotations(COMPACT_SENDER_RANGE, 0, text.length).firstOrNull() }
     val start = ranges.minOfOrNull { it.start } ?: if (inlineBody) text.length else 0
     val end = ranges.maxOfOrNull { it.end } ?: text.length
     val concealed = concealment.concealed && start < end
     val reveal = stringResource(R.string.chat_fool_reveal)
     val fill = MaterialTheme.colorScheme.surfaceContainerHighest
+    val senderFill = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
     val nativeBlur = Build.VERSION.SDK_INT >= 31 && LocalSurfaceEffects.current.enabled
     val radius = with(LocalDensity.current) { 40.dp.toPx() }
     val blurLayer = if (nativeBlur && concealed) rememberGraphicsLayer() else null
@@ -141,85 +150,112 @@ internal fun FoolBodyText(
         overflow = overflow,
         onTextLayout = { layout = it },
         modifier =
-            modifier.then(
-                if (!concealed) {
-                    Modifier
-                } else {
-                    Modifier
-                        .testTag(concealment.tag)
-                        .onPreviewKeyEvent {
-                            if (revealFocused && (it.key == Key.Enter || it.key == Key.Spacebar)) {
-                                if (it.type == KeyEventType.KeyUp) concealment.onReveal()
-                                true
-                            } else {
-                                false
-                            }
-                        }.onFocusChanged { revealFocused = it.isFocused }
-                        .focusable()
-                        .clearAndSetSemantics {
-                            contentDescription =
-                                text.text
-                                    .substring(0, start)
-                                    .trim()
-                                    .let { if (it.isEmpty()) reveal else "$it, $reveal" }
-                            onClick(label = reveal) {
-                                concealment.onReveal()
-                                true
-                            }
-                            senderLink?.let { link ->
-                                customActions =
-                                    listOf(
-                                        CustomAccessibilityAction(text.text.substring(0, start).trim()) {
-                                            link.linkInteractionListener?.onClick(link)
-                                            true
-                                        },
-                                    )
-                            }
-                        }.pointerInput(concealed, start, end, concealment.onReveal) {
-                            awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                                val result = layout
-                                val offset = result?.getOffsetForPosition(down.position)
-                                if ((start == 0 && end == text.length) ||
-                                    (offset != null && offset in start until end && result.getBoundingBox(offset).contains(down.position))
-                                ) {
-                                    down.consume()
-                                    var released: Boolean
-                                    var cancelled = false
-                                    do {
-                                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                                        val pointer = event.changes.firstOrNull { it.id == down.id }
-                                        cancelled = cancelled || pointer == null ||
-                                            (pointer.position - down.position).getDistance() > viewConfiguration.touchSlop ||
-                                            event.changes.any { it.id != down.id && it.pressed }
-                                        released = event.changes.none { it.pressed }
-                                        if (released && !cancelled) event.changes.forEach { it.consume() }
-                                    } while (!released)
-                                    if (!cancelled) concealment.onReveal()
-                                }
-                            }
-                        }.drawWithContent {
+            modifier
+                .then(
+                    if (senderRange == null) {
+                        Modifier
+                    } else {
+                        Modifier.drawWithCache {
                             val result = layout
-                            if (result == null || result.layoutInput.text.text != displayed.text) {
-                                // Never paint a readable frame while a new paragraph waits for layout.
-                                return@drawWithContent
-                            }
-                            val path = bodyPath?.takeIf { result === pathLayout } ?: result.getPathForRange(start, end)
-                            clipPath(path, ClipOp.Difference) { this@drawWithContent.drawContent() }
-                            clipPath(path) {
-                                if (blurLayer != null) {
-                                    blurLayer.renderEffect = blurEffect
-                                    blurLayer.record {
-                                        clipPath(path) { this@drawWithContent.drawContent() }
-                                    }
-                                    drawLayer(blurLayer)
+                            val senderPath =
+                                if (result != null && result.layoutInput.text.text == displayed.text) {
+                                    val path = result.getPathForRange(senderRange.start, senderRange.end)
+                                    Path.combine(PathOperation.Union, path, path)
                                 } else {
-                                    drawRect(fill)
+                                    null
                                 }
+                            val paint =
+                                Paint().apply {
+                                    this.color = senderFill
+                                    pathEffect = PathEffect.cornerPathEffect(4.dp.toPx())
+                                }
+                            onDrawWithContent {
+                                senderPath?.let { path ->
+                                    clipPath(path) { drawIntoCanvas { it.drawPath(path, paint) } }
+                                }
+                                drawContent()
                             }
                         }
-                },
-            ),
+                    },
+                ).then(
+                    if (!concealed) {
+                        Modifier
+                    } else {
+                        Modifier
+                            .testTag(concealment.tag)
+                            .onPreviewKeyEvent {
+                                if (revealFocused && (it.key == Key.Enter || it.key == Key.Spacebar)) {
+                                    if (it.type == KeyEventType.KeyUp) concealment.onReveal()
+                                    true
+                                } else {
+                                    false
+                                }
+                            }.onFocusChanged { revealFocused = it.isFocused }
+                            .focusable()
+                            .clearAndSetSemantics {
+                                contentDescription =
+                                    text.text
+                                        .substring(0, start)
+                                        .trim()
+                                        .let { if (it.isEmpty()) reveal else "$it, $reveal" }
+                                onClick(label = reveal) {
+                                    concealment.onReveal()
+                                    true
+                                }
+                                senderLink?.let { link ->
+                                    customActions =
+                                        listOf(
+                                            CustomAccessibilityAction(text.text.substring(0, start).trim()) {
+                                                link.linkInteractionListener?.onClick(link)
+                                                true
+                                            },
+                                        )
+                                }
+                            }.pointerInput(concealed, start, end, concealment.onReveal) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                    val result = layout
+                                    val offset = result?.getOffsetForPosition(down.position)
+                                    if ((start == 0 && end == text.length) ||
+                                        (offset != null && offset in start until end && result.getBoundingBox(offset).contains(down.position))
+                                    ) {
+                                        down.consume()
+                                        var released: Boolean
+                                        var cancelled = false
+                                        do {
+                                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                                            val pointer = event.changes.firstOrNull { it.id == down.id }
+                                            cancelled = cancelled || pointer == null ||
+                                                (pointer.position - down.position).getDistance() > viewConfiguration.touchSlop ||
+                                                event.changes.any { it.id != down.id && it.pressed }
+                                            released = event.changes.none { it.pressed }
+                                            if (released && !cancelled) event.changes.forEach { it.consume() }
+                                        } while (!released)
+                                        if (!cancelled) concealment.onReveal()
+                                    }
+                                }
+                            }.drawWithContent {
+                                val result = layout
+                                if (result == null || result.layoutInput.text.text != displayed.text) {
+                                    // Never paint a readable frame while a new paragraph waits for layout.
+                                    return@drawWithContent
+                                }
+                                val path = bodyPath?.takeIf { result === pathLayout } ?: result.getPathForRange(start, end)
+                                clipPath(path, ClipOp.Difference) { this@drawWithContent.drawContent() }
+                                clipPath(path) {
+                                    if (blurLayer != null) {
+                                        blurLayer.renderEffect = blurEffect
+                                        blurLayer.record {
+                                            clipPath(path) { this@drawWithContent.drawContent() }
+                                        }
+                                        drawLayer(blurLayer)
+                                    } else {
+                                        drawRect(fill)
+                                    }
+                                }
+                            }
+                    },
+                ),
     )
 }
 
