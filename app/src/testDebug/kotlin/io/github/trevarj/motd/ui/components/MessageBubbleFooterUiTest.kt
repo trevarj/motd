@@ -1201,8 +1201,8 @@ class MessageBubbleFooterUiTest {
                                 assertTrue("$label OFF must not disable nickname colors", coloredNicknameInk.getValue(layout) != ink)
                             }
                         }
-                        if (sample.friend) {
-                            val friendFill =
+                        if (sample.sender && !sample.dimmed) {
+                            val senderFill =
                                 scheme.primary
                                     .copy(alpha = 0.12f)
                                     .compositeOver(scheme.background)
@@ -1214,13 +1214,35 @@ class MessageBubbleFooterUiTest {
                             val top = (nickBounds.top - canvasBounds.top).toInt()
                             val bottom = (nickBounds.bottom - canvasBounds.top).toInt()
                             assertTrue(
-                                "$label OFF must preserve the painted friend nickname highlight",
-                                (left until right).any { x -> (top until bottom).any { py -> matchesPixel(plain.getPixel(x, py), friendFill) } },
+                                "$label OFF must preserve the painted sender nickname highlight",
+                                (left until right).any { x -> (top until bottom).any { py -> matchesPixel(plain.getPixel(x, py), senderFill) } },
                             )
                         }
                         assertPaintedTextContrast("$label OFF", compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true), if (sample.dimmed) 4.5 else 7.0)
                     } else {
                         assertTrue("$label mentions, ACTION, and Comfortable must be unchanged", tinted.sameAs(plain))
+                    }
+                    val bodyText =
+                        compose
+                            .onNodeWithText("Reading", substring = true, useUnmergedTree = true)
+                            .textLayout()
+                            .layoutInput.text
+                    val mentionOffset = bodyText.indexOf("@bob")
+                    assertTrue(
+                        "$label mentions must not acquire a sender background",
+                        bodyText.spanStyles.none { mentionOffset in it.start until it.end && it.item.background != Color.Unspecified },
+                    )
+                    if (layout != LayoutDensity.COMFORTABLE && (layout == LayoutDensity.COMPACT && sample.sender || sample.kind == MessageKind.ACTION)) {
+                        val senderOffset = bodyText.indexOf("alice")
+                        assertTrue(
+                            "$label inline senders must retain their background",
+                            bodyText.spanStyles.any { senderOffset in it.start until it.end && it.item.background == scheme.primary.copy(alpha = 0.12f) },
+                        )
+                    }
+                    if (layout == LayoutDensity.TWO_LINE && sample.kind != MessageKind.ACTION) {
+                        compose
+                            .onAllNodesWithTag("chat_sender_friend_star", useUnmergedTree = true)
+                            .assertCountEquals(if (sample.sender && sample.friend) 1 else 0)
                     }
                     compose.runOnIdle { enabled.value = true }
                     assertTrue("$label must restore its original rendered pixels", tinted.sameAs(canvas.captureToImage().asAndroidBitmap()))

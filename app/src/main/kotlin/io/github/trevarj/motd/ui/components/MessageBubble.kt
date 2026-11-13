@@ -438,7 +438,6 @@ fun MessageBubble(
                 modifier = renderedModifier,
                 hasMention = mentionHighlighted,
                 dimmed = dimmed,
-                senderIsFriend = senderIsFriend,
                 failed = failed,
                 pending = pending,
                 reply = reply,
@@ -524,7 +523,6 @@ fun MessageBubble(
             modifier = renderedModifier,
             hasMention = mentionHighlighted,
             dimmed = dimmed,
-            senderIsFriend = senderIsFriend,
             failed = failed,
             pending = pending,
             reply = reply,
@@ -743,7 +741,7 @@ fun MessageBubble(
                         fontWeight = FontWeight.Bold,
                         // Friend tint: a subtle theme-primary rounded background behind the name,
                         // layered under the nick color.
-                        modifier = if (senderIsFriend) Modifier.friendNickTint() else Modifier,
+                        modifier = if (senderIsFriend) Modifier.senderNickTint() else Modifier,
                     )
                     if (senderIsFriend) {
                         Icon(
@@ -1188,7 +1186,6 @@ private fun ActionMessageRow(
     modifier: Modifier = Modifier,
     hasMention: Boolean = false,
     dimmed: Boolean = false,
-    senderIsFriend: Boolean = false,
     failed: Boolean = false,
     pending: Boolean = false,
     reply: ReplyPreviewData? = null,
@@ -1247,12 +1244,7 @@ private fun ActionMessageRow(
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
     val codeColor = bodyInk
-    val friendTint =
-        if (senderIsFriend) {
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-        } else {
-            Color.Unspecified
-        }
+    val friendTint = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
     val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
     val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
     val senderLink =
@@ -1621,21 +1613,13 @@ private fun TwoLineMessageRow(
     val bodyInk = codeColor
     val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
     val nameBackground =
-        if (senderIsFriend) {
-            MaterialTheme.colorScheme.primary
-                .copy(alpha = 0.12f)
-                .compositeOver(contrastRow)
-        } else {
-            contrastRow
-        }
+        MaterialTheme.colorScheme.primary
+            .copy(alpha = 0.12f)
+            .compositeOver(contrastRow)
     val normalNameBackground =
-        if (senderIsFriend) {
-            MaterialTheme.colorScheme.primary
-                .copy(alpha = 0.12f)
-                .compositeOver(normalPaintedRow)
-        } else {
-            normalPaintedRow
-        }
+        MaterialTheme.colorScheme.primary
+            .copy(alpha = 0.12f)
+            .compositeOver(normalPaintedRow)
     val nameColor = remember(nameInk, nameBackground, normalNameBackground, dimmed) { messageContentColor(nameInk, nameBackground, dimmed, normalNameBackground) }
 
     MessagePaintedContent(
@@ -1690,7 +1674,8 @@ private fun TwoLineMessageRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier =
-                        (if (senderIsFriend) Modifier.friendNickTint() else Modifier)
+                        Modifier
+                            .senderNickTint()
                             .weight(1f, fill = false)
                             .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it },
                 )
@@ -1699,7 +1684,7 @@ private fun TwoLineMessageRow(
                         Icons.Filled.Star,
                         contentDescription = null,
                         tint = nameColor,
-                        modifier = Modifier.padding(start = 4.dp).size(12.dp),
+                        modifier = Modifier.padding(start = 4.dp).size(12.dp).testTag("chat_sender_friend_star"),
                     )
                 }
                 Row(
@@ -2400,12 +2385,12 @@ internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendMentionColor
 }
 
 /**
- * Subtle friend highlight behind the sender name: a low-alpha
+ * Subtle highlight behind the sender name: a low-alpha
  * theme-primary rounded pill layered under the nick color. Distinct enough to spot, quiet enough
  * not to fight the nick color or the bubble background.
  */
 @Composable
-internal fun Modifier.friendNickTint(): Modifier =
+internal fun Modifier.senderNickTint(): Modifier =
     this
         .clip(RoundedCornerShape(4.dp))
         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))

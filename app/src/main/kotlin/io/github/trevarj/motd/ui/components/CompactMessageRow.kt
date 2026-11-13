@@ -54,7 +54,7 @@ private const val COMPACT_ROW_TINT_ALPHA = 0.10f
 
 /**
  * Classic single-line IRC rendering used in COMPACT density: `nick: text` on one wrapping line,
- * nick colored via [NickColorScheme.nick] (friend tint preserved), a small trailing timestamp, no
+ * nick colored via [NickColorScheme.nick] with a sender background, a small trailing timestamp, no
  * avatar, no bubble, minimal vertical padding, uniformly left-aligned (IRC has no own-message
  * right-alignment). NOTICE gets a subtle `-nick-` marker; ACTION is handled by the shared accent
  * row before this renderer.
@@ -79,7 +79,6 @@ internal fun CompactMessageRow(
     dimmed: Boolean = false,
     // Group continuation flag: false = omit the `nick:` prefix so the line reads as a continued run.
     showSender: Boolean = true,
-    senderIsFriend: Boolean = false,
     failed: Boolean = false,
     pending: Boolean = false,
     reply: ReplyPreviewData? = null,
@@ -113,8 +112,7 @@ internal fun CompactMessageRow(
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
     val codeColor = readingInk(MaterialTheme.colorScheme)
     val nickFontSize = MaterialTheme.typography.bodyMedium.fontSize
-    // Friend highlight: a low-alpha primary background behind the nick, layered under the nick color.
-    val friendTint = if (senderIsFriend) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Unspecified
+    val senderTint = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
     // Per-nick row wash: a faint tint of the sender's own nick color behind the whole row so runs of
     // messages are visually trackable by speaker (stable per nick — no fragile list-wide parity).
     val rowTint =
@@ -140,7 +138,7 @@ internal fun CompactMessageRow(
     val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
 
     // The `nick: text` content is a single flowing AnnotatedString so it wraps as one paragraph
-    // like a real IRC line, with the nick colored (+ friend tint) and URLs linkified.
+    // like a real IRC line, with the nick colored and highlighted and URLs linkified.
     // Continuation lines (showSender == false) drop the `nick:` prefix so a run reads as one speaker.
     // Known-nick @mentions in the body are colored via the memoized resolver.
     val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
@@ -155,8 +153,7 @@ internal fun CompactMessageRow(
             nameColor,
             bodyColor,
             linkColor,
-            friendTint,
-            senderIsFriend,
+            senderTint,
             showSender,
             mentionColor,
             codeBackground,
@@ -172,7 +169,7 @@ internal fun CompactMessageRow(
                 nameColor,
                 bodyColor,
                 linkColor,
-                friendTint,
+                senderTint,
                 showSender,
                 isBot,
                 mentionColor,
@@ -269,7 +266,7 @@ internal fun CompactMessageRow(
 
 /**
  * Build the single-line `nick: text` content for COMPACT rendering. NOTICE uses `-nick-`; ordinary
- * messages use `nick: `. The nick span is colored (+ optional friend background); URLs in the body
+ * messages use `nick: `. The nick span is colored with a sender background; URLs in the body
  * are linkified and known-nick @mentions ([mentionColor]) are colored. When [showSender] is false
  * the prefix is dropped so the run reads as one speaker. Pure/testable.
  */
@@ -280,7 +277,7 @@ internal fun buildCompactLine(
     nameColor: Color,
     bodyColor: Color,
     linkColor: Color,
-    friendTint: Color,
+    senderTint: Color,
     showSender: Boolean = true,
     isBot: Boolean = false,
     mentionColor: (String) -> Color? = { null },
@@ -293,15 +290,15 @@ internal fun buildCompactLine(
 ): AnnotatedString =
     buildAnnotatedString {
         val nameBackground =
-            if (friendTint == Color.Unspecified || containerColor == Color.Unspecified) containerColor else friendTint.compositeOver(containerColor)
+            if (senderTint == Color.Unspecified || containerColor == Color.Unspecified) containerColor else senderTint.compositeOver(containerColor)
         val normalNameBackground =
-            if (friendTint == Color.Unspecified || normalContainerColor == Color.Unspecified) normalContainerColor else friendTint.compositeOver(normalContainerColor)
+            if (senderTint == Color.Unspecified || normalContainerColor == Color.Unspecified) normalContainerColor else senderTint.compositeOver(normalContainerColor)
         val nickStyle =
             SpanStyle(
                 color = if (nameBackground == Color.Unspecified) nameColor else messageContentColor(nameColor, nameBackground, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalNameBackground),
                 fontSize = nickFontSize,
                 fontWeight = FontWeight.Bold,
-                background = friendTint,
+                background = senderTint,
             )
         // Continuation lines omit the sender prefix entirely.
         if (showSender) {
