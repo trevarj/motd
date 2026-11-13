@@ -81,6 +81,7 @@ class MessageBubbleTextTest {
 
         assertEquals("hello bob", body.text)
         assertTrue(body.spanStyles.any { it.item.color == Color.Red })
+        assertTrue(body.spanStyles.all { it.item.fontWeight == null })
     }
 
     @Test
@@ -160,6 +161,20 @@ class MessageBubbleTextTest {
         assertTrue(body.spanStyles.any { it.item.color == Color.Red && body.text.substring(it.start, it.end) == "@bob" })
         assertTrue(body.spanStyles.any { it.item.fontFamily == FontFamily.Monospace && body.text.substring(it.start, it.end) == "code" })
         assertTrue(body.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+    }
+
+    @Test
+    fun automatic_mentions_are_color_only_and_explicit_bold_wins() {
+        val body =
+            linkifiedBody(
+                text = "bob ${IRC_BOLD}bob$IRC_BOLD",
+                linkColor = Color.Blue,
+                mentionColor = { if (it == "bob") Color.Red else null },
+            )
+        assertEquals("bob bob", body.text)
+        assertTrue(body.spanStyles.filter { it.item.color == Color.Red }.all { it.item.fontWeight == null })
+        assertTrue(body.spanStyles.none { it.start == 0 && it.item.fontWeight != null })
+        assertTrue(body.spanStyles.any { it.start == 4 && it.end == 7 && it.item.fontWeight == FontWeight.Bold })
     }
 
     @Test
@@ -269,7 +284,6 @@ class MessageBubbleTextTest {
                     scheme.secondary,
                     rowColor,
                     scheme.primary,
-                    scheme.primary.copy(alpha = 0.12f),
                     mentionColor = { if (it == "bob") scheme.secondary else null },
                     codeBackground = scheme.surfaceVariant.copy(alpha = 0.72f),
                     codeColor = readingInk,
@@ -412,6 +426,7 @@ class MessageBubbleTextTest {
         assertEquals(Color.Green, sender.color)
         assertEquals(FontWeight.Bold, sender.fontWeight)
         assertEquals(FontStyle.Normal, sender.fontStyle)
+        assertEquals(Color.Unspecified, sender.background)
         assertEquals(Color.Gray, body.color)
         assertEquals(FontStyle.Italic, body.fontStyle)
     }
@@ -427,6 +442,7 @@ class MessageBubbleTextTest {
                 nameColor = Color.Green,
                 bodyColor = Color.Gray,
                 linkColor = Color.Blue,
+                friendTint = Color.Yellow,
                 mentionsActive = false,
                 senderLink = senderLink,
                 includeStar = false,
@@ -440,6 +456,7 @@ class MessageBubbleTextTest {
         assertEquals(Color.Green, sender.color)
         assertEquals(FontWeight.Bold, sender.fontWeight)
         assertEquals(FontStyle.Normal, sender.fontStyle)
+        assertEquals(Color.Yellow, sender.background)
         assertEquals(Color.Gray, body.color)
         assertEquals(FontStyle.Italic, body.fontStyle)
         // Tappable nick survives the merge.

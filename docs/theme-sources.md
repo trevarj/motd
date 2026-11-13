@@ -105,11 +105,13 @@ shadows cannot composite over the sampled backing; opaque controls retain native
 
 Two-line headers keep sender names on one ellipsized line, reserving room for the avatar, friend
 indicator, delivery status, and timestamp even in narrow panes with large system fonts.
-Compact (classic IRC) sender prefixes and Two-line sender headers retain the subtle theme-primary
-nickname background used for friends, with matching 4dp rounded corners and extra horizontal room
-around the name. These highlights distinguish senders from bold, colored mentions even when
-consecutive messages omit the sender. Two-line's star remains friend-only; Comfortable friend styling
-is unchanged. The nickname-background toggle controls the row wash, not these sender highlights.
+Compact sender prefixes use `<nick> message`, with `[]`, `()`, or **None** (`nick: message`)
+available under Message layout only when Compact is selected, globally and per conversation.
+Conversation bracket overrides inherit the global choice independently of layout. Notices retain
+`-nick-` and actions retain `* nick`. Compact and Two-line sender names are bold and colored without
+nickname backgrounds; automatic mentions are color-only, while explicit IRC bold is preserved.
+Two-line's star remains friend-only; Comfortable friend styling is unchanged. The nickname-background
+toggle continues to control the row wash.
 
 Decorative monogram letters stay proportional to their fixed avatar discs, including the 20dp
 two-line avatar, at enlarged system font sizes. Message and sender text still follow font scaling.

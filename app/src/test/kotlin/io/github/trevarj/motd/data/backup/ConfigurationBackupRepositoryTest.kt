@@ -27,6 +27,7 @@ import io.github.trevarj.motd.data.prefs.ChatSoundVoice
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
@@ -70,6 +71,34 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class ConfigurationBackupRepositoryTest {
+    @Test
+    fun compactNickBracketsRoundTripAndOldSettingsDefaultToAngle() =
+        runTest {
+            val settings = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())
+            val original = settings.settings.first().compactNickBrackets
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                for (selected in listOf(CompactNickBrackets.SQUARE, CompactNickBrackets.ROUND)) {
+                    settings.setCompactNickBrackets(selected)
+                    val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                    assertTrue(raw.contains("\"compactNickBrackets\": \"${selected.name}\""))
+
+                    settings.setCompactNickBrackets(CompactNickBrackets.ANGLE)
+                    backup.import(raw, importMode = BackupImportMode.MERGE)
+                    assertEquals(selected, settings.settings.first().compactNickBrackets)
+
+                    val legacy = raw.replace(Regex(""",?\s*"compactNickBrackets"\s*:\s*"${selected.name}""""), "")
+                    assertFalse(legacy.contains("compactNickBrackets"))
+                    backup.import(legacy, importMode = BackupImportMode.MERGE)
+                    assertEquals(CompactNickBrackets.ANGLE, settings.settings.first().compactNickBrackets)
+                }
+            } finally {
+                settings.setCompactNickBrackets(original)
+                db.close()
+            }
+        }
+
     @Test
     fun customPresenceSelectionsRoundTripIncludingEmpty() =
         runTest {

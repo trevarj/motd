@@ -314,6 +314,11 @@ class JoinInviteViewModelTest {
             layout: LayoutDensity?,
         ): Boolean = true
 
+        override suspend fun setCompactNickBracketsOverride(
+            id: Long,
+            brackets: io.github.trevarj.motd.data.prefs.CompactNickBrackets?,
+        ): Boolean = true
+
         override suspend fun setMessageBackgroundOpacityOverride(
             id: Long,
             percent: Int?,

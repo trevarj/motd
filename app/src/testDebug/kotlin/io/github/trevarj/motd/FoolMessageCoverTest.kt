@@ -439,7 +439,7 @@ class FoolMessageCoverTest {
                     if (messageKind == MessageKind.ACTION) {
                         compose.onNodeWithTag("chat_action_text", useUnmergedTree = true)
                     } else {
-                        compose.onNodeWithText("fool:", useUnmergedTree = true)
+                        compose.onNodeWithText("<fool>", useUnmergedTree = true)
                     }
                 prefix.assertIsDisplayed()
                 compose.onNodeWithText("12:34", useUnmergedTree = true).assertIsDisplayed()

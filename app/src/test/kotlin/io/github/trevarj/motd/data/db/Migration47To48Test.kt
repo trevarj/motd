@@ -6,6 +6,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import kotlinx.coroutines.test.runTest
@@ -114,6 +115,56 @@ class Migration47To48Test {
                 assertNull(reset.messageBackgroundBlurOverride)
                 assertEquals(0, reset.messageBackgroundOpacityOverride)
                 assertEquals(LayoutDensity.COMPACT, reset.layoutDensityOverride)
+            } finally {
+                migrated.close()
+            }
+        }
+
+    @Test
+    fun migration49To50AddsInheritedBracketsAndPreservesLayoutOpacityAndBlur() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            context.deleteDatabase(DB_NAME)
+            helper =
+                FrameworkSQLiteOpenHelperFactory().create(
+                    SupportSQLiteOpenHelper.Configuration
+                        .builder(context)
+                        .name(DB_NAME)
+                        .callback(
+                            object : SupportSQLiteOpenHelper.Callback(49) {
+                                override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion(db, 49)
+
+                                override fun onUpgrade(
+                                    db: SupportSQLiteDatabase,
+                                    oldVersion: Int,
+                                    newVersion: Int,
+                                ) = Unit
+                            },
+                        ).build(),
+                )
+            helper!!.writableDatabase.apply {
+                execSQL("INSERT INTO networks(id, name, role, host, port, tls, nick, username, realname, saslMechanism, autoConnect, ordering, restoreAutoConnect) VALUES (1, 'n', 'DIRECT', 'irc.example', 6697, 1, 'me', 'me', 'Me', 'NONE', 1, 0, 1)")
+                execSQL("INSERT INTO buffers(id, networkId, name, displayName, type, joined, membershipCycle, pinned, muted, archived, ordering, historyComplete, dismissed, layoutDensityOverride, messageBackgroundOpacityOverride, messageBackgroundBlurOverride) VALUES (1, 1, '#c', '#c', 'CHANNEL', 1, 1, 0, 0, 0, 0, 0, 0, 'COMPACT', 0, 63)")
+            }
+            helper!!.close()
+            helper = null
+            val migrated = Room.databaseBuilder(context, MotdDatabase::class.java, DB_NAME).addMigrations(*ALL_MIGRATIONS).build()
+            try {
+                val room = requireNotNull(migrated.bufferDao().observeById(1))
+                assertNull(room.compactNickBracketsOverride)
+                assertEquals(LayoutDensity.COMPACT, room.layoutDensityOverride)
+                assertEquals(0, room.messageBackgroundOpacityOverride)
+                assertEquals(63, room.messageBackgroundBlurOverride)
+                for (brackets in CompactNickBrackets.entries) {
+                    assertEquals(1, migrated.bufferDao().setCompactNickBracketsOverride(1, brackets))
+                    assertEquals(brackets, migrated.bufferDao().observeById(1)?.compactNickBracketsOverride)
+                }
+                assertEquals(1, migrated.bufferDao().setCompactNickBracketsOverride(1, null))
+                val reset = requireNotNull(migrated.bufferDao().observeById(1))
+                assertNull(reset.compactNickBracketsOverride)
+                assertEquals(LayoutDensity.COMPACT, reset.layoutDensityOverride)
+                assertEquals(0, reset.messageBackgroundOpacityOverride)
+                assertEquals(63, reset.messageBackgroundBlurOverride)
             } finally {
                 migrated.close()
             }

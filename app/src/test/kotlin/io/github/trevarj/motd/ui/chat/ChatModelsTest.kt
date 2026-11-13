@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.history.HistoryLadderStalled
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
@@ -61,6 +62,17 @@ class ChatModelsTest {
                 override = LayoutDensity.COMFORTABLE,
             ).effective,
         )
+    }
+
+    @Test
+    fun `compact brackets inherit global independently of every density default`() {
+        for (density in LayoutDensity.entries) {
+            val inherited = ConversationLayoutState(global = density, bufferDefault = LayoutDensity.TWO_LINE, override = density)
+            assertEquals(CompactNickBrackets.SQUARE, inherited.effectiveCompactNickBrackets(CompactNickBrackets.SQUARE))
+            val local = inherited.copy(compactNickBracketsOverride = CompactNickBrackets.NONE)
+            assertEquals(CompactNickBrackets.NONE, local.effectiveCompactNickBrackets(CompactNickBrackets.SQUARE))
+            assertEquals(CompactNickBrackets.SQUARE, local.copy(compactNickBracketsOverride = null).effectiveCompactNickBrackets(CompactNickBrackets.SQUARE))
+        }
     }
 
     @Test

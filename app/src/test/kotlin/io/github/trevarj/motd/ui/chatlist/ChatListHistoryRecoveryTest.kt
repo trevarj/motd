@@ -446,6 +446,11 @@ class ChatListHistoryRecoveryTest {
                     layout: LayoutDensity?,
                 ): Boolean = error("Unexpected layout mutation")
 
+                override suspend fun setCompactNickBracketsOverride(
+                    id: Long,
+                    brackets: io.github.trevarj.motd.data.prefs.CompactNickBrackets?,
+                ): Boolean = error("Unexpected brackets mutation")
+
                 override suspend fun setMessageBackgroundOpacityOverride(
                     id: Long,
                     percent: Int?,

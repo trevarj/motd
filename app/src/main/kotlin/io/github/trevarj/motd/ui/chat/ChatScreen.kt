@@ -216,6 +216,7 @@ import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.EffectSurface
 import io.github.trevarj.motd.data.prefs.FoolPreferences
@@ -281,6 +282,7 @@ import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
 import io.github.trevarj.motd.ui.settings.foolEditorPreferences
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.ConversationTypography
+import io.github.trevarj.motd.ui.theme.LocalCompactNickBrackets
 import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundBlur
 import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundOpacityPercent
 import io.github.trevarj.motd.ui.theme.LocalSpacing
@@ -829,6 +831,7 @@ fun ChatScreen(
         onDismissAccountSetup = viewModel::dismissAccountSetupReminder,
         conversationLayout = state.conversationLayout,
         onConversationLayoutSelected = viewModel::setConversationLayoutOverride,
+        onCompactNickBracketsOverride = viewModel::setCompactNickBracketsOverride,
         onConversationMessageBackgroundOpacitySelected = viewModel::setConversationMessageBackgroundOpacityOverride,
         onConversationMessageBackgroundBlurSelected = viewModel::setConversationMessageBackgroundBlurOverride,
         onPresenceModeSelected = viewModel::setPresenceModeOverride,
@@ -1272,6 +1275,7 @@ internal fun ChatContent(
     nearestUnreadMentionBelow: suspend (Int, io.github.trevarj.motd.data.db.TimelineAnchor) -> ChatPositionTarget? = { _, _ -> null },
     conversationLayout: ConversationLayoutState = ConversationLayoutState(),
     onConversationLayoutSelected: (io.github.trevarj.motd.data.prefs.LayoutDensity?) -> Unit = {},
+    onCompactNickBracketsOverride: (CompactNickBrackets?) -> Unit = {},
     onConversationMessageBackgroundOpacitySelected: (Int?) -> Unit = {},
     onConversationMessageBackgroundBlurSelected: (Int?) -> Unit = {},
     onPresenceModeSelected: (io.github.trevarj.motd.data.prefs.PresenceMode?) -> Unit = {},
@@ -1309,6 +1313,7 @@ internal fun ChatContent(
     onReadAloudPreview: (ReadAloudSelection) -> Unit = {},
     composerStyle: ComposerStyle = ComposerStyle.COMFORTABLE,
 ) {
+    val globalCompactNickBrackets = LocalCompactNickBrackets.current
     val wallpaperSource = rememberSurfaceBackdropSource()
     val pageBackdrop = rememberSurfaceBackdropSource(wallpaperSource)
     // Scope the page before deriving UI state: capturing the entire derived screen exceeds JVM parameter slots.
@@ -4041,6 +4046,7 @@ internal fun ChatContent(
                             Box(modifier = Modifier.fillMaxSize()) {
                                 CompositionLocalProvider(
                                     LocalSpacing provides conversationSpacing,
+                                    LocalCompactNickBrackets provides conversationLayout.effectiveCompactNickBrackets(globalCompactNickBrackets),
                                     LocalMessageBackgroundOpacityPercent provides conversationLayout.effectiveMessageBackgroundOpacity(LocalMessageBackgroundOpacityPercent.current),
                                     LocalMessageBackgroundBlur provides effectiveBlur,
                                     LocalMessageWallpaperBackdrop provides wallpaperBackdrop,
@@ -4378,6 +4384,7 @@ internal fun ChatContent(
                         // pane's, so the replica renders under exactly the tokens the rows use.
                         CompositionLocalProvider(
                             LocalSpacing provides conversationSpacing,
+                            LocalCompactNickBrackets provides conversationLayout.effectiveCompactNickBrackets(globalCompactNickBrackets),
                             LocalMessageBackgroundOpacityPercent provides conversationLayout.effectiveMessageBackgroundOpacity(LocalMessageBackgroundOpacityPercent.current),
                             LocalMessageBackgroundBlur provides effectiveBlur,
                             LocalMessageWallpaperBackdrop provides wallpaperBackdrop,
@@ -4815,6 +4822,8 @@ internal fun ChatContent(
                 globalOpacity = LocalMessageBackgroundOpacityPercent.current,
                 onBlur = onConversationMessageBackgroundBlurSelected,
                 globalBlur = LocalMessageBackgroundBlur.current,
+                globalCompactNickBrackets = globalCompactNickBrackets,
+                onCompactNickBracketsOverride = onCompactNickBracketsOverride,
                 onDismiss = { conversationLayoutSheetOpen = false },
                 wallpaper = chatWallpaper,
                 conversationFontScalePercent = conversationFontScalePercent,

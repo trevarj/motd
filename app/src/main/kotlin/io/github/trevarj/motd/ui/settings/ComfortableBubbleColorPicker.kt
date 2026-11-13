@@ -206,6 +206,7 @@ private fun AppearanceBubbleColorOptions(
         dynamicColor = settings.dynamicColor,
         followSystem = appearance.followSystem,
         useThemeTextColors = appearance.useThemeTextColors,
+        compactNickBrackets = settings.compactNickBrackets,
         syncSystemBars = false,
     ) { content() }
 }
@@ -223,6 +224,7 @@ private fun AppearanceBubblePreview(
         followSystem = appearance.followSystem,
         useThemeTextColors = appearance.useThemeTextColors,
         layoutDensity = LayoutDensity.COMFORTABLE,
+        compactNickBrackets = settings.compactNickBrackets,
         nickColorsEnabled = settings.nickColorsEnabled,
         nickColorPalette = settings.nickColorPalette,
         nickColorOverrides = settings.nickColorOverrides,

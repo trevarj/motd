@@ -107,7 +107,7 @@ class MessageBubbleLayoutTest {
         val bodies =
             listOf(
                 linkifiedBody(raw, Color.Blue, true, { Color.Magenta }, Color.LightGray, Color.Black, fill, body, DIMMED_MESSAGE_TEXT_CONTRAST),
-                buildCompactLine("alice", raw, MessageKind.NOTICE, Color.Red, body, Color.Blue, Color.Unspecified, mentionColor = { Color.Magenta }, codeBackground = Color.LightGray, codeColor = Color.Black, containerColor = fill, minimumContrast = DIMMED_MESSAGE_TEXT_CONTRAST),
+                buildCompactLine("alice", raw, MessageKind.NOTICE, Color.Red, body, Color.Blue, mentionColor = { Color.Magenta }, codeBackground = Color.LightGray, codeColor = Color.Black, containerColor = fill, minimumContrast = DIMMED_MESSAGE_TEXT_CONTRAST),
                 buildActionLine("alice", raw, Color.Red, Color.Red, body, Color.Blue, mentionColor = { Color.Magenta }, codeBackground = Color.LightGray, codeColor = Color.Black, containerColor = fill, minimumContrast = DIMMED_MESSAGE_TEXT_CONTRAST),
             )
         for (text in bodies) {

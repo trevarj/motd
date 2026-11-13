@@ -197,6 +197,11 @@ internal class FakeBuffers : BufferRepository {
         layout: LayoutDensity?,
     ): Boolean = false
 
+    override suspend fun setCompactNickBracketsOverride(
+        id: Long,
+        brackets: io.github.trevarj.motd.data.prefs.CompactNickBrackets?,
+    ): Boolean = false
+
     override suspend fun setMessageBackgroundOpacityOverride(
         id: Long,
         percent: Int?,
@@ -447,6 +452,10 @@ internal class FakeSettings(
     override suspend fun setDeliveryMode(m: DeliveryMode) = Unit
 
     override suspend fun setLayoutDensity(d: LayoutDensity) = Unit
+
+    override suspend fun setCompactNickBrackets(value: io.github.trevarj.motd.data.prefs.CompactNickBrackets) {
+        state.value = state.value.copy(compactNickBrackets = value)
+    }
 
     override suspend fun setNickColorsEnabled(enabled: Boolean) = Unit
 

@@ -42,6 +42,7 @@ import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.AccountReminderStore
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.EbooksLabsPrefs
@@ -1047,6 +1048,7 @@ class ChatViewModel
                     global = settings.layoutDensity,
                     override = room?.layoutDensityOverride,
                     bufferDefault = LayoutDensity.TWO_LINE.takeIf { room?.type == BufferType.SERVER },
+                    compactNickBracketsOverride = room?.compactNickBracketsOverride,
                     messageBackgroundOpacityOverride = room?.messageBackgroundOpacityOverride,
                     messageBackgroundBlurOverride = room?.messageBackgroundBlurOverride,
                 )
@@ -1763,6 +1765,20 @@ class ChatViewModel
                 val written =
                     try {
                         bufferRepository.setLayoutDensityOverride(requestedId, override)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        false
+                    }
+                if (!written) uiEventQueue.enqueue(ChatUiEvent.ConversationLayoutWriteFailed)
+            }
+
+        fun setCompactNickBracketsOverride(brackets: CompactNickBrackets?) =
+            viewModelScope.launch {
+                val requestedId = operationalBufferId.value
+                val written =
+                    try {
+                        bufferRepository.setCompactNickBracketsOverride(requestedId, brackets)
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: Exception) {

@@ -18,6 +18,7 @@ import io.github.trevarj.motd.data.db.NotificationChannelRow
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.history.TimelineSeam
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
@@ -188,6 +189,11 @@ interface BufferRepository {
     suspend fun setLayoutDensityOverride(
         id: Long,
         layout: LayoutDensity?,
+    ): Boolean
+
+    suspend fun setCompactNickBracketsOverride(
+        id: Long,
+        brackets: CompactNickBrackets?,
     ): Boolean
 
     /** Null inherits global opacity; false means the requested conversation disappeared. */

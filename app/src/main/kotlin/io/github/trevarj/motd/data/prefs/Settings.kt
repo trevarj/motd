@@ -33,6 +33,16 @@ enum class ThemeMode {
 // Round 4: user-customizable UI settings.
 enum class LayoutDensity { COMPACT, COMFORTABLE, TWO_LINE }
 
+enum class CompactNickBrackets(
+    val opening: String,
+    val closing: String,
+) {
+    ANGLE("<", ">"),
+    SQUARE("[", "]"),
+    ROUND("(", ")"),
+    NONE("", ""),
+}
+
 enum class NickColorPalette { THEME, CLASSIC, VIVID }
 
 enum class FoolsMode { DIMMED, BLUR, COLLAPSE, HIDE }
@@ -283,6 +293,7 @@ data class Settings(
     val deliveryMode: DeliveryMode = DeliveryMode.PERSISTENT_SOCKET,
     // Round 4
     val layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
+    val compactNickBrackets: CompactNickBrackets = CompactNickBrackets.ANGLE,
     val nickColorsEnabled: Boolean = true,
     val nickColorPalette: NickColorPalette = NickColorPalette.THEME,
     /** Normalized nick -> hue/position 0..359, rendered through the active palette. */
@@ -372,6 +383,8 @@ interface SettingsRepository {
 
     // Round 4
     suspend fun setLayoutDensity(d: LayoutDensity)
+
+    suspend fun setCompactNickBrackets(value: CompactNickBrackets)
 
     suspend fun setFolderDisplayMode(mode: FolderDisplayMode) {}
 

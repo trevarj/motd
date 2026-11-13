@@ -43,6 +43,7 @@ import io.github.trevarj.motd.data.db.UserEntity
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaper
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.EbooksLabsPrefs
@@ -2337,6 +2338,51 @@ class ChatViewModelTest {
             assertEquals(listOf(query.id to LayoutDensity.TWO_LINE), queryBuffers.layoutWrites)
             assertEquals(LayoutDensity.COMPACT, channelVm.state.value.conversationLayout.effective)
             assertEquals(LayoutDensity.TWO_LINE, queryVm.state.value.conversationLayout.effective)
+        }
+
+    @Test
+    fun `compact brackets inherit global independently and persist canonical room override`() =
+        runTest {
+            val settings = FakeSettingsRepository()
+            val buffers = FakeBufferRepository(channel, routeId = query.id)
+            val vm = viewModel(channel, FakeConnectionManager(network.id), routeBufferId = query.id, buffers = buffers, settings = settings)
+            vm.state.first { it.buffer?.id == channel.id }
+            settings.setCompactNickBrackets(CompactNickBrackets.SQUARE)
+            vm.setCompactNickBracketsOverride(CompactNickBrackets.ROUND).join()
+            val explicit = vm.state.first { it.conversationLayout.compactNickBracketsOverride == CompactNickBrackets.ROUND }
+            assertEquals(CompactNickBrackets.ROUND, explicit.conversationLayout.effectiveCompactNickBrackets(settings.settings.value.compactNickBrackets))
+            assertEquals(listOf(channel.id to CompactNickBrackets.ROUND), buffers.bracketWrites)
+            assertNull(explicit.conversationLayout.override)
+            settings.setCompactNickBrackets(CompactNickBrackets.ANGLE)
+            assertEquals(
+                CompactNickBrackets.ROUND,
+                vm.state.value.conversationLayout
+                    .effectiveCompactNickBrackets(CompactNickBrackets.ANGLE),
+            )
+            vm.setCompactNickBracketsOverride(null).join()
+            val inherited = vm.state.first { it.conversationLayout.compactNickBracketsOverride == null }
+            assertEquals(CompactNickBrackets.ANGLE, inherited.conversationLayout.effectiveCompactNickBrackets(settings.settings.value.compactNickBrackets))
+        }
+
+    @Test
+    fun `compact bracket rejection and exceptions surface without optimistic state while cancellation propagates`() =
+        runTest {
+            val buffers = FakeBufferRepository(channel).apply { bracketWriteResult = false }
+            val vm = viewModel(channel, FakeConnectionManager(network.id), buffers = buffers)
+            vm.state.first { it.buffer != null }
+            for (failure in listOf(null, IllegalStateException("write failed"))) {
+                buffers.bracketWriteFailure = failure
+                vm.setCompactNickBracketsOverride(CompactNickBrackets.SQUARE).join()
+                assertNull(vm.state.value.conversationLayout.compactNickBracketsOverride)
+                val event = vm.uiEvents.first { it.isNotEmpty() }.single()
+                assertEquals(ChatUiEvent.ConversationLayoutWriteFailed, event.value)
+                vm.acknowledgeUiEvent(event.id)
+            }
+            buffers.bracketWriteFailure = CancellationException("leaving")
+            val canceled = vm.setCompactNickBracketsOverride(null)
+            canceled.join()
+            assertTrue(canceled.isCancelled)
+            assertTrue(vm.uiEvents.value.isEmpty())
         }
 
     @Test
@@ -7158,6 +7204,9 @@ class ChatViewModelTest {
         val chatList = MutableStateFlow<List<ChatListRow>>(emptyList())
         val layoutWrites = mutableListOf<Pair<Long, LayoutDensity?>>()
         var layoutWriteResult = true
+        val bracketWrites = mutableListOf<Pair<Long, CompactNickBrackets?>>()
+        var bracketWriteResult = true
+        var bracketWriteFailure: Exception? = null
         val opacityWrites = mutableListOf<Pair<Long, Int?>>()
         var opacityWriteResult = true
         var opacityWriteFailure: Exception? = null
@@ -7208,6 +7257,16 @@ class ChatViewModelTest {
             layoutWrites += id to layout
             if (layoutWriteResult) buffer.value = buffer.value.copy(layoutDensityOverride = layout)
             return layoutWriteResult
+        }
+
+        override suspend fun setCompactNickBracketsOverride(
+            id: Long,
+            brackets: CompactNickBrackets?,
+        ): Boolean {
+            bracketWrites += id to brackets
+            bracketWriteFailure?.let { throw it }
+            if (bracketWriteResult) buffer.value = buffer.value.copy(compactNickBracketsOverride = brackets)
+            return bracketWriteResult
         }
 
         override suspend fun setMessageBackgroundOpacityOverride(
@@ -7425,6 +7484,10 @@ class ChatViewModelTest {
         override suspend fun setDeliveryMode(m: DeliveryMode) = Unit
 
         override suspend fun setLayoutDensity(d: LayoutDensity) = Unit
+
+        override suspend fun setCompactNickBrackets(value: CompactNickBrackets) {
+            settings.value = settings.value.copy(compactNickBrackets = value)
+        }
 
         override suspend fun setNickColorsEnabled(enabled: Boolean) = Unit
 

@@ -12,6 +12,7 @@ import androidx.room.SkipQueryVerification
 import androidx.room.Transaction
 import androidx.room.Update
 import androidx.sqlite.db.SupportSQLiteQuery
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
@@ -574,6 +575,19 @@ interface BufferDao {
     suspend fun setLayoutDensityOverride(
         requestedId: RoomId,
         layout: LayoutDensity?,
+    ): Int
+
+    @Query(
+        """UPDATE buffers SET compactNickBracketsOverride = :brackets
+           WHERE id = (
+               SELECT COALESCE(redirectToRoomId, id)
+               FROM buffers
+               WHERE id = :requestedId
+           )""",
+    )
+    suspend fun setCompactNickBracketsOverride(
+        requestedId: RoomId,
+        brackets: CompactNickBrackets?,
     ): Int
 
     /** Write via a stale redirect shell to its current canonical conversation. */

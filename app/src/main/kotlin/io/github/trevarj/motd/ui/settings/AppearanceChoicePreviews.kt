@@ -72,6 +72,7 @@ internal fun AppearanceSampleTheme(
         followSystem = appearance.followSystem,
         useThemeTextColors = appearance.useThemeTextColors,
         layoutDensity = settings.layoutDensity,
+        compactNickBrackets = settings.compactNickBrackets,
         nickColorsEnabled = settings.nickColorsEnabled,
         nickColorPalette = settings.nickColorPalette,
         nickColorOverrides = emptyMap(),

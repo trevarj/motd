@@ -1005,6 +1005,9 @@
          tagged so lint (warningsAsErrors) stays green mid-wave.
          WP-U4 strips the markers once the usages exist. -->
     <string name="settings_density">Message layout</string>
+    <string name="settings_compact_nick_brackets">Nickname brackets</string>
+    <string name="settings_compact_nick_brackets_none">None</string>
+    <string name="chat_layout_global_brackets">Use global brackets</string>
     <string name="settings_nickname_backgrounds">Nickname backgrounds</string>
     <string name="settings_nickname_backgrounds_desc">Tint Compact and Two-line message backgrounds by sender. Nickname colors and mention highlights are unchanged.</string>
     <string name="settings_message_background_opacity">Message background opacity</string>

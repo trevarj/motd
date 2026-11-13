@@ -2085,7 +2085,7 @@ private fun ComposerTextField(
                             val nickStart = i
                             while (i < visibleText.length && visibleText[i].isComposerNickChar()) i++
                             val color = mentionColor(visibleText.substring(nickStart, i)) ?: continue
-                            addStyle(SpanStyle(color = color, fontWeight = FontWeight.Medium), start, i)
+                            addStyle(SpanStyle(color = color), start, i)
                         }
                     }
                 }

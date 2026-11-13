@@ -32,6 +32,7 @@ import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.DEFAULT_CUSTOM_TIME_FORMAT
 import io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.data.prefs.FontChoice
@@ -157,6 +158,9 @@ val LocalChatShadowsEnabled: ProvidableCompositionLocal<Boolean> = staticComposi
 /** Controls only the ordinary sender wash in Compact and Two-line message rows. */
 val LocalNicknameBackgroundsEnabled: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { true }
 
+val LocalCompactNickBrackets: ProvidableCompositionLocal<CompactNickBrackets> =
+    staticCompositionLocalOf { CompactNickBrackets.ANGLE }
+
 /** Ordinary message backing in every layout; incoming mention fills and child surfaces are separate. */
 val LocalMessageBackgroundOpacityPercent: ProvidableCompositionLocal<Int> = staticCompositionLocalOf { 100 }
 
@@ -253,6 +257,7 @@ fun MotdTheme(
     useThemeTextColors: Boolean = false,
     // Round 4; all defaulted so existing call sites (incl. previews) stay unchanged.
     layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
+    compactNickBrackets: CompactNickBrackets = CompactNickBrackets.ANGLE,
     nickColorsEnabled: Boolean = true,
     nickColorPalette: NickColorPalette = NickColorPalette.THEME,
     nickColorOverrides: Map<String, Int> = emptyMap(),
@@ -373,6 +378,7 @@ fun MotdTheme(
         CompositionLocalProvider(
             LocalUseThemeTextColors provides useThemeTextColors,
             LocalSpacing provides spacingFor(layoutDensity, messageSpacing, bubbleCornerStyle),
+            LocalCompactNickBrackets provides compactNickBrackets,
             LocalInputCornerStyle provides inputCornerStyle,
             LocalAvatarShape provides avatarShape,
             LocalChatCardCornerStyle provides chatCardCornerStyle,

@@ -16,6 +16,7 @@ import io.github.trevarj.motd.data.db.ObservationOrigin
 import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.inMemoryDb
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
@@ -1112,6 +1113,57 @@ class BufferStoreCanonicalTest {
             db.bufferDao().deleteBuffer(unrelated.id)
             assertEquals(null, store.getOrCreate(networkId, "#room", "#room", BufferType.CHANNEL).messageBackgroundBlurOverride)
             assertEquals(0, db.bufferDao().setMessageBackgroundBlurOverride(-1, 63))
+        }
+
+    @Test
+    fun bracketMergePreservesWinnerChoiceAndFallsBackToLoserOnlyForInheritance() =
+        runTest {
+            val winner = store.getOrCreate(networkId, "older", "Older", BufferType.QUERY)
+            val loser = store.getOrCreate(networkId, "newer", "Newer", BufferType.QUERY)
+            db.bufferDao().setCompactNickBracketsOverride(winner.id, CompactNickBrackets.NONE)
+            db.bufferDao().setCompactNickBracketsOverride(loser.id, CompactNickBrackets.ROUND)
+
+            val merged = store.mergeRooms(winner.id, loser.id)
+
+            assertEquals(CompactNickBrackets.NONE, merged.compactNickBracketsOverride)
+            assertEquals(CompactNickBrackets.NONE, db.bufferDao().rawById(winner.id)?.compactNickBracketsOverride)
+            val inherited = store.getOrCreate(networkId, "third", "Third", BufferType.QUERY)
+            val configured = store.getOrCreate(networkId, "fourth", "Fourth", BufferType.QUERY)
+            db.bufferDao().setCompactNickBracketsOverride(configured.id, CompactNickBrackets.SQUARE)
+            assertEquals(CompactNickBrackets.SQUARE, store.mergeRooms(inherited.id, configured.id).compactNickBracketsOverride)
+            assertEquals(CompactNickBrackets.SQUARE, db.bufferDao().rawById(inherited.id)?.compactNickBracketsOverride)
+        }
+
+    @Test
+    fun bracketWritesFollowStaleAliasesRemainIsolatedAndResetOnlyBrackets() =
+        runTest {
+            val winner = store.getOrCreate(networkId, "older", "Older", BufferType.QUERY)
+            val loser = store.getOrCreate(networkId, "newer", "Newer", BufferType.QUERY)
+            val channel = store.getOrCreate(networkId, "#room", "#room", BufferType.CHANNEL)
+            val server = store.getOrCreate(networkId, "*", "Server", BufferType.SERVER)
+            db.bufferDao().setCompactNickBracketsOverride(loser.id, CompactNickBrackets.ROUND)
+            db.bufferDao().setCompactNickBracketsOverride(channel.id, CompactNickBrackets.ANGLE)
+            db.bufferDao().setCompactNickBracketsOverride(server.id, CompactNickBrackets.ROUND)
+            db.bufferDao().setLayoutDensityOverride(winner.id, LayoutDensity.COMPACT)
+            db.bufferDao().setMessageBackgroundOpacityOverride(winner.id, 37)
+            db.bufferDao().setMessageBackgroundBlurOverride(winner.id, 63)
+            store.mergeRooms(winner.id, loser.id)
+
+            assertEquals(1, db.bufferDao().setCompactNickBracketsOverride(loser.id, CompactNickBrackets.NONE))
+            assertEquals(CompactNickBrackets.NONE, db.bufferDao().rawById(winner.id)?.compactNickBracketsOverride)
+            assertEquals(CompactNickBrackets.ROUND, db.bufferDao().rawById(loser.id)?.compactNickBracketsOverride)
+            assertEquals(CompactNickBrackets.ANGLE, db.bufferDao().rawById(channel.id)?.compactNickBracketsOverride)
+            assertEquals(CompactNickBrackets.ROUND, db.bufferDao().rawById(server.id)?.compactNickBracketsOverride)
+            assertEquals(1, db.bufferDao().setCompactNickBracketsOverride(loser.id, null))
+            val reset = requireNotNull(db.bufferDao().rawById(winner.id))
+            assertEquals(null, reset.compactNickBracketsOverride)
+            assertEquals(LayoutDensity.COMPACT, reset.layoutDensityOverride)
+            assertEquals(37, reset.messageBackgroundOpacityOverride)
+            assertEquals(63, reset.messageBackgroundBlurOverride)
+            assertEquals(CompactNickBrackets.ROUND, db.bufferDao().rawById(loser.id)?.compactNickBracketsOverride)
+            assertEquals(CompactNickBrackets.ANGLE, db.bufferDao().rawById(channel.id)?.compactNickBracketsOverride)
+            assertEquals(CompactNickBrackets.ROUND, db.bufferDao().rawById(server.id)?.compactNickBracketsOverride)
+            assertEquals(0, db.bufferDao().setCompactNickBracketsOverride(-1, CompactNickBrackets.SQUARE))
         }
 
     @Test

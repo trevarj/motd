@@ -61,6 +61,7 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.FontChoice
@@ -621,6 +622,44 @@ class AppearanceFolderLayoutUiTest {
 
         compose.onNodeWithTag("settings_theme_sheet", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithTag("settings_avatar_style_picker").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun compactBracketsUpdatePreviewAndSurviveOtherLayouts() {
+        val writes = mutableListOf<CompactNickBrackets>()
+        setContent(
+            settings = Settings(layoutDensity = LayoutDensity.COMPACT),
+            onCompactNickBrackets = writes::add,
+        )
+        compose.onNodeWithTag("settings_density_picker").performScrollTo().performClick()
+        scrollToSheetNode("settings_density_sheet", "settings_compact_nick_brackets_angle").assertIsSelected()
+        CompactNickBrackets.entries.forEach { brackets ->
+            val row = scrollToSheetNode("settings_density_sheet", "settings_compact_nick_brackets_${brackets.name.lowercase()}")
+            row.assertIsEnabled().performClick().assertIsSelected()
+            if (brackets == CompactNickBrackets.NONE) {
+                compose.onNode(hasTestTag("settings_compact_nick_brackets_none") and hasText("None")).assertExists()
+            }
+            val bounds = row.getUnclippedBoundsInRoot()
+            assertTrue(bounds.bottom - bounds.top >= 48.dp)
+            scrollToSheetNode("settings_density_sheet", "settings_chat_preview_sheet_configuration")
+            compose
+                .onNode(
+                    hasAnyAncestor(hasTestTag("settings_chat_preview_sheet_incoming")) and
+                        hasText(
+                            if (brackets == CompactNickBrackets.NONE) "Alex:" else "${brackets.opening}Alex${brackets.closing}",
+                            substring = true,
+                        ),
+                    useUnmergedTree = true,
+                ).assertExists()
+        }
+        assertEquals(CompactNickBrackets.entries, writes)
+        scrollToSheetNode("settings_density_sheet", "settings_density_two_line").performClick()
+        compose.onNodeWithTag("settings_compact_nick_brackets_none").assertDoesNotExist()
+        scrollToSheetNode("settings_density_sheet", "settings_density_comfortable").performClick()
+        compose.onNodeWithTag("settings_compact_nick_brackets_none").assertDoesNotExist()
+        scrollToSheetNode("settings_density_sheet", "settings_density_compact").performClick()
+        scrollToSheetNode("settings_density_sheet", "settings_compact_nick_brackets_none").assertIsSelected()
+        compose.onNodeWithTag("settings_density_sheet").assertIsDisplayed()
     }
 
     @Test
@@ -1272,6 +1311,7 @@ class AppearanceFolderLayoutUiTest {
         onTimeFormat: (TimeFormat) -> Unit = {},
         lifecycleOwner: LifecycleOwner? = null,
         onLayoutDensity: (LayoutDensity) -> Unit = {},
+        onCompactNickBrackets: (CompactNickBrackets) -> Unit = {},
         onComposerStyle: (ComposerStyle) -> Unit = {},
         onInputCornerStyle: (UiCornerStyle) -> Unit = {},
         onAvatarShape: (AvatarShape) -> Unit = {},
@@ -1315,6 +1355,7 @@ class AppearanceFolderLayoutUiTest {
                         onDynamicColor = {},
                         onUseThemeTextColors = onUseThemeTextColors,
                         onLayoutDensity = onLayoutDensity,
+                        onCompactNickBrackets = onCompactNickBrackets,
                         onComposerStyle = onComposerStyle,
                         onInputCornerStyle = onInputCornerStyle,
                         onAvatarShape = onAvatarShape,

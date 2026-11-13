@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.history.HistoryLadderStalled
 import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.history.seamAbove
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
@@ -1542,10 +1543,13 @@ data class ConversationLayoutState(
     val global: LayoutDensity = LayoutDensity.COMFORTABLE,
     val override: LayoutDensity? = null,
     val bufferDefault: LayoutDensity? = null,
+    val compactNickBracketsOverride: CompactNickBrackets? = null,
     val messageBackgroundOpacityOverride: Int? = null,
     val messageBackgroundBlurOverride: Int? = null,
 ) {
     val effective: LayoutDensity get() = override ?: bufferDefault ?: global
+
+    fun effectiveCompactNickBrackets(globalBrackets: CompactNickBrackets): CompactNickBrackets = compactNickBracketsOverride ?: globalBrackets
 
     fun effectiveMessageBackgroundOpacity(globalOpacity: Int): Int = (messageBackgroundOpacityOverride ?: globalOpacity).coerceIn(0, 100)
 

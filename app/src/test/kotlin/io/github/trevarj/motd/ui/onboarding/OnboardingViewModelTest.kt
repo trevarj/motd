@@ -179,6 +179,10 @@ class OnboardingViewModelTest {
 
         override suspend fun setLayoutDensity(d: LayoutDensity) = Unit
 
+        override suspend fun setCompactNickBrackets(value: io.github.trevarj.motd.data.prefs.CompactNickBrackets) {
+            settings.value = settings.value.copy(compactNickBrackets = value)
+        }
+
         override suspend fun setNickColorsEnabled(enabled: Boolean) = Unit
 
         override suspend fun setNickColorPalette(p: NickColorPalette) = Unit

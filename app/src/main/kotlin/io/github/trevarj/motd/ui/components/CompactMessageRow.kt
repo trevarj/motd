@@ -34,8 +34,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.ui.theme.LocalCompactNickBrackets
 import io.github.trevarj.motd.ui.theme.LocalMediaCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundOpacityPercent
 import io.github.trevarj.motd.ui.theme.LocalNickColors
@@ -45,7 +47,6 @@ import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
 import io.github.trevarj.motd.ui.theme.cornerRadius
-import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.readingInk
 
 /** Alpha for the per-nick row background wash in COMPACT density: strong enough to band messages
@@ -53,8 +54,8 @@ import io.github.trevarj.motd.ui.theme.readingInk
 private const val COMPACT_ROW_TINT_ALPHA = 0.10f
 
 /**
- * Classic single-line IRC rendering used in COMPACT density: `nick: text` on one wrapping line,
- * nick colored via [NickColorScheme.nick] with a sender background, a small trailing timestamp, no
+ * Classic single-line IRC rendering used in COMPACT density: `<nick> text` on one wrapping line,
+ * nick colored via [NickColorScheme.nick], a small trailing timestamp, no
  * avatar, no bubble, minimal vertical padding, uniformly left-aligned (IRC has no own-message
  * right-alignment). NOTICE gets a subtle `-nick-` marker; ACTION is handled by the shared accent
  * row before this renderer.
@@ -77,7 +78,7 @@ internal fun CompactMessageRow(
     modifier: Modifier = Modifier,
     hasMention: Boolean = false,
     dimmed: Boolean = false,
-    // Group continuation flag: false = omit the `nick:` prefix so the line reads as a continued run.
+    // Group continuation flag: false = omit the sender prefix.
     showSender: Boolean = true,
     failed: Boolean = false,
     pending: Boolean = false,
@@ -112,7 +113,7 @@ internal fun CompactMessageRow(
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
     val codeColor = readingInk(MaterialTheme.colorScheme)
     val nickFontSize = MaterialTheme.typography.bodyMedium.fontSize
-    val senderTint = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+    val brackets = LocalCompactNickBrackets.current
     // Per-nick row wash: a faint tint of the sender's own nick color behind the whole row so runs of
     // messages are visually trackable by speaker (stable per nick — no fragile list-wide parity).
     val rowTint =
@@ -137,9 +138,7 @@ internal fun CompactMessageRow(
     val bodyInk = codeColor
     val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
 
-    // The `nick: text` content is a single flowing AnnotatedString so it wraps as one paragraph
-    // like a real IRC line, with the nick colored and highlighted and URLs linkified.
-    // Continuation lines (showSender == false) drop the `nick:` prefix so a run reads as one speaker.
+    // The sender and body wrap as one paragraph; continuation lines omit the sender prefix.
     // Known-nick @mentions in the body are colored via the memoized resolver.
     val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
     val line =
@@ -153,7 +152,7 @@ internal fun CompactMessageRow(
             nameColor,
             bodyColor,
             linkColor,
-            senderTint,
+            brackets,
             showSender,
             mentionColor,
             codeBackground,
@@ -169,7 +168,7 @@ internal fun CompactMessageRow(
                 nameColor,
                 bodyColor,
                 linkColor,
-                senderTint,
+                brackets,
                 showSender,
                 isBot,
                 mentionColor,
@@ -265,9 +264,9 @@ internal fun CompactMessageRow(
 }
 
 /**
- * Build the single-line `nick: text` content for COMPACT rendering. NOTICE uses `-nick-`; ordinary
- * messages use `nick: `. The nick span is colored with a sender background; URLs in the body
- * are linkified and known-nick @mentions ([mentionColor]) are colored. When [showSender] is false
+ * Build the single-line bracketed sender and body for COMPACT rendering. NOTICE uses `-nick-`.
+ * URLs in the body are linkified and known-nick @mentions ([mentionColor]) are colored.
+ * When [showSender] is false
  * the prefix is dropped so the run reads as one speaker. Pure/testable.
  */
 internal fun buildCompactLine(
@@ -277,7 +276,7 @@ internal fun buildCompactLine(
     nameColor: Color,
     bodyColor: Color,
     linkColor: Color,
-    senderTint: Color,
+    brackets: CompactNickBrackets = CompactNickBrackets.ANGLE,
     showSender: Boolean = true,
     isBot: Boolean = false,
     mentionColor: (String) -> Color? = { null },
@@ -289,31 +288,28 @@ internal fun buildCompactLine(
     normalContainerColor: Color = containerColor,
 ): AnnotatedString =
     buildAnnotatedString {
-        val nameBackground =
-            if (senderTint == Color.Unspecified || containerColor == Color.Unspecified) containerColor else senderTint.compositeOver(containerColor)
-        val normalNameBackground =
-            if (senderTint == Color.Unspecified || normalContainerColor == Color.Unspecified) normalContainerColor else senderTint.compositeOver(normalContainerColor)
         val nickStyle =
             SpanStyle(
-                color = if (nameBackground == Color.Unspecified) nameColor else messageContentColor(nameColor, nameBackground, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalNameBackground),
+                color = if (containerColor == Color.Unspecified) nameColor else messageContentColor(nameColor, containerColor, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalContainerColor),
                 fontSize = nickFontSize,
                 fontWeight = FontWeight.Bold,
             )
         // Continuation lines omit the sender prefix entirely.
         if (showSender) {
-            val senderStart = length
             when (kind) {
                 MessageKind.NOTICE -> {
                     // irssi-style notice marker: `-nick-`.
                     withStyle(nickStyle) { append("-${botDisplayName(sender, isBot)}-") }
-                    addStringAnnotation(COMPACT_SENDER_RANGE, "", senderStart, length)
                     append(" ")
                 }
 
                 else -> {
-                    withStyle(nickStyle) { append(botDisplayName(sender, isBot)) }
-                    addStringAnnotation(COMPACT_SENDER_RANGE, "", senderStart, length)
-                    withStyle(SpanStyle(color = bodyColor)) { append(": ") }
+                    withStyle(nickStyle) { append("${brackets.opening}${botDisplayName(sender, isBot)}${brackets.closing}") }
+                    if (brackets == CompactNickBrackets.NONE) {
+                        withStyle(SpanStyle(color = bodyColor)) { append(": ") }
+                    } else {
+                        append(" ")
+                    }
                 }
             }
         }

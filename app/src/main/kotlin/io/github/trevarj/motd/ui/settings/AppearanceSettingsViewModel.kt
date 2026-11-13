@@ -12,6 +12,7 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
@@ -103,6 +104,8 @@ class AppearanceSettingsViewModel
         fun setDynamicColor(value: Boolean) = launch { settingsRepository.setDynamicColor(value) }
 
         fun setLayoutDensity(value: LayoutDensity) = launch { settingsRepository.setLayoutDensity(value) }
+
+        fun setCompactNickBrackets(value: CompactNickBrackets) = launch { settingsRepository.setCompactNickBrackets(value) }
 
         fun setComposerStyle(value: ComposerStyle) = launch { appearancePrefs.setComposerStyle(value) }
 

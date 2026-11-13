@@ -20,12 +20,14 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
 import io.github.trevarj.motd.ui.theme.ConversationTypography
 import io.github.trevarj.motd.ui.theme.LocalChatShadowsEnabled
+import io.github.trevarj.motd.ui.theme.LocalCompactNickBrackets
 import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundBlur
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
@@ -43,12 +45,14 @@ internal fun ChatLayoutPreview(
     tagPrefix: String,
     modifier: Modifier = Modifier,
     chatShadowsEnabled: Boolean = LocalChatShadowsEnabled.current,
+    compactNickBrackets: CompactNickBrackets = LocalCompactNickBrackets.current,
 ) {
     val spacing = remember(density, messageSpacing, bubbleCorners) { spacingFor(density, messageSpacing, bubbleCorners) }
     val avatars = remember { RemoteAvatarState() }
     val backdrop = rememberMessageWallpaperBackdrop(LocalMessageBackgroundBlur.current)
     CompositionLocalProvider(
         LocalSpacing provides spacing,
+        LocalCompactNickBrackets provides compactNickBrackets,
         LocalChatShadowsEnabled provides chatShadowsEnabled,
         LocalMessageWallpaperBackdrop provides backdrop,
         LocalRemoteAvatars provides avatars,

@@ -6,6 +6,7 @@ import androidx.room.ForeignKey
 import androidx.room.Fts4
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
@@ -321,6 +322,7 @@ data class RoomEntity(
     val redirectToRoomId: RoomId? = null,
     /** Null inherits the global message-layout preference for this durable conversation. */
     val layoutDensityOverride: LayoutDensity? = null,
+    val compactNickBracketsOverride: CompactNickBrackets? = null,
     /** Null inherits the global backing opacity, independently of message layout. */
     val messageBackgroundOpacityOverride: Int? = null,
     /** Null inherits global wallpaper blur; zero explicitly disables it, independently of tint. */

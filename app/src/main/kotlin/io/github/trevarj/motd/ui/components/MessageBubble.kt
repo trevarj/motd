@@ -1244,7 +1244,6 @@ private fun ActionMessageRow(
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
     val codeColor = bodyInk
-    val friendTint = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
     val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
     val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
     val senderLink =
@@ -1267,7 +1266,6 @@ private fun ActionMessageRow(
             nameColor,
             bodyColor,
             linkColor,
-            friendTint,
             mentionsActive,
             mentionColor,
             codeBackground,
@@ -1283,7 +1281,6 @@ private fun ActionMessageRow(
                 nameColor = nameColor,
                 bodyColor = bodyColor,
                 linkColor = linkColor,
-                friendTint = friendTint,
                 mentionsActive = mentionsActive,
                 mentionColor = mentionColor,
                 codeBackground = codeBackground,
@@ -1292,7 +1289,6 @@ private fun ActionMessageRow(
                 containerColor = contrastRow,
                 minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                 normalContainerColor = normalPaintedRow,
-                roundedSender = true,
             ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
         }
 
@@ -1332,7 +1328,6 @@ private fun ActionMessageRow(
                     text = actionLine,
                     concealment = LocalFoolBodyConcealment.current,
                     inlineBody = true,
-                    senderCornerRadius = if (spacing.twoLine) 0.dp else 4.dp,
                     style =
                         MaterialTheme.typography.bodyLarge.copy(
                             fontStyle = FontStyle.Italic,
@@ -1465,7 +1460,6 @@ internal fun buildActionLine(
     containerColor: Color = Color.Unspecified,
     minimumContrast: Double = MESSAGE_TEXT_CONTRAST,
     normalContainerColor: Color = containerColor,
-    roundedSender: Boolean = false,
 ): AnnotatedString =
     buildAnnotatedString {
         if (includeStar) {
@@ -1482,15 +1476,13 @@ internal fun buildActionLine(
                 color = if (nameBackground == Color.Unspecified) nameColor else messageContentColor(nameColor, nameBackground, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalNameBackground),
                 fontWeight = FontWeight.Bold,
                 fontStyle = FontStyle.Normal,
-                background = if (roundedSender) Color.Unspecified else friendTint,
+                background = friendTint,
             )
-        val senderStart = length
         if (senderLink != null) {
             withLink(senderLink) { withStyle(senderStyle) { append(sender) } }
         } else {
             withStyle(senderStyle) { append(sender) }
         }
-        if (roundedSender) addStringAnnotation(COMPACT_SENDER_RANGE, "", senderStart, length)
         append(" ")
         pushStringAnnotation(FOOL_BODY_RANGE, "")
         append(
@@ -1532,7 +1524,7 @@ private fun Modifier.actionAccentRail(accent: Color): Modifier =
 
 /**
  * TWO_LINE density renderer: a compact two-line message row.
- *  - Line 1: a small avatar, the nick-colored name (friend tint/star preserved), the own-message
+ *  - Line 1: a small avatar, the plain bold nick-colored name (friend star preserved), the own-message
  *    sent check ([MessageStatusIcon], own messages only), and the timestamp.
  *  - Line 2: the message body (linkified), plus the reply preview, inline image, link preview, and
  *    the now-compact reactions.
@@ -1617,15 +1609,7 @@ private fun TwoLineMessageRow(
     val contrastRow = drawFill.compositeOver(canvas)
     val bodyInk = codeColor
     val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
-    val nameBackground =
-        MaterialTheme.colorScheme.primary
-            .copy(alpha = 0.12f)
-            .compositeOver(contrastRow)
-    val normalNameBackground =
-        MaterialTheme.colorScheme.primary
-            .copy(alpha = 0.12f)
-            .compositeOver(normalPaintedRow)
-    val nameColor = remember(nameInk, nameBackground, normalNameBackground, dimmed) { messageContentColor(nameInk, nameBackground, dimmed, normalNameBackground) }
+    val nameColor = remember(nameInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(nameInk, contrastRow, dimmed, normalPaintedRow) }
 
     MessagePaintedContent(
         modifier =
@@ -1680,7 +1664,6 @@ private fun TwoLineMessageRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier =
                         Modifier
-                            .senderNickTint(horizontalPadding = 6.dp)
                             .weight(1f, fill = false)
                             .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it },
                 )
@@ -2373,7 +2356,7 @@ internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendMentionColor
             val color = mentionColor(nick)
             if (color != null) {
                 // Color the whole token including a leading '@' so the mention reads as one unit.
-                withStyle(SpanStyle(color = color, fontWeight = FontWeight.Medium)) {
+                withStyle(SpanStyle(color = color)) {
                     append(text.substring(start, i))
                 }
             } else {
@@ -2395,11 +2378,11 @@ internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendMentionColor
  * not to fight the nick color or the bubble background.
  */
 @Composable
-internal fun Modifier.senderNickTint(horizontalPadding: Dp = 4.dp): Modifier =
+internal fun Modifier.senderNickTint(): Modifier =
     this
         .clip(RoundedCornerShape(4.dp))
         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-        .padding(horizontal = horizontalPadding, vertical = 1.dp)
+        .padding(horizontal = 4.dp, vertical = 1.dp)
 
 /** Resolved reply target for the quoted mini-bubble. */
 data class ReplyPreviewData(

@@ -104,6 +104,11 @@ class ChatListReadFreshnessTest {
             layout: LayoutDensity?,
         ): Boolean = true
 
+        override suspend fun setCompactNickBracketsOverride(
+            id: Long,
+            brackets: io.github.trevarj.motd.data.prefs.CompactNickBrackets?,
+        ): Boolean = true
+
         override suspend fun setMessageBackgroundOpacityOverride(
             id: Long,
             percent: Int?,
@@ -172,6 +177,10 @@ class ChatListReadFreshnessTest {
         override suspend fun setDeliveryMode(m: DeliveryMode) = Unit
 
         override suspend fun setLayoutDensity(d: LayoutDensity) = Unit
+
+        override suspend fun setCompactNickBrackets(value: io.github.trevarj.motd.data.prefs.CompactNickBrackets) {
+            settings.value = settings.value.copy(compactNickBrackets = value)
+        }
 
         override suspend fun setNickColorsEnabled(enabled: Boolean) = Unit
 

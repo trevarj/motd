@@ -47,6 +47,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -1219,8 +1220,15 @@ class ComposerEditorStateTest {
         assertTrue(isColored("[Alice]"))
         assertTrue(isColored("@BoB"))
         assertTrue(!isColored("unknown"))
-        if (ircFormattingEnabled) {
-            assertTrue(layout().spanStyles.any { it.start == 0 && it.end == visible.length && it.item.fontWeight != null })
+        val input = field.textLayout().layoutInput
+        val expectedWeight = if (ircFormattingEnabled) FontWeight.Bold else input.style.fontWeight ?: FontWeight.Normal
+        for (token in listOf("[Alice]", "@BoB")) {
+            val offset = input.text.indexOf(token)
+            val resolved =
+                input.text.spanStyles
+                    .filter { offset in it.start until it.end }
+                    .fold(input.style.toSpanStyle()) { style, span -> style.merge(span.item) }
+            assertEquals(token, expectedWeight, resolved.fontWeight ?: FontWeight.Normal)
         }
         compose.runOnIdle {
             assertEquals(original, draft.value.text)

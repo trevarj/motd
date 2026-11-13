@@ -500,6 +500,7 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setDynamicColor(it.dynamicColor)
                 settingsRepository.setDeliveryMode(it.deliveryMode)
                 settingsRepository.setLayoutDensity(it.layoutDensity)
+                settingsRepository.setCompactNickBrackets(it.compactNickBrackets)
                 settingsRepository.setFolderDisplayMode(it.folderDisplayMode)
                 settingsRepository.setShowFolderChatsInAll(it.showFolderChatsInAll)
                 settingsRepository.setChatListSwipeAction(it.chatListSwipeAction)

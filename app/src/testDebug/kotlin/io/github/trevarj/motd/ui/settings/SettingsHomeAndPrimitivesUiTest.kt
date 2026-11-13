@@ -80,6 +80,7 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
@@ -575,6 +576,78 @@ class SettingsHomeAndPrimitivesUiTest {
     }
 
     @Test
+    fun compactBracketsInheritGlobalAndRetainOverridesWhenHidden() {
+        var saved by mutableStateOf(ConversationLayoutState(global = LayoutDensity.COMFORTABLE, bufferDefault = LayoutDensity.COMPACT))
+        var global by mutableStateOf(CompactNickBrackets.SQUARE)
+        var rejectWrite = false
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ConversationLayoutSheet(
+                    state = saved,
+                    onSelect = { saved = saved.copy(override = it) },
+                    onOpacity = { saved = saved.copy(messageBackgroundOpacityOverride = it) },
+                    globalOpacity = 100,
+                    onBlur = { saved = saved.copy(messageBackgroundBlurOverride = it) },
+                    globalBlur = 0,
+                    globalCompactNickBrackets = global,
+                    onCompactNickBracketsOverride = { if (!rejectWrite) saved = saved.copy(compactNickBracketsOverride = it) },
+                    onDismiss = {},
+                    wallpaper = WallpaperSelection(),
+                    conversationFontScalePercent = 100,
+                    messageSpacing = MessageSpacing.DEFAULT,
+                    bubbleCorners = BubbleCornerStyle.ROUNDED,
+                )
+            }
+        }
+        val options = compose.onNodeWithTag("chat_layout_sheet_options")
+
+        fun control(tag: String) = options.performScrollToNode(hasTestTag(tag)).let { compose.onNodeWithTag(tag) }
+
+        fun preview(brackets: CompactNickBrackets) {
+            options.performScrollToIndex(0)
+            compose
+                .onNode(
+                    hasAnyAncestor(hasTestTag("chat_layout_preview_incoming")) and
+                        hasText(
+                            if (brackets == CompactNickBrackets.NONE) "Alex:" else "${brackets.opening}Alex${brackets.closing}",
+                            substring = true,
+                        ),
+                    useUnmergedTree = true,
+                ).assertExists()
+        }
+        control("chat_compact_nick_brackets_global").assertIsSelected()
+        preview(CompactNickBrackets.SQUARE)
+        CompactNickBrackets.entries.forEach { brackets ->
+            val row = control("chat_compact_nick_brackets_${brackets.name.lowercase()}")
+            row.performClick().assertIsSelected()
+            if (brackets == CompactNickBrackets.NONE) {
+                compose.onNode(hasTestTag("chat_compact_nick_brackets_none") and hasText("None")).assertExists()
+            }
+            val bounds = row.getUnclippedBoundsInRoot()
+            assertTrue(bounds.bottom - bounds.top >= 48.dp)
+            assertEquals(brackets, saved.compactNickBracketsOverride)
+            preview(brackets)
+        }
+        preview(CompactNickBrackets.NONE)
+        control("chat_layout_two_line").performClick()
+        compose.onNodeWithTag("chat_compact_nick_brackets_none").assertDoesNotExist()
+        control("chat_layout_comfortable").performClick()
+        compose.onNodeWithTag("chat_compact_nick_brackets_none").assertDoesNotExist()
+        control("chat_layout_global").performClick()
+        control("chat_compact_nick_brackets_none").assertIsSelected()
+        compose.runOnIdle { rejectWrite = true }
+        control("chat_compact_nick_brackets_global").performClick().assertIsNotSelected()
+        preview(CompactNickBrackets.NONE)
+        compose.runOnIdle { rejectWrite = false }
+        control("chat_compact_nick_brackets_global").performClick().assertIsSelected()
+        assertEquals(null, saved.compactNickBracketsOverride)
+        preview(CompactNickBrackets.SQUARE)
+        compose.runOnIdle { global = CompactNickBrackets.ANGLE }
+        preview(CompactNickBrackets.ANGLE)
+        compose.onNodeWithTag("chat_layout_sheet").assertIsDisplayed()
+    }
+
+    @Test
     @Config(qualifiers = "w640dp-h360dp-land", fontScale = 2f)
     fun layoutSheetUsesSavedInheritanceAndStaysOpenAcrossSelectionsAndRejectedWrites() {
         var saved by mutableStateOf(ConversationLayoutState(global = LayoutDensity.COMPACT))
@@ -593,6 +666,8 @@ class SettingsHomeAndPrimitivesUiTest {
                     globalOpacity = 73,
                     onBlur = { if (!rejectWrite) saved = saved.copy(messageBackgroundBlurOverride = it) },
                     globalBlur = 41,
+                    globalCompactNickBrackets = CompactNickBrackets.ANGLE,
+                    onCompactNickBracketsOverride = { if (!rejectWrite) saved = saved.copy(compactNickBracketsOverride = it) },
                     onDismiss = { dismissals++ },
                     wallpaper = WallpaperSelection(),
                     conversationFontScalePercent = 140,
@@ -664,6 +739,8 @@ class SettingsHomeAndPrimitivesUiTest {
                     globalOpacity = globalOpacity,
                     onBlur = { if (!rejectWrite) saved = saved.copy(messageBackgroundBlurOverride = it) },
                     globalBlur = 0,
+                    globalCompactNickBrackets = CompactNickBrackets.ANGLE,
+                    onCompactNickBracketsOverride = { if (!rejectWrite) saved = saved.copy(compactNickBracketsOverride = it) },
                     onDismiss = {},
                     wallpaper = WallpaperSelection(io.github.trevarj.motd.data.prefs.ChatWallpaperPreset.NONE),
                     conversationFontScalePercent = 100,
@@ -730,6 +807,8 @@ class SettingsHomeAndPrimitivesUiTest {
                             if (!rejectWrite) saved = saved.copy(messageBackgroundBlurOverride = it)
                         },
                         globalBlur = globalBlur,
+                        globalCompactNickBrackets = CompactNickBrackets.ANGLE,
+                        onCompactNickBracketsOverride = { if (!rejectWrite) saved = saved.copy(compactNickBracketsOverride = it) },
                         onDismiss = {},
                         wallpaper = wallpaper,
                         conversationFontScalePercent = 100,

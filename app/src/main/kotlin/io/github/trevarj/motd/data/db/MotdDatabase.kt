@@ -38,7 +38,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 49,
+    version = 50,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -1130,6 +1130,13 @@ val MIGRATION_48_49 =
         }
     }
 
+val MIGRATION_49_50 =
+    object : Migration(49, 50) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE buffers ADD COLUMN compactNickBracketsOverride TEXT")
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1191,6 +1198,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_46_47,
         MIGRATION_47_48,
         MIGRATION_48_49,
+        MIGRATION_49_50,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"

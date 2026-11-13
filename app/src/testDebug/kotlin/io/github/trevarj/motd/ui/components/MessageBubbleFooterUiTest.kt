@@ -58,6 +58,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -68,12 +69,15 @@ import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
@@ -725,7 +729,7 @@ class MessageBubbleFooterUiTest {
     fun compactKeepsOwnNickInline() {
         compose.setContent { Sample(density = LayoutDensity.COMPACT) }
 
-        compose.onNodeWithText("$NICK: $BODY", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("<$NICK> $BODY", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag("self_sender_label", useUnmergedTree = true).assertDoesNotExist()
     }
 
@@ -1113,243 +1117,111 @@ class MessageBubbleFooterUiTest {
     }
 
     @Test
-    @Config(sdk = [28, 35])
-    fun compactSenderHighlightHasRoundedEmptyCornersAcrossWrappingAndConcealment() {
-        data class Sample(
-            val sender: String = "alice",
-            val kind: MessageKind = MessageKind.PRIVMSG,
-            val bot: Boolean = false,
-            val showSender: Boolean = true,
-            val density: LayoutDensity = LayoutDensity.COMPACT,
-        )
-        val sample = mutableStateOf(Sample())
-        val concealed = mutableStateOf(false)
-        val body = "Reading https://example.com `code`"
-        val scheme = requireNotNull(fixedThemeScheme(ColorThemePreset.AYU_LIGHT))
-        val background = scheme.background.toArgb()
-        val highlight =
-            scheme.primary
-                .copy(alpha = 0.12f)
-                .compositeOver(scheme.background)
-                .toArgb()
-
-        fun matches(
-            actual: Int,
-            expected: Int,
-        ): Boolean =
-            (0..3).all { channel ->
-                val shift = channel * 8
-                kotlin.math.abs((actual ushr shift and 255) - (expected ushr shift and 255)) <= 1
-            }
+    fun compactThemeBracketsChangeOnlyOrdinaryPrefixes() {
+        val brackets = mutableStateOf(CompactNickBrackets.ANGLE)
+        val kind = mutableStateOf(MessageKind.PRIVMSG)
         compose.setContent {
             MotdTheme(
                 dynamicColor = false,
-                themePreset = ColorThemePreset.AYU_LIGHT,
-                layoutDensity = sample.value.density,
-                nicknameBackgroundsEnabled = false,
-                messageBackgroundOpacityPercent = 0,
-                timestampConfig = TimestampConfig(show = false),
+                layoutDensity = LayoutDensity.COMPACT,
+                compactNickBrackets = brackets.value,
             ) {
-                CompositionLocalProvider(LocalDensity provides Density(2f, 1f)) {
-                    Box(Modifier.width(190.dp).background(MaterialTheme.colorScheme.background).testTag("rounded_sender_sample")) {
-                        FoolMessageScope(concealed.value, onReveal = {}) {
-                            MessageBubble(
-                                sender = sample.value.sender,
-                                text = body,
-                                timeMs = 0,
-                                formattedTime = TIME,
-                                isSelf = false,
-                                isBot = sample.value.bot,
-                                kind = sample.value.kind,
-                                showSender = sample.value.showSender,
-                                onSenderClick = {},
-                            )
-                        }
-                    }
-                }
+                MessageBubble("alice", BODY, 0, false, kind.value, true)
             }
         }
-        val samples =
-            listOf(
-                Sample(),
-                Sample(kind = MessageKind.NOTICE, bot = true),
-                Sample(kind = MessageKind.ACTION, bot = true),
-                Sample(sender = "alice אבג alice אבג alice אבג alice אבג", bot = true),
-                Sample(showSender = false),
-                Sample(kind = MessageKind.ACTION, bot = true, density = LayoutDensity.TWO_LINE),
-            )
-        for ((index, current) in samples.withIndex()) {
-            compose.runOnIdle {
-                sample.value = current
-                concealed.value = false
-            }
-            val canvas = compose.onNodeWithTag("rounded_sender_sample")
-            val textNode = compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true)
-            val layout = textNode.textLayout()
-            val image = canvas.captureToImage().asAndroidBitmap()
-            val proof = File("build/reports/compact-sender-rounded/${current.density.name.lowercase()}-${current.kind.name.lowercase()}-$index-sdk-${RuntimeEnvironment.getApiLevel()}.png")
-            requireNotNull(proof.parentFile).mkdirs()
-            proof.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            val canvasBounds = canvas.fetchSemanticsNode().boundsInRoot
-            val textBounds = textNode.fetchSemanticsNode().boundsInRoot
-            val textOrigin = textBounds.topLeft - canvasBounds.topLeft
-            val codeOffset = layout.layoutInput.text.indexOf("code")
-            val codeRegion = layout.getPathForRange(codeOffset, codeOffset + 4).getBounds().translate(textOrigin)
-            val codeFill =
-                (if (current.kind == MessageKind.ACTION) scheme.surfaceVariant else scheme.surfaceVariant.copy(alpha = 0.72f))
-                    .compositeOver(scheme.background)
-                    .toArgb()
-            assertTrue(
-                "$current body code keeps its own background",
-                (codeRegion.left.toInt() until codeRegion.right.toInt()).any { x ->
-                    (codeRegion.top.toInt() until codeRegion.bottom.toInt()).any { y -> matches(image.getPixel(x, y), codeFill) }
-                },
-            )
-            if (!current.showSender) {
-                assertTrue(
-                    "elided sender leaves only the body",
-                    layout.layoutInput.text.text
-                        .startsWith("Reading "),
-                )
-                val top = kotlin.math.ceil(textOrigin.y).toInt()
-                assertTrue("elided sender must not paint a highlight", (0 until image.width).all { x -> matches(image.getPixel(x, top), background) })
-                continue
-            }
-            val nick = botDisplayName(current.sender, current.bot).let { if (current.kind == MessageKind.NOTICE) "-$it-" else it }
-            val start = layout.layoutInput.text.indexOf(nick)
-            val end = start + nick.length
-            val firstLine = layout.getLineForOffset(start)
-            val lastLine = layout.getLineForOffset(end - 1)
-            if (index == 3) assertTrue("mixed-direction sender must wrap", lastLine > firstLine)
-            val regions =
-                (firstLine..lastLine).map { line ->
-                    layout
-                        .getPathForRange(maxOf(start, layout.getLineStart(line)), minOf(end, layout.getLineEnd(line)))
-                        .getBounds()
-                        .let { Rect(it.left - 4f, layout.getLineTop(line), it.right + 4f, layout.getLineBottom(line)) }
-                        .translate(textOrigin)
+        for (pair in CompactNickBrackets.entries) {
+            for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)) {
+                compose.runOnIdle {
+                    brackets.value = pair
+                    kind.value = messageKind
                 }
-            for ((region, topEdge) in listOf(regions.first() to true, regions.last() to false)) {
-                val left = kotlin.math.ceil(region.left).toInt()
-                val right = kotlin.math.floor(region.right).toInt() - 1
-                val y = if (topEdge) kotlin.math.ceil(region.top).toInt() else kotlin.math.floor(region.bottom).toInt() - 1
-                val cornerFill = if (current.density == LayoutDensity.TWO_LINE) highlight else background
-                assertTrue("$current preserves outer left corner top=$topEdge", matches(image.getPixel(left, y), cornerFill))
-                assertTrue("$current preserves outer right corner top=$topEdge", matches(image.getPixel(right, y), cornerFill))
+                val prefix =
+                    when (messageKind) {
+                        MessageKind.NOTICE -> "-alice-"
+                        MessageKind.ACTION -> "* alice"
+                        else -> if (pair == CompactNickBrackets.NONE) "alice:" else "${pair.opening}alice${pair.closing}"
+                    }
+                val layout = compose.onNodeWithText("$prefix $BODY", useUnmergedTree = true).assertIsDisplayed().textLayout()
                 assertTrue(
-                    "$current continuous filled outer edge top=$topEdge",
-                    (left + 8..right - 8).all { x -> matches(image.getPixel(x, y), highlight) },
-                )
-                val interior = kotlin.math.ceil(region.top).toInt() + 8 until kotlin.math.floor(region.bottom).toInt() - 8
-                for (x in listOf(left + 1, right - 1)) {
-                    val filled = interior.count { row -> matches(image.getPixel(x, row), highlight) }
-                    assertTrue("$current extra horizontal padding must paint beyond the glyph bounds at x=$x", filled >= interior.count() / 2)
-                }
-            }
-            val separator = layout.getBoundingBox(end).translate(textOrigin)
-            assertTrue(
-                "$current separator must remain outside the sender highlight",
-                matches(image.getPixel(kotlin.math.floor(separator.right).toInt() - 1, kotlin.math.ceil(separator.top).toInt()), background),
-            )
-            val first = regions.first()
-            val last = regions.last()
-            assertTrue("$current no extra vertical padding above", matches(image.getPixel(first.center.x.toInt(), kotlin.math.ceil(first.top).toInt() - 1), background))
-            assertTrue("$current no extra vertical padding below", matches(image.getPixel(last.center.x.toInt(), kotlin.math.ceil(last.bottom).toInt()), background))
-            compose.runOnIdle { concealed.value = true }
-            val covered = canvas.captureToImage().asAndroidBitmap()
-            assertFalse("$current body concealment must change pixels", image.sameAs(covered))
-            for (region in regions) {
-                assertTrue(
-                    "$current concealment must preserve the entire author",
-                    (kotlin.math.ceil(region.left).toInt() until region.right.toInt()).all { x ->
-                        (kotlin.math.ceil(region.top).toInt() until region.bottom.toInt()).all { y -> image.getPixel(x, y) == covered.getPixel(x, y) }
-                    },
+                    layout.layoutInput.text.spanStyles
+                        .all { it.item.background == Color.Unspecified },
                 )
             }
         }
     }
 
     @Test
-    @Config(sdk = [28, 35])
-    fun twoLineSenderPaddingWidensPaintWithoutChangingComfortableFriendPadding() {
-        val density = mutableStateOf(LayoutDensity.TWO_LINE)
+    fun twoLineSenderIsPlainBoldColoredAndKeepsNativeClick() {
         var senderClicks = 0
-        val scheme = requireNotNull(fixedThemeScheme(ColorThemePreset.AYU_LIGHT))
         compose.setContent {
             MotdTheme(
                 dynamicColor = false,
-                themePreset = ColorThemePreset.AYU_LIGHT,
-                layoutDensity = density.value,
-                nicknameBackgroundsEnabled = false,
-                timestampConfig = TimestampConfig(show = false),
+                layoutDensity = LayoutDensity.TWO_LINE,
+                compactNickBrackets = CompactNickBrackets.ROUND,
                 avatarStyle = AvatarStyle.NONE,
             ) {
-                CompositionLocalProvider(LocalDensity provides Density(2f, 1f)) {
-                    Box(Modifier.width(240.dp).background(scheme.background).testTag("sender_padding_sample")) {
-                        MessageBubble(
-                            sender = "alice",
-                            text = BODY,
-                            timeMs = 0,
-                            formattedTime = TIME,
-                            isSelf = false,
-                            kind = MessageKind.PRIVMSG,
-                            showSender = true,
-                            senderIsFriend = true,
-                            onSenderClick = { senderClicks++ },
-                        )
-                    }
+                MessageBubble(
+                    "alice",
+                    BODY,
+                    0,
+                    false,
+                    MessageKind.PRIVMSG,
+                    true,
+                    senderIsFriend = true,
+                    onSenderClick = { senderClicks++ },
+                )
+            }
+        }
+        val nick = compose.onNodeWithText("alice", useUnmergedTree = true).assertIsDisplayed()
+        val layout = nick.textLayout()
+        assertEquals("alice", layout.layoutInput.text.text)
+        assertEquals(FontWeight.Bold, layout.layoutInput.style.fontWeight)
+        assertTrue(layout.layoutInput.style.color != Color.Unspecified)
+        assertEquals(Color.Unspecified, layout.layoutInput.style.background)
+        nick.performClick()
+        compose.runOnIdle { assertEquals(1, senderClicks) }
+    }
+
+    @Test
+    fun compactPreviewUsesExplicitPairOrInheritsThemePair() {
+        val pair = mutableStateOf(CompactNickBrackets.SQUARE)
+        val explicit = mutableStateOf(false)
+        compose.setContent {
+            MotdTheme(dynamicColor = false, compactNickBrackets = pair.value) {
+                if (explicit.value) {
+                    ChatLayoutPreview(
+                        LayoutDensity.COMPACT,
+                        MessageSpacing.DEFAULT,
+                        BubbleCornerStyle.ROUNDED,
+                        WallpaperSelection(),
+                        100,
+                        "preview",
+                        compactNickBrackets = CompactNickBrackets.NONE,
+                    )
+                } else {
+                    ChatLayoutPreview(
+                        LayoutDensity.COMPACT,
+                        MessageSpacing.DEFAULT,
+                        BubbleCornerStyle.ROUNDED,
+                        WallpaperSelection(),
+                        100,
+                        "preview",
+                    )
                 }
             }
         }
-        for (current in listOf(LayoutDensity.TWO_LINE, LayoutDensity.COMFORTABLE)) {
-            compose.runOnIdle { density.value = current }
-            val canvas = compose.onNodeWithTag("sender_padding_sample")
-            val nick = compose.onNodeWithText("alice", useUnmergedTree = true)
-            val layout = nick.textLayout()
-            val bounds = nick.fetchSemanticsNode().boundsInRoot
-            val horizontal = if (current == LayoutDensity.TWO_LINE) 12f else 8f
-            val origin = bounds.topLeft - canvas.fetchSemanticsNode().boundsInRoot.topLeft
-            val image = canvas.captureToImage().asAndroidBitmap()
-            val left = kotlin.math.ceil(origin.x - horizontal).toInt()
-            val right = kotlin.math.floor(origin.x + layout.size.width + horizontal).toInt() - 1
-            val top = kotlin.math.ceil(origin.y - 2f).toInt()
-            val bottom = kotlin.math.floor(origin.y + layout.size.height + 2f).toInt() - 1
-            val middle = (origin.y + layout.size.height / 2f).toInt()
-            val center = (origin.x + layout.size.width / 2f).toInt()
-            val backing = image.getPixel(left - 2, middle)
-            val fill =
-                scheme.primary
-                    .copy(alpha = 0.12f)
-                    .compositeOver(Color(backing))
-                    .toArgb()
-            val samples =
-                listOf(
-                    Offset(left + 1f, middle.toFloat()) to fill,
-                    Offset(right - 1f, middle.toFloat()) to fill,
-                    Offset(left - 1f, middle.toFloat()) to backing,
-                    Offset(right + 1f, middle.toFloat()) to backing,
-                    Offset(center.toFloat(), top + 1f) to fill,
-                    Offset(center.toFloat(), bottom - 1f) to fill,
-                    Offset(center.toFloat(), top - 1f) to backing,
-                    Offset(center.toFloat(), bottom + 1f) to backing,
-                )
-            for ((point, expected) in samples) {
-                val pixel = image.getPixel(point.x.toInt(), point.y.toInt())
-                assertTrue(
-                    "$current painted padding extent at $point",
-                    (0..3).all { channel ->
-                        val shift = channel * 8
-                        kotlin.math.abs((pixel ushr shift and 255) - (expected ushr shift and 255)) <= 1
-                    },
-                )
-            }
-            val proof = File("build/reports/compact-sender-rounded/${current.name.lowercase()}-header-sdk-${RuntimeEnvironment.getApiLevel()}.png")
-            requireNotNull(proof.parentFile).mkdirs()
-            proof.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            val clicksBefore = senderClicks
-            nick.performClick()
-            compose.runOnIdle { assertEquals(clicksBefore + 1, senderClicks) }
+        val sender = RuntimeEnvironment.getApplication().getString(R.string.settings_chat_preview_sender)
+        val body = RuntimeEnvironment.getApplication().getString(R.string.settings_chat_preview_message)
+        compose.onNodeWithText("[$sender] $body", useUnmergedTree = true).assertIsDisplayed()
+        compose.runOnIdle { pair.value = CompactNickBrackets.ANGLE }
+        compose.onNodeWithText("<$sender> $body", useUnmergedTree = true).assertIsDisplayed()
+        compose.runOnIdle { pair.value = CompactNickBrackets.NONE }
+        compose.onNodeWithText("$sender: $body", useUnmergedTree = true).assertIsDisplayed()
+        compose.runOnIdle {
+            pair.value = CompactNickBrackets.ROUND
+            explicit.value = true
         }
+        compose.onNodeWithText("$sender: $body", useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test
@@ -1440,23 +1312,6 @@ class MessageBubbleFooterUiTest {
                             } else {
                                 assertTrue("$label OFF must not disable nickname colors", coloredNicknameInk.getValue(layout) != ink)
                             }
-                        }
-                        if (sample.sender && !sample.dimmed) {
-                            val senderFill =
-                                scheme.primary
-                                    .copy(alpha = 0.12f)
-                                    .compositeOver(scheme.background)
-                                    .toArgb()
-                            val nick = compose.onNodeWithText("alice", substring = true, useUnmergedTree = true)
-                            val nickBounds = nick.fetchSemanticsNode().boundsInRoot
-                            val left = (nickBounds.left - canvasBounds.left).toInt()
-                            val right = (nickBounds.right - canvasBounds.left).toInt()
-                            val top = (nickBounds.top - canvasBounds.top).toInt()
-                            val bottom = (nickBounds.bottom - canvasBounds.top).toInt()
-                            assertTrue(
-                                "$label OFF must preserve the painted sender nickname highlight",
-                                (left until right).any { x -> (top until bottom).any { py -> matchesPixel(plain.getPixel(x, py), senderFill) } },
-                            )
                         }
                         assertPaintedTextContrast("$label OFF", compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true), if (sample.dimmed) 4.5 else 7.0)
                     } else {

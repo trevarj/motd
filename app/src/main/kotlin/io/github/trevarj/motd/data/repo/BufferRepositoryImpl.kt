@@ -13,6 +13,7 @@ import io.github.trevarj.motd.data.db.MonitorQueryRow
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.identityRules
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
@@ -137,6 +138,11 @@ class BufferRepositoryImpl
             id: Long,
             layout: LayoutDensity?,
         ): Boolean = bufferDao.setLayoutDensityOverride(id, layout) == 1
+
+        override suspend fun setCompactNickBracketsOverride(
+            id: Long,
+            brackets: CompactNickBrackets?,
+        ): Boolean = bufferDao.setCompactNickBracketsOverride(id, brackets) == 1
 
         override suspend fun setMessageBackgroundOpacityOverride(
             id: Long,

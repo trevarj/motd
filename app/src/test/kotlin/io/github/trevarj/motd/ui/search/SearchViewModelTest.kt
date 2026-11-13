@@ -217,6 +217,15 @@ class SearchViewModelTest {
             layout: LayoutDensity?,
         ): Boolean = true
 
+        override suspend fun setCompactNickBracketsOverride(
+            id: Long,
+            brackets: io.github.trevarj.motd.data.prefs.CompactNickBrackets?,
+        ): Boolean {
+            val buffer = buffers.value?.takeIf { it.id == id } ?: return false
+            buffers.value = buffer.copy(compactNickBracketsOverride = brackets)
+            return true
+        }
+
         override suspend fun setMessageBackgroundOpacityOverride(
             id: Long,
             percent: Int?,

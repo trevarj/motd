@@ -85,6 +85,7 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.data.prefs.FONT_SCALE_STEP_PERCENT
@@ -173,6 +174,7 @@ fun AppearanceSettingsScreen(
         onDynamicColor = viewModel::setDynamicColor,
         onUseThemeTextColors = viewModel::setUseThemeTextColors,
         onLayoutDensity = viewModel::setLayoutDensity,
+        onCompactNickBrackets = viewModel::setCompactNickBrackets,
         onComposerStyle = viewModel::setComposerStyle,
         onInputCornerStyle = viewModel::setInputCornerStyle,
         onAvatarShape = viewModel::setAvatarShape,
@@ -220,6 +222,7 @@ fun AppearanceSettingsContent(
     onUseThemeTextColors: (Boolean) -> Unit,
     onLayoutDensity: (LayoutDensity) -> Unit,
     onComposerStyle: (ComposerStyle) -> Unit,
+    onCompactNickBrackets: (CompactNickBrackets) -> Unit = {},
     onInputCornerStyle: (UiCornerStyle) -> Unit = {},
     onAvatarShape: (AvatarShape) -> Unit = {},
     onChatCardCornerStyle: (UiCornerStyle) -> Unit = {},
@@ -786,6 +789,10 @@ fun AppearanceSettingsContent(
                 previewDensity = it
                 onLayoutDensity(it)
             },
+            onCompactNickBrackets = {
+                previewSettings = previewSettings.copy(compactNickBrackets = it)
+                onCompactNickBrackets(it)
+            },
             onComposerStyle = {
                 previewAppearance = previewAppearance.copy(composerStyle = it)
                 onComposerStyle(it)
@@ -895,6 +902,7 @@ internal fun AppearanceChatLayoutPreview(
         followSystem = appearance.followSystem,
         useThemeTextColors = appearance.useThemeTextColors,
         layoutDensity = density,
+        compactNickBrackets = settings.compactNickBrackets,
         nickColorsEnabled = settings.nickColorsEnabled,
         nickColorPalette = settings.nickColorPalette,
         nickColorOverrides = settings.nickColorOverrides,
@@ -1026,6 +1034,7 @@ private fun AppearanceChoiceSheet(
     previewShadows: Boolean,
     onPalette: (NickColorPalette) -> Unit,
     onDensity: (LayoutDensity) -> Unit,
+    onCompactNickBrackets: (CompactNickBrackets) -> Unit,
     onComposerStyle: (ComposerStyle) -> Unit,
     onInputCornerStyle: (UiCornerStyle) -> Unit,
     onAvatarShape: (AvatarShape) -> Unit,
@@ -1232,6 +1241,25 @@ private fun AppearanceChoiceSheet(
                         previewShadows,
                         "settings_chat_preview_sheet",
                     )
+                },
+                footer = {
+                    if (previewDensity == LayoutDensity.COMPACT) {
+                        Text(stringResource(R.string.settings_compact_nick_brackets), style = MaterialTheme.typography.titleSmall)
+                        CompactNickBrackets.entries.forEach { brackets ->
+                            RadioRow(
+                                label =
+                                    if (brackets == CompactNickBrackets.NONE) {
+                                        stringResource(R.string.settings_compact_nick_brackets_none)
+                                    } else {
+                                        "${brackets.opening}nick${brackets.closing}"
+                                    },
+                                selected = settings.compactNickBrackets == brackets,
+                                enabled = true,
+                                onClick = { onCompactNickBrackets(brackets) },
+                                modifier = Modifier.testTag("settings_compact_nick_brackets_${brackets.name.lowercase()}"),
+                            )
+                        }
+                    }
                 },
             )
         }

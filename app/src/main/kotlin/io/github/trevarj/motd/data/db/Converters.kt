@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.db
 
 import androidx.room.TypeConverter
+import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
@@ -94,6 +95,12 @@ internal class Converters {
 
     @TypeConverter
     fun stringToLayoutDensity(v: String?): LayoutDensity? = v?.let { runCatching { LayoutDensity.valueOf(it) }.getOrNull() }
+
+    @TypeConverter
+    fun compactNickBracketsToString(v: CompactNickBrackets?): String? = v?.name
+
+    @TypeConverter
+    fun stringToCompactNickBrackets(v: String?): CompactNickBrackets? = v?.let { runCatching { CompactNickBrackets.valueOf(it) }.getOrNull() }
 
     @TypeConverter
     fun presenceModeToString(v: PresenceMode?): String? = v?.name
