@@ -810,6 +810,32 @@ class RequiredHeadlessE2eTest {
         }
         assertEquals(originalSettings, runBlocking { settings.settings.first() })
         assertEquals(null, runBlocking { bootstrap.seams.buffers().joinedBufferId(network.childId, "#motd") })
+        val communityNetwork =
+            runBlocking {
+                bootstrap.seams
+                    .networks()
+                    .observeNetworks()
+                    .first()
+                    .single { it.id == network.childId }
+            }
+        val communityConnection =
+            bootstrap.seams
+                .connections()
+                .connectionStates.value[network.childId] as? IrcClientState.Ready
+        val advertisedIdentity = communityConnection?.isupport?.get("NETWORK")
+        val communityIdentity =
+            when {
+                advertisedIdentity.isNullOrBlank() -> "unknown"
+                advertisedIdentity.equals("Libera.Chat", ignoreCase = true) -> "libera"
+                else -> "other"
+            }
+        milestones.record(
+            "community_fixture_identity",
+            "network=${network.childId} role=${communityNetwork.role.name} ready=${communityConnection != null} identity=$communityIdentity",
+        )
+        assertEquals(NetworkRole.BOUNCER_CHILD, communityNetwork.role)
+        assertTrue("Private Community fixture must be Ready", communityConnection != null)
+        assertEquals("Private Community fixture must advertise Libera identity through Soju", "libera", communityIdentity)
         val communityId =
             runBlocking {
                 coroutineScope {

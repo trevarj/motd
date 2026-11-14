@@ -15,7 +15,7 @@
 #
 # Config kept intentionally small; ergo fills unset keys with built-in defaults.
 network:
-    name: HermeticTest
+    name: Libera.Chat
 
 server:
     name: ergo.test

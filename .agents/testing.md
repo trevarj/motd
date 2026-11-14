@@ -31,6 +31,8 @@ runs it.
 3. For Kotlin/Gradle changes run **root** `ktlintCheck`, not only
    `:app:ktlintCheck`: other modules and root scripts can fail Required CI.
    Use root `ktlintFormat` to apply enforced style. Run applicable lint below.
+   Run formatting in a separate Gradle invocation before checks; independent
+   source-set tasks can otherwise check pre-format inputs.
    Run `git diff --check` and, for staged changes, `git diff --cached --check`.
 4. Record which checks actually completed. If an earlier Gradle task fails,
    trailing tasks are not verified; fix it and run the remaining checks.
@@ -66,6 +68,11 @@ Rows are additive; select every affected boundary, including downstream callers.
 | Compose Kotlin / ordinary app journey | Nearest Robolectric behavior method in `testDebug` |
 | Cross-module or release-sensitive work | Nearest affected unit methods in each module; signed packaging/native-artifact checks below when affected |
 | Cutting a release | Nearest local checks plus focused actual-emulator visual verification below and [`releases.md`](releases.md) preflight |
+
+For hosted journey changes, inspect `test/e2e/hermetic-stack.sh` and its
+`test/e2e/hermetic/` configuration. Required CI uses that fixture, not the native
+`local-stack.sh` development stack. Verify protocol identity/capability assumptions
+against the actual fixture, not just a profile label or successful APK compilation.
 
 To target one unit test method:
 
