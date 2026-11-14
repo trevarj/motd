@@ -768,6 +768,7 @@ fun MessageBubble(
             reply?.let { ReplyMiniBubble(it, nickColors, onReplyClick, bubbleColor, dimmed) }
 
             if (text.isNotBlank()) {
+                val selecting = LocalMessageSelection.current != null
                 // Linkify http(s) URLs so the body is tappable even when the preview fails
                 // ; LinkAnnotation.Url uses the platform URI open handler. Known-nick
                 // @mentions are colored with the nick's own color. Body build is memoized per
@@ -782,6 +783,7 @@ fun MessageBubble(
                 val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
                 val body =
                     remember(
+                        selecting,
                         text,
                         mediaUrls,
                         audioPreviewUrls,
@@ -805,7 +807,7 @@ fun MessageBubble(
                             bodyColor,
                             minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                             normalContainerColor = bubbleRoles.normalContainer,
-                        ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
+                        ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
                     }
                 if (body.isNotBlank()) {
                     FoolBodyText(
@@ -946,6 +948,7 @@ private fun ComfortableActionBubble(
     trailingContent: (@Composable (Color) -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
+    val selecting = LocalMessageSelection.current != null
     val actionDescription = stringResource(R.string.chat_action_message)
     val actionLabel = if (LocalFoolBodyConcealment.current.concealed) actionAccessibilityLabel(displaySender, "") else actionAccessibilityLabel(displaySender, text)
     val scheme = MaterialTheme.colorScheme
@@ -1003,6 +1006,7 @@ private fun ComfortableActionBubble(
     val hideAvatar = avatarsHidden()
     val actionLine =
         remember(
+            selecting,
             displaySender,
             isBot,
             text,
@@ -1038,7 +1042,7 @@ private fun ComfortableActionBubble(
                 containerColor = rowColor,
                 minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                 normalContainerColor = roles.normalContainer,
-            ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
+            ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
         }
 
     Row(
@@ -1211,6 +1215,7 @@ private fun ActionMessageRow(
     trailingContent: (@Composable (Color) -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
+    val selecting = LocalMessageSelection.current != null
     val actionDescription = stringResource(R.string.chat_action_message)
     val actionLabel = if (LocalFoolBodyConcealment.current.concealed) actionAccessibilityLabel(displaySender, "") else actionAccessibilityLabel(displaySender, text)
     val spacing = LocalSpacing.current
@@ -1257,6 +1262,7 @@ private fun ActionMessageRow(
         }
     val actionLine =
         remember(
+            selecting,
             displaySender,
             isBot,
             text,
@@ -1289,7 +1295,7 @@ private fun ActionMessageRow(
                 containerColor = contrastRow,
                 minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                 normalContainerColor = normalPaintedRow,
-            ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
+            ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
         }
 
     // The caller's modifier carries the stable per-message semantics. Keep the ACTION-specific
@@ -1719,12 +1725,14 @@ private fun TwoLineMessageRow(
             }
 
             if (text.isNotBlank()) {
+                val selecting = LocalMessageSelection.current != null
                 val linkColor = MaterialTheme.colorScheme.primary
                 val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
                 val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
                 // Memoized body build (linkify + mention coloring) so it doesn't re-run per frame.
                 val richBody =
                     remember(
+                        selecting,
                         text,
                         mediaUrls,
                         audioPreviewUrls,
@@ -1748,7 +1756,7 @@ private fun TwoLineMessageRow(
                             bodyColor,
                             minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                             normalContainerColor = normalPaintedRow,
-                        ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
+                        ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
                     }
                 if (richBody.isNotBlank()) {
                     FoolBodyText(

@@ -328,6 +328,9 @@ fun MessageList(
     readMarkerLabel: String? = null,
     onLongPress: (MessageEntity) -> Unit,
     onReadMessage: ((MessageEntity) -> Unit)? = null,
+    selectionMessageId: Long? = null,
+    onSelectionDismiss: () -> Unit = {},
+    onSelectionBounds: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     onReply: (MessageEntity) -> Unit,
     swipeToReplyEnabled: Boolean = true,
     // React to a message; the whole entity is passed so a still-pending own row (msgid == null) is
@@ -774,6 +777,9 @@ fun MessageList(
                     }
                     MessageRow(
                         msg = msg,
+                        selecting = selectionMessageId == msg.id && renderExpanded == expanded,
+                        onSelectionDismiss = onSelectionDismiss,
+                        onSelectionBounds = onSelectionBounds,
                         networkId = networkId,
                         bufferId = bufferId,
                         conversationName = conversationName,
@@ -1770,6 +1776,9 @@ private sealed interface PreviewState {
 @Composable
 private fun MessageRow(
     msg: MessageEntity,
+    selecting: Boolean,
+    onSelectionDismiss: () -> Unit,
+    onSelectionBounds: (androidx.compose.ui.geometry.Rect) -> Unit,
     networkId: Long?,
     bufferId: Long?,
     conversationName: String?,
@@ -1983,7 +1992,7 @@ private fun MessageRow(
             displayTextForAudioMessage(msg.text, audioAttachments)
         }
     val renderedMessageText =
-        if (messageText == msg.text) msg.ircFormattedText ?: messageText else messageText
+        if (selecting) msg.ircFormattedText ?: msg.text else if (messageText == msg.text) msg.ircFormattedText ?: messageText else messageText
     val audioBodyBlank =
         remember(renderedMessageText, audioPreviewUrls) {
             if (audioPreviewUrls.isEmpty() || renderedMessageText.isBlank()) {
@@ -1994,7 +2003,7 @@ private fun MessageRow(
                     .isBlank()
             }
         }
-    val standaloneAudio = audioAttachments.isNotEmpty() && audioBodyBlank && reply == null
+    val standaloneAudio = !selecting && audioAttachments.isNotEmpty() && audioBodyBlank && reply == null
 
     // A cached completion is rendered synchronously even while scrolling. A cache miss waits for
     // idle, then joins the repository's process-owned single-flight fetch. Null is a definitive
@@ -2082,7 +2091,7 @@ private fun MessageRow(
             mentionDescription?.let { stateDescription = it }
         }
     val bodyConcealment = io.github.trevarj.motd.ui.components.LocalFoolBodyConcealment.current
-    val sourceSwipeEnabled = swipeToReplyEnabled && !bodyConcealment.concealed
+    val sourceSwipeEnabled = swipeToReplyEnabled && !bodyConcealment.concealed && !selecting
     val translatedSourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? =
         if (translation != null) {
             { content ->
@@ -2103,6 +2112,9 @@ private fun MessageRow(
                     LocalLinkMediaConsent provides linkMediaConsent,
                     LocalLinkPreviewAwaiting provides previewAwaiting,
                     LocalLinkPreviewFailed provides previewFailed,
+                    io.github.trevarj.motd.ui.components.LocalMessageSelection provides onSelectionDismiss.takeIf { selecting },
+                    io.github.trevarj.motd.ui.components.LocalMessageActionsEnabled provides !selecting,
+                    io.github.trevarj.motd.ui.components.LocalMessageSelectionBounds provides onSelectionBounds,
                 ) {
                     MessageBubble(
                         // Per-message handle for long-press/react/reply/deep-jump. Prefer the stable

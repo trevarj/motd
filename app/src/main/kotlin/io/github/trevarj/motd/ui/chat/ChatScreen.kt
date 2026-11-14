@@ -238,7 +238,6 @@ import io.github.trevarj.motd.dickord.isDiscordDirectMessage
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcClientState
-import io.github.trevarj.motd.irc.format.containsIrcFormatting
 import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.ChannelWatchDuration
@@ -2899,6 +2898,25 @@ internal fun ChatContent(
 
         // Long-press action sheet target.
         var sheetTarget by remember { mutableStateOf<MessageEntity?>(null) }
+        var selectionTarget by remember(state.buffer?.id) { mutableStateOf<MessageEntity?>(null) }
+        val latestSelectionBufferId by rememberUpdatedState(state.buffer?.id)
+        var selectionBounds by remember { mutableStateOf(Rect.Zero) }
+        var selectionHostOrigin by remember { mutableStateOf(Offset.Zero) }
+        fun canSelectMessage(target: MessageEntity): Boolean {
+            if (plainIrcText(target.text).isBlank()) return false
+            val expanded = if (latestExpandAllFools) target.id !in collapsedFools else target.id in expandedFools
+            return when (visibilityPolicy.foolPreferences(target)?.visibility) {
+                null, FoolsMode.DIMMED -> true
+                FoolsMode.BLUR, FoolsMode.COLLAPSE -> expanded
+                FoolsMode.HIDE -> hiddenFoolsRevealed && !restoringHiddenFools && expanded
+            }
+        }
+        val latestCanSelectMessage by rememberUpdatedState(::canSelectMessage)
+        val activeSelectionId = selectionTarget?.takeIf(::canSelectMessage)?.id
+        LaunchedEffect(selectionTarget, activeSelectionId) {
+            if (activeSelectionId == null) selectionTarget = null
+        }
+        androidx.activity.compose.BackHandler(enabled = activeSelectionId != null) { selectionTarget = null }
         var redactionTarget by remember { mutableStateOf<MessageEntity?>(null) }
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         var reactionPickerTarget by remember { mutableStateOf<MessageEntity?>(null) }
@@ -3574,6 +3592,17 @@ internal fun ChatContent(
             }
         }
         Scaffold(
+            modifier =
+                Modifier
+                    .onGloballyPositioned { selectionHostOrigin = it.positionInWindow() }
+                    .pointerInput(activeSelectionId) {
+                        if (activeSelectionId != null) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                if (!selectionBounds.contains(down.position + selectionHostOrigin)) selectionTarget = null
+                            }
+                        }
+                    },
             snackbarHost = { SnackbarHost(snackbarHostState) },
             contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
             topBar = {
@@ -4080,8 +4109,11 @@ internal fun ChatContent(
                                                 }
                                             }
                                         val onTimelineLongPress =
-                                            remember {
-                                                { message: MessageEntity -> sheetTarget = message }
+                                            remember(state.buffer?.id) {
+                                                { message: MessageEntity ->
+                                                    selectionTarget = null
+                                                    sheetTarget = message
+                                                }
                                             }
                                         val canRetryMessage =
                                             remember(state.buffer) {
@@ -4178,6 +4210,9 @@ internal fun ChatContent(
                                                 replyPreview = replyPreview,
                                                 onReplyPreviewClick = onReplyPreviewClick,
                                                 onLongPress = onTimelineLongPress,
+                                                selectionMessageId = activeSelectionId,
+                                                onSelectionDismiss = { selectionTarget = null },
+                                                onSelectionBounds = { selectionBounds = it },
                                                 onReadMessage =
                                                     onReadAloudMessage.takeIf {
                                                         readAloudState.enabled && !readAloudState.previewing &&
@@ -4663,22 +4698,7 @@ internal fun ChatContent(
         }
 
         sheetTarget?.let { target ->
-            val selectionVisibility = visibilityPolicy.foolPreferences(target)?.visibility
-            val selectionReadable =
-                when (selectionVisibility) {
-                    null, FoolsMode.DIMMED -> {
-                        true
-                    }
-
-                    FoolsMode.BLUR, FoolsMode.COLLAPSE -> {
-                        if (latestExpandAllFools) target.id !in collapsedFools else target.id in expandedFools
-                    }
-
-                    FoolsMode.HIDE -> {
-                        hiddenFoolsRevealed && !restoringHiddenFools &&
-                            (if (latestExpandAllFools) target.id !in collapsedFools else target.id in expandedFools)
-                    }
-                }
+            val selectionBufferId = state.buffer?.id
             // Dismiss with the M3 hide animation, clearing the target only once it settles.
             val hideThen: (() -> Unit) -> Unit = { after ->
                 scope.launch { sheetState.hide() }.invokeOnCompletion {
@@ -4689,15 +4709,14 @@ internal fun ChatContent(
             MessageActionSheet(
                 sheetState = sheetState,
                 isServerBuffer = isServerBuffer,
-                selectionText =
-                    if (selectionReadable) {
-                        remember(target.text) {
-                            (if (containsIrcFormatting(target.text)) plainIrcText(target.text) else target.text)
-                                .takeUnless(String::isBlank)
-                        }
-                    } else {
-                        null
-                    },
+                canSelectText = canSelectMessage(target),
+                onSelectText = {
+                    scope.launch {
+                        sheetState.hide()
+                        sheetTarget = null
+                        if (selectionBufferId == latestSelectionBufferId && latestCanSelectMessage(target)) selectionTarget = target
+                    }
+                },
                 onDismiss = { sheetTarget = null },
                 onTranslate =
                     if (externalTranslationText(target) != null) {

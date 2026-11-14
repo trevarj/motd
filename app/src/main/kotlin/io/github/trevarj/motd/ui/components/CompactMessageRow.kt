@@ -106,6 +106,7 @@ internal fun CompactMessageRow(
     trailingContent: (@Composable (Color) -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
+    val selecting = LocalMessageSelection.current != null
     val spacing = LocalSpacing.current
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
     // Self text stays on the default body color; others too (IRC is uniform). The nick carries color.
@@ -143,6 +144,7 @@ internal fun CompactMessageRow(
     val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
     val line =
         remember(
+            selecting,
             displaySender,
             mediaUrls,
             audioPreviewUrls,
@@ -178,7 +180,7 @@ internal fun CompactMessageRow(
                 containerColor = contrastRow,
                 minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                 normalContainerColor = normalPaintedRow,
-            ).withoutPreviewUrls(mediaUrls, audioPreviewUrls)
+            ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
         }
 
     MessagePaintedContent(

@@ -7,17 +7,22 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.selection.rememberSelectionState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.onFocusChanged
@@ -32,6 +37,8 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -46,12 +53,15 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.LocalSurfaceEffects
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 
 internal const val FOOL_BODY_RANGE = "fool_body"
 
@@ -62,6 +72,9 @@ internal data class FoolBodyConcealment(
 )
 
 internal val LocalFoolBodyConcealment = staticCompositionLocalOf { FoolBodyConcealment() }
+
+internal val LocalMessageSelection = staticCompositionLocalOf<(() -> Unit)?> { null }
+internal val LocalMessageSelectionBounds = staticCompositionLocalOf<(androidx.compose.ui.geometry.Rect) -> Unit> { {} }
 
 /** Scope only: authors, media, metadata and their input/semantics are never covered. */
 @Composable
@@ -84,8 +97,10 @@ internal fun FoolBodySelection(content: @Composable () -> Unit) {
     val currentContent by rememberUpdatedState(content)
     val body = remember { movableContentOf { currentContent() } }
     val concealed = LocalFoolBodyConcealment.current.concealed
-    SelectionContainer {
-        if (concealed) DisableSelection { body() } else body()
+    CompositionLocalProvider(LocalMessageSelection provides null) {
+        SelectionContainer {
+            if (concealed) DisableSelection { body() } else body()
+        }
     }
 }
 
@@ -133,6 +148,7 @@ internal fun FoolBodyText(
                 }
             }
         }
+    val body: @Composable (Modifier) -> Unit = { textModifier ->
     Text(
         text = displayed,
         color = color,
@@ -141,7 +157,7 @@ internal fun FoolBodyText(
         overflow = overflow,
         onTextLayout = { layout = it },
         modifier =
-            modifier
+            textModifier
                 .then(
                     if (!concealed) {
                         Modifier
@@ -222,6 +238,32 @@ internal fun FoolBodyText(
                     },
                 ),
     )
+    }
+    val dismissSelection = LocalMessageSelection.current.takeUnless { concealed || start >= end }
+    if (dismissSelection == null) {
+        body(modifier)
+    } else {
+        val selectionState = rememberSelectionState()
+        val latestDismiss by rememberUpdatedState(dismissSelection)
+        val onBounds = LocalMessageSelectionBounds.current
+        SelectionContainer(
+            state = selectionState,
+            modifier = modifier.testTag("message_selection").onGloballyPositioned { onBounds(it.boundsInWindow()) },
+        ) {
+            body(Modifier.testTag("message_selection_text"))
+        }
+        LaunchedEffect(selectionState, text) {
+            snapshotFlow { layout }.first { it?.layoutInput?.text == displayed }
+            withFrameNanos {}
+            selectionState.select(TextRange(start, end))
+            snapshotFlow { selectionState.selectedTexts.isEmpty() }.collect { empty ->
+                if (empty) latestDismiss()
+            }
+        }
+        DisposableEffect(selectionState) {
+            onDispose { latestDismiss() }
+        }
+    }
 }
 
 @Composable

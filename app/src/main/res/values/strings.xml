@@ -906,8 +906,6 @@
     <string name="chat_reply_open">Go to replied message</string>
     <string name="chat_action_copy">Copy</string>
     <string name="chat_action_select_text">Select text</string>
-    <string name="chat_selection_hint">Hold text, then drag the handles to select a passage.</string>
-    <string name="chat_selection_close">Close</string>
     <string name="chat_action_quote">Quote</string>
     <string name="chat_action_forward">Forward</string>
     <string name="chat_forward_title">Forward message</string>

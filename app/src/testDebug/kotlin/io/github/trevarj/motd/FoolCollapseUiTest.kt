@@ -2,6 +2,8 @@ package io.github.trevarj.motd
 
 import android.content.ClipboardManager
 import android.content.Context
+import android.view.View
+import android.widget.TextView
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
@@ -84,6 +86,7 @@ import io.github.trevarj.motd.ui.chat.ConversationLayoutState
 import io.github.trevarj.motd.ui.chat.ConversationPresenceState
 import io.github.trevarj.motd.ui.chat.EntryPositionState
 import io.github.trevarj.motd.ui.chat.FoolCollapseChip
+import io.github.trevarj.motd.ui.chat.nativeEmojiViews
 import io.github.trevarj.motd.ui.components.FoolVisibilityExample
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.CompletableDeferred
@@ -105,6 +108,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadow.api.Shadow
+import org.robolectric.shadows.ShadowWindowManagerImpl
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -116,12 +121,15 @@ class FoolCollapseUiTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
+    @Config(sdk = [26], qualifiers = "en-w411dp-h891dp")
     fun comfortableSelectionUsesCompletePlainBodyAndWholeCopyStaysRaw() = assertSelectionBodyAndWholeCopy(LayoutDensity.COMFORTABLE)
 
     @Test
+    @Config(sdk = [26], qualifiers = "en-w411dp-h891dp")
     fun compactSelectionUsesCompletePlainBodyAndWholeCopyStaysRaw() = assertSelectionBodyAndWholeCopy(LayoutDensity.COMPACT)
 
     @Test
+    @Config(sdk = [26], qualifiers = "en-w411dp-h891dp")
     fun twoLineSelectionUsesCompletePlainBodyAndWholeCopyStaysRaw() = assertSelectionBodyAndWholeCopy(LayoutDensity.TWO_LINE)
 
     private fun holdMessageBubble(nick: String) {
@@ -136,6 +144,45 @@ class FoolCollapseUiTest {
         row.performTouchInput {
             longClick(Offset(bubbleBounds.center.x, bubbleBounds.bottom - 1f) - rowBounds.topLeft)
         }
+    }
+
+    private val nativeHandles =
+        SemanticsMatcher("native selection handle") { node ->
+            node.config.any { it.key.name == "SelectionHandleInfo" }
+        }
+
+    private fun nativeCopyView(): View? =
+        Shadow
+            .extract<ShadowWindowManagerImpl>(
+                ApplicationProvider.getApplicationContext<Context>().getSystemService(Context.WINDOW_SERVICE),
+            ).views
+            .asSequence()
+            .flatMap { it.nativeEmojiViews() }
+            .filterIsInstance<TextView>()
+            .firstOrNull { it.isShown && it.text.toString().equals("Copy", ignoreCase = true) }
+
+    private fun copyNativeSelection(expected: String) {
+        var copy: View? = null
+        compose.waitUntil(5_000) {
+            compose.runOnIdle {
+                copy = nativeCopyView()
+                copy != null
+            }
+        }
+        compose.runOnIdle {
+            val action = generateSequence(checkNotNull(copy)) { it.parent as? View }.first { it.isClickable }
+            assertTrue(action.performClick())
+            val clipboard = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
+            assertEquals(expected, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+        }
+        assertNativeSelectionRemoved()
+    }
+
+    private fun assertNativeSelectionRemoved() {
+        compose.onNodeWithTag("message_selection").assertDoesNotExist()
+        compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
+        assertTrue(compose.onAllNodes(nativeHandles, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        compose.runOnIdle { assertNull(nativeCopyView()) }
     }
 
     private fun assertSelectionBodyAndWholeCopy(layout: LayoutDensity) {
@@ -180,10 +227,48 @@ class FoolCollapseUiTest {
             compose.setContent { fixture.Content() }
             holdSourcePadding()
             compose.onNodeWithTag("message_action_select_text").performScrollTo().performClick()
-            compose.onNodeWithTag("message_selection_text").assertTextEquals(plain)
-            compose.onNodeWithTag("message_selection_close").performClick()
+            compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+            compose
+                .onNode(
+                    hasTestTag("message_selection") and hasAnyAncestor(hasTestTag("chat_timeline")),
+                    useUnmergedTree = true,
+                ).assertIsDisplayed()
+            val selected = compose.onNodeWithTag("message_selection_text", useUnmergedTree = true).assertIsDisplayed()
+            val layouts = mutableListOf<TextLayoutResult>()
+            selected.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val textLayout = layouts.single()
+            val text = textLayout.layoutInput.text.text
+            assertTrue("The original body must expose the complete plain text and preview URL", text.endsWith(plain))
+            assertEquals(2, compose.onAllNodes(nativeHandles, useUnmergedTree = true).fetchSemanticsNodes().size)
+
+            val middleStart = text.indexOf("middle")
+            val middleEnd = middleStart + "middle".length
+            val endHandle = compose.onAllNodes(nativeHandles, useUnmergedTree = true)[1]
+            val endDelta =
+                textLayout.getBoundingBox(middleEnd - 1).bottomRight -
+                    textLayout.getBoundingBox(text.lastIndex).bottomRight
+            endHandle.performTouchInput {
+                down(center)
+                moveTo(center + endDelta, delayMillis = 500)
+                up()
+            }
+            val startHandle = compose.onAllNodes(nativeHandles, useUnmergedTree = true)[0]
+            val bodyStart = text.length - plain.length
+            val startDelta =
+                textLayout.getBoundingBox(middleStart).bottomLeft -
+                    textLayout.getBoundingBox(bodyStart).bottomLeft
+            startHandle.performTouchInput {
+                down(center)
+                moveTo(center + startDelta, delayMillis = 500)
+                up()
+            }
+            copyNativeSelection("middle")
             holdSourcePadding()
-            compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
+            compose.onNodeWithTag("message_action_select_text").performScrollTo().performClick()
+            assertEquals(2, compose.onAllNodes(nativeHandles, useUnmergedTree = true).fetchSemanticsNodes().size)
+            copyNativeSelection(plain)
+            holdSourcePadding()
+            compose.onNodeWithTag("message_selection").assertDoesNotExist()
             compose.onNodeWithTag("message_action_copy").performScrollTo().performClick()
             compose.runOnIdle {
                 assertEquals(
@@ -221,21 +306,17 @@ class FoolCollapseUiTest {
             compose.setContent { fixture.Content() }
             holdMessageBubble("a")
             compose.onNodeWithTag("message_action_select_text").performClick()
-            compose.onNodeWithTag("message_selection_text").performTouchInput { longClick() }
-            val handles =
-                androidx.compose.ui.test.SemanticsMatcher("native selection handle") { node ->
-                    node.config.any { it.key.name == "SelectionHandleInfo" }
-                }
-            assertTrue(compose.onAllNodes(handles, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+            compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+            compose.onNodeWithTag("message_selection_text").assertTextEquals("A body")
+            assertEquals(2, compose.onAllNodes(nativeHandles, useUnmergedTree = true).fetchSemanticsNodes().size)
             runBlocking { fixture.repo.setFoolPreferences("a", FoolPreferences(FoolsMode.COLLAPSE)) }
             compose.waitForIdle()
-            compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
+            assertNativeSelectionRemoved()
             compose.onNodeWithText("A body", useUnmergedTree = true).assertDoesNotExist()
-            compose.onNodeWithTag("message_action_select_text").assertDoesNotExist()
-            assertTrue(compose.onAllNodes(handles, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
             runBlocking { fixture.repo.setFoolPreferences("a", FoolPreferences(FoolsMode.DIMMED)) }
             compose.waitForIdle()
-            compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
+            assertNativeSelectionRemoved()
+            holdMessageBubble("a")
             compose.onNodeWithTag("message_action_select_text").assertIsDisplayed()
         } finally {
             fixture.close()
@@ -243,6 +324,7 @@ class FoolCollapseUiTest {
     }
 
     @Test
+    @Config(sdk = [26], qualifiers = "en-w411dp-h891dp")
     fun hiddenRevealRevocationRemovesSelectionEvenWhileExpanded() {
         val fixture = FoolTimelineFixture()
         try {
@@ -251,8 +333,9 @@ class FoolCollapseUiTest {
             holdMessageBubble("c")
             compose.onNodeWithTag("message_action_select_text").performClick()
             compose.onNodeWithTag("message_selection_text").assertTextEquals("C body")
+            assertEquals(2, compose.onAllNodes(nativeHandles, useUnmergedTree = true).fetchSemanticsNodes().size)
             compose.runOnIdle { fixture.revealed.value = false }
-            compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
+            assertNativeSelectionRemoved()
             compose.onNodeWithTag("message_action_select_text").assertDoesNotExist()
             compose.onNodeWithText("C body", useUnmergedTree = true).assertDoesNotExist()
         } finally {
@@ -261,6 +344,7 @@ class FoolCollapseUiTest {
     }
 
     @Test
+    @Config(sdk = [26], qualifiers = "en-w411dp-h891dp")
     fun globalRestoreRemovesSelectionFromExpandedCollapsedFool() {
         val fixture = FoolTimelineFixture()
         try {
@@ -269,8 +353,9 @@ class FoolCollapseUiTest {
             holdMessageBubble("b")
             compose.onNodeWithTag("message_action_select_text").performClick()
             compose.onNodeWithTag("message_selection_text").assertTextEquals("B body")
+            assertEquals(2, compose.onAllNodes(nativeHandles, useUnmergedTree = true).fetchSemanticsNodes().size)
             compose.runOnIdle { fixture.expandAllFools.value = false }
-            compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
+            assertNativeSelectionRemoved()
             compose.onNodeWithTag("message_action_select_text").assertDoesNotExist()
             compose.onNodeWithText("B body", useUnmergedTree = true).assertDoesNotExist()
         } finally {
