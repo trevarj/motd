@@ -774,7 +774,6 @@ class ConnectionManagerImpl
         private val readMarkerRepository: ReadMarkerRepository,
         private val messageNotifier: MessageNotifier,
         private val chatSoundPlayer: ChatSoundPlayer,
-        private val presetEnrollmentCoordinator: PresetEnrollmentCoordinator,
         private val avatarCoordinator: AvatarCoordinator,
         private val pushHealthStore: PushHealthStore,
         private val diagnostics: DiagnosticLogger,
@@ -2083,19 +2082,6 @@ class ConnectionManagerImpl
             // Persist STS policy if the server advertised one.
             val stsValue = client.caps.firstOrNull { it == "sts" || it.startsWith("sts=") }?.substringAfter('=', "")
             stsStore.parse(row.host, stsValue?.ifEmpty { null }, row.tls, row.port)?.let { stsStore.upsert(it) }
-            val enrollmentResult =
-                presetEnrollmentCoordinator.onReady(
-                    networkId = row.id,
-                    isCurrent = isCurrent,
-                ) { channel ->
-                    client.send(
-                        io.github.trevarj.motd.irc.proto
-                            .IrcMessage(command = "JOIN", params = listOf(channel)),
-                    )
-                }
-            if (enrollmentResult == EnrollmentJoinResult.FAILED) {
-                Log.w(TAG, "One-shot Libera #motd JOIN write failed for network ${row.id}")
-            }
             // Final self-heal for children whose loops died while the endpoint was down (startup
             // step 3A/3B): the primary revival now runs on the root's Registering edge, but Ready is
             // kept as the belt-and-braces pass — childrenNeedingReconnect makes both idempotent, so a

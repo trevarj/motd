@@ -9,7 +9,6 @@ import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
-import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
@@ -83,7 +82,6 @@ class AddNetworkViewModel
     constructor(
         private val networkRepository: NetworkRepository,
         private val connectionManager: ConnectionManager,
-        private val presetEnrollmentPrefs: PresetEnrollmentPrefs,
         private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
     ) : ViewModel() {
         private val _state = MutableStateFlow(AddNetworkUiState())
@@ -214,7 +212,6 @@ class AddNetworkViewModel
                         _state.value = _state.value.copy(duplicateConnection = true)
                         return@launch
                     }
-                    if (s.presetId == NetworkPresetId.LIBERA) presetEnrollmentPrefs.markLiberaEligible(networkId)
                     _state.value =
                         _state.value.copy(
                             phase = AddNetworkPhase.TESTING,
@@ -316,7 +313,6 @@ class AddNetworkViewModel
         private suspend fun deleteHalfCreated() {
             testJob?.cancel()
             _state.value.networkId?.takeIf { _state.value.provisionalCreated }?.let { networkId ->
-                presetEnrollmentPrefs.revokeLiberaEligibility(networkId)
                 networkRepository.deleteNetwork(networkId)
             }
         }

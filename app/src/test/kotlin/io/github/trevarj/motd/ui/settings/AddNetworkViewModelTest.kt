@@ -6,7 +6,6 @@ import io.github.trevarj.motd.bouncer.ZncLoginForm
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
-import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -70,22 +69,6 @@ class AddNetworkViewModelTest {
         override suspend fun childrenOf(rootId: Long) = networks.values.filter { it.parentId == rootId }
     }
 
-    private class FakePresetEnrollmentPrefs : PresetEnrollmentPrefs {
-        val eligible = mutableSetOf<Long>()
-        val revoked = mutableSetOf<Long>()
-
-        override suspend fun markLiberaEligible(networkId: Long) {
-            eligible += networkId
-        }
-
-        override suspend fun claimLiberaMotdJoin(networkId: Long) = eligible.remove(networkId)
-
-        override suspend fun revokeLiberaEligibility(networkId: Long) {
-            eligible -= networkId
-            revoked += networkId
-        }
-    }
-
     private class FakeBouncerKindPrefs : BouncerKindPrefs {
         val ids = MutableStateFlow<Set<Long>>(emptySet())
         override val zncNetworkIds: Flow<Set<Long>> = ids
@@ -136,9 +119,8 @@ class AddNetworkViewModelTest {
     private fun vm(
         repo: NetworkRepository,
         cm: ConnectionManager,
-        prefs: PresetEnrollmentPrefs = FakePresetEnrollmentPrefs(),
         bouncerPrefs: BouncerKindPrefs = FakeBouncerKindPrefs(),
-    ) = AddNetworkViewModel(repo, cm, prefs, bouncerPrefs)
+    ) = AddNetworkViewModel(repo, cm, bouncerPrefs)
 
     private fun AddNetworkViewModel.fillValidDirect() {
         editServer(ServerForm(host = "irc.libera.chat", port = "6697", nick = "me"))
@@ -445,60 +427,10 @@ class AddNetworkViewModelTest {
         }
 
     @Test
-    fun only_a_new_unchanged_libera_preset_is_marked_for_enrollment() =
-        runTest {
-            val newRepo = FakeNetworkRepository()
-            val newPrefs = FakePresetEnrollmentPrefs()
-            val newVm = vm(newRepo, FakeConnectionManager(), newPrefs)
-            newVm.selectPreset(NetworkPresetId.LIBERA)
-            newVm.editServer(
-                newVm.state.value.server
-                    .copy(nick = "trev"),
-            )
-            newVm.submit({}, {})
-            runCurrent()
-            assertEquals(setOf(newVm.state.value.networkId!!), newPrefs.eligible)
-
-            val customPrefs = FakePresetEnrollmentPrefs()
-            val customVm = vm(FakeNetworkRepository(), FakeConnectionManager(), customPrefs)
-            customVm.fillValidDirect()
-            customVm.submit({}, {})
-            runCurrent()
-            assertTrue(customPrefs.eligible.isEmpty())
-
-            val sojuPrefs = FakePresetEnrollmentPrefs()
-            val sojuVm = vm(FakeNetworkRepository(), FakeConnectionManager(), sojuPrefs)
-            sojuVm.setKind(ConnectionChoice.BOUNCER)
-            sojuVm.editServer(ServerForm(host = "soju.example", port = "6697", nick = "trev"))
-            sojuVm.editSojuLogin(SojuLoginForm("trev", "password"))
-            sojuVm.submit({}, {})
-            runCurrent()
-            assertTrue(sojuPrefs.eligible.isEmpty())
-
-            val existingRepo = FakeNetworkRepository()
-            existingRepo.networks[42] =
-                newRepo.networks.values
-                    .single()
-                    .copy(id = 42)
-            existingRepo.existingResult = 42
-            val existingPrefs = FakePresetEnrollmentPrefs()
-            val existingVm = vm(existingRepo, FakeConnectionManager(), existingPrefs)
-            existingVm.selectPreset(NetworkPresetId.LIBERA)
-            existingVm.editServer(
-                existingVm.state.value.server
-                    .copy(nick = "trev"),
-            )
-            existingVm.submit({}, {})
-            runCurrent()
-            assertTrue(existingPrefs.eligible.isEmpty())
-        }
-
-    @Test
-    fun deleting_a_provisional_libera_row_revokes_eligibility() =
+    fun abandoning_a_provisional_libera_preset_deletes_the_row() =
         runTest {
             val repo = FakeNetworkRepository()
-            val prefs = FakePresetEnrollmentPrefs()
-            val vm = vm(repo, FakeConnectionManager(), prefs)
+            val vm = vm(repo, FakeConnectionManager())
             vm.selectPreset(NetworkPresetId.LIBERA)
             vm.editServer(
                 vm.state.value.server
@@ -511,7 +443,6 @@ class AddNetworkViewModelTest {
             vm.abandon {}
             runCurrent()
 
-            assertEquals(setOf(id), prefs.revoked)
-            assertTrue(prefs.eligible.isEmpty())
+            assertFalse(repo.networks.containsKey(id))
         }
 }

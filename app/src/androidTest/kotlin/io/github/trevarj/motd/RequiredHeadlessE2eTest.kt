@@ -809,6 +809,29 @@ class RequiredHeadlessE2eTest {
             }
         }
         assertEquals(originalSettings, runBlocking { settings.settings.first() })
+        SettingsRobot(compose).open()
+        compose.onNodeWithTag("settings_category_about").performScrollTo().performClick()
+        compose.onNodeWithTag("about_community").performScrollTo().assertIsDisplayed().performClick()
+        compose.waitUntil("Community flow chooses a route or opens the conversation", 10_000) {
+            compose.onAllNodesWithTag("community_network_picker").fetchSemanticsNodes().isNotEmpty() ||
+                compose.onAllNodesWithTag("chat_timeline").fetchSemanticsNodes().isNotEmpty()
+        }
+        if (compose.onAllNodesWithTag("community_network_picker").fetchSemanticsNodes().isNotEmpty()) {
+            compose.onNodeWithTag("community_network_${network.childId}").performClick()
+        }
+        val communityId =
+            awaitWhileComposing("Private fixture confirms community JOIN", 15_000) {
+                BufferProbe(bootstrap.seams.buffers(), milestones).awaitJoinedChannel(network.childId, "#motd")
+            }
+        compose.waitUntil("Community conversation opens after self-JOIN", 10_000) {
+            compose.onAllNodesWithTag("chat_timeline").fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(
+            communityId,
+            runBlocking { bootstrap.seams.buffers().joinedBufferId(network.childId, "#motd") },
+        )
+        scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        ChatListRobot(compose).awaitTag("chatlist_row_$communityId")
         SettingsRobot(compose).apply {
             open()
             notifications()

@@ -270,6 +270,7 @@ class MainActivity :
                                     appearance = appearance,
                                     showComposerEmoji = settings.showComposerEmoji,
                                     showComposerFormattingTools = settings.showComposerFormattingTools,
+                                    appContentVisible = !startupSplashLoading && startupSplashOverlay == null,
                                     navController = navController,
                                     notificationTarget = notificationTarget,
                                     onNotificationTargetHandled = ::consumeNotificationTarget,

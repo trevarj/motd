@@ -11,7 +11,6 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
 import io.github.trevarj.motd.data.prefs.PresenceMode
-import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
@@ -150,18 +149,13 @@ class OnboardingViewModelTest {
         }
     }
 
-    private object FakePresetPrefs : PresetEnrollmentPrefs {
-        override suspend fun markLiberaEligible(networkId: Long) = Unit
-
-        override suspend fun claimLiberaMotdJoin(networkId: Long) = false
-
-        override suspend fun revokeLiberaEligibility(networkId: Long) = Unit
-    }
-
     private object FakeOnboardingPrefs : OnboardingPrefs {
         override val completed: Flow<Boolean> = flowOf(false)
+        override val communityInvitationHandled: Flow<Boolean> = flowOf(false)
 
         override suspend fun markCompleted() = Unit
+
+        override suspend fun markCommunityInvitationHandled() = Unit
     }
 
     /** Records the persisted depth and the ordering against child connects. */
@@ -274,7 +268,6 @@ class OnboardingViewModelTest {
             OnboardingViewModel(
                 repository,
                 connections,
-                FakePresetPrefs,
                 FakeOnboardingPrefs,
                 operations,
                 settings,

@@ -249,11 +249,40 @@ fun ChatListScreen(
     onOpenChannelList: (Long) -> Unit = {},
     selectedBufferId: Long? = null,
     suppressOnboarding: Boolean = false,
+    appContentVisible: Boolean = true,
     onDefaultBufferAvailable: (Long) -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
     audioViewModel: AudioPlaybackViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val community by viewModel.community.collectAsStateWithLifecycle()
+    val communityLifecycle = LocalLifecycleOwner.current
+    val communityAllowed = appContentVisible && !suppressOnboarding && selectedBufferId == null && !state.loading && (state.onboardingComplete || state.networks.isNotEmpty())
+    DisposableEffect(communityLifecycle, communityAllowed) {
+        fun update() = viewModel.setCommunityVisitActive(communityAllowed && communityLifecycle.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+        val observer = LifecycleEventObserver { _, _ -> update() }
+        communityLifecycle.lifecycle.addObserver(observer)
+        update()
+        onDispose {
+            communityLifecycle.lifecycle.removeObserver(observer)
+            viewModel.setCommunityVisitActive(false)
+        }
+    }
+    LaunchedEffect(community.openBufferId, communityAllowed) {
+        if (communityAllowed && communityLifecycle.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            community.openBufferId?.let {
+                viewModel.consumeCommunityNavigation()
+                onOpenBuffer(it)
+            }
+        }
+    }
+    if (communityAllowed) CommunityPicker(
+        state = community,
+        onChoose = viewModel::chooseCommunityNetwork,
+        onSettings = { viewModel.cancelCommunity(); onOpenNetworkSettings(it) },
+        onSetup = { viewModel.cancelCommunity(); onOpenAddNetwork() },
+        onCancel = viewModel::cancelCommunity,
+    )
     val audioPlaybackState by audioViewModel.state.collectAsStateWithLifecycle()
     // Collected once here, outside the ChatListState combine (see ChatListViewModel), so a
     // buffer's sync transition recomposes only its own row rather than the whole list.
@@ -284,6 +313,13 @@ fun ChatListScreen(
 
     ChatListContent(
         state = state,
+        communityInvitation = {
+            if (communityAllowed && community.invitation) CommunityInvitation(
+                onDisplayed = viewModel::communityInvitationDisplayed,
+                onJoin = viewModel::requestCommunity,
+                onDismiss = viewModel::dismissCommunityInvitation,
+            )
+        },
         syncIndicators = syncIndicators,
         syncChrome = syncChrome,
         recoveringActivityIds = recoveringActivityIds,
@@ -377,6 +413,7 @@ private fun chatListTopBarMode(
 @Composable
 fun ChatListContent(
     state: ChatListState,
+    communityInvitation: @Composable () -> Unit = {},
     syncIndicators: Map<Long, ChatListSyncIndicator> = emptyMap(),
     recoveringActivityIds: Set<Long> = emptySet(),
     syncChrome: ChatListSyncChrome = ChatListSyncChrome.Hidden,
@@ -1133,6 +1170,7 @@ fun ChatListContent(
                         if (!folderTabsVisible && pinnedMentionsVisible) {
                             MentionsPinnedRow(state.allMentions, state.allMentionsIncomplete, onOpenMentions)
                         }
+                        communityInvitation()
                     }
                     AudioMiniPlayer(
                         state = audioPlaybackState,

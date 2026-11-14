@@ -6,7 +6,6 @@ import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.avatar.SelfAvatarSetting
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
-import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.NickServIdentifySyntax
@@ -39,18 +38,6 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class NetworkSettingsViewModelTest {
-    private class FakePresetEnrollmentPrefs : PresetEnrollmentPrefs {
-        val revoked = mutableSetOf<Long>()
-
-        override suspend fun markLiberaEligible(networkId: Long) = Unit
-
-        override suspend fun claimLiberaMotdJoin(networkId: Long) = false
-
-        override suspend fun revokeLiberaEligibility(networkId: Long) {
-            revoked += networkId
-        }
-    }
-
     private class FakeNetworkRepository(
         initial: List<NetworkEntity>,
     ) : NetworkRepository {
@@ -186,13 +173,11 @@ class NetworkSettingsViewModelTest {
 
     private fun TestScope.loadedVm(
         repo: FakeNetworkRepository,
-        prefs: PresetEnrollmentPrefs = FakePresetEnrollmentPrefs(),
         connectionManager: FakeConnectionManager = FakeConnectionManager(),
     ): NetworkSettingsViewModel =
         NetworkSettingsViewModel(
             repo,
             connectionManager,
-            prefs,
             FakeAvatarPrefs(),
             FakeAvatarController,
         ).also {
@@ -335,16 +320,14 @@ class NetworkSettingsViewModelTest {
     fun deletingBouncerRoot_disconnectsAndForgetsEveryLocalMirror() =
         runTest {
             val repo = FakeNetworkRepository(listOf(root(), child(2), child(3)))
-            val prefs = FakePresetEnrollmentPrefs()
             val connectionManager = FakeConnectionManager()
-            val vm = loadedVm(repo, prefs, connectionManager)
+            val vm = loadedVm(repo, connectionManager)
             var done = false
 
             vm.delete { done = true }
             runCurrent()
 
             assertEquals(listOf(2L, 3L, 1L), connectionManager.disconnected)
-            assertEquals(setOf(1L, 2L, 3L), prefs.revoked)
             assertEquals(listOf(2L, 3L, 1L), FakeAvatarController.cleared)
             assertEquals(listOf("delete:1"), repo.operations)
             assertTrue(repo.networks.isEmpty())
@@ -419,7 +402,7 @@ class NetworkSettingsViewModelTest {
         }
 
     @Test
-    fun changing_an_eligible_direct_endpoint_revokes_enrollment_before_save() =
+    fun changing_a_direct_libera_endpoint_saves_the_new_host() =
         runTest {
             val directLibera =
                 root(host = "irc.libera.chat", port = 6697).copy(
@@ -427,8 +410,7 @@ class NetworkSettingsViewModelTest {
                     parentId = null,
                 )
             val repo = FakeNetworkRepository(listOf(directLibera))
-            val prefs = FakePresetEnrollmentPrefs()
-            val vm = loadedVm(repo, prefs)
+            val vm = loadedVm(repo)
             vm.editServer(
                 vm.state.value.server
                     .copy(host = "irc.example.org"),
@@ -437,7 +419,6 @@ class NetworkSettingsViewModelTest {
             vm.save {}
             runCurrent()
 
-            assertEquals(setOf(1L), prefs.revoked)
             assertEquals("irc.example.org", repo.networks.getValue(1).host)
         }
 
@@ -512,7 +493,6 @@ class NetworkSettingsViewModelTest {
                 NetworkSettingsViewModel(
                     repo,
                     FakeConnectionManager(mapOf(1L to ready)),
-                    FakePresetEnrollmentPrefs(),
                     FakeAvatarPrefs(),
                     FakeAvatarController,
                 )
@@ -559,7 +539,6 @@ class NetworkSettingsViewModelTest {
                 NetworkSettingsViewModel(
                     repo,
                     FakeConnectionManager(mapOf(1L to ready)),
-                    FakePresetEnrollmentPrefs(),
                     FakeAvatarPrefs(),
                     FakeAvatarController,
                 )

@@ -55,6 +55,7 @@ import io.github.trevarj.motd.ui.settings.SettingsTarget as SettingsTargetAnchor
 fun AboutScreen(
     onBack: () -> Unit = {},
     target: SettingsTarget? = null,
+    onOpenCommunity: () -> Unit = {},
     viewModel: AboutViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -66,6 +67,7 @@ fun AboutScreen(
         state = state,
         target = target,
         onBack = onBack,
+        onOpenCommunity = onOpenCommunity,
         onDiagnosticLoggingChanged = viewModel::setDiagnosticLoggingEnabled,
         onExportDiagnostics = { createDiagnosticDocument.launch("motd-diagnostics-${System.currentTimeMillis()}.txt") },
     )
@@ -78,6 +80,7 @@ internal fun AboutContent(
     onBack: () -> Unit,
     onDiagnosticLoggingChanged: (Boolean) -> Unit,
     onExportDiagnostics: () -> Unit,
+    onOpenCommunity: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val licenseUrl = stringResource(R.string.about_license_url)
@@ -143,6 +146,13 @@ internal fun AboutContent(
             }
         }
         SettingsGroup(title = stringResource(R.string.about_project_section)) {
+            SettingsActionRow(
+                title = stringResource(R.string.community_title),
+                summary = stringResource(R.string.community_channel),
+                modifier = Modifier.testTag("about_community"),
+                onClick = onOpenCommunity,
+            )
+            SettingsDivider()
             SettingsTargetAnchor(target?.name, SettingsTarget.LICENSE.name) { targetModifier ->
                 SettingsActionRow(
                     title = stringResource(R.string.about_license),

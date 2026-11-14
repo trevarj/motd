@@ -131,6 +131,16 @@ Questions, bug reports, and feedback: join
 [`#motd` on Libera.Chat](https://web.libera.chat/#motd), or open an
 [issue](https://github.com/trevarj/motd/issues).
 
+The app offers one dismissible chat-list invitation on new and existing
+installations, excluding known channel members. **About → Project → MOTD community**
+keeps the join/open action available afterward.
+
+Joining requires your action; selecting the Libera preset no longer joins
+automatically. The action reuses your Libera connection, including soju or ZNC,
+and opens the channel if already joined. Ambiguous connections require a choice;
+offline or missing connections lead to explicit connection/setup options rather
+than silently creating a direct connection.
+
 ## License
 
 Copyright 2026 Trevor Arjeski. Licensed under the

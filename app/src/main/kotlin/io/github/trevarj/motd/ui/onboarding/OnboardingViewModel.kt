@@ -10,7 +10,6 @@ import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.HistorySyncDepth
 import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
-import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -24,7 +23,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -41,7 +39,6 @@ class OnboardingViewModel
     constructor(
         private val networkRepository: NetworkRepository,
         private val connectionManager: ConnectionManager,
-        private val presetEnrollmentPrefs: PresetEnrollmentPrefs,
         private val onboardingPrefs: OnboardingPrefs,
         private val bouncerOperations: OnboardingBouncerOperations,
         private val settingsRepository: SettingsRepository,
@@ -169,19 +166,7 @@ class OnboardingViewModel
                                     else -> networkPreset(s.presetId)?.displayName ?: s.server.host
                                 },
                         )
-                    val existingNetworkIds =
-                        networkRepository
-                            .observeNetworks()
-                            .first()
-                            .mapTo(mutableSetOf()) { it.id }
                     val networkId = networkRepository.addNetwork(entity)
-                    if (
-                        networkId !in existingNetworkIds &&
-                        !s.isBouncer &&
-                        s.presetId == NetworkPresetId.LIBERA
-                    ) {
-                        presetEnrollmentPrefs.markLiberaEligible(networkId)
-                    }
                     dispatch(OnboardingAction.NetworkCreated(networkId))
 
                     connectionManager.connect(networkId)

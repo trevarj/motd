@@ -60,8 +60,6 @@ import io.github.trevarj.motd.data.prefs.InviteEnrollmentCleanup
 import io.github.trevarj.motd.data.prefs.InviteEnrollmentStore
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
 import io.github.trevarj.motd.data.prefs.OnboardingPrefsImpl
-import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
-import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefsImpl
 import io.github.trevarj.motd.data.prefs.PushPrefs
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
@@ -171,9 +169,6 @@ internal abstract class AppModule {
 
     @Binds @Singleton
     abstract fun bouncerKindPrefs(impl: BouncerKindPrefsImpl): BouncerKindPrefs
-
-    @Binds @Singleton
-    abstract fun presetEnrollmentPrefs(impl: PresetEnrollmentPrefsImpl): PresetEnrollmentPrefs
 
     @Binds @Singleton
     abstract fun historySyncPrefs(impl: HistorySyncPrefsImpl): HistorySyncPrefs

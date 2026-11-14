@@ -19,9 +19,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.InviteEnrollmentStore
-import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefsImpl
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
-import io.github.trevarj.motd.data.repo.NetworkRepositoryImpl
 import io.github.trevarj.motd.data.sync.ChatSoundPlayer
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.HistoryGapFillCoordinator
@@ -768,7 +766,6 @@ class NotificationReplyReadinessTest {
                 readMarkerRepository = ReadMarkerRepository(db),
                 messageNotifier = notifier,
                 chatSoundPlayer = ChatSoundPlayer.Noop,
-                presetEnrollmentCoordinator = PresetEnrollmentCoordinator(PresetEnrollmentPrefsImpl(context), NetworkRepositoryImpl(db.networkDao())),
                 avatarCoordinator = avatarCoordinator,
                 pushHealthStore = NoopPushHealthStore,
                 diagnostics = DiagnosticLogger.Noop,

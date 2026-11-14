@@ -24,4 +24,21 @@ class OnboardingPrefsTest {
 
             assertTrue(OnboardingPrefsImpl(context).completed.first())
         }
+
+    @Test
+    fun communityInvitationDefaultsFalseAndPersistsIndependentlyOfCompletion() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val prefs: OnboardingPrefs = OnboardingPrefsImpl(context)
+
+            assertFalse(prefs.communityInvitationHandled.first())
+            prefs.markCompleted()
+            assertFalse(prefs.communityInvitationHandled.first())
+
+            prefs.markCommunityInvitationHandled()
+
+            val restored: OnboardingPrefs = OnboardingPrefsImpl(context)
+            assertTrue(restored.communityInvitationHandled.first())
+            assertTrue(restored.completed.first())
+        }
 }

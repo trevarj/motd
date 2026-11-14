@@ -17,7 +17,6 @@ import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.HistorySyncDepth
 import io.github.trevarj.motd.data.prefs.NoopBouncerKindPrefs
-import io.github.trevarj.motd.data.prefs.PresetEnrollmentPrefs
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.data.sync.HistorySyncOutcome
 import io.github.trevarj.motd.data.sync.HistoryWindowFetcher
@@ -26,7 +25,6 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.obfs.VlessLink
 import io.github.trevarj.motd.service.ConnectionManager
-import io.github.trevarj.motd.service.liberaEndpointChanged
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.ServerForm
 import kotlinx.coroutines.flow.Flow
@@ -165,7 +163,6 @@ class NetworkSettingsViewModel
     constructor(
         private val networkRepository: NetworkRepository,
         private val connectionManager: ConnectionManager,
-        private val presetEnrollmentPrefs: PresetEnrollmentPrefs,
         private val avatarPrefs: AvatarPrefs,
         private val avatarController: AvatarController,
         private val bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
@@ -379,9 +376,6 @@ class NetworkSettingsViewModel
                             pendingBouncerIdentityChange = BouncerIdentityChange(children.size),
                         )
                 } else {
-                    if (liberaEndpointChanged(current, updated)) {
-                        presetEnrollmentPrefs.revokeLiberaEligibility(current.id)
-                    }
                     networkRepository.updateNetwork(updated)
                     onDone()
                 }
@@ -417,7 +411,6 @@ class NetworkSettingsViewModel
             if (removeLocalMirrors) {
                 networkRepository.childrenOf(updated.id).forEach { child ->
                     connectionManager.disconnect(child.id)
-                    presetEnrollmentPrefs.revokeLiberaEligibility(child.id)
                     avatarController.clearNetworkState(child.id)
                     networkRepository.deleteNetwork(child.id)
                 }
@@ -489,10 +482,7 @@ class NetworkSettingsViewModel
                             }
                         ) + network
                     localTree.forEach { connectionManager.disconnect(it.id) }
-                    localTree.forEach {
-                        presetEnrollmentPrefs.revokeLiberaEligibility(it.id)
-                        avatarController.clearNetworkState(it.id)
-                    }
+                    localTree.forEach { avatarController.clearNetworkState(it.id) }
                     networkRepository.deleteNetwork(network.id)
                 }
                 onDone()

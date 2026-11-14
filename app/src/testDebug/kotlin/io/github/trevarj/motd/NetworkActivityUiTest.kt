@@ -14,6 +14,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
@@ -63,6 +64,7 @@ import io.github.trevarj.motd.ui.chatlist.ChatListInvitation
 import io.github.trevarj.motd.ui.chatlist.ChatListState
 import io.github.trevarj.motd.ui.chatlist.ChatListSyncChrome
 import io.github.trevarj.motd.ui.chatlist.ChatListViewModel
+import io.github.trevarj.motd.ui.chatlist.CommunityInvitation
 import io.github.trevarj.motd.ui.chatlist.NetworkActivityAction
 import io.github.trevarj.motd.ui.chatlist.NetworkActivityChat
 import io.github.trevarj.motd.ui.chatlist.NetworkActivityDisposition
@@ -106,6 +108,36 @@ class NetworkActivityUiTest {
     private fun activity(issues: List<NetworkActivityIssue> = listOf(issue())) = NetworkActivityState(networks = listOf(NetworkActivityNetwork(1, "Libera", if (issues.any { it.bufferId == null }) IrcClientState.Failed("bad certificate", true) else ready)), active = issues)
 
     private fun row(archived: Boolean = false) = ChatListRow(bufferId = 7, networkId = 1, networkName = "Libera", displayName = "#kotlin", type = BufferType.CHANNEL, pinned = false, muted = false, lastMessageText = "hi", lastMessageSender = "alice", lastMessageTime = 1, unreadCount = 0, mentionCount = 0, archived = archived)
+
+    @Test fun communityInvitationHasAccessibleActionsAndDismissalSurvivesReentry() {
+        val model = activityModel(NoopConnectionManager())
+        try {
+            compose.setContent {
+                val community by model.community.collectAsState()
+                MotdTheme(dynamicColor = false) {
+                    if (community.invitation) {
+                        CommunityInvitation(
+                            onDisplayed = model::communityInvitationDisplayed,
+                            onJoin = model::requestCommunity,
+                            onDismiss = model::dismissCommunityInvitation,
+                        )
+                    }
+                }
+            }
+            compose.runOnIdle { model.setCommunityVisitActive(true) }
+            compose.waitUntil(5_000) { model.community.value.invitation }
+            compose.onNodeWithTag("community_invitation_join").assertIsDisplayed().assertHasClickAction()
+            compose.onNodeWithTag("community_invitation_dismiss").assertIsDisplayed().assertHasClickAction().performClick()
+            compose.onNodeWithTag("community_invitation").assertDoesNotExist()
+            compose.runOnIdle {
+                model.setCommunityVisitActive(false)
+                model.setCommunityVisitActive(true)
+            }
+            compose.onNodeWithTag("community_invitation").assertDoesNotExist()
+        } finally {
+            compose.runOnIdle { model.viewModelScope.cancel() }
+        }
+    }
 
     @Test fun activityAttentionUsesVmWatermarkAcrossModesAllClearAndRestoration() {
         val connections =
@@ -837,9 +869,12 @@ class NetworkActivityUiTest {
         settingsRepository = FakeSettings(),
         onboardingPrefs =
             object : OnboardingPrefs {
-                override val completed = flowOf(true)
+                override val completed = MutableStateFlow(true)
+                override val communityInvitationHandled = MutableStateFlow(false)
 
-                override suspend fun markCompleted() = Unit
+                override suspend fun markCompleted() { completed.value = true }
+
+                override suspend fun markCommunityInvitationHandled() { communityInvitationHandled.value = true }
             },
         globalFeedPrefs =
             object : GlobalFeedPrefs {

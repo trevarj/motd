@@ -203,6 +203,16 @@ flowchart TD
   callback cannot restart the overlay.
   Tapping either app-owned cover dismisses it immediately, even before local data is
   ready; loading continues in the app. The OS launch window still waits for the first frame.
+- Community discovery offers one inline chat-list invitation across new and existing
+  installations, plus a permanent About action for `#motd` on Libera.Chat. The
+  invitation is handled only when actually visible or known membership suppresses it;
+  a late self-JOIN removes it. Displayed invitations stay available for the current
+  visit until acted on, but do not recur. Initial placeholder state is not eligibility.
+  Explicit actions reuse an identified direct or bound bouncer route; ambiguous
+  routes require user choice, and offline/missing routes use connection/setup UI.
+  A persisted joined buffer confirms navigation, not transport write acceptance;
+  rejection, disconnection and timeout remain visible. Promotional preset enrollment
+  is retired without changing user commands, existing memberships or normal rejoin.
 - Preview-bearing preference choices save immediately and stay open for comparison, with one
   prominent selected sample; per-chat layout samples follow the same override/default/global
   inheritance as chat. Fictional examples reuse production renderers with local data and isolated

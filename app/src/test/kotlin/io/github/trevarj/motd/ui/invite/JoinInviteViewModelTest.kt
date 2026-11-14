@@ -375,6 +375,11 @@ class JoinInviteViewModelTest {
     private class FakeOnboarding : OnboardingPrefs {
         val completedState = MutableStateFlow(false)
         override val completed: Flow<Boolean> = completedState
+        override val communityInvitationHandled = MutableStateFlow(false)
+
+        override suspend fun markCommunityInvitationHandled() {
+            communityInvitationHandled.value = true
+        }
 
         override suspend fun markCompleted() {
             completedState.value = true

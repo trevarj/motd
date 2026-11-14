@@ -13,6 +13,12 @@ import io.github.trevarj.motd.data.db.InvitationEventRow
 import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.service.ChannelJoinOutcome
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeoutOrNull
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
@@ -207,7 +213,7 @@ class ChatListViewModel
         private val channelCloseCoordinator: ChannelCloseCoordinator,
         private val readMarkerRepository: ReadMarkerSnapshotter,
         private val settingsRepository: SettingsRepository,
-        onboardingPrefs: OnboardingPrefs,
+        private val onboardingPrefs: OnboardingPrefs,
         globalFeedPrefs: GlobalFeedPrefs,
         dickordLabsPrefs: DickordLabsPrefs,
         private val savedStateHandle: SavedStateHandle,
@@ -220,6 +226,182 @@ class ChatListViewModel
             // fresh ViewModel after process/configuration recreation re-drives any unfinished leaves.
             channelCloseCoordinator.start()
             chatPageCache?.start(viewModelScope, appVisibility, settingsRepository.settings)
+        }
+
+        private val _community = MutableStateFlow(CommunityState())
+        val community: StateFlow<CommunityState> = _community.asStateFlow()
+        private var communityActive = false
+        private var communityHandled: Boolean? = null
+        private var communityEligible = false
+        private var communityShown = false
+        private var communityVisitConsumed = false
+        private var communityRequested = false
+        private var communityWork: Job? = null
+
+        init {
+            viewModelScope.launch {
+                combine(
+                    networkRepository.observeNetworks(),
+                    connectionManager.connectionStates,
+                    bufferRepository.observeNotificationChannels(),
+                    onboardingPrefs.communityInvitationHandled,
+                    onboardingPrefs.completed,
+                ) { networks, connections, channels, handled, completed ->
+                    val routes = networks.filter { network ->
+                        val advertised = (connections[network.id] as? IrcClientState.Ready)?.isupport?.get("NETWORK")
+                        network.role != NetworkRole.BOUNCER_ROOT &&
+                            (advertised.isNullOrBlank() || advertised.equals("Libera.Chat", true))
+                    }.map {
+                        CommunityRoute(
+                            it,
+                            isCommunityNetwork(it, connections[it.id]),
+                            connections[it.id] is IrcClientState.Ready,
+                            channels.firstOrNull { channel -> channel.networkId == it.id && channel.joined && channel.displayName.equals("#motd", true) }?.bufferId,
+                        )
+                    }
+                    val member = channels.any { channel ->
+                        channel.joined && channel.displayName.equals("#motd", true) &&
+                            networks.any { it.id == channel.networkId && it.role != NetworkRole.BOUNCER_ROOT }
+                    }
+                    Triple(routes, member, handled to (completed || networks.isNotEmpty()))
+                }.collect { (routes, member, prefs) ->
+                    communityHandled = prefs.first
+                    communityEligible = prefs.second && !prefs.first && !member
+                    if (member) {
+                        communityShown = false
+                        communityVisitConsumed = true
+                        if (!prefs.first) onboardingPrefs.markCommunityInvitationHandled()
+                    }
+                    _community.value = _community.value.copy(
+                        routes = routes,
+                        invitation = communityActive && !communityVisitConsumed && (communityShown || communityEligible),
+                    )
+                    if (communityActive && communityRequested) {
+                        communityRequested = false
+                        startCommunity()
+                    }
+                }
+            }
+        }
+
+        fun setCommunityVisitActive(active: Boolean) {
+            if (communityActive == active) return
+            communityActive = active
+            if (!active) {
+                if (communityShown) communityVisitConsumed = true
+                communityShown = false
+                cancelCommunity()
+                _community.value = _community.value.copy(invitation = false)
+            } else {
+                _community.value = _community.value.copy(invitation = !communityVisitConsumed && communityEligible)
+                if (communityRequested && communityHandled != null) {
+                    communityRequested = false
+                    startCommunity()
+                }
+            }
+        }
+
+        fun communityInvitationDisplayed() {
+            if (!communityActive || !_community.value.invitation || communityShown) return
+            communityShown = true
+            viewModelScope.launch { onboardingPrefs.markCommunityInvitationHandled() }
+        }
+
+        fun dismissCommunityInvitation() {
+            communityVisitConsumed = true
+            communityShown = false
+            _community.value = _community.value.copy(invitation = false)
+            viewModelScope.launch { onboardingPrefs.markCommunityInvitationHandled() }
+        }
+
+        fun requestCommunity() {
+            dismissCommunityInvitation()
+            if (communityActive && communityHandled != null) startCommunity() else communityRequested = true
+        }
+
+        private fun startCommunity() {
+            val routes = _community.value.routes
+            val unique = routes.singleOrNull()?.takeIf { it.identified && (it.ready || it.joinedBufferId != null) }
+            if (unique != null) chooseCommunityNetwork(unique.network.id)
+            else _community.value = _community.value.copy(picker = true, error = null, rejectionReason = null)
+        }
+
+        fun cancelCommunity() {
+            communityWork?.cancel()
+            communityWork = null
+            communityRequested = false
+            _community.value = _community.value.copy(picker = false, joining = false, error = null, rejectionReason = null, openBufferId = null)
+        }
+
+        fun consumeCommunityNavigation() {
+            _community.value = _community.value.copy(openBufferId = null)
+        }
+
+        fun chooseCommunityNetwork(networkId: Long) {
+            if (!communityActive || _community.value.joining) return
+            if (_community.value.routes.none { it.network.id == networkId }) return
+            communityWork?.cancel()
+            _community.value = _community.value.copy(picker = true, joining = true, error = null, rejectionReason = null)
+            communityWork = viewModelScope.launch {
+                try {
+                    val normalize = connectionManager.clientFor(networkId)?.isupport?.let { it::normalize }
+                        ?: { name: String -> name.lowercase() }
+                    val existing = bufferRepository.joinedBufferId(networkId, normalize("#motd"))
+                    if (existing == null && connectionManager.connectionStates.value[networkId] !is IrcClientState.Ready) {
+                        _community.value = _community.value.copy(error = CommunityError.CONNECTION, joining = false)
+                        return@launch
+                    }
+                    val result = existing ?: coroutineScope {
+                        val rejected = async(start = CoroutineStart.UNDISPATCHED) {
+                            connectionManager.channelJoinOutcomes.filter {
+                                it is ChannelJoinOutcome.Rejected && it.networkId == networkId && normalize(it.channel) == normalize("#motd")
+                            }.first() as ChannelJoinOutcome.Rejected
+                        }
+                        val joined = async(start = CoroutineStart.UNDISPATCHED) {
+                            bufferRepository.observeJoinedChannelNames(networkId).first { names -> names.any { normalize(it) == normalize("#motd") } }
+                            bufferRepository.joinedBufferId(networkId, normalize("#motd"))
+                        }
+                        val disconnected = async(start = CoroutineStart.UNDISPATCHED) {
+                            connectionManager.connectionStates.first { it[networkId] !is IrcClientState.Ready }
+                        }
+                        try {
+                            if (!connectionManager.joinChannel(networkId, "#motd", null)) {
+                                _community.value = _community.value.copy(error = CommunityError.CONNECTION)
+                                null
+                            } else {
+                                withTimeoutOrNull(20_000) {
+                                    select<Long?> {
+                                        rejected.onAwait {
+                                            _community.value = _community.value.copy(error = CommunityError.REJECTED, rejectionReason = it.reason)
+                                            null
+                                        }
+                                        joined.onAwait { it }
+                                        disconnected.onAwait {
+                                            _community.value = _community.value.copy(error = CommunityError.CONNECTION)
+                                            null
+                                        }
+                                    }
+                                }.also {
+                                    if (it == null && _community.value.error == null) _community.value = _community.value.copy(error = CommunityError.TIMEOUT)
+                                }
+                            }
+                        } finally {
+                            rejected.cancel()
+                            joined.cancel()
+                            disconnected.cancel()
+                        }
+                    }
+                    if (communityActive && result != null) {
+                        _community.value = _community.value.copy(picker = false, openBufferId = result)
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    _community.value = _community.value.copy(error = CommunityError.FAILED)
+                } finally {
+                    if (communityWork == coroutineContext[Job]) _community.value = _community.value.copy(joining = false)
+                }
+            }
         }
 
         // One-shot: unmuting marked a muted backlog read, so the screen can report it and offer an undo.

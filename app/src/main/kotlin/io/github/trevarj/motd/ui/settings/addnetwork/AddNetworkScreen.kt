@@ -270,12 +270,7 @@ internal fun NetworkPresetPicker(
             val endpoint = stringResource(R.string.add_network_preset_tls_endpoint, preset.host, preset.port)
             RadioRow(
                 label = preset.displayName,
-                subtitle =
-                    if (preset.id == NetworkPresetId.LIBERA) {
-                        stringResource(R.string.add_network_preset_detail, endpoint, stringResource(R.string.add_network_preset_libera_motd))
-                    } else {
-                        endpoint
-                    },
+                subtitle = endpoint,
                 selected = selected == preset.id,
                 enabled = true,
                 onClick = { onSelect(preset.id) },

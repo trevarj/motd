@@ -104,6 +104,7 @@ fun MotdNavGraph(
     appearance: AppearanceConfig,
     showComposerEmoji: Boolean,
     showComposerFormattingTools: Boolean,
+    appContentVisible: Boolean = true,
     navController: NavHostController = rememberNavController(),
     // Notification-tap deep-link: open the buffer and jump to the message. Null when absent.
     notificationTarget: NotificationTarget? = null,
@@ -197,6 +198,7 @@ fun MotdNavGraph(
                     ChatListPane(
                         navController = navController,
                         viewModel = chatListViewModel,
+                        appContentVisible = appContentVisible && notificationTarget == null && pendingShare == null,
                         suppressOnboarding = pendingJoinInvite != null,
                         onDefaultBufferAvailable = { bufferId ->
                             if (twoPane && !openedDefault) {
@@ -660,9 +662,17 @@ fun MotdNavGraph(
             )
         }
         composable<AboutRoute> { entry ->
+            val chatListEntry = remember(entry, navController) {
+                navController.getBackStackEntry(requireNotNull(ChatListRoute::class.qualifiedName))
+            }
+            val chatListViewModel: ChatListViewModel = hiltViewModel(chatListEntry)
             AboutScreen(
                 target = entry.toRoute<AboutRoute>().target,
                 onBack = { navController.popBackStack() },
+                onOpenCommunity = {
+                    chatListViewModel.requestCommunity()
+                    navController.returnToChatList()
+                },
             )
         }
         // Round 5: app-shell / network-management destinations.
@@ -785,6 +795,7 @@ private fun ChatListPane(
     selectedBufferId: Long? = null,
     replaceCurrentChat: Boolean = false,
     suppressOnboarding: Boolean = false,
+    appContentVisible: Boolean = true,
     onDefaultBufferAvailable: (Long) -> Unit = {},
 ) {
     ChatListScreen(
@@ -821,6 +832,7 @@ private fun ChatListPane(
         onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
         selectedBufferId = selectedBufferId,
         suppressOnboarding = suppressOnboarding,
+        appContentVisible = appContentVisible,
         onDefaultBufferAvailable = onDefaultBufferAvailable,
     )
 }
