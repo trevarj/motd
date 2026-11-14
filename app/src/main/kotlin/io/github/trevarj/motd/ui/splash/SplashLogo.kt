@@ -5,6 +5,8 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,10 +21,13 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import io.github.trevarj.motd.R
@@ -56,50 +61,54 @@ fun StartupSplashGate(
         Box(if (isCoveringContent) Modifier.clearAndSetSemantics { } else Modifier) {
             content()
         }
-        if (loading) {
-            // The native launch surface stays black until its measured icon bounds are available.
-            Box(Modifier.fillMaxSize().background(Color.Black).consumeSplashInput())
-        } else if (request != null) {
-            Box(Modifier.fillMaxSize().background(Color.Black).consumeSplashInput()) {
-                val progress = remember(request) { Animatable(STARTUP_SPLASH_START_PROGRESS) }
-                val ready by rememberUpdatedState(rootReady)
-                val shown by rememberUpdatedState(onShown)
-                LaunchedEffect(request) {
-                    withFrameNanos { }
-                    shown()
-                    snapshotFlow { ready }.collectLatest { isReady ->
-                        val remainingMs =
-                            ((STARTUP_SPLASH_END_PROGRESS - progress.value) * SPARK_CUT_DURATION_MS)
-                                .toInt().coerceAtLeast(0)
-                        val durationMs =
-                            if (isReady) minOf(remainingMs, STARTUP_SPLASH_READY_DURATION_MS) else remainingMs
-                        progress.animateTo(STARTUP_SPLASH_END_PROGRESS, tween(durationMs, easing = LinearEasing))
-                        progress.snapTo(1f)
-                        finish()
+        if (isCoveringContent) {
+            val skipLabel = stringResource(R.string.skip_splash_screen)
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .testTag("splash_cover")
+                    .semantics { contentDescription = skipLabel }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        role = Role.Button,
+                        onClickLabel = skipLabel,
+                        onClick = { finish() },
+                    ),
+            ) {
+                if (!loading && request != null) {
+                    val progress = remember(request) { Animatable(STARTUP_SPLASH_START_PROGRESS) }
+                    val ready by rememberUpdatedState(rootReady)
+                    val shown by rememberUpdatedState(onShown)
+                    LaunchedEffect(request) {
+                        withFrameNanos { }
+                        shown()
+                        snapshotFlow { ready }.collectLatest { isReady ->
+                            val remainingMs =
+                                ((STARTUP_SPLASH_END_PROGRESS - progress.value) * SPARK_CUT_DURATION_MS)
+                                    .toInt().coerceAtLeast(0)
+                            val durationMs =
+                                if (isReady) minOf(remainingMs, STARTUP_SPLASH_READY_DURATION_MS) else remainingMs
+                            progress.animateTo(STARTUP_SPLASH_END_PROGRESS, tween(durationMs, easing = LinearEasing))
+                            progress.snapTo(1f)
+                            finish()
+                        }
                     }
+                    SplashMarkArtwork(
+                        progress = progress.value,
+                        size = request.logoSize,
+                        modifier =
+                            (
+                                request.locationInWindow?.let { location -> Modifier.absoluteOffset { location } }
+                                    ?: Modifier.align(Alignment.Center)
+                            ).testTag("splash_logo_mark"),
+                    )
                 }
-                SplashMarkArtwork(
-                    progress = progress.value,
-                    size = request.logoSize,
-                    modifier =
-                        (
-                            request.locationInWindow?.let { location -> Modifier.absoluteOffset { location } }
-                                ?: Modifier.align(Alignment.Center)
-                        ).testTag("splash_logo_mark"),
-                )
             }
         }
     }
 }
-
-private fun Modifier.consumeSplashInput(): Modifier =
-    pointerInput(Unit) {
-        awaitPointerEventScope {
-            while (true) {
-                awaitPointerEvent().changes.forEach { change -> change.consume() }
-            }
-        }
-    }
 
 /** The sole launch treatment resolves to the unchanged ceramic splash artwork. */
 @Composable

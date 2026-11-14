@@ -201,6 +201,8 @@ flowchart TD
   at a nominal 200 ms without restarting the cut. Handoff and animation share a
   five-second deadline; completion removes both launch covers, and a late platform
   callback cannot restart the overlay.
+  Tapping either app-owned cover dismisses it immediately, even before local data is
+  ready; loading continues in the app. The OS launch window still waits for the first frame.
 - Preview-bearing preference choices save immediately and stay open for comparison, with one
   prominent selected sample; per-chat layout samples follow the same override/default/global
   inheritance as chat. Fictional examples reuse production renderers with local data and isolated

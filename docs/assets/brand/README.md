@@ -69,6 +69,11 @@ choices remain readable in preferences and configuration backups but do not
 control startup. The native launch surface is black so it never exposes the
 finished aperture before the app-owned cut.
 
+Tapping the app-owned splash dismisses it immediately without waiting for local
+data or animation completion. The tap is consumed rather than forwarded to the
+app, and loading continues in the background. The OS-owned launch window cannot
+be skipped before the app's first frame.
+
 `tools/splash-spark-cut.html` is the editable artwork preview. Reconstruct the
 uncut ceramic face (`drawable-nodpi/splash_spark_intact.png`) from the original
 800px splash raster and regenerate the self-contained preview, GIF, phone-size

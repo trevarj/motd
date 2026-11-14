@@ -8,12 +8,20 @@ import android.window.SplashScreenView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertContentDescriptionEquals
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
@@ -22,6 +30,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.MainActivity
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.UiDispatcherResetRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -32,6 +41,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
@@ -46,6 +56,64 @@ class SplashLogoUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun loadingCoverCanBeSkippedBeforeRootIsReady() {
+        assertTapSkipsUnreadySplash(loadingInitially = true)
+    }
+
+    @Test
+    fun animatedCoverCanBeSkippedBeforeRootIsReady() {
+        assertTapSkipsUnreadySplash(loadingInitially = false)
+    }
+
+    private fun assertTapSkipsUnreadySplash(loadingInitially: Boolean) {
+        val loading = mutableStateOf(loadingInitially)
+        val request = mutableStateOf(if (loadingInitially) null else SplashOverlayRequest(180.dp))
+        var finished = 0
+        var clicks = 0
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            StartupSplashGate(
+                request = request.value,
+                loading = loading.value,
+                rootReady = false,
+                onShown = {},
+                onFinished = {
+                    finished++
+                    loading.value = false
+                    request.value = null
+                },
+            ) {
+                Box(Modifier.fillMaxSize().testTag("startup_content").clickable { clicks++ })
+            }
+        }
+        if (!loadingInitially) {
+            compose.mainClock.advanceTimeBy(80)
+            compose.waitForIdle()
+        }
+        val skipLabel = RuntimeEnvironment.getApplication().getString(R.string.skip_splash_screen)
+        val cover = compose.onNodeWithTag("splash_cover")
+        cover.assertIsDisplayed()
+            .assertContentDescriptionEquals(skipLabel)
+            .assertHasClickAction()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+        assertEquals(skipLabel, cover.fetchSemanticsNode().config[SemanticsActions.OnClick].label)
+        compose.onNodeWithTag("startup_content").assertDoesNotExist()
+        assertEquals(0, finished)
+        cover.performTouchInput { click() }
+        assertEquals("skip completes without waiting for readiness or advancing the clock", 1, finished)
+        assertEquals("the dismissing tap is not delivered to the app", 0, clicks)
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.onNodeWithTag("splash_cover").assertDoesNotExist()
+        compose.onNodeWithTag("startup_content").assertIsDisplayed().assertHasClickAction()
+            .performTouchInput { click() }
+        assertEquals(1, clicks)
+        compose.mainClock.advanceTimeBy(STARTUP_SPLASH_TIMEOUT_MS + 1_000)
+        compose.waitForIdle()
+        assertEquals("skip cancels both animation and deadline completion", 1, finished)
+    }
 
     @Test
     @Config(sdk = [31])
@@ -144,12 +212,12 @@ class SplashLogoUiTest {
                 }
             }
         }
-        val firstFrame = compose.onNodeWithTag("splash_logo_mark").captureToImage().asAndroidBitmap()
+        val firstFrame = compose.onNodeWithTag("splash_logo_mark", useUnmergedTree = true).captureToImage().asAndroidBitmap()
         compose.mainClock.advanceTimeBy(80)
         compose.waitForIdle()
         assertEquals(1, shown)
         assertEquals(0, finished)
-        val moving = compose.onNodeWithTag("splash_logo_mark").captureToImage().asAndroidBitmap()
+        val moving = compose.onNodeWithTag("splash_logo_mark", useUnmergedTree = true).captureToImage().asAndroidBitmap()
         assertFalse("startup starts at the active cut, not the opening hold", firstFrame.sameAs(moving))
         compose.onNodeWithTag("startup_content").assertDoesNotExist()
         compose.mainClock.advanceTimeBy(STARTUP_SPLASH_READY_DURATION_MS.toLong() - 80 + 48)
@@ -255,12 +323,12 @@ class SplashLogoUiTest {
         }
         compose.mainClock.advanceTimeBy(afterMs)
         compose.waitForIdle()
-        val before = compose.onNodeWithTag("splash_logo_mark").captureToImage().asAndroidBitmap()
+        val before = compose.onNodeWithTag("splash_logo_mark", useUnmergedTree = true).captureToImage().asAndroidBitmap()
         assertEquals(0, finished)
         compose.runOnIdle { ready.value = true }
         compose.mainClock.advanceTimeBy(64)
         compose.waitForIdle()
-        val after = compose.onNodeWithTag("splash_logo_mark").captureToImage().asAndroidBitmap()
+        val after = compose.onNodeWithTag("splash_logo_mark", useUnmergedTree = true).captureToImage().asAndroidBitmap()
         fun openedPixels(bitmap: Bitmap): Int =
             (bitmap.width / 3 until bitmap.width * 2 / 3).sumOf { x ->
                 (bitmap.height / 3 until bitmap.height * 2 / 3).count { y -> bitmap.getPixel(x, y) == Color.BLACK }
@@ -270,7 +338,7 @@ class SplashLogoUiTest {
         compose.waitForIdle()
         assertEquals("readiness never extends normal remaining motion", 1, finished)
         assertEquals("readiness must not repeat the native handoff", 1, shown)
-        val completed = compose.onNodeWithTag("splash_logo_mark").captureToImage().asAndroidBitmap()
+        val completed = compose.onNodeWithTag("splash_logo_mark", useUnmergedTree = true).captureToImage().asAndroidBitmap()
         compose.runOnIdle { request.value = null }
         compose.mainClock.advanceTimeByFrame()
         compose.waitForIdle()
