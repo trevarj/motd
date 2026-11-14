@@ -169,6 +169,14 @@ internal class TimelineRobot(
             awaitTag(firstTag, timeoutMs)
             awaitTag(secondTag, timeoutMs)
             val timeline = rule.onNodeWithTag("chat_timeline", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val viewportTop =
+                maxOf(
+                    timeline.top,
+                    rule
+                        .onNodeWithTag("chat_top_app_bar", useUnmergedTree = true)
+                        .fetchSemanticsNode()
+                        .boundsInRoot.bottom,
+                )
             expectedLabel?.let {
                 rule
                     .onNode(
@@ -198,11 +206,23 @@ internal class TimelineRobot(
                 InstrumentationRegistry
                     .getInstrumentation()
                     .targetContext.resources.displayMetrics.density
-            assertTrue("first unread was above the timeline viewport", first.top >= timeline.top - density)
+            // The timeline now draws behind the header. Entry aligns the whole lazy row (including
+            // its history seam and unread divider), not the message bubble, to the unobscured top.
+            val seam =
+                rule
+                    .onAllNodesWithTag(CHAT_GAP_DIVIDER_TAG, useUnmergedTree = true)
+                    .fetchSemanticsNodes()
+                    .map { it.boundsInRoot }
+                    .lastOrNull { it.bottom <= divider.top && it.bottom >= viewportTop }
+            val boundaryTop = seam?.top ?: divider.top
+            assertTrue("first unread was above the unobscured viewport", first.top >= viewportTop - density)
             assertTrue(
-                "first unread was not anchored near the viewport top: timeline=${timeline.top}, row=${first.top}",
-                first.top <= timeline.top + 96f * density,
+                "unread boundary was not at the unobscured viewport top: viewport=$viewportTop, boundary=$boundaryTop, divider=${divider.top}, row=${first.top}",
+                kotlin.math.abs(boundaryTop - viewportTop) <= density,
             )
+            seam?.let {
+                assertTrue("history seam was detached from the unread divider", divider.top - it.bottom <= 24f * density)
+            }
             assertTrue("second unread did not follow the first", second.top > first.top)
             assertTrue("unread divider was not attached to the first unread row", divider.bottom <= first.top)
             assertTrue(

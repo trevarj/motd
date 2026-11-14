@@ -22,6 +22,10 @@ automation in `.github/workflows/release.yml` is authoritative.
    its `headless` E2E job and final `gate` job—to pass before tagging. Confirm the
    Android job's **Build and verify signed release APK** step succeeded; a green
    test/lint-only run or skipped packaging step is not release-build evidence.
+   If a test-only follow-up skips Android, dispatch full Required CI with
+   `nix develop -c gh workflow run ci.yml --ref main`. Require that run's matching
+   candidate SHA, successful gate, and signed-packaging step; `workflow_dispatch`
+   deliberately selects every tier.
 4. Confirm the requested semantic version and that the `v<semver>` tag does not
    already exist locally or remotely.
 5. Confirm the four signing secrets exist in GitHub: `KEYSTORE_BASE64`,

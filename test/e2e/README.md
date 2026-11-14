@@ -24,12 +24,18 @@ setup and teardown deliberately clear application data.
 
 The fast headless suite is a required pull-request and main-branch CI gate. It
 runs exactly four isolated Kotlin journeys: TLS onboarding/import, one
-canonical echo/send/reconnect row, an 80-row second-client unread/history recovery,
+canonical echo/send/reconnect row, a 260-row second-client unread/history recovery,
 and bootstrapped navigation/settings/bouncer smoke. Host UIAutomator remains manual-only;
 the exhaustive A-H/J/R/I workflow is diagnostics, not a required fast phase.
 Release CI requires the exact tagged SHA's green `Required CI / gate`, then builds and verifies the signed FOSS artifact without rerunning those checks.
 The required workflow also runs fixture-free component tests under Robolectric,
 keeping UI-state coverage continuous without coupling those cases to Soju or an emulator.
+
+Unread entry checks the persisted boundary at the unobscured viewport top: the
+timeline extends behind the header, and the entry row can include a history seam
+before its unread divider and message. The first two unread messages must remain
+visible, ordered and unique, with the divider attached to the first. Failure
+timeline snapshots include header and seam bounds alongside the divider and rows.
 
 ## Prerequisites
 

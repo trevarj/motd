@@ -21,6 +21,7 @@ import io.github.trevarj.motd.data.history.ResolvedGap
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
+import io.github.trevarj.motd.ui.components.CHAT_GAP_DIVIDER_TAG
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -101,7 +102,9 @@ internal class TimelineDiagnostics(
                     put("bufferId", bufferId)
                 },
             )
-            root.put("divider", guarded { dividerSnapshot() })
+            root.put("divider", guarded { boundsSnapshot(UNREAD_DIVIDER_TAG) })
+            root.put("header", guarded { boundsSnapshot("chat_top_app_bar") })
+            root.put("seams", guarded { boundsSnapshot(CHAT_GAP_DIVIDER_TAG) })
             // Room first: it resolves the newest event ids that the Paging key probes ask for.
             root.put("room", guarded { roomSnapshot(targetKey) })
             root.put("paging", guarded { pagingSnapshot(containerTag, targetTag, targetKey) })
@@ -207,8 +210,8 @@ internal class TimelineDiagnostics(
         return out
     }
 
-    private fun dividerSnapshot(): JSONObject {
-        val nodes = compose.onAllNodesWithTag(UNREAD_DIVIDER_TAG, useUnmergedTree = true).fetchSemanticsNodes()
+    private fun boundsSnapshot(tag: String): JSONObject {
+        val nodes = compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes()
         return JSONObject().apply {
             put("composed", nodes.isNotEmpty())
             put("count", nodes.size)
