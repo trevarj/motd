@@ -840,8 +840,6 @@ class RequiredHeadlessE2eTest {
             runBlocking {
                 coroutineScope {
                     val client = requireNotNull(bootstrap.seams.connections().clientFor(network.childId))
-                    // Subscribe before navigation: only a real server self-JOIN may satisfy this
-                    // journey, not a pre-existing buffer or a locally accepted JOIN write.
                     val selfJoin =
                         async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) {
                             client.broadcastEvents.filterIsInstance<IrcEvent.Joined>().first {
@@ -855,14 +853,6 @@ class RequiredHeadlessE2eTest {
                         .performScrollTo()
                         .assertIsDisplayed()
                         .performClick()
-                    val fixtureRouteTag = "community_network_${network.childId}"
-                    compose.waitUntil("Community offers the private fixture or opens its conversation", 10_000) {
-                        compose.onAllNodesWithTag(fixtureRouteTag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() ||
-                            compose.onAllNodesWithTag("chat_timeline").fetchSemanticsNodes().isNotEmpty()
-                    }
-                    if (compose.onAllNodesWithTag(fixtureRouteTag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()) {
-                        ChatListRobot(compose).click(fixtureRouteTag)
-                    }
                     awaitWhileComposing("Private fixture confirms community self-JOIN and persistence", 15_000) {
                         withTimeout(15_000) {
                             selfJoin.await()

@@ -14,7 +14,11 @@ Android emulator --TLS 10.0.2.2:6697--> soju --TCP ergo:6667--> ergo
                                     message-store DB         seed identity
 ```
 
-- `ergo` is the private upstream IRCd.
+- `ergo` is the private upstream IRCd. Like the native fixture, it advertises
+  `NETWORK=Libera.Chat` so About → Community exercises the production identity
+  filter and real `JOIN #motd` without connecting to public Libera.Chat. The
+  required journey checks the identity received through Soju, not its `libera`
+  alias or this configuration alone.
 - `ergo-provision` registers the upstream accounts and channel before soju
   connects.
 - `soju` presents a self-signed TLS certificate, exposes the bouncer network
