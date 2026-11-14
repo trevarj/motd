@@ -1,0 +1,6 @@
+- Select and copy part of a message directly in chat.
+- Customize Compact nickname brackets globally or per chat.
+- Improve sender highlights, chat edge fades and composer spacing.
+- Speed up the startup animation when ready, or tap to skip it.
+- Join #motd on Libera.Chat through an optional invitation or About; preset setup no longer joins automatically.
+- Fix concealed-message clipping and text selection readiness.
