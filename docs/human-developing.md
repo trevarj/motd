@@ -37,31 +37,20 @@ the repository root. Replace `<serial>` with the target's `adb devices` serial:
 
 ```sh
 nix develop -c env ANDROID_SERIAL="<serial>" bash ./gradlew \
-  :app:compileDebugKotlin --rerun :app:installDebug \
-  -Pkotlin.incremental=false -Pksp.incremental=false --no-build-cache \
-  -PmotdAiAbis=arm64-v8a --stacktrace --console=plain
+  :app:installDebug -PmotdAiAbis=arm64-v8a --stacktrace --console=plain
 ```
 
-Kotlin 2.4.21 Compose incremental output has retained callers of generated
-`$stable` fields missing from recompiled classes, causing `NoSuchFieldError`
-on channel entry (`ChatPageCache.Entry` and previously `Lease`). This workflow
-recompiles coherently before packaging and installing; ADB does not repair the
-compiler output. The pinned Android Gradle plugin honors `ANDROID_SERIAL` for
-`installDebug`, restricting installation to that device.
+`installDebug` automatically reruns the app's debug KSP generation and Kotlin compilation
+with incremental mode disabled, even when sources are unchanged. These tasks cannot reuse
+previous outputs from up-to-date history or the build cache. Qualified and unqualified
+task names and Gradle-resolved abbreviations use the same refresh.
 
-Gradle's task-local `--rerun` forces only `:app:compileDebugKotlin` to execute
-even when up-to-date, unlike `--rerun-tasks`, which forces its dependencies too.
-`-Pkotlin.incremental=false` disables Kotlin incremental compilation only for
-this invocation; `-Pksp.incremental=false` also regenerates changed Hilt/Room
-outputs without stale incremental backup files. `--no-build-cache` prevents
-restoring older compiler output. Other tasks retain their normal up-to-date
-checks, and configuration caching remains enabled.
+Configuration caching and other tasks' caches remain enabled. Ordinary builds, tests and
+release tasks retain their normal incremental settings; no manual compiler flags are needed.
 
-Run this workflow as the first debug build after restoring incremental defaults,
-even without source changes, so existing outputs or cached bytecode cannot
-supply the installed app. The non-incremental compile also invalidates Kotlin's
-incremental caches. Subsequent ordinary builds use the incremental defaults
-again; keep these flags command-local and use this workflow for debug installs.
+This avoids Kotlin 2.4.21 Compose incremental output retaining callers of generated `$stable`
+fields missing from recompiled classes, which caused `NoSuchFieldError` on channel entry.
+The pinned Android Gradle plugin honors `ANDROID_SERIAL`, restricting installation to that device.
 Keep app data: clearing data or uninstalling cannot repair mismatched bytecode.
 
 The `-PmotdAiAbis=arm64-v8a` opt-in changes only the native AI modules' ABI

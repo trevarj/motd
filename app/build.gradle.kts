@@ -1,5 +1,6 @@
 import com.android.build.api.artifact.SingleArtifact
 import com.android.build.api.variant.BuiltArtifactsLoader
+import com.google.devtools.ksp.gradle.KspAATask
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.DirectoryProperty
@@ -13,6 +14,7 @@ import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.bundling.Zip
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -571,6 +573,19 @@ dependencies {
     androidTestUtil(libs.androidx.test.orchestrator)
     // Real WebSocket handshake for the WSS transport framing test.
     testImplementation(libs.okhttp.mockwebserver)
+}
+
+tasks.configureEach {
+    if (name == "installDebug") {
+        tasks.named<KotlinCompile>("compileDebugKotlin").get().apply {
+            incremental = false
+            outputs.upToDateWhen { false }
+        }
+        tasks.named<KspAATask>("kspDebugKotlin").get().apply {
+            kspConfig.incremental.set(false)
+            outputs.upToDateWhen { false }
+        }
+    }
 }
 
 // Generated JUnit cases are deterministic only for the selected profile/seed/replay inputs.
