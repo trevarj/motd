@@ -35,7 +35,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.dp
 import androidx.core.graphics.scale
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -165,18 +164,24 @@ fun ChatWallpaperBackground(
 
 internal fun Modifier.fadeChatEdges(
     color: Color,
+    readTopHostHeightPx: () -> Int,
+    readBottomHostHeightPx: () -> Int,
+    readBottomOffsetPx: () -> Int = { 0 },
     blendMode: BlendMode = BlendMode.SrcOver,
 ): Modifier =
     drawWithCache {
-        val topFraction = if (size.height > 0f) (192.dp.toPx() / size.height).coerceAtMost(0.5f) else 0.5f
-        val bottomFraction = if (size.height > 0f) (96.dp.toPx() / size.height).coerceAtMost(0.5f) else 0.5f
+        val height = size.height.coerceAtLeast(1f)
+        val bottom = (size.height - readBottomOffsetPx()).coerceIn(0f, size.height)
+        val topExtent = readTopHostHeightPx().toFloat().coerceIn(0f, bottom)
+        val bottomExtent = readBottomHostHeightPx().toFloat().coerceIn(0f, bottom)
+        val scale = if (topExtent + bottomExtent > bottom) bottom / (topExtent + bottomExtent) else 1f
         val transparent = color.copy(alpha = 0f)
         val fade =
             Brush.verticalGradient(
                 0f to color,
-                topFraction to transparent,
-                (1f - bottomFraction) to transparent,
-                1f to color,
+                topExtent * scale / height to transparent,
+                (bottom - bottomExtent * scale) / height to transparent,
+                bottom / height to color,
             )
         onDrawWithContent {
             drawContent()

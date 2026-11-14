@@ -7,22 +7,27 @@ import android.graphics.BitmapFactory
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -227,6 +232,13 @@ class ScenicWallpaperUiTest {
     fun pageWallpaperEdgesFadeToCanvasAndReachSharedCaptures() {
         var theme by mutableStateOf(ColorThemePreset.LIGHT)
         var height by mutableStateOf(448)
+        var topHeight by mutableIntStateOf(128)
+        var bottomHeight by mutableIntStateOf(56)
+        var imeHeight by mutableIntStateOf(0)
+        var consumedImeHeight by mutableIntStateOf(0)
+        var measuredTop by mutableIntStateOf(0)
+        var measuredBottom by mutableIntStateOf(0)
+        val messageInk = Color(0xff31c976)
         var faded by mutableStateOf(false)
         var replay by mutableStateOf("page")
         var canvas = Color.Unspecified
@@ -245,7 +257,13 @@ class ScenicWallpaperUiTest {
                                 .matchParentSize()
                                 .captureSurfaceBackdrop(surfaceSource)
                                 .recordMessageWallpaper(messageSource, MaterialTheme.colorScheme.surface)
-                                .then(if (faded) Modifier.fadeChatEdges(background) else Modifier),
+                                .then(
+                                    if (faded) {
+                                        Modifier.fadeChatEdges(background, { measuredTop }, { measuredBottom }, { (imeHeight - consumedImeHeight).coerceAtLeast(0) })
+                                    } else {
+                                        Modifier
+                                    },
+                                ),
                             animate = false,
                         )
                         Box(
@@ -260,8 +278,20 @@ class ScenicWallpaperUiTest {
                                     messageSource.revision
                                     drawLayer(messageSource.raw)
                                 }
+                                if (replay == "timeline") drawRect(background)
                             },
                         )
+                        Box(
+                            Modifier
+                                .size(128.dp, (height - (imeHeight - consumedImeHeight).coerceAtLeast(0)).dp)
+                                .graphicsLayer {
+                                    alpha = if (replay == "timeline") 1f else 0f
+                                    compositingStrategy = CompositingStrategy.Offscreen
+                                }.fadeChatEdges(Color.Black, { measuredTop }, { measuredBottom }, blendMode = BlendMode.DstOut)
+                                .background(messageInk),
+                        )
+                        Box(Modifier.height(topHeight.dp).onSizeChanged { measuredTop = it.height })
+                        Box(Modifier.height(bottomHeight.dp).onSizeChanged { measuredBottom = it.height })
                     }
                 }
             }
@@ -301,34 +331,72 @@ class ScenicWallpaperUiTest {
                         image.recycle()
                     }
                 }
-                for (viewport in listOf(448, 256, 128)) {
+                var fixedWallpaperPixels: IntArray? = null
+
+                data class FadeScenario(
+                    val name: String,
+                    val viewport: Int,
+                    val top: Int,
+                    val bottom: Int,
+                    val ime: Int,
+                    val consumedIme: Int = 0,
+                )
+                for ((scenario, viewport, top, bottom, ime, consumedIme) in listOf(
+                    FadeScenario("expanded", 448, 128, 56, 0),
+                    FadeScenario("mini", 448, 64, 56, 0),
+                    FadeScenario("growing", 448, 64, 112, 0),
+                    FadeScenario("ime", 448, 64, 112, 128),
+                    FadeScenario("ime-consumed", 448, 64, 112, 128, 128),
+                    FadeScenario("ime-partial", 448, 64, 112, 128, 64),
+                    FadeScenario("zero", 448, 0, 0, 0),
+                    FadeScenario("tiny", 32, 64, 56, 0),
+                    FadeScenario("single-pixel", 1, 0, 0, 0),
+                )) {
                     compose.runOnIdle {
                         height = viewport
+                        topHeight = top
+                        bottomHeight = bottom
+                        imeHeight = ime
+                        consumedImeHeight = consumedIme
                         faded = false
                         replay = "page"
                     }
                     val original = capture()
+                    if (viewport == 448) {
+                        val actual = pixels(original)
+                        val previous = fixedWallpaperPixels
+                        if (previous == null) fixedWallpaperPixels = actual else assertTrue("chrome and IME keep wallpaper origin and size", previous.contentEquals(actual))
+                    }
                     compose.runOnIdle { faded = true }
                     val page = capture()
                     val message = capture("message")
                     val surface = capture("surface")
+                    val timeline = capture("timeline")
                     try {
-                        for ((name, bitmap) in listOf("page" to page, "message" to message, "surface" to surface)) {
-                            File(proofs, "$mode-$viewport-$name.png").outputStream().use {
+                        for ((name, bitmap) in listOf("page" to page, "message" to message, "surface" to surface, "timeline" to timeline)) {
+                            File(proofs, "$mode-$scenario-$name.png").outputStream().use {
                                 assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
                             }
                         }
                         assertEquals(128, page.width)
                         assertEquals(viewport, page.height)
                         assertTrue("the scenic source must contrast with the canvas", original.getPixel(64, 0) != canvas.toArgb())
-                        val topExtent = minOf(192f, viewport / 2f)
-                        val bottomExtent = minOf(96f, viewport / 2f)
+                        val foreground = viewport - (ime - consumedIme).coerceAtLeast(0)
+                        val topExtent = minOf(top.toFloat(), foreground.toFloat())
+                        val bottomExtent = minOf(bottom.toFloat(), foreground.toFloat())
+                        val scale = if (topExtent + bottomExtent > foreground) foreground / (topExtent + bottomExtent) else 1f
                         for (x in listOf(16, 64, 112)) {
                             for (y in 0 until viewport) {
                                 val opacity =
                                     maxOf(
-                                        1f - (y + 0.5f) / topExtent,
-                                        1f - (viewport - y - 0.5f) / bottomExtent,
+                                        if (topExtent > 0f) 1f - (y + 0.5f) / (topExtent * scale) else 0f,
+                                        if (y >= foreground) {
+                                            1f
+                                        } else if (bottomExtent > 0f) {
+                                            1f - (foreground - y - 0.5f) / (bottomExtent * scale)
+                                        } else {
+                                            0f
+                                        },
                                         0f,
                                     )
                                 val source = original.getPixel(x, y)
@@ -339,20 +407,33 @@ class ScenicWallpaperUiTest {
                                     expected = expected or ((ink * (1f - opacity) + base * opacity).toInt() shl shift)
                                 }
                                 assertNear("$mode/$viewport fade at $x,$y", expected, page.getPixel(x, y))
-                                if (y + 0.5f >= topExtent && y + 0.5f <= viewport - bottomExtent) {
+                                if (y + 0.5f >= top && y + 0.5f <= foreground - bottom) {
                                     assertEquals("interior art is unchanged at $x,$y", source, page.getPixel(x, y))
                                 }
                                 assertNear("message raw replay at $x,$y", page.getPixel(x, y), message.getPixel(x, y), 1)
                                 assertNear("surface replay at $x,$y", page.getPixel(x, y), surface.getPixel(x, y))
+                                if (y < foreground) {
+                                    var expectedMessage = 0xff000000.toInt()
+                                    for (shift in listOf(16, 8, 0)) {
+                                        val ink = (messageInk.toArgb() shr shift) and 255
+                                        val base = (canvas.toArgb() shr shift) and 255
+                                        expectedMessage = expectedMessage or ((ink * (1f - opacity) + base * opacity).toInt() shl shift)
+                                    }
+                                    assertNear("DstOut message at $x,$y", expectedMessage, timeline.getPixel(x, y))
+                                    if (y >= top && y < foreground - bottom) {
+                                        assertEquals("readable message is fully opaque", messageInk.toArgb(), timeline.getPixel(x, y))
+                                    }
+                                }
                             }
-                            assertNear("top reaches theme canvas", canvas.toArgb(), page.getPixel(x, 0))
-                            assertNear("bottom reaches theme canvas", canvas.toArgb(), page.getPixel(x, viewport - 1))
+                            if (top > 0 && scenario != "tiny") assertNear("top reaches theme canvas", canvas.toArgb(), page.getPixel(x, 0))
+                            if (bottom > 0 && scenario != "tiny") assertNear("bottom reaches theme canvas", canvas.toArgb(), page.getPixel(x, foreground - 1))
                         }
                     } finally {
                         original.recycle()
                         page.recycle()
                         message.recycle()
                         surface.recycle()
+                        timeline.recycle()
                     }
                 }
             } finally {

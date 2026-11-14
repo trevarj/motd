@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -47,8 +48,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.onConsumedWindowInsetsChanged
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -1082,7 +1085,7 @@ fun ChatScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun ChatContent(
     state: ChatState,
@@ -3782,9 +3785,14 @@ internal fun ChatContent(
             },
         ) { padding ->
             if (topHostPadding !== padding) topHostPadding = padding
-            Box(modifier = Modifier.fillMaxSize()) {
+            val consumedWallpaperInsets = remember { mutableStateOf<WindowInsets>(WindowInsets(0)) }
+            Box(
+                modifier = Modifier.fillMaxSize().onConsumedWindowInsetsChanged { consumedWallpaperInsets.value = it },
+            ) {
                 val effectiveBlur = conversationLayout.effectiveMessageBackgroundBlur(LocalMessageBackgroundBlur.current)
                 val wallpaperBackdrop = rememberMessageWallpaperBackdrop(effectiveBlur)
+                val wallpaperIme = WindowInsets.ime
+                val wallpaperDensity = LocalDensity.current
                 ChatWallpaperBackground(
                     chatWallpaper,
                     modifier =
@@ -3794,7 +3802,14 @@ internal fun ChatContent(
                             .recordMessageWallpaper(wallpaperBackdrop, MaterialTheme.colorScheme.surface)
                             .then(
                                 if (chatWallpaper.preset != ChatWallpaperPreset.NONE || chatWallpaper.localImageName != null) {
-                                    Modifier.fadeChatEdges(MaterialTheme.colorScheme.background)
+                                    Modifier.fadeChatEdges(
+                                        MaterialTheme.colorScheme.background,
+                                        readTopHostHeightPx,
+                                        readBottomHostHeightPx,
+                                        readBottomOffsetPx = {
+                                            (wallpaperIme.getBottom(wallpaperDensity) - consumedWallpaperInsets.value.getBottom(wallpaperDensity)).coerceAtLeast(0)
+                                        },
+                                    )
                                 } else {
                                     Modifier
                                 },
@@ -4169,8 +4184,12 @@ internal fun ChatContent(
                                                     .graphicsLayer {
                                                         alpha = if (entryVeilLifted && drawingAllowed) 1f else 0f
                                                         compositingStrategy = CompositingStrategy.Offscreen
-                                                    }.fadeChatEdges(Color.Black, BlendMode.DstOut)
-                                                    .then(if (entryVeilLifted && drawingAllowed) Modifier else Modifier.clearAndSetSemantics {}),
+                                                    }.fadeChatEdges(
+                                                        Color.Black,
+                                                        readTopHostHeightPx,
+                                                        readBottomHostHeightPx,
+                                                        blendMode = BlendMode.DstOut,
+                                                    ).then(if (entryVeilLifted && drawingAllowed) Modifier else Modifier.clearAndSetSemantics {}),
                                         ) {
                                             MessageList(
                                                 items = items,

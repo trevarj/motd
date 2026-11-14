@@ -339,8 +339,11 @@ flowchart TD
   The transparent foreground consumes Scaffold and IME padding; only the measured
   composer host reserves the bottom navigation inset. The timeline extends beneath
   the gesture handle while resting messages clear the complete composer host.
-  A stationary alpha mask fades scrolling messages at the page edges without fading
-  the header, composer, floating controls, or send-flight overlay.
+  A stationary alpha mask fades scrolling messages only behind the measured title
+  and composer hosts, following expanded/mini headers and composer/IME changes.
+  Wallpaper uses matching boundaries in its fixed viewport; the readable area
+  between hosts stays unfaded. Header, composer, floating controls and send-flight
+  overlay remain unmasked.
   The send-flight overlay keeps its existing foreground coordinate origin.
   Its status comes from the matching loaded canonical row, preferring accepted event IDs
   over an established landing ID; without a known row it stays pending rather than
