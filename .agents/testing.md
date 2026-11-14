@@ -59,6 +59,10 @@ App test JVMs export `java.base/jdk.internal.access` to unnamed modules in
 `app/build.gradle.kts` so Robolectric 4.17's FileDescriptor interceptor can use
 `SharedSecrets` on JDK 21. No broader module opens are needed for this access.
 
+Native text-selection hold tests use SDK 26: Robolectric's API 28+ magnifier can fail during
+surface teardown. Keep production selection unchanged. Use `ShadowWindowManagerImpl.views`
+to inspect native toolbar windows on SDK 26; `WindowInspector` requires API 29.
+
 ## Behavior-test arrangements
 
 Arrange the state needed for the behavior under test. Select typed navigation

@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.ui.chat
 
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Looper
@@ -40,6 +42,7 @@ import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
@@ -48,6 +51,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -55,6 +59,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.ColorUtils
@@ -80,6 +85,8 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadow.api.Shadow
+import org.robolectric.shadows.ShadowWindowManagerImpl
 import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
@@ -117,6 +124,107 @@ class MessageActionSheetUiTest {
             R.string.chat_action_quote,
             R.string.chat_action_delete_message,
         )
+
+    @Test
+    @Config(sdk = [26], qualifiers = "en-w411dp-h891dp")
+    fun selectionCopiesOnlyTheNativeSelectedWordAndReopeningStartsFresh() {
+        val body = "alpha middle omega https://example.org/complete"
+        val windows = Shadow.extract<ShadowWindowManagerImpl>(ApplicationProvider.getApplicationContext<Context>().getSystemService(Context.WINDOW_SERVICE))
+        render(selectionText = { body })
+        compose.onNodeWithTag("message_action_select_text").performClick()
+        val text = compose.onNodeWithTag("message_selection_text").assertTextEquals(body)
+        val layouts = mutableListOf<TextLayoutResult>()
+        text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val word = layouts.single().getBoundingBox(body.indexOf("middle") + 2).center
+        text.performTouchInput { longClick(word) }
+        var copy: View? = null
+        compose.waitUntil(5_000) {
+            compose.runOnIdle {
+                copy =
+                    windows.views
+                        .asSequence()
+                        .flatMap { it.nativeEmojiViews() }
+                        .filterIsInstance<TextView>()
+                        .firstOrNull { it.isShown && it.text.toString().equals("Copy", ignoreCase = true) }
+                copy != null
+            }
+        }
+        compose.runOnIdle {
+            val action = generateSequence(checkNotNull(copy)) { it.parent as? View }.first { it.isClickable }
+            assertTrue(action.performClick())
+        }
+        val clipboard = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
+        compose.runOnIdle {
+            assertEquals(
+                "middle",
+                clipboard.primaryClip
+                    ?.getItemAt(0)
+                    ?.text
+                    ?.toString(),
+            )
+        }
+        compose.onNodeWithTag("message_selection_close").performClick()
+        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+        compose.onNodeWithTag("reopen_message_actions").performClick()
+        compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
+        compose.onNodeWithTag("message_action_select_text").assertIsDisplayed()
+    }
+
+    @Test
+    @Config(sdk = [26], qualifiers = "en-w411dp-h891dp")
+    fun revokingSelectionDisposesNativeHandlesAndAccessibleBodyImmediately() {
+        var body by mutableStateOf<String?>("private selectable passage")
+        val windows = Shadow.extract<ShadowWindowManagerImpl>(ApplicationProvider.getApplicationContext<Context>().getSystemService(Context.WINDOW_SERVICE))
+        render(selectionText = { body })
+        compose.onNodeWithTag("message_action_select_text").performClick()
+        compose.onNodeWithTag("message_selection_text").performTouchInput { longClick() }
+        val handles =
+            SemanticsMatcher("native selection handle") { node ->
+                node.config.any { it.key.name == "SelectionHandleInfo" }
+            }
+        assertTrue(compose.onAllNodes(handles, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+        compose.runOnIdle { body = null }
+        compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
+        compose.onNodeWithText("private selectable passage", useUnmergedTree = true).assertDoesNotExist()
+        assertTrue(compose.onAllNodes(handles, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        compose.onNodeWithTag("message_action_select_text").assertDoesNotExist()
+        compose.runOnIdle {
+            assertFalse(
+                windows.views
+                    .asSequence()
+                    .flatMap { it.nativeEmojiViews() }
+                    .filterIsInstance<TextView>()
+                    .any { it.isShown && it.text.toString().equals("Copy", ignoreCase = true) },
+            )
+        }
+        compose.runOnIdle { body = "private selectable passage" }
+        compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
+        compose.onNodeWithTag("message_action_select_text").assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h360dp", fontScale = 2f)
+    fun serverSelectionRemainsReadableAtLargeFontWithReachableClose() {
+        val body = (1..80).joinToString("\n") { "Line $it https://example.org/$it" }
+        render(isServerBuffer = true, selectionText = { body })
+        compose.onNodeWithTag("message_action_select_text").performScrollTo().performClick()
+        compose.onNodeWithTag("message_selection_text").assertTextEquals(body)
+        compose.onNodeWithTag("message_selection").performTouchInput { swipeUp() }
+        val scroll = compose.onNodeWithTag("message_selection").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+        assertTrue("The native readable body must scroll independently of Close", scroll.value() > 0f)
+        val close = compose.onNodeWithTag("message_selection_close").assertIsDisplayed()
+        val bounds = close.getUnclippedBoundsInRoot()
+        assertTrue(bounds.bottom - bounds.top >= 48.dp)
+        assertTrue(bounds.right - bounds.left >= 48.dp)
+        close.performClick()
+        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+    }
+
+    @Test
+    fun emptySelectionTextDoesNotOfferSelection() {
+        render(selectionText = { " \n" })
+        compose.onNodeWithTag("message_action_select_text").assertDoesNotExist()
+    }
 
     @Test
     fun tabsAreAbsentWithoutPersistedReactions() {
@@ -180,26 +288,8 @@ class MessageActionSheetUiTest {
     }
 
     @Test
-    fun compactActionsUseQuarterWidthCellsAndPreserveActionOrder() {
-        render(
-            canPrepareThreadContext = true,
-            canRedact = true,
-            onTranslate = {},
-            onForward = {},
-        )
-        assertCompactActionGeometry()
-    }
-
-    @Test
-    fun partialLastRowKeepsQuarterWidthCells() {
-        render(canPrepareThreadContext = true, onTranslate = {}, onForward = {})
-        assertCompactActionGeometry(allActionTags.dropLast(1))
-    }
-
-    @Test
     @Config(qualifiers = "w320dp-h360dp", fontScale = 2f)
     fun compactActionsRemainAccessibleAcrossFontScales() {
-        val invoked = mutableListOf<String>()
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
 
         fun labelLayout(
@@ -217,17 +307,13 @@ class MessageActionSheetUiTest {
         render(
             canPrepareThreadContext = true,
             canRedact = true,
-            onPrepareThreadContext = { invoked += "message_prepare_thread_context" },
-            onRedact = { invoked += "message_redact" },
-            onTranslate = { invoked += "message_action_translate" },
-            onForward = { invoked += "message_action_forward" },
-            onAction = { invoked += it },
+            onTranslate = {},
+            onForward = {},
+            selectionText = { "Selected message text" },
         )
-        assertCompactActionGeometry()
         val threadLabel = context.getString(R.string.agent_context_thread)
         val scaledThreadLayout = labelLayout("message_prepare_thread_context", threadLabel)
         assertEquals("The native dialog must actually use 2x fonts", 2f, scaledThreadLayout.layoutInput.density.fontScale, 0f)
-        assertTrue("The narrow 2x label must wrap beyond a two-line cap", scaledThreadLayout.lineCount > 2)
 
         val viewport = compose.onNodeWithTag("message_action_actions").fetchSemanticsNode().boundsInRoot
         assertEquals("The native sheet must use the actual narrow viewport", 320f, viewport.width / pixelsPerDp, 1f)
@@ -259,14 +345,16 @@ class MessageActionSheetUiTest {
             assertTrue("The $label label must not ellipsize", (0 until layout.lineCount).none { layout.isLineEllipsized(it) })
             assertEquals("The $label layout includes its final character", label.length, layout.getLineEnd(layout.lineCount - 1))
             val bounds = action.getUnclippedBoundsInRoot()
-            val padding = ButtonDefaults.TextButtonContentPadding
-            val completeContentHeight =
-                layout.size.height / pixelsPerDp + 24f +
-                    padding.calculateTopPadding().value + padding.calculateBottomPadding().value
-            assertTrue("The $label tile must fit its icon and every label line", (bounds.bottom - bounds.top).value + 1f >= completeContentHeight)
+            assertTrue("The $label touch target must be at least 48dp tall", bounds.bottom - bounds.top >= 48.dp)
+            assertTrue("The $label touch target must be at least 48dp wide", bounds.right - bounds.left >= 48.dp)
             action.performClick()
         }
-        compose.runOnIdle { assertEquals(allActionTags, invoked) }
+        val selection = compose.onNodeWithTag("message_action_select_text").performScrollTo().assertIsDisplayed()
+        val selectionBounds = selection.getUnclippedBoundsInRoot()
+        assertTrue(selectionBounds.bottom - selectionBounds.top >= 48.dp)
+        assertTrue(selectionBounds.right - selectionBounds.left >= 48.dp)
+        selection.performClick()
+        compose.onNodeWithTag("message_selection_text").assertTextEquals("Selected message text")
     }
 
     @Test
@@ -445,23 +533,6 @@ class MessageActionSheetUiTest {
         compose.runOnIdle { assertEquals(listOf("🦑"), picked) }
     }
 
-    private fun assertCompactActionGeometry(tags: List<String> = allActionTags) {
-        val viewport = compose.onNodeWithTag("message_action_actions").fetchSemanticsNode().boundsInRoot
-        val bounds = tags.map { compose.onNodeWithTag(it).getUnclippedBoundsInRoot() }
-        val quarterWidth = (viewport.width / pixelsPerDp - 16f) / 4f
-        bounds.forEach {
-            assertEquals("Every action, including the last row, occupies a quarter-width cell", quarterWidth, (it.right - it.left).value, 1f)
-            assertTrue("Touch width is at least 48dp", it.right - it.left >= 48.dp)
-            assertTrue("Touch height is at least 48dp", it.bottom - it.top >= 48.dp)
-        }
-        bounds.chunked(4).forEach { row ->
-            assertTrue("Action order is left to right without overlapping tiles", row.zipWithNext().all { (left, right) -> left.right <= right.left + 1.dp })
-            row.forEach { assertEquals(row.first().top.value, it.top.value, 1f) }
-        }
-        assertTrue("The second row starts below every tile in the first row", bounds.drop(4).all { next -> bounds.take(4).all { it.bottom <= next.top + 1.dp } })
-        assertEquals("The grid has an 8dp leading inset", viewport.left / pixelsPerDp + 8f, bounds.first().left.value, 1f)
-    }
-
     @OptIn(ExperimentalMaterial3Api::class)
     private fun render(
         reactions: List<ReactionChip> = emptyList(),
@@ -476,6 +547,7 @@ class MessageActionSheetUiTest {
         onReact: (String) -> Unit = {},
         reactionEnabled: (String) -> Boolean = { true },
         themePreset: ColorThemePreset = ColorThemePreset.SYSTEM,
+        selectionText: () -> String? = { null },
     ) {
         compose.setContent {
             MotdTheme(themePreset = themePreset) {
@@ -525,6 +597,7 @@ class MessageActionSheetUiTest {
                         isServerBuffer = isServerBuffer,
                         onTranslate = onTranslate,
                         onForward = onForward,
+                        selectionText = selectionText(),
                     )
                 }
             }

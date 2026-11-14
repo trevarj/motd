@@ -238,6 +238,7 @@ import io.github.trevarj.motd.dickord.isDiscordDirectMessage
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.format.containsIrcFormatting
 import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.ChannelWatchDuration
@@ -4662,6 +4663,22 @@ internal fun ChatContent(
         }
 
         sheetTarget?.let { target ->
+            val selectionVisibility = visibilityPolicy.foolPreferences(target)?.visibility
+            val selectionReadable =
+                when (selectionVisibility) {
+                    null, FoolsMode.DIMMED -> {
+                        true
+                    }
+
+                    FoolsMode.BLUR, FoolsMode.COLLAPSE -> {
+                        if (latestExpandAllFools) target.id !in collapsedFools else target.id in expandedFools
+                    }
+
+                    FoolsMode.HIDE -> {
+                        hiddenFoolsRevealed && !restoringHiddenFools &&
+                            (if (latestExpandAllFools) target.id !in collapsedFools else target.id in expandedFools)
+                    }
+                }
             // Dismiss with the M3 hide animation, clearing the target only once it settles.
             val hideThen: (() -> Unit) -> Unit = { after ->
                 scope.launch { sheetState.hide() }.invokeOnCompletion {
@@ -4672,6 +4689,15 @@ internal fun ChatContent(
             MessageActionSheet(
                 sheetState = sheetState,
                 isServerBuffer = isServerBuffer,
+                selectionText =
+                    if (selectionReadable) {
+                        remember(target.text) {
+                            (if (containsIrcFormatting(target.text)) plainIrcText(target.text) else target.text)
+                                .takeUnless(String::isBlank)
+                        }
+                    } else {
+                        null
+                    },
                 onDismiss = { sheetTarget = null },
                 onTranslate =
                     if (externalTranslationText(target) != null) {

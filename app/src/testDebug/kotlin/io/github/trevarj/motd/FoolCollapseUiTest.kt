@@ -1,5 +1,6 @@
 package io.github.trevarj.motd
 
+import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
@@ -15,9 +16,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
@@ -25,13 +29,17 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.SavedStateHandle
@@ -53,6 +61,7 @@ import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.settingsDataStore
@@ -71,6 +80,7 @@ import io.github.trevarj.motd.ui.chat.ChatPositionTarget
 import io.github.trevarj.motd.ui.chat.ChatState
 import io.github.trevarj.motd.ui.chat.ChatViewModel
 import io.github.trevarj.motd.ui.chat.ChatViewModelTest
+import io.github.trevarj.motd.ui.chat.ConversationLayoutState
 import io.github.trevarj.motd.ui.chat.ConversationPresenceState
 import io.github.trevarj.motd.ui.chat.EntryPositionState
 import io.github.trevarj.motd.ui.chat.FoolCollapseChip
@@ -104,6 +114,169 @@ class FoolCollapseUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun comfortableSelectionUsesCompletePlainBodyAndWholeCopyStaysRaw() = assertSelectionBodyAndWholeCopy(LayoutDensity.COMFORTABLE)
+
+    @Test
+    fun compactSelectionUsesCompletePlainBodyAndWholeCopyStaysRaw() = assertSelectionBodyAndWholeCopy(LayoutDensity.COMPACT)
+
+    @Test
+    fun twoLineSelectionUsesCompletePlainBodyAndWholeCopyStaysRaw() = assertSelectionBodyAndWholeCopy(LayoutDensity.TWO_LINE)
+
+    private fun holdMessageBubble(nick: String) {
+        val tag = "chat_message_fool-$nick"
+        compose.onNodeWithTag("chat_timeline", useUnmergedTree = true).performScrollToNode(hasTestTag(tag))
+        val row = compose.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
+        val sourceSurface = SemanticsMatcher("message long-press surface") { it.config.contains(SemanticsActions.OnLongClick) }
+        val bubble =
+            compose.onNode(hasAnyAncestor(hasTestTag(tag)) and sourceSurface, useUnmergedTree = true).assertIsDisplayed()
+        val rowBounds = row.fetchSemanticsNode().boundsInRoot
+        val bubbleBounds = bubble.fetchSemanticsNode().boundsInRoot
+        row.performTouchInput {
+            longClick(Offset(bubbleBounds.center.x, bubbleBounds.bottom - 1f) - rowBounds.topLeft)
+        }
+    }
+
+    private fun assertSelectionBodyAndWholeCopy(layout: LayoutDensity) {
+        val raw = "\u0002Alpha\u0002 middle\nhttps://example.org/path?q=full#fragment"
+        val plain = "Alpha middle\nhttps://example.org/path?q=full#fragment"
+        val fixture = FoolTimelineFixture(layout = layout, aText = raw)
+        val clipboard = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
+
+        fun holdSourcePadding() {
+            val rowTag = "chat_message_fool-a"
+            compose.onNodeWithTag("chat_timeline", useUnmergedTree = true).performScrollToNode(hasTestTag(rowTag))
+            val row = compose.onNodeWithTag(rowTag, useUnmergedTree = true).assertIsDisplayed()
+            val sourceSurface = SemanticsMatcher("message long-press surface") { it.config.contains(SemanticsActions.OnLongClick) }
+            val source = compose.onNode(hasAnyAncestor(hasTestTag(rowTag)) and sourceSurface, useUnmergedTree = true).assertIsDisplayed()
+            val text =
+                compose
+                    .onNode(
+                        hasText("Alpha", substring = true) and hasAnyAncestor(hasTestTag(rowTag)),
+                        useUnmergedTree = true,
+                    ).assertIsDisplayed()
+            val layouts = mutableListOf<TextLayoutResult>()
+            text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val layoutResult = layouts.single()
+            val wordPosition =
+                layoutResult
+                    .getBoundingBox(
+                        layoutResult.layoutInput.text.text
+                            .indexOf("Alpha") + 2,
+                    ).center
+            val sourceBounds = source.fetchSemanticsNode().boundsInRoot
+            val textBounds = text.fetchSemanticsNode().boundsInRoot
+            val rowBounds = row.fetchSemanticsNode().boundsInRoot
+            assertTrue("The source's end gutter must be outside the rich text hit region", sourceBounds.right > textBounds.right)
+            val paddingPosition =
+                Offset(
+                    (sourceBounds.right + textBounds.right) / 2f,
+                    textBounds.top + wordPosition.y,
+                ) - rowBounds.topLeft
+            row.performTouchInput { longClick(paddingPosition) }
+        }
+        try {
+            compose.setContent { fixture.Content() }
+            holdSourcePadding()
+            compose.onNodeWithTag("message_action_select_text").performScrollTo().performClick()
+            compose.onNodeWithTag("message_selection_text").assertTextEquals(plain)
+            compose.onNodeWithTag("message_selection_close").performClick()
+            holdSourcePadding()
+            compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
+            compose.onNodeWithTag("message_action_copy").performScrollTo().performClick()
+            compose.runOnIdle {
+                assertEquals(
+                    raw,
+                    clipboard.primaryClip
+                        ?.getItemAt(0)
+                        ?.text
+                        ?.toString(),
+                )
+            }
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun formattingOnlyBodyHasNoSelectionAction() {
+        val fixture = FoolTimelineFixture(aText = "\u0002 \u000f")
+        try {
+            compose.setContent { fixture.Content() }
+            holdMessageBubble("a")
+            compose.onNodeWithTag("message_action_sheet").assertIsDisplayed()
+            compose.onNodeWithTag("message_action_select_text").assertDoesNotExist()
+            compose.onNodeWithTag("message_action_copy").assertIsDisplayed()
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    @Config(sdk = [26])
+    fun liveConcealmentRemovesSelectedBodyAndNativeHandlesWithoutReopening() {
+        val fixture = FoolTimelineFixture()
+        try {
+            compose.setContent { fixture.Content() }
+            holdMessageBubble("a")
+            compose.onNodeWithTag("message_action_select_text").performClick()
+            compose.onNodeWithTag("message_selection_text").performTouchInput { longClick() }
+            val handles =
+                androidx.compose.ui.test.SemanticsMatcher("native selection handle") { node ->
+                    node.config.any { it.key.name == "SelectionHandleInfo" }
+                }
+            assertTrue(compose.onAllNodes(handles, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+            runBlocking { fixture.repo.setFoolPreferences("a", FoolPreferences(FoolsMode.COLLAPSE)) }
+            compose.waitForIdle()
+            compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
+            compose.onNodeWithText("A body", useUnmergedTree = true).assertDoesNotExist()
+            compose.onNodeWithTag("message_action_select_text").assertDoesNotExist()
+            assertTrue(compose.onAllNodes(handles, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+            runBlocking { fixture.repo.setFoolPreferences("a", FoolPreferences(FoolsMode.DIMMED)) }
+            compose.waitForIdle()
+            compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
+            compose.onNodeWithTag("message_action_select_text").assertIsDisplayed()
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun hiddenRevealRevocationRemovesSelectionEvenWhileExpanded() {
+        val fixture = FoolTimelineFixture()
+        try {
+            compose.setContent { fixture.Content() }
+            toggleAll()
+            holdMessageBubble("c")
+            compose.onNodeWithTag("message_action_select_text").performClick()
+            compose.onNodeWithTag("message_selection_text").assertTextEquals("C body")
+            compose.runOnIdle { fixture.revealed.value = false }
+            compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
+            compose.onNodeWithTag("message_action_select_text").assertDoesNotExist()
+            compose.onNodeWithText("C body", useUnmergedTree = true).assertDoesNotExist()
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun globalRestoreRemovesSelectionFromExpandedCollapsedFool() {
+        val fixture = FoolTimelineFixture()
+        try {
+            compose.setContent { fixture.Content() }
+            toggleAll()
+            holdMessageBubble("b")
+            compose.onNodeWithTag("message_action_select_text").performClick()
+            compose.onNodeWithTag("message_selection_text").assertTextEquals("B body")
+            compose.runOnIdle { fixture.expandAllFools.value = false }
+            compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
+            compose.onNodeWithTag("message_action_select_text").assertDoesNotExist()
+            compose.onNodeWithText("B body", useUnmergedTree = true).assertDoesNotExist()
+        } finally {
+            fixture.close()
+        }
+    }
 
     @Test
     fun blurRevealAndRestoreAreStableIdLocalAndImmediate() {
@@ -686,6 +859,8 @@ class FoolCollapseUiTest {
 /** Real Room paging and persisted preferences; also used by the temporary rendered smoke. */
 internal class FoolTimelineFixture(
     defaultMode: FoolsMode = FoolsMode.DIMMED,
+    private val layout: LayoutDensity = LayoutDensity.COMFORTABLE,
+    private val aText: String = "A body",
 ) {
     val repo = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())
     private val db = inMemoryDb(directCommit = true)
@@ -707,7 +882,7 @@ internal class FoolTimelineFixture(
                 sender = nick,
                 normalizedActor = nick,
                 kind = MessageKind.PRIVMSG,
-                text = "${nick.uppercase()} body",
+                text = if (nick == "a") aText else "${nick.uppercase()} body",
                 hasMention = true,
                 dedupKey = "fool-$nick",
             )
@@ -723,8 +898,8 @@ internal class FoolTimelineFixture(
             db.messageDao().insertAll(rows)
             repo.settings.first()
         }
-    private val revealed = mutableStateOf(false)
-    private val expandAllFools = mutableStateOf(false)
+    val revealed = mutableStateOf(false)
+    val expandAllFools = mutableStateOf(false)
     val holdRevealPresentation = mutableStateOf(false)
     val contentAvailable = mutableStateOf(true)
     private val target = mutableStateOf<ChatPositionTarget?>(null)
@@ -782,6 +957,7 @@ internal class FoolTimelineFixture(
                 foolPreferences = settings.foolPreferences,
                 hiddenFoolsRevealed = revealed.value,
                 presentedVisibilitySpec = presented,
+                conversationLayout = ConversationLayoutState(global = layout),
                 expandAllFools = expandAllFools.value,
                 onExpandAllFoolsChange = {
                     expandAllFools.value = it

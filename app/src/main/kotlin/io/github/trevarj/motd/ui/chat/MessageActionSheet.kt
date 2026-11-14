@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Reply
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -37,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalTextToolbar
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -96,9 +100,12 @@ fun MessageActionSheet(
     onPrepareThreadContext: () -> Unit = {},
     onTranslate: (() -> Unit)? = null,
     onForward: (() -> Unit)? = null,
+    selectionText: String? = null,
 ) {
     val hasReactions = reactions.isNotEmpty()
     var selectedTab by remember(hasReactions) { mutableIntStateOf(0) }
+    val selectableText = selectionText?.takeUnless(String::isBlank)
+    var selecting by remember(selectableText) { mutableStateOf(false) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -108,6 +115,51 @@ fun MessageActionSheet(
         contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         SheetSystemBars()
+        if (selecting && selectableText != null) {
+            Column(modifier = Modifier.padding(bottom = 24.dp)) {
+                val toolbar = LocalTextToolbar.current
+                DisposableEffect(toolbar) {
+                    onDispose { toolbar.hide() }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.chat_action_select_text),
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("message_selection_close"),
+                    ) { Text(stringResource(R.string.chat_selection_close)) }
+                }
+                Column(
+                    modifier =
+                        Modifier
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState())
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                            .testTag("message_selection"),
+                ) {
+                    Text(
+                        stringResource(R.string.chat_selection_hint),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 16.dp),
+                    )
+                    SelectionContainer {
+                        Text(
+                            selectableText,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.testTag("message_selection_text"),
+                        )
+                    }
+                }
+            }
+            return@ModalBottomSheet
+        }
         Column(modifier = Modifier.padding(bottom = 24.dp)) {
             if (hasReactions) {
                 PrimaryTabRow(
@@ -226,6 +278,14 @@ fun MessageActionSheet(
                             onCopy,
                             modifier = actionModifier.testTag("message_action_copy"),
                         )
+                        if (selectableText != null) {
+                            ActionItem(
+                                Icons.Outlined.TextFields,
+                                stringResource(R.string.chat_action_select_text),
+                                { selecting = true },
+                                modifier = actionModifier.testTag("message_action_select_text"),
+                            )
+                        }
                         onForward?.let {
                             ActionItem(
                                 Icons.AutoMirrored.Filled.Send,
@@ -261,6 +321,7 @@ fun MessageActionSheet(
                                 (if (!isServerBuffer && canPrepareThreadContext) 1 else 0) +
                                 (if (onTranslate != null) 1 else 0) +
                                 (if (onForward != null) 1 else 0) +
+                                (if (selectableText != null) 1 else 0) +
                                 (if (canRedact) 1 else 0)
                         repeat((4 - actionCount % 4) % 4) { Spacer(actionModifier) }
                     }

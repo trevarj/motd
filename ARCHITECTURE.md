@@ -435,6 +435,10 @@ flowchart TD
   row is fully inside the usable viewport, clear of the composer.
   Dimmed ink uses a known opaque fill and a 4.5:1 contrast floor, not whole-row alpha.
   The shared immediate editor serializes field changes against committed preferences.
+- Message actions offer **Select text** for readable, nonblank bodies. The same native sheet
+  presents the complete IRC-plain body, including previewed URLs, with Android selection handles
+  and partial Copy. Whole-message Copy retains the original payload. Live concealment revokes
+  selectable text, handles and toolbar immediately; reopening starts without a previous selection.
 - TLS policy, Android KeyChain integration, proxy selection, and embedded
   obfuscation are injected at the `:app` boundary so `:irc` stays pure JVM.
 - Each saved network owns its own ordered post-connect commands. `ConnectionActor`
