@@ -127,7 +127,11 @@ class NetworkActivityUiTest {
             compose.runOnIdle { model.setCommunityVisitActive(true) }
             compose.waitUntil(5_000) { model.community.value.invitation }
             compose.onNodeWithTag("community_invitation_join").assertIsDisplayed().assertHasClickAction()
-            compose.onNodeWithTag("community_invitation_dismiss").assertIsDisplayed().assertHasClickAction().performClick()
+            compose
+                .onNodeWithTag("community_invitation_dismiss")
+                .assertIsDisplayed()
+                .assertHasClickAction()
+                .performClick()
             compose.onNodeWithTag("community_invitation").assertDoesNotExist()
             compose.runOnIdle {
                 model.setCommunityVisitActive(false)
@@ -872,9 +876,13 @@ class NetworkActivityUiTest {
                 override val completed = MutableStateFlow(true)
                 override val communityInvitationHandled = MutableStateFlow(false)
 
-                override suspend fun markCompleted() { completed.value = true }
+                override suspend fun markCompleted() {
+                    completed.value = true
+                }
 
-                override suspend fun markCommunityInvitationHandled() { communityInvitationHandled.value = true }
+                override suspend fun markCommunityInvitationHandled() {
+                    communityInvitationHandled.value = true
+                }
             },
         globalFeedPrefs =
             object : GlobalFeedPrefs {

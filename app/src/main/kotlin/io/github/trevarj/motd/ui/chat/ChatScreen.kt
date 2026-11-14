@@ -2902,6 +2902,7 @@ internal fun ChatContent(
         val latestSelectionBufferId by rememberUpdatedState(state.buffer?.id)
         var selectionBounds by remember { mutableStateOf(Rect.Zero) }
         var selectionHostOrigin by remember { mutableStateOf(Offset.Zero) }
+
         fun canSelectMessage(target: MessageEntity): Boolean {
             if (plainIrcText(target.text).isBlank()) return false
             val expanded = if (latestExpandAllFools) target.id !in collapsedFools else target.id in expandedFools
@@ -2911,7 +2912,8 @@ internal fun ChatContent(
                 FoolsMode.HIDE -> hiddenFoolsRevealed && !restoringHiddenFools && expanded
             }
         }
-        val latestCanSelectMessage by rememberUpdatedState(::canSelectMessage)
+        // A local callable reference compares equal across compositions despite changed captures.
+        val latestCanSelectMessage by rememberUpdatedState { target: MessageEntity -> canSelectMessage(target) }
         val activeSelectionId = selectionTarget?.takeIf(::canSelectMessage)?.id
         LaunchedEffect(selectionTarget, activeSelectionId) {
             if (activeSelectionId == null) selectionTarget = null

@@ -22,11 +22,17 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 
 @Composable
-internal fun CommunityInvitation(onDisplayed: () -> Unit, onJoin: () -> Unit, onDismiss: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("community_invitation").onGloballyPositioned {
-        val bounds = it.boundsInWindow()
-        if (bounds.width > 0 && bounds.height > 0) onDisplayed()
-    }) {
+internal fun CommunityInvitation(
+    onDisplayed: () -> Unit,
+    onJoin: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("community_invitation").onGloballyPositioned {
+            val bounds = it.boundsInWindow()
+            if (bounds.width > 0 && bounds.height > 0) onDisplayed()
+        },
+    ) {
         Text(stringResource(R.string.community_title), style = MaterialTheme.typography.titleMedium)
         Text(stringResource(R.string.community_channel), style = MaterialTheme.typography.bodyMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -37,7 +43,13 @@ internal fun CommunityInvitation(onDisplayed: () -> Unit, onJoin: () -> Unit, on
 }
 
 @Composable
-internal fun CommunityPicker(state: CommunityState, onChoose: (Long) -> Unit, onSettings: (Long) -> Unit, onSetup: () -> Unit, onCancel: () -> Unit) {
+internal fun CommunityPicker(
+    state: CommunityState,
+    onChoose: (Long) -> Unit,
+    onSettings: (Long) -> Unit,
+    onSetup: () -> Unit,
+    onCancel: () -> Unit,
+) {
     if (!state.picker) return
     AlertDialog(
         modifier = Modifier.testTag("community_network_picker"),
@@ -52,12 +64,14 @@ internal fun CommunityPicker(state: CommunityState, onChoose: (Long) -> Unit, on
                 }
                 state.error?.let { error ->
                     Text(
-                        stringResource(when (error) {
-                            CommunityError.CONNECTION -> R.string.community_connection_error
-                            CommunityError.TIMEOUT -> R.string.community_timeout
-                            CommunityError.REJECTED -> R.string.community_rejected
-                            CommunityError.FAILED -> R.string.community_failed
-                        }),
+                        stringResource(
+                            when (error) {
+                                CommunityError.CONNECTION -> R.string.community_connection_error
+                                CommunityError.TIMEOUT -> R.string.community_timeout
+                                CommunityError.REJECTED -> R.string.community_rejected
+                                CommunityError.FAILED -> R.string.community_failed
+                            },
+                        ),
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.testTag("community_join_error"),
                     )
@@ -71,11 +85,15 @@ internal fun CommunityPicker(state: CommunityState, onChoose: (Long) -> Unit, on
                     ) {
                         Column {
                             Text(route.network.name)
-                            Text(stringResource(when {
-                                !route.ready -> R.string.community_connect
-                                route.identified -> R.string.community_channel
-                                else -> R.string.community_confirm_unknown
-                            }))
+                            Text(
+                                stringResource(
+                                    when {
+                                        !route.ready -> R.string.community_connect
+                                        route.identified -> R.string.community_channel
+                                        else -> R.string.community_confirm_unknown
+                                    },
+                                ),
+                            )
                         }
                     }
                 }

@@ -452,6 +452,9 @@ flowchart TD
   The shared immediate editor serializes field changes against committed preferences.
 - Message actions offer **Select text** for readable, nonblank bodies. The sheet closes
   before the original timeline body receives Android selection handles and partial Copy.
+  After sheet dismissal, the current reveal policy is revalidated before selection starts.
+  The replacement selectable text must report its own layout and its container
+  position before the initial range is applied.
   Selection includes the complete IRC-plain body, including previewed URLs; compact and
   ACTION prefixes are excluded from the initial range. Whole-message Copy retains the
   original payload. Back, outside taps, native Copy, row disposal and live concealment

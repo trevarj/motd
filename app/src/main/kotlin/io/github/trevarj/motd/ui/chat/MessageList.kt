@@ -1992,7 +1992,13 @@ private fun MessageRow(
             displayTextForAudioMessage(msg.text, audioAttachments)
         }
     val renderedMessageText =
-        if (selecting) msg.ircFormattedText ?: msg.text else if (messageText == msg.text) msg.ircFormattedText ?: messageText else messageText
+        if (selecting) {
+            msg.ircFormattedText ?: msg.text
+        } else if (messageText == msg.text) {
+            msg.ircFormattedText ?: messageText
+        } else {
+            messageText
+        }
     val audioBodyBlank =
         remember(renderedMessageText, audioPreviewUrls) {
             if (audioPreviewUrls.isEmpty() || renderedMessageText.isBlank()) {

@@ -87,7 +87,8 @@ fun StartupSplashGate(
                         snapshotFlow { ready }.collectLatest { isReady ->
                             val remainingMs =
                                 ((STARTUP_SPLASH_END_PROGRESS - progress.value) * SPARK_CUT_DURATION_MS)
-                                    .toInt().coerceAtLeast(0)
+                                    .toInt()
+                                    .coerceAtLeast(0)
                             val durationMs =
                                 if (isReady) minOf(remainingMs, STARTUP_SPLASH_READY_DURATION_MS) else remainingMs
                             progress.animateTo(STARTUP_SPLASH_END_PROGRESS, tween(durationMs, easing = LinearEasing))

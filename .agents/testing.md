@@ -1,11 +1,12 @@
 # Testing and verification
 
-Run all Gradle commands through the repository Nix shell (`nix develop -c ...`,
-or enter `nix develop` once and invoke Gradle there). For task validation, run
-the nearest relevant unit test method in each affected module. Changed behavior
-needs a new or updated regression unless an existing named test already exercises
-that branch. Do not automatically run a full test class, unfiltered suite, emulator
-suite, or full pre-push gate.
+Run all Gradle commands through the repository Nix shell with
+`nix develop -c bash ./gradlew ...` (the local wrapper's `/bin/sh` is unavailable).
+Run the nearest relevant unit test method in each affected module. Changed
+behavior needs a new or updated regression unless an existing named test already
+exercises that branch. Do not automatically run a full test class, unfiltered
+suite, emulator suite, or full pre-push gate; broader failure diagnosis or an
+explicit request to get CI green can require broader coverage.
 
 For UI changes, if a device is available, install the changed debug build using
 the [serial-targeted debug install workflow](../docs/human-developing.md#debug-device-install),
@@ -15,12 +16,29 @@ solely for a routine check.
 Add an emulator test covering the main journey of a large new feature; hosted CI
 runs it.
 
-Before committing implementation changes, build each changed module with
-`:app:assembleDebug`, `:irc:assemble`, `:ai-whisper:assembleDebug`, or
-`:ai-text:assembleDebug`, as applicable. Run each changed module's existing
-`ktlintCheck` and each changed Android module's `lintDebug`. Root Gradle/style
-configuration changes require root `ktlintCheck`. Use the corresponding
-`ktlintFormat` task to apply enforced style.
+## Before committing or pushing
+
+1. Map changed files through `tools/ci-paths.sh` and the command matrix below;
+   include consumers of changed interfaces, DI, signatures, and resources, not
+   just edited source files.
+   Shared rendering or paging changes must include existing consumer regressions,
+   not only newly added tests for the changed feature.
+2. Compile every affected source set and run the nearest behavior regressions.
+   App main compilation or `assembleDebug` alone does not compile `test`,
+   `testDebug`, or E2E instrumentation. Test filters narrow execution, not
+   compilation; source inspection or a delegated "source-only" review is not
+   verification.
+3. For Kotlin/Gradle changes run **root** `ktlintCheck`, not only
+   `:app:ktlintCheck`: other modules and root scripts can fail Required CI.
+   Use root `ktlintFormat` to apply enforced style. Run applicable lint below.
+   Run `git diff --check` and, for staged changes, `git diff --cached --check`.
+4. Record which checks actually completed. If an earlier Gradle task fails,
+   trailing tasks are not verified; fix it and run the remaining checks.
+   Report skipped or blocked checks explicitly, never as passing.
+5. Do not push known failures or unrelated changes while CI is red. Run the
+   applicable local checks before pushing corrective fixes, then require that
+   exact candidate's complete hosted `Required CI / gate` before merge/release
+   or declaring CI green. Local checks never replace that gate.
 
 The local Nix development shells limit Gradle to two workers without cross-project
 parallelism, JVM processor-sized pools to two CPUs, and each native Ninja build to
@@ -30,24 +48,29 @@ quota; hosted builds without the shell environment retain their existing setting
 
 ## Command matrix
 
-| Changed surface | Task validation (in addition to pre-commit build and lint above) |
+All Gradle tasks below use `nix develop -c bash ./gradlew <tasks> --stacktrace`.
+Rows are additive; select every affected boundary, including downstream callers.
+
+| Changed surface | Required local checks before commit/push |
 | --- | --- |
 | Documentation only | `git diff --check`; verify links, commands, and referenced paths |
-| Shell harness/config | `bash -n test/e2e/*.sh test/e2e/fixtures/*.sh test/e2e/hermetic/*/*.sh` plus the relevant dry run |
-| IRC parser/client/transport | Nearest `:irc:test` unit test method |
-| Android repositories, services, preferences, or ViewModels | Nearest `:app` unit test method |
+| Kotlin or Gradle, any module | Root `ktlintCheck` plus the relevant rows below |
+| Workflow, CI path rules, or shell harness/config | Inspect `tools/ci-paths.sh` mapping for changed paths; `nix develop -c bash ./test/e2e/validate.sh` plus the relevant dry run |
+| IRC parser/client/transport | `:irc:assemble` and nearest `:irc:test` method; compile affected app consumers below when public API changes |
+| App main code, interfaces, DI, signatures, resources, or build configuration | `:app:assembleDebug :app:compileDebugKotlin :app:compileDebugUnitTestKotlin` (includes all `src/test` and `src/testDebug` fakes), plus nearest behavior regression |
+| App `test` or `testDebug` only | `:app:compileDebugUnitTestKotlin` and nearest affected unit/Robolectric method |
+| `androidTest`, E2E journey, shared API used there, or app build configuration | `:app:compileE2eAndroidTestKotlin`, or hosted artifact pair `:app:assembleE2e :app:assembleE2eAndroidTest`; update affected journey/main-journey regression. Debug compilation is not evidence for this source set; no emulator needed to compile |
+| Android production code/resources/manifest/configuration | `nix develop -c bash ./tools/android-lint.sh` for Required CI's `:app:lintRelease`; add `MOTD_LINT_DEBUG=true` when `tools/ci-paths.sh` reports `debug_lint=true` (debug sources, app build configuration, root build inputs, or fallback paths) |
+| Other Android modules | Changed module's `:ai-whisper:assembleDebug` or `:ai-text:assembleDebug` and corresponding `lintDebug`; nearest affected behavior method |
 | Room entities/schema/migrations | Nearest database unit regression; review and commit generated `app/schemas` changes |
-| Compose Kotlin | Nearest Robolectric behavior method in `testDebug` |
-| Resources/manifest/packaging | Nearest unit test when behavior changed |
-| Instrumentation source, affected journey, or large new feature | Update the affected journey or add an emulator test for the feature's main journey; hosted CI runs E2E coverage |
-| Ordinary app user journey | Nearest unit test method |
-| Cross-module or release-sensitive work | Nearest affected unit test methods in each module |
+| Compose Kotlin / ordinary app journey | Nearest Robolectric behavior method in `testDebug` |
+| Cross-module or release-sensitive work | Nearest affected unit methods in each module; signed packaging/native-artifact checks below when affected |
 | Cutting a release | Nearest local checks plus focused actual-emulator visual verification below and [`releases.md`](releases.md) preflight |
 
 To target one unit test method:
 
 ```sh
-nix develop -c ./gradlew :app:testDebugUnitTest \
+nix develop -c bash ./gradlew :app:testDebugUnitTest \
   --tests '<fully-qualified-class.method>' --stacktrace
 ```
 
@@ -90,12 +113,14 @@ fuzz seed, and runs only applicable deterministic non-emulator checks. Override
 the comparison base with `MOTD_PREFLIGHT_BASE=<ref>` when needed. For production
 Android changes it runs the debug unit/Robolectric suite once plus release lint;
 release unit tests duplicate shared coverage and are not part of the gate.
-A failing check must be fixed and committed before rerunning; do not stack more
-pushes on red CI.
+A failing check must be fixed and committed before rerunning; push corrective
+fixes, not unrelated changes, until CI is green.
 
-Require all applicable hosted `Required CI / gate` checks before merge. If an
-individual job fails, inspect that job's existing diagnostics and begin the fix
-immediately instead of waiting for aggregate `gate`; remaining coverage continues normally.
+Require all applicable hosted `Required CI / gate` checks for the exact candidate
+before merge/release. If an individual job fails, inspect its existing logs and
+artifacts and begin the fix immediately instead of waiting for aggregate `gate`;
+remaining coverage continues normally. Do not rerun a known failure just to
+confirm it.
 
 ## Signed release packaging
 

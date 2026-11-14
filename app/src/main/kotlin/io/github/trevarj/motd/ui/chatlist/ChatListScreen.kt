@@ -276,13 +276,21 @@ fun ChatListScreen(
             }
         }
     }
-    if (communityAllowed) CommunityPicker(
-        state = community,
-        onChoose = viewModel::chooseCommunityNetwork,
-        onSettings = { viewModel.cancelCommunity(); onOpenNetworkSettings(it) },
-        onSetup = { viewModel.cancelCommunity(); onOpenAddNetwork() },
-        onCancel = viewModel::cancelCommunity,
-    )
+    if (communityAllowed) {
+        CommunityPicker(
+            state = community,
+            onChoose = viewModel::chooseCommunityNetwork,
+            onSettings = {
+                viewModel.cancelCommunity()
+                onOpenNetworkSettings(it)
+            },
+            onSetup = {
+                viewModel.cancelCommunity()
+                onOpenAddNetwork()
+            },
+            onCancel = viewModel::cancelCommunity,
+        )
+    }
     val audioPlaybackState by audioViewModel.state.collectAsStateWithLifecycle()
     // Collected once here, outside the ChatListState combine (see ChatListViewModel), so a
     // buffer's sync transition recomposes only its own row rather than the whole list.
@@ -314,11 +322,13 @@ fun ChatListScreen(
     ChatListContent(
         state = state,
         communityInvitation = {
-            if (communityAllowed && community.invitation) CommunityInvitation(
-                onDisplayed = viewModel::communityInvitationDisplayed,
-                onJoin = viewModel::requestCommunity,
-                onDismiss = viewModel::dismissCommunityInvitation,
-            )
+            if (communityAllowed && community.invitation) {
+                CommunityInvitation(
+                    onDisplayed = viewModel::communityInvitationDisplayed,
+                    onJoin = viewModel::requestCommunity,
+                    onDismiss = viewModel::dismissCommunityInvitation,
+                )
+            }
         },
         syncIndicators = syncIndicators,
         syncChrome = syncChrome,

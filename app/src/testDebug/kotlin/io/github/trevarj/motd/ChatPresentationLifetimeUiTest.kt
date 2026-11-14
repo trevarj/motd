@@ -147,7 +147,8 @@ class ChatPresentationLifetimeUiTest {
             }
             fixture.open(fixture.rooms.first().id)
             val original = fixture.awaitReady()
-            val rowTag = "chat_message_retained-0-900"
+            // Keep the paint probe above the timeline's intentional bottom-edge fade.
+            val rowTag = "chat_message_retained-0-896"
             val root = compose.onNodeWithTag("retained_surface", useUnmergedTree = true)
             val row = compose.onNodeWithTag(rowTag, useUnmergedTree = true)
             row.assertIsDisplayed()

@@ -811,7 +811,11 @@ class RequiredHeadlessE2eTest {
         assertEquals(originalSettings, runBlocking { settings.settings.first() })
         SettingsRobot(compose).open()
         compose.onNodeWithTag("settings_category_about").performScrollTo().performClick()
-        compose.onNodeWithTag("about_community").performScrollTo().assertIsDisplayed().performClick()
+        compose
+            .onNodeWithTag("about_community")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
         compose.waitUntil("Community flow chooses a route or opens the conversation", 10_000) {
             compose.onAllNodesWithTag("community_network_picker").fetchSemanticsNodes().isNotEmpty() ||
                 compose.onAllNodesWithTag("chat_timeline").fetchSemanticsNodes().isNotEmpty()

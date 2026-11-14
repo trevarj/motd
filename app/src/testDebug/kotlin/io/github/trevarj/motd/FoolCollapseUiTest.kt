@@ -17,6 +17,7 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -41,6 +42,7 @@ import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.edit
@@ -173,7 +175,13 @@ class FoolCollapseUiTest {
             val action = generateSequence(checkNotNull(copy)) { it.parent as? View }.first { it.isClickable }
             assertTrue(action.performClick())
             val clipboard = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
-            assertEquals(expected, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+            assertEquals(
+                expected,
+                clipboard.primaryClip
+                    ?.getItemAt(0)
+                    ?.text
+                    ?.toString(),
+            )
         }
         assertNativeSelectionRemoved()
     }
@@ -190,6 +198,7 @@ class FoolCollapseUiTest {
         val plain = "Alpha middle\nhttps://example.org/path?q=full#fragment"
         val fixture = FoolTimelineFixture(layout = layout, aText = raw)
         val clipboard = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
+        var touchSlop = 0f
 
         fun holdSourcePadding() {
             val rowTag = "chat_message_fool-a"
@@ -224,7 +233,11 @@ class FoolCollapseUiTest {
             row.performTouchInput { longClick(paddingPosition) }
         }
         try {
-            compose.setContent { fixture.Content() }
+            compose.setContent {
+                val configuration = LocalViewConfiguration.current
+                SideEffect { touchSlop = configuration.touchSlop }
+                fixture.Content()
+            }
             holdSourcePadding()
             compose.onNodeWithTag("message_action_select_text").performScrollTo().performClick()
             compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
@@ -249,7 +262,9 @@ class FoolCollapseUiTest {
                     textLayout.getBoundingBox(text.lastIndex).bottomRight
             endHandle.performTouchInput {
                 down(center)
-                moveTo(center + endDelta, delayMillis = 500)
+                // Native handle dragging consumes touch slop before reporting movement.
+                moveTo(center + Offset(touchSlop + 1f, 0f))
+                moveTo(center + endDelta + Offset(touchSlop, 0f), delayMillis = 500)
                 up()
             }
             val startHandle = compose.onAllNodes(nativeHandles, useUnmergedTree = true)[0]
@@ -259,7 +274,8 @@ class FoolCollapseUiTest {
                     textLayout.getBoundingBox(bodyStart).bottomLeft
             startHandle.performTouchInput {
                 down(center)
-                moveTo(center + startDelta, delayMillis = 500)
+                moveTo(center + Offset(touchSlop + 1f, 0f))
+                moveTo(center + startDelta + Offset(touchSlop, 0f), delayMillis = 500)
                 up()
             }
             copyNativeSelection("middle")
@@ -331,7 +347,7 @@ class FoolCollapseUiTest {
             compose.setContent { fixture.Content() }
             toggleAll()
             holdMessageBubble("c")
-            compose.onNodeWithTag("message_action_select_text").performClick()
+            compose.onNodeWithTag("message_action_select_text").performScrollTo().performClick()
             compose.onNodeWithTag("message_selection_text").assertTextEquals("C body")
             assertEquals(2, compose.onAllNodes(nativeHandles, useUnmergedTree = true).fetchSemanticsNodes().size)
             compose.runOnIdle { fixture.revealed.value = false }

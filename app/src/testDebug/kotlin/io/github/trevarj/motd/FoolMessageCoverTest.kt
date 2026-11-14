@@ -64,6 +64,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -108,11 +110,22 @@ class FoolMessageCoverTest {
                     val start = annotations.minOfOrNull { it.start } ?: 0
                     val end = annotations.maxOfOrNull { it.end } ?: layout.layoutInput.text.length
                     val sample = compose.onNodeWithTag("sample")
-                    val origin = text.fetchSemanticsNode().boundsInRoot.topLeft - sample.fetchSemanticsNode().boundsInRoot.topLeft
+                    val textBounds = text.fetchSemanticsNode().boundsInRoot
+                    val sampleBounds = sample.fetchSemanticsNode().boundsInRoot
+                    val origin = textBounds.topLeft - sampleBounds.topLeft
                     val visible = sample.captureToImage().toPixelMap()
                     val path = layout.getPathForRange(start, end).asAndroidPath()
                     path.offset(origin.x, origin.y)
-                    val region = Region().apply { setPath(path, Region(0, 0, visible.width, visible.height)) }
+                    // Paragraph selection paths can extend past the text layer; drawRect cannot.
+                    // Only fully covered pixels inside its exclusive right/bottom edges are body samples.
+                    val textClip =
+                        Region(
+                            ceil(origin.x).toInt(),
+                            ceil(origin.y).toInt(),
+                            floor(origin.x + layout.size.width).toInt(),
+                            floor(origin.y + layout.size.height).toInt(),
+                        ).apply { op(Region(0, 0, visible.width, visible.height), Region.Op.INTERSECT) }
+                    val region = Region().apply { setPath(path, textClip) }
                     compose.runOnIdle { concealed.value = true }
                     compose.onNodeWithText(body, substring = true, useUnmergedTree = true).assertDoesNotExist()
                     compose.onNodeWithText("12:34", useUnmergedTree = true).assertIsDisplayed()
@@ -127,13 +140,24 @@ class FoolMessageCoverTest {
                             val nearBody = (-1..1).any { dx -> (-1..1).any { dy -> region.contains(x + dx, y + dy) } }
                             if (!nearBody) {
                                 // Includes the actual avatar, author prefix/header, timestamp and bubble backing.
-                                assertEquals("non-body pixel at $x,$y ($mode/$messageKind/$enabled)", visible[x, y], hidden[x, y])
+                                assertEquals(
+                                    "non-body pixel at $x,$y ($mode/$messageKind/$enabled, SDK ${Build.VERSION.SDK_INT}); " +
+                                        "origin=$origin, layout=${layout.size}, textBounds=$textBounds, sampleBounds=$sampleBounds",
+                                    visible[x, y],
+                                    hidden[x, y],
+                                )
                             }
                             if (region.contains(x - 1, y) && region.contains(x + 1, y) && region.contains(x, y - 1) && region.contains(x, y + 1)) {
                                 originalEdges += abs(visible[x, y].luminance() - visible[x - 1, y].luminance())
                                 concealedEdges += abs(hidden[x, y].luminance() - hidden[x - 1, y].luminance())
                                 if (!enabled || Build.VERSION.SDK_INT < 31) {
-                                    assertEquals("opaque body fallback", fallback, hidden[x, y])
+                                    assertEquals(
+                                        "opaque body fallback at $x,$y ($mode/$messageKind/$enabled, SDK ${Build.VERSION.SDK_INT}); " +
+                                            "visible=${visible[x, y]}, origin=$origin, layout=${layout.size}, " +
+                                            "textBounds=$textBounds, sampleBounds=$sampleBounds",
+                                        fallback,
+                                        hidden[x, y],
+                                    )
                                     opaquePixels++
                                 }
                             }

@@ -662,9 +662,10 @@ fun MotdNavGraph(
             )
         }
         composable<AboutRoute> { entry ->
-            val chatListEntry = remember(entry, navController) {
-                navController.getBackStackEntry(requireNotNull(ChatListRoute::class.qualifiedName))
-            }
+            val chatListEntry =
+                remember(entry, navController) {
+                    navController.getBackStackEntry(requireNotNull(ChatListRoute::class.qualifiedName))
+                }
             val chatListViewModel: ChatListViewModel = hiltViewModel(chatListEntry)
             AboutScreen(
                 target = entry.toRoute<AboutRoute>().target,

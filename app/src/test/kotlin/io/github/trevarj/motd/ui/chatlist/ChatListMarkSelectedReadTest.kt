@@ -314,9 +314,13 @@ class ChatListMarkSelectedReadTest {
                             override val completed = MutableStateFlow(true)
                             override val communityInvitationHandled = MutableStateFlow(false)
 
-                            override suspend fun markCompleted() { completed.value = true }
+                            override suspend fun markCompleted() {
+                                completed.value = true
+                            }
 
-                            override suspend fun markCommunityInvitationHandled() { communityInvitationHandled.value = true }
+                            override suspend fun markCommunityInvitationHandled() {
+                                communityInvitationHandled.value = true
+                            }
                         },
                     globalFeedPrefs =
                         object : GlobalFeedPrefs {
@@ -382,9 +386,13 @@ class ChatListMarkSelectedReadTest {
                             override val completed = MutableStateFlow(true)
                             override val communityInvitationHandled = MutableStateFlow(false)
 
-                            override suspend fun markCompleted() { completed.value = true }
+                            override suspend fun markCompleted() {
+                                completed.value = true
+                            }
 
-                            override suspend fun markCommunityInvitationHandled() { communityInvitationHandled.value = true }
+                            override suspend fun markCommunityInvitationHandled() {
+                                communityInvitationHandled.value = true
+                            }
                         },
                     globalFeedPrefs =
                         object : GlobalFeedPrefs {

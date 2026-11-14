@@ -75,26 +75,34 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
   distribution unless the maintainer explicitly asks for it. Lint warnings are
   errors.
   When a change crosses modules or release behavior, run the nearest affected
-  unit tests in each module; Required CI owns full release parity.
+  unit tests in each module; Required CI owns the complete hosted gate.
 - For task validation, run the nearest relevant unit test method in each
-  affected module. Use `nix develop -c ./gradlew :app:testDebugUnitTest --tests
+  affected module. Use `nix develop -c bash ./gradlew :app:testDebugUnitTest --tests
   '<fully-qualified-class.method>' --stacktrace`, or `:irc:test` for protocol
   changes. Filters narrow execution, not compilation of test sources and
   dependencies. Robolectric Compose tests are local unit-tier checks.
-- Before committing implementation changes, build each changed module and run
-  its formatting and lint checks as described in the command matrix. Use root
-  `ktlintCheck` for root Gradle/style configuration changes. Do not automatically
-  append an unfiltered test suite or a full pre-push gate.
+- Before committing or pushing, assemble each changed module and follow the command
+  matrix: root `ktlintCheck`
+  for any Kotlin/Gradle change; compile affected source sets, including app
+  `compileDebugKotlin` and `compileDebugUnitTestKotlin` for main/API changes and
+  `compileE2eAndroidTestKotlin` for affected instrumentation consumers. Debug
+  assembly does not cover those test boundaries. Use `tools/android-lint.sh`
+  for production release lint, adding debug lint when `tools/ci-paths.sh` selects
+  it. Do not automatically append an unfiltered suite or full pre-push gate.
+  A failed earlier task leaves trailing tasks unverified; skipped checks and
+  delegated source-only reviews are not verification.
 - For database changes, run the nearest database unit regression and review/commit
   generated `app/schemas` changes.
 - `./tools/prepush.sh` is optional local gate reproduction only when explicitly
   requested to diagnose broader failures, not a handoff/push prerequisite or a
   substitute for hosted CI. It requires a clean, committed tree; use
   `MOTD_PREFLIGHT_BASE=<ref>` to override its `origin/main` comparison base.
-- Require all applicable hosted `Required CI / gate` checks before merge. When
-  an individual job fails, inspect its existing diagnostics and begin fixing it
-  immediately rather than waiting for aggregate `gate`; remaining coverage
-  continues normally.
+- Do not push known failures or unrelated changes while CI is red. Check corrective
+  fixes locally before pushing them. Require all applicable hosted `Required CI / gate` checks for that
+  exact commit before merge/release or declaring CI green. When an individual
+  job fails, inspect its existing logs/artifacts and begin fixing it immediately
+  rather than waiting for aggregate `gate`; do not rerun merely to confirm the
+  failure. Remaining coverage continues normally.
 - For UI changes, if a device is available, install the changed debug build using
   the [serial-targeted debug install workflow](docs/human-developing.md#debug-device-install),
   perform a quick ADB check, and inspect a fresh screencapture. Otherwise, leave

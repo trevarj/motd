@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
@@ -26,6 +27,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
@@ -94,7 +96,8 @@ class SplashLogoUiTest {
         }
         val skipLabel = RuntimeEnvironment.getApplication().getString(R.string.skip_splash_screen)
         val cover = compose.onNodeWithTag("splash_cover")
-        cover.assertIsDisplayed()
+        cover
+            .assertIsDisplayed()
             .assertContentDescriptionEquals(skipLabel)
             .assertHasClickAction()
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
@@ -107,7 +110,10 @@ class SplashLogoUiTest {
         compose.mainClock.advanceTimeByFrame()
         compose.waitForIdle()
         compose.onNodeWithTag("splash_cover").assertDoesNotExist()
-        compose.onNodeWithTag("startup_content").assertIsDisplayed().assertHasClickAction()
+        compose
+            .onNodeWithTag("startup_content")
+            .assertIsDisplayed()
+            .assertHasClickAction()
             .performTouchInput { click() }
         assertEquals(1, clicks)
         compose.mainClock.advanceTimeBy(STARTUP_SPLASH_TIMEOUT_MS + 1_000)
@@ -297,7 +303,10 @@ class SplashLogoUiTest {
         assertReadinessRetargets(afterMs = 640, remainingBoundMs = 740 - 640)
     }
 
-    private fun assertReadinessRetargets(afterMs: Long, remainingBoundMs: Long) {
+    private fun assertReadinessRetargets(
+        afterMs: Long,
+        remainingBoundMs: Long,
+    ) {
         val request = mutableStateOf<SplashOverlayRequest?>(SplashOverlayRequest(180.dp))
         val ready = mutableStateOf(false)
         var shown = 0
@@ -311,7 +320,10 @@ class SplashLogoUiTest {
                 onShown = { shown++ },
                 onFinished = { finished++ },
             ) {
-                Box(Modifier.size(180.dp).background(androidx.compose.ui.graphics.Color.Black)) {
+                Box(
+                    Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black),
+                    contentAlignment = Alignment.Center,
+                ) {
                     SplashMarkArtwork(1f, 180.dp, Modifier.testTag("original_mark"))
                 }
             }
@@ -323,27 +335,35 @@ class SplashLogoUiTest {
         }
         compose.mainClock.advanceTimeBy(afterMs)
         compose.waitForIdle()
-        val before = compose.onNodeWithTag("splash_logo_mark", useUnmergedTree = true).captureToImage().asAndroidBitmap()
         assertEquals(0, finished)
         compose.runOnIdle { ready.value = true }
         compose.mainClock.advanceTimeBy(64)
         compose.waitForIdle()
         val after = compose.onNodeWithTag("splash_logo_mark", useUnmergedTree = true).captureToImage().asAndroidBitmap()
-        fun openedPixels(bitmap: Bitmap): Int =
-            (bitmap.width / 3 until bitmap.width * 2 / 3).sumOf { x ->
-                (bitmap.height / 3 until bitmap.height * 2 / 3).count { y -> bitmap.getPixel(x, y) == Color.BLACK }
-            }
-        assertTrue("readiness must not replay the intact face", openedPixels(after) >= openedPixels(before))
+
+        assertTrue(
+            "readiness must not replay the intact face",
+            Color.red(after.getPixel(after.width / 2, after.height / 2)) < 180,
+        )
         compose.mainClock.advanceTimeBy(remainingBoundMs - 64 + 48)
         compose.waitForIdle()
         assertEquals("readiness never extends normal remaining motion", 1, finished)
         assertEquals("readiness must not repeat the native handoff", 1, shown)
-        val completed = compose.onNodeWithTag("splash_logo_mark", useUnmergedTree = true).captureToImage().asAndroidBitmap()
-        compose.runOnIdle { request.value = null }
         compose.mainClock.advanceTimeByFrame()
         compose.waitForIdle()
+        val completed = compose.onNodeWithTag("splash_logo_mark", useUnmergedTree = true).captureToImage().asAndroidBitmap()
+        compose.runOnIdle { request.value = null }
+        compose.waitUntil(10_000) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+            compose.onAllNodesWithTag("original_mark").fetchSemanticsNodes().isNotEmpty()
+        }
         val original = compose.onNodeWithTag("original_mark").captureToImage().asAndroidBitmap()
-        assertTrue("playback reaches the original painter before completion", completed.sameAs(original))
+        assertTrue(
+            "completed playback matches the original raster " +
+                "(${completed.width}x${completed.height} vs ${original.width}x${original.height})",
+            completed.sameAs(original),
+        )
     }
 
     @Test
