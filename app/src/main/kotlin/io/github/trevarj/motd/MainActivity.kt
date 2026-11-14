@@ -151,7 +151,7 @@ class MainActivity :
             avatarStore.records,
             contentPreviewPrefs.config,
         ) { settings, appearance, avatarConfig, avatarRecords, contentPreviews ->
-            MainActivityUiState(settings, appearance, avatarConfig, avatarRecords, contentPreviews)
+            MainActivityUiState(settings, appearance, avatarConfig, avatarRecords, contentPreviews, rootReady = true)
         }.stateIn(
             scope = lifecycleScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -201,6 +201,7 @@ class MainActivity :
             StartupSplashGate(
                 request = startupSplashOverlay,
                 loading = startupSplashLoading,
+                rootReady = uiState.rootReady,
                 onShown = ::removePlatformSplashForOverlay,
                 onFinished = ::finishStartupSplash,
             ) {
@@ -514,6 +515,7 @@ internal data class MainActivityUiState(
             autoLoadOnUnmetered = false,
             autoLoadOnMetered = false,
         ),
+    val rootReady: Boolean = false,
 )
 
 /** Collects the ConnectionManager's cert prompts and shows the dialog for the first pending one. */

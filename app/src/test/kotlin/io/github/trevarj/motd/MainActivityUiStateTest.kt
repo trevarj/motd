@@ -6,8 +6,10 @@ import org.junit.Test
 class MainActivityUiStateTest {
     @Test
     fun initialRemoteContentStateFailsClosedUntilPreferencesLoad() {
-        val previews = MainActivityUiState().contentPreviews
+        val initial = MainActivityUiState()
+        val previews = initial.contentPreviews
 
+        assertFalse(initial.rootReady)
         assertFalse(previews.showImages)
         assertFalse(previews.showLinkPreviews)
         assertFalse(previews.autoLoadOnUnmetered)

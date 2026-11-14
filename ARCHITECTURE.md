@@ -196,8 +196,11 @@ flowchart TD
   Reconcile-only publication never takes the network retirement guard; network sessions retain
   retirement-before-session locking. Syncing broadcasts snapshot their owners so synchronous
   observers can attach another owner without invalidating the current iteration.
-- Startup splash artwork is cosmetic: its handoff and animation share a five-second deadline.
-  Completion removes both launch covers; a late platform callback cannot restart the overlay.
+- Startup splash plays the active spark cut without opening or final still holds.
+  Once the root local settings/database snapshot resolves, remaining motion is capped
+  at a nominal 200 ms without restarting the cut. Handoff and animation share a
+  five-second deadline; completion removes both launch covers, and a late platform
+  callback cannot restart the overlay.
 - Preview-bearing preference choices save immediately and stay open for comparison, with one
   prominent selected sample; per-chat layout samples follow the same override/default/global
   inheritance as chat. Fictional examples reuse production renderers with local data and isolated

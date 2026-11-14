@@ -60,7 +60,10 @@ Verify exports with:
 nix develop .#sprite-studies -c node tools/verify-branding.mjs
 ```
 
-Startup has one 950 ms spark-cut treatment, not selectable light treatments.
+Startup keeps the ceramic spark cut but skips its opening and final still holds.
+The artwork retains its 950 ms authored timeline; startup plays the active
+120–860 ms portion. Once the root local configuration loads, remaining motion
+accelerates to at most 200 ms at normal animation speed without restarting.
 Reduced motion and activity recreation skip the animation. Saved legacy splash
 choices remain readable in preferences and configuration backups but do not
 control startup. The native launch surface is black so it never exposes the

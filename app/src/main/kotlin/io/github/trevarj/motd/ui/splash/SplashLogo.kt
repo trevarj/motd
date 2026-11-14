@@ -14,6 +14,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,13 +27,18 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import io.github.trevarj.motd.R
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 
 internal const val STARTUP_SPLASH_TIMEOUT_MS = 5_000L
+internal const val STARTUP_SPLASH_READY_DURATION_MS = 200
+private const val STARTUP_SPLASH_START_PROGRESS = 120f / SPARK_CUT_DURATION_MS
+private const val STARTUP_SPLASH_END_PROGRESS = 860f / SPARK_CUT_DURATION_MS
 
 @Composable
 fun StartupSplashGate(
     request: SplashOverlayRequest?,
     loading: Boolean,
+    rootReady: Boolean,
     onShown: () -> Unit,
     onFinished: () -> Unit,
     content: @Composable () -> Unit,
@@ -55,12 +61,22 @@ fun StartupSplashGate(
             Box(Modifier.fillMaxSize().background(Color.Black).consumeSplashInput())
         } else if (request != null) {
             Box(Modifier.fillMaxSize().background(Color.Black).consumeSplashInput()) {
-                val progress = remember(request) { Animatable(0f) }
+                val progress = remember(request) { Animatable(STARTUP_SPLASH_START_PROGRESS) }
+                val ready by rememberUpdatedState(rootReady)
+                val shown by rememberUpdatedState(onShown)
                 LaunchedEffect(request) {
                     withFrameNanos { }
-                    onShown()
-                    progress.animateTo(1f, tween(SPARK_CUT_DURATION_MS, easing = LinearEasing))
-                    onFinished()
+                    shown()
+                    snapshotFlow { ready }.collectLatest { isReady ->
+                        val remainingMs =
+                            ((STARTUP_SPLASH_END_PROGRESS - progress.value) * SPARK_CUT_DURATION_MS)
+                                .toInt().coerceAtLeast(0)
+                        val durationMs =
+                            if (isReady) minOf(remainingMs, STARTUP_SPLASH_READY_DURATION_MS) else remainingMs
+                        progress.animateTo(STARTUP_SPLASH_END_PROGRESS, tween(durationMs, easing = LinearEasing))
+                        progress.snapTo(1f)
+                        finish()
+                    }
                 }
                 SplashMarkArtwork(
                     progress = progress.value,

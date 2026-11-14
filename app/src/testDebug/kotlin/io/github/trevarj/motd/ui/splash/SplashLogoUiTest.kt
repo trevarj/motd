@@ -86,6 +86,7 @@ class SplashLogoUiTest {
             StartupSplashGate(
                 request = value("getStartupSplashOverlay") as SplashOverlayRequest?,
                 loading = value("getStartupSplashLoading") as Boolean,
+                rootReady = true,
                 onShown = { invoke("removePlatformSplashForOverlay") },
                 onFinished = { invoke("finishStartupSplash") },
             ) {
@@ -122,7 +123,7 @@ class SplashLogoUiTest {
     }
 
     @Test
-    fun normalSplashAnimationFinishesBeforeDeadlineAndOnlyOnce() {
+    fun readySplashShowsActiveMotionAndFinishesWithoutStaticHolds() {
         val request = mutableStateOf<SplashOverlayRequest?>(SplashOverlayRequest(180.dp))
         var shown = 0
         var finished = 0
@@ -131,24 +132,32 @@ class SplashLogoUiTest {
             StartupSplashGate(
                 request = request.value,
                 loading = false,
+                rootReady = true,
                 onShown = { shown++ },
                 onFinished = {
                     finished++
                     request.value = null
                 },
             ) {
-                Box(Modifier.size(80.dp).testTag("startup_content"))
+                Box(Modifier.size(180.dp).background(androidx.compose.ui.graphics.Color.Black).testTag("startup_content")) {
+                    SplashMarkArtwork(120f / SPARK_CUT_DURATION_MS, 180.dp)
+                }
             }
         }
-        compose.mainClock.advanceTimeBy(100)
+        val firstFrame = compose.onNodeWithTag("splash_logo_mark").captureToImage().asAndroidBitmap()
+        compose.mainClock.advanceTimeBy(80)
         compose.waitForIdle()
         assertEquals(1, shown)
         assertEquals(0, finished)
-        compose.onNodeWithTag("splash_logo_mark").assertExists()
-        compose.mainClock.advanceTimeBy(2_000)
+        val moving = compose.onNodeWithTag("splash_logo_mark").captureToImage().asAndroidBitmap()
+        assertFalse("startup starts at the active cut, not the opening hold", firstFrame.sameAs(moving))
+        compose.onNodeWithTag("startup_content").assertDoesNotExist()
+        compose.mainClock.advanceTimeBy(STARTUP_SPLASH_READY_DURATION_MS.toLong() - 80 + 48)
         compose.waitForIdle()
         assertEquals(1, finished)
         compose.onNodeWithTag("startup_content").assertIsDisplayed()
+        val activeStart = compose.onNodeWithTag("startup_content").captureToImage().asAndroidBitmap()
+        assertTrue("startup omits the authored opening hold", firstFrame.sameAs(activeStart))
         compose.mainClock.advanceTimeBy(STARTUP_SPLASH_TIMEOUT_MS)
         compose.waitForIdle()
         assertEquals(1, finished)
@@ -157,6 +166,7 @@ class SplashLogoUiTest {
     @Test
     fun lateHandoffDoesNotRestartTheCoverDeadline() {
         val loading = mutableStateOf(true)
+        val ready = mutableStateOf(false)
         val request = mutableStateOf<SplashOverlayRequest?>(null)
         var finished = 0
         var shown = 0
@@ -166,6 +176,7 @@ class SplashLogoUiTest {
                 request = request.value,
                 loading = loading.value,
                 onShown = { shown++ },
+                rootReady = ready.value,
                 onFinished = {
                     finished++
                     loading.value = false
@@ -196,6 +207,9 @@ class SplashLogoUiTest {
         }
         assertEquals("the original deadline has not expired", 0, finished)
         compose.onNodeWithTag("startup_content").assertDoesNotExist()
+        compose.mainClock.advanceTimeBy(coverStartedAt + STARTUP_SPLASH_TIMEOUT_MS - 80 - compose.mainClock.currentTime)
+        compose.waitForIdle()
+        compose.runOnIdle { ready.value = true }
         compose.mainClock.advanceTimeBy(coverStartedAt + STARTUP_SPLASH_TIMEOUT_MS + 32 - compose.mainClock.currentTime)
         compose.waitForIdle()
         assertEquals(1, finished)
@@ -203,6 +217,65 @@ class SplashLogoUiTest {
         compose.mainClock.advanceTimeBy(2_000)
         compose.waitForIdle()
         assertEquals(1, finished)
+    }
+
+    @Test
+    fun readinessDuringMotionAcceleratesWithoutReplayingOrRepeatingNativeHandoff() {
+        assertReadinessRetargets(afterMs = 300, remainingBoundMs = STARTUP_SPLASH_READY_DURATION_MS.toLong())
+    }
+
+    @Test
+    fun readinessNearTheEndDoesNotExtendPlaybackAndCompletesToTheOriginalRaster() {
+        assertReadinessRetargets(afterMs = 640, remainingBoundMs = 740 - 640)
+    }
+
+    private fun assertReadinessRetargets(afterMs: Long, remainingBoundMs: Long) {
+        val request = mutableStateOf<SplashOverlayRequest?>(SplashOverlayRequest(180.dp))
+        val ready = mutableStateOf(false)
+        var shown = 0
+        var finished = 0
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            StartupSplashGate(
+                request = request.value,
+                loading = false,
+                rootReady = ready.value,
+                onShown = { shown++ },
+                onFinished = { finished++ },
+            ) {
+                Box(Modifier.size(180.dp).background(androidx.compose.ui.graphics.Color.Black)) {
+                    SplashMarkArtwork(1f, 180.dp, Modifier.testTag("original_mark"))
+                }
+            }
+        }
+        compose.waitUntil(10_000) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+            shown == 1
+        }
+        compose.mainClock.advanceTimeBy(afterMs)
+        compose.waitForIdle()
+        val before = compose.onNodeWithTag("splash_logo_mark").captureToImage().asAndroidBitmap()
+        assertEquals(0, finished)
+        compose.runOnIdle { ready.value = true }
+        compose.mainClock.advanceTimeBy(64)
+        compose.waitForIdle()
+        val after = compose.onNodeWithTag("splash_logo_mark").captureToImage().asAndroidBitmap()
+        fun openedPixels(bitmap: Bitmap): Int =
+            (bitmap.width / 3 until bitmap.width * 2 / 3).sumOf { x ->
+                (bitmap.height / 3 until bitmap.height * 2 / 3).count { y -> bitmap.getPixel(x, y) == Color.BLACK }
+            }
+        assertTrue("readiness must not replay the intact face", openedPixels(after) >= openedPixels(before))
+        compose.mainClock.advanceTimeBy(remainingBoundMs - 64 + 48)
+        compose.waitForIdle()
+        assertEquals("readiness never extends normal remaining motion", 1, finished)
+        assertEquals("readiness must not repeat the native handoff", 1, shown)
+        val completed = compose.onNodeWithTag("splash_logo_mark").captureToImage().asAndroidBitmap()
+        compose.runOnIdle { request.value = null }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        val original = compose.onNodeWithTag("original_mark").captureToImage().asAndroidBitmap()
+        assertTrue("playback reaches the original painter before completion", completed.sameAs(original))
     }
 
     @Test
