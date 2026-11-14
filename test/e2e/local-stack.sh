@@ -153,7 +153,7 @@ write_configs() {
   mkdir -p "$RUN/ergo" "$RUN/soju/tls"
   cat >"$CONF_ERGO" <<YAML
 network:
-    name: MotdLocal
+    name: Libera.Chat
 server:
     name: ergo.local
     listeners:

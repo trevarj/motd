@@ -809,23 +809,41 @@ class RequiredHeadlessE2eTest {
             }
         }
         assertEquals(originalSettings, runBlocking { settings.settings.first() })
-        SettingsRobot(compose).open()
-        compose.onNodeWithTag("settings_category_about").performScrollTo().performClick()
-        compose
-            .onNodeWithTag("about_community")
-            .performScrollTo()
-            .assertIsDisplayed()
-            .performClick()
-        compose.waitUntil("Community flow chooses a route or opens the conversation", 10_000) {
-            compose.onAllNodesWithTag("community_network_picker").fetchSemanticsNodes().isNotEmpty() ||
-                compose.onAllNodesWithTag("chat_timeline").fetchSemanticsNodes().isNotEmpty()
-        }
-        if (compose.onAllNodesWithTag("community_network_picker").fetchSemanticsNodes().isNotEmpty()) {
-            compose.onNodeWithTag("community_network_${network.childId}").performClick()
-        }
+        assertEquals(null, runBlocking { bootstrap.seams.buffers().joinedBufferId(network.childId, "#motd") })
         val communityId =
-            awaitWhileComposing("Private fixture confirms community JOIN", 15_000) {
-                BufferProbe(bootstrap.seams.buffers(), milestones).awaitJoinedChannel(network.childId, "#motd")
+            runBlocking {
+                coroutineScope {
+                    val client = requireNotNull(bootstrap.seams.connections().clientFor(network.childId))
+                    // Subscribe before navigation: only a real server self-JOIN may satisfy this
+                    // journey, not a pre-existing buffer or a locally accepted JOIN write.
+                    val selfJoin =
+                        async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) {
+                            client.broadcastEvents.filterIsInstance<IrcEvent.Joined>().first {
+                                it.isSelf && it.channel.equals("#motd", ignoreCase = true)
+                            }
+                        }
+                    SettingsRobot(compose).open()
+                    compose.onNodeWithTag("settings_category_about").performScrollTo().performClick()
+                    compose
+                        .onNodeWithTag("about_community")
+                        .performScrollTo()
+                        .assertIsDisplayed()
+                        .performClick()
+                    val fixtureRouteTag = "community_network_${network.childId}"
+                    compose.waitUntil("Community offers the private fixture or opens its conversation", 10_000) {
+                        compose.onAllNodesWithTag(fixtureRouteTag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() ||
+                            compose.onAllNodesWithTag("chat_timeline").fetchSemanticsNodes().isNotEmpty()
+                    }
+                    if (compose.onAllNodesWithTag(fixtureRouteTag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()) {
+                        ChatListRobot(compose).click(fixtureRouteTag)
+                    }
+                    awaitWhileComposing("Private fixture confirms community self-JOIN and persistence", 15_000) {
+                        withTimeout(15_000) {
+                            selfJoin.await()
+                            BufferProbe(bootstrap.seams.buffers(), milestones).awaitJoinedChannel(network.childId, "#motd")
+                        }
+                    }
+                }
             }
         compose.waitUntil("Community conversation opens after self-JOIN", 10_000) {
             compose.onAllNodesWithTag("chat_timeline").fetchSemanticsNodes().isNotEmpty()
@@ -834,6 +852,12 @@ class RequiredHeadlessE2eTest {
             communityId,
             runBlocking { bootstrap.seams.buffers().joinedBufferId(network.childId, "#motd") },
         )
+        ChatRobot(compose).send("$token community")
+        val communityMessage =
+            awaitWhileComposing("Community conversation sends to the joined fixture buffer", 20_000) {
+                messages.awaitCanonical("$token community", communityId)
+            }
+        TimelineRobot(compose).assertMessageVisible(communityMessage.tag())
         scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         ChatListRobot(compose).awaitTag("chatlist_row_$communityId")
         SettingsRobot(compose).apply {

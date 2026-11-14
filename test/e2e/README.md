@@ -211,7 +211,9 @@ The four journeys cover:
   read action covers the mention but leaves a later ordinary event unread; and
 - a second-client offline gap crossing a Paging window, first-unread viewport placement,
   frozen read state, canonical ordering, exactly-once recovery, and deliberate read advancement; and
-- navigation, settings, themes, and Soju control-center panels.
+- About → Community joining `#motd` through the configured private fixture, navigation,
+  settings, themes, and Soju control-center panels. The journey observes a real server
+  self-JOIN and its persisted buffer before requiring the conversation to open.
 
 The Soju Control Center opens on an overview; its Networks, Channels, Account,
 and Console cards open full-page panels, and Back returns to the overview.
@@ -393,6 +395,15 @@ by the fixture rather than matching processes by command line.
 network, seeds `##motdtest`, and installs the reverse. It fails if ports `6667`
 or `6697` are already occupied. Stop the owner by its exact PID; never use a
 broad `pkill -f` pattern for ergo or soju.
+
+The private Ergo fixture intentionally advertises `NETWORK=Libera.Chat` so the
+Community journey exercises the production Libera route eligibility and real
+`JOIN #motd` → persisted self-JOIN → conversation flow. The bouncer alias alone
+(`libera`) is not upstream identity. This changes only the fixture's advertised
+protocol identity: its local endpoints, TLS trust and fictional credentials stay
+unchanged, and it never connects to public Libera.Chat. Production still excludes
+known non-Libera upstreams; do not bypass that filter or create a public/direct
+profile to make the journey pass.
 
 Onboard the debug app with **Bouncer → soju**:
 
