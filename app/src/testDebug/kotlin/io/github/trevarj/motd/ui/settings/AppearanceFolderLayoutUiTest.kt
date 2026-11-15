@@ -47,6 +47,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -67,6 +68,7 @@ import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
+import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
@@ -365,6 +367,65 @@ class AppearanceFolderLayoutUiTest {
             preview.performScrollTo().assertIsDisplayed()
             assertTrue("$density live preview must restore its sender wash", tinted.sameAs(preview.captureToImage().asAndroidBitmap()))
         }
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w411dp-h1600dp")
+    fun nickMentionStyleSavesAllChoicesPreviewsImmediatelyAndReopensPersistedSelection() {
+        val settings = mutableStateOf(Settings(dynamicColor = false, nickColorsEnabled = false))
+        val saved = mutableListOf<NickMentionStyle>()
+        setContent(
+            settingsProvider = { settings.value },
+            appearance = AppearanceConfig(theme = ColorThemePreset.AYU_LIGHT, wallpaper = WallpaperSelection(ChatWallpaperPreset.NONE)),
+            onNickMentionStyle = saved::add,
+        )
+        compose.onNodeWithTag("settings_palette_picker").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("settings_nick_mention_style_picker").performScrollTo().performClick()
+        scrollToSheetNode("settings_nick_mention_style_sheet", "settings_nick_mention_style_bold").assertIsSelected()
+        val context = RuntimeEnvironment.getApplication()
+        val reply = context.getString(io.github.trevarj.motd.R.string.settings_chat_preview_reply)
+        val nick = context.getString(io.github.trevarj.motd.R.string.settings_chat_preview_sender)
+        for (style in listOf(NickMentionStyle.NONE, NickMentionStyle.BOLD, NickMentionStyle.CHIP)) {
+            val option = scrollToSheetNode("settings_nick_mention_style_sheet", "settings_nick_mention_style_${style.name.lowercase()}")
+            val bounds = option.getUnclippedBoundsInRoot()
+            assertTrue("Whole choice row must remain accessible", bounds.bottom - bounds.top >= 48.dp)
+            option.performClick().assertIsSelected()
+            compose.onNodeWithTag("settings_nick_mention_style_sheet").assertIsDisplayed()
+            assertEquals(style, saved.last())
+            assertEquals(NickMentionStyle.BOLD, settings.value.nickMentionStyle)
+            scrollToSheetNode("settings_nick_mention_style_sheet", "settings_nick_mention_preview_configuration").assertExists()
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose
+                .onNode(hasText(reply, substring = true) and hasAnyAncestor(hasTestTag("settings_nick_mention_preview_configuration")), useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val text = layouts.single().layoutInput.text
+            val start = text.text.indexOf(nick)
+            assertTrue("The production sample must contain a known nickname", start >= 0)
+            val spans = text.spanStyles.filter { it.start <= start && it.end >= start + nick.length }.map { it.item }
+            assertEquals(style == NickMentionStyle.BOLD, spans.any { it.fontWeight == FontWeight.Bold })
+            assertEquals(style == NickMentionStyle.CHIP, spans.any { it.background != Color.Unspecified })
+            System.getenv("MOTD_NICK_MENTION_PNG_DIR")?.let { directory ->
+                val output = java.io.File(directory).apply { mkdirs() }
+                compose.waitForIdle()
+                val image = compose.onNodeWithTag("settings_nick_mention_style_sheet_options").captureToImage().asAndroidBitmap()
+                try {
+                    java.io.File(output, "nick_mention_${style.name.lowercase()}.png").outputStream().use {
+                        image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                    }
+                } finally {
+                    image.recycle()
+                }
+            }
+        }
+        assertEquals(listOf(NickMentionStyle.NONE, NickMentionStyle.BOLD, NickMentionStyle.CHIP), saved)
+        dismissSheet("settings_nick_mention_style_sheet")
+        compose.onNodeWithTag("settings_palette_picker").performScrollTo().assertIsEnabled()
+        compose.onNodeWithTag("settings_nick_color_overrides").performScrollTo().assertIsEnabled()
+        compose.onNodeWithTag("settings_switch_nick_colors_row").performScrollTo().assertIsOff()
+        compose.runOnIdle { settings.value = settings.value.copy(nickMentionStyle = saved.last()) }
+        compose.onNodeWithTag("settings_nick_mention_style_picker").performScrollTo().performClick()
+        scrollToSheetNode("settings_nick_mention_style_sheet", "settings_nick_mention_style_chip").assertIsSelected()
+        scrollToSheetNode("settings_nick_mention_style_sheet", "settings_nick_mention_preview_configuration").assertExists()
     }
 
     @Test
@@ -1303,6 +1364,7 @@ class AppearanceFolderLayoutUiTest {
     private fun setContent(
         settings: Settings = Settings(),
         appearance: AppearanceConfig = AppearanceConfig(),
+        settingsProvider: () -> Settings = { settings },
         appearanceProvider: () -> AppearanceConfig = { appearance },
         customFontFile: java.io.File? = null,
         onFolderDisplayMode: (FolderDisplayMode) -> Unit = {},
@@ -1323,6 +1385,7 @@ class AppearanceFolderLayoutUiTest {
         onBubbleCornerStyle: (BubbleCornerStyle) -> Unit = {},
         onChatShadowsEnabled: (Boolean) -> Unit = {},
         onNicknameBackgroundsEnabled: (Boolean) -> Unit = {},
+        onNickMentionStyle: (NickMentionStyle) -> Unit = {},
         onUseThemeTextColors: (Boolean) -> Unit = {},
         onOpenSurfaceEffects: (SettingsTarget?) -> Unit = {},
         onWallpaper: (WallpaperSelection) -> Unit = {},
@@ -1331,6 +1394,7 @@ class AppearanceFolderLayoutUiTest {
     ) {
         compose.setContent {
             val currentAppearance = appearanceProvider()
+            val currentSettings = settingsProvider()
             MotdTheme(
                 dynamicColor = false,
                 themePreset = currentAppearance.theme,
@@ -1338,13 +1402,14 @@ class AppearanceFolderLayoutUiTest {
                 useThemeTextColors = currentAppearance.useThemeTextColors,
                 uiFontScalePercent = currentAppearance.uiFontScalePercent,
                 uiIconSet = currentAppearance.uiIconSet,
+                nickMentionStyle = currentSettings.nickMentionStyle,
             ) {
                 CompositionLocalProvider(
                     LocalRippleConfiguration provides null,
                     LocalLifecycleOwner provides (lifecycleOwner ?: LocalLifecycleOwner.current),
                 ) {
                     AppearanceSettingsContent(
-                        settings = settings,
+                        settings = currentSettings,
                         customFontFile = customFontFile,
                         appearance = currentAppearance,
                         onBack = {},
@@ -1367,6 +1432,7 @@ class AppearanceFolderLayoutUiTest {
                         onAvatarStyle = onAvatarStyle,
                         onNickColorsEnabled = {},
                         onNickColorPalette = {},
+                        onNickMentionStyle = onNickMentionStyle,
                         onWallpaper = onWallpaper,
                         importedWallpaper = importedWallpaperProvider(),
                         onUiFontScale = {},

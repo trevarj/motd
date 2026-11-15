@@ -62,6 +62,15 @@ class SettingsSearchTest {
     }
 
     @Test
+    fun nickMentionStyleQueriesOpenGlobalAppearanceControl() {
+        val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
+        val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_MENTION_STYLE)
+        for (query in listOf("nick mention style", "nickname mentions", "chip", "bold")) {
+            assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
+        }
+    }
+
+    @Test
     fun messageBackgroundOpacityQueriesOpenTheirTypedAppearanceControl() {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
         val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.MESSAGE_BACKGROUND_OPACITY)
@@ -270,6 +279,7 @@ class SettingsSearchTest {
             R.string.settings_notifications_summary -> "Global, server, and channel alerts and watches"
             R.string.settings_composer_formatting_tools -> "Formatting tools"
             R.string.settings_composer_formatting_tools_desc -> "Show rich text controls"
+            R.string.settings_nick_mention_style -> "Nick mention style"
             R.string.settings_message_background_opacity -> "Message background opacity"
             R.string.settings_message_background_opacity_desc -> "Message tint in every layout. 0% removes tint, not blur; content, mention highlights, and semantic rails stay visible."
             R.string.settings_message_background_blur -> "Message background blur"

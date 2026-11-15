@@ -150,6 +150,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_theme_text_colors, R.string.settings_theme_text_colors_desc, "match theme static neutral font ink text palette", SettingsSearchPage.APPEARANCE, SettingsTarget.THEME_TEXT_COLORS),
         spec(R.string.settings_icon_set, R.string.settings_icon_set_desc, "ui icons icon set material lucide symbols glyphs interface toolbar menus", SettingsSearchPage.APPEARANCE, SettingsTarget.UI_ICON_SET),
         spec(R.string.settings_nick_colors, R.string.settings_nick_colors_desc, "nickname sender", SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_COLORS),
+        spec(R.string.settings_nick_mention_style, R.string.settings_nick_mention_style_desc, "nickname mentions message body none bold chip background", SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_MENTION_STYLE),
         spec(R.string.settings_nick_palette, R.string.settings_nick_palette_desc, "nickname colors classic vivid avatars", SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_PALETTE),
         spec(R.string.settings_nick_color_overrides, R.string.settings_nick_color_overrides_desc, "nickname hue overrides custom avatars", SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_OVERRIDES),
         spec(R.string.settings_app_font, R.string.settings_appearance_text_section, "app typeface text font system device default", SettingsSearchPage.APPEARANCE, SettingsTarget.APP_FONT),

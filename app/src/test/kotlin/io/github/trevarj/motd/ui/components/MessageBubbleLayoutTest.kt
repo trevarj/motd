@@ -6,8 +6,11 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.ui.theme.MotdDarkScheme
@@ -114,6 +117,35 @@ class MessageBubbleLayoutTest {
             text.spanStyles.filter { it.item.color != Color.Unspecified }.forEach { span ->
                 val backing = if (span.item.background == Color.Unspecified) fill else span.item.background.compositeOver(fill)
                 assertTrue("${text.text} $span", contrastRatio(span.item.color, backing) >= 4.5 - 0.00001)
+            }
+        }
+    }
+
+    @Test fun chipMentions_keepRawBackgroundAndReadableInkAcrossInlineRenderersIncludingDimmed() {
+        val rawNick = Color(0xFF777777)
+        val fill = Color(0xFFEEEEEE)
+        for (dimmed in listOf(false, true)) {
+            val minimum = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST
+            val ink = messageContentColor(Color.Black, fill, dimmed)
+            for (colored in listOf(false, true)) {
+                val bodies =
+                    listOf(
+                        linkifiedBody("@bob", Color.Blue, mentionColor = { rawNick }, containerColor = fill, contentColor = ink, minimumContrast = minimum, nickMentionStyle = NickMentionStyle.CHIP, mentionColorsEnabled = colored),
+                        buildCompactLine("alice", "@bob", MessageKind.PRIVMSG, Color.Red, ink, Color.Blue, mentionColor = { rawNick }, containerColor = fill, minimumContrast = minimum, nickMentionStyle = NickMentionStyle.CHIP, mentionColorsEnabled = colored),
+                        buildActionLine("alice", "@bob", Color.Red, Color.Red, ink, Color.Blue, mentionColor = { rawNick }, containerColor = fill, minimumContrast = minimum, nickMentionStyle = NickMentionStyle.CHIP, mentionColorsEnabled = colored),
+                        buildActionBody("@bob", ink, Color.Blue, mentionColor = { rawNick }, containerColor = fill, minimumContrast = minimum, nickMentionStyle = NickMentionStyle.CHIP, mentionColorsEnabled = colored),
+                        buildAnnotatedString {
+                            appendRichText("@bob", SpanStyle(color = ink), SpanStyle(color = Color.Blue), SpanStyle(), mentionColor = { rawNick }, containerColor = fill, contentColor = ink, minimumContrast = minimum, nickMentionStyle = NickMentionStyle.CHIP, mentionColorsEnabled = colored)
+                        },
+                    )
+                for (text in bodies) {
+                    assertTrue(text.text.endsWith("@bob"))
+                    val start = text.text.indexOf("@bob")
+                    val chip = text.spanStyles.single { it.start == start && it.end == start + 4 && it.item.background != Color.Unspecified }.item
+                    assertEquals("dimmed=$dimmed colored=$colored", rawNick, chip.background)
+                    assertEquals(ensureContrast(ink, listOf(rawNick), minimum), chip.color)
+                    assertTrue(contrastRatio(chip.color, rawNick) >= 4.5 - 0.00001)
+                }
             }
         }
     }

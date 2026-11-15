@@ -7,6 +7,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
+import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -101,27 +102,38 @@ class CompactLineTest {
     }
 
     @Test
-    fun known_nick_mention_gets_nick_color() {
+    fun known_nick_mention_uses_selected_style_without_changing_sender_prefix() {
         val mention = Color(0xFFAABBCC)
-        // "bob" is a known nick; "hi bob:" should color the bob token with the mention color.
-        val line =
-            buildCompactLine(
-                "alice",
-                "hi bob: welcome",
-                MessageKind.PRIVMSG,
-                nick,
-                body,
-                link,
-                mentionColor = { token -> if (token.lowercase() == "bob") mention else null },
-            )
-        assertEquals("<alice> hi bob: welcome", line.text)
-        val start = line.text.indexOf("bob")
-        val spanAtBob =
-            line.spanStyles.firstOrNull {
-                it.start <= start && it.end >= start + 3 && it.item.color == mention
+        for (style in NickMentionStyle.entries) {
+            for (colored in listOf(false, true)) {
+                val line =
+                    buildCompactLine(
+                        "alice",
+                        "hi bob: welcome",
+                        MessageKind.PRIVMSG,
+                        nick,
+                        body,
+                        link,
+                        mentionColor = { if (it == "bob") mention else null },
+                        nickMentionStyle = style,
+                        mentionColorsEnabled = colored,
+                    )
+                assertEquals("<alice> hi bob: welcome", line.text)
+                val sender = line.spanStyles.first { it.start == 0 && it.end == 7 }.item
+                assertEquals(nick, sender.color)
+                assertEquals(FontWeight.Bold, sender.fontWeight)
+                assertEquals(Color.Unspecified, sender.background)
+                val start = line.text.indexOf("bob")
+                val span = line.spanStyles.single { it.start == start && it.end == start + 3 }.item
+                assertEquals(if (style == NickMentionStyle.BOLD) FontWeight.Bold else null, span.fontWeight)
+                assertEquals(if (style == NickMentionStyle.CHIP) mention else Color.Unspecified, span.background)
+                if (style == NickMentionStyle.CHIP) {
+                    assertReadingContrast("compact chip", span.color, mention)
+                } else {
+                    assertEquals(if (colored) mention else Color.Unspecified, span.color)
+                }
             }
-        assertTrue("expected the bob mention colored with the nick color", spanAtBob != null)
-        assertEquals(null, spanAtBob!!.item.fontWeight)
+        }
     }
 
     @Test
@@ -171,7 +183,7 @@ class CompactLineTest {
     }
 
     @Test
-    fun explicit_irc_bold_is_preserved_on_colored_mentions() {
+    fun none_style_preserves_explicit_irc_bold_on_colored_mentions() {
         val line =
             buildCompactLine(
                 "alice",
@@ -181,6 +193,7 @@ class CompactLineTest {
                 body,
                 link,
                 mentionColor = { if (it == "bob") Color.Red else null },
+                nickMentionStyle = NickMentionStyle.NONE,
             )
         val first = line.text.indexOf("bob")
         val second = line.text.lastIndexOf("bob")

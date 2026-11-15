@@ -103,6 +103,10 @@ class HistoryResyncCoordinatorTest {
         object : SettingsRepository by DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>()) {
             override val settings = settingsState
 
+            override suspend fun setNickMentionStyle(value: io.github.trevarj.motd.data.prefs.NickMentionStyle) {
+                settings.value = settings.value.copy(nickMentionStyle = value)
+            }
+
             override suspend fun setFoolPreferences(
                 nick: String,
                 preferences: io.github.trevarj.motd.data.prefs.FoolPreferences,

@@ -78,6 +78,7 @@ import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
+import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
@@ -952,6 +953,144 @@ class MessageBubbleFooterUiTest {
         override fun hashCode(): Int = 0
 
         override fun equals(other: Any?): Boolean = other === this
+    }
+
+    @Test
+    @Config(sdk = [35])
+    fun nativeMentionStylesUpdateLiveAcrossLayoutsAndActionsWithoutChangingSelectableOffsets() {
+        val density = mutableStateOf(LayoutDensity.COMFORTABLE)
+        val kind = mutableStateOf(MessageKind.PRIVMSG)
+        val style = mutableStateOf(NickMentionStyle.BOLD)
+        val enabled = mutableStateOf(true)
+        val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
+        val selecting = mutableStateOf(false)
+        val dismissSelection: () -> Unit = {}
+        val source = "Reading @bob, bob! @unknown `bob` https://example.com/bob"
+        val plain = "Reading @bob, bob! @unknown bob https://example.com/bob"
+        var rawNick = Color.Unspecified
+        compose.setContent {
+            CompositionLocalProvider(
+                LocalDensity provides Density(1f),
+                LocalMessageSelection provides if (selecting.value) dismissSelection else null,
+            ) {
+                MotdTheme(
+                    dynamicColor = false,
+                    themePreset = preset.value,
+                    layoutDensity = density.value,
+                    nickMentionStyle = style.value,
+                    nickColorsEnabled = enabled.value,
+                    avatarStyle = AvatarStyle.NONE,
+                    chatShadowsEnabled = false,
+                    timestampConfig = TimestampConfig(show = false),
+                ) {
+                    rawNick = LocalNickColors.current.mention("bob")
+                    Surface(Modifier.width(380.dp).testTag("mention_style_sample")) {
+                        MessageBubble(
+                            sender = "alice",
+                            text = source,
+                            timeMs = 0,
+                            isSelf = false,
+                            kind = kind.value,
+                            showSender = true,
+                            knownNicks = setOf("bob"),
+                        )
+                    }
+                }
+            }
+        }
+        val proofs = File("build/reports/nick-mention-styles").apply { mkdirs() }
+        val coloredNicks = mutableMapOf<ColorThemePreset, Color>()
+        for (theme in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
+            for (layout in LayoutDensity.entries) {
+                for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.ACTION)) {
+                    for (colorsEnabled in listOf(true, false)) {
+                        compose.runOnIdle {
+                            preset.value = theme
+                            density.value = layout
+                            kind.value = messageKind
+                            enabled.value = colorsEnabled
+                        }
+                        var baseline: Bitmap? = null
+                        var baselineText: String? = null
+                        var baselinePrefix: androidx.compose.ui.text.AnnotatedString? = null
+                        // Return to BOLD in the same composition to catch stale remember keys.
+                        for ((step, mentionStyle) in listOf(NickMentionStyle.BOLD, NickMentionStyle.CHIP, NickMentionStyle.NONE, NickMentionStyle.BOLD).withIndex()) {
+                            compose.runOnIdle {
+                                selecting.value = false
+                                style.value = mentionStyle
+                            }
+                            val label = "$theme-$layout-$messageKind-colors-$colorsEnabled-$mentionStyle"
+                            val node = compose.onNodeWithText(plain, substring = true, useUnmergedTree = true).assertIsDisplayed()
+                            val text = node.textLayout()
+                            val annotated = text.layoutInput.text
+                            val start = annotated.text.indexOf(plain)
+                            assertTrue("$label keeps the complete body", start >= 0)
+                            val prefix = annotated.subSequence(0, start)
+                            val nickOffsets = listOf(start + plain.indexOf("bob"), start + plain.indexOf("bob!"))
+                            if (step == 0) {
+                                baselineText = annotated.text
+                                baselinePrefix = prefix
+                                if (colorsEnabled) coloredNicks[theme] = rawNick
+                            }
+                            assertEquals("$label keeps characters and prefix offsets", baselineText, annotated.text)
+                            assertEquals("$label never restyles the sender prefix", baselinePrefix, prefix)
+                            assertEquals("$label retains the raw nickname color with coloring disabled", coloredNicks[theme], rawNick)
+                            for (offset in nickOffsets) {
+                                val spans = annotated.spanStyles.filter { offset in it.start until it.end }
+                                val background = spans.lastOrNull { it.item.background != Color.Unspecified }?.item?.background ?: Color.Unspecified
+                                val weight = spans.lastOrNull { it.item.fontWeight != null }?.item?.fontWeight ?: text.layoutInput.style.fontWeight
+                                assertEquals("$label mention weight at $offset", mentionStyle == NickMentionStyle.BOLD, weight == FontWeight.Bold)
+                                if (mentionStyle == NickMentionStyle.CHIP) {
+                                    assertEquals("$label uses the unmodified nickname color", rawNick, background)
+                                    val ink = text.inkAt("bob")
+                                    val actualContrast = contrastRatio(ink, background)
+                                    val attainable = maxOf(contrastRatio(Color.Black, background), contrastRatio(Color.White, background))
+                                    val target = minOf(MESSAGE_TEXT_CONTRAST, attainable)
+                                    assertTrue("$label chip ink=$ink background=$background contrast=$actualContrast target=$target", actualContrast >= target - 0.00001)
+                                    assertTrue("$label chip retains accessible contrast", actualContrast >= 4.5)
+                                    val tokenStart = if (annotated.text.getOrNull(offset - 1) == '@') offset - 1 else offset
+                                    assertTrue("$label chip covers the nick and leading @, not punctuation", spans.any { it.start == tokenStart && it.end == offset + 3 && it.item.background == rawNick })
+                                } else {
+                                    assertEquals("$label has no chip", Color.Unspecified, background)
+                                    if (!colorsEnabled) assertEquals("$label disabled coloring inherits prose ink", text.inkAt("Reading"), text.inkAt("bob"))
+                                }
+                                val glyph = text.getBoundingBox(offset + 1)
+                                assertEquals("$label hit testing retains mention offsets", offset + 1, text.getOffsetForPosition(Offset(glyph.left + glyph.width * 0.2f, glyph.center.y)))
+                            }
+                            for (word in listOf("@unknown", "bob https://", "https://")) {
+                                val offset = annotated.text.indexOf(word)
+                                assertTrue("$label excludes unknown nicks, code and links from chips", annotated.spanStyles.none { offset in it.start until it.end && it.item.background == rawNick })
+                            }
+                            val sample = compose.onNodeWithTag("mention_style_sample")
+                            val bitmap = sample.captureToImage().asAndroidBitmap()
+                            if (mentionStyle == NickMentionStyle.CHIP) {
+                                val root = sample.fetchSemanticsNode().boundsInRoot
+                                val bounds = node.fetchSemanticsNode().boundsInRoot
+                                val first = text.getBoundingBox(nickOffsets.first())
+                                val last = text.getBoundingBox(nickOffsets.first() + 2)
+                                val left = (bounds.left - root.left + first.left).toInt().coerceAtLeast(0)
+                                val right = (bounds.left - root.left + last.right).toInt().coerceAtMost(bitmap.width)
+                                val top = (bounds.top - root.top + first.top).toInt().coerceAtLeast(0)
+                                val bottom = (bounds.top - root.top + first.bottom).toInt().coerceAtMost(bitmap.height)
+                                val pixels = (left until right).flatMap { x -> (top until bottom).map { y -> bitmap.getPixel(x, y) } }
+                                assertTrue("$label paints real native chip pixels", pixels.count { it == rawNick.toArgb() } > 3)
+                                assertTrue("$label paints real contrasting glyph pixels", pixels.any { it == text.inkAt("bob").toArgb() })
+                                assertFalse("$label changes the native output", requireNotNull(baseline).sameAs(bitmap))
+                            }
+                            if (step == 0) baseline = bitmap
+                            if (step == 3) assertTrue("$label restores exact native BOLD pixels", requireNotNull(baseline).sameAs(bitmap))
+                            if (step < 3) {
+                                File(proofs, "$label.png").outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                            }
+                            compose.runOnIdle { selecting.value = true }
+                            val selected = compose.onNodeWithTag("message_selection_text", useUnmergedTree = true).assertIsDisplayed().textLayout()
+                            assertEquals("$label native selection retains characters", annotated.text, selected.layoutInput.text.text)
+                            assertEquals("$label native selection retains mention spans and offsets", annotated.spanStyles, selected.layoutInput.text.spanStyles)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     @Test

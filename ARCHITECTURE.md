@@ -235,6 +235,11 @@ flowchart TD
   heterogeneous geometry, while visible values name the resolved geometry (including the input
   layout's current radius). Theme/time inheritance also names the device's resolved mode;
   notification policy retains effective policy and its global/server source. Notification avatars remain circular.
+  Nick mention style is global: None keeps optional nick coloring without added emphasis;
+  Bold is the default and also works with nick colors disabled; Chip uses the original
+  nick color as its background with contrast-fitted ink. Matching excludes URLs/code;
+  sender prefixes and composer styling remain separate. All layouts and ACTIONs retain
+  their single selectable paragraph and unchanged body offsets.
   Appearance → Transparency and blur owns continuous 0–100 controls for ordinary PRIVMSG, NOTICE, and ACTION
   backings in every layout, with or without nickname tint: opacity defaults to 100%, and independent
   wallpaper blur defaults to Off (0), mapping linearly to 32dp at 100. Zero opacity removes tint,

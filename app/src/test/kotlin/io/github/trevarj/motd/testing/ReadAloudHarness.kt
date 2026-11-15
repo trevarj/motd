@@ -53,6 +53,10 @@ internal class ReadAloudHarness(
             settings ?: object : SettingsRepository by DataStoreSettingsRepository(context) {
                 override val settings = social
 
+                override suspend fun setNickMentionStyle(value: io.github.trevarj.motd.data.prefs.NickMentionStyle) {
+                    social.value = social.value.copy(nickMentionStyle = value)
+                }
+
                 override suspend fun setFoolPreferences(
                     nick: String,
                     preferences: io.github.trevarj.motd.data.prefs.FoolPreferences,

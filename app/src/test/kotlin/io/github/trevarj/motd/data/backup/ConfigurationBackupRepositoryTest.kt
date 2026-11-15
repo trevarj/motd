@@ -40,6 +40,7 @@ import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.prefs.MessageSpacing
+import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
@@ -71,6 +72,32 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class ConfigurationBackupRepositoryTest {
+    @Test
+    fun nickMentionStylesRoundTripAndOldSettingsDefaultToBold() =
+        runTest {
+            val settings = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())
+            val original = settings.settings.first().nickMentionStyle
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                for (selected in listOf(NickMentionStyle.NONE, NickMentionStyle.CHIP)) {
+                    settings.setNickMentionStyle(selected)
+                    val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+
+                    settings.setNickMentionStyle(NickMentionStyle.BOLD)
+                    backup.import(raw, importMode = BackupImportMode.MERGE)
+                    assertEquals(selected, settings.settings.first().nickMentionStyle)
+
+                    val legacy = raw.replace(Regex(""",?\s*"nickMentionStyle"\s*:\s*"${selected.name}""""), "")
+                    backup.import(legacy, importMode = BackupImportMode.MERGE)
+                    assertEquals(NickMentionStyle.BOLD, settings.settings.first().nickMentionStyle)
+                }
+            } finally {
+                settings.setNickMentionStyle(original)
+                db.close()
+            }
+        }
+
     @Test
     fun compactNickBracketsRoundTripAndOldSettingsDefaultToAngle() =
         runTest {

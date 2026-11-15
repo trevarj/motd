@@ -24,6 +24,7 @@ import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
 import io.github.trevarj.motd.ui.theme.ConversationTypography
 import io.github.trevarj.motd.ui.theme.LocalChatShadowsEnabled
@@ -49,6 +50,9 @@ internal fun ChatLayoutPreview(
 ) {
     val spacing = remember(density, messageSpacing, bubbleCorners) { spacingFor(density, messageSpacing, bubbleCorners) }
     val avatars = remember { RemoteAvatarState() }
+    val sender = stringResource(R.string.settings_chat_preview_sender)
+    val self = stringResource(R.string.settings_chat_preview_self)
+    val knownNicks = remember(sender, self) { setOf(IrcIdentityRules().normalize(sender), IrcIdentityRules().normalize(self)) }
     val backdrop = rememberMessageWallpaperBackdrop(LocalMessageBackgroundBlur.current)
     CompositionLocalProvider(
         LocalSpacing provides spacing,
@@ -92,6 +96,7 @@ internal fun ChatLayoutPreview(
                                     isSelf = false,
                                     kind = MessageKind.PRIVMSG,
                                     showSender = true,
+                                    knownNicks = knownNicks,
                                     modifier = Modifier.testTag("${tagPrefix}_incoming"),
                                 )
                                 Spacer(Modifier.height(spacing.bubbleBurstGap))
@@ -102,6 +107,7 @@ internal fun ChatLayoutPreview(
                                     isSelf = false,
                                     kind = MessageKind.PRIVMSG,
                                     showSender = false,
+                                    knownNicks = knownNicks,
                                 )
                                 Spacer(Modifier.height(spacing.bubbleBreakGap))
                                 MessageBubble(
@@ -111,6 +117,7 @@ internal fun ChatLayoutPreview(
                                     isSelf = true,
                                     kind = MessageKind.PRIVMSG,
                                     showSender = true,
+                                    knownNicks = knownNicks,
                                 )
                                 Spacer(Modifier.height(spacing.bubbleBreakGap))
                                 MessageBubble(
@@ -120,6 +127,7 @@ internal fun ChatLayoutPreview(
                                     isSelf = false,
                                     kind = MessageKind.ACTION,
                                     showSender = true,
+                                    knownNicks = knownNicks,
                                 )
                             }
                         }

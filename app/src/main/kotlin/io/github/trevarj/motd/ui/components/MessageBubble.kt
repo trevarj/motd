@@ -86,6 +86,7 @@ import com.airbnb.lottie.model.KeyPath
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.AvatarShape
+import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
@@ -101,6 +102,7 @@ import io.github.trevarj.motd.ui.theme.LocalMediaCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundOpacityPercent
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.LocalNickMentionStyle
 import io.github.trevarj.motd.ui.theme.LocalNicknameBackgroundsEnabled
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
@@ -779,8 +781,9 @@ fun MessageBubble(
                     } else {
                         MaterialTheme.colorScheme.primary
                     }
-                val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
-                val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
+                val nickMentionStyle = LocalNickMentionStyle.current
+                val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules, nickMentionStyle)
+                val mentionsActive = knownNicks.isNotEmpty() && (nickColors.enabled || nickMentionStyle != NickMentionStyle.NONE)
                 val body =
                     remember(
                         selecting,
@@ -790,6 +793,8 @@ fun MessageBubble(
                         linkColor,
                         mentionsActive,
                         mentionColor,
+                        nickMentionStyle,
+                        nickColors.enabled,
                         codeBackground,
                         codeColor,
                         bubbleColor,
@@ -807,6 +812,8 @@ fun MessageBubble(
                             bodyColor,
                             minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                             normalContainerColor = bubbleRoles.normalContainer,
+                            nickMentionStyle = nickMentionStyle,
+                            mentionColorsEnabled = nickColors.enabled,
                         ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
                     }
                 if (body.isNotBlank()) {
@@ -971,8 +978,9 @@ private fun ComfortableActionBubble(
     val linkColor = roles.normalContent
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
     val codeColor = bodyInk
-    val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
-    val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
+    val nickMentionStyle = LocalNickMentionStyle.current
+    val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules, nickMentionStyle)
+    val mentionsActive = knownNicks.isNotEmpty() && (nickColors.enabled || nickMentionStyle != NickMentionStyle.NONE)
     val friendTint =
         if (senderIsFriend) {
             MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
@@ -1018,6 +1026,8 @@ private fun ComfortableActionBubble(
             friendTint,
             mentionsActive,
             mentionColor,
+            nickMentionStyle,
+            nickColors.enabled,
             codeBackground,
             codeColor,
             senderLink,
@@ -1042,6 +1052,8 @@ private fun ComfortableActionBubble(
                 containerColor = rowColor,
                 minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                 normalContainerColor = roles.normalContainer,
+                nickMentionStyle = nickMentionStyle,
+                mentionColorsEnabled = nickColors.enabled,
             ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
         }
 
@@ -1249,8 +1261,9 @@ private fun ActionMessageRow(
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
     val codeColor = bodyInk
-    val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
-    val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
+    val nickMentionStyle = LocalNickMentionStyle.current
+    val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules, nickMentionStyle)
+    val mentionsActive = knownNicks.isNotEmpty() && (nickColors.enabled || nickMentionStyle != NickMentionStyle.NONE)
     val senderLink =
         remember(onSenderClick) {
             onSenderClick?.let { callback ->
@@ -1274,6 +1287,8 @@ private fun ActionMessageRow(
             linkColor,
             mentionsActive,
             mentionColor,
+            nickMentionStyle,
+            nickColors.enabled,
             codeBackground,
             codeColor,
             senderLink,
@@ -1295,6 +1310,8 @@ private fun ActionMessageRow(
                 containerColor = contrastRow,
                 minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                 normalContainerColor = normalPaintedRow,
+                nickMentionStyle = nickMentionStyle,
+                mentionColorsEnabled = nickColors.enabled,
             ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
         }
 
@@ -1408,6 +1425,8 @@ internal fun buildActionBody(
     containerColor: Color = Color.Unspecified,
     minimumContrast: Double = MESSAGE_TEXT_CONTRAST,
     normalContainerColor: Color = containerColor,
+    nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
+    mentionColorsEnabled: Boolean = true,
 ): AnnotatedString =
     buildAnnotatedString {
         // fontSynthesis is explicit because some OEM system fonts (e.g. Nothing OS) ship no italic
@@ -1441,6 +1460,8 @@ internal fun buildActionBody(
             contentColor = bodyColor,
             minimumContrast = minimumContrast,
             normalContainerColor = normalContainerColor,
+            nickMentionStyle = nickMentionStyle,
+            mentionColorsEnabled = mentionColorsEnabled,
         )
     }
 
@@ -1466,6 +1487,8 @@ internal fun buildActionLine(
     containerColor: Color = Color.Unspecified,
     minimumContrast: Double = MESSAGE_TEXT_CONTRAST,
     normalContainerColor: Color = containerColor,
+    nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
+    mentionColorsEnabled: Boolean = true,
 ): AnnotatedString =
     buildAnnotatedString {
         if (includeStar) {
@@ -1503,6 +1526,8 @@ internal fun buildActionLine(
                 containerColor = containerColor,
                 minimumContrast = minimumContrast,
                 normalContainerColor = normalContainerColor,
+                nickMentionStyle = nickMentionStyle,
+                mentionColorsEnabled = mentionColorsEnabled,
             ),
         )
         pop()
@@ -1727,8 +1752,9 @@ private fun TwoLineMessageRow(
             if (text.isNotBlank()) {
                 val selecting = LocalMessageSelection.current != null
                 val linkColor = MaterialTheme.colorScheme.primary
-                val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
-                val mentionsActive = knownNicks.isNotEmpty() && nickColors.enabled
+                val nickMentionStyle = LocalNickMentionStyle.current
+                val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules, nickMentionStyle)
+                val mentionsActive = knownNicks.isNotEmpty() && (nickColors.enabled || nickMentionStyle != NickMentionStyle.NONE)
                 // Memoized body build (linkify + mention coloring) so it doesn't re-run per frame.
                 val richBody =
                     remember(
@@ -1739,6 +1765,8 @@ private fun TwoLineMessageRow(
                         linkColor,
                         mentionsActive,
                         mentionColor,
+                        nickMentionStyle,
+                        nickColors.enabled,
                         codeBackground,
                         codeColor,
                         contrastRow,
@@ -1756,6 +1784,8 @@ private fun TwoLineMessageRow(
                             bodyColor,
                             minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                             normalContainerColor = normalPaintedRow,
+                            nickMentionStyle = nickMentionStyle,
+                            mentionColorsEnabled = nickColors.enabled,
                         ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
                     }
                 if (richBody.isNotBlank()) {
@@ -2122,6 +2152,8 @@ internal fun linkifiedBody(
     contentColor: Color = Color.Unspecified,
     minimumContrast: Double = MESSAGE_TEXT_CONTRAST,
     normalContainerColor: Color = containerColor,
+    nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
+    mentionColorsEnabled: Boolean = true,
 ): AnnotatedString {
     // Most chat rows are plain text. Avoid the URL regex, nick token walk, and builder allocation
     // when neither link annotations, mention styling, nor mIRC formatting can affect the result.
@@ -2147,6 +2179,8 @@ internal fun linkifiedBody(
             contentColor = contentColor,
             minimumContrast = minimumContrast,
             normalContainerColor = normalContainerColor,
+            nickMentionStyle = nickMentionStyle,
+            mentionColorsEnabled = mentionColorsEnabled,
         )
     }
 }
@@ -2165,6 +2199,8 @@ internal fun AnnotatedString.Builder.appendRichText(
     contentColor: Color = Color.Unspecified,
     minimumContrast: Double = MESSAGE_TEXT_CONTRAST,
     normalContainerColor: Color = containerColor,
+    nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
+    mentionColorsEnabled: Boolean = true,
 ) {
     val formatted = parseIrcFormatting(text)
     val segments = parseInlineCode(formatted.visibleText)
@@ -2190,9 +2226,24 @@ internal fun AnnotatedString.Builder.appendRichText(
     val readingPlain = readingStyle(plainStyle)
     val readingLink = readingStyle(linkStyle)
     val readingCode = readingStyle(codeStyle)
-    val readingMention: (String) -> Color? = { nick ->
-        mentionColor(nick)?.let { ink ->
-            if (containerColor == Color.Unspecified) ink else messageContentColor(ink, containerColor, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalContainerColor)
+    val mentionStyle: (Color) -> SpanStyle = { nickColor ->
+        if (nickMentionStyle == NickMentionStyle.CHIP) {
+            SpanStyle(
+                background = nickColor,
+                color = ensureContrast(if (contentColor == Color.Unspecified) Color.Black else contentColor, listOf(nickColor), minimumContrast),
+            )
+        } else {
+            SpanStyle(
+                color =
+                    if (!mentionColorsEnabled) {
+                        Color.Unspecified
+                    } else if (containerColor == Color.Unspecified) {
+                        nickColor
+                    } else {
+                        messageContentColor(nickColor, containerColor, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalContainerColor)
+                    },
+                fontWeight = if (nickMentionStyle == NickMentionStyle.BOLD) FontWeight.Bold else null,
+            )
         }
     }
     for (segment in segments) {
@@ -2206,7 +2257,8 @@ internal fun AnnotatedString.Builder.appendRichText(
                     segment.text,
                     readingPlain,
                     readingLink,
-                    readingMention,
+                    mentionColor,
+                    mentionStyle,
                 )
             }
         }
@@ -2214,7 +2266,9 @@ internal fun AnnotatedString.Builder.appendRichText(
     // Only color-bearing IRC runs need the overlay boundaries: a single IRC run may cross a
     // mention, link, or code span, whose foreground/background differs from its neighbors.
     val overlays =
-        if (containerColor != Color.Unspecified && formatted.runs.any { it.state.foreground != null || it.state.background != null }) {
+        if ((containerColor != Color.Unspecified || nickMentionStyle == NickMentionStyle.CHIP) &&
+            formatted.runs.any { it.state.foreground != null || it.state.background != null }
+        ) {
             toAnnotatedString().spanStyles
         } else {
             emptyList()
@@ -2244,8 +2298,8 @@ internal fun AnnotatedString.Builder.appendRichText(
                     if (overlay.start <= from && overlay.end >= to) {
                         if (overlay.item.color != Color.Unspecified) ink = overlay.item.color
                         if (overlay.item.background != Color.Unspecified) {
-                            background = overlay.item.background.compositeOver(containerColor)
-                            normalBackground = overlay.item.background.compositeOver(normalContainerColor)
+                            background = if (containerColor == Color.Unspecified) overlay.item.background else overlay.item.background.compositeOver(containerColor)
+                            normalBackground = if (normalContainerColor == Color.Unspecified) overlay.item.background else overlay.item.background.compositeOver(normalContainerColor)
                         }
                     }
                 }
@@ -2280,22 +2334,23 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendPlainLinksAnd
     plainStyle: SpanStyle,
     linkStyle: SpanStyle,
     mentionColor: (String) -> androidx.compose.ui.graphics.Color?,
+    mentionStyle: (Color) -> SpanStyle,
 ) {
     val urls = extractUrls(text)
     if (urls.isEmpty()) {
-        withStyle(plainStyle) { appendMentionColored(text, mentionColor) }
+        withStyle(plainStyle) { appendMentionColored(text, mentionColor, mentionStyle) }
         return
     }
     var cursor = 0
     for (url in urls) {
         val at = text.indexOf(url, cursor)
         if (at < 0) continue
-        withStyle(plainStyle) { appendMentionColored(text.substring(cursor, at), mentionColor) }
+        withStyle(plainStyle) { appendMentionColored(text.substring(cursor, at), mentionColor, mentionStyle) }
         withLink(LinkAnnotation.Url(url)) { withStyle(linkStyle) { append(url) } }
         cursor = at + url.length
     }
     if (cursor < text.length) {
-        withStyle(plainStyle) { appendMentionColored(text.substring(cursor), mentionColor) }
+        withStyle(plainStyle) { appendMentionColored(text.substring(cursor), mentionColor, mentionStyle) }
     }
 }
 
@@ -2310,16 +2365,15 @@ internal fun rememberMentionColor(
     knownNicks: Set<String>,
     nickColors: NickColorScheme,
     identityRules: IrcIdentityRules = IrcIdentityRules(),
+    nickMentionStyle: NickMentionStyle = NickMentionStyle.NONE,
 ): (String) -> androidx.compose.ui.graphics.Color? =
-    remember(knownNicks, nickColors, identityRules) {
-        if (knownNicks.isEmpty() || !nickColors.enabled) {
+    remember(knownNicks, nickColors, identityRules, nickMentionStyle) {
+        if (knownNicks.isEmpty() || !nickColors.enabled && nickMentionStyle == NickMentionStyle.NONE) {
             { null }
         } else {
             { token ->
-                // Mentions always resolve to the nick's own color; Unspecified fallback is never
-                // hit because membership is checked first.
                 if (matchesKnownMention(token, knownNicks, identityRules)) {
-                    nickColors.nick(token, androidx.compose.ui.graphics.Color.Unspecified)
+                    if (nickColors.enabled || nickMentionStyle == NickMentionStyle.CHIP) nickColors.mention(token) else Color.Unspecified
                 } else {
                     null
                 }
@@ -2348,6 +2402,7 @@ private fun isNickChar(c: Char): Boolean =
 internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendMentionColored(
     text: String,
     mentionColor: (String) -> androidx.compose.ui.graphics.Color?,
+    mentionStyle: (Color) -> SpanStyle = { SpanStyle(color = it) },
 ) {
     var i = 0
     val n = text.length
@@ -2364,7 +2419,7 @@ internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendMentionColor
             val color = mentionColor(nick)
             if (color != null) {
                 // Color the whole token including a leading '@' so the mention reads as one unit.
-                withStyle(SpanStyle(color = color)) {
+                withStyle(mentionStyle(color)) {
                     append(text.substring(start, i))
                 }
             } else {

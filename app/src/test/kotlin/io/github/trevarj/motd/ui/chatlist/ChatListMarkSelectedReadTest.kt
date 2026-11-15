@@ -158,6 +158,10 @@ class ChatListMarkSelectedReadTest {
             settings.value = settings.value.copy(compactNickBrackets = value)
         }
 
+        override suspend fun setNickMentionStyle(value: io.github.trevarj.motd.data.prefs.NickMentionStyle) {
+            settings.value = settings.value.copy(nickMentionStyle = value)
+        }
+
         override suspend fun setNickColorsEnabled(enabled: Boolean) = Unit
 
         override suspend fun setNickColorPalette(p: NickColorPalette) = Unit

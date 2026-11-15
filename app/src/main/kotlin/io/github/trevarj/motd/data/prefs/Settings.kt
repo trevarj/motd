@@ -45,6 +45,10 @@ enum class CompactNickBrackets(
 
 enum class NickColorPalette { THEME, CLASSIC, VIVID }
 
+enum class NickMentionStyle { NONE, BOLD, CHIP }
+
+internal fun nickMentionStyleFromPreference(saved: String?): NickMentionStyle = saved?.let { runCatching { NickMentionStyle.valueOf(it) }.getOrNull() } ?: NickMentionStyle.BOLD
+
 enum class FoolsMode { DIMMED, BLUR, COLLAPSE, HIDE }
 
 @Serializable
@@ -296,6 +300,7 @@ data class Settings(
     val compactNickBrackets: CompactNickBrackets = CompactNickBrackets.ANGLE,
     val nickColorsEnabled: Boolean = true,
     val nickColorPalette: NickColorPalette = NickColorPalette.THEME,
+    val nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
     /** Normalized nick -> hue/position 0..359, rendered through the active palette. */
     val nickColorOverrides: Map<String, Int> = emptyMap(),
     /** Normalized nicks. friends and fools are kept disjoint by the repository. */
@@ -399,6 +404,8 @@ interface SettingsRepository {
     suspend fun setNickColorsEnabled(enabled: Boolean)
 
     suspend fun setNickColorPalette(p: NickColorPalette)
+
+    suspend fun setNickMentionStyle(value: NickMentionStyle)
 
     /** hue 0..359 (coerced); null removes. [nick] is normalized internally. */
     suspend fun setNickColorOverride(

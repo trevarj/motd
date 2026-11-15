@@ -214,6 +214,7 @@ class MainActivity :
                     layoutDensity = settings.layoutDensity,
                     compactNickBrackets = settings.compactNickBrackets,
                     nickColorsEnabled = settings.nickColorsEnabled,
+                    nickMentionStyle = settings.nickMentionStyle,
                     nickColorPalette = settings.nickColorPalette,
                     nickColorOverrides = settings.nickColorOverrides,
                     avatarStyle = settings.avatarStyle,

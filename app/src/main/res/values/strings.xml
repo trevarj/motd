@@ -1012,6 +1012,11 @@
     <string name="chat_layout_global_brackets">Use global brackets</string>
     <string name="settings_nickname_backgrounds">Nickname backgrounds</string>
     <string name="settings_nickname_backgrounds_desc">Tint Compact and Two-line message backgrounds by sender. Nickname colors and mention highlights are unchanged.</string>
+    <string name="settings_nick_mention_style">Nick mention style</string>
+    <string name="settings_nick_mention_style_desc">Style known nicknames inside messages. Chip uses the nickname color even when nickname colors are off.</string>
+    <string name="settings_nick_mention_style_none">None</string>
+    <string name="settings_nick_mention_style_bold">Bold</string>
+    <string name="settings_nick_mention_style_chip">Chip</string>
     <string name="settings_message_background_opacity">Message background opacity</string>
     <string name="settings_message_background_opacity_desc" formatted="false">Message tint in every layout. 0% removes tint, not blur; content, mention highlights, and semantic rails stay visible.</string>
     <string name="settings_message_background_opacity_off" formatted="false">0% (off)</string>

@@ -97,6 +97,7 @@ import io.github.trevarj.motd.data.prefs.MAX_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.data.prefs.MIN_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
+import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
@@ -186,6 +187,7 @@ fun AppearanceSettingsScreen(
         onAvatarStyle = viewModel::setAvatarStyle,
         onNickColorsEnabled = viewModel::setNickColorsEnabled,
         onNickColorPalette = viewModel::setNickColorPalette,
+        onNickMentionStyle = viewModel::setNickMentionStyle,
         onWallpaper = viewModel::setWallpaper,
         onImportWallpaper = viewModel::importWallpaper,
         importedWallpaper = importedWallpaper,
@@ -233,6 +235,7 @@ fun AppearanceSettingsContent(
     onAvatarStyle: (AvatarStyle) -> Unit,
     onNickColorsEnabled: (Boolean) -> Unit,
     onNickColorPalette: (NickColorPalette) -> Unit,
+    onNickMentionStyle: (NickMentionStyle) -> Unit,
     onWallpaper: (io.github.trevarj.motd.data.prefs.WallpaperSelection) -> Unit,
     onUiFontScale: (Int) -> Unit,
     onConversationFontScale: (Int) -> Unit,
@@ -312,6 +315,7 @@ fun AppearanceSettingsContent(
         }
     }
     val followSystemAvailable = appearance.theme.systemPartner != null
+    val nickPaletteUsed = previewSettings.nickColorsEnabled || previewSettings.nickMentionStyle == NickMentionStyle.CHIP
     val trueBlackAvailable =
         appearance.theme == ColorThemePreset.SYSTEM ||
             appearance.theme.isDark || (appearance.followSystem && followSystemAvailable)
@@ -613,17 +617,27 @@ fun AppearanceSettingsContent(
                 )
             }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.NICK_MENTION_STYLE.name) { targetModifier ->
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_nick_mention_style),
+                    value = nickMentionStyleLabel(previewSettings.nickMentionStyle),
+                    summary = stringResource(R.string.settings_nick_mention_style_desc),
+                    modifier = targetModifier.testTag("settings_nick_mention_style_picker"),
+                    onClick = { choiceSheet = AppearanceChoice.NICK_MENTION_STYLE },
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsTarget(target?.name, SettingsTarget.NICK_PALETTE.name) { targetModifier ->
                 SettingsNavigationRow(
                     title = stringResource(R.string.settings_nick_palette),
                     value = nickPaletteLabel(settings.nickColorPalette),
                     summary =
-                        if (settings.nickColorsEnabled) {
+                        if (nickPaletteUsed) {
                             stringResource(R.string.settings_nick_palette_desc)
                         } else {
                             stringResource(R.string.settings_nick_palette_disabled)
                         },
-                    enabled = settings.nickColorsEnabled,
+                    enabled = nickPaletteUsed,
                     modifier = targetModifier.testTag("settings_palette_picker"),
                     onClick = { choiceSheet = AppearanceChoice.PALETTE },
                 )
@@ -785,6 +799,10 @@ fun AppearanceSettingsContent(
                 previewSettings = previewSettings.copy(nickColorPalette = it)
                 onNickColorPalette(it)
             },
+            onNickMentionStyle = {
+                previewSettings = previewSettings.copy(nickMentionStyle = it)
+                onNickMentionStyle(it)
+            },
             onDensity = {
                 previewDensity = it
                 onLayoutDensity(it)
@@ -881,7 +899,7 @@ fun AppearanceSettingsContent(
     }
 }
 
-private enum class AppearanceChoice { PALETTE, ICONS, FOLDER_LAYOUT, CHAT_CARD_SHAPE, DENSITY, COMPOSER_STYLE, INPUT_SHAPE, MEDIA_SHAPE, AVATAR, AVATAR_SHAPE, TIME, SPACING, BUBBLES, LAUNCHER }
+private enum class AppearanceChoice { PALETTE, NICK_MENTION_STYLE, ICONS, FOLDER_LAYOUT, CHAT_CARD_SHAPE, DENSITY, COMPOSER_STYLE, INPUT_SHAPE, MEDIA_SHAPE, AVATAR, AVATAR_SHAPE, TIME, SPACING, BUBBLES, LAUNCHER }
 
 @Composable
 internal fun AppearanceChatLayoutPreview(
@@ -904,6 +922,7 @@ internal fun AppearanceChatLayoutPreview(
         layoutDensity = density,
         compactNickBrackets = settings.compactNickBrackets,
         nickColorsEnabled = settings.nickColorsEnabled,
+        nickMentionStyle = settings.nickMentionStyle,
         nickColorPalette = settings.nickColorPalette,
         nickColorOverrides = settings.nickColorOverrides,
         avatarStyle = settings.avatarStyle,
@@ -963,6 +982,7 @@ private fun ComposerStylePreview(
         useThemeTextColors = appearance.useThemeTextColors,
         layoutDensity = settings.layoutDensity,
         nickColorsEnabled = settings.nickColorsEnabled,
+        nickMentionStyle = settings.nickMentionStyle,
         nickColorPalette = settings.nickColorPalette,
         nickColorOverrides = settings.nickColorOverrides,
         avatarStyle = settings.avatarStyle,
@@ -1033,6 +1053,7 @@ private fun AppearanceChoiceSheet(
     previewCorners: BubbleCornerStyle,
     previewShadows: Boolean,
     onPalette: (NickColorPalette) -> Unit,
+    onNickMentionStyle: (NickMentionStyle) -> Unit,
     onDensity: (LayoutDensity) -> Unit,
     onCompactNickBrackets: (CompactNickBrackets) -> Unit,
     onComposerStyle: (ComposerStyle) -> Unit,
@@ -1051,6 +1072,33 @@ private fun AppearanceChoiceSheet(
     onDismiss: () -> Unit,
 ) {
     when (choice) {
+        AppearanceChoice.NICK_MENTION_STYLE -> {
+            SingleChoiceSheet(
+                title = stringResource(R.string.settings_nick_mention_style),
+                selected = settings.nickMentionStyle,
+                options =
+                    NickMentionStyle.entries.map {
+                        ChoiceOption(it, nickMentionStyleLabel(it), tag = "settings_nick_mention_style_${it.name.lowercase()}")
+                    },
+                onSelect = onNickMentionStyle,
+                onDismiss = onDismiss,
+                tag = "settings_nick_mention_style_sheet",
+                dismissOnSelect = false,
+                preview = {
+                    AppearanceChatLayoutPreview(
+                        settings,
+                        appearance,
+                        customFontFile,
+                        settings.layoutDensity,
+                        appearance.messageSpacing,
+                        appearance.bubbleCornerStyle,
+                        appearance.chatShadowsEnabled,
+                        tagPrefix = "settings_nick_mention_preview",
+                    )
+                },
+            )
+        }
+
         AppearanceChoice.ICONS -> {
             SingleChoiceSheet(
                 title = stringResource(R.string.settings_icon_set),
@@ -1184,7 +1232,7 @@ private fun AppearanceChoiceSheet(
                 dismissOnSelect = false,
                 preview = {
                     AppearanceSampleTheme(if (settings.nickColorsEnabled) settings else settings.copy(nickColorsEnabled = true), appearance, customFontFile) {
-                        NickPalettePreview(settings.nickColorsEnabled)
+                        NickPalettePreview(settings.nickColorsEnabled || settings.nickMentionStyle == NickMentionStyle.CHIP)
                     }
                 },
             )
@@ -1378,6 +1426,16 @@ private fun AppearanceChoiceSheet(
         }
     }
 }
+
+@Composable
+private fun nickMentionStyleLabel(style: NickMentionStyle): String =
+    stringResource(
+        when (style) {
+            NickMentionStyle.NONE -> R.string.settings_nick_mention_style_none
+            NickMentionStyle.BOLD -> R.string.settings_nick_mention_style_bold
+            NickMentionStyle.CHIP -> R.string.settings_nick_mention_style_chip
+        },
+    )
 
 @Composable
 private fun uiIconSetLabel(iconSet: UiIconSet): String =
@@ -1982,6 +2040,7 @@ private fun AppearanceSettingsPreview() {
             onAvatarStyle = {},
             onNickColorsEnabled = {},
             onNickColorPalette = {},
+            onNickMentionStyle = {},
             onWallpaper = {},
             onUiFontScale = {},
             onConversationFontScale = {},
@@ -2018,6 +2077,7 @@ private fun AppearanceSettingsMinTextPreview() {
             onAvatarStyle = {},
             onNickColorsEnabled = {},
             onNickColorPalette = {},
+            onNickMentionStyle = {},
             onWallpaper = {},
             onUiFontScale = {},
             onConversationFontScale = {},
@@ -2054,6 +2114,7 @@ private fun AppearanceSettingsMaxTextPreview() {
             onAvatarStyle = {},
             onNickColorsEnabled = {},
             onNickColorPalette = {},
+            onNickMentionStyle = {},
             onWallpaper = {},
             onUiFontScale = {},
             onConversationFontScale = {},

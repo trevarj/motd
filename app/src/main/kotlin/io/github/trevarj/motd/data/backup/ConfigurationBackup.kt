@@ -508,6 +508,7 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setMentionsPlacement(it.mentionsPlacement)
                 settingsRepository.setNickColorsEnabled(it.nickColorsEnabled)
                 settingsRepository.setNickColorPalette(it.nickColorPalette)
+                settingsRepository.setNickMentionStyle(it.nickMentionStyle)
                 current.nickColorOverrides.keys
                     .filter { nick -> nick !in it.nickColorOverrides }
                     .forEach { nick -> settingsRepository.setNickColorOverride(nick, null) }

@@ -50,6 +50,7 @@ internal object PrefKeys {
     val MENTIONS_PLACEMENT = stringPreferencesKey("mentions_placement")
     val NICK_COLORS_ENABLED = stringPreferencesKey("nick_colors_enabled")
     val NICK_COLOR_PALETTE = stringPreferencesKey("nick_color_palette")
+    val NICK_MENTION_STYLE = stringPreferencesKey("nick_mention_style")
     val NICK_COLOR_OVERRIDES = stringPreferencesKey("nick_color_overrides")
     val FRIEND_NICKS = stringPreferencesKey("friend_nicks")
     val FOOL_NICKS = stringPreferencesKey("fool_nicks")
@@ -191,6 +192,7 @@ class DataStoreSettingsRepository
                             ?: CompactNickBrackets.ANGLE,
                     nickColorsEnabled = prefs[PrefKeys.NICK_COLORS_ENABLED]?.toBooleanStrictOrNull() ?: true,
                     nickColorPalette = nickColorPaletteFromPreference(prefs[PrefKeys.NICK_COLOR_PALETTE]),
+                    nickMentionStyle = nickMentionStyleFromPreference(prefs[PrefKeys.NICK_MENTION_STYLE]),
                     nickColorOverrides = decodeHueOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]),
                     friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]),
                     fools = fools,
@@ -287,6 +289,10 @@ class DataStoreSettingsRepository
 
         override suspend fun setNickColorPalette(p: NickColorPalette) {
             store.edit { it[PrefKeys.NICK_COLOR_PALETTE] = p.name }
+        }
+
+        override suspend fun setNickMentionStyle(value: NickMentionStyle) {
+            store.edit { it[PrefKeys.NICK_MENTION_STYLE] = value.name }
         }
 
         override suspend fun setNickColorOverride(

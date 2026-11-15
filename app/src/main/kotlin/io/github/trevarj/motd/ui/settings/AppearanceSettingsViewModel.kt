@@ -21,6 +21,7 @@ import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
+import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.TimeFormat
@@ -126,6 +127,8 @@ class AppearanceSettingsViewModel
         fun setAvatarStyle(value: AvatarStyle) = launch { settingsRepository.setAvatarStyle(value) }
 
         fun setNickColorsEnabled(value: Boolean) = launch { settingsRepository.setNickColorsEnabled(value) }
+
+        fun setNickMentionStyle(value: NickMentionStyle) = launch { settingsRepository.setNickMentionStyle(value) }
 
         fun setNickColorPalette(value: NickColorPalette) = launch { settingsRepository.setNickColorPalette(value) }
 

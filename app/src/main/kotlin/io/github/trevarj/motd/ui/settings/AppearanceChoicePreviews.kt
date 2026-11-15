@@ -74,6 +74,7 @@ internal fun AppearanceSampleTheme(
         layoutDensity = settings.layoutDensity,
         compactNickBrackets = settings.compactNickBrackets,
         nickColorsEnabled = settings.nickColorsEnabled,
+        nickMentionStyle = settings.nickMentionStyle,
         nickColorPalette = settings.nickColorPalette,
         nickColorOverrides = emptyMap(),
         avatarStyle = settings.avatarStyle,

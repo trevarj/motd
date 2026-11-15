@@ -35,12 +35,14 @@ import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
+import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.theme.LocalCompactNickBrackets
 import io.github.trevarj.motd.ui.theme.LocalMediaCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundOpacityPercent
 import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.LocalNickMentionStyle
 import io.github.trevarj.motd.ui.theme.LocalNicknameBackgroundsEnabled
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
@@ -141,7 +143,8 @@ internal fun CompactMessageRow(
 
     // The sender and body wrap as one paragraph; continuation lines omit the sender prefix.
     // Known-nick @mentions in the body are colored via the memoized resolver.
-    val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules)
+    val nickMentionStyle = LocalNickMentionStyle.current
+    val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules, nickMentionStyle)
     val line =
         remember(
             selecting,
@@ -157,6 +160,8 @@ internal fun CompactMessageRow(
             brackets,
             showSender,
             mentionColor,
+            nickMentionStyle,
+            nickColors.enabled,
             codeBackground,
             codeColor,
             nickFontSize,
@@ -180,6 +185,8 @@ internal fun CompactMessageRow(
                 containerColor = contrastRow,
                 minimumContrast = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
                 normalContainerColor = normalPaintedRow,
+                nickMentionStyle = nickMentionStyle,
+                mentionColorsEnabled = nickColors.enabled,
             ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
         }
 
@@ -288,6 +295,8 @@ internal fun buildCompactLine(
     containerColor: Color = Color.Unspecified,
     minimumContrast: Double = MESSAGE_TEXT_CONTRAST,
     normalContainerColor: Color = containerColor,
+    nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
+    mentionColorsEnabled: Boolean = true,
 ): AnnotatedString =
     buildAnnotatedString {
         val nickStyle =
@@ -332,6 +341,8 @@ internal fun buildCompactLine(
             contentColor = bodyColor,
             minimumContrast = minimumContrast,
             normalContainerColor = normalContainerColor,
+            nickMentionStyle = nickMentionStyle,
+            mentionColorsEnabled = mentionColorsEnabled,
         )
         pop()
     }

@@ -11,6 +11,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.font.FontWeight
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IRC_HEX_COLOR
 import io.github.trevarj.motd.irc.format.IRC_REVERSE
@@ -70,18 +71,30 @@ class MessageBubbleTextTest {
     }
 
     @Test
-    fun active_mention_stays_colored_without_a_url() {
-        val body =
-            linkifiedBody(
-                text = "hello bob",
-                linkColor = Color.Blue,
-                mentionsActive = true,
-                mentionColor = { nick -> if (nick == "bob") Color.Red else null },
-            )
-
-        assertEquals("hello bob", body.text)
-        assertTrue(body.spanStyles.any { it.item.color == Color.Red })
-        assertTrue(body.spanStyles.all { it.item.fontWeight == null })
+    fun active_mentions_apply_selected_style_independently_of_coloring() {
+        for (style in NickMentionStyle.entries) {
+            for (colored in listOf(false, true)) {
+                val body =
+                    linkifiedBody(
+                        text = "hello @bob, bob!",
+                        linkColor = Color.Blue,
+                        mentionColor = { if (it == "bob") Color.Red else null },
+                        nickMentionStyle = style,
+                        mentionColorsEnabled = colored,
+                    )
+                assertEquals("hello @bob, bob!", body.text)
+                for ((start, end) in listOf(6 to 10, 12 to 15)) {
+                    val mention = body.spanStyles.single { it.start == start && it.end == end }.item
+                    assertEquals(style.name, if (style == NickMentionStyle.BOLD) FontWeight.Bold else null, mention.fontWeight)
+                    assertEquals(style.name, if (style == NickMentionStyle.CHIP) Color.Red else Color.Unspecified, mention.background)
+                    if (style == NickMentionStyle.CHIP) {
+                        assertReadingContrast("chip colored=$colored", mention.color, Color.Red)
+                    } else {
+                        assertEquals(style.name, if (colored) Color.Red else Color.Unspecified, mention.color)
+                    }
+                }
+            }
+        }
     }
 
     @Test
@@ -105,28 +118,30 @@ class MessageBubbleTextTest {
     }
 
     @Test
-    fun links_and_mentions_inside_code_are_inert() {
-        val body =
-            linkifiedBody(
-                text = "`https://inside.example @bob` https://outside.example @bob",
-                linkColor = Color.Blue,
-                mentionColor = { nick -> if (nick == "bob") Color.Red else null },
-                codeBackground = Color.DarkGray,
-                codeColor = Color.White,
+    fun links_and_mentions_inside_code_are_inert_for_every_style() {
+        for (style in NickMentionStyle.entries) {
+            val resolved = mutableListOf<String>()
+            val body =
+                linkifiedBody(
+                    text = "`https://inside.example/@bob @bob` https://outside.example/@bob @bob",
+                    linkColor = Color.Blue,
+                    mentionColor = { nick ->
+                        resolved += nick
+                        if (nick == "bob") Color.Red else null
+                    },
+                    codeBackground = Color.DarkGray,
+                    codeColor = Color.White,
+                    nickMentionStyle = style,
+                )
+            assertEquals("https://inside.example/@bob @bob https://outside.example/@bob @bob", body.text)
+            assertEquals(
+                listOf("https://outside.example/@bob"),
+                body.getLinkAnnotations(0, body.length).map { (it.item as LinkAnnotation.Url).url },
             )
-
-        val links =
-            body
-                .getLinkAnnotations(0, body.length)
-                .map { it.item }
-                .filterIsInstance<LinkAnnotation.Url>()
-                .map { it.url }
-        assertEquals(listOf("https://outside.example"), links)
-        val redRuns =
-            body.spanStyles
-                .filter { it.item.color == Color.Red }
-                .map { body.text.substring(it.start, it.end) }
-        assertEquals(listOf("@bob"), redRuns)
+            assertEquals(listOf("bob"), resolved)
+            val mentionStart = body.text.lastIndexOf("@bob")
+            assertTrue(body.spanStyles.any { it.start == mentionStart && it.end == body.length })
+        }
     }
 
     @Test
@@ -164,17 +179,80 @@ class MessageBubbleTextTest {
     }
 
     @Test
-    fun automatic_mentions_are_color_only_and_explicit_bold_wins() {
+    fun none_style_preserves_explicit_irc_bold_without_automatic_weight() {
         val body =
             linkifiedBody(
                 text = "bob ${IRC_BOLD}bob$IRC_BOLD",
                 linkColor = Color.Blue,
                 mentionColor = { if (it == "bob") Color.Red else null },
+                nickMentionStyle = NickMentionStyle.NONE,
             )
         assertEquals("bob bob", body.text)
         assertTrue(body.spanStyles.filter { it.item.color == Color.Red }.all { it.item.fontWeight == null })
         assertTrue(body.spanStyles.none { it.start == 0 && it.item.fontWeight != null })
         assertTrue(body.spanStyles.any { it.start == 4 && it.end == 7 && it.item.fontWeight == FontWeight.Bold })
+    }
+
+    @Test
+    fun action_builders_forward_selected_style_with_coloring_disabled() {
+        for (style in NickMentionStyle.entries) {
+            val body =
+                buildActionBody(
+                    "greets @bob",
+                    Color.Gray,
+                    Color.Blue,
+                    mentionColor = { if (it == "bob") Color.Red else null },
+                    nickMentionStyle = style,
+                    mentionColorsEnabled = false,
+                )
+            val line =
+                buildActionLine(
+                    "alice",
+                    "greets @bob",
+                    Color.Magenta,
+                    Color.Green,
+                    Color.Gray,
+                    Color.Blue,
+                    mentionColor = { if (it == "bob") Color.Red else null },
+                    nickMentionStyle = style,
+                    mentionColorsEnabled = false,
+                )
+            assertEquals("greets @bob", body.text)
+            assertEquals("* alice greets @bob", line.text)
+            val sender = line.spanStyles.first { it.start == 2 && it.end == 7 }.item
+            assertEquals(Color.Green, sender.color)
+            assertEquals(FontWeight.Bold, sender.fontWeight)
+            assertEquals(Color.Unspecified, sender.background)
+            for (text in listOf(body, line)) {
+                val start = text.text.indexOf("@bob")
+                val mention = text.spanStyles.single { it.start == start && it.end == start + 4 }.item
+                assertEquals(if (style == NickMentionStyle.BOLD) FontWeight.Bold else null, mention.fontWeight)
+                assertEquals(if (style == NickMentionStyle.CHIP) Color.Red else Color.Unspecified, mention.background)
+                if (style != NickMentionStyle.CHIP) assertEquals(Color.Unspecified, mention.color)
+            }
+        }
+    }
+
+    @Test
+    fun explicit_irc_colors_override_chip_colors_and_preserve_weight() {
+        val body =
+            linkifiedBody(
+                text = "$IRC_BOLD\u000304,01bob\u000f bob",
+                linkColor = Color.Blue,
+                mentionColor = { if (it == "bob") Color.Yellow else null },
+                nickMentionStyle = NickMentionStyle.CHIP,
+                containerColor = Color.White,
+                contentColor = Color.Black,
+            )
+        assertEquals("bob bob", body.text)
+        val explicit = body.spanStyles.last { it.start == 0 && it.end == 3 }.item
+        assertEquals(FontWeight.Bold, explicit.fontWeight)
+        assertEquals(Color.Black, explicit.background)
+        assertEquals(ensureContrast(Color.Red, listOf(Color.Black), MESSAGE_TEXT_CONTRAST), explicit.color)
+        val automatic = body.spanStyles.last { it.start == 4 && it.end == 7 }.item
+        assertEquals(Color.Yellow, automatic.background)
+        assertEquals(null, automatic.fontWeight)
+        assertReadingContrast("automatic chip", automatic.color, automatic.background)
     }
 
     @Test

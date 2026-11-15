@@ -282,6 +282,8 @@ class NickColorScheme(
         fallback: Color,
     ): Color = if (!enabled) fallback else text(nick)
 
+    fun mention(nick: String): Color = text(nick)
+
     /** Avatar and channel-mark fill: override + palette always apply (never falls back to neutral). */
     fun avatar(name: String): Color = fill(name)
 

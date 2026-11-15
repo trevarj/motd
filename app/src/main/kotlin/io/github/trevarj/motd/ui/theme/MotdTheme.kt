@@ -39,6 +39,7 @@ import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
+import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.SurfaceEffects
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
@@ -161,6 +162,9 @@ val LocalNicknameBackgroundsEnabled: ProvidableCompositionLocal<Boolean> = stati
 val LocalCompactNickBrackets: ProvidableCompositionLocal<CompactNickBrackets> =
     staticCompositionLocalOf { CompactNickBrackets.ANGLE }
 
+val LocalNickMentionStyle: ProvidableCompositionLocal<NickMentionStyle> =
+    staticCompositionLocalOf { NickMentionStyle.BOLD }
+
 /** Ordinary message backing in every layout; incoming mention fills and child surfaces are separate. */
 val LocalMessageBackgroundOpacityPercent: ProvidableCompositionLocal<Int> = staticCompositionLocalOf { 100 }
 
@@ -259,6 +263,7 @@ fun MotdTheme(
     layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
     compactNickBrackets: CompactNickBrackets = CompactNickBrackets.ANGLE,
     nickColorsEnabled: Boolean = true,
+    nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
     nickColorPalette: NickColorPalette = NickColorPalette.THEME,
     nickColorOverrides: Map<String, Int> = emptyMap(),
     avatarStyle: AvatarStyle = AvatarStyle.IRC_SPRITE,
@@ -379,6 +384,7 @@ fun MotdTheme(
             LocalUseThemeTextColors provides useThemeTextColors,
             LocalSpacing provides spacingFor(layoutDensity, messageSpacing, bubbleCornerStyle),
             LocalCompactNickBrackets provides compactNickBrackets,
+            LocalNickMentionStyle provides nickMentionStyle,
             LocalInputCornerStyle provides inputCornerStyle,
             LocalAvatarShape provides avatarShape,
             LocalChatCardCornerStyle provides chatCardCornerStyle,
