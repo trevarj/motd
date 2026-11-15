@@ -77,6 +77,7 @@ import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.ui.components.FolderIcon
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
+import io.github.trevarj.motd.ui.components.assertRoundedNickChip
 import io.github.trevarj.motd.ui.components.withStripedMessageWallpaper
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -385,6 +386,7 @@ class AppearanceFolderLayoutUiTest {
         val context = RuntimeEnvironment.getApplication()
         val reply = context.getString(io.github.trevarj.motd.R.string.settings_chat_preview_reply)
         val nick = context.getString(io.github.trevarj.motd.R.string.settings_chat_preview_sender)
+        var literalPreview: String? = null
         for (style in listOf(NickMentionStyle.NONE, NickMentionStyle.BOLD, NickMentionStyle.CHIP)) {
             val option = scrollToSheetNode("settings_nick_mention_style_sheet", "settings_nick_mention_style_${style.name.lowercase()}")
             val bounds = option.getUnclippedBoundsInRoot()
@@ -395,26 +397,36 @@ class AppearanceFolderLayoutUiTest {
             assertEquals(NickMentionStyle.BOLD, settings.value.nickMentionStyle)
             scrollToSheetNode("settings_nick_mention_style_sheet", "settings_nick_mention_preview_configuration").assertExists()
             val layouts = mutableListOf<TextLayoutResult>()
-            compose
-                .onNode(hasText(reply, substring = true) and hasAnyAncestor(hasTestTag("settings_nick_mention_preview_configuration")), useUnmergedTree = true)
-                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val preview =
+                compose.onNode(
+                    hasText(reply, substring = true) and hasAnyAncestor(hasTestTag("settings_nick_mention_preview_configuration")),
+                    useUnmergedTree = true,
+                )
+            preview.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
             val text = layouts.single().layoutInput.text
             val start = text.text.indexOf(nick)
             assertTrue("The production sample must contain a known nickname", start >= 0)
             val spans = text.spanStyles.filter { it.start <= start && it.end >= start + nick.length }.map { it.item }
             assertEquals(style == NickMentionStyle.BOLD, spans.any { it.fontWeight == FontWeight.Bold })
-            assertEquals(style == NickMentionStyle.CHIP, spans.any { it.background != Color.Unspecified })
-            System.getenv("MOTD_NICK_MENTION_PNG_DIR")?.let { directory ->
-                val output = java.io.File(directory).apply { mkdirs() }
-                compose.waitForIdle()
-                val image = compose.onNodeWithTag("settings_nick_mention_style_sheet_options").captureToImage().asAndroidBitmap()
-                try {
-                    java.io.File(output, "nick_mention_${style.name.lowercase()}.png").outputStream().use {
-                        image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
-                    }
-                } finally {
-                    image.recycle()
+            val output =
+                java.io
+                    .File(
+                        System.getenv("MOTD_NICK_MENTION_PNG_DIR") ?: "build/reports/nick-mention-styles/appearance",
+                    ).apply { mkdirs() }
+            val image = compose.onNodeWithTag("settings_nick_mention_style_sheet_options").captureToImage().asAndroidBitmap()
+            try {
+                java.io.File(output, "nick_mention_${style.name.lowercase()}.png").outputStream().use {
+                    assertTrue(image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
                 }
+            } finally {
+                image.recycle()
+            }
+            if (style == NickMentionStyle.CHIP) {
+                assertEquals("Production inline alternate text stays literal", requireNotNull(literalPreview), text.text)
+                assertRoundedNickChip(preview, layouts.single(), start, start + nick.length, label = "settings CHIP preview")
+            } else {
+                assertTrue("Ordinary preview styles use native text without placeholders", layouts.single().placeholderRects.isEmpty())
+                literalPreview = text.text
             }
         }
         assertEquals(listOf(NickMentionStyle.NONE, NickMentionStyle.BOLD, NickMentionStyle.CHIP), saved)

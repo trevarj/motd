@@ -2,6 +2,7 @@ package io.github.trevarj.motd
 
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
 import android.view.View
 import android.widget.TextView
 import androidx.compose.foundation.layout.Box
@@ -66,6 +67,7 @@ import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.settingsDataStore
@@ -112,6 +114,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadow.api.Shadow
 import org.robolectric.shadows.ShadowWindowManagerImpl
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -194,18 +197,16 @@ class FoolCollapseUiTest {
     }
 
     private fun assertSelectionBodyAndWholeCopy(layout: LayoutDensity) {
-        val raw = "\u0002Alpha\u0002 middle\nhttps://example.org/path?q=full#fragment"
-        val plain = "Alpha middle\nhttps://example.org/path?q=full#fragment"
-        val fixture = FoolTimelineFixture(layout = layout, aText = raw)
+        val raw = "\u0002Alpha\u0002 @middle\nhttps://example.org/path?q=full#fragment"
+        val plain = "Alpha @middle\nhttps://example.org/path?q=full#fragment"
+        val fixture = FoolTimelineFixture(layout = layout, aText = raw, nickMentionStyle = NickMentionStyle.CHIP, knownNicks = setOf("middle"))
         val clipboard = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
         var touchSlop = 0f
 
-        fun holdSourcePadding() {
+        fun holdSourceNick() {
             val rowTag = "chat_message_fool-a"
             compose.onNodeWithTag("chat_timeline", useUnmergedTree = true).performScrollToNode(hasTestTag(rowTag))
             val row = compose.onNodeWithTag(rowTag, useUnmergedTree = true).assertIsDisplayed()
-            val sourceSurface = SemanticsMatcher("message long-press surface") { it.config.contains(SemanticsActions.OnLongClick) }
-            val source = compose.onNode(hasAnyAncestor(hasTestTag(rowTag)) and sourceSurface, useUnmergedTree = true).assertIsDisplayed()
             val text =
                 compose
                     .onNode(
@@ -215,22 +216,11 @@ class FoolCollapseUiTest {
             val layouts = mutableListOf<TextLayoutResult>()
             text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
             val layoutResult = layouts.single()
-            val wordPosition =
-                layoutResult
-                    .getBoundingBox(
-                        layoutResult.layoutInput.text.text
-                            .indexOf("Alpha") + 2,
-                    ).center
-            val sourceBounds = source.fetchSemanticsNode().boundsInRoot
+            assertTrue("Normal CHIP display reserves native inline cells", layoutResult.placeholderRects.any { it != null })
+            val nickPosition = layoutResult.placeholderRects.first { it != null }!!.center
             val textBounds = text.fetchSemanticsNode().boundsInRoot
             val rowBounds = row.fetchSemanticsNode().boundsInRoot
-            assertTrue("The source's end gutter must be outside the rich text hit region", sourceBounds.right > textBounds.right)
-            val paddingPosition =
-                Offset(
-                    (sourceBounds.right + textBounds.right) / 2f,
-                    textBounds.top + wordPosition.y,
-                ) - rowBounds.topLeft
-            row.performTouchInput { longClick(paddingPosition) }
+            row.performTouchInput { longClick(textBounds.topLeft + nickPosition - rowBounds.topLeft) }
         }
         try {
             compose.setContent {
@@ -238,7 +228,7 @@ class FoolCollapseUiTest {
                 SideEffect { touchSlop = configuration.touchSlop }
                 fixture.Content()
             }
-            holdSourcePadding()
+            holdSourceNick()
             compose.onNodeWithTag("message_action_select_text").performScrollTo().performClick()
             compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
             compose
@@ -254,17 +244,40 @@ class FoolCollapseUiTest {
             assertTrue("The original body must expose the complete plain text and preview URL", text.endsWith(plain))
             assertEquals(2, compose.onAllNodes(nativeHandles, useUnmergedTree = true).fetchSemanticsNodes().size)
 
-            val middleStart = text.indexOf("middle")
-            val middleEnd = middleStart + "middle".length
+            val chipStart = text.indexOf("@middle")
+            assertTrue(
+                "Selection uses plain native nick text, not chip annotations",
+                textLayout.layoutInput.text
+                    .getStringAnnotations("nick_chip", 0, text.length)
+                    .isEmpty(),
+            )
+            assertTrue("Selection has no inline placeholders", textLayout.placeholderRects.isEmpty())
+            assertTrue(chipStart >= 0)
+            val proofs = File("build/reports/nick-mention-selection").apply { mkdirs() }
+            File(proofs, "$layout-complete.png").outputStream().use {
+                assertTrue(
+                    compose
+                        .onRoot()
+                        .captureToImage()
+                        .asAndroidBitmap()
+                        .compress(Bitmap.CompressFormat.PNG, 100, it),
+                )
+            }
+            val middleStart = text.indexOf("middle") + 1
+            val middleEnd = middleStart + "idd".length
             val endHandle = compose.onAllNodes(nativeHandles, useUnmergedTree = true)[1]
             val endDelta =
                 textLayout.getBoundingBox(middleEnd - 1).bottomRight -
+                    textLayout.getBoundingBox(text.lastIndex).bottomRight
+            val nickEndDelta =
+                textLayout.getBoundingBox(text.indexOf("middle") + "middle".lastIndex).bottomRight -
                     textLayout.getBoundingBox(text.lastIndex).bottomRight
             endHandle.performTouchInput {
                 down(center)
                 // Native handle dragging consumes touch slop before reporting movement.
                 moveTo(center + Offset(touchSlop + 1f, 0f))
-                moveTo(center + endDelta + Offset(touchSlop, 0f), delayMillis = 500)
+                moveTo(center + nickEndDelta + Offset(touchSlop, 0f), delayMillis = 500)
+                moveTo(center + endDelta + Offset(touchSlop, 0f), delayMillis = 100)
                 up()
             }
             val startHandle = compose.onAllNodes(nativeHandles, useUnmergedTree = true)[0]
@@ -278,12 +291,21 @@ class FoolCollapseUiTest {
                 moveTo(center + startDelta + Offset(touchSlop, 0f), delayMillis = 500)
                 up()
             }
-            copyNativeSelection("middle")
-            holdSourcePadding()
+            File(proofs, "$layout-partial-idd.png").outputStream().use {
+                assertTrue(
+                    compose
+                        .onRoot()
+                        .captureToImage()
+                        .asAndroidBitmap()
+                        .compress(Bitmap.CompressFormat.PNG, 100, it),
+                )
+            }
+            copyNativeSelection("idd")
+            holdSourceNick()
             compose.onNodeWithTag("message_action_select_text").performScrollTo().performClick()
             assertEquals(2, compose.onAllNodes(nativeHandles, useUnmergedTree = true).fetchSemanticsNodes().size)
             copyNativeSelection(plain)
-            holdSourcePadding()
+            holdSourceNick()
             compose.onNodeWithTag("message_selection").assertDoesNotExist()
             compose.onNodeWithTag("message_action_copy").performScrollTo().performClick()
             compose.runOnIdle {
@@ -962,6 +984,8 @@ internal class FoolTimelineFixture(
     defaultMode: FoolsMode = FoolsMode.DIMMED,
     private val layout: LayoutDensity = LayoutDensity.COMFORTABLE,
     private val aText: String = "A body",
+    private val nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
+    private val knownNicks: Set<String> = emptySet(),
 ) {
     val repo = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())
     private val db = inMemoryDb(directCommit = true)
@@ -1035,7 +1059,7 @@ internal class FoolTimelineFixture(
         SideEffect { items = collected }
         // Mirrors ChatScreen's missing-presenter early return without disposing the visit owner.
         if (!contentAvailable.value) return
-        MotdTheme(dynamicColor = false) {
+        MotdTheme(dynamicColor = false, nickMentionStyle = nickMentionStyle) {
             ChatContent(
                 state = ChatState(buffer = room, connState = IrcClientState.Ready("me", emptySet(), emptyMap()), conversationPresence = ConversationPresenceState(global = PresenceMode.ALL)),
                 items = collected,
@@ -1053,6 +1077,7 @@ internal class FoolTimelineFixture(
                 loadPreview = { _, _ -> null },
                 showImages = false,
                 showLinkPreviews = false,
+                knownNicks = knownNicks,
                 fools = settings.fools,
                 foolsMode = settings.foolsMode,
                 foolPreferences = settings.foolPreferences,

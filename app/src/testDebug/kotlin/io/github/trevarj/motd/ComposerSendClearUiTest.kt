@@ -138,6 +138,7 @@ import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
 import io.github.trevarj.motd.dcc.EbooksResultCache
@@ -514,6 +515,9 @@ class ComposerSendClearUiTest {
         externalTranslationInFlight: () -> Boolean = { false },
         composerStyle: () -> ComposerStyle = { ComposerStyle.COMFORTABLE },
         memberNicks: List<String> = emptyList(),
+        knownNicks: Set<String> = emptySet(),
+        nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
+        nickColorsEnabled: Boolean = true,
         contentHeight: () -> Dp? = { null },
         voiceState: () -> VoiceMessageUiState = { VoiceMessageUiState() },
         onViewportRefreshAnchor: (ViewportRefreshAnchor?) -> Unit = {},
@@ -536,7 +540,7 @@ class ComposerSendClearUiTest {
                 LocalDensity provides (fontScale?.let { Density(LocalDensity.current.density, it) } ?: LocalDensity.current),
                 LocalDickordLabsEnabled provides dickordEnabled(),
             ) {
-                MotdTheme(layoutDensity = layoutDensity()) {
+                MotdTheme(layoutDensity = layoutDensity(), nickMentionStyle = nickMentionStyle, nickColorsEnabled = nickColorsEnabled) {
                     Box(
                         Modifier
                             .then(contentHeight()?.let { Modifier.height(it).fillMaxWidth() } ?: Modifier.fillMaxSize())
@@ -613,6 +617,7 @@ class ComposerSendClearUiTest {
                             composerStyle = composerStyle(),
                             chatWallpaper = chatWallpaper,
                             memberNicks = memberNicks,
+                            knownNicks = knownNicks,
                             voiceState = voiceState(),
                             onViewportRefreshAnchor = onViewportRefreshAnchor,
                         )
@@ -3011,7 +3016,7 @@ class ComposerSendClearUiTest {
     }
 
     @Test
-    fun entryReadinessPaintsFullyAndAcceptsTouchOnTheNextFrame() {
+    fun entryReadinessPaintsFullyAndRoutesBodyMentionTouchOnTheNextFrame() {
         val row =
             MessageEntity(
                 id = 701,
@@ -3019,7 +3024,7 @@ class ComposerSendClearUiTest {
                 serverTime = 100,
                 sender = "entry-peer",
                 kind = MessageKind.PRIVMSG,
-                text = "Already stored and measured",
+                text = "Hello body-peer",
                 dedupKey = "entry-paint",
             )
         var target by mutableStateOf<ChatPositionTarget?>(null)
@@ -3041,6 +3046,7 @@ class ComposerSendClearUiTest {
                     ),
                 ),
             chatWallpaper = WallpaperSelection(ChatWallpaperPreset.NONE),
+            knownNicks = setOf("body-peer"),
             initialTarget = { target },
             entryState = { entry },
             onInitialPositionHandled = {
@@ -3054,7 +3060,10 @@ class ComposerSendClearUiTest {
         compose.mainClock.autoAdvance = false
         val root = compose.onNodeWithTag("chat_surface_root")
         val message = compose.onNodeWithTag("chat_message_701", useUnmergedTree = true)
-        val sender = compose.onNodeWithText("entry-peer", useUnmergedTree = true)
+        val body = compose.onNodeWithText(row.text, useUnmergedTree = true)
+        val layouts = mutableListOf<TextLayoutResult>()
+        body.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val mentionCenter = layouts.single().getBoundingBox(row.text.indexOf("body-peer") + 2).center
         val bounds = message.fetchSemanticsNode().boundsInRoot
         val rootBounds = root.fetchSemanticsNode().boundsInRoot
 
@@ -3071,7 +3080,9 @@ class ComposerSendClearUiTest {
         }
         compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertExists()
         val hidden = paintedRow()
-        sender.performTouchInput { click() }
+        body.performTouchInput { click(mentionCenter) }
+        body.performTouchInput { longClick(mentionCenter) }
+        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
         compose.runOnIdle {
             assertTrue("Hidden timeline input must still be blocked", senderClicks.isEmpty())
             target = ChatPositionTarget(index = 0, expectedEventId = row.id, forceScrollOnEntry = true)
@@ -3094,16 +3105,112 @@ class ComposerSendClearUiTest {
         compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertDoesNotExist()
         val readyFrame = compose.mainClock.currentTime
         // The click helper advances gesture time by one frame; inject the ready-frame touch directly.
-        sender.performTouchInput {
-            down(center)
+        body.performTouchInput {
+            down(mentionCenter)
             up()
         }
-        compose.runOnIdle { assertEquals(listOf("entry-peer"), senderClicks) }
+        compose.runOnIdle { assertEquals(listOf("body-peer"), senderClicks) }
         assertEquals("Touch must be accepted without advancing the animation clock", readyFrame, compose.mainClock.currentTime)
         compose.mainClock.advanceTimeBy(1_000)
         compose.waitForIdle()
         assertEquals(bounds, message.fetchSemanticsNode().boundsInRoot)
         assertTrue("The first ready frame must already have full opacity", ready.sameAs(paintedRow()))
+    }
+
+    @Test
+    @Config(sdk = [26])
+    fun selfContinuationBodyMentionRoutesWithoutHeaderStyleOrColorsAndNotWhileSelecting() = assertSelfContinuationMentionSelection(NickMentionStyle.NONE)
+
+    @Test
+    @Config(sdk = [26])
+    fun paddedSelfContinuationMentionDismissesSelectionBeforeRoutingProfile() = assertSelfContinuationMentionSelection(NickMentionStyle.CHIP)
+
+    private fun assertSelfContinuationMentionSelection(style: NickMentionStyle) {
+        val row =
+            MessageEntity(
+                id = 702,
+                bufferId = buffer.id,
+                serverTime = 101,
+                sender = "me",
+                isSelf = true,
+                kind = MessageKind.PRIVMSG,
+                text = "Hello @body-peer",
+                dedupKey = "self-mention",
+            )
+        val older = row.copy(id = 703, serverTime = 100, text = "Previous @other-peer https://example.org/profile", dedupKey = "self-older")
+        val profileClicks = mutableListOf<String>()
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            pages = flowOf(PagingData.from(listOf(row, older))),
+            knownNicks = setOf("body-peer", "other-peer"),
+            nickMentionStyle = style,
+            nickColorsEnabled = false,
+            onSenderClick = { profileClicks += it },
+            onSubmit = {},
+        )
+        val body = compose.onNodeWithText(row.text, useUnmergedTree = true)
+        val layouts = mutableListOf<TextLayoutResult>()
+        body.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val mentionCenter =
+            if (style == NickMentionStyle.CHIP) {
+                layouts
+                    .single()
+                    .placeholderRects
+                    .single()!!
+                    .center
+            } else {
+                layouts.single().getBoundingBox(row.text.indexOf("body-peer") + 2).center
+            }
+        compose
+            .onNode(
+                hasText("me") and hasAnyAncestor(hasTestTag("chat_message_702")),
+                useUnmergedTree = true,
+            ).assertDoesNotExist()
+        body.performTouchInput { click(mentionCenter) }
+        compose.runOnIdle { assertEquals(listOf("body-peer"), profileClicks) }
+        val olderBody = compose.onNodeWithText(older.text, useUnmergedTree = true)
+        val olderLayouts = mutableListOf<TextLayoutResult>()
+        olderBody.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(olderLayouts) }
+        val olderMentionCenter =
+            if (style == NickMentionStyle.CHIP) {
+                olderLayouts
+                    .single()
+                    .placeholderRects
+                    .single()!!
+                    .center
+            } else {
+                olderLayouts.single().getBoundingBox(older.text.indexOf("other-peer") + 2).center
+            }
+        val urlCenter = olderLayouts.single().getBoundingBox(older.text.indexOf("https://") + 2).center
+        olderBody.performTouchInput { longClick(urlCenter) }
+        compose.onNodeWithTag("message_action_sheet").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(listOf("body-peer"), profileClicks) }
+        compose
+            .onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss), useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.Dismiss) { it() }
+        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+        olderBody.performTouchInput { longClick(olderMentionCenter) }
+        compose.onNodeWithTag("message_action_sheet").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(listOf("body-peer"), profileClicks) }
+        compose.onNodeWithTag("message_action_select_text").performScrollTo().performClick()
+        compose.onNodeWithTag("message_selection_text").assertTextEquals(older.text)
+        val selectedLayouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithTag("message_selection_text").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(selectedLayouts) }
+        assertTrue("Selected body uses plain native text", selectedLayouts.single().placeholderRects.isEmpty())
+        val nativeHandles =
+            SemanticsMatcher("native selection handle") { node ->
+                node.config.any { it.key.name == "SelectionHandleInfo" }
+            }
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(nativeHandles, useUnmergedTree = true).fetchSemanticsNodes().size == 2
+        }
+        body.performTouchInput { click(mentionCenter) }
+        compose.runOnIdle { assertEquals(listOf("body-peer"), profileClicks) }
+        compose.onNodeWithTag("message_selection").assertDoesNotExist()
+        compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
+        compose.onAllNodes(nativeHandles, useUnmergedTree = true).assertCountEquals(0)
+        body.performTouchInput { click(mentionCenter) }
+        compose.runOnIdle { assertEquals(listOf("body-peer", "body-peer"), profileClicks) }
     }
 
     @Test

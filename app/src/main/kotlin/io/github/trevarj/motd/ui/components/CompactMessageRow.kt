@@ -103,6 +103,7 @@ internal fun CompactMessageRow(
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
+    onMentionClick: ((String) -> Unit)? = null,
     containerModifier: Modifier = Modifier,
     sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? = null,
     trailingContent: (@Composable (Color) -> Unit)? = null,
@@ -143,8 +144,8 @@ internal fun CompactMessageRow(
 
     // The sender and body wrap as one paragraph; continuation lines omit the sender prefix.
     // Known-nick @mentions in the body are colored via the memoized resolver.
-    val nickMentionStyle = LocalNickMentionStyle.current
-    val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules, nickMentionStyle)
+    val nickMentionStyle = LocalNickMentionStyle.current.let { if (selecting && it == NickMentionStyle.CHIP) NickMentionStyle.NONE else it }
+    val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules, nickMentionStyle, onMentionClick != null)
     val line =
         remember(
             selecting,
@@ -160,6 +161,7 @@ internal fun CompactMessageRow(
             brackets,
             showSender,
             mentionColor,
+            onMentionClick,
             nickMentionStyle,
             nickColors.enabled,
             codeBackground,
@@ -187,6 +189,7 @@ internal fun CompactMessageRow(
                 normalContainerColor = normalPaintedRow,
                 nickMentionStyle = nickMentionStyle,
                 mentionColorsEnabled = nickColors.enabled,
+                onMentionClick = onMentionClick.takeUnless { selecting },
             ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
         }
 
@@ -217,6 +220,7 @@ internal fun CompactMessageRow(
             FoolBodyText(
                 text = line,
                 concealment = LocalFoolBodyConcealment.current,
+                onLinkLongPress = onLongPress,
                 inlineBody = true,
                 style = MaterialTheme.typography.bodyLarge,
                 color = bodyColor,
@@ -297,6 +301,7 @@ internal fun buildCompactLine(
     normalContainerColor: Color = containerColor,
     nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
     mentionColorsEnabled: Boolean = true,
+    onMentionClick: ((String) -> Unit)? = null,
 ): AnnotatedString =
     buildAnnotatedString {
         val nickStyle =
@@ -343,6 +348,7 @@ internal fun buildCompactLine(
             normalContainerColor = normalContainerColor,
             nickMentionStyle = nickMentionStyle,
             mentionColorsEnabled = mentionColorsEnabled,
+            onMentionClick = onMentionClick,
         )
         pop()
     }

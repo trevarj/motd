@@ -1,10 +1,13 @@
 package io.github.trevarj.motd
 
+import android.graphics.Bitmap
+import android.graphics.Path
 import android.graphics.Region
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -12,10 +15,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.platform.testTag
@@ -36,23 +41,28 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioCacheStatus
 import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.SurfaceEffects
 import io.github.trevarj.motd.ui.chat.InlineMessageTranslation
 import io.github.trevarj.motd.ui.chat.InlineTranslation
 import io.github.trevarj.motd.ui.chat.VoiceTranscriptState
 import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
 import io.github.trevarj.motd.ui.components.FOOL_BODY_RANGE
+import io.github.trevarj.motd.ui.components.FoolBodyConcealment
+import io.github.trevarj.motd.ui.components.FoolBodyText
 import io.github.trevarj.motd.ui.components.FoolMessageScope
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
+import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -63,6 +73,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.io.File
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -181,15 +192,175 @@ class FoolMessageCoverTest {
     }
 
     @Test
+    fun boundaryMentionChipsNeverLeakColoredPaddingWhileConcealed() {
+        val concealed = mutableStateOf(false)
+        val density = mutableStateOf(LayoutDensity.COMFORTABLE)
+        val kind = mutableStateOf(MessageKind.PRIVMSG)
+        val effects = mutableStateOf(false)
+        val captured = mutableStateOf<TextLayoutResult?>(null)
+        val inlineAnnotationTag =
+            buildAnnotatedString { appendInlineContent("fixture", "x") }
+                .getStringAnnotations(0, 1)
+                .single()
+                .tag
+        val body = "bob wrapped body שלום العربية keeps the native author prefix and ends with bob"
+        var chipColor = Color.Unspecified
+        var fallback = Color.Unspecified
+        compose.setContent {
+            MotdTheme(
+                dynamicColor = false,
+                layoutDensity = density.value,
+                surfaceEffects = SurfaceEffects(enabled = effects.value),
+                nickMentionStyle = NickMentionStyle.CHIP,
+                nickColorOverrides = mapOf("bob" to 300, "fool" to 120),
+            ) {
+                chipColor = LocalNickColors.current.mention("bob")
+                fallback = MaterialTheme.colorScheme.surfaceContainerHighest
+                Column(Modifier.width(290.dp).background(MaterialTheme.colorScheme.background).testTag("chip_sample")) {
+                    val original = captured.value
+                    if (original == null) {
+                        MessageBubble("fool", body, 1000L, false, kind.value, true, formattedTime = "12:34", knownNicks = setOf("bob"))
+                    } else {
+                        val annotated =
+                            original.layoutInput.text.flatMapAnnotations { annotation ->
+                                if (annotation.tag == inlineAnnotationTag) emptyList() else listOf(annotation)
+                            }
+                        FoolBodyText(
+                            text = annotated,
+                            style = original.layoutInput.style,
+                            modifier = Modifier.width(with(LocalDensity.current) { original.size.width.toDp() }),
+                            concealment = FoolBodyConcealment(concealed.value, { concealed.value = false }, "reveal"),
+                        )
+                    }
+                }
+            }
+        }
+        val proofs = File("build/reports/nick-mention-concealment").apply { mkdirs() }
+        for (mode in LayoutDensity.entries) {
+            for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.ACTION)) {
+                for (enabled in listOf(false, true)) {
+                    val label = "$mode-$messageKind-effects-$enabled-sdk-${Build.VERSION.SDK_INT}"
+                    compose.runOnIdle {
+                        density.value = mode
+                        kind.value = messageKind
+                        effects.value = enabled
+                        captured.value = null
+                        concealed.value = false
+                    }
+                    val production = compose.onNodeWithText(body, substring = true, useUnmergedTree = true).layout()
+                    val annotated = production.layoutInput.text
+                    val ranges = annotated.getStringAnnotations(FOOL_BODY_RANGE, 0, annotated.length)
+                    compose.runOnIdle { captured.value = production }
+                    val node = compose.onNodeWithText(body, substring = true, useUnmergedTree = true)
+                    val layout = node.layout()
+                    val sample = compose.onNodeWithTag("chip_sample")
+                    val textBounds = node.fetchSemanticsNode().boundsInRoot
+                    val origin = textBounds.topLeft - sample.fetchSemanticsNode().boundsInRoot.topLeft
+                    val start = ranges.minOfOrNull { it.start } ?: 0
+                    val end = ranges.maxOfOrNull { it.end } ?: annotated.length
+                    val bodyPath = layout.getPathForRange(start, end).asAndroidPath().apply { offset(origin.x, origin.y) }
+                    val visibleImage = sample.captureToImage()
+                    compose.runOnIdle { concealed.value = true }
+                    val hiddenBounds = compose.onNodeWithTag("reveal", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                    val hiddenImage = sample.captureToImage()
+                    for ((state, image) in listOf(
+                        "visible" to visibleImage,
+                        "concealed" to hiddenImage,
+                    )) {
+                        File(proofs, "$label-$state.png").outputStream().use {
+                            assertTrue(image.asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it))
+                        }
+                    }
+                    assertEquals(
+                        "$label retains the production body boundary",
+                        body,
+                        annotated.text.substring(ranges.minOfOrNull { it.start } ?: 0, ranges.maxOfOrNull { it.end } ?: annotated.length),
+                    )
+                    assertTrue("$label fixture must wrap", production.lineCount > 1)
+                    val visible = visibleImage.toPixelMap()
+                    val hidden = hiddenImage.toPixelMap()
+                    assertEquals("$label preserves concealed native text bounds", textBounds, hiddenBounds)
+                    assertTrue("$label uses real inline chip placeholders", layout.placeholderRects.count { it != null } >= 2)
+                    assertTrue(
+                        "$label renders colored chip pixels",
+                        (0 until visible.height).sumOf { y ->
+                            (0 until visible.width).count { x -> visible[x, y] == chipColor }
+                        } > 3,
+                    )
+                    assertEquals(visible.width, hidden.width)
+                    assertEquals(visible.height, hidden.height)
+                    var originalEdges = 0.0
+                    var concealedEdges = 0.0
+                    var opaquePixels = 0
+                    val pixel = Path()
+                    val intersection = Path()
+                    val outside = Path()
+                    for (y in 0 until hidden.height) {
+                        for (x in 0 until hidden.width) {
+                            assertFalse("$label leaks chip color at $x,$y", hidden[x, y] == chipColor)
+                            pixel.rewind()
+                            pixel.addRect(x.toFloat(), y.toFloat(), x + 1f, y + 1f, Path.Direction.CW)
+                            intersection.op(bodyPath, pixel, Path.Op.INTERSECT)
+                            if (intersection.isEmpty) {
+                                assertEquals("$label wholly outside native body at $x,$y", visible[x, y], hidden[x, y])
+                            } else {
+                                pixel.rewind()
+                                pixel.addRect(x - 1f, y - 1f, x + 2f, y + 2f, Path.Direction.CW)
+                                outside.op(pixel, bodyPath, Path.Op.DIFFERENCE)
+                                if (outside.isEmpty &&
+                                    x - 1f >= origin.x && y - 1f >= origin.y &&
+                                    x + 2f <= origin.x + layout.size.width &&
+                                    y + 2f <= origin.y + layout.size.height
+                                ) {
+                                    originalEdges += abs(visible[x, y].luminance() - visible[x - 1, y].luminance())
+                                    concealedEdges += abs(hidden[x, y].luminance() - hidden[x - 1, y].luminance())
+                                    if (!enabled || Build.VERSION.SDK_INT < 31) {
+                                        assertEquals("$label opaque body fill at $x,$y", fallback, hidden[x, y])
+                                        opaquePixels++
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    assertTrue("$label visible body has readable edges", originalEdges > 1.0)
+                    if (enabled && Build.VERSION.SDK_INT >= 31) {
+                        assertTrue("$label native blur obscures chip and glyph edges", concealedEdges < originalEdges * 0.35)
+                    } else {
+                        assertTrue("$label samples real opaque body pixels", opaquePixels > 100)
+                    }
+                    compose.onNodeWithText(body, substring = true, useUnmergedTree = true).assertDoesNotExist()
+                    compose.runOnIdle { concealed.value = false }
+                    val restored = node.layout()
+                    assertEquals(annotated.text, restored.layoutInput.text.text)
+                    for (candidate in listOf(layout, restored)) {
+                        assertEquals("$label preserves native width", production.size, candidate.size)
+                        assertEquals("$label preserves native wrapping", production.lineCount, candidate.lineCount)
+                        assertEquals("$label preserves native inline cells", production.placeholderRects, candidate.placeholderRects)
+                        for (offset in annotated.text.indices) {
+                            assertEquals(
+                                "$label preserves native offset $offset",
+                                production.getBoundingBox(offset),
+                                candidate.getBoundingBox(offset),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     fun actionAuthorRemainsNativeAndFirstBodyGestureNeverRunsRowOrLinkAction() {
         val concealed = mutableStateOf(false)
         val density = mutableStateOf(LayoutDensity.COMFORTABLE)
-        val body = "waves https://example.org/hello"
+        val style = mutableStateOf(NickMentionStyle.BOLD)
+        val body = "waves @bob https://example.org/hello"
         var authors = 0
         var rows = 0
         val opened = mutableListOf<String>()
+        val profiles = mutableListOf<String>()
         compose.setContent {
-            MotdTheme(dynamicColor = false, layoutDensity = density.value) {
+            MotdTheme(dynamicColor = false, layoutDensity = density.value, nickMentionStyle = style.value, nickColorsEnabled = false) {
                 CompositionLocalProvider(
                     LocalUriHandler provides
                         object : UriHandler {
@@ -208,6 +379,8 @@ class FoolMessageCoverTest {
                                 MessageKind.ACTION,
                                 true,
                                 onSenderClick = { authors++ },
+                                knownNicks = setOf("bob"),
+                                onMentionClick = { profiles += it },
                                 onClick = { rows++ },
                                 onLongPress = { rows++ },
                             )
@@ -216,9 +389,10 @@ class FoolMessageCoverTest {
                 }
             }
         }
-        for (mode in LayoutDensity.entries) {
+        for ((mode, mentionStyle) in LayoutDensity.entries.flatMap { mode -> NickMentionStyle.entries.map { mode to it } }) {
             compose.runOnIdle {
                 density.value = mode
+                style.value = mentionStyle
                 concealed.value = false
             }
             val node = compose.onNodeWithText(body, substring = true, useUnmergedTree = true)
@@ -234,10 +408,25 @@ class FoolMessageCoverTest {
             val url = text.text.indexOf("https://")
             val authorPoint = layout.getBoundingBox(nick + 1).center + origin
             val bodyPoint = layout.getBoundingBox(url + 1).center + origin
+            val mentionPoint = layout.getBoundingBox(text.text.indexOf("@bob") + 2).center + origin
             compose.runOnIdle { concealed.value = true }
             compose.onNodeWithTag("sample").performTouchInput { click(authorPoint) }
             compose.runOnIdle { assertTrue(concealed.value) }
             compose.onNodeWithText(body, substring = true, useUnmergedTree = true).assertDoesNotExist()
+            compose.onNodeWithTag("sample").performTouchInput { click(mentionPoint) }
+            compose.runOnIdle {
+                assertFalse(concealed.value)
+                assertTrue(profiles.isEmpty())
+                assertEquals(0, rows)
+                assertTrue(opened.isEmpty())
+            }
+            compose.onNodeWithTag("sample").performTouchInput { click(mentionPoint) }
+            compose.runOnIdle {
+                assertEquals(listOf("bob"), profiles)
+                profiles.clear()
+                assertEquals(0, rows)
+                concealed.value = true
+            }
             compose.onNodeWithTag("sample").performTouchInput { click(bodyPoint) }
             compose.runOnIdle {
                 assertFalse(concealed.value)
@@ -261,7 +450,7 @@ class FoolMessageCoverTest {
                 assertTrue(opened.isEmpty())
             }
         }
-        compose.runOnIdle { assertEquals(LayoutDensity.entries.size, authors) }
+        compose.runOnIdle { assertEquals(LayoutDensity.entries.size * NickMentionStyle.entries.size, authors) }
     }
 
     @Test

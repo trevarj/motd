@@ -48,7 +48,9 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -59,6 +61,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -957,17 +960,25 @@ class MessageBubbleFooterUiTest {
 
     @Test
     @Config(sdk = [35])
-    fun nativeMentionStylesUpdateLiveAcrossLayoutsAndActionsWithoutChangingSelectableOffsets() {
+    fun nativeMentionStylesUpdateLiveAcrossLayoutsAndActionsWithPlainNativeSelection() {
         val density = mutableStateOf(LayoutDensity.COMFORTABLE)
         val kind = mutableStateOf(MessageKind.PRIVMSG)
         val style = mutableStateOf(NickMentionStyle.BOLD)
         val enabled = mutableStateOf(true)
         val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
         val selecting = mutableStateOf(false)
+        val self = mutableStateOf(false)
+        val hasMention = mutableStateOf(false)
         val dismissSelection: () -> Unit = {}
         val source = "Reading @bob, bob! @unknown `bob` https://example.com/bob"
         val plain = "Reading @bob, bob! @unknown bob https://example.com/bob"
+        val body = mutableStateOf(source)
+        val width = mutableStateOf(380.dp)
+        val longNick = "bobbobbobbobbobbobbobbobbobbobbob"
+        val mentionedNicks = mutableListOf<String>()
+        var longPresses = 0
         var rawNick = Color.Unspecified
+
         compose.setContent {
             CompositionLocalProvider(
                 LocalDensity provides Density(1f),
@@ -984,15 +995,18 @@ class MessageBubbleFooterUiTest {
                     timestampConfig = TimestampConfig(show = false),
                 ) {
                     rawNick = LocalNickColors.current.mention("bob")
-                    Surface(Modifier.width(380.dp).testTag("mention_style_sample")) {
+                    Surface(Modifier.width(width.value).testTag("mention_style_sample")) {
                         MessageBubble(
                             sender = "alice",
-                            text = source,
+                            text = body.value,
                             timeMs = 0,
-                            isSelf = false,
+                            isSelf = self.value,
+                            hasMention = hasMention.value,
                             kind = kind.value,
                             showSender = true,
-                            knownNicks = setOf("bob"),
+                            knownNicks = setOf("bob", "f", "i", "gyp", "é", longNick),
+                            onMentionClick = mentionedNicks::add,
+                            onLongPress = { longPresses++ },
                         )
                     }
                 }
@@ -1013,6 +1027,7 @@ class MessageBubbleFooterUiTest {
                         var baseline: Bitmap? = null
                         var baselineText: String? = null
                         var baselinePrefix: androidx.compose.ui.text.AnnotatedString? = null
+                        var chipGlyphHeights: List<Int>? = null
                         // Return to BOLD in the same composition to catch stale remember keys.
                         for ((step, mentionStyle) in listOf(NickMentionStyle.BOLD, NickMentionStyle.CHIP, NickMentionStyle.NONE, NickMentionStyle.BOLD).withIndex()) {
                             compose.runOnIdle {
@@ -1020,10 +1035,22 @@ class MessageBubbleFooterUiTest {
                                 style.value = mentionStyle
                             }
                             val label = "$theme-$layout-$messageKind-colors-$colorsEnabled-$mentionStyle"
-                            val node = compose.onNodeWithText(plain, substring = true, useUnmergedTree = true).assertIsDisplayed()
+                            val node =
+                                (
+                                    if (messageKind == MessageKind.ACTION) {
+                                        compose.onNodeWithTag("chat_action_text", useUnmergedTree = true)
+                                    } else {
+                                        compose.onNodeWithText(plain, substring = true, useUnmergedTree = true)
+                                    }
+                                ).assertIsDisplayed()
                             val text = node.textLayout()
                             val annotated = text.layoutInput.text
                             val start = annotated.text.indexOf(plain)
+                            val sample = compose.onNodeWithTag("mention_style_sample")
+                            val bitmap = sample.captureToImage().asAndroidBitmap()
+                            if (step < 3) {
+                                File(proofs, "$label.png").outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                            }
                             assertTrue("$label keeps the complete body", start >= 0)
                             val prefix = annotated.subSequence(0, start)
                             val nickOffsets = listOf(start + plain.indexOf("bob"), start + plain.indexOf("bob!"))
@@ -1037,57 +1064,226 @@ class MessageBubbleFooterUiTest {
                             assertEquals("$label retains the raw nickname color with coloring disabled", coloredNicks[theme], rawNick)
                             for (offset in nickOffsets) {
                                 val spans = annotated.spanStyles.filter { offset in it.start until it.end }
-                                val background = spans.lastOrNull { it.item.background != Color.Unspecified }?.item?.background ?: Color.Unspecified
                                 val weight = spans.lastOrNull { it.item.fontWeight != null }?.item?.fontWeight ?: text.layoutInput.style.fontWeight
                                 assertEquals("$label mention weight at $offset", mentionStyle == NickMentionStyle.BOLD, weight == FontWeight.Bold)
                                 if (mentionStyle == NickMentionStyle.CHIP) {
-                                    assertEquals("$label uses the unmodified nickname color", rawNick, background)
                                     val ink = text.inkAt("bob")
-                                    val actualContrast = contrastRatio(ink, background)
-                                    val attainable = maxOf(contrastRatio(Color.Black, background), contrastRatio(Color.White, background))
+                                    val actualContrast = contrastRatio(ink, rawNick)
+                                    val attainable = maxOf(contrastRatio(Color.Black, rawNick), contrastRatio(Color.White, rawNick))
                                     val target = minOf(MESSAGE_TEXT_CONTRAST, attainable)
-                                    assertTrue("$label chip ink=$ink background=$background contrast=$actualContrast target=$target", actualContrast >= target - 0.00001)
+                                    assertTrue("$label chip ink=$ink background=$rawNick contrast=$actualContrast target=$target", actualContrast >= target - 0.00001)
                                     assertTrue("$label chip retains accessible contrast", actualContrast >= 4.5)
-                                    val tokenStart = if (annotated.text.getOrNull(offset - 1) == '@') offset - 1 else offset
-                                    assertTrue("$label chip covers the nick and leading @, not punctuation", spans.any { it.start == tokenStart && it.end == offset + 3 && it.item.background == rawNick })
                                 } else {
-                                    assertEquals("$label has no chip", Color.Unspecified, background)
                                     if (!colorsEnabled) assertEquals("$label disabled coloring inherits prose ink", text.inkAt("Reading"), text.inkAt("bob"))
                                 }
-                                val glyph = text.getBoundingBox(offset + 1)
-                                assertEquals("$label hit testing retains mention offsets", offset + 1, text.getOffsetForPosition(Offset(glyph.left + glyph.width * 0.2f, glyph.center.y)))
+                                if (mentionStyle != NickMentionStyle.CHIP) {
+                                    val glyph = text.getBoundingBox(offset + 1)
+                                    assertEquals("$label hit testing retains mention offsets", offset + 1, text.getOffsetForPosition(Offset(glyph.left + glyph.width * 0.2f, glyph.center.y)))
+                                }
                             }
-                            for (word in listOf("@unknown", "bob https://", "https://")) {
-                                val offset = annotated.text.indexOf(word)
-                                assertTrue("$label excludes unknown nicks, code and links from chips", annotated.spanStyles.none { offset in it.start until it.end && it.item.background == rawNick })
-                            }
-                            val sample = compose.onNodeWithTag("mention_style_sample")
-                            val bitmap = sample.captureToImage().asAndroidBitmap()
                             if (mentionStyle == NickMentionStyle.CHIP) {
-                                val root = sample.fetchSemanticsNode().boundsInRoot
-                                val bounds = node.fetchSemanticsNode().boundsInRoot
-                                val first = text.getBoundingBox(nickOffsets.first())
-                                val last = text.getBoundingBox(nickOffsets.first() + 2)
-                                val left = (bounds.left - root.left + first.left).toInt().coerceAtLeast(0)
-                                val right = (bounds.left - root.left + last.right).toInt().coerceAtMost(bitmap.width)
-                                val top = (bounds.top - root.top + first.top).toInt().coerceAtLeast(0)
-                                val bottom = (bounds.top - root.top + first.bottom).toInt().coerceAtMost(bitmap.height)
-                                val pixels = (left until right).flatMap { x -> (top until bottom).map { y -> bitmap.getPixel(x, y) } }
-                                assertTrue("$label paints real native chip pixels", pixels.count { it == rawNick.toArgb() } > 3)
-                                assertTrue("$label paints real contrasting glyph pixels", pixels.any { it == text.inkAt("bob").toArgb() })
+                                val paragraph = node.captureToImage().asAndroidBitmap()
+                                for (word in listOf("@unknown", "bob https://", "https://example.com/bob")) {
+                                    val offset = annotated.text.indexOf(word)
+                                    val excluded = if (word == "bob https://") "bob" else word
+                                    for (index in offset until offset + excluded.length) {
+                                        val box = text.getBoundingBox(index)
+                                        for (
+                                        y in box.top.toInt().coerceAtLeast(0) until
+                                            kotlin.math
+                                                .ceil(box.bottom)
+                                                .toInt()
+                                                .coerceAtMost(paragraph.height)
+                                        ) {
+                                            for (
+                                            x in box.left.toInt().coerceAtLeast(0) until
+                                                kotlin.math
+                                                    .ceil(box.right)
+                                                    .toInt()
+                                                    .coerceAtMost(paragraph.width)
+                                            ) {
+                                                assertFalse("$label excludes chip fill from $excluded at $x,$y", paragraph.getPixel(x, y) == rawNick.toArgb())
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (mentionStyle == NickMentionStyle.CHIP || mentionStyle == NickMentionStyle.NONE) {
+                                val paragraph = node.captureToImage().asAndroidBitmap()
+                                val ink = text.inkAt("bob").toArgb()
+                                val glyphHeights =
+                                    nickOffsets.map { offset ->
+                                        val tokenStart = if (annotated.text.getOrNull(offset - 1) == '@') offset - 1 else offset
+                                        val box = if (mentionStyle == NickMentionStyle.CHIP) text.nickChipRects(tokenStart, offset + 3).single() else text.getPathForRange(tokenStart, offset + 3).getBounds()
+                                        val backing =
+                                            if (mentionStyle == NickMentionStyle.CHIP) {
+                                                rawNick.toArgb()
+                                            } else {
+                                                (
+                                                    box.top.toInt().coerceAtLeast(0) until
+                                                        kotlin.math
+                                                            .ceil(box.bottom)
+                                                            .toInt()
+                                                            .coerceAtMost(paragraph.height)
+                                                ).flatMap { y ->
+                                                    (
+                                                        box.left.toInt().coerceAtLeast(0) until
+                                                            kotlin.math
+                                                                .ceil(box.right)
+                                                                .toInt()
+                                                                .coerceAtMost(paragraph.width)
+                                                    ).map { x -> paragraph.getPixel(x, y) }
+                                                }.groupingBy { it }
+                                                    .eachCount()
+                                                    .maxBy { it.value }
+                                                    .key
+                                            }
+                                        (
+                                            box.top.toInt().coerceAtLeast(0) until
+                                                kotlin.math
+                                                    .ceil(box.bottom)
+                                                    .toInt()
+                                                    .coerceAtMost(paragraph.height)
+                                        ).filter { y ->
+                                            (
+                                                box.left.toInt().coerceAtLeast(0) until
+                                                    kotlin.math
+                                                        .ceil(box.right)
+                                                        .toInt()
+                                                        .coerceAtMost(paragraph.width)
+                                            ).any { x -> fittedNickInkPixel(paragraph.getPixel(x, y), backing, ink) }
+                                        }.size
+                                    }
+                                if (mentionStyle == NickMentionStyle.CHIP) {
+                                    chipGlyphHeights = glyphHeights
+                                } else {
+                                    val small = requireNotNull(chipGlyphHeights)
+                                    File(proofs, "$label-ink-heights.txt").writeText("CHIP=$small\nNONE=$glyphHeights\n")
+                                    assertTrue("$label CHIP label is visibly shorter than native prose-sized nick ink: $small vs $glyphHeights", small.zip(glyphHeights).all { (chip, prose) -> chip <= prose } && small.zip(glyphHeights).any { (chip, prose) -> chip < prose })
+                                }
+                            }
+                            if (mentionStyle == NickMentionStyle.CHIP) {
+                                for (offset in nickOffsets) {
+                                    val tokenStart = if (annotated.text.getOrNull(offset - 1) == '@') offset - 1 else offset
+                                    assertRoundedNickChip(node, text, tokenStart, offset + 3, rawNick, label)
+                                }
                                 assertFalse("$label changes the native output", requireNotNull(baseline).sameAs(bitmap))
                             }
                             if (step == 0) baseline = bitmap
                             if (step == 3) assertTrue("$label restores exact native BOLD pixels", requireNotNull(baseline).sameAs(bitmap))
-                            if (step < 3) {
-                                File(proofs, "$label.png").outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                            val clickCount = mentionedNicks.size
+                            for (offset in nickOffsets) {
+                                node.performTouchInput {
+                                    click(if (mentionStyle == NickMentionStyle.CHIP) text.nickChipRects(offset, offset + 3).single().center else text.getBoundingBox(offset + 1).center)
+                                }
+                            }
+                            compose.runOnIdle {
+                                assertEquals("$label native mention taps resolve WHOIS without the @ prefix", listOf("bob", "bob"), mentionedNicks.drop(clickCount))
+                            }
+                            if (mentionStyle == NickMentionStyle.CHIP) {
+                                val holds = longPresses
+                                node.performTouchInput { longClick(text.nickChipRects(nickOffsets.first(), nickOffsets.first() + 3).single().center) }
+                                compose.runOnIdle {
+                                    assertEquals("$label chip hold opens row actions once", holds + 1, longPresses)
+                                    assertEquals("$label chip hold does not resolve WHOIS on release", clickCount + 2, mentionedNicks.size)
+                                }
+                            }
+                            for (word in listOf("@unknown", "bob https://")) {
+                                val offset = annotated.text.indexOf(word)
+                                node.performTouchInput { click(text.getBoundingBox(offset + 1).center) }
+                            }
+                            compose.runOnIdle {
+                                assertEquals("$label unknown and code tokens never resolve WHOIS", clickCount + 2, mentionedNicks.size)
                             }
                             compose.runOnIdle { selecting.value = true }
                             val selected = compose.onNodeWithTag("message_selection_text", useUnmergedTree = true).assertIsDisplayed().textLayout()
+                            if (mentionStyle == NickMentionStyle.CHIP) {
+                                val selectedImage = sample.captureToImage().asAndroidBitmap()
+                                File(proofs, "$label-selected.png").outputStream().use { assertTrue(selectedImage.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                            }
                             assertEquals("$label native selection retains characters", annotated.text, selected.layoutInput.text.text)
-                            assertEquals("$label native selection retains mention spans and offsets", annotated.spanStyles, selected.layoutInput.text.spanStyles)
+                            assertTrue("$label selection has no atomic placeholders", selected.placeholderRects.isEmpty())
+                            for (offset in nickOffsets) {
+                                val glyph = selected.getBoundingBox(offset + 1)
+                                val selectedWeight =
+                                    selected.layoutInput.text.spanStyles
+                                        .lastOrNull { offset in it.start until it.end && it.item.fontWeight != null }
+                                        ?.item
+                                        ?.fontWeight ?: selected.layoutInput.style.fontWeight
+                                assertEquals("$label selection only keeps BOLD for the BOLD setting", mentionStyle == NickMentionStyle.BOLD, selectedWeight == FontWeight.Bold)
+                                assertEquals("$label selection hit offset", offset + 1, selected.getOffsetForPosition(Offset(glyph.left + glyph.width * 0.2f, glyph.center.y)))
+                            }
+                            val selectedNode = compose.onNodeWithTag("message_selection_text", useUnmergedTree = true)
+                            val selectedClickCount = mentionedNicks.size
+                            for (offset in nickOffsets) {
+                                selectedNode.performTouchInput { click(selected.getBoundingBox(offset + 1).center) }
+                            }
+                            compose.runOnIdle {
+                                assertEquals("$label selecting suppresses mention WHOIS", selectedClickCount, mentionedNicks.size)
+                            }
                         }
                     }
+                }
+            }
+        }
+        for (layout in LayoutDensity.entries) {
+            for ((case, content, nick) in listOf(
+                Triple("wrapped", longNick, longNick),
+                Triple("bidi", "שלום bob עולם", "bob"),
+                Triple("punctuation", "Reading(bob),done.", "bob"),
+                Triple("start-body", "bob Reading", "bob"),
+                Triple("end-body", "Reading bob", "bob"),
+                Triple("bare", "bob", "bob"),
+                Triple("single-f", "f", "f"),
+                Triple("single-i", "i", "i"),
+                Triple("descenders", "gyp", "gyp"),
+                Triple("accent", "é", "é"),
+                Triple("capital-boundary", "BOB", "BOB"),
+                Triple("self-frame", "Reading @bob, done.", "bob"),
+                Triple("incoming-mention-frame", "Reading @bob, done.", "bob"),
+            )) {
+                compose.runOnIdle {
+                    selecting.value = false
+                    preset.value = ColorThemePreset.AYU_LIGHT
+                    density.value = layout
+                    kind.value = MessageKind.PRIVMSG
+                    enabled.value = true
+                    style.value = NickMentionStyle.CHIP
+                    body.value = content
+                    width.value = if (case == "wrapped") 150.dp else 380.dp
+                    self.value = case == "self-frame"
+                    hasMention.value = case == "incoming-mention-frame"
+                }
+                val label = "$layout-CHIP-$case"
+                val node = compose.onNodeWithText(content, substring = layout == LayoutDensity.COMPACT, useUnmergedTree = true).assertIsDisplayed()
+                val text = node.textLayout()
+                val bitmap = compose.onNodeWithTag("mention_style_sample").captureToImage().asAndroidBitmap()
+                File(proofs, "$label.png").outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                val token = nick
+                val start =
+                    text.layoutInput.text.text
+                        .lastIndexOf(token)
+                val end = start + token.length
+                assertTrue("$label keeps the native token", start >= 0)
+                assertRoundedNickChip(node, text, start, end, if (nick == "bob") rawNick else null, label)
+                if (case == "self-frame" || case == "incoming-mention-frame") {
+                    val clicks = mentionedNicks.size
+                    node.performTouchInput { click(text.nickChipRects(start, end).single().center) }
+                    compose.runOnIdle {
+                        assertEquals("$label padded chip retains native WHOIS inside its message frame", listOf("bob"), mentionedNicks.drop(clicks))
+                    }
+                }
+                if (case == "wrapped") assertTrue("$label exercises multiple chip fragments", text.nickChipRects(start, end).size > 1)
+                compose.runOnIdle { selecting.value = true }
+                val selected = compose.onNodeWithTag("message_selection_text", useUnmergedTree = true).textLayout()
+                val selectedBitmap = compose.onNodeWithTag("mention_style_sample").captureToImage().asAndroidBitmap()
+                File(proofs, "$label-selected.png").outputStream().use { assertTrue(selectedBitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                assertEquals("$label selection keeps body characters", text.layoutInput.text.text, selected.layoutInput.text.text)
+                assertTrue("$label selection has no atomic placeholders", selected.placeholderRects.isEmpty())
+                for (offset in start until end) {
+                    val glyph = selected.getBoundingBox(offset)
+                    val x = if (selected.getBidiRunDirection(offset) == ResolvedTextDirection.Rtl) glyph.right - glyph.width * 0.2f else glyph.left + glyph.width * 0.2f
+                    assertEquals("$label selection retains native hit offset $offset", offset, selected.getOffsetForPosition(Offset(x, glyph.center.y)))
                 }
             }
         }
@@ -2280,6 +2476,122 @@ class MessageBubbleFooterUiTest {
         const val LONG_NICK = "trev-before-rename-with-a-very-long-stored-nickname"
         const val BODY = "That sounds good to me."
         const val TIME = "14:32"
+    }
+}
+
+internal fun TextLayoutResult.nickChipRects(
+    start: Int,
+    end: Int,
+): List<Rect> =
+    layoutInput.placeholders.zip(placeholderRects).mapNotNull { (range, rect) ->
+        rect.takeIf { range.start < end && range.end > start }
+    }
+
+private fun fittedNickInkPixel(
+    pixel: Int,
+    backing: Int,
+    ink: Int,
+    outside: Int? = null,
+): Boolean {
+    val red = android.graphics.Color.red(ink) - android.graphics.Color.red(backing)
+    val green = android.graphics.Color.green(ink) - android.graphics.Color.green(backing)
+    val blue = android.graphics.Color.blue(ink) - android.graphics.Color.blue(backing)
+    val pixelRed = android.graphics.Color.red(pixel) - android.graphics.Color.red(backing)
+    val pixelGreen = android.graphics.Color.green(pixel) - android.graphics.Color.green(backing)
+    val pixelBlue = android.graphics.Color.blue(pixel) - android.graphics.Color.blue(backing)
+    val distance = red * red + green * green + blue * blue
+    if (distance == 0) return false
+    val coverage = (pixelRed * red + pixelGreen * green + pixelBlue * blue).toFloat() / distance
+    if (coverage !in 0.5f..1f ||
+        kotlin.math.abs(pixelRed - coverage * red) > 1f ||
+        kotlin.math.abs(pixelGreen - coverage * green) > 1f ||
+        kotlin.math.abs(pixelBlue - coverage * blue) > 1f
+    ) {
+        return false
+    }
+    if (outside == null) return true
+
+    val outsideRed = android.graphics.Color.red(outside) - android.graphics.Color.red(backing)
+    val outsideGreen = android.graphics.Color.green(outside) - android.graphics.Color.green(backing)
+    val outsideBlue = android.graphics.Color.blue(outside) - android.graphics.Color.blue(backing)
+    val outsideDistance = outsideRed * outsideRed + outsideGreen * outsideGreen + outsideBlue * outsideBlue
+    if (outsideDistance == 0) return true
+    val outsideCoverage =
+        ((pixelRed * outsideRed + pixelGreen * outsideGreen + pixelBlue * outsideBlue).toFloat() / outsideDistance).coerceIn(0f, 1f)
+    val inkError =
+        (pixelRed - coverage * red).let { it * it } +
+            (pixelGreen - coverage * green).let { it * it } +
+            (pixelBlue - coverage * blue).let { it * it }
+    val outsideError =
+        (pixelRed - outsideCoverage * outsideRed).let { it * it } +
+            (pixelGreen - outsideCoverage * outsideGreen).let { it * it } +
+            (pixelBlue - outsideCoverage * outsideBlue).let { it * it }
+    return inkError < outsideError
+}
+
+internal fun assertRoundedNickChip(
+    node: SemanticsNodeInteraction,
+    text: TextLayoutResult,
+    start: Int,
+    end: Int,
+    fill: Color? = null,
+    label: String,
+) {
+    val bitmap = node.captureToImage().asAndroidBitmap()
+    val rectangles = text.nickChipRects(start, end)
+    assertTrue("$label reserves actual atomic nickname placeholders", rectangles.isNotEmpty())
+    val ranges = text.layoutInput.placeholders.filter { it.start < end && it.end > start }
+    assertEquals("$label placeholder ranges preserve every literal nickname character", end - start, ranges.sumOf { minOf(end, it.end) - maxOf(start, it.start) })
+    val ink =
+        text.layoutInput.text.spanStyles
+            .filter { start in it.start until it.end && it.item.color != Color.Unspecified }
+            .fold(text.layoutInput.style.color) { _, span -> span.item.color }
+            .toArgb()
+
+    for ((line, box) in rectangles.withIndex()) {
+        val left =
+            kotlin.math
+                .ceil(box.left)
+                .toInt()
+                .coerceAtLeast(0)
+        val right = box.right.toInt().coerceAtMost(bitmap.width)
+        val top =
+            kotlin.math
+                .ceil(box.top)
+                .toInt()
+                .coerceAtLeast(0)
+        val bottom = box.bottom.toInt().coerceAtMost(bitmap.height)
+        val pixels = (top until bottom).flatMap { y -> (left until right).map { x -> bitmap.getPixel(x, y) } }
+        val background = bitmap.getPixel(left, top)
+        val chip =
+            fill?.toArgb() ?: pixels
+                .filter { it != background && it != ink }
+                .groupingBy { it }
+                .eachCount()
+                .maxBy { it.value }
+                .key
+        assertTrue("$label retains readable fitted ink", contrastRatio(Color(ink), Color(chip)) >= 4.5)
+        val painted = (top until bottom).flatMap { y -> (left until right).filter { x -> bitmap.getPixel(x, y) == chip }.map { x -> x to y } }
+        assertTrue("$label line $line paints nickname fill", painted.size > 3)
+        val x0 = painted.minOf { it.first }
+        val x1 = painted.maxOf { it.first }
+        val y0 = painted.minOf { it.second }
+        val y1 = painted.maxOf { it.second }
+        val nickInk =
+            (top until bottom).flatMap { y ->
+                (left until right).mapNotNull { x ->
+                    val pixel = bitmap.getPixel(x, y)
+                    (x to y).takeIf { fittedNickInkPixel(pixel, chip, ink, outside = background) }
+                }
+            }
+        assertTrue("$label line $line contains measured nickname ink", nickInk.isNotEmpty())
+        val inkLeft = nickInk.minOf { it.first }
+        val inkRight = nickInk.maxOf { it.first }
+        assertTrue("$label fragment $line has visible left interior padding: fill=$x0 ink=$inkLeft", inkLeft > x0)
+        assertTrue("$label fragment $line has visible right interior padding: ink=$inkRight fill=$x1", inkRight < x1)
+        for ((x, y) in listOf(x0 to y0, x1 to y0, x0 to y1, x1 to y1)) {
+            assertTrue("$label line $line cuts out rounded corner ($x,$y)", bitmap.getPixel(x, y) != chip)
+        }
     }
 }
 

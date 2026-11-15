@@ -1,19 +1,27 @@
 package io.github.trevarj.motd.ui.components
 
 import android.os.Build
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.selection.rememberSelectionState
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +33,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
@@ -33,6 +42,7 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -43,23 +53,34 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.getTextLayoutResult
 import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.LocalSurfaceEffects
+import io.github.trevarj.motd.ui.theme.MotdShapes
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 
@@ -104,7 +125,6 @@ internal fun FoolBodySelection(content: @Composable () -> Unit) {
     }
 }
 
-/** The original single paragraph is laid out once. Only its annotated body range is concealed. */
 @Composable
 internal fun FoolBodyText(
     text: AnnotatedString,
@@ -115,6 +135,86 @@ internal fun FoolBodyText(
     overflow: TextOverflow = TextOverflow.Clip,
     concealment: FoolBodyConcealment,
     inlineBody: Boolean = false,
+    onLinkLongPress: (() -> Unit)? = null,
+) {
+    val selecting = LocalMessageSelection.current != null
+    val nativeLayout = remember(text, selecting) { mutableStateOf<TextLayoutResult?>(null) }
+    val chips = remember(text) { text.getStringAnnotations(NICK_CHIP_RANGE, 0, text.length) }
+    if (chips.isEmpty()) {
+        FoolBodyTextHost(text, modifier, color, style, maxLines, overflow, concealment, inlineBody, onLinkLongPress, nativeLayout)
+        return
+    }
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    val resolvedStyle = LocalTextStyle.current.merge(style).let { if (color == Color.Unspecified) it else it.copy(color = color) }
+    val layoutDirection = LocalLayoutDirection.current
+    val layoutSemantics =
+        if (concealment.concealed) {
+            Modifier
+        } else {
+            Modifier.semantics {
+                getTextLayoutResult { results ->
+                    nativeLayout.value?.let { results.add(it) } ?: false
+                }
+            }
+        }
+    BoxWithConstraints(modifier.then(layoutSemantics)) {
+        val width = constraints.maxWidth
+        val prepared =
+            remember(text, chips, width, density, measurer, resolvedStyle, layoutDirection) {
+                val horizontal = with(density) { 4.dp.toPx() }
+                val vertical = with(density) { 1.dp.toPx() }
+                val available = (width - horizontal * 2).toInt().coerceAtLeast(1)
+                val builder = AnnotatedString.Builder(text)
+                val content = mutableMapOf<String, InlineTextContent>()
+                val captionStyle = resolvedStyle.copy(lineHeight = TextUnit.Unspecified)
+                chips.forEach { chip ->
+                    val caption = text.subSequence(chip.start, chip.end)
+                    val wrapped = measurer.measure(caption, captionStyle, constraints = Constraints(maxWidth = available))
+                    for (line in 0 until wrapped.lineCount) {
+                        val from = wrapped.getLineStart(line)
+                        val to = wrapped.getLineEnd(line)
+                        if (from == to) continue
+                        val fragment = if (wrapped.lineCount == 1) caption else caption.subSequence(from, to)
+                        val measured = if (wrapped.lineCount == 1) wrapped else measurer.measure(fragment, captionStyle, softWrap = false)
+                        val id = "nick:${chip.start}:$from"
+                        val placeholder =
+                            Placeholder(
+                                with(density) { (measured.size.width + horizontal * 2).toSp() },
+                                with(density) { (measured.size.height + vertical * 2).toSp() },
+                                PlaceholderVerticalAlign.TextCenter,
+                            )
+                        val annotation = buildAnnotatedString { appendInlineContent(id, fragment.text) }
+                        annotation.getStringAnnotations(0, annotation.length).forEach {
+                            builder.addStringAnnotation(it.tag, it.item, chip.start + from + it.start, chip.start + from + it.end)
+                        }
+                        content[id] =
+                            InlineTextContent(placeholder) {
+                                Canvas(Modifier.fillMaxSize().background(Color(chip.item.toULong()), MotdShapes.tag).clearAndSetSemantics {}) {
+                                    drawText(measured, topLeft = Offset(horizontal, vertical))
+                                }
+                            }
+                    }
+                }
+                builder.toAnnotatedString() to content
+            }
+        FoolBodyTextHost(prepared.first, Modifier, color, style, maxLines, overflow, concealment, inlineBody, onLinkLongPress, nativeLayout, prepared.second)
+    }
+}
+
+@Composable
+private fun FoolBodyTextHost(
+    text: AnnotatedString,
+    modifier: Modifier,
+    color: Color,
+    style: TextStyle,
+    maxLines: Int,
+    overflow: TextOverflow,
+    concealment: FoolBodyConcealment,
+    inlineBody: Boolean,
+    onLinkLongPress: (() -> Unit)?,
+    layoutState: MutableState<TextLayoutResult?>,
+    inlineContent: Map<String, InlineTextContent> = emptyMap(),
 ) {
     val ranges = remember(text) { text.getStringAnnotations(FOOL_BODY_RANGE, 0, text.length) }
     val start = ranges.minOfOrNull { it.start } ?: if (inlineBody) text.length else 0
@@ -127,8 +227,7 @@ internal fun FoolBodyText(
     val blurLayer = if (nativeBlur && concealed) rememberGraphicsLayer() else null
     val blurEffect = remember(nativeBlur, concealed, radius) { if (nativeBlur && concealed) BlurEffect(radius, radius, TileMode.Decal) else null }
     val dismissSelection = LocalMessageSelection.current.takeUnless { concealed || start >= end }
-    // Entering selection replaces the Text host; its previous layout cannot prove readiness.
-    var layout by remember(dismissSelection != null) { mutableStateOf<TextLayoutResult?>(null) }
+    var layout by layoutState
     var revealFocused by remember { mutableStateOf(false) }
     val pathLayout = layout
     val bodyPath =
@@ -142,17 +241,60 @@ internal fun FoolBodyText(
             if (!concealed) {
                 text
             } else {
-                buildAnnotatedString {
-                    append(text.subSequence(0, start))
-                    val body = text.subSequence(start, end)
-                    append(AnnotatedString(body.text, body.spanStyles, body.paragraphStyles))
-                    append(text.subSequence(end, text.length))
+                text.flatMapAnnotations { annotation ->
+                    if (annotation.item is LinkAnnotation && annotation.start < end && annotation.end > start) emptyList() else listOf(annotation)
                 }
             }
+        }
+    val latestLinkLongPress by rememberUpdatedState(onLinkLongPress)
+    val haptic = LocalHapticFeedback.current
+    val linkLongPressModifier =
+        if (!concealed && dismissSelection == null && LocalMessageActionsEnabled.current && onLinkLongPress != null &&
+            displayed.hasLinkAnnotations(0, displayed.length)
+        ) {
+            Modifier.pointerInput(displayed, haptic) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = true, pass = PointerEventPass.Initial)
+                    if (currentEvent.changes.size != 1) return@awaitEachGesture
+                    val result = layout ?: return@awaitEachGesture
+                    if (result.layoutInput.text.text != displayed.text) return@awaitEachGesture
+                    val offset = result.nativeOffsetAt(down.position) ?: return@awaitEachGesture
+                    if (offset >= displayed.length || displayed.getLinkAnnotations(offset, offset + 1).isEmpty()) {
+                        return@awaitEachGesture
+                    }
+                    val nativeDown = awaitPointerEvent(PointerEventPass.Final)
+                    if (nativeDown.changes.none { it.id == down.id && it.isConsumed }) return@awaitEachGesture
+                    val releasedOrMoved =
+                        withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                if (event.changes.size != 1 ||
+                                    event.changes.any {
+                                        it.isConsumed || !it.pressed || (it.position - down.position).getDistance() > viewConfiguration.touchSlop ||
+                                            it.position.x < 0 || it.position.y < 0 || it.position.x > size.width || it.position.y > size.height
+                                    }
+                                ) {
+                                    return@withTimeoutOrNull true
+                                }
+                            }
+                        }
+                    if (releasedOrMoved == null) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        latestLinkLongPress?.invoke()
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            event.changes.forEach { it.consume() }
+                        } while (event.changes.any { it.pressed })
+                    }
+                }
+            }
+        } else {
+            Modifier
         }
     val body: @Composable (Modifier) -> Unit = { textModifier ->
         Text(
             text = displayed,
+            inlineContent = inlineContent,
             color = color,
             style = style,
             maxLines = maxLines,
@@ -160,6 +302,7 @@ internal fun FoolBodyText(
             onTextLayout = { layout = it },
             modifier =
                 textModifier
+                    .then(linkLongPressModifier)
                     .then(
                         if (!concealed) {
                             Modifier
@@ -198,10 +341,8 @@ internal fun FoolBodyText(
                                     awaitEachGesture {
                                         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                                         val result = layout
-                                        val offset = result?.getOffsetForPosition(down.position)
-                                        if ((start == 0 && end == text.length) ||
-                                            (offset != null && offset in start until end && result.getBoundingBox(offset).contains(down.position))
-                                        ) {
+                                        val offset = result?.nativeOffsetAt(down.position)
+                                        if ((start == 0 && end == text.length) || (offset != null && offset in start until end)) {
                                             down.consume()
                                             var released: Boolean
                                             var cancelled = false
@@ -275,6 +416,14 @@ internal fun FoolBodyText(
             onDispose { latestDismiss() }
         }
     }
+}
+
+private fun TextLayoutResult.nativeOffsetAt(position: Offset): Int? {
+    placeholderRects.forEachIndexed { index, rect ->
+        if (rect?.contains(position) == true) return layoutInput.placeholders[index].start
+    }
+    val offset = getOffsetForPosition(position)
+    return offset.takeIf { it < layoutInput.text.length && getBoundingBox(it).contains(position) }
 }
 
 @Composable

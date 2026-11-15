@@ -24,6 +24,31 @@ class CompactLineTest {
     private val link = Color(0xFF778899)
 
     @Test
+    fun compact_chip_markers_and_clicks_cover_only_body_mentions() {
+        val clicked = mutableListOf<String>()
+        val line =
+            buildCompactLine(
+                "bob",
+                "@BoB `bob` https://example.com/bob unknown",
+                MessageKind.PRIVMSG,
+                nick,
+                body,
+                link,
+                mentionColor = { if (it.equals("bob", ignoreCase = true)) Color.Red else null },
+                nickMentionStyle = NickMentionStyle.CHIP,
+                onMentionClick = { clicked.add(it) },
+            )
+        val marker = line.getStringAnnotations(NICK_CHIP_RANGE, 0, line.length).single()
+        assertEquals("@BoB", line.text.substring(marker.start, marker.end))
+        assertEquals(Color.Red.value.toString(), marker.item)
+        val mention = line.getLinkAnnotations(0, line.length).single { it.item is LinkAnnotation.Clickable }
+        assertEquals(marker.start, mention.start)
+        assertEquals(marker.end, mention.end)
+        mention.item.linkInteractionListener!!.onClick(mention.item)
+        assertEquals(listOf("BoB"), clicked)
+    }
+
+    @Test
     fun privmsg_renders_every_bracket_pair_as_copyable_text() {
         val prefixes =
             mapOf(
@@ -126,7 +151,8 @@ class CompactLineTest {
                 val start = line.text.indexOf("bob")
                 val span = line.spanStyles.single { it.start == start && it.end == start + 3 }.item
                 assertEquals(if (style == NickMentionStyle.BOLD) FontWeight.Bold else null, span.fontWeight)
-                assertEquals(if (style == NickMentionStyle.CHIP) mention else Color.Unspecified, span.background)
+                assertEquals(Color.Unspecified, span.background)
+                assertEquals(if (style == NickMentionStyle.CHIP) listOf(mention.value.toString()) else emptyList<String>(), line.getStringAnnotations(NICK_CHIP_RANGE, start, start + 3).map { it.item })
                 if (style == NickMentionStyle.CHIP) {
                     assertReadingContrast("compact chip", span.color, mention)
                 } else {

@@ -121,7 +121,7 @@ class MessageBubbleLayoutTest {
         }
     }
 
-    @Test fun chipMentions_keepRawBackgroundAndReadableInkAcrossInlineRenderersIncludingDimmed() {
+    @Test fun chipMentions_keepReadableInkAcrossInlineRenderersIncludingDimmed() {
         val rawNick = Color(0xFF777777)
         val fill = Color(0xFFEEEEEE)
         for (dimmed in listOf(false, true)) {
@@ -139,12 +139,13 @@ class MessageBubbleLayoutTest {
                         },
                     )
                 for (text in bodies) {
-                    assertTrue(text.text.endsWith("@bob"))
                     val start = text.text.indexOf("@bob")
-                    val chip = text.spanStyles.single { it.start == start && it.end == start + 4 && it.item.background != Color.Unspecified }.item
-                    assertEquals("dimmed=$dimmed colored=$colored", rawNick, chip.background)
-                    assertEquals(ensureContrast(ink, listOf(rawNick), minimum), chip.color)
-                    assertTrue(contrastRatio(chip.color, rawNick) >= 4.5 - 0.00001)
+                    val mentionInk =
+                        text.spanStyles
+                            .last { start in it.start until it.end && it.item.color != Color.Unspecified }
+                            .item.color
+                    assertEquals(ensureContrast(ink, listOf(rawNick), minimum), mentionInk)
+                    assertTrue(contrastRatio(mentionInk, rawNick) >= 4.5 - 0.00001)
                 }
             }
         }

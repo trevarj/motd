@@ -237,9 +237,14 @@ flowchart TD
   notification policy retains effective policy and its global/server source. Notification avatars remain circular.
   Nick mention style is global: None keeps optional nick coloring without added emphasis;
   Bold is the default and also works with nick colors disabled; Chip uses the original
-  nick color as its background with contrast-fitted ink. Matching excludes URLs/code;
-  sender prefixes and composer styling remain separate. All layouts and ACTIONs retain
-  their single selectable paragraph and unchanged body offsets.
+  nick color with contrast-fitted ink and the chat-card tag's rounded shape. Inline
+  labels use 85% text size with 4dp horizontal and 1dp vertical padding; long nicks
+  split into bounded native fragments. Selecting text temporarily flattens chips to
+  ordinary nick text for character-by-character copying, and may reflow the message.
+  Literal characters and body offsets stay unchanged. Known mentions open the existing
+  nickname/WHOIS sheet in every style; matching excludes URLs/code. Mention links stay
+  inactive through concealment or active transcript selection, while long-press still
+  opens message actions. Sender prefixes and composer styling remain separate.
   Appearance → Transparency and blur owns continuous 0–100 controls for ordinary PRIVMSG, NOTICE, and ACTION
   backings in every layout, with or without nickname tint: opacity defaults to 100%, and independent
   wallpaper blur defaults to Off (0), mapping linearly to 32dp at 100. Zero opacity removes tint,

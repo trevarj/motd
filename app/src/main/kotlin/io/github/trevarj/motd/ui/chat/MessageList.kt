@@ -405,7 +405,7 @@ fun MessageList(
     // flips a single fool row either way so expand/re-collapse is bidirectional (bug #9).
     foolExpanded: (Long) -> Boolean = { false },
     onToggleFool: (Long) -> Unit = {},
-    // Tapping a non-self sender's name/avatar opens the nick sheet.
+    // Tapping a non-self sender or body mention opens the nick sheet.
     onSenderClick: (String) -> Unit = {},
     onAcceptInvite: (Long) -> Unit = {},
     onDismissInvite: (Long) -> Unit = {},
@@ -831,6 +831,7 @@ fun MessageList(
                         onVoiceTranscriptionCancel = onVoiceTranscriptionCancel,
                         onOpenLink = onOpenLink,
                         onSenderClick = onSenderClick,
+                        onMentionClick = onSenderClick.takeIf { selectionMessageId == null },
                         replyPreview = replyPreview,
                         onReplyPreviewClick = onReplyPreviewClick,
                         translation = translation,
@@ -1827,6 +1828,7 @@ private fun MessageRow(
     onVoiceTranscriptionCancel: (String) -> Unit,
     onOpenLink: (String) -> Unit,
     onSenderClick: (String) -> Unit,
+    onMentionClick: ((String) -> Unit)?,
     replyPreview: (ReplyTarget) -> StateFlow<ReplyPreviewData?>,
     onReplyPreviewClick: (ReplyTarget) -> Unit,
     // Non-null for an expanded fool row: renders a "hide" chip above the bubble that re-collapses it.
@@ -2186,6 +2188,7 @@ private fun MessageRow(
                         },
                         // Only non-self senders open the nick sheet.
                         onSenderClick = if (msg.isSelf) null else ({ onSenderClick(msg.sender) }),
+                        onMentionClick = onMentionClick,
                         sourceWrapper = translatedSourceWrapper,
                         trailingContent = translationContent.takeUnless { standaloneAudio },
                         containerModifier = if (standaloneAudio) Modifier else translationHostModifier,

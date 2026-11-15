@@ -27,6 +27,78 @@ import org.junit.Test
 
 class MessageBubbleTextTest {
     @Test
+    fun action_mentions_remain_interactive_without_styling_or_colors() {
+        val clicked = mutableListOf<String>()
+        val line =
+            buildActionLine(
+                sender = "alice",
+                text = "@BoB unknown `bob`",
+                accentColor = Color.Blue,
+                nameColor = Color.Red,
+                bodyColor = Color.Black,
+                linkColor = Color.Blue,
+                mentionsActive = false,
+                mentionColor = {
+                    if (matchesKnownMention(it, setOf("bob"), IrcIdentityRules())) Color.Unspecified else null
+                },
+                nickMentionStyle = NickMentionStyle.NONE,
+                mentionColorsEnabled = false,
+                onMentionClick = { clicked.add(it) },
+            )
+        val mention = line.getLinkAnnotations(0, line.length).single()
+        assertEquals("@BoB", line.text.substring(mention.start, mention.end))
+        mention.item.linkInteractionListener!!.onClick(mention.item)
+        assertEquals(listOf("BoB"), clicked)
+        assertTrue(line.getStringAnnotations(NICK_CHIP_RANGE, 0, line.length).isEmpty())
+    }
+
+    @Test
+    fun mention_links_preserve_tokens_and_exclude_code_urls_and_unknown_nicks() {
+        for (style in NickMentionStyle.entries) {
+            val clicked = mutableListOf<String>()
+            val body =
+                linkifiedBody(
+                    text = "@BoB, bob `bob` https://example.com/bob unknown",
+                    linkColor = Color.Blue,
+                    mentionsActive = false,
+                    mentionColor = { if (it.equals("bob", ignoreCase = true)) Color.Red else null },
+                    nickMentionStyle = style,
+                    mentionColorsEnabled = false,
+                    onMentionClick = { clicked.add(it) },
+                )
+            val mentions = body.getLinkAnnotations(0, body.length).filter { it.item is LinkAnnotation.Clickable }
+            assertEquals(listOf("@BoB", "bob"), mentions.map { body.text.substring(it.start, it.end) })
+            assertEquals(listOf("mention:BoB", "mention:bob"), mentions.map { (it.item as LinkAnnotation.Clickable).tag })
+            mentions.forEach { it.item.linkInteractionListener!!.onClick(it.item) }
+            assertEquals(listOf("BoB", "bob"), clicked)
+            mentions.forEach { assertEquals(SpanStyle(), it.item.styles!!.style) }
+            val markers = body.getStringAnnotations(NICK_CHIP_RANGE, 0, body.length)
+            assertEquals(if (style == NickMentionStyle.CHIP) 2 else 0, markers.size)
+            markers.forEach {
+                assertEquals(Color.Red.value.toString(), it.item)
+                assertTrue(body.spanStyles.any { span -> span.start == it.start && span.end == it.end && span.item.background == Color.Unspecified })
+            }
+            if (style == NickMentionStyle.NONE) {
+                assertTrue(body.spanStyles.all { it.item.fontWeight == null })
+                assertTrue(body.spanStyles.filter { it.start == 0 && it.end == 4 }.all { it.item.color == Color.Unspecified })
+            }
+        }
+    }
+
+    @Test
+    fun native_background_and_code_are_not_automatic_chips() {
+        val body =
+            linkifiedBody(
+                text = "\u000304,02plain\u000f `bob`",
+                linkColor = Color.Blue,
+                codeBackground = Color.Red,
+                nickMentionStyle = NickMentionStyle.CHIP,
+                mentionColor = { if (it == "bob") Color.Red else null },
+            )
+        assertTrue(body.getStringAnnotations(NICK_CHIP_RANGE, 0, body.length).isEmpty())
+    }
+
+    @Test
     fun bot_indicator_only_changes_the_display_label() {
         assertEquals("helper 🤖", botDisplayName("helper", isBot = true))
         assertEquals("helper", botDisplayName("helper", isBot = false))
@@ -86,7 +158,8 @@ class MessageBubbleTextTest {
                 for ((start, end) in listOf(6 to 10, 12 to 15)) {
                     val mention = body.spanStyles.single { it.start == start && it.end == end }.item
                     assertEquals(style.name, if (style == NickMentionStyle.BOLD) FontWeight.Bold else null, mention.fontWeight)
-                    assertEquals(style.name, if (style == NickMentionStyle.CHIP) Color.Red else Color.Unspecified, mention.background)
+                    assertEquals(style.name, Color.Unspecified, mention.background)
+                    assertEquals(if (style == NickMentionStyle.CHIP) listOf(Color.Red.value.toString()) else emptyList<String>(), body.getStringAnnotations(NICK_CHIP_RANGE, start, end).map { it.item })
                     if (style == NickMentionStyle.CHIP) {
                         assertReadingContrast("chip colored=$colored", mention.color, Color.Red)
                     } else {
@@ -227,7 +300,8 @@ class MessageBubbleTextTest {
                 val start = text.text.indexOf("@bob")
                 val mention = text.spanStyles.single { it.start == start && it.end == start + 4 }.item
                 assertEquals(if (style == NickMentionStyle.BOLD) FontWeight.Bold else null, mention.fontWeight)
-                assertEquals(if (style == NickMentionStyle.CHIP) Color.Red else Color.Unspecified, mention.background)
+                assertEquals(Color.Unspecified, mention.background)
+                assertEquals(if (style == NickMentionStyle.CHIP) listOf(Color.Red.value.toString()) else emptyList<String>(), text.getStringAnnotations(NICK_CHIP_RANGE, start, start + 4).map { it.item })
                 if (style != NickMentionStyle.CHIP) assertEquals(Color.Unspecified, mention.color)
             }
         }
@@ -250,9 +324,10 @@ class MessageBubbleTextTest {
         assertEquals(Color.Black, explicit.background)
         assertEquals(ensureContrast(Color.Red, listOf(Color.Black), MESSAGE_TEXT_CONTRAST), explicit.color)
         val automatic = body.spanStyles.last { it.start == 4 && it.end == 7 }.item
-        assertEquals(Color.Yellow, automatic.background)
+        assertEquals(Color.Unspecified, automatic.background)
+        assertEquals(Color.Yellow.value.toString(), body.getStringAnnotations(NICK_CHIP_RANGE, 4, 7).single().item)
         assertEquals(null, automatic.fontWeight)
-        assertReadingContrast("automatic chip", automatic.color, automatic.background)
+        assertReadingContrast("automatic chip", automatic.color, Color.Yellow)
     }
 
     @Test
