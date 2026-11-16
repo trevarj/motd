@@ -37,6 +37,7 @@ private val COMPOSER_STYLE = stringPreferencesKey("composer_style_v1")
 private val INPUT_CORNER_STYLE = stringPreferencesKey("input_corner_style_v1")
 private val AVATAR_SHAPE = stringPreferencesKey("avatar_shape_v1")
 private val CHAT_CARD_CORNER_STYLE = stringPreferencesKey("chat_card_corner_style_v1")
+private val COLLAPSE_TITLE_BAR = booleanPreferencesKey("collapse_title_bar_v1")
 private val MEDIA_CORNER_STYLE = stringPreferencesKey("media_corner_style_v1")
 private val UI_ICON_SET = stringPreferencesKey("ui_icon_set_v1")
 private val BUBBLE_CORNER_STYLE = stringPreferencesKey("bubble_corner_style_v1")
@@ -133,6 +134,7 @@ class AppearancePrefsImpl
                     chatCardCornerStyle =
                         prefs[CHAT_CARD_CORNER_STYLE]?.let { runCatching { UiCornerStyle.valueOf(it) }.getOrNull() }
                             ?: UiCornerStyle.DEFAULT,
+                    collapseTitleBar = prefs[COLLAPSE_TITLE_BAR] ?: true,
                     mediaCornerStyle =
                         prefs[MEDIA_CORNER_STYLE]?.let { runCatching { UiCornerStyle.valueOf(it) }.getOrNull() }
                             ?: UiCornerStyle.DEFAULT,
@@ -242,6 +244,10 @@ class AppearancePrefsImpl
 
         override suspend fun setChatCardCornerStyle(style: UiCornerStyle) {
             store.edit { it[CHAT_CARD_CORNER_STYLE] = style.name }
+        }
+
+        override suspend fun setCollapseTitleBar(enabled: Boolean) {
+            store.edit { it[COLLAPSE_TITLE_BAR] = enabled }
         }
 
         override suspend fun setMediaCornerStyle(style: UiCornerStyle) {

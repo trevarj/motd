@@ -163,7 +163,7 @@ class BouncerServClientImpl
                                 }
 
                                 is SendAcceptance.Accepted -> {
-                                    when (acceptance.immediateWireAcceptance) {
+                                    when (acceptance.wireOutcome.await()) {
                                         ImmediateWireAcceptance.ACCEPTED -> {}
 
                                         ImmediateWireAcceptance.DISCONNECTED -> {

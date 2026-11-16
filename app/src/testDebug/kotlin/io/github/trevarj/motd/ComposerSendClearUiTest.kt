@@ -58,6 +58,7 @@ import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertHeightIsEqualTo
@@ -467,6 +468,8 @@ class ComposerSendClearUiTest {
         pages: Flow<PagingData<MessageEntity>> = flowOf(PagingData.from(emptyList())),
         outgoingFlight: () -> OutgoingFlight? = { null },
         onFlightSettled: (Long) -> Unit = {},
+        onRetry: (MessageEntity) -> Unit = {},
+        onDelete: (MessageEntity) -> Unit = {},
         chatBuffer: () -> BufferEntity = { buffer },
         connectionState: IrcClientState? = IrcClientState.Ready("me", emptySet(), emptyMap()),
         memberCount: Int? = null,
@@ -499,6 +502,7 @@ class ComposerSendClearUiTest {
         dickordEnabled: () -> Boolean = { false },
         layoutDensity: () -> LayoutDensity = { LayoutDensity.COMFORTABLE },
         chatWallpaper: WallpaperSelection = WallpaperSelection(),
+        collapseTitleBar: () -> Boolean = { true },
         onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
         initialTarget: () -> ChatPositionTarget? = { null },
         entryState: () -> EntryPositionState = { EntryPositionState.Settled },
@@ -581,7 +585,8 @@ class ComposerSendClearUiTest {
                             },
                             onReact = onReact,
                             reactionChips = reactionChips,
-                            onRetry = {},
+                            onRetry = onRetry,
+                            onDelete = onDelete,
                             loadPreview = { _, _ -> null },
                             onAudioToggle = onAudioToggle,
                             composerDraft = ownerDraft ?: draft(),
@@ -616,6 +621,7 @@ class ComposerSendClearUiTest {
                             showLinkPreviews = showLinkPreviews,
                             composerStyle = composerStyle(),
                             chatWallpaper = chatWallpaper,
+                            collapseTitleBar = collapseTitleBar(),
                             memberNicks = memberNicks,
                             knownNicks = knownNicks,
                             voiceState = voiceState(),
@@ -1123,7 +1129,7 @@ class ComposerSendClearUiTest {
     }
 
     @Test
-    fun forwardSendingLocksSheetAndDurableUnsentAcceptanceOffersOnlyClose() {
+    fun forwardSendingLocksSheetUntilDurableAcceptanceThenCloses() {
         val destination = buffer.copy(id = 2, name = "alice", displayName = "alice", type = BufferType.QUERY)
         val gate = CompletableDeferred<Unit>()
         val sends = mutableListOf<String>()
@@ -1175,25 +1181,12 @@ class ComposerSendClearUiTest {
                 assertEquals(1, sends.size)
                 gate.complete(Unit)
             }
-            waitForForward(owner) { owner.forwardState.value?.acceptance != null && owner.forwardState.value?.sending == false }
-            compose.onNodeWithTag("message_forward_error").assertTextEquals("Message saved in the destination but not fully sent. Open that chat to review delivery.")
-            compose.onNodeWithTag("message_forward_preview").assertTextEquals("> alice: Bonjour")
-            compose.onNodeWithTag("message_forward_include_sender").assertDoesNotExist()
-            compose.onNodeWithTag("message_forward_change_destination").assertDoesNotExist()
-            compose.onNodeWithTag("message_forward_confirm").assertDoesNotExist()
-            compose.onNodeWithTag("message_forward_cancel").assertIsEnabled().assertTextEquals("Close")
+            waitForForward(owner) { owner.forwardState.value == null }
             compose.runOnIdle {
-                assertEquals(
-                    ImmediateWireAcceptance.DISCONNECTED,
-                    owner.forwardState.value
-                        ?.acceptance
-                        ?.immediateWireAcceptance,
-                )
                 assertEquals(listOf("> alice: Bonjour"), sends)
                 owner.confirmForward()
                 assertEquals(1, sends.size)
             }
-            compose.onNodeWithTag("message_forward_cancel").performClick()
             compose.onNodeWithTag("message_forward_sheet").assertDoesNotExist()
             compose.onNodeWithTag("chat_composer_field").assertTextEquals("Unsent draft")
             compose.onNodeWithText("Replying to alice").assertIsDisplayed()
@@ -1366,7 +1359,6 @@ class ComposerSendClearUiTest {
             compose.onNodeWithTag("message_forward_confirm").performClick()
             waitForForward(owner) { owner.forwardState.value?.error == MessageForwardError.SEND_REJECTED && attempts.size == 2 }
             compose.runOnIdle {
-                assertNull(owner.forwardState.value?.acceptance)
                 assertEquals(listOf("> alice: Bonjour", "> Bonjour"), attempts)
             }
             compose
@@ -3223,9 +3215,21 @@ class ComposerSendClearUiTest {
         assertUnreadEntryUsesFinalViewport(firstUnreadIndex = 1, clampedAtBottom = true)
     }
 
+    @Test
+    fun unreadEntryKeepsExpandedViewportWhenTitleBarCollapseIsDisabled() {
+        assertUnreadEntryUsesFinalViewport(firstUnreadIndex = 50, clampedAtBottom = false, collapseTitleBar = false)
+    }
+
+    @Test
+    fun unreadEntryUsesUpdatedTitleBarPreferenceWhileWaitingForHistory() {
+        assertUnreadEntryUsesFinalViewport(firstUnreadIndex = 50, clampedAtBottom = false, collapseTitleBar = false, changeCollapseWhileLoading = true)
+    }
+
     private fun assertUnreadEntryUsesFinalViewport(
         firstUnreadIndex: Int,
         clampedAtBottom: Boolean,
+        collapseTitleBar: Boolean = true,
+        changeCollapseWhileLoading: Boolean = false,
     ) {
         val history = headerHistory()
         val firstUnread = history[firstUnreadIndex]
@@ -3233,21 +3237,24 @@ class ComposerSendClearUiTest {
         var target by mutableStateOf<ChatPositionTarget?>(null)
         var entry by mutableStateOf<EntryPositionState>(EntryPositionState.Pending)
         var positionsHandled = 0
+        var collapse by mutableStateOf(if (changeCollapseWhileLoading) true else collapseTitleBar)
+
+        fun page(refresh: LoadState) =
+            PagingData.from(
+                history,
+                sourceLoadStates =
+                    LoadStates(
+                        refresh = refresh,
+                        prepend = LoadState.NotLoading(endOfPaginationReached = true),
+                        append = LoadState.NotLoading(endOfPaginationReached = true),
+                    ),
+            )
+
+        val pages = MutableStateFlow(page(if (changeCollapseWhileLoading) LoadState.Loading else LoadState.NotLoading(endOfPaginationReached = false)))
         setContent(
             draft = { ComposerDraftState(hydrated = true) },
-            // Static PagingData without source states displays rows but leaves refresh Loading.
-            pages =
-                flowOf(
-                    PagingData.from(
-                        history,
-                        sourceLoadStates =
-                            LoadStates(
-                                refresh = LoadState.NotLoading(endOfPaginationReached = false),
-                                prepend = LoadState.NotLoading(endOfPaginationReached = true),
-                                append = LoadState.NotLoading(endOfPaginationReached = true),
-                            ),
-                    ),
-                ),
+            collapseTitleBar = { collapse },
+            pages = pages,
             initialTarget = { target },
             entryState = { entry },
             unreadEntrySnapshot =
@@ -3278,6 +3285,15 @@ class ComposerSendClearUiTest {
         }
         // Robolectric's paused main looper is drained by waitForIdle, not waitUntil.
         compose.waitForIdle()
+        if (changeCollapseWhileLoading) {
+            compose.runOnIdle {
+                assertEquals(0, positionsHandled)
+                collapse = collapseTitleBar
+            }
+            compose.waitForIdle()
+            compose.runOnIdle { pages.value = page(LoadState.NotLoading(endOfPaginationReached = false)) }
+            compose.waitForIdle()
+        }
         compose.waitUntil(5_000) { positionsHandled == 1 }
         compose.waitForIdle()
         val timeline = compose.onNodeWithTag("chat_timeline")
@@ -3297,7 +3313,11 @@ class ComposerSendClearUiTest {
             assertTrue("The short unread run must remain clamped below the viewport top", dividerTop > viewportTop + 1f)
             compose.onNodeWithTag("chat_scroll_to_bottom_fab").assertDoesNotExist()
         } else {
-            assertTrue("Unread placement must already use history chrome", placedHeight < expandedHeight)
+            if (collapseTitleBar) {
+                assertTrue("Unread placement must already use history chrome", placedHeight < expandedHeight)
+            } else {
+                assertEquals("Disabled title collapse keeps the expanded viewport", expandedHeight, placedHeight, 1f)
+            }
             assertEquals("The unread boundary must top the unobscured viewport", bar.fetchSemanticsNode().boundsInRoot.bottom, dividerTop, 1f)
         }
         assertTrue(firstTop >= divider.fetchSemanticsNode().boundsInRoot.bottom)
@@ -3427,6 +3447,42 @@ class ComposerSendClearUiTest {
         assertEquals("Latest must restore the expanded titlebar", expandedHeight, headerHeight(), 0.5f)
         assertArrayEquals("Wallpaper moved after titlebar reexpansion", expandedPixels, wallpaperPixels())
         compose.mainClock.autoAdvance = true
+    }
+
+    @Test
+    fun disablingTitleBarCollapseKeepsToolbarActionsWhileReadingHistory() {
+        var collapse by mutableStateOf(false)
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            pages = flowOf(PagingData.from(headerHistory())),
+            collapseTitleBar = { collapse },
+            memberCount = 42,
+            onSubmit = {},
+        )
+        val bar = compose.onNodeWithTag("chat_top_app_bar", useUnmergedTree = true)
+        val expandedBounds = bar.getUnclippedBoundsInRoot()
+        val expandedHeight = (expandedBounds.bottom - expandedBounds.top).value
+        val timeline = compose.onNodeWithTag("chat_timeline")
+        timeline.performScrollToIndex(50)
+        compose.onNodeWithTag("chat_title").assertHeightIsAtLeast(48.dp).assertHasClickAction()
+        compose.onNodeWithTag("chat_overflow").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithTag("chat_compact_actions").assertDoesNotExist()
+        compose.onNodeWithTag("chat_compact_back").assertDoesNotExist()
+        compose.onNodeWithTag("chat_scroll_to_bottom_fab").assertIsDisplayed()
+        val historyBounds = bar.getUnclippedBoundsInRoot()
+        assertEquals(expandedHeight, (historyBounds.bottom - historyBounds.top).value, 0.5f)
+
+        compose.runOnIdle { collapse = true }
+        compose.onNodeWithTag("chat_compact_actions").assertIsDisplayed()
+        compose.onNodeWithTag("chat_overflow").assertDoesNotExist()
+        compose.runOnIdle { collapse = false }
+        compose.onNodeWithTag("chat_overflow").assertIsDisplayed()
+        compose.onNodeWithTag("chat_compact_actions").assertDoesNotExist()
+        compose.onNodeWithTag("chat_compact_back").assertDoesNotExist()
+        timeline.performScrollToIndex(0)
+        compose.onNodeWithTag("chat_scroll_to_bottom_fab").assertDoesNotExist()
+        compose.onNodeWithTag("chat_overflow").assertIsDisplayed().performClick()
+        compose.onAllNodesWithTag("chat_overflow_menu").assertCountEquals(1)
     }
 
     @Test
@@ -4511,7 +4567,7 @@ class ComposerSendClearUiTest {
             val motion = SendFlightMotion(morphEnabled = true)
             runBlocking { motion.morph.snapTo(1f) }
             var renderFlight by mutableStateOf(false)
-            var status by mutableStateOf(true to false)
+            var status by mutableStateOf(false to false)
             var opacity by mutableStateOf(100)
             var blur by mutableStateOf(0)
             compose.setContent {
@@ -4570,7 +4626,7 @@ class ComposerSendClearUiTest {
                 colors.count { it == android.graphics.Color.BLACK } > image.width / 8 &&
                     colors.count { it == android.graphics.Color.WHITE } > image.width / 8
             }
-            for ((flags, percent, intensity) in listOf(true to false, false to false, true to true, false to true).flatMap { flags ->
+            for ((flags, percent, intensity) in listOf(false to false, true to true, false to true).flatMap { flags ->
                 listOf(100, 37, 0, 100).flatMap { percent -> listOf(0, 75).map { Triple(flags, percent, it) } }
             }) {
                 compose.runOnIdle {
@@ -4637,7 +4693,7 @@ class ComposerSendClearUiTest {
                                 ) {
                                     SendFlightOverlay(
                                         flight = flight,
-                                        pending = true,
+                                        pending = false,
                                         failed = false,
                                         anchors = anchors,
                                         motion = motion,
@@ -4682,7 +4738,7 @@ class ComposerSendClearUiTest {
         }
 
     @Test
-    fun activeFlight_tracksCanonicalStatusBeforeLandingWithoutGuessingByText() {
+    fun acceptedOffscreenRow_doesNotKeepFlightOrComposerOccupied() {
         val launchedAt = 1_000L
         val pending =
             MessageEntity(
@@ -4695,91 +4751,91 @@ class ComposerSendClearUiTest {
                 isSelf = true,
                 pendingLabel = "pending-42",
                 dedupKey = "pending-42",
-                serverTimeAuthoritative = false,
                 timelineOrder = 42,
             )
-        // Keep the canonical row loaded but outside layout: the completed ghost stays airborne,
-        // and no real status glyph can account for a pixel change on the captured screen.
         val history =
             (100L downTo 51L).map { id ->
-                MessageEntity(
+                pending.copy(
                     id = id,
-                    bufferId = buffer.id,
-                    serverTime = launchedAt + id,
                     sender = "other",
-                    kind = MessageKind.PRIVMSG,
                     text = "history-$id",
+                    isSelf = false,
+                    pendingLabel = null,
                     dedupKey = "history-$id",
                     timelineOrder = id,
                 )
             }
-        val confirmed = pending.copy(pendingLabel = null, serverTime = launchedAt - 100)
-        val pages = MutableStateFlow(PagingData.from(history + confirmed))
-        var flight by mutableStateOf(OutgoingFlight(token = 7, text = pending.text, launchedAtMs = launchedAt))
+        var flight by mutableStateOf<OutgoingFlight?>(
+            OutgoingFlight(token = 7, text = pending.text, launchedAtMs = launchedAt, eventIds = setOf(pending.id)),
+        )
         var settled = 0
         compose.mainClock.autoAdvance = false
-        compose.setContent {
-            MotdTheme(dynamicColor = false) {
-                CompositionLocalProvider(LocalLottieMotionEnabled provides false) {
-                    Box(Modifier.fillMaxSize().testTag("flight_status_screen")) {
-                        ChatContent(
-                            state = ChatState(buffer = buffer, connState = IrcClientState.Ready("me", emptySet(), emptyMap())),
-                            items = pages.collectAsLazyPagingItems(),
-                            composerEnabled = true,
-                            onBack = {},
-                            onOpenChannelInfo = {},
-                            onOpenSearch = {},
-                            onOpenImage = {},
-                            nickNormalizer = { it.lowercase() },
-                            onSubmit = {},
-                            onTyping = {},
-                            onSetReply = {},
-                            onReact = { _, _ -> },
-                            onRetry = {},
-                            loadPreview = { _, _ -> null },
-                            composerDraft = ComposerDraftState(hydrated = true),
-                            outgoingFlight = flight,
-                            onFlightSettled = { settled++ },
-                            entryState = EntryPositionState.Settled,
-                        )
-                    }
-                }
-            }
-        }
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            pages = flowOf(PagingData.from(history + pending)),
+            outgoingFlight = { flight },
+            onFlightSettled = {
+                settled++
+                flight = null
+            },
+            onSubmit = {},
+        )
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(2_000)
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(1, settled) }
+        compose.onNodeWithTag("chat_composer_field").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
+    }
 
-        fun pixels(): Bitmap {
-            compose.waitForIdle()
-            compose.mainClock.advanceTimeBy(2_000)
-            compose.waitForIdle()
-            compose.runOnIdle { assertEquals("The offscreen row must not settle the flight", 0, settled) }
-            compose.onAllNodesWithText("hello").assertCountEquals(0)
-            return compose.onNodeWithTag("flight_status_screen").captureToImage().asAndroidBitmap()
-        }
-
-        val unknown = pixels()
-        compose.runOnIdle { pages.value = PagingData.from(history + pending) }
-        val sending = pixels()
-        assertTrue("Historical confirmed text without an identity must remain pending", unknown.sameAs(sending))
-        compose.runOnIdle { flight = flight.copy(eventIds = setOf(pending.id)) }
-        assertTrue("Acceptance alone must not paint a check", sending.sameAs(pixels()))
-
-        val unchangedStatuses = mutableListOf<String>()
-        compose.runOnIdle {
-            // Same token and ID; an echo may rewrite both its text and server timestamp.
-            pages.value = PagingData.from(history + confirmed.copy(text = "echo-rewritten"))
-        }
-        val sent = pixels()
-        if (sending.sameAs(sent)) unchangedStatuses += "confirmed"
-        compose.runOnIdle { pages.value = PagingData.from(history + pending.copy(failed = true)) }
-        val failed = pixels()
-        if (sending.sameAs(failed) || sent.sameAs(failed)) unchangedStatuses += "failed"
-        compose.runOnIdle { pages.value = PagingData.from(history + confirmed.copy(failed = true)) }
-        assertTrue("Failure must win whether or not the pending label remains", failed.sameAs(pixels()))
-        compose.runOnIdle { pages.value = PagingData.from(history + pending) }
-        assertTrue("Status must not be cached by flight token", sending.sameAs(pixels()))
-        compose.runOnIdle { pages.value = PagingData.from(history + confirmed.copy(id = 41)) }
-        assertTrue("A missing accepted ID must not claim a historical same-text row", sending.sameAs(pixels()))
-        assertEquals("The active production ghost must render each canonical status", emptyList<String>(), unchangedStatuses)
+    @Test
+    fun pendingMessage_showsProgressThenFailureRetryAndDeleteWithoutRestoringDraft() {
+        val pending =
+            MessageEntity(
+                id = 42,
+                bufferId = buffer.id,
+                serverTime = 1_000,
+                sender = "me",
+                kind = MessageKind.PRIVMSG,
+                text = "hello",
+                isSelf = true,
+                pendingLabel = "pending-42",
+                dedupKey = "pending-42",
+                timelineOrder = 42,
+            )
+        val pages = MutableStateFlow(PagingData.from(listOf(pending)))
+        var retries = 0
+        var deletes = 0
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            pages = pages,
+            onRetry = {
+                assertEquals(pending.id, it.id)
+                retries++
+                pages.value = PagingData.from(listOf(pending))
+            },
+            onDelete = {
+                assertEquals(pending.id, it.id)
+                deletes++
+                pages.value = PagingData.from(emptyList())
+            },
+            onSubmit = {},
+        )
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Sending…").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo))
+        compose.onNodeWithText("Retry").assertDoesNotExist()
+        compose.runOnIdle { pages.value = PagingData.from(listOf(pending.copy(failed = true))) }
+        compose.waitForIdle()
+        compose.onNodeWithText("Retry").performClick()
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(1, retries) }
+        compose.onNodeWithContentDescription("Sending…").assertIsDisplayed()
+        compose.runOnIdle { pages.value = PagingData.from(listOf(pending.copy(failed = true))) }
+        compose.waitForIdle()
+        compose.onNodeWithText("Delete").performClick()
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(1, deletes) }
+        compose.onNodeWithText("hello").assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_field").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
     }
 
     @Test
@@ -4850,7 +4906,7 @@ class ComposerSendClearUiTest {
     }
 
     @Test
-    fun delayedLanding_keepsFlightUntilPendingRowTakesOver() {
+    fun missingLanding_settlesFlightAndRevealsLaterPendingRowWithoutRestoringDraft() {
         val launchedAt = 1_000L
         val pages = MutableStateFlow(PagingData.from(emptyList<MessageEntity>()))
         var flight by mutableStateOf<OutgoingFlight?>(
@@ -4872,7 +4928,8 @@ class ComposerSendClearUiTest {
 
         compose.waitForIdle()
         compose.mainClock.advanceTimeBy(2_000)
-        compose.runOnIdle { assertEquals(0, settled) }
+        compose.runOnIdle { assertEquals(1, settled) }
+        compose.onNodeWithTag("chat_composer_field").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
 
         compose.runOnUiThread {
             pages.value =
@@ -4901,6 +4958,7 @@ class ComposerSendClearUiTest {
 
         compose.runOnIdle { assertEquals(1, settled) }
         compose.onNodeWithContentDescription("Sending…").assertIsDisplayed()
+        compose.onNodeWithTag("chat_composer_field").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
     }
 
     @Test

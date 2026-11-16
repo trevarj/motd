@@ -89,7 +89,6 @@ import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ForegroundBufferTracker
 import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistorySyncStatus
-import io.github.trevarj.motd.service.ImmediateWireAcceptance
 import io.github.trevarj.motd.service.NotificationMode
 import io.github.trevarj.motd.service.NotificationSettings
 import io.github.trevarj.motd.service.PresenceKey
@@ -213,15 +212,14 @@ private sealed interface DraftCommand {
     ) : DraftCommand
 
     data class ClearSubmission(
-        val snapshot: DraftSnapshot,
         val persisted: ComposerDraftEntity,
-        val result: CompletableDeferred<Boolean>,
+        val result: CompletableDeferred<Unit>,
     ) : DraftCommand
 }
 
 private data class PreparedDraftSubmission(
     val snapshot: DraftSnapshot,
-    val persisted: ComposerDraftEntity?,
+    val persisted: ComposerDraftEntity,
 )
 
 /**
@@ -240,6 +238,8 @@ private sealed interface DraftSubmissionOutcome {
     data object Duplicate : DraftSubmissionOutcome
 
     data object Stale : DraftSubmissionOutcome
+
+    data object PersistenceFailed : DraftSubmissionOutcome
 }
 
 internal fun MessageEntity.toReplyPreviewData(): ReplyPreviewData = ReplyPreviewData(sender, text, ircFormattedText)
@@ -1142,7 +1142,7 @@ class ChatViewModel
 
         private fun editableForwardState(): MessageForwardState? =
             _forwardState.value?.takeUnless {
-                it.sending || it.acceptance != null ||
+                it.sending ||
                     it.error == MessageForwardError.SOURCE_UNAVAILABLE || it.error == MessageForwardError.SEND_FAILED
             }
 
@@ -1257,14 +1257,7 @@ class ChatViewModel
                         }
 
                         is SendAcceptance.Accepted -> {
-                            finishForward(
-                                request,
-                                if (acceptance.immediateWireAcceptance == ImmediateWireAcceptance.ACCEPTED) {
-                                    null
-                                } else {
-                                    request.copy(sending = false, acceptance = acceptance)
-                                },
-                            )
+                            finishForward(request, null)
                         }
                     }
                 } catch (cancelled: CancellationException) {
@@ -1660,6 +1653,12 @@ class ChatViewModel
                         synchronized(draftStateLock) {
                             activeAiDraft = null
                             draftCommands.close()
+                        }
+                        withContext(NonCancellable) {
+                            while (true) {
+                                val command = draftCommands.tryReceive().getOrNull() ?: break
+                                if (command is DraftCommand.ClearSubmission) clearPersistedSubmission(command)
+                            }
                         }
                     }
                 }
@@ -3019,37 +3018,14 @@ class ChatViewModel
                         command.result.complete(persisted)
                     }
 
-                    is DraftCommand.ClearSubmission -> {
-                        val unchangedBeforeDelete =
-                            synchronized(draftStateLock) {
-                                _composerDraft.value.revision == command.snapshot.revision
-                            }
-                        val deleted =
-                            unchangedBeforeDelete &&
-                                runCatching {
-                                    draftStore.clearIfUnchanged(command.persisted)
-                                }.getOrDefault(false)
-                        val cleared =
-                            if (deleted) {
-                                synchronized(draftStateLock) {
-                                    if (_composerDraft.value.revision != command.snapshot.revision) {
-                                        false
-                                    } else {
-                                        currentDraftText = ""
-                                        currentReplyToEventId = null
-                                        replyTo.value = null
-                                        replySenderNotInChannel.value = false
-                                        advanceDraftRevisionLocked(hydrated = true)
-                                        true
-                                    }
-                                }
-                            } else {
-                                false
-                            }
-                        command.result.complete(cleared)
-                    }
+                    is DraftCommand.ClearSubmission -> withContext(NonCancellable) { clearPersistedSubmission(command) }
                 }
             }
+        }
+
+        private suspend fun clearPersistedSubmission(command: DraftCommand.ClearSubmission) {
+            runCatching { draftStore.clearIfUnchanged(command.persisted) }
+            command.result.complete(Unit)
         }
 
         private fun advanceDraftRevisionLocked(hydrated: Boolean = _composerDraft.value.hydrated): DraftSnapshot {
@@ -3098,7 +3074,13 @@ class ChatViewModel
                     candidate
                 } ?: return if (duplicate) DraftSubmissionOutcome.Duplicate else DraftSubmissionOutcome.Stale
             return try {
-                DraftSubmissionOutcome.Prepared(PreparedDraftSubmission(snapshot, result.await()))
+                val persisted = result.await()
+                if (persisted == null) {
+                    releaseDraftSubmission(snapshot)
+                    DraftSubmissionOutcome.PersistenceFailed
+                } else {
+                    DraftSubmissionOutcome.Prepared(PreparedDraftSubmission(snapshot, persisted))
+                }
             } catch (cancelled: CancellationException) {
                 releaseDraftSubmission(snapshot)
                 throw cancelled
@@ -3127,6 +3109,12 @@ class ChatViewModel
                 DraftSubmissionOutcome.Stale -> {
                     republishDraft()
                     uiEventQueue.enqueue(ChatUiEvent.SendDropped)
+                    null
+                }
+
+                DraftSubmissionOutcome.PersistenceFailed -> {
+                    republishDraft()
+                    uiEventQueue.enqueue(ChatUiEvent.SendRejected)
                     null
                 }
             }
@@ -3174,15 +3162,22 @@ class ChatViewModel
             }
         }
 
-        private suspend fun clearDraftSubmission(submission: PreparedDraftSubmission): Boolean {
-            val persisted = submission.persisted ?: return false
-            val result = CompletableDeferred<Boolean>()
-            synchronized(draftStateLock) {
-                draftCommands.trySend(
-                    DraftCommand.ClearSubmission(submission.snapshot, persisted, result),
-                )
+        private suspend fun clearDraftSubmission(submission: PreparedDraftSubmission) {
+            val result = CompletableDeferred<Unit>()
+            val command = DraftCommand.ClearSubmission(submission.persisted, result)
+            val queued = synchronized(draftStateLock) {
+                // Acceptance transfers this revision to the outbox, even if disk cleanup loses a CAS.
+                if (_composerDraft.value.revision == submission.snapshot.revision) {
+                    currentDraftText = ""
+                    currentReplyToEventId = null
+                    replyTo.value = null
+                    replySenderNotInChannel.value = false
+                    advanceDraftRevisionLocked(hydrated = true)
+                }
+                draftCommands.trySend(command).isSuccess
             }
-            return result.await()
+            if (!queued) withContext(NonCancellable) { clearPersistedSubmission(command) }
+            result.await()
         }
 
         // --- search deep-jump ---

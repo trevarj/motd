@@ -116,6 +116,8 @@ class AppearanceSettingsViewModel
 
         fun setChatCardCornerStyle(value: UiCornerStyle) = launch { appearancePrefs.setChatCardCornerStyle(value) }
 
+        fun setCollapseTitleBar(value: Boolean) = launch { appearancePrefs.setCollapseTitleBar(value) }
+
         fun setMediaCornerStyle(value: UiCornerStyle) = launch { appearancePrefs.setMediaCornerStyle(value) }
 
         fun setUiIconSet(value: UiIconSet) = launch { appearancePrefs.setUiIconSet(value) }

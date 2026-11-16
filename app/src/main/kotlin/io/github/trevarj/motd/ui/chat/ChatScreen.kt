@@ -644,6 +644,7 @@ fun ChatScreen(
         expandAllFools = expandAllFools,
         onExpandAllFoolsChange = viewModel::setExpandAllFools,
         chatWallpaper = appearance.wallpaper,
+        collapseTitleBar = appearance.collapseTitleBar,
         conversationFontScalePercent = appearance.conversationFontScalePercent,
         messageSpacing = appearance.messageSpacing,
         bubbleCornerStyle = appearance.bubbleCornerStyle,
@@ -1173,6 +1174,7 @@ internal fun ChatContent(
     chatWallpaper: io.github.trevarj.motd.data.prefs.WallpaperSelection =
         io.github.trevarj.motd.data.prefs
             .WallpaperSelection(),
+    collapseTitleBar: Boolean = true,
     conversationFontScalePercent: Int = io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT,
     messageSpacing: io.github.trevarj.motd.data.prefs.MessageSpacing =
         io.github.trevarj.motd.data.prefs.MessageSpacing.DEFAULT,
@@ -1632,8 +1634,11 @@ internal fun ChatContent(
                     } else {
                         null
                     }
-                snapshotFlow { flightAnchors.landingRow }.filterNotNull().first()
-                flightMotion.progress.animateTo(1f, MotdMotion.sendFlightSpring)
+                val landing =
+                    withTimeoutOrNull(1_000L) {
+                        snapshotFlow { flightAnchors.landingRow }.filterNotNull().first()
+                    }
+                if (landing != null) flightMotion.progress.animateTo(1f, MotdMotion.sendFlightSpring)
                 liftJob.join()
                 // A quick Room write must not reveal the row while its body is still leaving the field.
                 morphJob?.join()
@@ -1857,12 +1862,15 @@ internal fun ChatContent(
 
         // ponytail: top-entry alignment needs the final viewport; settled reader transitions still animate.
         val placingTopEntry = initialTarget?.let { it.placeAtTop && it.index > 0 } == true
+        val latestCollapseTitleBar by rememberUpdatedState(collapseTitleBar)
         var topEntryClampedAtBottom by remember(initialTarget) { mutableStateOf(false) }
         var laidOutEntryHeaderExpansion by remember(initialTarget) { mutableFloatStateOf(-1f) }
         val headerExpansion =
             animateFloatAsState(
                 targetValue =
-                    if (placingTopEntry) {
+                    if (!collapseTitleBar) {
+                        1f
+                    } else if (placingTopEntry) {
                         if (topEntryClampedAtBottom) 1f else 0f
                     } else if (presentation != null && !initialPositionSettled && !entryVeilLifted) {
                         presentation.headerExpansion
@@ -1883,7 +1891,7 @@ internal fun ChatContent(
             val hostHeight = readBottomHostHeightPx()
             if (hostHeight <= 0 || layout.beforeContentPadding < hostHeight) return false
             if (target.placeAtTop && placingTopEntry) {
-                val expansion = if (topEntryClampedAtBottom) 1f else 0f
+                val expansion = if (!latestCollapseTitleBar || topEntryClampedAtBottom) 1f else 0f
                 return laidOutEntryHeaderExpansion == expansion &&
                     (
                         topEntryClampedAtBottom ||
@@ -2452,7 +2460,7 @@ internal fun ChatContent(
                     snapshotFlow {
                         (items.loadState.refresh is LoadState.NotLoading || presentationLease?.hasPublishedWindow(items.itemSnapshotList) == true) &&
                             initialPagingPage(items.itemCount, items.loadState.append) != InitialPagingPage.Pending &&
-                            (!placingTopEntry || laidOutEntryHeaderExpansion == 0f)
+                            (!placingTopEntry || laidOutEntryHeaderExpansion == if (latestCollapseTitleBar) 0f else 1f)
                     }.first { it }
                 } != null
             if (!pageReady) {

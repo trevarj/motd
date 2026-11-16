@@ -428,6 +428,7 @@ fun AttachmentSheets(
                         ?.setPrimaryClip(ClipData.newPlainText(record.displayName, record.url))
                 },
                 onDeleteRecent = { deleteTarget = it },
+                onClearHistory = viewModel::clearHistory,
             )
         }
 
@@ -793,7 +794,31 @@ private fun SourceSheet(
     onInsertRecent: (UploadRecord) -> Unit,
     onCopyRecent: (UploadRecord) -> Unit,
     onDeleteRecent: (UploadRecord) -> Unit,
+    onClearHistory: () -> Unit,
 ) {
+    var confirmClearHistory by remember { mutableStateOf(false) }
+    if (confirmClearHistory) {
+        AlertDialog(
+            onDismissRequest = { confirmClearHistory = false },
+            icon = { Icon(Icons.Filled.Delete, null) },
+            title = { Text(stringResource(R.string.upload_clear_history_title)) },
+            text = { Text(stringResource(R.string.upload_clear_history_body)) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onClearHistory()
+                        confirmClearHistory = false
+                    },
+                    modifier = Modifier.testTag("attachment_clear_history_confirm"),
+                ) {
+                    Text(stringResource(R.string.upload_clear_history))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearHistory = false }) { Text(stringResource(R.string.action_cancel)) }
+            },
+        )
+    }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag("attachment_source_sheet")) {
         SheetSystemBars()
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -838,6 +863,12 @@ private fun SourceSheet(
                     Icon(Icons.Outlined.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.upload_recent), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                }
+                TextButton(
+                    onClick = { confirmClearHistory = true },
+                    modifier = Modifier.testTag("attachment_clear_history"),
+                ) {
+                    Text(stringResource(R.string.upload_clear_history))
                 }
                 Spacer(Modifier.height(8.dp))
                 recent.forEach { record -> RecentUploadRow(record, onInsertRecent, onCopyRecent, onDeleteRecent) }

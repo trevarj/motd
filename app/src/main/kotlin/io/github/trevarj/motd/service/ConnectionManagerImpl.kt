@@ -81,6 +81,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -279,6 +280,7 @@ internal class DurableSendLifecycle {
     private var activeSends = 0
     private var blocked: CompletableDeferred<Unit>? = null
     private var drained: CompletableDeferred<Unit>? = null
+    private val wireTails = mutableMapOf<Long, CompletableDeferred<Unit>>()
 
     suspend fun <T> sending(block: suspend () -> T): T {
         while (true) {
@@ -299,6 +301,37 @@ internal class DurableSendLifecycle {
                 stateLock.withLock {
                     activeSends--
                     if (activeSends == 0) drained?.complete(Unit)
+                }
+            }
+        }
+    }
+
+    /** Transfer an admitted send to application ownership before releasing its caller. */
+    @OptIn(DelicateCoroutinesApi::class)
+    suspend fun continueSending(
+        scope: CoroutineScope,
+        networkId: Long,
+        block: suspend () -> ImmediateWireAcceptance,
+    ): Deferred<ImmediateWireAcceptance> {
+        val completion = CompletableDeferred<Unit>()
+        val previous =
+            stateLock.withLock {
+                activeSends++
+                wireTails.put(networkId, completion)
+            }
+        // ATOMIC must enter the NonCancellable cleanup even if the owner is cancelled before dispatch.
+        return scope.async(start = CoroutineStart.ATOMIC) {
+            withContext(NonCancellable) {
+                try {
+                    previous?.await()
+                    block()
+                } finally {
+                    stateLock.withLock {
+                        completion.complete(Unit)
+                        if (wireTails[networkId] === completion) wireTails.remove(networkId)
+                        activeSends--
+                        if (activeSends == 0) drained?.complete(Unit)
+                    }
                 }
             }
         }
@@ -399,27 +432,39 @@ internal suspend fun resolveAndAdvanceCurrentReadTarget(
         target
     }
 
-/** Return durable acceptance even if the caller is cancelled after the transaction commits. */
+/** Hand off committed rows without waiting for the wire mutex, transport, or sound. */
 internal suspend fun completeDurableAcceptance(
     eventIds: List<Long>,
+    networkId: Long,
     transition: suspend () -> ImmediateWireAcceptance,
     secondaryEffect: suspend () -> Unit,
     storedTexts: List<String> = emptyList(),
-): SendAcceptance.Accepted =
-    withContext(NonCancellable) {
-        val wireAcceptance =
-            try {
-                transition()
-            } catch (_: Exception) {
-                ImmediateWireAcceptance.FAILED
+    scope: CoroutineScope,
+    lifecycle: DurableSendLifecycle,
+    failPending: suspend (List<Long>) -> Unit,
+): SendAcceptance.Accepted {
+    val outcome =
+        withContext(NonCancellable) {
+            lifecycle.continueSending(scope, networkId) {
+                val result =
+                    try {
+                        transition()
+                    } catch (_: Exception) {
+                        failPending(eventIds)
+                        ImmediateWireAcceptance.FAILED
+                    }
+                scope.launch {
+                    try {
+                        secondaryEffect()
+                    } catch (_: Exception) {
+                        // The durable timeline state is authoritative; presentation is best effort.
+                    }
+                }
+                result
             }
-        try {
-            secondaryEffect()
-        } catch (_: Exception) {
-            // The durable timeline state is authoritative; presentation effects are best effort.
         }
-        SendAcceptance.Accepted(eventIds, wireAcceptance, storedTexts)
-    }
+    return SendAcceptance.Accepted(eventIds, outcome, storedTexts)
+}
 
 internal const val NOTIFICATION_REPLY_READY_TIMEOUT_MS = 5_000L
 
@@ -833,6 +878,7 @@ class ConnectionManagerImpl
                 .newKeySet<Long>()
         private val monitorLocks = java.util.concurrent.ConcurrentHashMap<Long, Mutex>()
         private val sendLocks = java.util.concurrent.ConcurrentHashMap<Long, Mutex>()
+        private val retryLocks = java.util.concurrent.ConcurrentHashMap<Long, Mutex>()
         private val sendLifecycle = DurableSendLifecycle()
         private val multilineFallbackLabels =
             java.util.concurrent.ConcurrentHashMap
@@ -2572,8 +2618,13 @@ class ConnectionManagerImpl
                 return SendAcceptance.Rejected(SendRejectionReason.NOT_IN_CHANNEL)
             }
             retainNotificationReplyNetwork(notificationRepliesInFlight, buffer.networkId)
+            var handedOff = false
+            fun releaseNetwork() {
+                releaseNotificationReplyNetwork(notificationRepliesInFlight, buffer.networkId)
+                scope.launch { evaluatePushMode() }
+            }
             try {
-                return sendNotificationReplyWhenReady(
+                val acceptance = sendNotificationReplyWhenReady(
                     networkId = buffer.networkId,
                     type = buffer.type,
                     target = buffer.ircTarget,
@@ -2584,9 +2635,13 @@ class ConnectionManagerImpl
                         sendMessageInternal(buffer.id, text, null, null, notificationClient = client)
                     },
                 )
+                if (acceptance is SendAcceptance.Accepted) {
+                    handedOff = true
+                    acceptance.wireOutcome.invokeOnCompletion { releaseNetwork() }
+                }
+                return acceptance
             } finally {
-                releaseNotificationReplyNetwork(notificationRepliesInFlight, buffer.networkId)
-                scope.launch { evaluatePushMode() }
+                if (!handedOff) releaseNetwork()
             }
         }
 
@@ -2696,6 +2751,10 @@ class ConnectionManagerImpl
                     }
                 val eventIds = durable.map { it.eventId }
                 completeDurableAcceptance(
+                    scope = scope,
+                    lifecycle = sendLifecycle,
+                    failPending = eventProcessor::failPendingEvents,
+                    networkId = buffer.networkId,
                     eventIds = eventIds,
                     transition = {
                         // Serialize only the wire, inside post-commit cancellation protection.
@@ -2728,7 +2787,7 @@ class ConnectionManagerImpl
                 if (!isGenericRetryEligible(buffer, original)) {
                     return@sending SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)
                 }
-                sendLocks.getOrPut(buffer.networkId) { Mutex() }.withLock {
+                retryLocks.getOrPut(buffer.networkId) { Mutex() }.withLock {
                     val current =
                         messageDao.byCanonicalId(eventId)
                             ?: return@withLock SendAcceptance.Rejected(SendRejectionReason.EVENT_NOT_RETRYABLE)
@@ -2767,33 +2826,39 @@ class ConnectionManagerImpl
                             ),
                         )
                     completeDurableAcceptance(
+                        scope = scope,
+                        lifecycle = sendLifecycle,
+                        failPending = eventProcessor::failPendingEvents,
+                        networkId = currentBuffer.networkId,
                         eventIds = listOf(retry.id),
                         transition = transition@{
-                            val retryBuffer =
-                                bufferDao.observeById(retry.bufferId)
-                                    ?: return@transition ImmediateWireAcceptance.DISCONNECTED
-                            val client = clientFor(retryBuffer.networkId)
-                            val ready = client?.state?.value as? IrcClientState.Ready
-                            val parentId: Long? = retry.replyToEventId
-                            val parent: MessageEntity? =
-                                if (parentId != null) {
-                                    messageDao.byCanonicalId(parentId)
-                                } else {
-                                    null
-                                }
-                            val wireReply =
-                                parent?.msgid?.takeIf {
-                                    ready != null && canSendClientTag(ready.caps, ready.isupport, "+reply")
-                                }
-                            writeDurablePlan(
-                                retryBuffer,
-                                client,
-                                ready,
-                                planned,
-                                listOf(retry.id),
-                                wireReply,
-                                channelContext = retry.channelContext,
-                            )
+                            sendLocks.getOrPut(buffer.networkId) { Mutex() }.withLock {
+                                val retryBuffer =
+                                    bufferDao.observeById(retry.bufferId)
+                                        ?: return@transition ImmediateWireAcceptance.DISCONNECTED
+                                val client = clientFor(retryBuffer.networkId)
+                                val ready = client?.state?.value as? IrcClientState.Ready
+                                val parentId: Long? = retry.replyToEventId
+                                val parent: MessageEntity? =
+                                    if (parentId != null) {
+                                        messageDao.byCanonicalId(parentId)
+                                    } else {
+                                        null
+                                    }
+                                val wireReply =
+                                    parent?.msgid?.takeIf {
+                                        ready != null && canSendClientTag(ready.caps, ready.isupport, "+reply")
+                                    }
+                                writeDurablePlan(
+                                    retryBuffer,
+                                    client,
+                                    ready,
+                                    planned,
+                                    listOf(retry.id),
+                                    wireReply,
+                                    channelContext = retry.channelContext,
+                                )
+                            }
                         },
                         secondaryEffect = { notifyOutgoingAccepted(currentBuffer.id) },
                     )

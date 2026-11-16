@@ -319,6 +319,7 @@ data class AppearanceConfig(
     val inputCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
     val avatarShape: AvatarShape = AvatarShape.DEFAULT,
     val chatCardCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
+    val collapseTitleBar: Boolean = true,
     val mediaCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
     val uiIconSet: UiIconSet = UiIconSet.MATERIAL,
 )
@@ -357,6 +358,8 @@ interface AppearancePrefs {
     suspend fun setAvatarShape(shape: AvatarShape)
 
     suspend fun setChatCardCornerStyle(style: UiCornerStyle)
+
+    suspend fun setCollapseTitleBar(enabled: Boolean)
 
     suspend fun setMediaCornerStyle(style: UiCornerStyle)
 

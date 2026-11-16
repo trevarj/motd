@@ -569,6 +569,7 @@ class ConfigurationBackupRepositoryImpl
                 appearancePrefs.setInputCornerStyle(it.inputCornerStyle)
                 appearancePrefs.setAvatarShape(it.avatarShape)
                 appearancePrefs.setChatCardCornerStyle(it.chatCardCornerStyle)
+                appearancePrefs.setCollapseTitleBar(it.collapseTitleBar)
                 appearancePrefs.setMediaCornerStyle(it.mediaCornerStyle)
                 appearancePrefs.setUiIconSet(it.uiIconSet)
                 appearancePrefs.setBubbleCornerStyle(it.bubbleCornerStyle)

@@ -92,13 +92,13 @@ class NotificationReplyRejectionTest {
         }
 
     @Test
-    fun durableDisconnectedReplyPreservesTextAndRequiresReview() =
+    fun durableDisconnectedReplyRequiresReviewWithoutRestoringDraft() =
         runTest {
             val recorder = Recorder()
 
-            deliver(accepted.copy(immediateWireAcceptance = ImmediateWireAcceptance.DISCONNECTED), retry = false, recorder)
+            deliver(accepted.copy(wireOutcome = CompletableDeferred(ImmediateWireAcceptance.DISCONNECTED)), retry = false, recorder)
 
-            assertEquals(1, recorder.preserved)
+            assertEquals(0, recorder.preserved)
             assertEquals(ImmediateWireAcceptance.DISCONNECTED, recorder.uncertainWith)
             assertEquals(0, recorder.released)
             assertEquals(0, recorder.resolved)
@@ -106,13 +106,13 @@ class NotificationReplyRejectionTest {
         }
 
     @Test
-    fun durableFailedReplyPreservesTextAndRequiresReview() =
+    fun durableFailedReplyRequiresReviewWithoutRestoringDraft() =
         runTest {
             val recorder = Recorder()
 
-            deliver(accepted.copy(immediateWireAcceptance = ImmediateWireAcceptance.FAILED), retry = false, recorder)
+            deliver(accepted.copy(wireOutcome = CompletableDeferred(ImmediateWireAcceptance.FAILED)), retry = false, recorder)
 
-            assertEquals(1, recorder.preserved)
+            assertEquals(0, recorder.preserved)
             assertEquals(ImmediateWireAcceptance.FAILED, recorder.uncertainWith)
             assertEquals(0, recorder.released)
             assertEquals(0, recorder.resolved)
@@ -125,13 +125,44 @@ class NotificationReplyRejectionTest {
             val recorder = Recorder()
 
             deliver(SendAcceptance.Rejected(SendRejectionReason.CONNECTION_UNAVAILABLE), retry = false, recorder)
-            for (wireAcceptance in listOf(ImmediateWireAcceptance.DISCONNECTED, ImmediateWireAcceptance.FAILED)) {
-                deliver(accepted.copy(immediateWireAcceptance = wireAcceptance), retry = true, recorder)
+            for ((index, wireAcceptance) in listOf(ImmediateWireAcceptance.DISCONNECTED, ImmediateWireAcceptance.FAILED).withIndex()) {
+                deliver(accepted.copy(wireOutcome = CompletableDeferred(wireAcceptance)), retry = true, recorder)
                 assertEquals(1, recorder.preserved)
-                assertEquals(0, recorder.released)
+                assertEquals(index + 1, recorder.released)
                 assertEquals(0, recorder.resolved)
                 assertEquals(wireAcceptance, recorder.uncertainWith)
             }
+        }
+
+    @Test
+    fun acceptedRetryReleasesDraftBeforeWireOutcomeWithoutRestoringItOnFailure() =
+        runTest {
+            val outcome = CompletableDeferred<ImmediateWireAcceptance>()
+            val released = CompletableDeferred<Unit>()
+            val recorder = Recorder()
+            val delivery =
+                launch {
+                    deliverNotificationReply(
+                        retry = true,
+                        send = { accepted.copy(wireOutcome = outcome) },
+                        preserveDraft = { recorder.preserved++ },
+                        releaseDraft = {
+                            recorder.released++
+                            released.complete(Unit)
+                        },
+                        notifyFailed = { recorder.failedWith = it },
+                        notifyUncertain = { recorder.uncertainWith = it },
+                        notifyResolved = { recorder.resolved++ },
+                    )
+                }
+            released.await()
+            assertEquals(1, recorder.released)
+            assertEquals(0, recorder.preserved)
+            outcome.complete(ImmediateWireAcceptance.FAILED)
+            delivery.join()
+            assertEquals(0, recorder.preserved)
+            assertEquals(ImmediateWireAcceptance.FAILED, recorder.uncertainWith)
+            assertEquals(0, recorder.resolved)
         }
 
     @Test

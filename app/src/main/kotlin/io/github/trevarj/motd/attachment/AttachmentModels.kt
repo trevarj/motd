@@ -129,6 +129,8 @@ interface AttachmentPrefs {
     suspend fun addUpload(record: UploadRecord)
 
     suspend fun removeUpload(url: String)
+
+    suspend fun clearUploadHistory()
 }
 
 interface AttachmentUploader {

@@ -20,6 +20,23 @@ class AppearancePrefsTest {
     private val prefs: AppearancePrefs = AppearancePrefsImpl(ApplicationProvider.getApplicationContext<Context>())
     private val jsonWithDefaults = Json { encodeDefaults = true }
 
+    @Test fun collapseTitleBarDefaultsOnAndPersistsInConfiguration() =
+        runTest {
+            val original = prefs.config.first().collapseTitleBar
+            try {
+                assertEquals(true, AppearanceConfig().collapseTitleBar)
+                assertEquals(true, Json.decodeFromString<AppearanceConfig>("{}").collapseTitleBar)
+                prefs.setCollapseTitleBar(false)
+                val reloaded = AppearancePrefsImpl(ApplicationProvider.getApplicationContext<Context>()).config.first()
+                assertEquals(false, reloaded.collapseTitleBar)
+                assertEquals(false, Json.decodeFromString<AppearanceConfig>(jsonWithDefaults.encodeToString(reloaded)).collapseTitleBar)
+                prefs.setCollapseTitleBar(true)
+                assertEquals(true, prefs.config.first().collapseTitleBar)
+            } finally {
+                prefs.setCollapseTitleBar(original)
+            }
+        }
+
     @Test fun linkedGlobalEditsBroadcastOnlyTheirDimensionFromEveryEntryPoint() =
         runTest {
             val original = prefs.config.first()

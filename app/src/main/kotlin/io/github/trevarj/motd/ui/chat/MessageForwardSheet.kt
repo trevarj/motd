@@ -46,7 +46,6 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.irc.format.containsIrcFormatting
 import io.github.trevarj.motd.irc.format.plainIrcText
-import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
 import io.github.trevarj.motd.ui.share.filterShareTargets
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
@@ -65,7 +64,6 @@ internal data class MessageForwardState(
     val includeSender: Boolean = true,
     val sending: Boolean = false,
     val error: MessageForwardError? = null,
-    val acceptance: SendAcceptance.Accepted? = null,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -86,14 +84,12 @@ internal fun MessageForwardSheet(
             confirmValueChange = { it != SheetValue.Hidden || !sending },
         )
     var query by remember(state.source.id) { mutableStateOf("") }
-    val accepted = state.acceptance != null
     val editable =
-        !state.sending && !accepted &&
+        !state.sending &&
             state.error != MessageForwardError.SOURCE_UNAVAILABLE &&
             state.error != MessageForwardError.SEND_FAILED
     val error =
         when {
-            accepted -> R.string.chat_forward_saved_not_sent
             state.error == MessageForwardError.SOURCE_UNAVAILABLE -> R.string.chat_forward_source_unavailable
             state.error == MessageForwardError.TARGET_UNAVAILABLE -> R.string.chat_forward_target_unavailable
             state.error == MessageForwardError.SEND_REJECTED -> R.string.chat_send_rejected
@@ -157,30 +153,28 @@ internal fun MessageForwardSheet(
                         modifier = Modifier.fillMaxWidth().testTag("message_forward_preview"),
                     )
                 }
-                if (!accepted) {
-                    Row(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .testTag("message_forward_include_sender")
-                                .toggleable(
-                                    value = state.includeSender,
-                                    enabled = editable,
-                                    role = Role.Checkbox,
-                                    onValueChange = onIncludeSenderChanged,
-                                ).padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(checked = state.includeSender, onCheckedChange = null, enabled = editable)
-                        Text(stringResource(R.string.chat_forward_include_sender), modifier = Modifier.padding(start = 8.dp))
-                    }
-                    TextButton(
-                        onClick = onChangeDestination,
-                        enabled = editable,
-                        modifier = Modifier.testTag("message_forward_change_destination"),
-                    ) {
-                        Text(stringResource(R.string.chat_forward_change_destination))
-                    }
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .testTag("message_forward_include_sender")
+                            .toggleable(
+                                value = state.includeSender,
+                                enabled = editable,
+                                role = Role.Checkbox,
+                                onValueChange = onIncludeSenderChanged,
+                            ).padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = state.includeSender, onCheckedChange = null, enabled = editable)
+                    Text(stringResource(R.string.chat_forward_include_sender), modifier = Modifier.padding(start = 8.dp))
+                }
+                TextButton(
+                    onClick = onChangeDestination,
+                    enabled = editable,
+                    modifier = Modifier.testTag("message_forward_change_destination"),
+                ) {
+                    Text(stringResource(R.string.chat_forward_change_destination))
                 }
             }
             FlowRow(
@@ -193,9 +187,9 @@ internal fun MessageForwardSheet(
                     enabled = !state.sending,
                     modifier = Modifier.testTag("message_forward_cancel"),
                 ) {
-                    Text(stringResource(if (accepted || !editable && !state.sending) R.string.ai_text_close else R.string.action_cancel))
+                    Text(stringResource(if (!editable && !state.sending) R.string.ai_text_close else R.string.action_cancel))
                 }
-                if (destination != null && !accepted) {
+                if (destination != null) {
                     Button(
                         onClick = onConfirm,
                         enabled = editable,

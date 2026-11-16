@@ -25,4 +25,26 @@ class AttachmentPrefsTest {
             assertEquals("camera-user", reopened.username)
             assertEquals("camera-secret", reopened.password)
         }
+
+    @Test
+    fun clearUploadHistoryPersistsWithoutChangingConfigurationOrFutureUploads() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val prefs = AttachmentPrefsImpl(context)
+            val config = PasteBackendConfig(username = "keep-user", password = "keep-secret")
+            prefs.setConfig(config)
+            prefs.addUpload(UploadRecord("https://files.example/one", AttachmentBackend.CRAFTERBIN, "one", deletionToken = "token"))
+            prefs.addUpload(UploadRecord("https://files.example/two", AttachmentBackend.X0_AT, "two"))
+            assertEquals(2, prefs.recentUploads.first().size)
+
+            prefs.clearUploadHistory()
+            prefs.clearUploadHistory()
+
+            val reopened = AttachmentPrefsImpl(context)
+            assertEquals(emptyList<UploadRecord>(), reopened.recentUploads.first())
+            assertEquals(config, reopened.config.first())
+            val completed = UploadRecord("https://files.example/three", AttachmentBackend.CRAFTERBIN, "three")
+            reopened.addUpload(completed)
+            assertEquals(listOf(completed), prefs.recentUploads.first())
+        }
 }

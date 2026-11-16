@@ -220,7 +220,11 @@ class OutgoingMessagePlanTest {
                     val result =
                         lifecycle.sending {
                             completeDurableAcceptance(
+                                scope = this@runTest,
+                                lifecycle = lifecycle,
+                                failPending = {},
                                 eventIds = listOf(40L, 41L),
+                                networkId = 1L,
                                 transition = {
                                     transitionEntered.complete(Unit)
                                     releaseTransition.await()
@@ -237,10 +241,8 @@ class OutgoingMessagePlanTest {
             releaseTransition.complete(Unit)
             job.join()
 
-            assertEquals(
-                SendAcceptance.Accepted(listOf(40L, 41L), ImmediateWireAcceptance.ACCEPTED),
-                accepted.await(),
-            )
+            assertEquals(listOf(40L, 41L), accepted.await().eventIds)
+            assertEquals(ImmediateWireAcceptance.ACCEPTED, accepted.await().wireOutcome.await())
         }
 
     @Test
@@ -256,7 +258,11 @@ class OutgoingMessagePlanTest {
                     val result =
                         lifecycle.sending {
                             completeDurableAcceptance(
+                                scope = this@runTest,
+                                lifecycle = lifecycle,
+                                failPending = {},
                                 eventIds = listOf(45L, 46L),
+                                networkId = 1L,
                                 transition = {
                                     waiting.complete(Unit)
                                     wireMutex.withLock {
@@ -272,17 +278,93 @@ class OutgoingMessagePlanTest {
             waiting.await()
             job.cancel()
             runCurrent()
-            assertFalse(accepted.isCompleted)
+            assertTrue(accepted.isCompleted)
+            assertFalse(accepted.await().wireOutcome.isCompleted)
             assertEquals(emptyList<Long>(), written)
 
             wireMutex.unlock()
             job.join()
 
-            assertEquals(
-                SendAcceptance.Accepted(listOf(45L, 46L), ImmediateWireAcceptance.ACCEPTED),
-                accepted.await(),
-            )
+            assertEquals(listOf(45L, 46L), accepted.await().eventIds)
+            assertEquals(ImmediateWireAcceptance.ACCEPTED, accepted.await().wireOutcome.await())
             assertEquals(listOf(45L, 46L), written)
+        }
+
+    @Test
+    fun `blocked wire returns acceptance while lifecycle stop still drains its task`() =
+        runTest {
+            val lifecycle = DurableSendLifecycle()
+            val releaseWire = CompletableDeferred<Unit>()
+            val enteredWire = CompletableDeferred<Unit>()
+            val written = mutableListOf<Long>()
+            val acceptance =
+                lifecycle.sending {
+                    completeDurableAcceptance(
+                        eventIds = listOf(47L),
+                        networkId = 1L,
+                        scope = this@runTest,
+                        lifecycle = lifecycle,
+                        failPending = {},
+                        transition = {
+                            enteredWire.complete(Unit)
+                            releaseWire.await()
+                            written += 47L
+                            ImmediateWireAcceptance.ACCEPTED
+                        },
+                        secondaryEffect = {},
+                    )
+                }
+            enteredWire.await()
+            val queued =
+                lifecycle.sending {
+                    lifecycle.continueSending(this@runTest, 1L) {
+                        written += 48L
+                        ImmediateWireAcceptance.ACCEPTED
+                    }
+                }
+            val otherNetwork =
+                lifecycle.sending {
+                    lifecycle.continueSending(this@runTest, 2L) {
+                        written += 50L
+                        ImmediateWireAcceptance.ACCEPTED
+                    }
+                }
+            assertEquals(ImmediateWireAcceptance.ACCEPTED, otherNetwork.await())
+            assertEquals(listOf(50L), written)
+            assertFalse(queued.isCompleted)
+            assertEquals(listOf(47L), acceptance.eventIds)
+            assertFalse(acceptance.wireOutcome.isCompleted)
+            var recovered = false
+            val stop = launch { lifecycle.quiesce { recovered = true } }
+            runCurrent()
+            assertFalse(recovered)
+            releaseWire.complete(Unit)
+            stop.join()
+            assertTrue(recovered)
+            assertEquals(ImmediateWireAcceptance.ACCEPTED, acceptance.wireOutcome.await())
+            assertEquals(ImmediateWireAcceptance.ACCEPTED, queued.await())
+            assertEquals(listOf(50L, 47L, 48L), written)
+        }
+
+    @Test
+    fun `unexpected transition failure fails committed rows through persistence boundary`() =
+        runTest {
+            val failed = mutableListOf<Long>()
+            val lifecycle = DurableSendLifecycle()
+            val acceptance =
+                lifecycle.sending {
+                    completeDurableAcceptance(
+                        eventIds = listOf(48L, 49L),
+                        networkId = 1L,
+                        scope = this@runTest,
+                        lifecycle = lifecycle,
+                        failPending = { failed += it },
+                        transition = { error("write failed") },
+                        secondaryEffect = {},
+                    )
+                }
+            assertEquals(ImmediateWireAcceptance.FAILED, acceptance.wireOutcome.await())
+            assertEquals(listOf(48L, 49L), failed)
         }
 
     @Test

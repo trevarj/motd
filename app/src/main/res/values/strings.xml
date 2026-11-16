@@ -865,6 +865,9 @@
     <string name="upload_text">Text paste</string>
     <string name="upload_text_desc">Write a new paste</string>
     <string name="upload_recent">Recent uploads</string>
+    <string name="upload_clear_history">Clear history</string>
+    <string name="upload_clear_history_title">Clear upload history?</string>
+    <string name="upload_clear_history_body">Clear all recent uploads from this device, including saved deletion tokens. Uploaded files stay on their servers, but you will no longer be able to delete them from this history. Uploads in progress will continue.</string>
     <string name="upload_insert_link">Insert link</string>
     <string name="upload_copy_link">Copy link</string>
     <string name="upload_size_unknown">Unknown size</string>
@@ -916,7 +919,6 @@
     <string name="chat_forward_source_unavailable">This message changed or is no longer available. Reopen Forward.</string>
     <string name="chat_forward_target_unavailable">This chat is no longer available for forwarding. Choose another chat.</string>
     <string name="chat_forward_send_failed">Forwarding could not be confirmed. Check the destination before trying again.</string>
-    <string name="chat_forward_saved_not_sent">Message saved in the destination but not fully sent. Open that chat to review delivery.</string>
     <string name="chat_action_share">Share</string>
     <string name="chat_action_share_chooser">Share message</string>
     <string name="chat_action_translate">Translate</string>
@@ -1416,6 +1418,8 @@
     <string name="settings_database_compacted">Freed %1$s</string>
     <string name="settings_database_compact_failed">Couldn\'t compact the database</string>
     <string name="settings_appearance_messages_section">Messages &amp; input</string>
+    <string name="settings_collapse_title_bar">Collapse title bar</string>
+    <string name="settings_collapse_title_bar_desc">Shrink the chat title bar and move its menu to a floating button while reading older messages.</string>
     <string name="settings_chat_preview">%1$s chat preview</string>
     <string name="settings_chat_preview_sender">Alex</string>
     <string name="settings_chat_preview_self">You</string>

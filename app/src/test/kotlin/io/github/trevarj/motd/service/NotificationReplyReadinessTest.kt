@@ -472,7 +472,32 @@ class NotificationReplyReadinessTest {
         }
 
     @Test
-    fun managerReturnsDurableNotificationIdsWhenCancelledBehindAnotherSendsWireLock() =
+    fun managerRetriesAnExplicitlyFailedSendWithoutCreatingAnotherRow() =
+        runBlocking {
+            val fixture = managerFixture()
+            try {
+                val room = fixture.room(BufferType.QUERY, "alice")
+                val accepted = fixture.manager.sendMessage(room.id, "retry this row") as SendAcceptance.Accepted
+                assertEquals(ImmediateWireAcceptance.DISCONNECTED, accepted.wireOutcome.await())
+                val original = fixture.db.messageDao().byIds(accepted.eventIds).single()
+                assertTrue(original.failed)
+                val (_, connection) = startNetwork(fixture)
+                val retried = fixture.manager.retryMessage(original.id) as SendAcceptance.Accepted
+                assertEquals(accepted.eventIds, retried.eventIds)
+                assertEquals(ImmediateWireAcceptance.ACCEPTED, retried.wireOutcome.await())
+                val current = fixture.db.messageDao().byIds(accepted.eventIds).single()
+                assertFalse(current.failed)
+                assertTrue(original.pendingLabel != current.pendingLabel)
+                assertEquals(1, fixture.db.messageDao().countForBuffer(room.id))
+                connection.awaitLine { it == "PRIVMSG alice :retry this row" }
+                assertEquals(listOf("PRIVMSG alice :retry this row"), connection.messages())
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
+    fun managerReturnsDurableNotificationIdsBeforeAnotherSendsWireLockIsReleased() =
         runBlocking {
             val fixture = managerFixture()
             var wireLock: Mutex? = null
@@ -491,16 +516,21 @@ class NotificationReplyReadinessTest {
                         notificationAcceptance.complete(fixture.manager.sendNotificationReply(room.id, "voice reply"))
                     }
                 awaitStoredText(fixture, room.id, "voice reply")
+                val accepted =
+                    kotlinx.coroutines.withTimeout(5_000) {
+                        notificationAcceptance.await() as SendAcceptance.Accepted
+                    }
+                assertFalse(accepted.wireOutcome.isCompleted)
+                assertTrue(first.isCompleted)
                 assertEquals(2, fixture.db.messageDao().countForBuffer(room.id))
                 assertEquals(emptyList<String>(), connection.messages())
                 notification.cancel()
-                assertFalse(notificationAcceptance.isCompleted)
+                assertTrue(notificationAcceptance.isCompleted)
 
                 wireLock.unlock()
                 wireLock = null
                 first.await()
                 notification.join()
-                val accepted = notificationAcceptance.await() as SendAcceptance.Accepted
                 val durable =
                     fixture.db
                         .messageDao()
@@ -508,7 +538,7 @@ class NotificationReplyReadinessTest {
                         .single()
                 assertEquals(room.id, durable.bufferId)
                 assertEquals("voice reply", durable.text)
-                assertEquals(ImmediateWireAcceptance.ACCEPTED, accepted.immediateWireAcceptance)
+                assertEquals(ImmediateWireAcceptance.ACCEPTED, accepted.wireOutcome.await())
                 connection.awaitLine { it == "PRIVMSG alice :voice reply" }
                 assertEquals(
                     listOf("PRIVMSG alice :first composer send", "PRIVMSG alice :voice reply"),

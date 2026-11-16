@@ -178,7 +178,7 @@ class ReplyFailureNotificationTest {
         }
 
     @Test
-    fun rejectedAndUncertainRetriesNeverDuplicateThePreservedTextOrClearTheNotice() =
+    fun acceptedUncertainRetriesRemoveThePreservedTextWithoutClearingTheReviewNotice() =
         runTest {
             val store = ComposerDraftStore(db)
             store.saveDraft(bufferId, "typing", replyToEventId = 7L)
@@ -197,9 +197,9 @@ class ReplyFailureNotificationTest {
                     sends++
                     val ids = persistReply("lost text", wireAcceptance.name)
                     durableIds += ids
-                    SendAcceptance.Accepted(ids, wireAcceptance)
+                    SendAcceptance.Accepted(ids, CompletableDeferred(wireAcceptance))
                 }
-                assertEquals("typing\nlost text", store.loadDraft(bufferId)?.text)
+                assertEquals("typing", store.loadDraft(bufferId)?.text)
                 assertEquals(7L, store.loadDraft(bufferId)?.replyToEventId)
                 assertTrue(
                     shadowManager.activeNotifications
@@ -215,15 +215,15 @@ class ReplyFailureNotificationTest {
 
     @Test
     @Config(sdk = [33])
-    fun deniedNotificationPermissionStillPreservesRejectedAndDurableUncertainText() =
+    fun deniedNotificationPermissionPreservesRejectedTextButNeverDuplicatesDurableText() =
         runTest {
             shadowOf(context as Application).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)
             deliver(text = "rejected text") { SendAcceptance.Rejected(SendRejectionReason.CONNECTION_UNAVAILABLE) }
             val ids = persistReply("uncertain text", "denied-permission")
-            deliver(text = "uncertain text") { SendAcceptance.Accepted(ids, ImmediateWireAcceptance.FAILED) }
+            deliver(text = "uncertain text") { SendAcceptance.Accepted(ids, CompletableDeferred(ImmediateWireAcceptance.FAILED)) }
 
             assertTrue(shadowManager.activeNotifications.isEmpty())
-            assertEquals("rejected text\nuncertain text", ComposerDraftStore(db).loadDraft(bufferId)?.text)
+            assertEquals("rejected text", ComposerDraftStore(db).loadDraft(bufferId)?.text)
             assertEquals(
                 "uncertain text",
                 db
@@ -239,7 +239,7 @@ class ReplyFailureNotificationTest {
         runTest {
             db.bufferDao().deleteBuffer(bufferId)
 
-            deliver { SendAcceptance.Accepted(listOf(7L), ImmediateWireAcceptance.DISCONNECTED) }
+            deliver { SendAcceptance.Accepted(listOf(7L), CompletableDeferred(ImmediateWireAcceptance.DISCONNECTED)) }
 
             assertNull(ComposerDraftStore(db).loadDraft(bufferId))
             val notification = shadowManager.activeNotifications.single().notification
@@ -253,7 +253,7 @@ class ReplyFailureNotificationTest {
         }
 
     @Test
-    fun cancellationAfterCommitKeepsAcceptedIdsAndPreservesUncertainDraftBeforeFinishingOnce() =
+    fun cancellationAfterCommitKeepsAcceptedIdsWithoutRestoringUncertainDraftBeforeFinishingOnce() =
         runTest {
             assertPostCommitCancellation(ImmediateWireAcceptance.FAILED, retry = false)
         }
@@ -292,7 +292,11 @@ class ReplyFailureNotificationTest {
                         val ids = persistReply("lost text", "cancel-after-commit")
                         val result =
                             completeDurableAcceptance(
+                                scope = this@coroutineScope,
+                                lifecycle = DurableSendLifecycle(),
+                                failPending = {},
                                 eventIds = ids,
+                                networkId = 1L,
                                 transition = {
                                     committed.complete(ids)
                                     wireMutex.withLock { wireAcceptance }
@@ -306,12 +310,13 @@ class ReplyFailureNotificationTest {
             }
         val ids = committed.await()
         receiver.cancel()
-        assertFalse(accepted.isCompleted)
+        assertTrue(accepted.isCompleted)
         assertEquals(0, finishes)
         wireMutex.unlock()
         receiver.join()
 
-        assertEquals(SendAcceptance.Accepted(ids, wireAcceptance), accepted.await())
+        assertEquals(ids, accepted.await().eventIds)
+        assertEquals(wireAcceptance, accepted.await().wireOutcome.await())
         assertEquals(ids, db.messageDao().byIds(ids).map { it.id })
         assertEquals(
             "lost text",
@@ -324,7 +329,7 @@ class ReplyFailureNotificationTest {
         assertEquals(1, finishes)
         assertEquals(0, timeouts)
         assertTrue(failures.isEmpty())
-        assertEquals(if (retry) "typing" else "typing\nlost text", store.loadDraft(bufferId)?.text)
+        assertEquals("typing", store.loadDraft(bufferId)?.text)
         assertEquals(7L, store.loadDraft(bufferId)?.replyToEventId)
         if (retry) {
             assertTrue(shadowManager.activeNotifications.isEmpty())

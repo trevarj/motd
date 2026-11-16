@@ -100,7 +100,7 @@ class ReplyReceiver : BroadcastReceiver() {
         }.onFailure { Log.w(TAG, "preserving notification reply failed", it) }
     }
 
-    /** Drop the preserved copy once the retry lands, unless the user has since edited the draft. */
+    /** Drop the preserved copy once the retry is durable, unless the user has since edited the draft. */
     private suspend fun clearRetriedDraft(
         bufferId: Long,
         text: String,
@@ -123,7 +123,7 @@ class ReplyReceiver : BroadcastReceiver() {
     }
 }
 
-/** Preserve first-attempt failures; only a wire-accepted manual retry retires the preserved copy. */
+/** Preserve rejected text only; accepted rows own the text even while their wire outcome is pending. */
 internal suspend fun deliverNotificationReply(
     retry: Boolean,
     send: suspend () -> SendAcceptance,
@@ -136,17 +136,16 @@ internal suspend fun deliverNotificationReply(
     when (val acceptance = send()) {
         is SendAcceptance.Accepted -> {
             withContext(NonCancellable) {
-                when (acceptance.immediateWireAcceptance) {
+                if (retry) releaseDraft()
+                when (val outcome = acceptance.wireOutcome.await()) {
                     ImmediateWireAcceptance.ACCEPTED -> {
                         if (retry) {
-                            releaseDraft()
                             notifyResolved()
                         }
                     }
 
                     ImmediateWireAcceptance.DISCONNECTED, ImmediateWireAcceptance.FAILED -> {
-                        if (!retry) preserveDraft()
-                        notifyUncertain(acceptance.immediateWireAcceptance)
+                        notifyUncertain(outcome)
                     }
                 }
             }

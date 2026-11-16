@@ -51,6 +51,7 @@ import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.attachment.AVAILABLE_ATTACHMENT_BACKENDS
 import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.AttachmentPrefs
+import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
 import io.github.trevarj.motd.attachment.AttachmentUploader
@@ -67,8 +68,10 @@ import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Before
@@ -114,6 +117,37 @@ class AttachmentConfirmationSheetUiTest {
                 pickerRequestCode = requestCode
             }
         }
+
+    @Test
+    fun clearHistoryRequiresConfirmationAndClearsPersistedRecentsWithoutRemoteDeletion() {
+        val prefs = AttachmentPrefsImpl(context)
+        val records =
+            listOf(
+                UploadRecord("https://files.example/photo", AttachmentBackend.CRAFTERBIN, "photo.png", "image/png", deletionToken = "token"),
+                UploadRecord("https://files.example/text", AttachmentBackend.X0_AT, "text.txt", "text/plain"),
+            )
+        runBlocking {
+            prefs.clearUploadHistory()
+            records.forEach { prefs.addUpload(it) }
+        }
+        showConditionalAttachments(prefs = prefs)
+
+        compose.onNodeWithTag("attachment_clear_history").performScrollTo().performClick()
+        compose.onNodeWithTag("attachment_clear_history_confirm").assertIsDisplayed()
+        assertEquals(records.reversed(), runBlocking { prefs.recentUploads.first() })
+        compose.onNodeWithText(context.getString(R.string.action_cancel)).performClick()
+        compose.onNodeWithTag("attachment_clear_history_confirm").assertDoesNotExist()
+        assertEquals(records.reversed(), runBlocking { AttachmentPrefsImpl(context).recentUploads.first() })
+
+        compose.onNodeWithTag("attachment_clear_history").performScrollTo().performClick()
+        compose.onNodeWithTag("attachment_clear_history_confirm").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag("attachment_clear_history").fetchSemanticsNodes().isEmpty()
+        }
+        compose.onNodeWithText("photo.png").assertDoesNotExist()
+        compose.onNodeWithText("text.txt").assertDoesNotExist()
+        assertEquals(emptyList<UploadRecord>(), runBlocking { AttachmentPrefsImpl(context).recentUploads.first() })
+    }
 
     @Test
     fun newTextOpensEditorThenConfirmation() {
@@ -427,11 +461,12 @@ class AttachmentConfirmationSheetUiTest {
         onOpenNetworkSettings: (Long) -> Unit = {},
         pasteIntoComposer: Boolean = false,
         onUploadAttempt: () -> Unit = {},
+        prefs: AttachmentPrefs? = null,
     ) {
         val viewModel =
             AttachmentViewModel(
                 prefs =
-                    object : AttachmentPrefs {
+                    prefs ?: object : AttachmentPrefs {
                         override val config = flowOf(PasteBackendConfig())
                         override val recentUploads = flowOf(emptyList<UploadRecord>())
 
@@ -442,6 +477,8 @@ class AttachmentConfirmationSheetUiTest {
                         override suspend fun addUpload(record: UploadRecord) = Unit
 
                         override suspend fun removeUpload(url: String) = Unit
+
+                        override suspend fun clearUploadHistory() = Unit
                     },
                 uploader =
                     object : AttachmentUploader {

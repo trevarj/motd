@@ -3,6 +3,8 @@ package io.github.trevarj.motd.bouncer
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
+import io.github.trevarj.motd.service.ImmediateWireAcceptance
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -92,7 +94,7 @@ class BouncerServClientTest {
                     acceptance =
                         io.github.trevarj.motd.service.SendAcceptance.Accepted(
                             emptyList(),
-                            io.github.trevarj.motd.service.ImmediateWireAcceptance.DISCONNECTED,
+                            CompletableDeferred(ImmediateWireAcceptance.DISCONNECTED),
                         ),
                 ) { }
 
@@ -112,7 +114,7 @@ class BouncerServClientTest {
                     acceptance =
                         io.github.trevarj.motd.service.SendAcceptance.Accepted(
                             emptyList(),
-                            io.github.trevarj.motd.service.ImmediateWireAcceptance.FAILED,
+                            CompletableDeferred(ImmediateWireAcceptance.FAILED),
                         ),
                 ) { }
 

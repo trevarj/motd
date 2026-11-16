@@ -10,6 +10,8 @@ import io.github.trevarj.motd.irc.ext.SearchRequest
 import io.github.trevarj.motd.irc.ext.SearchResultMessage
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,10 +34,14 @@ enum class ImmediateWireAcceptance {
     FAILED,
 }
 
+private val acceptedWireOutcome: Deferred<ImmediateWireAcceptance> =
+    CompletableDeferred(ImmediateWireAcceptance.ACCEPTED)
+
 sealed interface SendAcceptance {
     data class Accepted(
         val eventIds: List<TimelineEventId>,
-        val immediateWireAcceptance: ImmediateWireAcceptance = ImmediateWireAcceptance.ACCEPTED,
+        /** Durable acceptance precedes the ordered transport attempt; Room owns delivery state. */
+        val wireOutcome: Deferred<ImmediateWireAcceptance> = acceptedWireOutcome,
         /**
          * Row identity texts, using exact IRC-formatted payloads when present, in order.
          *

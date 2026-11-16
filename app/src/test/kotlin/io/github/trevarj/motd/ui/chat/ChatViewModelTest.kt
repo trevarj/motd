@@ -642,7 +642,6 @@ class ChatViewModelTest {
                     assertEquals(MessageForwardError.SOURCE_UNAVAILABLE, invalid.error)
                     assertEquals(source, invalid.source)
                     assertFalse(invalid.sending)
-                    assertNull(invalid.acceptance)
                     vm.confirmForward()
                     vm.changeForwardDestination()
                     vm.selectForwardDestination(target)
@@ -865,7 +864,6 @@ class ChatViewModelTest {
                     assertEquals(target, rejected.destination)
                     assertFalse(rejected.includeSender)
                     assertFalse(rejected.sending)
-                    assertNull(rejected.acceptance)
                     assertTrue(manager.messages.isEmpty())
                     assertEquals(1, manager.messageAttempts.size)
                     manager.sendRejection = null
@@ -934,7 +932,7 @@ class ChatViewModelTest {
         }
 
     @Test
-    fun forwardDurableUnsentAcceptanceRetainsEventIdsAndAllowsOnlyClose() =
+    fun forwardDurableAcceptanceClosesPreviewRegardlessOfWireOutcome() =
         runTest {
             val source = seedTranslationSource()
             for (wire in listOf(ImmediateWireAcceptance.DISCONNECTED, ImmediateWireAcceptance.FAILED)) {
@@ -947,19 +945,9 @@ class ChatViewModelTest {
                     vm.selectForwardDestination(target)
                     vm.confirmForward()
                     runCurrent()
-                    val terminal = requireNotNull(vm.forwardState.value)
-                    val acceptance = requireNotNull(terminal.acceptance)
-                    assertEquals(wire, acceptance.immediateWireAcceptance)
-                    assertEquals(listOf(1L, 2L), acceptance.eventIds)
-                    assertEquals(forwardMessageText(source, true).split('\n'), acceptance.storedTexts)
-                    assertFalse(terminal.sending)
-                    assertNull(terminal.error)
+                    assertNull(vm.forwardState.value)
                     vm.confirmForward()
-                    vm.selectForwardDestination(target.copy(displayName = "Different"))
-                    vm.changeForwardDestination()
-                    vm.setForwardIncludeSender(false)
-                    vm.openForward(source.copy(text = "Different"))
-                    assertTrue(vm.forwardState.value === terminal)
+                    vm.dismissForward()
                     assertEquals(1, manager.messageAttempts.size)
                     assertEquals(1, manager.messages.size)
                     vm.dismissForward()
@@ -986,7 +974,6 @@ class ChatViewModelTest {
                     runCurrent()
                     val terminal = requireNotNull(vm.forwardState.value)
                     assertEquals(source, terminal.source)
-                    assertNull(terminal.acceptance)
                     if (failure is CancellationException) {
                         assertTrue(terminal.sending)
                         assertNull(terminal.error)
@@ -2093,6 +2080,102 @@ class ChatViewModelTest {
 
             assertEquals(listOf(SentMessage(channel.id, link, null)), manager.messages)
             assertEquals("", vm.composerDraft.value.text)
+        }
+
+    @Test
+    fun `accepted draft clears before wire completion and flight settlement`() =
+        runTest {
+            val wireOutcome = CompletableDeferred<ImmediateWireAcceptance>()
+            val manager = FakeConnectionManager(network.id, wireOutcome = wireOutcome)
+            val vm = viewModel(channel, manager)
+            vm.state.first { it.buffer != null }
+            vm.saveDraft("accepted")
+
+            vm.submit("accepted", {}, {}).join()
+
+            assertFalse(wireOutcome.isCompleted)
+            assertEquals("", vm.composerDraft.value.text)
+            assertNull(db.composerDraftDao().byRoom(channel.id))
+            val flight = requireNotNull(vm.outgoingFlight.value)
+            vm.onFlightSettled(flight.token)
+            vm.saveDraft("new draft")
+            wireOutcome.complete(ImmediateWireAcceptance.FAILED)
+            advanceUntilIdle()
+
+            assertEquals("new draft", vm.composerDraft.value.text)
+            assertEquals("new draft", db.composerDraftDao().byRoom(channel.id)?.text)
+            assertEquals(1, manager.messageAttempts.size)
+        }
+
+    @Test
+    fun `accepted draft clears locally when a newer persisted draft wins compare and clear`() =
+        runTest {
+            val gate = CompletableDeferred<Unit>()
+            val manager = FakeConnectionManager(network.id, sendGate = gate)
+            val vm = viewModel(channel, manager)
+            vm.state.first { it.buffer != null }
+            vm.saveDraft("accepted")
+            val submission = vm.submit("accepted", {}, {})
+            manager.messageStarted.await()
+            val external = ComposerDraftStore(db).saveDraft(channel.id, "new external draft", null)
+
+            gate.complete(Unit)
+            submission.join()
+
+            assertEquals("", vm.composerDraft.value.text)
+            assertEquals(external, db.composerDraftDao().byRoom(channel.id))
+            val recreated = viewModel(channel, FakeConnectionManager(network.id))
+            assertEquals("new external draft", recreated.composerDraft.first { it.hydrated }.text)
+        }
+
+    @Test
+    fun `unpersistable draft is rejected before submission and retains text and reply`() =
+        runTest {
+            val manager = FakeConnectionManager(network.id)
+            val vm = viewModel(channel, manager)
+            vm.state.first { it.buffer != null }
+            vm.composerDraft.first { it.hydrated }
+            val parent = message(channel.id, "parent", "parent", "alice", 88)
+            vm.setReply(parent)
+            vm.saveDraft("not submitted")
+            db.bufferDao().update(channel.copy(dismissed = true))
+
+            vm.submit("not submitted", {}, {}).join()
+
+            assertTrue(manager.messageAttempts.isEmpty())
+            assertEquals("not submitted", vm.composerDraft.value.text)
+            assertEquals(parent, vm.state.first { it.replyTo != null }.replyTo)
+            assertEquals(ChatUiEvent.SendRejected, vm.uiEvents.value.single().value)
+        }
+
+    @Test
+    fun `cancellation after durable acceptance cannot retain the accepted draft`() =
+        runTest {
+            for (cancelViewModel in listOf(false, true)) {
+                lateinit var vm: ChatViewModel
+                lateinit var submission: kotlinx.coroutines.Job
+                val manager =
+                    FakeConnectionManager(
+                        network.id,
+                        onAccepted = {
+                            if (cancelViewModel) vm.viewModelScope.cancel() else submission.cancel()
+                        },
+                    )
+                vm = viewModel(channel, manager)
+                vm.state.first { it.buffer != null }
+                vm.saveDraft("accepted")
+                submission = vm.submit("accepted", {}, {})
+                submission.join()
+                advanceUntilIdle()
+
+                assertEquals(1, manager.messages.size)
+                assertEquals("", vm.composerDraft.value.text)
+                assertNull(db.composerDraftDao().byRoom(channel.id))
+                val recreated = viewModel(channel, FakeConnectionManager(network.id))
+                assertEquals("", recreated.composerDraft.first { it.hydrated }.text)
+                vm.viewModelScope.cancel()
+                recreated.viewModelScope.cancel()
+            }
         }
 
     @Test
@@ -6949,6 +7032,8 @@ class ChatViewModelTest {
         private val retryRejection: io.github.trevarj.motd.service.SendRejectionReason? = null,
         private val inviteAccepted: Boolean = false,
         private val immediateWireAcceptance: ImmediateWireAcceptance = ImmediateWireAcceptance.ACCEPTED,
+        private val wireOutcome: CompletableDeferred<ImmediateWireAcceptance> = CompletableDeferred(immediateWireAcceptance),
+        private val onAccepted: (() -> Unit)? = null,
         private val sendException: Exception? = null,
         private val onSendMessage: ((Long, String, Long?, String?) -> Unit)? = null,
         historyPending: Set<Long> = emptySet(),
@@ -7046,9 +7131,10 @@ class ChatViewModelTest {
             // Mirror the real manager, which reports what it actually persisted: a reply can gain
             // a visible prefix and newlines split one submission into several rows.
             val stored = storedTexts?.invoke(text) ?: listOf(text)
+            onAccepted?.invoke()
             return io.github.trevarj.motd.service.SendAcceptance.Accepted(
                 eventIds = List(stored.size) { it + 1L },
-                immediateWireAcceptance = immediateWireAcceptance,
+                wireOutcome = wireOutcome,
                 storedTexts = stored,
             )
         }

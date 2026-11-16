@@ -23,6 +23,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.paging.LoadState
@@ -51,6 +52,7 @@ import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -357,6 +359,48 @@ class GlobalFeedScreenTest {
         compose.waitUntil(timeoutMillis = 10_000) { viewportStates.lastOrNull() == true }
         compose.onNodeWithTag("mentions_navigation_down").performClick()
         compose.waitUntil(timeoutMillis = 10_000) { viewportStates.lastOrNull() == false }
+    }
+
+    @Test
+    fun mentionsRefreshKeepsTheVisibleMessageAndOffsetAcrossLiveAndHistoryInsertions() {
+        val original = (1L..80L).map { row(id = it, text = "mention $it") }
+        val stream = MutableStateFlow(PagingData.from(original))
+        setContent(stream, mentions = true)
+        awaitTag("mentions_row_1")
+        compose.onNodeWithTag("mentions_list").performScrollToIndex(30)
+        compose.waitUntil(timeoutMillis = 10_000) { navigationListState?.firstVisibleItemIndex == 30 }
+        var anchor: Any? = null
+        var offset = 0
+        compose.runOnIdle {
+            val state = checkNotNull(navigationListState)
+            anchor =
+                state.layoutInfo.visibleItemsInfo
+                    .first()
+                    .key
+            offset = state.firstVisibleItemScrollOffset
+            stream.value =
+                PagingData.from(
+                    listOf(row(100, text = "live mention")) +
+                        original.take(25) +
+                        row(101, text = "history mention") +
+                        original.drop(25) +
+                        row(102, text = "older history mention"),
+                )
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+        compose.runOnIdle {
+            val state = checkNotNull(navigationListState)
+            assertEquals(83, state.layoutInfo.totalItemsCount)
+            assertEquals(
+                anchor,
+                state.layoutInfo.visibleItemsInfo
+                    .first()
+                    .key,
+            )
+            assertEquals(offset, state.firstVisibleItemScrollOffset)
+        }
+        compose.onNodeWithTag("mentions_row_31").assertIsDisplayed()
     }
 
     @Test

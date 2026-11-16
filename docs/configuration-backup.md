@@ -85,6 +85,8 @@ The appearance `uiIconSet` enum (`MATERIAL` or `LUCIDE`) is exported and explici
 restored too. Older appearance objects without it restore `MATERIAL`; missing
 appearance objects still leave the local icon set untouched. No format-version
 change is required for these defaulted additive fields.
+The appearance `collapseTitleBar` flag also round-trips, defaulting to `true`
+for older appearance objects. An absent appearance object preserves its local value.
 
 Legacy `splashScreenAnimation` values (`EDGE_TRACE`, `SOFT_WASH`, `TRAVELING_PULSE`,
 `STATIC`) still round-trip and restore for compatibility, although startup now

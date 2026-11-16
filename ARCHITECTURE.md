@@ -321,6 +321,8 @@ flowchart TD
   bottom restores expanded chrome and waits for that layout before consuming the target.
   Target consumption preserves the final header, viewport and unread placement; settled
   reader scrolls still animate, and latest stays expanded.
+  With Appearance's title-bar collapse disabled, entry placement instead waits for the
+  expanded viewport and keeps ordinary toolbar actions; suspended placement reads the live choice.
   Compact headers keep member counts beside the ellipsizing title with separate text semantics;
   expanded headers stack the count below it. Typing and connection/failure subtitles stay stacked.
   Entry's frozen unread metadata reads only the resolved canonical room, reusing the
@@ -359,6 +361,12 @@ flowchart TD
   over an established landing ID; without a known row it stays pending rather than
   claiming a historical same-text confirmation. Echo/failure updates change the airborne
   glyph without shortening the morph or taking ownership from the accessible real row.
+  Landing-row discovery is capped at one second; an absent/offscreen row cannot keep
+  the flight alive or restore submitted text to the composer.
+- Outgoing acceptance transfers ownership from the draft to durable transcript rows before
+  waiting for transport. Ordered per-network service work retains lifecycle protection;
+  immediate-wire consumers explicitly await its outcome. Pending rows show a spinner,
+  then confirmation or failure with retry/delete. Forwarding closes on durable acceptance.
 - Inline reaction chips clip their press indication to the same capsule shape as
   their fill and border, independently of chat-shadow elevation.
   Reaction-window, saved-position and displayed-depth observers follow the current paging-items
@@ -602,8 +610,9 @@ flowchart TD
   Notification replies request one reconnect when not Ready and allow five seconds for
   the current client to become Ready and, for channels, self-JOIN; expiry never queues
   a later send. Submission uses the existing durable sender once. Pre-persistence rejection
-  preserves text with phone-only manual Retry; uncertain durable/wire delivery preserves
-  drafts and durable rows with a phone-only review notice, without text-based Retry.
+  preserves text with phone-only manual Retry. Durable acceptance retires an unchanged retry draft
+  before awaiting transport and never recreates it on wire failure; uncertain delivery retains
+  the durable rows with a phone-only review notice, without text-based Retry.
 
 ## Where to work
 

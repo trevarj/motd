@@ -67,6 +67,10 @@ class AttachmentPrefsImpl
             store.edit { prefs -> prefs[HISTORY] = encodeHistory(prefs[HISTORY]?.let(::decodeHistory).orEmpty().filterNot { it.url == url }) }
         }
 
+        override suspend fun clearUploadHistory() {
+            store.edit { it.remove(HISTORY) }
+        }
+
         private fun encodeConfig(c: PasteBackendConfig) =
             buildJsonObject {
                 put("backend", c.backend.name)

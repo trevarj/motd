@@ -413,7 +413,7 @@ class GlobalFeedPagingDbTest {
                     isAtNewest = atNewest::get,
                 )
             val anchoredRefresh = anchoredSource.refresh(key = anchoredKey, loadSize = 2)
-            assertEquals(listOf("mention-2", "mention-1"), anchoredRefresh.data.map { it.message.text })
+            assertEquals(listOf("mention-3", "mention-2"), anchoredRefresh.data.map { it.message.text })
 
             atNewest.set(true)
 
@@ -442,6 +442,43 @@ class GlobalFeedPagingDbTest {
                     isAtNewest = atNewest::get,
                 )
             assertEquals(anchoredKey, allSource.getRefreshKey(anchoredState))
+        }
+
+    @Test
+    fun mentionsRefreshPublishesBothSidesOfTheReadingAnchorTogetherWithinTheLoadBound() =
+        runTest {
+            val ids =
+                db.messageDao().insertAll(
+                    (1..200).map {
+                        message(
+                            if (it % 2 == 0) bufferA else bufferB,
+                            "mention-$it",
+                            serverTime = it * 100L,
+                            dedupKey = "centered-$it",
+                            hasMention = true,
+                        )
+                    },
+                )
+            val source = GlobalFeedPagingSource(db, MessageVisibilitySpec(), GlobalFeedMode.MENTIONS)
+            val first = source.refresh(key = null, loadSize = GLOBAL_FEED_PAGING_CONFIG.initialLoadSize)
+            assertEquals((200 downTo 51).map { "mention-$it" }, first.data.map { it.message.text })
+            assertNull(first.prevKey)
+            assertNotNull(first.nextKey)
+
+            val anchor = GlobalFeedKey(10_000, ids[99])
+            val refreshed = source.refresh(key = anchor, loadSize = 50)
+            assertEquals((125 downTo 76).map { "mention-$it" }, refreshed.data.map { it.message.text })
+            assertEquals(25, refreshed.data.indexOfFirst { it.message.id == anchor.id })
+            assertEquals(GlobalFeedKey(12_500, ids[124]), refreshed.prevKey)
+            assertEquals(GlobalFeedKey(7_600, ids[75]), refreshed.nextKey)
+
+            val nearNewest = source.refresh(key = GlobalFeedKey(19_800, ids[197]), loadSize = 50)
+            assertEquals((200 downTo 151).map { "mention-$it" }, nearNewest.data.map { it.message.text })
+            assertNull(nearNewest.prevKey)
+
+            val nearOldest = source.refresh(key = GlobalFeedKey(200, ids[1]), loadSize = 50)
+            assertEquals((27 downTo 1).map { "mention-$it" }, nearOldest.data.map { it.message.text })
+            assertNull(nearOldest.nextKey)
         }
 
     /** The plan must stay an ordered index walk with a real seek, not a per-page sort. */

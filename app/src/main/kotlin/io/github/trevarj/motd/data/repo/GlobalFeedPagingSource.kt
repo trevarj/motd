@@ -70,6 +70,7 @@ internal class GlobalFeedPagingSource(
                 when (params) {
                     // Anchored refresh includes the anchor row itself, so the viewport keeps its place.
                     is LoadParams.Refresh -> {
+                        if (mode == GlobalFeedMode.MENTIONS) return@withContext refreshMentions(params)
                         val rows = page(params.key, GlobalFeedSeek.OLDER_OR_AT, params.loadSize)
                         LoadResult.Page(
                             data = rows,
@@ -96,6 +97,28 @@ internal class GlobalFeedPagingSource(
                 LoadResult.Error(e)
             }
         }
+
+    private suspend fun refreshMentions(params: LoadParams.Refresh<GlobalFeedKey>): LoadResult.Page<GlobalFeedKey, SearchHit> {
+        val newerLimit = params.loadSize / 2
+        val newer =
+            if (params.key != null && newerLimit > 0) {
+                page(params.key, GlobalFeedSeek.NEWER, newerLimit).asReversed()
+            } else {
+                emptyList()
+            }
+        val olderLimit = params.loadSize - newer.size
+        val older = page(params.key, GlobalFeedSeek.OLDER_OR_AT, olderLimit)
+        return LoadResult.Page(
+            data = newer + older,
+            prevKey =
+                if (params.key != null && (newerLimit == 0 || newer.size == newerLimit)) {
+                    newer.firstOrNull()?.key() ?: older.firstOrNull()?.key() ?: params.key
+                } else {
+                    null
+                },
+            nextKey = if (older.size == olderLimit) older.lastOrNull()?.key() else null,
+        )
+    }
 
     private suspend fun page(
         key: GlobalFeedKey?,

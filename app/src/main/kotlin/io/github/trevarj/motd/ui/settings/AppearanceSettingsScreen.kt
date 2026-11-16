@@ -180,6 +180,7 @@ fun AppearanceSettingsScreen(
         onInputCornerStyle = viewModel::setInputCornerStyle,
         onAvatarShape = viewModel::setAvatarShape,
         onChatCardCornerStyle = viewModel::setChatCardCornerStyle,
+        onCollapseTitleBar = viewModel::setCollapseTitleBar,
         onMediaCornerStyle = viewModel::setMediaCornerStyle,
         onUiIconSet = viewModel::setUiIconSet,
         onFolderDisplayMode = viewModel::setFolderDisplayMode,
@@ -228,6 +229,7 @@ fun AppearanceSettingsContent(
     onInputCornerStyle: (UiCornerStyle) -> Unit = {},
     onAvatarShape: (AvatarShape) -> Unit = {},
     onChatCardCornerStyle: (UiCornerStyle) -> Unit = {},
+    onCollapseTitleBar: (Boolean) -> Unit = {},
     onMediaCornerStyle: (UiCornerStyle) -> Unit = {},
     onUiIconSet: (UiIconSet) -> Unit = {},
     onFolderDisplayMode: (FolderDisplayMode) -> Unit,
@@ -504,6 +506,17 @@ fun AppearanceSettingsContent(
             }
         }
         SettingsGroup(title = stringResource(R.string.settings_appearance_messages_section)) {
+            SettingsTarget(target?.name, SettingsTarget.COLLAPSE_TITLE_BAR.name) { targetModifier ->
+                SwitchRow(
+                    title = stringResource(R.string.settings_collapse_title_bar),
+                    subtitle = stringResource(R.string.settings_collapse_title_bar_desc),
+                    checked = appearance.collapseTitleBar,
+                    onCheckedChange = onCollapseTitleBar,
+                    switchTag = "settings_switch_collapse_title_bar",
+                    modifier = targetModifier,
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsTarget(target?.name, SettingsTarget.MESSAGE_STYLE.name) { targetModifier ->
                 SettingsNavigationRow(
                     title = stringResource(R.string.settings_density),

@@ -47,14 +47,21 @@ Security. Custom services need a 0x0-compatible multipart HTTPS endpoint, with
 optional credentials; their link opens only a valid configured endpoint.
 The editable size limit is enforced by the app, not a verified service capacity.
 
+File upload → Recents → Clear history confirms before removing local upload records
+and saved deletion tokens. Hosted files and active uploads are unaffected.
+
 ## Chat navigation
 
 The drawer's Networks header shows total mentions, not total unread messages.
 Per-network unread badges and the scoped Mark all as read action remain available.
+Mentions refreshes load newer and older rows around the reader together in one bounded
+window, rather than dropping newer rows and then loading them back page by page.
 
 Comfortable chat sends grow the actual formatted message bubble from the composer
 over a 500ms morph, keeping its body and metadata aligned through the landing.
 Replies and denser message styles retain their ordinary send-flight presentation.
+Accepted sends clear the composer once saved to chat. Their bubbles settle while a spinner
+shows pending delivery, then show confirmation or failure with Retry and Delete.
 
 A chat-list swipe acts only after release at least 60% across the row width. Short
 flicks spring back without flying offscreen; right swipes do not dismiss chats.
@@ -64,11 +71,16 @@ strip. On the right, 56dp floating buttons stack conversation actions, Back, and
 latest from top to bottom with 8dp gaps; Back is separate from the actions menu
 and appears only where Back navigation is available. Latest restores the full
 toolbar. Large accessibility text can grow the strip rather than being clipped.
+Appearance → Messages & input → Collapse title bar can keep the full toolbar and
+its menu in place while reading older messages; the latest-message button remains available.
 History refreshes preserve the already-loaded bounded window around a parked
 reader, so collapsed presence runs do not replace painted messages with placeholders.
 
 Chat-list tabs use the same theme surface as the title bar and chat rows.
 The selected tab retains its distinct pill highlight.
+
+Opening settings search focuses its input immediately. Returning from a result keeps
+the query without requesting focus again.
 
 Labs → Dickord mode provides Discord-style navigation for the
 [Dickord Discord-to-IRC bridge](https://github.com/trevarj/dickord). Its project link

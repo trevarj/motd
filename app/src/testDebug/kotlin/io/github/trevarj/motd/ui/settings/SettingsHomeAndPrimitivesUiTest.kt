@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -39,6 +40,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -48,6 +50,8 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -60,6 +64,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.isHeading
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -69,6 +74,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontStyle
@@ -157,7 +163,7 @@ class SettingsHomeAndPrimitivesUiTest {
         compose.onNodeWithTag("settings_search_action").performClick()
         compose.onNodeWithTag("settings_search_prompt").assertIsDisplayed()
         compose.onNodeWithTag("settings_category_networks").assertDoesNotExist()
-        compose.onNodeWithTag("settings_search_field").performTextReplacement("obfuscation")
+        compose.onNodeWithTag("settings_search_field").assertIsFocused().performTextInput("obfuscation")
         compose.onNodeWithTag("settings_search_result_network_4_OBFUSCATION").assertIsDisplayed().performClick()
         compose.onNodeWithTag("settings_search_field").assertIsDisplayed()
         compose.onNodeWithTag("settings_search_result_network_4_OBFUSCATION").assertIsDisplayed()
@@ -191,6 +197,51 @@ class SettingsHomeAndPrimitivesUiTest {
         compose.runOnIdle {
             assertEquals(SettingsSearchDestination.Page(SettingsSearchPage.NOTIFICATIONS, SettingsTarget.NOTIFICATIONS), opened)
         }
+        compose.onNodeWithTag("settings_search_action").performClick()
+        compose.onNodeWithTag("settings_search_field").assertDoesNotExist()
+        compose.onNodeWithTag("settings_search_action").performClick()
+        compose.onNodeWithTag("settings_search_field").assertIsFocused()
+        compose.runOnIdle { assertEquals("", state.query) }
+    }
+
+    @Test
+    fun search_focus_is_requested_once_for_direct_entry_and_not_restored_on_return() {
+        var state by mutableStateOf(SettingsHomeUiState(query = "collapse title"))
+        lateinit var focusManager: FocusManager
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            focusManager = LocalFocusManager.current
+            MotdTheme(dynamicColor = false) {
+                SettingsContent(
+                    state = state,
+                    onQueryChange = { state = state.copy(query = it) },
+                    onBack = {},
+                    onOpenAppearance = {},
+                    onOpenChat = {},
+                    onOpenDelivery = {},
+                    onOpenNotifications = {},
+                    onOpenNetworks = {},
+                    onOpenUploads = {},
+                    onOpenBackupRestore = {},
+                    onOpenLabs = {},
+                    onOpenAbout = {},
+                    onOpenSearchResult = { focusManager.clearFocus() },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("settings_search_field").assertIsFocused().performTextReplacement("collapse title bar")
+        compose.runOnIdle { assertEquals("collapse title bar", state.query) }
+        compose.onNodeWithTag("settings_search_result_page_APPEARANCE_COLLAPSE_TITLE_BAR").performClick()
+        compose.onNodeWithTag("settings_search_field").assertIsNotFocused()
+        compose.runOnIdle { state = state.copy(query = "theme") }
+        compose.onNodeWithTag("settings_search_field").assertIsNotFocused()
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("settings_search_field").assertIsNotFocused()
+        compose.runOnIdle { assertEquals("theme", state.query) }
+        compose.onNodeWithTag("settings_search_action").performClick()
+        compose.onNodeWithTag("settings_search_action").performClick()
+        compose.onNodeWithTag("settings_search_field").assertIsFocused()
     }
 
     @Test

@@ -299,6 +299,10 @@ internal class FakeAppearance(
         state.value = state.value.copy(chatCardCornerStyle = style)
     }
 
+    override suspend fun setCollapseTitleBar(enabled: Boolean) {
+        state.value = state.value.copy(collapseTitleBar = enabled)
+    }
+
     override suspend fun setMediaCornerStyle(style: UiCornerStyle) {
         state.value = state.value.copy(mediaCornerStyle = style)
     }

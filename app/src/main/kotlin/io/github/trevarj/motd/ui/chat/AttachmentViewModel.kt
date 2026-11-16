@@ -86,6 +86,17 @@ class AttachmentViewModel
             _error.value = null
         }
 
+        fun clearHistory() =
+            viewModelScope.launch {
+                try {
+                    prefs.clearUploadHistory()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    _error.value = AttachmentError(failure.message ?: "Clear history failed")
+                }
+            }
+
         fun delete(record: UploadRecord) =
             viewModelScope.launch {
                 runCatching {

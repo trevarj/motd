@@ -29,8 +29,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -2081,18 +2081,18 @@ internal fun SentIcon(contentColor: Color = MaterialTheme.colorScheme.onSurfaceV
     )
 }
 
-/** Small clock glyph shown next to the timestamp while a message is still sending. */
+/** Small spinner shown next to the timestamp while a message is still sending. */
 @Composable
 internal fun PendingIcon(contentColor: Color = MaterialTheme.colorScheme.onSurfaceVariant) {
-    Icon(
-        Icons.Filled.Schedule,
-        contentDescription = stringResource(R.string.chat_sending),
-        tint = contentColor,
+    val description = stringResource(R.string.chat_sending)
+    CircularProgressIndicator(
+        color = contentColor,
+        strokeWidth = 1.5.dp,
         modifier =
             Modifier
                 .padding(end = 4.dp)
-                .heightIn(max = 12.dp)
-                .width(12.dp),
+                .size(12.dp)
+                .semantics { contentDescription = description },
     )
 }
 
