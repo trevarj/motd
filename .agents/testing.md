@@ -106,6 +106,8 @@ existing local helpers rather than adding a second generic fixture framework.
 Before holding repository reads for a later `ChatViewModel` action, await
 `entryPreparationReady.first { it }` so entry initialization cannot consume the
 action's read barrier.
+For exact-jump completion, await the real `onJumpHandled` callback; a cleared
+jump target can precede asynchronous message resolution.
 For timeline geometry across navigation, settle IME insets to the same state
 before capturing the baseline and comparing the restored viewport.
 

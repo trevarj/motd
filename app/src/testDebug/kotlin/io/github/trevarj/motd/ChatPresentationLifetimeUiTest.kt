@@ -391,16 +391,17 @@ class ChatPresentationLifetimeUiTest {
             compose.waitForIdle()
             assertTrue("the current SQL reveal remains authorized during the native exit", owner.hiddenFoolsRevealed.value)
             compose.onAllNodesWithText(body("retained-0-899")).assertCountEquals(0)
+            val handledJumpsBefore = fixture.handledJumpCount
             compose.runOnIdle { owner.focusRecentMention(fixture.target(room, 0).copy(fromSavedPosition = false)) }
+            compose.waitUntil(10_000) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                fixture.handledJumpCount > handledJumpsBefore && owner.jumpTarget.value == null
+            }
             compose.mainClock.advanceTimeBy(500)
             compose.waitForIdle()
             assertTrue("an exact jump cancels, rather than dispatches, the deferred Restore", owner.expandAllFools.value)
             compose.onNodeWithTag("chat_message_retained-0-899", useUnmergedTree = true).assertIsDisplayed()
-            compose.waitUntil(10_000) {
-                compose.mainClock.advanceTimeByFrame()
-                compose.waitForIdle()
-                owner.jumpTarget.value == null
-            }
 
             fixture.toggleFools()
             compose.mainClock.advanceTimeBy(32)
@@ -1032,6 +1033,8 @@ class ChatPresentationLifetimeUiTest {
         val foolSettings = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())
         var readCallbacks = 0
         var saveCallbacks = 0
+        var handledJumpCount = 0
+            private set
         val depthAnchors = ArrayList<TimelineAnchor>()
 
         init {
@@ -1478,7 +1481,10 @@ class ChatPresentationLifetimeUiTest {
                     readCallbacks++
                     owner.markRead(it)
                 },
-                onJumpHandled = owner::onJumpHandled,
+                onJumpHandled = {
+                    owner.onJumpHandled(it)
+                    handledJumpCount++
+                },
                 onJumpToNewest = owner::jumpToNewest,
                 onFocusRecentMention = owner::focusRecentMention,
                 onJumpUnresolved = owner::onJumpUnresolved,
