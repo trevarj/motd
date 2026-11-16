@@ -12,6 +12,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -32,6 +35,7 @@ import io.github.trevarj.motd.data.prefs.*
 import io.github.trevarj.motd.data.repo.catalogPaletteLink
 import io.github.trevarj.motd.ui.theme.MotdDarkRaw
 import io.github.trevarj.motd.ui.theme.MotdLightRaw
+import io.github.trevarj.motd.ui.theme.UiIcon
 import io.github.trevarj.motd.ui.theme.rawFixedThemeScheme
 import io.github.trevarj.motd.ui.theme.themeIdentityPalette
 import kotlinx.coroutines.CancellationException
@@ -126,7 +130,9 @@ fun PaletteHubScreen(
         modifier = Modifier.testTag("palette_hub"),
         topBar = {
             TopAppBar(title = { Text(stringResource(R.string.palette_title)) }, navigationIcon = {
-                TextButton(onClick = onBack, modifier = Modifier.testTag("palette_back")) { Text(stringResource(R.string.palette_back)) }
+                IconButton(onClick = onBack, modifier = Modifier.testTag("palette_back")) {
+                    UiIcon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back))
+                }
             })
         },
         bottomBar = {
@@ -248,8 +254,12 @@ fun PaletteHubScreen(
                                 } else if (tracked.isNotEmpty() || identical) {
                                     Text("Installed", Modifier.padding(horizontal = 12.dp))
                                 }
-                                TextButton(onClick = { browseCatalog(document) }) { Text("Preview palette") }
-                                TextButton(onClick = { copyLink(catalogPaletteLink(document.id, document.revision)) }) { Text("Copy link") }
+                                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                                    TextButton(onClick = { browseCatalog(document) }, modifier = Modifier.weight(1f)) { Text("Preview palette") }
+                                    IconButton(onClick = { copyLink(catalogPaletteLink(document.id, document.revision)) }, modifier = Modifier.size(48.dp)) {
+                                        UiIcon(Icons.Filled.ContentCopy, stringResource(R.string.upload_copy_link))
+                                    }
+                                }
                             }
                         }
                         item {

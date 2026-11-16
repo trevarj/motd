@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -24,6 +26,7 @@ import io.github.trevarj.motd.ui.chat.ColorComponentSlider
 import io.github.trevarj.motd.ui.chat.ColorWheel
 import io.github.trevarj.motd.ui.chat.parseColorHex
 import io.github.trevarj.motd.ui.chat.wallpaperColorHex
+import io.github.trevarj.motd.ui.theme.UiIcon
 import io.github.trevarj.motd.ui.theme.accessibleColorScheme
 import io.github.trevarj.motd.ui.theme.toRawColorScheme
 import io.github.trevarj.motd.ui.theme.withTrueBlackSurfaces
@@ -56,7 +59,9 @@ fun PaletteEditorScreen(
         modifier = Modifier.imePadding(),
         topBar = {
             TopAppBar(title = { Text(stringResource(R.string.palette_editor_title)) }, navigationIcon = {
-                TextButton(onClick = { back() }, modifier = Modifier.testTag("palette_editor_back")) { Text(stringResource(R.string.palette_editor_back)) }
+                IconButton(onClick = { back() }, modifier = Modifier.testTag("palette_editor_back")) {
+                    UiIcon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back))
+                }
             })
         },
         bottomBar = {

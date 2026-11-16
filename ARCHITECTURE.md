@@ -67,6 +67,7 @@ flowchart TD
   changes. Full previews carry validated immutable document snapshots; only explicit
   Save/Apply/Update writes appearance preferences. Preview chrome reserves status
   and navigation bar insets so its actions remain reachable edge-to-edge.
+  Palette screens share standard back-arrow bars and inline community-card actions.
 - File intake classifies bounded owned bytes before ordinary chat sharing. Latest
   delivery ownership and source-matched consumption survive recreation; generic
   unmarked JSON shares remain attachments. SAF and narrow FileProvider exports
