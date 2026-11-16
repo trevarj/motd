@@ -1010,7 +1010,11 @@ class RequiredHeadlessE2eTest {
                 ChatRobot(compose).send(text)
                 val message =
                     awaitWhileComposing("Palette URL arrives through the owning IRC network", 20_000) {
-                        MessageLifecycleProbe(bootstrap.seams.search(), milestones).awaitCanonical(text, bufferId)
+                        MessageLifecycleProbe(bootstrap.seams.search(), milestones).awaitCanonicalContaining(
+                            query = "$token palette",
+                            expectedSubstring = text,
+                            bufferId = bufferId,
+                        )
                     }
                 TimelineRobot(compose).assertMessageVisible(message.tag())
                 val robot = PaletteRobot(compose)

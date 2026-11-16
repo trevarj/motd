@@ -107,6 +107,7 @@ class PaletteCatalog
                 } catch (error: CancellationException) {
                     throw error
                 } catch (_: Exception) {
+                    currentCoroutineContext().ensureActive()
                     mutableState.value = mutableState.value.copy(cached = hasCatalog, error = "Could not refresh the community catalog. Retry.")
                 } finally {
                     mutableState.value = mutableState.value.copy(loading = false)

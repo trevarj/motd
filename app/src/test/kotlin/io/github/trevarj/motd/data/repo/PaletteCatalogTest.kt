@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.ContextWrapper
 import io.github.trevarj.motd.data.prefs.decodePalette
 import io.github.trevarj.motd.data.prefs.encodePalette
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -31,6 +33,14 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
+import java.io.InputStream
+import java.net.HttpURLConnection
+import java.net.Proxy
+import java.net.URL
+import java.net.URLConnection
+import java.net.URLStreamHandler
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPOutputStream
 
@@ -229,15 +239,70 @@ class PaletteCatalogTest {
         runBlocking {
             val good = index(validFixture())
             cache.writeText(good)
-            server.enqueue(MockResponse().setBody(good).setBodyDelay(3, TimeUnit.SECONDS))
-            val loader = catalog()
-            val request = async { loader.refresh() }
-            assertNotNull(withContext(Dispatchers.IO) { server.takeRequest(5, TimeUnit.SECONDS) })
+            val reading = CompletableDeferred<Unit>()
+            val disconnected = CountDownLatch(1)
+            val cancellation = CompletableDeferred<CancellationException>()
+            val endpoint = server.url("/index.json").toUrl()
+            val connection =
+                object : HttpURLConnection(endpoint) {
+                    override fun connect() = Unit
+
+                    override fun disconnect() = disconnected.countDown()
+
+                    override fun usingProxy() = false
+
+                    override fun getResponseCode() = HTTP_OK
+
+                    override fun getInputStream(): InputStream =
+                        object : InputStream() {
+                            override fun read(): Int {
+                                reading.complete(Unit)
+                                check(disconnected.await(5, TimeUnit.SECONDS))
+                                throw IOException("Read interrupted by disconnect")
+                            }
+                        }
+                }
+            var firstConnection = true
+            val url =
+                URL(
+                    null,
+                    endpoint.toString(),
+                    object : URLStreamHandler() {
+                        override fun openConnection(url: URL): URLConnection = openConnection(url, Proxy.NO_PROXY)
+
+                        override fun openConnection(
+                            url: URL,
+                            proxy: Proxy,
+                        ): URLConnection =
+                            if (firstConnection) {
+                                firstConnection = false
+                                connection
+                            } else {
+                                endpoint.openConnection(proxy)
+                            }
+                    },
+                )
+            val loader = PaletteCatalog(context, url)
+            val request =
+                async {
+                    try {
+                        loader.refresh()
+                    } catch (error: CancellationException) {
+                        cancellation.complete(error)
+                        throw error
+                    }
+                }
+            withTimeout(5_000) { reading.await() }
+            assertTrue(loader.state.value.loading)
+            assertEquals(decodePaletteCatalog(good.toByteArray()), loader.state.value.palettes)
             request.cancelAndJoin()
             assertTrue(request.isCancelled)
+            assertTrue(cancellation.isCompleted)
             assertFalse(loader.state.value.loading)
             assertNull(loader.state.value.error)
             assertEquals(good, cache.readText())
+            assertEquals(decodePaletteCatalog(good.toByteArray()), loader.state.value.palettes)
+            assertTrue(loader.state.value.cached)
             server.enqueue(MockResponse().setBody(index()))
             loader.refresh()
             assertEquals(PaletteCatalogState(), loader.state.value)
