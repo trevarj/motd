@@ -14,7 +14,6 @@
     <string name="palette_import">Import</string>
     <string name="palette_device_colors">Device colors</string>
     <string name="palette_brand">MOTD</string>
-    <string name="palette_back">Back</string>
     <string name="palette_empty_yours">No saved palettes. Create one or import a MOTD palette file.</string>
     <string name="palette_empty_community">No community palettes are available yet. Create a palette with light and dark modes to contribute.</string>
     <string name="palette_contribution">Export a palette with both light and dark modes, then submit its file through the MOTD palettes repository. Nothing is uploaded automatically.</string>
