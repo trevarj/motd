@@ -27,6 +27,9 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
@@ -1034,9 +1037,31 @@ class RequiredHeadlessE2eTest {
                 assertEquals(before, runBlocking { appearance.config.first() })
                 val draft = "$token original composer"
                 robot.replace("chat_composer_field", draft)
+
+                fun settleSourceViewport() {
+                    val activityScenario = requireNotNull(scenario.scenario)
+                    activityScenario.onActivity { activity ->
+                        WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime())
+                    }
+                    compose.waitUntil("Source timeline IME insets are hidden", 5_000) {
+                        var hidden = false
+                        activityScenario.onActivity { activity ->
+                            val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)
+                            hidden =
+                                insets != null &&
+                                !insets.isVisible(WindowInsetsCompat.Type.ime()) &&
+                                insets.getInsets(WindowInsetsCompat.Type.ime()).bottom == 0
+                        }
+                        hidden
+                    }
+                    compose.waitForIdle()
+                }
+
+                settleSourceViewport()
                 val cardTop = compose.onNodeWithTag("link_preview_palette", useUnmergedTree = true).getUnclippedBoundsInRoot().top
 
                 fun assertSourceRestored() {
+                    settleSourceViewport()
                     compose.onNodeWithTag("chat_composer_field", useUnmergedTree = true).assertTextEquals(draft)
                     compose.onNodeWithTag(message.tag(), useUnmergedTree = true).assertIsDisplayed()
                     assertEquals(
