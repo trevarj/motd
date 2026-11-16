@@ -1,5 +1,10 @@
 package io.github.trevarj.motd.e2e.robots
 
+import android.app.KeyguardManager
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.PowerManager
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -18,6 +23,9 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.AnnotatedString
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.e2e.E2eArtifactSink
+import org.json.JSONArray
+import org.json.JSONObject
 
 internal class SettingsRobot(
     compose: ComposeTestRule,
@@ -548,7 +556,10 @@ internal class PaletteRobot(
         awaitTag("settings_palette_hub")
     }
 
-    fun shareInstalledPaletteToMotd(name: String) {
+    fun shareInstalledPaletteToMotd(
+        name: String,
+        artifactPrefix: String,
+    ) {
         scrollToAndClick("settings_palette_hub")
         compose.onNodeWithText("Yours").performClick()
         replace("palette_search", name)
@@ -560,6 +571,8 @@ internal class PaletteRobot(
         val label = context.applicationInfo.loadLabel(context.packageManager).toString()
         val deadline = android.os.SystemClock.uptimeMillis() + 15_000
         var selected = false
+        var targetLabelFound = false
+        var targetClickableFound = false
 
         fun findText(
             node: android.view.accessibility.AccessibilityNodeInfo?,
@@ -576,7 +589,9 @@ internal class PaletteRobot(
             text: String,
         ): Boolean {
             var node = findText(root, text)
+            if (text == label && node != null) targetLabelFound = true
             while (node != null && !node.isClickable) node = node.parent
+            if (text == label && node != null) targetClickableFound = true
             return node?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK) == true
         }
         // Drive the real Android chooser; the receiver reads the production FileProvider grant.
@@ -590,8 +605,114 @@ internal class PaletteRobot(
             }
             android.os.SystemClock.sleep(100)
         }
-        org.junit.Assert.assertTrue("Android chooser offers MOTD for the shared JSON file", selected)
+        if (!selected) runCatching { captureChooserFailure(artifactPrefix, label, targetLabelFound, targetClickableFound) }
         awaitTag("palette_preview_apply")
+    }
+
+    private fun captureChooserFailure(
+        artifactPrefix: String,
+        expectedLabel: String,
+        targetLabelFound: Boolean,
+        targetClickableFound: Boolean,
+    ) {
+        val instrumentation =
+            androidx.test.platform.app.InstrumentationRegistry
+                .getInstrumentation()
+        val context = instrumentation.targetContext
+        val snapshot =
+            JSONObject()
+                .put("schema", "palette-chooser/1")
+                .put("expectedLabel", expectedLabel)
+                .put("targetLabelFound", targetLabelFound)
+                .put("targetClickableFound", targetClickableFound)
+        val publicLabels = mutableSetOf(expectedLabel, "Just once", "Always", "Cancel", "Share", "More")
+        val systemPackages = setOf("android", "com.android.intentresolver", "com.android.systemui")
+        runCatching {
+            val targets = JSONArray()
+            val request = Intent(Intent.ACTION_SEND).setType("application/json")
+            context.packageManager.queryIntentActivities(request, PackageManager.MATCH_DEFAULT_ONLY).forEach { resolved ->
+                val activity = resolved.activityInfo
+                val activityLabel = activity.loadLabel(context.packageManager).toString()
+                val resolvedLabel = resolved.loadLabel(context.packageManager).toString()
+                publicLabels.add(activityLabel)
+                publicLabels.add(resolvedLabel)
+                targets.put(
+                    JSONObject()
+                        .put("package", activity.packageName)
+                        .put("component", activity.name)
+                        .put("activityLabel", activityLabel)
+                        .put("resolvedLabel", resolvedLabel)
+                        .put("enabled", activity.enabled)
+                        .put("exported", activity.exported),
+                )
+            }
+            snapshot.put("resolvedTargets", targets)
+        }.onFailure { snapshot.put("targetCaptureError", it::class.java.name) }
+        runCatching {
+            val power = requireNotNull(context.getSystemService(PowerManager::class.java))
+            val keyguard = requireNotNull(context.getSystemService(KeyguardManager::class.java))
+            snapshot
+                .put("interactive", power.isInteractive)
+                .put("keyguardLocked", keyguard.isKeyguardLocked)
+                .put("deviceLocked", keyguard.isDeviceLocked)
+        }.onFailure { snapshot.put("powerCaptureError", it::class.java.name) }
+
+        fun hierarchy(root: AccessibilityNodeInfo?): JSONObject {
+            val nodes = JSONArray()
+
+            fun visit(
+                node: AccessibilityNodeInfo,
+                parent: Int,
+                depth: Int,
+            ) {
+                if (nodes.length() >= 512 || depth > 24) return
+                val index = nodes.length()
+                val systemUi = node.packageName?.toString() in systemPackages
+                val publicNode = systemUi && !node.isEditable && !node.isPassword
+                val label = if (publicNode) node.text?.toString().orEmpty() else ""
+                val description = if (publicNode) node.contentDescription?.toString().orEmpty() else ""
+                nodes.put(
+                    JSONObject()
+                        .put("parent", parent)
+                        .put("package", node.packageName?.toString())
+                        .put("class", node.className?.toString())
+                        .put("viewId", if (systemUi) node.viewIdResourceName else JSONObject.NULL)
+                        .put("publicLabel", if (publicNode && label in publicLabels) label else JSONObject.NULL)
+                        .put("publicDescription", if (publicNode && description in publicLabels) description else JSONObject.NULL)
+                        .put("labelMatchesExpected", publicNode && label.equals(expectedLabel, ignoreCase = true))
+                        .put("descriptionContainsExpected", publicNode && description.contains(expectedLabel, ignoreCase = true))
+                        .put("clickable", node.isClickable)
+                        .put("enabled", node.isEnabled)
+                        .put("visible", node.isVisibleToUser)
+                        .put("scrollable", node.isScrollable)
+                        .put("childCount", node.childCount),
+                )
+                for (childIndex in 0 until node.childCount) {
+                    node.getChild(childIndex)?.let { visit(it, index, depth + 1) }
+                }
+            }
+            root?.let { visit(it, -1, 0) }
+            return JSONObject().put("rootPresent", root != null).put("nodes", nodes)
+        }
+
+        runCatching {
+            snapshot.put("activeRoot", hierarchy(instrumentation.uiAutomation.rootInActiveWindow))
+        }.onFailure { snapshot.put("activeRootCaptureError", it::class.java.name) }
+        runCatching {
+            val windows = JSONArray()
+            instrumentation.uiAutomation.windows.forEach { window ->
+                windows.put(
+                    JSONObject()
+                        .put("id", window.id)
+                        .put("type", window.type)
+                        .put("active", window.isActive)
+                        .put("focused", window.isFocused)
+                        .put("hierarchy", hierarchy(window.root)),
+                )
+            }
+            snapshot.put("windows", windows)
+        }.onFailure { snapshot.put("windowCaptureError", it::class.java.name) }
+        E2eArtifactSink.write("$artifactPrefix/chooser-failure/semantics.json", snapshot.toString())
     }
 
     fun cancelSharedPreview() {

@@ -917,13 +917,13 @@ class RequiredHeadlessE2eTest {
             runBlocking { AppearancePrefsImpl(InstrumentationRegistry.getInstrumentation().targetContext).config.first() }.paletteSelection.installedId,
         )
         val paletteRobot = PaletteRobot(compose)
-        paletteRobot.shareInstalledPaletteToMotd(savedPaletteName)
+        paletteRobot.shareInstalledPaletteToMotd(savedPaletteName, artifacts.artifactPrefix())
         val previewedPalette = runBlocking { palettePrefs.config.first() }
         assertEquals(appliedPalette.paletteSelection, previewedPalette.paletteSelection)
         assertEquals(appliedPalette.customPalettes, previewedPalette.customPalettes)
         paletteRobot.cancelSharedPreview()
         assertEquals(appliedPalette.paletteSelection, runBlocking { palettePrefs.config.first() }.paletteSelection)
-        paletteRobot.shareInstalledPaletteToMotd(savedPaletteName)
+        paletteRobot.shareInstalledPaletteToMotd(savedPaletteName, artifacts.artifactPrefix())
         paletteRobot.applySharedPreview()
         val importedPalette = runBlocking { palettePrefs.config.first() }
         val savedId =
