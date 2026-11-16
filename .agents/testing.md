@@ -4,9 +4,9 @@ Run all Gradle commands through the repository Nix shell with
 `nix develop -c bash ./gradlew ...` (the local wrapper's `/bin/sh` is unavailable).
 Run the nearest relevant unit test method in each affected module. Changed
 behavior needs a new or updated regression unless an existing named test already
-exercises that branch. Do not automatically run a full test class, unfiltered
-suite, emulator suite, or full pre-push gate; broader failure diagnosis or an
-explicit request to get CI green can require broader coverage.
+exercises that branch. Keep iterative checks targeted; the installed pre-push hook
+runs full applicable non-emulator CI tiers before pushing. Do not automatically
+start an emulator suite for routine development.
 
 For UI changes, if a device is available, install the changed debug build using
 the [serial-targeted debug install workflow](../docs/human-developing.md#debug-device-install),
@@ -105,23 +105,33 @@ layout outside tests of those contracts.
 For failure mappings, assert category-keyed expectations rather than enum order;
 shared runtime categories must each retain an explicit expected result.
 
-## Optional local gate reproduction
+## Enforced local pre-push gate
 
-`./tools/prepush.sh` is only an explicitly requested diagnostic for broader
-failures, not a normal handoff/push prerequisite and not a substitute for hosted
-CI. It requires the candidate tree to be committed and clean:
+Install the repository-local Git hook once per clone:
 
 ```sh
-./tools/prepush.sh
+nix develop -c bash tools/install-pre-push-hook.sh
 ```
 
-The script compares `HEAD` with `origin/main`, uses the exact commit as the PR
-fuzz seed, and runs only applicable deterministic non-emulator checks. Override
-the comparison base with `MOTD_PREFLIGHT_BASE=<ref>` when needed. For production
-Android changes it runs the debug unit/Robolectric suite once plus release lint;
-release unit tests duplicate shared coverage and are not part of the gate.
-A failing check must be fixed and committed before rerunning; push corrective
-fixes, not unrelated changes, until CI is green.
+The installer preserves unknown hooks and custom hook configurations. It pins the
+wrapper's Bash interpreter, including on hosts without `/usr/bin/env`. Git invokes
+it automatically before pushes. Do not use `--no-verify` to bypass it.
+
+The hook validates the actual pushed refs, peels tags, and requires each candidate
+to match the current clean committed `HEAD`. It checks the union of exact remote-old
+endpoint diffs, not a merge-base or potentially stale `origin/main`. New refs or
+unavailable remote commits select all tiers; deletions need no build.
+
+`tools/ci-paths.sh` selects the same local tiers as Required CI: full applicable
+IRC/app unit suites, formatting, FOSS dependencies, CI-key signed packaging,
+Android lint, native artifacts, harness validation and E2E APK compilation.
+Emulator journeys remain hosted-only; the hook never starts or installs to a device.
+Release unit tests duplicate shared coverage and are not added.
+
+Manual diagnostics use `nix develop -c bash tools/prepush.sh [BASE ...]`.
+Without bases, `MOTD_PREFLIGHT_BASE` or `origin/main` is used; `--all` forces every
+tier. Failed checks stop the push. Fix and commit failures before trying again.
+
 
 Require all applicable hosted `Required CI / gate` checks for the exact candidate
 before merge/release. If an individual job fails, inspect its existing logs and
@@ -142,8 +152,8 @@ The explicit CI mode creates and removes a disposable keystore and refuses an
 existing signing environment. Its APK is test-signed, not for distribution.
 Without `--ci-key`, all four production signing variables are required. The helper
 builds only the release variant, verifies its native contents and cryptographic
-signature, and rejects forbidden signing-block metadata. It is not a routine UI
-handoff prerequisite or an invitation to run the full pre-push gate.
+signature, and rejects forbidden signing-block metadata. The enforced pre-push gate
+runs it for app-tier changes; it is not a routine editing or UI-handoff check.
 
 The hosted Android tier has a 45-minute wall-clock budget for sequential cold
 release packaging, lint, debug/E2E artifact builds, and cleanup; all checks remain

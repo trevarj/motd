@@ -31,6 +31,17 @@ Release CI requires the exact tagged SHA's green `Required CI / gate`, then buil
 The required workflow also runs fixture-free component tests under Robolectric,
 keeping UI-state coverage continuous without coupling those cases to Soju or an emulator.
 
+The settings/bouncer journey also exercises hosted palette links through a local
+SOCKS5/TLS fixture and the real owning-network preview route, with production
+destination policy unchanged. Its complete palette JSON and pinned certificate
+are instrumentation assets; no public palette endpoint is contacted. With
+automatic loading and images disabled it checks manual Load, native light/dark
+swatches, full preview Cancel and Apply, unchanged preferences before Apply,
+one HTTPS request across both previews, and source composer/viewport retention.
+The existing create/save/share/import journey remains in the same test.
+Execute these journeys only in hosted CI; local implementation verification is
+`:app:compileE2eAndroidTestKotlin`, not a device/emulator run.
+
 Unread entry checks the persisted boundary at the unobscured viewport top: the
 timeline extends behind the header, and the entry row can include a history seam
 before its unread divider and message. The first two unread messages must remain
@@ -207,6 +218,12 @@ configuration and enforce isolation with Android Test Orchestrator.
 Required CI uses the direct launcher: AGP 9.4's connected task can report success
 after `Invalid userId -2` without starting any case. Direct mode requires a
 completed instrumentation result from each of the four discovered methods.
+
+The hosted launcher first runs `ci-emulator-suite.sh` with the action's explicit
+emulator serial. It requires GitHub CI and QEMU confirmation before removing the
+two E2E packages, so cached userdata cannot retain APKs signed by another runner.
+Normal local launchers never perform this uninstall. Build, install, discovery and
+data-clear failures abort before running cases against stale or uninitialized state.
 
 The four journeys cover:
 

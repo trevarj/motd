@@ -1,0 +1,34 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "duplicate-fixture",
+  "name": "Duplicate fixture",
+  "revision": 1,
+  "light": {
+    "primary": "#006C70",
+    "primary": false,
+    "secondary": "#8B4FA5",
+    "tertiary": "#B44C46",
+    "background": "#FFFFFF",
+    "surface": "#FFFFFF",
+    "surfaceContainer": "#F0F4F4",
+    "onBackground": "#171717",
+    "onSurface": "#171717",
+    "onSurfaceVariant": "#414949",
+    "outlineVariant": "#737B7B",
+    "nicknameColors": []
+  },
+  "dark": {
+    "primary": "#80CBC4",
+    "secondary": "#CE93D8",
+    "tertiary": "#EF9A9A",
+    "background": "#121212",
+    "surface": "#181818",
+    "surfaceContainer": "#242424",
+    "onBackground": "#EEEEEE",
+    "onSurface": "#EEEEEE",
+    "onSurfaceVariant": "#BBBBBB",
+    "outlineVariant": "#888888",
+    "nicknameColors": []
+  }
+}

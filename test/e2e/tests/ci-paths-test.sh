@@ -28,6 +28,9 @@ app_build=$'runtime=true\nirc=false\napp=true\ndevice=true\nharness=false\ndebug
 all=$'runtime=true\nirc=true\napp=true\ndevice=true\nharness=true\ndebug_lint=true'
 
 assert_paths "$none" README.md docs/testing.md
+assert_paths "$none" palettes/index.json palettes/sample/1.motd-palette.json
+assert_paths "$none" tools/palette-catalog.py tools/test_palette_catalog.py
+assert_paths "$production_app" palettes/index.json app/src/main/kotlin/MainActivity.kt
 assert_paths "$irc_test" irc/src/test/kotlin/ParserTest.kt
 assert_paths "$app_test" app/src/test/kotlin/RepoTest.kt app/src/testDebug/kotlin/UiTest.kt
 assert_paths "$production_irc" irc/src/main/kotlin/IrcClient.kt

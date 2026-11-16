@@ -40,6 +40,18 @@ jobs:
           else
             ./tools/ci-paths.sh unknown/runtime.surface >> "$GITHUB_OUTPUT"
           fi
+      - name: Validate community palette catalog
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ -n "$BASE_SHA" && ! "$BASE_SHA" =~ ^0+$ ]] && git cat-file -e "$BASE_SHA^{commit}"; then
+            args+=(--base "$BASE_SHA")
+          fi
+          python3 tools/palette-catalog.py --check "${args[@]}"
+      - name: Test community palette validator
+        run: python3 -m unittest discover -s tools -p test_palette_catalog.py
       - name: Validate workflow and E2E harness changes
         if: steps.classify.outputs.harness == 'true'
         run: ./test/e2e/validate.sh
@@ -232,9 +244,10 @@ jobs:
           profile: pixel_6
           disk-size: 3G
           force-avd-creation: false
+          emulator-port: 5554
           disable-animations: true
           emulator-options: -no-window -no-snapshot-save -noaudio -no-boot-anim -gpu swiftshader_indirect
-          script: ./test/e2e/fast-suite.sh direct
+          script: bash ./test/e2e/ci-emulator-suite.sh emulator-5554
       - name: Upload privacy-safe required diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

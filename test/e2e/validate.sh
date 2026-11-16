@@ -50,6 +50,8 @@ bash "$E2E_DIR/tests/ci-paths-test.sh"
 bash "$E2E_DIR/tests/build-signed-release-test.sh"
 bash "$E2E_DIR/tests/fast-suite-classifier-test.sh"
 bash "$E2E_DIR/tests/fast-suite-privacy-test.sh"
+bash "$E2E_DIR/tests/fast-suite-prerequisites-test.sh"
+python3 "$E2E_DIR/../../tools/test-prepush.py"
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   bash "$E2E_DIR/hermetic-stack.sh" validate
 else

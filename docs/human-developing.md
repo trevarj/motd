@@ -88,10 +88,9 @@ narrow execution, not compilation of test sources and dependencies. The command
 above assumes the Nix shell; alternatively use
 `nix develop -c ./gradlew :app:testDebugUnitTest --tests '<fully-qualified-class.method>' --stacktrace`.
 
-Run each changed module's existing `:app:ktlintCheck`, `:irc:ktlintCheck`, or
-`:ai-whisper:ktlintCheck` once before handoff. Root Gradle/style configuration
-changes still require root `ktlintCheck`. Do not automatically append an
-unfiltered suite, Android lint, APK assembly, or a full pre-push gate.
+Run root `ktlintCheck` for Kotlin/Gradle changes and the affected compilation,
+assembly and lint checks in the command matrix. Keep iterative tests targeted;
+the installed pre-push hook runs the full applicable non-emulator gate.
 
 For database changes, run the nearest database regression and review/commit
 generated `app/schemas` changes. Compile affected instrumentation journeys with
@@ -99,10 +98,20 @@ generated `app/schemas` changes. Compile affected instrumentation journeys with
 manifest, packaging, or an actual APK require it. No routine local emulator or
 physical-device runs.
 
-`./tools/prepush.sh` is only an explicitly requested diagnostic for broader
-failures, not a handoff/push prerequisite or a substitute for hosted CI. It
-requires a clean committed tree; `MOTD_PREFLIGHT_BASE=<ref>` overrides its
-`origin/main` comparison base.
+Install automatic repository-local push checks once per clone:
+
+```sh
+nix develop -c bash tools/install-pre-push-hook.sh
+```
+
+Normal direct pushes then require a clean committed `HEAD` and run the local tiers
+selected by the shared CI classifier, including full affected suites and signed
+test packaging. The hook checks actual pushed remote bases; new or unavailable
+bases select all tiers. It never starts an emulator or installs to a phone.
+Do not bypass it with `--no-verify`; Git hooks are local safeguards, not server policy.
+
+For manual diagnostics, use `nix develop -c bash tools/prepush.sh [BASE ...]`.
+Without bases, `MOTD_PREFLIGHT_BASE` or `origin/main` is used. `--all` selects every tier.
 
 Require all applicable hosted `Required CI / gate` checks before merge. Inspect
 an individual failed job's existing diagnostics and begin fixing it immediately

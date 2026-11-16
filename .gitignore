@@ -30,3 +30,5 @@ _site/
 
 # agent worktrees
 .claude/worktrees/
+
+__pycache__/

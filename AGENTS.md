@@ -88,15 +88,17 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
   `compileE2eAndroidTestKotlin` for affected instrumentation consumers. Debug
   assembly does not cover those test boundaries. Use `tools/android-lint.sh`
   for production release lint, adding debug lint when `tools/ci-paths.sh` selects
-  it. Do not automatically append an unfiltered suite or full pre-push gate.
+  it. Keep editing checks targeted; the installed pre-push hook runs full applicable
+  suites before pushing.
   A failed earlier task leaves trailing tasks unverified; skipped checks and
   delegated source-only reviews are not verification.
 - For database changes, run the nearest database unit regression and review/commit
   generated `app/schemas` changes.
-- `./tools/prepush.sh` is optional local gate reproduction only when explicitly
-  requested to diagnose broader failures, not a handoff/push prerequisite or a
-  substitute for hosted CI. It requires a clean, committed tree; use
-  `MOTD_PREFLIGHT_BASE=<ref>` to override its `origin/main` comparison base.
+- Direct pushes require the repository-local hook installed with
+  `nix develop -c bash tools/install-pre-push-hook.sh`. Do not bypass it with
+  `--no-verify`. It checks a clean committed `HEAD` against the actual pushed
+  remote bases using the shared CI classifier, including full selected local
+  suites and packaging checks. Emulator journeys remain required in hosted CI.
 - Do not push known failures or unrelated changes while CI is red. Check corrective
   fixes locally before pushing them. Require all applicable hosted `Required CI / gate` checks for that
   exact commit before merge/release or declaring CI green. When an individual

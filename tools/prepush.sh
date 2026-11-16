@@ -2,73 +2,99 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BASE="${MOTD_PREFLIGHT_BASE:-origin/main}"
+bases=()
+all=false
+candidate="$(git -C "$REPO" rev-parse --verify 'HEAD^{commit}')"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --all) all=true ;;
+    --head)
+      shift
+      [ "$#" -gt 0 ] && [ "$1" = "$candidate" ] || {
+        echo "Push candidate changed; check out the pushed commit before checking." >&2
+        exit 1
+      }
+      ;;
+    -*) echo "Usage: bash tools/prepush.sh [--all] [--head COMMIT] [BASE ...]" >&2; exit 1 ;;
+    *) bases+=("$1") ;;
+  esac
+  shift
+done
+if ! "$all" && [ "${#bases[@]}" -eq 0 ]; then
+  bases+=("${MOTD_PREFLIGHT_BASE:-origin/main}")
+fi
 cd "$REPO"
-
-git rev-parse --verify "$BASE^{commit}" >/dev/null
 [ -z "$(git status --porcelain)" ] || {
   echo "pre-push checks require a clean committed tree" >&2
   exit 1
 }
-mapfile -t changed < <(git diff --name-only "$BASE"...HEAD)
-[ "${#changed[@]}" -gt 0 ] || {
-  echo "No changes since $BASE"
-  exit 0
-}
+paths_file="$(mktemp)"
+trap 'rm -f "$paths_file"' EXIT
+for base in "${bases[@]}"; do
+  base="$(git rev-parse --verify --end-of-options "$base^{commit}")"
+  git diff --check "$base" "$candidate"
+  git diff --name-only -z "$base" "$candidate" >> "$paths_file"
+done
+mapfile -d '' -t changed < "$paths_file"
+if "$all"; then
+  changed+=(unknown/runtime.surface)
+fi
+runtime=false irc=false app=false device=false harness=false debug_lint=false
+classification="$(bash ./tools/ci-paths.sh "${changed[@]}" </dev/null)"
+while IFS='=' read -r tier selected; do
+  case "$tier:$selected" in
+    runtime:true|irc:true|app:true|device:true|harness:true|debug_lint:true) declare "$tier=true" ;;
+    runtime:false|irc:false|app:false|device:false|harness:false|debug_lint:false) ;;
+    *) echo "Invalid CI path classification: $tier=$selected" >&2; exit 1 ;;
+  esac
+done <<< "$classification"
 
-matches() { printf '%s\n' "${changed[@]}" | grep -Eq "$1"; }
 gradle() { nix develop -c bash ./gradlew "$@" --stacktrace; }
-native_gradle() { nix develop .#native -c bash ./gradlew "$@" --stacktrace; }
-pr_gradle() {
-  MOTD_FUZZ_PROFILE=pr MOTD_FUZZ_SEED="$(git rev-parse HEAD)" gradle "$@"
-}
-
-git diff --check "$BASE"...HEAD
+export MOTD_FUZZ_PROFILE=pr MOTD_FUZZ_SEED="$candidate"
 changed_shell=()
 for path in "${changed[@]}"; do
   [[ "$path" == *.sh && -f "$path" ]] && changed_shell+=("$path")
 done
 [ "${#changed_shell[@]}" -eq 0 ] || bash -n "${changed_shell[@]}"
-
-matches '^\.github/(workflows/.*\.ya?ml|actions/)' && nix develop -c actionlint
-matches '\.(kt|kts)$' && gradle ktlintCheck
-
-build_changed='^(build\.gradle\.kts|settings\.gradle\.kts|gradle\.properties|gradlew|gradle/)'
-irc_changed='^irc/(src/|build\.gradle\.kts$)'
-app_tested_changed='^app/(schemas/|src/(main|test|testDebug)/|build\.gradle\.kts$)'
-production_android_changed='^(app/src/main/|app/build\.gradle\.kts$|irc/src/main/)|'"$build_changed"
-if matches "$irc_changed|$build_changed"; then
-  pr_gradle :irc:test
+catalog_args=()
+for base in "${bases[@]}"; do
+  catalog_args+=(--base "$base")
+done
+nix develop -c python3 tools/palette-catalog.py --check "${catalog_args[@]}"
+nix develop -c python3 -m unittest discover -s tools -p test_palette_catalog.py
+if "$harness"; then
+  nix develop -c actionlint
+  nix develop -c bash ./test/e2e/validate.sh
 fi
-if matches "$app_tested_changed|^irc/src/main/|$build_changed"; then
-  pr_gradle :app:testDebugUnitTest
+if "$irc"; then
+  gradle :irc:ktlintCheck :irc:test
 fi
-if matches "$production_android_changed|^app/src/debug/"; then
-  MOTD_LINT_DEBUG=false
-  matches "^app/src/debug/|^app/build\\.gradle\\.kts$|$build_changed" && MOTD_LINT_DEBUG=true
-  MOTD_LINT_DEBUG="$MOTD_LINT_DEBUG" nix develop -c bash ./tools/android-lint.sh
-fi
-
-matches '^app/src/androidTest/' && gradle :app:compileE2eAndroidTestKotlin
-if matches '^app/(src/(main|debug|release)/(res/|AndroidManifest\.xml)|build\.gradle\.kts$|libs/)|^third_party/sing-box/source\.lock$|^gradle/|^gradlew$|^(build|settings)\.gradle\.kts$|^gradle\.properties$'; then
-  native_gradle :app:assembleDebug :app:assembleRelease
-fi
-if matches '(^|/)(build\.gradle\.kts|libs\.versions\.toml|settings\.gradle\.kts)$'; then
-  if gradle :app:dependencies --configuration releaseRuntimeClasspath | grep -Ei 'firebase|play-services'; then
+if "$app"; then
+  gradle ktlintCheck
+  gradle :app:testDebugUnitTest
+  git diff --exit-code -- app/schemas
+  test -z "$(git ls-files --others --exclude-standard -- app/schemas)"
+  # Keep producer failure distinct from grep's ordinary no-match status.
+  dependencies="$(nix develop -c bash ./gradlew :app:dependencies --configuration releaseRuntimeClasspath)"
+  if grep -Ei 'firebase|play-services' <<< "$dependencies"; then
     echo "Google-only dependencies reached the FOSS runtime classpath" >&2
     exit 1
   fi
+  nix develop -c bash ./tools/build-signed-release.sh --ci-key
+  MOTD_LINT_DEBUG="$debug_lint" MOTD_LINT_LOG=app/build/reports/android-lint.log \
+    nix develop -c bash ./tools/android-lint.sh
+  gradle --no-daemon --no-parallel --max-workers=2 :app:verifyAiNativeArtifacts
 fi
-if matches '^test/e2e/.*\.sh$|^tools/(ci-paths|android-lint)\.sh$|^\.github/.*\.ya?ml$'; then
-  bash ./test/e2e/validate.sh
+if "$device"; then
+  gradle :app:assembleE2e :app:assembleE2eAndroidTest
+  echo "Emulator journey runtime remains required in hosted CI; no local device is started or installed."
 fi
-if matches '^app/(schemas/|src/(main|test|testDebug)/.*data/db/)'; then
-  git diff --exit-code -- app/schemas
-  test -z "$(git ls-files --others --exclude-standard -- app/schemas)"
-fi
-
+[ "$(git rev-parse --verify 'HEAD^{commit}')" = "$candidate" ] || {
+  echo "HEAD changed during pre-push checks" >&2
+  exit 1
+}
 [ -z "$(git status --porcelain)" ] || {
   echo "pre-push checks changed the working tree" >&2
   exit 1
 }
-echo "Pre-push checks passed for $(git rev-parse --short HEAD)"
+echo "Pre-push checks passed for $candidate"

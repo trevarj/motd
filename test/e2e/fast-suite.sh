@@ -85,22 +85,24 @@ discover_direct_methods() {
 }
 
 run_direct_suite() {
-  local app_apk test_apk runner method channel_arg instrument_output rc=0
+  local app_apk test_apk runner method channel_arg instrument_output discovered clear_output rc=0
   local -a methods
   app_apk="${FAST_E2E_APP_APK:-$REPO/app/build/outputs/apk/e2e/app-e2e.apk}"
   test_apk="${FAST_E2E_TEST_APK:-$REPO/app/build/outputs/apk/androidTest/e2e/app-e2e-androidTest.apk}"
   # Daemon on for warm rebuilds; --max-workers=2 because the emulator + native
   # stack are already resident and competing for the 14 GiB box's RAM.
-  "$REPO/gradlew" :app:assembleE2e :app:assembleE2eAndroidTest --stacktrace --max-workers=2
-  e2e_adb install -r -g "$app_apk" >/dev/null
-  e2e_adb install -r "$test_apk" >/dev/null
-  runner="$(e2e_adb shell pm list instrumentation | sed -n "s#^instrumentation:\([^ ]*\) (target=${FAST_E2E_TARGET_PACKAGE})#\1#p" | head -1 | tr -d '\r')"
+  "$REPO/gradlew" :app:assembleE2e :app:assembleE2eAndroidTest --stacktrace --max-workers=2 || return $?
+  e2e_adb install -r -g "$app_apk" >/dev/null || return $?
+  e2e_adb install -r "$test_apk" >/dev/null || return $?
+  runner="$(e2e_adb shell pm list instrumentation | sed -n "s#^instrumentation:\([^ ]*\) (target=${FAST_E2E_TARGET_PACKAGE})#\1#p" | head -1 | tr -d '\r')" || return $?
   [ -n "$runner" ] || return 1
   channel_arg="'$FAST_E2E_CHANNEL'"
-  mapfile -t methods < <(discover_direct_methods "$runner")
+  discovered="$(discover_direct_methods "$runner")" || return $?
+  mapfile -t methods <<<"$discovered"
   [ "${#methods[@]}" -eq 4 ] || { echo "required fast suite must discover exactly 4 Class#method cases" >&2; return 1; }
   for method in "${methods[@]}"; do
-    e2e_adb shell pm clear "$FAST_E2E_TARGET_PACKAGE" >/dev/null
+    clear_output="$(e2e_adb shell pm clear "$FAST_E2E_TARGET_PACKAGE")" || return $?
+    [ "${clear_output//$'\r'/}" = Success ] || { echo "required fast suite could not clear target package" >&2; return 1; }
     instrument_output="$(e2e_adb shell am instrument -w -r -e class "$method" \
       -e sojuHost "$FAST_E2E_SOJU_HOST" -e sojuPort "$FAST_E2E_SOJU_PORT" \
       -e sojuUser "$FAST_E2E_SOJU_USER" -e sojuPassword "$FAST_E2E_SOJU_PASSWORD" \

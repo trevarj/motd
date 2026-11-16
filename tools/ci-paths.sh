@@ -25,6 +25,8 @@ for path in "${paths[@]}"; do
   case "$path" in
     *.md|LICENSE|docs/*|site/*|screenshots/*|fastlane/metadata/*)
       ;;
+    palettes/*|tools/palette-catalog.py|tools/test_palette_catalog.py)
+      ;;
     irc/src/test/*)
       runtime=true; irc=true
       ;;

@@ -31,8 +31,8 @@ connection ownership, or module boundaries.
    or stable tags when the interaction belongs in the device harness.
 5. Follow [`testing.md`](testing.md): run the nearest relevant unit test method
    in each affected module. Before committing implementation changes, build each
-   changed module and run its formatting and lint checks. Do not routinely run
-   full test classes, unfiltered suites, or long-running emulator suites.
+   changed module and run its formatting and lint checks. Keep iterative checks
+   targeted; the installed pre-push hook runs full applicable non-emulator suites.
    For UI changes, if a device is available, install the changed debug build using
    the [serial-targeted debug install workflow](../docs/human-developing.md#debug-device-install),
    check it with ADB, and inspect a fresh screencapture; otherwise leave visual
@@ -40,9 +40,9 @@ connection ownership, or module boundaries.
    Add an emulator test for the main journey of a large new feature and update
    affected `RequiredHeadlessE2eTest` journeys; hosted CI runs E2E coverage.
    Follow [`releases.md`](releases.md) for release-specific verification.
-   `./tools/prepush.sh` is an explicitly requested diagnostic, not a handoff or
-   push prerequisite. Require applicable hosted `Required CI / gate` checks
-   before merge; inspect individual failures promptly. Report checks not run.
+   Install the repository-local pre-push hook as described in `testing.md`; it
+   enforces local checks for direct pushes. Hosted `Required CI / gate` still owns
+   emulator coverage. Inspect failures promptly and report checks not run.
 
 ## Gradle and Kotlin agent tools
 
