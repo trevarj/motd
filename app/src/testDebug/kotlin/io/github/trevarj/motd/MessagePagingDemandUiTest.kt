@@ -160,6 +160,7 @@ class MessagePagingDemandUiTest {
                 }
                 MotdTheme(dynamicColor = false) {
                     MessageList(
+                        onOpenPalette = { _, _ -> },
                         items = collected,
                         listState = timeline,
                         networkId = 1,
@@ -321,6 +322,7 @@ class MessagePagingDemandUiTest {
                 )
                 MotdTheme(dynamicColor = false) {
                     MessageList(
+                        onOpenPalette = { _, _ -> },
                         items = collected,
                         listState = timeline,
                         networkId = 1,
@@ -530,6 +532,7 @@ class MessagePagingDemandUiTest {
                 )
                 MotdTheme(dynamicColor = false) {
                     MessageList(
+                        onOpenPalette = { _, _ -> },
                         items = collected,
                         listState = timeline,
                         networkId = 1,
@@ -665,6 +668,7 @@ class MessagePagingDemandUiTest {
                 SideEffect { items = collected }
                 MotdTheme(dynamicColor = false) {
                     ChatContent(
+                        onOpenPalette = { _, _ -> },
                         state =
                             ChatState(
                                 buffer = room.copy(id = bufferId),
@@ -901,6 +905,7 @@ class MessagePagingDemandUiTest {
                         },
                     ) {
                         ChatContent(
+                            onOpenPalette = { _, _ -> },
                             state =
                                 ChatState(
                                     buffer = room.copy(id = bufferId),
@@ -1150,6 +1155,7 @@ class MessagePagingDemandUiTest {
                 }
                 MotdTheme(dynamicColor = false) {
                     MessageList(
+                        onOpenPalette = { _, _ -> },
                         items = collected,
                         listState = timeline,
                         networkId = 1,

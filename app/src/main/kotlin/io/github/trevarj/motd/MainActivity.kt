@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +44,7 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.di.NotificationPermissionStatus
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.dickord.DickordLabsPrefs
@@ -67,9 +69,8 @@ import io.github.trevarj.motd.ui.components.RemoteMediaNetworkMonitor
 import io.github.trevarj.motd.ui.components.automaticRemoteMediaAllowed
 import io.github.trevarj.motd.ui.nav.MotdNavGraph
 import io.github.trevarj.motd.ui.nav.NotificationTarget
-import io.github.trevarj.motd.ui.share.PendingShare
+import io.github.trevarj.motd.ui.share.PaletteIntentIntake
 import io.github.trevarj.motd.ui.share.PendingShareStore
-import io.github.trevarj.motd.ui.share.parseSharedContent
 import io.github.trevarj.motd.ui.splash.SplashOverlayRequest
 import io.github.trevarj.motd.ui.splash.StartupSplashGate
 import io.github.trevarj.motd.ui.splash.shouldShowStartupSplash
@@ -124,14 +125,9 @@ class MainActivity :
     // Latest notification-tap deep-link target. Seeded from the launch intent (cold start) and
     // updated by onNewIntent (warm start); the nav graph consumes it and clears it after routing.
     private var notificationTarget by mutableStateOf<NotificationTarget?>(null)
+    private var notificationSource by mutableStateOf<Intent?>(null)
 
-    // Latest inbound ACTION_SEND payload, seeded/updated the same way. The payload itself is parked
-    // in [pendingShareStore]; this state only drives the navigation to the chat picker.
-    private var pendingShare by mutableStateOf<PendingShare?>(null)
-
-    // Validated external motd://invite payload. Empty means an invite URI was present but invalid,
-    // so the destination can render a safe error instead of silently dropping the user's scan.
-    private var pendingJoinInvite by mutableStateOf<String?>(null)
+    private val incomingIntake: PaletteIntentIntake by viewModels()
 
     // The platform splash owns Android 12+ until its exit callback. Keep its exact measured icon
     // canvas for the Compose handoff instead of assuming the system's 288dp outer canvas.
@@ -171,8 +167,8 @@ class MainActivity :
         maybeStartForegroundService()
         // Cold start: the launcher created the activity with the notification's content intent.
         notificationTarget = parseNotificationTarget(intent)
-        acceptShareFrom(intent)
-        acceptJoinInviteFrom(intent)
+        notificationSource = intent.takeIf { notificationTarget != null }
+        incomingIntake.receive(intent, restoring = savedInstanceState != null)
         acceptInvitationFrom(intent)
 
         setContent {
@@ -190,6 +186,11 @@ class MainActivity :
                 automaticRemoteMediaAllowed(remoteMediaNetwork, uiState.contentPreviews)
             val settings = uiState.settings
             val appearance = uiState.appearance
+            val paletteSelection = appearance.paletteSelection
+            val customPalette =
+                paletteSelection.installedId?.let { id ->
+                    appearance.customPalettes.find { it.document.id == id }?.document
+                }
             // Re-check the on-disk font whenever the imported name changes (a fresh import or a
             // backup restore that cleared it), or when CustomFontStore's revision bumps (a
             // same-name re-import changes no persisted state, so the name alone would miss it).
@@ -206,10 +207,11 @@ class MainActivity :
                 onFinished = ::finishStartupSplash,
             ) {
                 MotdTheme(
-                    themePreset = appearance.theme,
+                    themePreset = paletteSelection.builtin,
                     trueBlack = appearance.trueBlack,
                     dynamicColor = settings.dynamicColor,
-                    followSystem = appearance.followSystem,
+                    paletteMode = paletteSelection.mode,
+                    customPalette = customPalette,
                     useThemeTextColors = appearance.useThemeTextColors,
                     layoutDensity = settings.layoutDensity,
                     compactNickBrackets = settings.compactNickBrackets,
@@ -267,6 +269,7 @@ class MainActivity :
                         ) {
                             PreloadChatWallpaperTile(appearance.wallpaper)
                             io.github.trevarj.motd.ui.components.SurfaceBackdropRoot(content = {
+                                val notificationIntent = notificationSource
                                 MotdNavGraph(
                                     appearance = appearance,
                                     showComposerEmoji = settings.showComposerEmoji,
@@ -274,11 +277,12 @@ class MainActivity :
                                     appContentVisible = !startupSplashLoading && startupSplashOverlay == null,
                                     navController = navController,
                                     notificationTarget = notificationTarget,
-                                    onNotificationTargetHandled = ::consumeNotificationTarget,
-                                    pendingShare = pendingShare,
-                                    onPendingShareHandled = ::consumePendingShare,
-                                    pendingJoinInvite = pendingJoinInvite,
-                                    onPendingJoinInviteHandled = ::consumePendingJoinInvite,
+                                    notificationSource = notificationIntent,
+                                    isNotificationTargetCurrent = { notificationIntent != null && notificationSource === notificationIntent && intent === notificationIntent },
+                                    onNotificationTargetHandled = { consumeNotificationTarget(notificationIntent) },
+                                    incomingIntake = incomingIntake,
+                                    onIncomingShare = pendingShareStore::set,
+                                    onIncomingConsumed = ::consumeIncomingIntent,
                                 )
                             }, overlays = {
                                 // Global TOFU cert-trust dialog host, above the whole navigation graph.
@@ -351,9 +355,14 @@ class MainActivity :
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        notificationTarget = null
+        notificationSource = null
         warmNotificationEntry(
             intent,
-            onTarget = { notificationTarget = it },
+            onTarget = {
+                notificationTarget = it
+                notificationSource = intent
+            },
             // The manager reconnects stale actors and skips the pass for any connection that never
             // died, so repeated taps do not storm the wire. The tapped buffer is named so it is
             // reconciled first rather than behind whatever the checkpoint decides.
@@ -361,8 +370,7 @@ class MainActivity :
                 lifecycleScope.launch { connectionManager.checkpointHistory(bufferId) }
             },
         )
-        acceptShareFrom(intent)
-        acceptJoinInviteFrom(intent)
+        incomingIntake.receive(intent)
         acceptInvitationFrom(intent)
     }
 
@@ -372,38 +380,15 @@ class MainActivity :
     }
 
     /** Prevent recreation from replaying a notification whose navigation was already consumed. */
-    private fun consumeNotificationTarget() {
+    private fun consumeNotificationTarget(source: Intent?) {
+        if (source == null || notificationSource !== source) return
         notificationTarget = null
-        if (intent.action == MotdNotifications.ACTION_OPEN_BUFFER ||
-            intent.action == MotdNotifications.ACTION_ACCEPT_INVITE
-        ) {
-            setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
-        }
+        notificationSource = null
+        consumeIncomingIntent(source)
     }
 
-    /** Prevent recreation from replaying a share whose picker was already opened. */
-    private fun consumePendingShare() {
-        pendingShare = null
-        if (intent.action == Intent.ACTION_SEND) {
-            setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
-        }
-    }
-
-    /** Park a single-item share payload for the picker; ignores every non-share intent. */
-    private fun acceptShareFrom(intent: Intent?) {
-        parseSharedContent(intent)?.let {
-            pendingShareStore.set(it)
-            pendingShare = it
-        }
-    }
-
-    private fun acceptJoinInviteFrom(intent: Intent?) {
-        parseJoinInvitePayload(intent)?.let { pendingJoinInvite = it }
-    }
-
-    private fun consumePendingJoinInvite() {
-        pendingJoinInvite = null
-        if (intent.action == Intent.ACTION_VIEW) {
+    private fun consumeIncomingIntent(source: Intent) {
+        if (intent === source) {
             setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
         }
     }

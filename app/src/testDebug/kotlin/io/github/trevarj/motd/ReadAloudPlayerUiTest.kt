@@ -143,6 +143,7 @@ class ReadAloudPlayerUiTest {
                     MotdTheme(dynamicColor = false, layoutDensity = layoutDensity()) {
                         Box(Modifier.width(320.dp).fillMaxSize().testTag("reader_surface_root")) {
                             ChatContent(
+                                onOpenPalette = { _, _ -> },
                                 state = ChatState(buffer = room),
                                 items = items,
                                 composerEnabled = true,

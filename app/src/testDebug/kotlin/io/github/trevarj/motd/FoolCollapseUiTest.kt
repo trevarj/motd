@@ -720,6 +720,7 @@ class FoolCollapseUiTest {
                 SideEffect { items = collected }
                 MotdTheme(dynamicColor = false) {
                     ChatContent(
+                        onOpenPalette = { _, _ -> },
                         state = state,
                         items = collected,
                         composerEnabled = false,
@@ -895,6 +896,7 @@ class FoolCollapseUiTest {
                 SideEffect { items = collected }
                 MotdTheme(dynamicColor = false) {
                     ChatContent(
+                        onOpenPalette = { _, _ -> },
                         state = state,
                         items = collected,
                         composerEnabled = false,
@@ -1061,6 +1063,7 @@ internal class FoolTimelineFixture(
         if (!contentAvailable.value) return
         MotdTheme(dynamicColor = false, nickMentionStyle = nickMentionStyle) {
             ChatContent(
+                onOpenPalette = { _, _ -> },
                 state = ChatState(buffer = room, connState = IrcClientState.Ready("me", emptySet(), emptyMap()), conversationPresence = ConversationPresenceState(global = PresenceMode.ALL)),
                 items = collected,
                 composerEnabled = false,

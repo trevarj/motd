@@ -5,6 +5,12 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.InstalledPalette
+import io.github.trevarj.motd.data.prefs.PaletteColors
+import io.github.trevarj.motd.data.prefs.PaletteDocument
+import io.github.trevarj.motd.data.prefs.PaletteMode
+import io.github.trevarj.motd.data.prefs.PaletteSelection
+import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.ui.chat.AttachmentRequestStore
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -313,9 +319,10 @@ class GestureActionDispatcherTest {
 
             assertEquals(GestureActionResult.Done, world.dispatcher.execute(GestureAction.ToggleTheme))
 
-            assertEquals(ColorThemePreset.GRUVBOX_DARK, world.appearance.state.value.theme)
-            // Left on, the OS would immediately re-decide the pair and the swap would look like a no-op.
-            assertEquals(false, world.appearance.state.value.followSystem)
+            assertEquals(
+                PaletteSelection(ColorThemePreset.GRUVBOX_DARK, null, PaletteMode.DARK),
+                world.appearance.state.value.paletteSelection,
+            )
         }
 
     @Test fun `theme toggle swaps away from the palette the OS is currently resolving to`() =
@@ -330,27 +337,104 @@ class GestureActionDispatcherTest {
 
             assertEquals(GestureActionResult.Done, world.dispatcher.execute(GestureAction.ToggleTheme))
 
-            assertEquals(ColorThemePreset.GRUVBOX_LIGHT, world.appearance.state.value.theme)
-            assertEquals(false, world.appearance.state.value.followSystem)
+            assertEquals(
+                PaletteSelection(ColorThemePreset.GRUVBOX_DARK, null, PaletteMode.LIGHT),
+                world.appearance.state.value.paletteSelection,
+            )
         }
 
     @Test fun `a palette with no light-dark partner keeps what it has`() =
         runTest {
-            val world = world(appearance = AppearanceConfig(theme = ColorThemePreset.DRACULA))
+            val world = world(appearance = AppearanceConfig(theme = ColorThemePreset.KANAGAWA_DRAGON))
 
             assertEquals(GestureActionResult.Unavailable, world.dispatcher.execute(GestureAction.ToggleTheme))
-            assertEquals(ColorThemePreset.DRACULA, world.appearance.state.value.theme)
+            assertEquals(ColorThemePreset.KANAGAWA_DRAGON, world.appearance.state.value.theme)
         }
 
     @Test fun `the stock system preset pins the opposite of whatever the OS is showing`() =
         runTest {
             val dark = world(appearance = AppearanceConfig(theme = ColorThemePreset.SYSTEM), systemDark = true)
             assertEquals(GestureActionResult.Done, dark.dispatcher.execute(GestureAction.ToggleTheme))
-            assertEquals(ColorThemePreset.LIGHT, dark.appearance.state.value.theme)
+            assertEquals(
+                PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.LIGHT),
+                dark.appearance.state.value.paletteSelection,
+            )
 
             val light = world(appearance = AppearanceConfig(theme = ColorThemePreset.SYSTEM), systemDark = false)
             assertEquals(GestureActionResult.Done, light.dispatcher.execute(GestureAction.ToggleTheme))
-            assertEquals(ColorThemePreset.DARK, light.appearance.state.value.theme)
+            assertEquals(
+                PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.DARK),
+                light.appearance.state.value.paletteSelection,
+            )
+        }
+
+    @Test fun `newly paired palettes toggle without changing family`() =
+        runTest {
+            listOf(ColorThemePreset.DRACULA, ColorThemePreset.TOKYO_NIGHT).forEach { builtin ->
+                val legacy = world(appearance = AppearanceConfig(theme = builtin, followSystem = true))
+                assertEquals(GestureActionResult.Done, legacy.dispatcher.execute(GestureAction.ToggleTheme))
+                assertEquals(PaletteSelection(builtin, null, PaletteMode.LIGHT), legacy.appearance.state.value.paletteSelection)
+                listOf(false, true).forEach { systemDark ->
+                    val world =
+                        world(
+                            appearance = AppearanceConfig(theme = builtin, paletteMode = PaletteMode.SYSTEM),
+                            systemDark = systemDark,
+                        )
+                    assertEquals(GestureActionResult.Done, world.dispatcher.execute(GestureAction.ToggleTheme))
+                    val expectedMode = if (systemDark) PaletteMode.LIGHT else PaletteMode.DARK
+                    assertEquals(PaletteSelection(builtin, null, expectedMode), world.appearance.state.value.paletteSelection)
+                }
+            }
+        }
+
+    @Test fun `custom system and explicit modes toggle atomically preserving installed identity`() =
+        runTest {
+            val colors =
+                PaletteColors(
+                    primary = "#336699",
+                    secondary = "#663399",
+                    tertiary = "#996633",
+                    background = "#101010",
+                    surface = "#202020",
+                    surfaceContainer = "#303030",
+                    onBackground = "#FFFFFF",
+                    onSurface = "#FFFFFF",
+                    onSurfaceVariant = "#CCCCCC",
+                    outlineVariant = "#888888",
+                )
+            val installed = InstalledPalette(PaletteDocument("custom", "Custom", 1, light = colors, dark = colors))
+            listOf(PaletteMode.SYSTEM, PaletteMode.LIGHT, PaletteMode.DARK).forEach { mode ->
+                val config =
+                    AppearanceConfig(
+                        theme = ColorThemePreset.NORD,
+                        paletteMode = mode,
+                        customPaletteId = "custom",
+                        customPalettes = listOf(installed),
+                    )
+                val world = world(appearance = config, systemDark = true)
+                val emissions = mutableListOf<AppearanceConfig>()
+                val collector =
+                    backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                        world.appearance.state.collect { emissions += it }
+                    }
+                assertEquals(GestureActionResult.Done, world.dispatcher.execute(GestureAction.ToggleTheme))
+                val expectedMode = if (mode == PaletteMode.LIGHT) PaletteMode.DARK else PaletteMode.LIGHT
+                assertEquals(PaletteSelection(ColorThemePreset.NORD, "custom", expectedMode), emissions.last().paletteSelection)
+                assertEquals(listOf(installed), emissions.last().customPalettes)
+                assertEquals(2, emissions.size)
+                collector.cancel()
+            }
+            listOf(installed.document.copy(light = null), installed.document.copy(dark = null)).forEach { document ->
+                val config =
+                    AppearanceConfig(
+                        customPaletteId = "custom",
+                        paletteMode = PaletteMode.SYSTEM,
+                        customPalettes = listOf(InstalledPalette(document)),
+                    )
+                val world = world(appearance = config)
+                assertEquals(GestureActionResult.Unavailable, world.dispatcher.execute(GestureAction.ToggleTheme))
+                assertEquals(config, world.appearance.state.value)
+            }
         }
 
     @Test fun `an action from a newer build is inert`() =

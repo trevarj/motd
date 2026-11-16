@@ -3,4 +3,5 @@
     <cache-path name="camera" path="camera/" />
     <cache-path name="invite_qr" path="invite-qr/" />
     <cache-path name="image_clipboard" path="image-clipboard/" />
+    <cache-path name="palette_share" path="palette-share/" />
 </paths>

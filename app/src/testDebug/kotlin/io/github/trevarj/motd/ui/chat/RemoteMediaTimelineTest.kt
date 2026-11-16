@@ -489,6 +489,7 @@ class RemoteMediaTimelineTest {
                     LocalUriHandler provides (uriHandler ?: LocalUriHandler.current),
                 ) {
                     MessageList(
+                        onOpenPalette = { _, _ -> },
                         items = pages.collectAsLazyPagingItems(),
                         listState = rememberLazyListState(),
                         networkId = networkId,

@@ -69,6 +69,8 @@ import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
+import io.github.trevarj.motd.data.prefs.PaletteMode
+import io.github.trevarj.motd.data.prefs.PaletteSelection
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
@@ -681,20 +683,36 @@ class AppearanceFolderLayoutUiTest {
     }
 
     @Test
-    fun dismissingThemeSheetKeepsAppearanceControlsAvailable() {
-        setContent()
+    fun colorModeRetainsPaletteBeforePersistenceEmits() {
+        val selected = mutableListOf<PaletteSelection>()
+        setContent(
+            appearance = AppearanceConfig(theme = ColorThemePreset.AYU_DARK, paletteMode = PaletteMode.DARK),
+            onSelectPalette = selected::add,
+        )
+        compose.onNodeWithTag("settings_color_mode_light").performScrollTo().performClick()
+        assertEquals(PaletteSelection(ColorThemePreset.AYU_DARK, null, PaletteMode.LIGHT), selected.single())
+        compose.onNodeWithTag("settings_color_mode_light").assertIsSelected()
+    }
 
-        compose.onNodeWithTag("settings_theme_picker").performClick()
-        val themeSheet = hasTestTag("settings_theme_sheet")
-        val dismissAction =
-            SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and
-                (themeSheet or hasAnyAncestor(themeSheet))
-        compose
-            .onAllNodes(dismissAction, useUnmergedTree = true)[0]
-            .performSemanticsAction(SemanticsActions.Dismiss)
-
-        compose.onNodeWithTag("settings_theme_sheet", useUnmergedTree = true).assertDoesNotExist()
+    @Test
+    fun paletteNavigationLeavesAppearanceControlsAvailable() {
+        var opened = false
+        setContent(onOpenPalettes = { opened = true })
+        compose.onNodeWithTag("settings_palette_hub").performClick()
+        assertTrue(opened)
         compose.onNodeWithTag("settings_avatar_style_picker").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun singleModeDisablesUnsupportedColorModes() {
+        setContent(appearance = AppearanceConfig(theme = ColorThemePreset.MONOKAI, paletteMode = PaletteMode.DARK))
+        compose.onNodeWithTag("settings_color_mode_system").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("settings_color_mode_light").performScrollTo().assertIsNotEnabled()
+        compose
+            .onNodeWithTag("settings_color_mode_dark")
+            .performScrollTo()
+            .assertIsEnabled()
+            .assertIsSelected()
     }
 
     @Test
@@ -1379,6 +1397,8 @@ class AppearanceFolderLayoutUiTest {
         settingsProvider: () -> Settings = { settings },
         appearanceProvider: () -> AppearanceConfig = { appearance },
         customFontFile: java.io.File? = null,
+        onSelectPalette: (PaletteSelection) -> Unit = {},
+        onOpenPalettes: () -> Unit = {},
         onFolderDisplayMode: (FolderDisplayMode) -> Unit = {},
         onShowFolderChatsInAll: (Boolean) -> Unit = {},
         onAvatarStyle: (AvatarStyle) -> Unit = {},
@@ -1426,9 +1446,9 @@ class AppearanceFolderLayoutUiTest {
                         appearance = currentAppearance,
                         onBack = {},
                         onOpenNickColors = {},
-                        onThemePreset = {},
+                        onOpenPalettes = onOpenPalettes,
+                        onSelectPalette = onSelectPalette,
                         onTrueBlack = {},
-                        onFollowSystem = {},
                         onDynamicColor = {},
                         onUseThemeTextColors = onUseThemeTextColors,
                         onLayoutDensity = onLayoutDensity,

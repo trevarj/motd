@@ -21,6 +21,7 @@ import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.PaletteDocument
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
@@ -425,7 +426,7 @@ interface LinkPreviewRepository {
     ): LinkPreview?
 }
 
-enum class LinkPreviewKind { WEB, VIDEO, FILE, TEXT, WIKIPEDIA }
+enum class LinkPreviewKind { WEB, VIDEO, FILE, TEXT, WIKIPEDIA, PALETTE }
 
 data class LinkPreview(
     val url: String,
@@ -434,4 +435,9 @@ data class LinkPreview(
     val imageUrl: String?,
     val siteName: String?,
     val kind: LinkPreviewKind = LinkPreviewKind.WEB,
-)
+    val palette: PaletteDocument? = null,
+) {
+    init {
+        require((kind == LinkPreviewKind.PALETTE) == (palette != null))
+    }
+}

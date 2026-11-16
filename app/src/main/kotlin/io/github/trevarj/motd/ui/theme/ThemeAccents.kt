@@ -4,51 +4,32 @@ import androidx.compose.ui.graphics.Color
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 
 /**
- * Each theme's own declared accent colors, in hue order.
+ * Each theme's published identity colors.
  *
- * Terminal and editor themes ship a real palette -- base16 names eight accent slots
- * (base08..base0F), base24 and Kitty's ANSI 16 add the bright variants, Catppuccin publishes
- * fourteen named accents, and Modus publishes faint/base/warmer/cooler/intense per hue. motd's
- * Material [ColorScheme] only carries three of them, which is why generated identity colors used to
- * look foreign: they were synthesized around a hue wheel instead of picked from the palette the
- * theme actually defines.
- *
- * Values come from each theme's own upstream source: Kitty/terminal configs shipped by the theme
- * (Kanagawa, Rose Pine, Tokyo Night), the tinted-theming base16 and base24 scheme files, Nord's
- * published nord7..nord15, Everforest's palette.md accent row, and the Modus palettes in
- * modus-themes.el. Each list is then filtered to drop near-neutrals, out-of-range lightness, and
- * perceptual duplicates. Themes absent from this map -- the Material light/dark/AMOLED schemes and
- * Material You dynamic color -- publish no accent list, so they fall back to the hue-wheel
- * construction in [NickColor].
+ * Catalog-aligned themes use the six normal chromatic terminal colors in
+ * red/green/yellow/blue/magenta/cyan order. Other themes retain their upstream accent lists.
+ * Material light/dark/AMOLED and Material You publish no accent list, so they fall back to
+ * the hue-wheel construction in [NickColor].
  */
 internal val ThemeIdentityPalettes: Map<ColorThemePreset, List<Color>> =
     mapOf(
         ColorThemePreset.AYU_DARK to
             listOf(
-                Color(0xFFF07178),
-                Color(0xFFFF8F40),
-                Color(0xFFFFB454),
-                Color(0xFFE6B450),
-                Color(0xFFAAD94C),
+                Color(0xFFEA6C73),
                 Color(0xFF7FD962),
-                Color(0xFF95E6CB),
-                Color(0xFF39BAE6),
-                Color(0xFF59C2FF),
-                Color(0xFF73B8FF),
-                Color(0xFFD2A6FF),
+                Color(0xFFF9AF4F),
+                Color(0xFF53BDFA),
+                Color(0xFFCDA1FA),
+                Color(0xFF90E1C6),
             ),
         ColorThemePreset.AYU_LIGHT to
             listOf(
-                Color(0xFFF07171),
-                Color(0xFFFA8D3E),
-                Color(0xFFF2AE49),
-                Color(0xFF86B300),
-                Color(0xFF6CBF49),
-                Color(0xFF4CBF99),
-                Color(0xFF55B4D4),
-                Color(0xFF399EE6),
-                Color(0xFFA37ACC),
-                Color(0xFFB595D6),
+                Color(0xFFEA6C6D),
+                Color(0xFF6CBF43),
+                Color(0xFFECA944),
+                Color(0xFF3199E1),
+                Color(0xFF9E75C7),
+                Color(0xFF46BA94),
             ),
         ColorThemePreset.AYU_MIRAGE to
             listOf(
@@ -68,143 +49,101 @@ internal val ThemeIdentityPalettes: Map<ColorThemePreset, List<Color>> =
         ColorThemePreset.CATPPUCCIN_LATTE to
             listOf(
                 Color(0xFFD20F39),
-                Color(0xFFDD7878),
-                Color(0xFFDC8A78),
-                Color(0xFFFE640B),
-                Color(0xFFDF8E1D),
                 Color(0xFF40A02B),
-                Color(0xFF179299),
-                Color(0xFF209FB5),
-                Color(0xFF04A5E5),
+                Color(0xFFDF8E1D),
                 Color(0xFF1E66F5),
-                Color(0xFF8839EF),
                 Color(0xFFEA76CB),
+                Color(0xFF179299),
             ),
         ColorThemePreset.CATPPUCCIN_MOCHA to
             listOf(
                 Color(0xFFF38BA8),
-                Color(0xFFF2CDCD),
-                Color(0xFFFAB387),
-                Color(0xFFF9E2AF),
                 Color(0xFFA6E3A1),
-                Color(0xFF94E2D5),
-                Color(0xFF89DCEB),
-                Color(0xFF74C7EC),
+                Color(0xFFF9E2AF),
                 Color(0xFF89B4FA),
-                Color(0xFFCBA6F7),
                 Color(0xFFF5C2E7),
+                Color(0xFF94E2D5),
             ),
         ColorThemePreset.DRACULA to
             listOf(
-                Color(0xFF993333),
                 Color(0xFFFF5555),
-                Color(0xFFFFB86C),
                 Color(0xFF50FA7B),
-                Color(0xFFA4FFFF),
-                Color(0xFF8BE9FD),
+                Color(0xFFF1FA8C),
                 Color(0xFFBD93F9),
-                Color(0xFFFF92DF),
                 Color(0xFFFF79C6),
+                Color(0xFF8BE9FD),
+            ),
+        ColorThemePreset.DRACULA_LIGHT to
+            listOf(
+                Color(0xFFFF5555),
+                Color(0xFF50FA7B),
+                Color(0xFFF1FA8C),
+                Color(0xFFBD93F9),
+                Color(0xFFFF79C6),
+                Color(0xFF8BE9FD),
             ),
         ColorThemePreset.EVERFOREST_DARK to
             listOf(
                 Color(0xFFE67E80),
-                Color(0xFFE69875),
-                Color(0xFFDBBC7F),
                 Color(0xFFA7C080),
-                Color(0xFF83C092),
+                Color(0xFFDBBC7F),
                 Color(0xFF7FBBB3),
                 Color(0xFFD699B6),
+                Color(0xFF83C092),
             ),
         ColorThemePreset.EVERFOREST_LIGHT to
             listOf(
                 Color(0xFFF85552),
-                Color(0xFFF57D26),
-                Color(0xFFDFA000),
                 Color(0xFF8DA101),
-                Color(0xFF35A77C),
+                Color(0xFFDFA000),
                 Color(0xFF3A94C5),
                 Color(0xFFDF69BA),
+                Color(0xFF35A77C),
             ),
         ColorThemePreset.GRUVBOX_DARK to
             listOf(
-                Color(0xFFD3869B),
-                Color(0xFF9D0006),
                 Color(0xFFCC241D),
-                Color(0xFFFB4934),
-                Color(0xFFD65D0E),
-                Color(0xFFD79921),
-                Color(0xFFFABD2F),
                 Color(0xFF98971A),
-                Color(0xFFB8BB26),
-                Color(0xFF8EC07C),
-                Color(0xFF689D6A),
-                Color(0xFF83A598),
+                Color(0xFFD79921),
                 Color(0xFF458588),
                 Color(0xFFB16286),
+                Color(0xFF689D6A),
             ),
         ColorThemePreset.GRUVBOX_LIGHT to
             listOf(
-                Color(0xFF9D0006),
                 Color(0xFFCC241D),
-                Color(0xFFD65D0E),
-                Color(0xFFB57614),
-                Color(0xFFD79921),
-                Color(0xFF79740E),
                 Color(0xFF98971A),
-                Color(0xFF689D6A),
-                Color(0xFF427B58),
+                Color(0xFFD79921),
                 Color(0xFF458588),
-                Color(0xFF076678),
-                Color(0xFF8F3F71),
                 Color(0xFFB16286),
+                Color(0xFF689D6A),
             ),
         ColorThemePreset.KANAGAWA_DRAGON to
             listOf(
-                Color(0xFFE46876),
                 Color(0xFFC4746E),
-                Color(0xFFB98D7B),
-                Color(0xFFB6927B),
-                Color(0xFFC4B28A),
-                Color(0xFFC8C093),
                 Color(0xFF8A9A7B),
-                Color(0xFF87A987),
-                Color(0xFF7AA89F),
-                Color(0xFF7FB4CA),
-                Color(0xFF938AA9),
+                Color(0xFFC4B28A),
+                Color(0xFF8BA4B0),
+                Color(0xFFA292A3),
+                Color(0xFF8EA4A2),
             ),
         ColorThemePreset.KANAGAWA_LOTUS to
             listOf(
                 Color(0xFFC84053),
-                Color(0xFFE82424),
-                Color(0xFFCC6D00),
-                Color(0xFF836F4A),
-                Color(0xFF77713F),
                 Color(0xFF6F894E),
-                Color(0xFF6E915F),
-                Color(0xFF5E857A),
-                Color(0xFF597B75),
-                Color(0xFF6693BF),
+                Color(0xFF77713F),
                 Color(0xFF4D699B),
-                Color(0xFF43436C),
-                Color(0xFF624C83),
                 Color(0xFFB35B79),
+                Color(0xFF597B75),
             ),
         ColorThemePreset.KANAGAWA_WAVE to
             listOf(
-                Color(0xFFFF5D62),
                 Color(0xFFC34043),
-                Color(0xFFFFA066),
-                Color(0xFFE6C384),
-                Color(0xFFC0A36E),
-                Color(0xFFDCD7BA),
-                Color(0xFFC8C093),
-                Color(0xFF98BB6C),
                 Color(0xFF76946A),
-                Color(0xFF6A9589),
-                Color(0xFF7FB4CA),
+                Color(0xFFC0A36E),
                 Color(0xFF7E9CD8),
                 Color(0xFF957FB8),
+                Color(0xFF6A9589),
             ),
         ColorThemePreset.MODUS_OPERANDI to
             listOf(
@@ -405,26 +344,20 @@ internal val ThemeIdentityPalettes: Map<ColorThemePreset, List<Color>> =
         ColorThemePreset.NORD to
             listOf(
                 Color(0xFFBF616A),
-                Color(0xFFD08770),
-                Color(0xFFEBCB8B),
                 Color(0xFFA3BE8C),
-                Color(0xFF8FBCBB),
-                Color(0xFF88C0D0),
+                Color(0xFFEBCB8B),
                 Color(0xFF81A1C1),
-                Color(0xFF5E81AC),
                 Color(0xFFB48EAD),
+                Color(0xFF88C0D0),
             ),
         ColorThemePreset.NORD_LIGHT to
             listOf(
                 Color(0xFFBF616A),
-                Color(0xFFD08770),
-                Color(0xFFEBCB8B),
-                Color(0xFFA3BE8C),
-                Color(0xFF8FBCBB),
-                Color(0xFF88C0D0),
+                Color(0xFF96B17F),
+                Color(0xFFC5A565),
                 Color(0xFF81A1C1),
-                Color(0xFF5E81AC),
                 Color(0xFFB48EAD),
+                Color(0xFF7BB3C3),
             ),
         ColorThemePreset.ONE_DARK to
             listOf(
@@ -445,72 +378,65 @@ internal val ThemeIdentityPalettes: Map<ColorThemePreset, List<Color>> =
         ColorThemePreset.ROSE_PINE to
             listOf(
                 Color(0xFFEB6F92),
-                Color(0xFFEBBCBA),
+                Color(0xFF31748F),
                 Color(0xFFF6C177),
                 Color(0xFF9CCFD8),
-                Color(0xFF31748F),
-                Color(0xFF26233A),
-                Color(0xFF6E6A86),
                 Color(0xFFC4A7E7),
+                Color(0xFFEBBCBA),
             ),
         ColorThemePreset.ROSE_PINE_DAWN to
             listOf(
                 Color(0xFFB4637A),
-                Color(0xFFD7827E),
+                Color(0xFF286983),
                 Color(0xFFEA9D34),
                 Color(0xFF56949F),
-                Color(0xFF286983),
-                Color(0xFF575279),
                 Color(0xFF907AA9),
+                Color(0xFFD7827E),
             ),
         ColorThemePreset.ROSE_PINE_MOON to
             listOf(
                 Color(0xFFEB6F92),
-                Color(0xFFEA9A97),
+                Color(0xFF3E8FB0),
                 Color(0xFFF6C177),
                 Color(0xFF9CCFD8),
-                Color(0xFF3E8FB0),
-                Color(0xFF393552),
-                Color(0xFF6E6A86),
                 Color(0xFFC4A7E7),
+                Color(0xFFEA9A97),
             ),
         ColorThemePreset.SOLARIZED_DARK to
             listOf(
-                Color(0xFF6E1917),
                 Color(0xFFDC322F),
-                Color(0xFFCB4B16),
-                Color(0xFFB58900),
                 Color(0xFF859900),
-                Color(0xFF2AA198),
+                Color(0xFFB58900),
                 Color(0xFF268BD2),
-                Color(0xFF6C71C4),
                 Color(0xFFD33682),
+                Color(0xFF2AA198),
             ),
         ColorThemePreset.SOLARIZED_LIGHT to
             listOf(
-                Color(0xFF6E1917),
                 Color(0xFFDC322F),
-                Color(0xFFCB4B16),
-                Color(0xFFB58900),
                 Color(0xFF859900),
-                Color(0xFF2AA198),
+                Color(0xFFB58900),
                 Color(0xFF268BD2),
-                Color(0xFF6C71C4),
                 Color(0xFFD33682),
+                Color(0xFF2AA198),
             ),
         ColorThemePreset.TOKYO_NIGHT to
             listOf(
                 Color(0xFFF7768E),
-                Color(0xFFDB4B4B),
-                Color(0xFFFF9E64),
-                Color(0xFFE0AF68),
                 Color(0xFF9ECE6A),
-                Color(0xFF7DCFFF),
+                Color(0xFFE0AF68),
                 Color(0xFF7AA2F7),
-                Color(0xFF414868),
-                Color(0xFFC0CAF5),
-                Color(0xFFA9B1D6),
                 Color(0xFFBB9AF7),
+                Color(0xFF7DCFFF),
+            ),
+        ColorThemePreset.TOKYO_NIGHT_LIGHT to
+            listOf(
+                Color(0xFFF52A65),
+                Color(0xFF587539),
+                Color(0xFF8C6C3E),
+                Color(0xFF2E7DE9),
+                Color(0xFF9854F1),
+                Color(0xFF007197),
             ),
         ColorThemePreset.ZENBURN to
             listOf(

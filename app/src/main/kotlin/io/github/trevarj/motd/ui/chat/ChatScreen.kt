@@ -225,6 +225,7 @@ import io.github.trevarj.motd.data.prefs.EffectSurface
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.PaletteDocument
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
@@ -394,6 +395,7 @@ internal fun dismissKeyboardBeforeNavigating(
 fun ChatScreen(
     bufferId: Long,
     appearance: AppearanceConfig,
+    onOpenPalette: (PaletteDocument, String) -> Unit,
     onBack: () -> Unit = {},
     showBack: Boolean = true,
     onOpenChannelInfo: (Long) -> Unit = {},
@@ -703,6 +705,7 @@ fun ChatScreen(
         },
         onOpenSearch = onOpenSearch,
         onOpenImage = { onOpenImage(it, state.buffer?.networkId) },
+        onOpenPalette = onOpenPalette,
         onInviteUser = {
             viewModel.ensureMembersObserved()
             inviteChannelOpen = true
@@ -1107,6 +1110,7 @@ internal fun ChatContent(
     onOpenChannelInfo: (Long) -> Unit,
     onOpenSearch: (Long) -> Unit,
     onOpenImage: (String) -> Unit,
+    onOpenPalette: (PaletteDocument, String) -> Unit,
     nickNormalizer: (String) -> String,
     onSubmit: (String) -> Unit,
     onTyping: (Boolean) -> Unit,
@@ -4281,6 +4285,7 @@ internal fun ChatContent(
                                                 onVoiceTranscribe = onVoiceTranscribe,
                                                 onVoiceTranscriptionCancel = onVoiceTranscriptionCancel,
                                                 onOpenLink = onOpenLink,
+                                                onOpenPalette = onOpenPalette,
                                                 highlightMsgid = highlightMsgid,
                                                 highlightEventId = highlightEventId,
                                                 knownNicks = knownNicks,

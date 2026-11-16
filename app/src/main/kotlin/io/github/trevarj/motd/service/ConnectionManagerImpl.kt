@@ -2619,22 +2619,24 @@ class ConnectionManagerImpl
             }
             retainNotificationReplyNetwork(notificationRepliesInFlight, buffer.networkId)
             var handedOff = false
+
             fun releaseNetwork() {
                 releaseNotificationReplyNetwork(notificationRepliesInFlight, buffer.networkId)
                 scope.launch { evaluatePushMode() }
             }
             try {
-                val acceptance = sendNotificationReplyWhenReady(
-                    networkId = buffer.networkId,
-                    type = buffer.type,
-                    target = buffer.ircTarget,
-                    snapshots = registry.snapshot,
-                    start = ::startAll,
-                    reconnect = ::connect,
-                    submit = { client ->
-                        sendMessageInternal(buffer.id, text, null, null, notificationClient = client)
-                    },
-                )
+                val acceptance =
+                    sendNotificationReplyWhenReady(
+                        networkId = buffer.networkId,
+                        type = buffer.type,
+                        target = buffer.ircTarget,
+                        snapshots = registry.snapshot,
+                        start = ::startAll,
+                        reconnect = ::connect,
+                        submit = { client ->
+                            sendMessageInternal(buffer.id, text, null, null, notificationClient = client)
+                        },
+                    )
                 if (acceptance is SendAcceptance.Accepted) {
                     handedOff = true
                     acceptance.wireOutcome.invokeOnCompletion { releaseNetwork() }

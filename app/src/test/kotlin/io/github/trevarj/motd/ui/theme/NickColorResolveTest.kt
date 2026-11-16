@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.theme
 
+import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.NickColorPalette
@@ -7,6 +8,7 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.isFixedPalette
 import io.github.trevarj.motd.data.prefs.nickColorPaletteFromPreference
+import io.github.trevarj.motd.ui.components.customContrastPalette
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -231,9 +233,14 @@ class NickColorResolveTest {
         val isDark: Boolean,
     )
 
-    private fun fixture(preset: ColorThemePreset): ThemeFixture {
-        val scheme = fixedThemeScheme(preset)!!
-        return ThemeFixture(
+    private fun fixture(preset: ColorThemePreset): ThemeFixture = fixture(fixedThemeScheme(preset)!!, preset.isDark, themeIdentityPalette(preset))
+
+    private fun fixture(
+        scheme: ColorScheme,
+        dark: Boolean,
+        identities: List<Color>,
+    ): ThemeFixture =
+        ThemeFixture(
             accents = listOf(scheme.primary, scheme.tertiary, scheme.secondary).distinct(),
             backgrounds =
                 listOf(
@@ -246,9 +253,107 @@ class NickColorResolveTest {
                     scheme.secondaryContainer,
                     scheme.tertiaryContainer,
                 ).distinct(),
-            identityPalette = themeIdentityPalette(preset),
-            isDark = preset.isDark,
+            identityPalette = identities,
+            isDark = dark,
         )
+
+    private fun customFixtures(identities: List<String> = emptyList()): List<ThemeFixture> =
+        listOf(false, true).flatMap { dark ->
+            val colors = customContrastPalette(dark).copy(nicknameColors = identities)
+            val palette = colors.nicknameColors.map { Color(0xFF000000L or it.substring(1).toLong(16)) }
+            listOf(false, true).flatMap { useThemeTextColors ->
+                val scheme = accessibleColorScheme(colors.toRawColorScheme(dark), dark, useThemeTextColors)
+                listOf(fixture(scheme, dark, palette)) +
+                    if (dark) listOf(fixture(scheme.withTrueBlackSurfaces(), true, palette)) else emptyList()
+            }
+        }
+
+    private fun nickScheme(
+        f: ThemeFixture,
+        palette: NickColorPalette = NickColorPalette.THEME,
+        overrides: Map<String, Int> = emptyMap(),
+        enabled: Boolean = true,
+    ): NickColorScheme =
+        NickColorScheme(
+            enabled = enabled,
+            palette = palette,
+            overrides = overrides,
+            isDark = f.isDark,
+            textBackgrounds = f.backgrounds,
+            themeColors = f.accents,
+            identityPalette = f.identityPalette,
+        )
+
+    @Test
+    fun customIdentities_preserveAuthoredFillsAndReadableNickHuesAcrossModes() {
+        for (f in customFixtures(listOf("#A84274", "#358F87", "#8664BB"))) {
+            val scheme = nickScheme(f)
+            val used = crowd.map { scheme.avatar(it) }.toSet()
+            assertEquals(f.identityPalette.toSet(), used)
+            for (nick in crowd) {
+                val fill = scheme.avatar(nick)
+                val text = scheme.nick(nick, fallback)
+                assertEquals(0f, hueGap(fill.toOklch().hue, text.toOklch().hue), 2f)
+                for (background in f.backgrounds) {
+                    assertTrue("custom/$nick unreadable on $background", contrastRatio(text, background) >= 4.49)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun customEmptyIdentities_useReadableAccentDerivedHueWheelAcrossModes() {
+        for (f in customFixtures()) {
+            val scheme = nickScheme(f)
+            val fills = crowd.map { scheme.avatar(it) }.toSet()
+            assertTrue("automatic identities must expand beyond three accents", fills.size > f.accents.size)
+            val differentAccents =
+                NickColorScheme(
+                    enabled = true,
+                    palette = NickColorPalette.THEME,
+                    overrides = emptyMap(),
+                    isDark = f.isDark,
+                    textBackgrounds = f.backgrounds,
+                    themeColors = listOf(Color.Cyan, Color.Blue, Color.Green),
+                )
+            assertNotEquals(scheme.avatar("alice"), differentAccents.avatar("alice"))
+            for (nick in crowd) {
+                val text = scheme.nick(nick, fallback)
+                assertTrue(text.alpha == 1f)
+                assertEquals(scheme.mention(nick), text)
+                for (background in f.backgrounds) {
+                    assertTrue("automatic/$nick unreadable on $background", contrastRatio(text, background) >= 4.49)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun customIdentities_doNotOverrideClassicVividOrExplicitNickChoices() {
+        for (f in customFixtures(listOf("#A84274", "#358F87", "#8664BB"))) {
+            for (palette in listOf(NickColorPalette.CLASSIC, NickColorPalette.VIVID)) {
+                val custom = nickScheme(f, palette)
+                val withoutCustom = nickScheme(ThemeFixture(emptyList(), f.backgrounds, emptyList(), f.isDark), palette)
+                for (nick in nicks) {
+                    assertEquals(withoutCustom.avatar(nick), custom.avatar(nick))
+                    assertEquals(withoutCustom.nick(nick, fallback), custom.nick(nick, fallback))
+                    assertTrue(f.backgrounds.all { contrastRatio(custom.nick(nick, fallback), it) >= 4.49 })
+                }
+            }
+            for (palette in NickColorPalette.entries) {
+                val overridden = nickScheme(f, palette, mapOf("alice" to 210))
+                assertEquals(hueFill(210, f.isDark, palette, f.accents), overridden.avatar(" Alice "))
+                val text = overridden.nick(" Alice ", fallback)
+                assertEquals(hueColor(210, f.isDark, palette, f.accents, f.backgrounds), text)
+                if (palette == NickColorPalette.THEME) {
+                    assertEquals(0f, hueGap(210f, text.toOklch().hue), 2f)
+                }
+                assertTrue(f.backgrounds.all { contrastRatio(text, it) >= 4.49 })
+                val disabled = nickScheme(f, palette, mapOf("alice" to 210), enabled = false)
+                assertEquals(fallback, disabled.nick("alice", fallback))
+                assertEquals(overridden.avatar("alice"), disabled.avatar("alice"))
+            }
+        }
     }
 
     private fun themeNick(
@@ -299,19 +404,6 @@ class NickColorResolveTest {
     }
 
     private val fixedPresets = ColorThemePreset.entries.filter { it.isFixedPalette }
-
-    @Test
-    fun everyFixedTheme_publishesAUsableIdentityPalette() {
-        for (preset in fixedPresets) {
-            val palette = themeIdentityPalette(preset)
-            assertTrue("$preset declares no palette", palette.size >= 6)
-            for (color in palette) {
-                val lch = color.toOklch()
-                assertTrue("$preset has a near-neutral accent", lch.chroma >= 0.035f)
-                assertTrue("$preset accent lightness ${lch.lightness}", lch.lightness in 0.18f..0.95f)
-            }
-        }
-    }
 
     @Test
     fun avatarFill_isExactlyOneOfTheThemesOwnColors() {

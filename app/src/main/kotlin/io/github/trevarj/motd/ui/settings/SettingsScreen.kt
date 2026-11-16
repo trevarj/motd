@@ -40,6 +40,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.prefs.paletteSelection
+import io.github.trevarj.motd.data.prefs.selectedCustomPalette
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.ui.about.appVersion
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -231,7 +233,7 @@ private fun SettingsRoot(
             icon = Icons.Outlined.Palette,
             iconTint = colors.tertiary,
             summary = stringResource(R.string.settings_appearance_summary),
-            value = themePresetLabel(state.appearance.theme),
+            value = state.appearance.selectedCustomPalette?.name ?: paletteBuiltinName(state.appearance.paletteSelection.builtin),
             modifier = Modifier.testTag("settings_category_appearance"),
             onClick = onOpenAppearance,
         )

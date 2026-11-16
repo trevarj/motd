@@ -11,6 +11,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
@@ -33,11 +34,14 @@ import io.github.trevarj.motd.ai.WhisperNativeAssertions
 import io.github.trevarj.motd.audio.VoiceSendProgress
 import io.github.trevarj.motd.audio.VoiceSendRequest
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
+import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.e2e.BootstrappedNetwork
 import io.github.trevarj.motd.e2e.BufferProbe
 import io.github.trevarj.motd.e2e.ConnectionProbe
@@ -48,6 +52,7 @@ import io.github.trevarj.motd.e2e.FixtureIrcClient
 import io.github.trevarj.motd.e2e.HistorySyncProbe
 import io.github.trevarj.motd.e2e.MessageLifecycleProbe
 import io.github.trevarj.motd.e2e.MessageRunProbe
+import io.github.trevarj.motd.e2e.PaletteLinkFixture
 import io.github.trevarj.motd.e2e.ScenarioHolder
 import io.github.trevarj.motd.e2e.TimelineDiagnostics
 import io.github.trevarj.motd.e2e.robots.BouncerRobot
@@ -55,8 +60,8 @@ import io.github.trevarj.motd.e2e.robots.ChatListRobot
 import io.github.trevarj.motd.e2e.robots.ChatRobot
 import io.github.trevarj.motd.e2e.robots.NetworksRobot
 import io.github.trevarj.motd.e2e.robots.OnboardingRobot
+import io.github.trevarj.motd.e2e.robots.PaletteRobot
 import io.github.trevarj.motd.e2e.robots.SettingsRobot
-import io.github.trevarj.motd.e2e.robots.ThemeSheetRobot
 import io.github.trevarj.motd.e2e.robots.TimelineRobot
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
@@ -876,6 +881,7 @@ class RequiredHeadlessE2eTest {
         TimelineRobot(compose).assertMessageVisible(communityMessage.tag())
         scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         ChatListRobot(compose).awaitTag("chatlist_row_$communityId")
+        exerciseHostedPaletteLink(bootstrap, network, communityId, token)
         SettingsRobot(compose).apply {
             open()
             notifications()
@@ -887,8 +893,46 @@ class RequiredHeadlessE2eTest {
             returnToRoot()
             appearance()
         }
-        ThemeSheetRobot(compose).selectAyuDarkAndTrueBlack()
-        ThemeSheetRobot(compose).dismiss()
+        PaletteRobot(compose).selectAyuDarkAndTrueBlack()
+        val palettePrefs = AppearancePrefsImpl(InstrumentationRegistry.getInstrumentation().targetContext)
+        val beforeDraftSave = runBlocking { palettePrefs.config.first() }.paletteSelection
+        val savedPaletteName = "$token saved palette"
+        PaletteRobot(compose).createPalette(savedPaletteName, apply = false)
+        val afterDraftSave = runBlocking { palettePrefs.config.first() }
+        assertEquals(beforeDraftSave, afterDraftSave.paletteSelection)
+        assertTrue(afterDraftSave.customPalettes.any { it.document.name == savedPaletteName })
+        val appliedPaletteName = "$token applied palette"
+        PaletteRobot(compose).createPalette(appliedPaletteName, apply = true)
+        val appliedPalette = runBlocking { palettePrefs.config.first() }
+        val appliedId =
+            appliedPalette.customPalettes
+                .single { it.document.name == appliedPaletteName }
+                .document.id
+        assertEquals(appliedId, appliedPalette.paletteSelection.installedId)
+        assertEquals(
+            appliedId,
+            runBlocking { AppearancePrefsImpl(InstrumentationRegistry.getInstrumentation().targetContext).config.first() }.paletteSelection.installedId,
+        )
+        val paletteRobot = PaletteRobot(compose)
+        paletteRobot.shareInstalledPaletteToMotd(savedPaletteName)
+        val previewedPalette = runBlocking { palettePrefs.config.first() }
+        assertEquals(appliedPalette.paletteSelection, previewedPalette.paletteSelection)
+        assertEquals(appliedPalette.customPalettes, previewedPalette.customPalettes)
+        paletteRobot.cancelSharedPreview()
+        assertEquals(appliedPalette.paletteSelection, runBlocking { palettePrefs.config.first() }.paletteSelection)
+        paletteRobot.shareInstalledPaletteToMotd(savedPaletteName)
+        paletteRobot.applySharedPreview()
+        val importedPalette = runBlocking { palettePrefs.config.first() }
+        val savedId =
+            afterDraftSave.customPalettes
+                .single { it.document.name == savedPaletteName }
+                .document.id
+        assertEquals(savedId, importedPalette.paletteSelection.installedId)
+        assertEquals(appliedPalette.customPalettes, importedPalette.customPalettes)
+        assertEquals(
+            savedId,
+            runBlocking { AppearancePrefsImpl(InstrumentationRegistry.getInstrumentation().targetContext).config.first() }.paletteSelection.installedId,
+        )
         SettingsRobot(compose).selectThemeTextColors()
         SettingsRobot(compose).selectIrcSprites()
         SettingsRobot(compose).selectWallpaperAndIntensity()
@@ -931,6 +975,112 @@ class RequiredHeadlessE2eTest {
         NetworksRobot(compose).openRoot(network.rootId)
         BouncerRobot(compose).assertPanels()
         milestones.record("settings_bouncer_smoke", "root=${network.rootId}")
+    }
+
+    private fun exerciseHostedPaletteLink(
+        bootstrap: E2eBootstrap,
+        network: BootstrappedNetwork,
+        bufferId: Long,
+        token: String,
+    ) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val previews = ContentPreviewPrefsImpl(context)
+        val appearance = AppearancePrefsImpl(context)
+        val originalPreviews = runBlocking { previews.config.first() }
+        val root =
+            runBlocking {
+                bootstrap.seams
+                    .networks()
+                    .observeNetworks()
+                    .first()
+                    .single { it.id == network.rootId }
+            }
+        PaletteLinkFixture(instrumentation.context).use { fixture ->
+            val priorPin = runBlocking { bootstrap.seams.certTrust().pinnedFor(fixture.host, root.port) }
+            try {
+                runBlocking {
+                    previews.setAutoLoadOnMetered(false)
+                    previews.setAutoLoadOnUnmetered(false)
+                    previews.setShowImages(false)
+                    previews.setShowLinkPreviews(true)
+                }
+                ChatListRobot(compose).open(bufferId)
+                val text = "$token palette ${fixture.url}"
+                ChatRobot(compose).send(text)
+                val message =
+                    awaitWhileComposing("Palette URL arrives through the owning IRC network", 20_000) {
+                        MessageLifecycleProbe(bootstrap.seams.search(), milestones).awaitCanonical(text, bufferId)
+                    }
+                TimelineRobot(compose).assertMessageVisible(message.tag())
+                val robot = PaletteRobot(compose)
+                robot.awaitTag("link_preview_awaiting")
+                fixture.assertRequests(0)
+                runBlocking {
+                    bootstrap.seams.certTrust().pin(fixture.host, root.port, fixture.fingerprint)
+                    bootstrap.seams.networks().updateNetwork(
+                        root.copy(host = fixture.host, obfsMode = ObfsMode.SOCKS5, proxyHost = "127.0.0.1", proxyPort = fixture.port),
+                    )
+                }
+                val before = runBlocking { appearance.config.first() }
+                robot.loadLinkedPalette()
+                fixture.assertRequests(1)
+                assertEquals(before, runBlocking { appearance.config.first() })
+                val draft = "$token original composer"
+                robot.replace("chat_composer_field", draft)
+                val cardTop = compose.onNodeWithTag("link_preview_palette", useUnmergedTree = true).getUnclippedBoundsInRoot().top
+
+                fun assertSourceRestored() {
+                    compose.onNodeWithTag("chat_composer_field", useUnmergedTree = true).assertTextEquals(draft)
+                    compose.onNodeWithTag(message.tag(), useUnmergedTree = true).assertIsDisplayed()
+                    assertEquals(
+                        "Palette preview preserves the source timeline position",
+                        cardTop.value,
+                        compose
+                            .onNodeWithTag("link_preview_palette", useUnmergedTree = true)
+                            .getUnclippedBoundsInRoot()
+                            .top.value,
+                        1f,
+                    )
+                    fixture.assertRequests(1)
+                }
+                robot.openLinkedPreview()
+                assertEquals(before, runBlocking { appearance.config.first() })
+                fixture.assertRequests(1)
+                robot.closeLinkedPreview(apply = false)
+                assertSourceRestored()
+                assertEquals(before, runBlocking { appearance.config.first() })
+                robot.openLinkedPreview()
+                assertEquals(before, runBlocking { appearance.config.first() })
+                robot.closeLinkedPreview(apply = true)
+                assertSourceRestored()
+                val applied = runBlocking { appearance.config.first() }
+                assertEquals(fixture.document.id, applied.paletteSelection.installedId)
+                val installed = applied.customPalettes.single { it.document.id == fixture.document.id }
+                assertEquals(fixture.document, installed.document)
+                assertEquals(fixture.url, installed.sourceLink)
+                assertEquals(null, installed.catalogId)
+                assertEquals(null, installed.catalogRevision)
+                assertEquals(before.customPalettes.size + 1, applied.customPalettes.size)
+                robot.replace("chat_composer_field", "")
+                scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+                ChatListRobot(compose).awaitTag("chatlist_row_$bufferId")
+                milestones.record("palette_link_preview_applied", "buffer=$bufferId requests=1")
+            } finally {
+                runBlocking {
+                    bootstrap.seams.networks().updateNetwork(root)
+                    if (priorPin == null) {
+                        bootstrap.seams.certTrust().unpin(fixture.host, root.port)
+                    } else {
+                        bootstrap.seams.certTrust().pin(fixture.host, root.port, priorPin)
+                    }
+                    previews.setShowImages(originalPreviews.showImages)
+                    previews.setShowLinkPreviews(originalPreviews.showLinkPreviews)
+                    previews.setAutoLoadOnMetered(originalPreviews.autoLoadOnMetered)
+                    previews.setAutoLoadOnUnmetered(originalPreviews.autoLoadOnUnmetered)
+                }
+            }
+        }
     }
 
     private fun exerciseSurfaceEffects() {

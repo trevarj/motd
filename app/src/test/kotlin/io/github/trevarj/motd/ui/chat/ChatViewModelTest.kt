@@ -2145,7 +2145,12 @@ class ChatViewModelTest {
             assertTrue(manager.messageAttempts.isEmpty())
             assertEquals("not submitted", vm.composerDraft.value.text)
             assertEquals(parent, vm.state.first { it.replyTo != null }.replyTo)
-            assertEquals(ChatUiEvent.SendRejected, vm.uiEvents.value.single().value)
+            assertEquals(
+                ChatUiEvent.SendRejected,
+                vm.uiEvents.value
+                    .single()
+                    .value,
+            )
         }
 
     @Test

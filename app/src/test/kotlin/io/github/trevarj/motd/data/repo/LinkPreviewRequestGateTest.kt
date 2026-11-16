@@ -61,6 +61,36 @@ class LinkPreviewRequestGateTest {
     )
 
     @Test
+    fun disabled_palette_candidate_never_requests_or_resolves_a_route() =
+        runTest {
+            prefs.setShowLinkPreviews(false)
+            val repository =
+                LinkPreviewRepositoryImpl(
+                    prefs,
+                    { error("disabled preview resolved a route") },
+                    LinkPreviewFetchPolicy(),
+                    this,
+                    StandardTestDispatcher(testScheduler),
+                )
+            assertNull(repository.preview("https://example.org/a.motd-palette.json", NETWORK_ID))
+            assertEquals(0, server.requestCount)
+        }
+
+    @Test
+    fun palette_payload_and_kind_must_agree() {
+        val palette =
+            io.github.trevarj.motd.data.prefs.decodePalette(
+                javaClass.getResourceAsStream("/palettes/duplicate-last-valid.motd-palette.json")!!.use { it.readBytes() },
+            )
+        for ((kind, payload) in listOf(LinkPreviewKind.WEB to palette, LinkPreviewKind.PALETTE to null)) {
+            org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+                LinkPreview("https://example.org/a", null, null, null, null, kind, payload)
+            }
+        }
+        assertEquals(palette, LinkPreview("https://example.org/a", null, null, null, null, LinkPreviewKind.PALETTE, palette).palette)
+    }
+
+    @Test
     fun disabled_gate_skips_network_and_cached_metadata() =
         runTest {
             val repository = repository(this, StandardTestDispatcher(testScheduler))

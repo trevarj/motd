@@ -479,13 +479,21 @@ class NotificationReplyReadinessTest {
                 val room = fixture.room(BufferType.QUERY, "alice")
                 val accepted = fixture.manager.sendMessage(room.id, "retry this row") as SendAcceptance.Accepted
                 assertEquals(ImmediateWireAcceptance.DISCONNECTED, accepted.wireOutcome.await())
-                val original = fixture.db.messageDao().byIds(accepted.eventIds).single()
+                val original =
+                    fixture.db
+                        .messageDao()
+                        .byIds(accepted.eventIds)
+                        .single()
                 assertTrue(original.failed)
                 val (_, connection) = startNetwork(fixture)
                 val retried = fixture.manager.retryMessage(original.id) as SendAcceptance.Accepted
                 assertEquals(accepted.eventIds, retried.eventIds)
                 assertEquals(ImmediateWireAcceptance.ACCEPTED, retried.wireOutcome.await())
-                val current = fixture.db.messageDao().byIds(accepted.eventIds).single()
+                val current =
+                    fixture.db
+                        .messageDao()
+                        .byIds(accepted.eventIds)
+                        .single()
                 assertFalse(current.failed)
                 assertTrue(original.pendingLabel != current.pendingLabel)
                 assertEquals(1, fixture.db.messageDao().countForBuffer(room.id))

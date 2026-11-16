@@ -1269,6 +1269,7 @@ class ChatPresentationLifetimeUiTest {
                 }
             }
             ChatContent(
+                onOpenPalette = { _, _ -> },
                 state = ChatState(buffer = rooms.first { it.id == roomId }, connState = IrcClientState.Ready("me", emptySet(), emptyMap())),
                 items = presentation.items,
                 presentation = presentation,
@@ -1416,6 +1417,7 @@ class ChatPresentationLifetimeUiTest {
                     Visit(entry.id, presentation, desired.expectedEventId, desired.expectedMsgid, lease, owner, motionScope).also(visits::add)
                 }
             ChatContent(
+                onOpenPalette = { _, _ -> },
                 state = state,
                 items = presentation.items,
                 presentation = presentation,

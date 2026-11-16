@@ -575,6 +575,7 @@ class ComposerSendClearUiTest {
                             onSaveDccToDownloads = onSaveDccToDownloads,
                             onOpenSearch = onOpenSearch,
                             onOpenImage = {},
+                            onOpenPalette = { _, _ -> },
                             onInviteUser = onInviteUser,
                             nickNormalizer = { it.lowercase() },
                             onSubmit = onSubmit,
@@ -2873,6 +2874,7 @@ class ComposerSendClearUiTest {
                         showImages = false,
                         showLinkPreviews = false,
                         onOpenLink = {},
+                        onOpenPalette = { _, _ -> },
                         modifier =
                             Modifier.drawWithContent {
                                 val layout = listState.layoutInfo

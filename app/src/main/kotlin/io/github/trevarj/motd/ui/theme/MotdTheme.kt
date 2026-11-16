@@ -40,13 +40,15 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
+import io.github.trevarj.motd.data.prefs.PaletteDocument
+import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.SurfaceEffects
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.normalizeFontScalePercent
-import io.github.trevarj.motd.data.prefs.resolveAutoPalette
+import io.github.trevarj.motd.data.prefs.resolvePalettePreset
 import java.io.File
 
 private val BaseTypography = Typography()
@@ -257,7 +259,8 @@ fun MotdTheme(
     themePreset: ColorThemePreset = ColorThemePreset.SYSTEM,
     trueBlack: Boolean = false,
     dynamicColor: Boolean = true,
-    followSystem: Boolean = false,
+    paletteMode: PaletteMode? = null,
+    customPalette: PaletteDocument? = null,
     useThemeTextColors: Boolean = false,
     // Round 4; all defaulted so existing call sites (incl. previews) stay unchanged.
     layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
@@ -295,31 +298,64 @@ fun MotdTheme(
     // fixed palette must not change this function's slot structure and dispose stateful content.
     val systemDark = isSystemInDarkTheme()
     val context = LocalContext.current
-    val resolvedPreset = resolveAutoPalette(themePreset, followSystem, systemDark)
-    val dark = if (resolvedPreset == ColorThemePreset.SYSTEM) systemDark else resolvedPreset.isDark
+    val mode =
+        paletteMode ?: when {
+            themePreset == ColorThemePreset.SYSTEM -> PaletteMode.SYSTEM
+            themePreset.isDark -> PaletteMode.DARK
+            else -> PaletteMode.LIGHT
+        }
+    val requestedDark =
+        when (mode) {
+            PaletteMode.SYSTEM -> systemDark
+            PaletteMode.DARK -> true
+            PaletteMode.LIGHT -> false
+        }
+    val resolvedPreset = resolvePalettePreset(themePreset, mode, systemDark)
+    val dark =
+        if (customPalette != null) {
+            when {
+                customPalette.light == null -> true
+                customPalette.dark == null -> false
+                else -> requestedDark
+            }
+        } else if (resolvedPreset == ColorThemePreset.SYSTEM) {
+            requestedDark
+        } else {
+            resolvedPreset.isDark
+        }
+    val customColors = if (dark) customPalette?.dark else customPalette?.light
     val effectivePreset = if (resolvedPreset == ColorThemePreset.AMOLED) ColorThemePreset.DARK else resolvedPreset
     val resolvedScheme =
-        fixedThemeScheme(effectivePreset, useThemeTextColors) ?: when {
-            // Material You dynamic color, API 31+.
-            resolvedPreset == ColorThemePreset.SYSTEM &&
-                dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-                accessibleColorScheme(
-                    if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context),
-                    dark,
-                    useThemeTextColors,
-                )
-            }
+        remember(customColors, effectivePreset, dark, context, dynamicColor, useThemeTextColors) {
+            if (customColors != null) {
+                accessibleColorScheme(customColors.toRawColorScheme(dark), dark, useThemeTextColors)
+            } else {
+                fixedThemeScheme(effectivePreset, useThemeTextColors) ?: when {
+                    // Only Device colors is eligible for Material You, including forced modes.
+                    effectivePreset == ColorThemePreset.SYSTEM &&
+                        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                        accessibleColorScheme(
+                            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context),
+                            dark,
+                            useThemeTextColors,
+                        )
+                    }
 
-            dark -> {
-                if (useThemeTextColors) MotdDarkThemeTextScheme else MotdDarkScheme
-            }
+                    dark -> {
+                        if (useThemeTextColors) MotdDarkThemeTextScheme else MotdDarkScheme
+                    }
 
-            else -> {
-                if (useThemeTextColors) MotdLightThemeTextScheme else MotdLightScheme
+                    else -> {
+                        if (useThemeTextColors) MotdLightThemeTextScheme else MotdLightScheme
+                    }
+                }
             }
         }
-    val useTrueBlack = dark && (trueBlack || themePreset == ColorThemePreset.AMOLED)
-    val colorScheme = if (useTrueBlack) resolvedScheme.withTrueBlackSurfaces() else resolvedScheme
+    val useTrueBlack = dark && (trueBlack || (customPalette == null && themePreset == ColorThemePreset.AMOLED))
+    val colorScheme =
+        remember(resolvedScheme, useTrueBlack) {
+            if (useTrueBlack) resolvedScheme.withTrueBlackSurfaces() else resolvedScheme
+        }
     val comfortableBubbleColors =
         remember(colorScheme, sentBubbleColor, receivedBubbleColor) {
             ComfortableBubbleColors(
@@ -367,7 +403,26 @@ fun MotdTheme(
         }
     // Terminal and editor themes publish a real accent palette; identity colors are picked from it
     // rather than synthesized, so a nick is always one of the theme's own colors.
-    val nickIdentityPalette = remember(effectivePreset) { themeIdentityPalette(effectivePreset) }
+    val nickIdentityPalette =
+        remember(customColors, effectivePreset) {
+            if (customColors != null) {
+                customColors.nicknameColors.map { Color(0xFF000000L or it.substring(1).toLong(16)) }
+            } else {
+                themeIdentityPalette(effectivePreset)
+            }
+        }
+    val nickColorScheme =
+        remember(nickColorsEnabled, nickColorPalette, nickColorOverrides, dark, nickTextBackgrounds, nickThemeColors, nickIdentityPalette) {
+            NickColorScheme(
+                nickColorsEnabled,
+                nickColorPalette,
+                nickColorOverrides,
+                dark,
+                nickTextBackgrounds,
+                nickThemeColors,
+                nickIdentityPalette,
+            )
+        }
     // Style-only concerns (spacing, nick colors, avatar style) flow through CompositionLocals so
     // components never receive them as parameters.
     val appFontFamily = rememberAppFontFamily(fontChoice, customFontFile)
@@ -397,16 +452,7 @@ fun MotdTheme(
             LocalMessageBackgroundBlur provides messageBackgroundBlur.coerceIn(0, 100),
             LocalComfortableBubbleColors provides comfortableBubbleColors,
             LocalMotdDark provides dark,
-            LocalNickColors provides
-                NickColorScheme(
-                    nickColorsEnabled,
-                    nickColorPalette,
-                    nickColorOverrides,
-                    dark,
-                    nickTextBackgrounds,
-                    nickThemeColors,
-                    nickIdentityPalette,
-                ),
+            LocalNickColors provides nickColorScheme,
             LocalAvatarStyle provides avatarStyle,
             LocalAppFontFamily provides appFontFamily,
             LocalTimestampConfig provides timestampConfig,

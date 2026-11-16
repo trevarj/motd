@@ -40,6 +40,8 @@ import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.paletteSelection
+import io.github.trevarj.motd.data.prefs.selectedCustomPalette
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
 import io.github.trevarj.motd.ui.components.Avatar
@@ -65,11 +67,13 @@ internal fun AppearanceSampleTheme(
     content: @Composable () -> Unit,
 ) {
     val avatars = remember { RemoteAvatarState() }
+    val selection = appearance.paletteSelection
     MotdTheme(
-        themePreset = appearance.theme,
+        themePreset = selection.builtin,
+        paletteMode = selection.mode,
+        customPalette = appearance.selectedCustomPalette,
         trueBlack = appearance.trueBlack,
         dynamicColor = settings.dynamicColor,
-        followSystem = appearance.followSystem,
         useThemeTextColors = appearance.useThemeTextColors,
         layoutDensity = settings.layoutDensity,
         compactNickBrackets = settings.compactNickBrackets,

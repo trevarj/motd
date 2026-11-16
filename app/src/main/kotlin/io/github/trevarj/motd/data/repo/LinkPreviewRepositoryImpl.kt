@@ -4,6 +4,10 @@ import android.util.LruCache
 import io.github.trevarj.motd.audio.MediaRouteResolver
 import io.github.trevarj.motd.audio.NetworkMediaRoute
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.PALETTE_MAX_BYTES
+import io.github.trevarj.motd.data.prefs.PaletteException
+import io.github.trevarj.motd.data.prefs.decodePalette
+import io.github.trevarj.motd.data.prefs.validatePalette
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.di.IoDispatcher
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
@@ -31,6 +35,7 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.Inet6Address
 import java.net.InetAddress
+import java.net.URI
 import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -42,6 +47,37 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+
+internal data class PaletteLinkTarget(
+    val fetchUrl: String,
+    val community: Boolean,
+)
+
+private val communityPalettePath =
+    Regex(
+        "/trevarj/motd/(main|[0-9a-fA-F]{40})/palettes/[a-z0-9][a-z0-9-]{0,63}/[1-9][0-9]*\\.motd-palette\\.json",
+    )
+
+internal fun paletteLinkTarget(url: String): PaletteLinkTarget? {
+    val uri = runCatching { URI(url) }.getOrNull() ?: return null
+    if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrEmpty() ||
+        uri.rawUserInfo != null || url.any(Char::isISOControl)
+    ) {
+        return null
+    }
+    val host = uri.host.lowercase()
+    val path = uri.rawPath.orEmpty()
+    val rawPath = if (host == "github.com") path.replaceFirst("/trevarj/motd/blob/", "/trevarj/motd/") else path
+    if ((uri.port == -1 || uri.port == 443) &&
+        (host == "raw.githubusercontent.com" || host == "github.com" && path.startsWith("/trevarj/motd/blob/")) &&
+        communityPalettePath.matches(rawPath)
+    ) {
+        return PaletteLinkTarget("https://raw.githubusercontent.com$rawPath", community = true)
+    }
+    if (host == "github.com" && path.split('/').getOrNull(3) == "blob") return null
+    if (!path.substringAfterLast('/').endsWith(".motd-palette.json", ignoreCase = true)) return null
+    return PaletteLinkTarget(url.substringBefore('#'), community = false)
+}
 
 /**
  * Production fetch limits for link previews. The single relaxation flag exists for unit tests,
@@ -195,6 +231,12 @@ class LinkPreviewRepositoryImpl
                 val job =
                     applicationScope.launch(ioDispatcher) {
                         try {
+                            val paletteTarget = paletteLinkTarget(url)
+                            if (paletteTarget != null) {
+                                val result = fetchPalette(url, paletteTarget, route, connection)
+                                if (continuation.isActive) continuation.resume(result)
+                                return@launch
+                            }
                             val youtubeUrl = youtubeOEmbedUrl(url)
                             if (youtubeUrl != null) {
                                 // Watch HTML can redirect to supported_browsers; never cache that as a video.
@@ -231,6 +273,32 @@ class LinkPreviewRepositoryImpl
                     job.cancel()
                     connection.get()?.let { conn -> applicationScope.launch(ioDispatcher) { conn.disconnect() } }
                 }
+            }
+
+        private fun fetchPalette(
+            originalUrl: String,
+            target: PaletteLinkTarget,
+            route: NetworkMediaRoute,
+            connection: AtomicReference<HttpURLConnection?>,
+        ): LinkPreview? =
+            request(target.fetchUrl, JSON_ACCEPT, route, connection, exactDestination = target.fetchUrl.takeIf { target.community }) { conn ->
+                if (!hasSupportedContentEncoding(conn)) return@request null
+                val bytes = conn.readCappedBody(PALETTE_MAX_BYTES + 1)
+                val palette =
+                    try {
+                        decodePalette(bytes).also { if (target.community) validatePalette(it, requireBothModes = true) }
+                    } catch (_: PaletteException) {
+                        return@request null
+                    }
+                LinkPreview(
+                    url = originalUrl,
+                    title = palette.name,
+                    description = null,
+                    imageUrl = null,
+                    siteName = URL(originalUrl).host,
+                    kind = LinkPreviewKind.PALETTE,
+                    palette = palette,
+                )
             }
 
         private fun fetchYoutubeOEmbed(
@@ -314,7 +382,7 @@ class LinkPreviewRepositoryImpl
                         filePreview(finalUrl, contentType, kind)
                     }
 
-                    LinkPreviewKind.WIKIPEDIA, null -> {
+                    LinkPreviewKind.PALETTE, LinkPreviewKind.WIKIPEDIA, null -> {
                         null
                     }
                 }
@@ -325,11 +393,13 @@ class LinkPreviewRepositoryImpl
             accept: String,
             route: NetworkMediaRoute,
             connection: AtomicReference<HttpURLConnection?>,
+            exactDestination: String? = null,
             read: (HttpURLConnection) -> T?,
         ): T? {
             var current = url
             var redirects = 0
             while (true) {
+                if (exactDestination != null && current != exactDestination) return null
                 val parsed = runCatching { URL(current) }.getOrNull() ?: return null
                 // Validate every hop. Proxy routes never resolve target hostnames locally.
                 if (fetchPolicy.enforceDestinationPolicy &&
@@ -551,6 +621,7 @@ class LinkPreviewRepositoryImpl
                 resolveDns: Boolean,
             ): Boolean {
                 if (!url.protocol.equals("https", ignoreCase = true)) return false
+                if (url.userInfo != null) return false
                 val host =
                     url.host
                         .orEmpty()

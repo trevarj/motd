@@ -22,13 +22,23 @@ import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.ChatSoundConfig
 import io.github.trevarj.motd.data.prefs.ChatSoundPrefs
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.InstalledPalette
+import io.github.trevarj.motd.data.prefs.PaletteSelection
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.prefs.decodePalette
+import io.github.trevarj.motd.data.prefs.decodePaletteTree
+import io.github.trevarj.motd.data.prefs.encodePalette
+import io.github.trevarj.motd.data.prefs.normalizePaletteSelection
+import io.github.trevarj.motd.data.prefs.paletteSelection
+import io.github.trevarj.motd.data.prefs.validateInstalledPalette
+import io.github.trevarj.motd.data.prefs.validateInstalledPalettes
 import io.github.trevarj.motd.data.repo.ChatFolderRepository
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.data.repo.FolderPortableAssignment
@@ -40,9 +50,16 @@ import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
 import java.net.URI
 import java.security.SecureRandom
 import java.util.Base64
+import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
@@ -63,6 +80,7 @@ private const val MAX_ICON_REFERENCE_LENGTH = 128
 private const val PBKDF2_ITERATIONS = 600_000
 private const val AES_KEY_BITS = 256
 private const val GCM_TAG_BITS = 128
+private val catalogRevisionToken = Regex("[1-9][0-9]*")
 
 enum class BackupExportMode { CREDENTIALS_EXCLUDED, ENCRYPTED_WITH_CREDENTIALS }
 
@@ -194,6 +212,7 @@ class ConfigurationBackupRepositoryImpl
         ): ConfigurationImportPreview {
             val decoded = decodeDocument(rawDocument, password)
             val plan = planImport(decoded.payload, importMode)
+            preflightPalettes(decoded.payload.settings.appearance, importMode)
             return ConfigurationImportPreview(
                 appVersion = decoded.envelope.appVersion,
                 exportedAtEpochMillis = decoded.envelope.exportedAtEpochMillis,
@@ -218,10 +237,12 @@ class ConfigurationBackupRepositoryImpl
             val decoded = decodeDocument(rawDocument, password)
             validatePayload(decoded.payload)
             val plan = planImport(decoded.payload, importMode)
+            val paletteRestore = preflightPalettes(decoded.payload.settings.appearance, importMode)
 
             applySettings(
                 decoded.payload.settings,
                 includeSecrets = decoded.envelope.mode == BackupEnvelopeMode.ENCRYPTED_WITH_CREDENTIALS,
+                paletteRestore = paletteRestore,
             )
             val idMap = mutableMapOf<String, Long>()
             val importedIds = mutableSetOf<Long>()
@@ -324,7 +345,7 @@ class ConfigurationBackupRepositoryImpl
                 settings =
                     PortableSettings(
                         general = settingsRepository.settings.first(),
-                        appearance = appearancePrefs.config.first(),
+                        appearance = snapshotAppearance(),
                         contentPreviews = contentPreviewPrefs.config.first(),
                         chatSounds = chatSoundPrefs.config.first(),
                         replies = replyPrefs.config.first(),
@@ -340,6 +361,70 @@ class ConfigurationBackupRepositoryImpl
                         gestureMenu = gesturePrefs.menu.first().takeIf { it != GestureMenuConfig() },
                     ),
             )
+        }
+
+        private fun canonicalPalette(palette: InstalledPalette): InstalledPalette {
+            validateInstalledPalette(palette)
+            return palette.copy(document = decodePalette(encodePalette(palette.document)))
+        }
+
+        private suspend fun snapshotAppearance(): AppearanceConfig {
+            val appearance = appearancePrefs.config.first()
+            require(appearance.customPaletteReadError == null) { "Installed palettes cannot be read." }
+            validateInstalledPalettes(appearance.customPalettes)
+            val selection = appearance.paletteSelection
+            return appearance.copy(
+                theme = selection.builtin,
+                customPaletteId = selection.installedId,
+                paletteMode = selection.mode,
+                customPalettes = appearance.customPalettes.map(::canonicalPalette),
+                trueBlack = appearance.trueBlack || (appearance.paletteMode == null && appearance.theme == ColorThemePreset.AMOLED),
+            )
+        }
+
+        private suspend fun preflightPalettes(
+            appearance: AppearanceConfig?,
+            importMode: BackupImportMode,
+        ): PaletteRestore? {
+            if (appearance == null) return null
+            val modern = appearance.paletteMode != null
+            val incoming = appearance.customPalettes.map(::canonicalPalette)
+            val selection = appearance.paletteSelection
+            if (modern && importMode == BackupImportMode.REPLACE) {
+                return PaletteRestore(incoming, selection)
+            }
+            val current = appearancePrefs.config.first()
+            require(current.customPaletteReadError == null) { "Installed palettes cannot be read." }
+            validateInstalledPalettes(current.customPalettes)
+            val target = current.customPalettes.map(::canonicalPalette).toMutableList()
+            val remaps = mutableMapOf<String, String>()
+            if (modern) {
+                val reservedIds = (target + incoming).map { it.document.id }.toMutableSet()
+                incoming.forEach { palette ->
+                    val existing = target.find { it.document.id == palette.document.id }
+                    when {
+                        existing == null -> {
+                            target += palette
+                        }
+
+                        existing == palette -> {
+                            Unit
+                        }
+
+                        else -> {
+                            var id: String
+                            do {
+                                id = UUID.randomUUID().toString()
+                            } while (!reservedIds.add(id))
+                            remaps[palette.document.id] = id
+                            target += palette.copy(document = palette.document.copy(id = id))
+                        }
+                    }
+                }
+            }
+            validateInstalledPalettes(target)
+            val remapped = selection.copy(installedId = remaps[selection.installedId] ?: selection.installedId)
+            return PaletteRestore(target, normalizePaletteSelection(remapped, target))
         }
 
         private fun decodeDocument(
@@ -359,7 +444,8 @@ class ConfigurationBackupRepositoryImpl
                         val encryptedPayload = envelope.encryptedPayload ?: throw BackupFormatException()
                         val decrypted = decryptPayload(encryptedPayload, password, envelope.appVersion, envelope.exportedAtEpochMillis)
                         if (decrypted.size > MAX_DECRYPTED_BYTES) throw BackupFormatException()
-                        compactJson.decodeFromString<BackupPayload>(decrypted.decodeToString())
+                        val tree = compactJson.parseToJsonElement(decrypted.decodeToString(throwOnInvalidSequence = true))
+                        compactJson.decodeFromJsonElement<BackupPayload>(validatePaletteStateTree(tree))
                     }
                 }
             validatePayload(payload)
@@ -368,7 +454,57 @@ class ConfigurationBackupRepositoryImpl
 
         private fun decodeEnvelope(rawDocument: String): BackupEnvelope {
             if (rawDocument.encodeToByteArray().size > MAX_DOCUMENT_BYTES) throw BackupFormatException()
-            return compactJson.decodeFromString<BackupEnvelope>(rawDocument)
+            val tree = compactJson.parseToJsonElement(rawDocument)
+            val root = tree as? JsonObject ?: throw BackupFormatException()
+            val payload = root["payload"]
+            val validated =
+                if (payload == null || payload == JsonNull) {
+                    root
+                } else {
+                    JsonObject(root + ("payload" to validatePaletteStateTree(payload)))
+                }
+            return compactJson.decodeFromJsonElement<BackupEnvelope>(validated)
+        }
+
+        private fun validatePaletteStateTree(tree: JsonElement): JsonElement {
+            try {
+                val payload = tree as? JsonObject ?: throw BackupFormatException()
+                val settings = payload["settings"] as? JsonObject ?: return tree
+                val appearance = settings["appearance"] as? JsonObject ?: return tree
+                for (key in listOf("paletteMode", "customPaletteId")) {
+                    val value = appearance[key]
+                    require(value == null || value == JsonNull || (value is JsonPrimitive && value.isString)) { "Invalid $key." }
+                }
+                val entries = appearance["customPalettes"]
+                if (entries != null && entries != JsonNull) {
+                    require(entries is JsonArray) { "Installed palettes must be an array." }
+                    entries.forEach { element ->
+                        val entry = element as? JsonObject ?: throw BackupFormatException()
+                        for (key in listOf("catalogId", "sourceLink")) {
+                            val value = entry[key]
+                            require(value == null || value == JsonNull || (value is JsonPrimitive && value.isString)) { "Invalid $key." }
+                        }
+                        val revision = entry["catalogRevision"]
+                        require(
+                            revision == null || revision == JsonNull ||
+                                (revision is JsonPrimitive && !revision.isString && catalogRevisionToken.matches(revision.content)),
+                        ) {
+                            "Invalid catalog revision."
+                        }
+                        val document = decodePaletteTree(entry["document"] ?: throw BackupFormatException())
+                        val installed = Json.decodeFromJsonElement<InstalledPalette>(entry)
+                        validateInstalledPalette(installed.copy(document = document))
+                    }
+                }
+                if (entries != JsonNull) return tree
+                require(appearance["paletteMode"] == null || appearance["paletteMode"] == JsonNull) {
+                    "Modern palette state requires an installed palette array."
+                }
+                val normalized = JsonObject(appearance + ("customPalettes" to JsonArray(emptyList())))
+                return JsonObject(payload + ("settings" to JsonObject(settings + ("appearance" to normalized))))
+            } catch (failure: IllegalArgumentException) {
+                throw BackupFormatException(failure)
+            }
         }
 
         private fun validatePayload(payload: BackupPayload) {
@@ -381,6 +517,16 @@ class ConfigurationBackupRepositoryImpl
 
         private fun validatePayloadFields(payload: BackupPayload) {
             require(payload.version == FORMAT_VERSION) { "Unsupported payload version ${payload.version}." }
+            payload.settings.appearance?.let { appearance ->
+                validateInstalledPalettes(appearance.customPalettes)
+                if (appearance.paletteMode == null) {
+                    require(appearance.customPalettes.isEmpty() && appearance.customPaletteId == null) { "Palette state requires an explicit mode." }
+                } else {
+                    val selection = PaletteSelection(appearance.theme, appearance.customPaletteId, appearance.paletteMode)
+                    val normalized = normalizePaletteSelection(selection, appearance.customPalettes)
+                    require(normalized.mode == selection.mode) { "Selected palette does not support this mode." }
+                }
+            }
             require(payload.networks.size <= MAX_NETWORKS) { "Too many networks in backup." }
             val ids = payload.networks.map { it.exportId }
             require(ids.size == ids.toSet().size) { "Backup contains duplicate network ids." }
@@ -493,6 +639,7 @@ class ConfigurationBackupRepositoryImpl
         private suspend fun applySettings(
             settings: PortableSettings,
             includeSecrets: Boolean,
+            paletteRestore: PaletteRestore?,
         ) {
             settings.general?.let {
                 val current = settingsRepository.settings.first()
@@ -553,9 +700,9 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setAutoAwayMessage(it.autoAwayMessage)
             }
             settings.appearance?.let {
-                appearancePrefs.setTheme(it.theme)
-                appearancePrefs.setTrueBlack(it.trueBlack)
-                appearancePrefs.setFollowSystem(it.followSystem)
+                val target = requireNotNull(paletteRestore)
+                appearancePrefs.restorePalettes(target.palettes, target.selection)
+                appearancePrefs.setTrueBlack(it.trueBlack || (it.paletteMode == null && it.theme == ColorThemePreset.AMOLED))
                 appearancePrefs.setUseThemeTextColors(it.useThemeTextColors)
                 appearancePrefs.setWallpaper(it.wallpaper)
                 appearancePrefs.setUiFontScale(it.uiFontScalePercent)
@@ -694,6 +841,11 @@ class ConfigurationBackupRepositoryImpl
             exportedAt: Long,
         ): String = "motdconfig-v1|$appVersion|$exportedAt|${BackupEnvelopeMode.ENCRYPTED_WITH_CREDENTIALS.name}"
     }
+
+private data class PaletteRestore(
+    val palettes: List<InstalledPalette>,
+    val selection: PaletteSelection,
+)
 
 @Serializable
 private data class BackupEnvelope(

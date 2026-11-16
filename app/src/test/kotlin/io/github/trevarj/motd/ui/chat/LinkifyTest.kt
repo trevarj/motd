@@ -6,6 +6,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LinkifyTest {
+    @Test fun palette_links_keep_first_url_order_repeats_punctuation_and_code_rules() {
+        val palette = "https://files.example/pair.MOTD-PALETTE.JSON?download=1#sample"
+        val ordinary = "https://example.com/article"
+        assertEquals(palette, messageUrls("($palette), $palette").linkUrl)
+        assertEquals(ordinary, messageUrls("$ordinary $palette").linkUrl)
+        assertEquals(palette, messageUrls("`$ordinary` $palette").linkUrl)
+        assertEquals(MessageUrls.Empty, messageUrls("`$palette`"))
+        assertEquals(listOf(palette, palette), extractUrls("$palette $palette"))
+    }
+
     @Test fun trims_trailing_sentence_punctuation() {
         assertEquals(listOf("https://example.com"), extractUrls("see https://example.com."))
         assertEquals(listOf("https://example.com"), extractUrls("(https://example.com)"))

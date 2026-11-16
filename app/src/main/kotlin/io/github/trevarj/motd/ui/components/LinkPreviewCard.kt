@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -44,9 +45,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.toColorInt
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.prefs.PaletteColors
+import io.github.trevarj.motd.data.prefs.PaletteDocument
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewKind
 import io.github.trevarj.motd.ui.theme.LocalMediaCornerStyle
@@ -166,6 +170,10 @@ private fun LinkPreviewContent(
     networkId: Long?,
     onClick: () -> Unit,
 ) {
+    if (preview.kind == LinkPreviewKind.PALETTE) {
+        PaletteLinkPreview(requireNotNull(preview.palette), onClick)
+        return
+    }
     val scheme = MaterialTheme.colorScheme
     val readingInk = ensureContrast(readingInk(scheme), listOf(scheme.surfaceContainerHighest.compositeOver(scheme.background)), MESSAGE_TEXT_CONTRAST)
     Row(
@@ -207,15 +215,94 @@ private fun LinkPreviewContent(
                         when (preview.kind) {
                             LinkPreviewKind.TEXT -> 4
                             LinkPreviewKind.WIKIPEDIA -> 3
-                            LinkPreviewKind.WEB, LinkPreviewKind.VIDEO, LinkPreviewKind.FILE -> 2
+                            LinkPreviewKind.WEB, LinkPreviewKind.VIDEO, LinkPreviewKind.FILE, LinkPreviewKind.PALETTE -> 2
                         },
                     overflow = TextOverflow.Ellipsis,
                     modifier =
                         when (preview.kind) {
                             LinkPreviewKind.TEXT -> Modifier.testTag("link_preview_text_body")
                             LinkPreviewKind.WIKIPEDIA -> Modifier.testTag("link_preview_wikipedia_body")
-                            LinkPreviewKind.WEB, LinkPreviewKind.VIDEO, LinkPreviewKind.FILE -> Modifier
+                            LinkPreviewKind.WEB, LinkPreviewKind.VIDEO, LinkPreviewKind.FILE, LinkPreviewKind.PALETTE -> Modifier
                         },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PaletteLinkPreview(
+    palette: PaletteDocument,
+    onClick: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val ink = ensureContrast(readingInk(scheme), listOf(scheme.surfaceContainerHighest.compositeOver(scheme.background)), MESSAGE_TEXT_CONTRAST)
+    val action = stringResource(R.string.palette_preview_action)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
+            .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(12.dp)))
+            .background(scheme.surfaceContainerHighest)
+            .testTag("link_preview_palette")
+            .semantics { contentDescription = action }
+            .clickable(onClickLabel = action, onClick = onClick)
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(palette.name, color = ink, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            palette.light?.let { PaletteLinkSample(it, stringResource(R.string.palette_mode_light), "light", Modifier.weight(1f)) }
+            palette.dark?.let { PaletteLinkSample(it, stringResource(R.string.palette_mode_dark), "dark", Modifier.weight(1f)) }
+        }
+        Text(action, color = ink, style = MaterialTheme.typography.labelLarge)
+    }
+}
+
+@Composable
+private fun PaletteLinkSample(
+    colors: PaletteColors,
+    label: String,
+    mode: String,
+    modifier: Modifier,
+) {
+    val background = remember(colors.background) { Color(colors.background.toColorInt()) }
+    val surface = remember(colors.surface) { Color(colors.surface.toColorInt()) }
+    val authoredInk = remember(colors.onSurface) { Color(colors.onSurface.toColorInt()) }
+    val ink = remember(authoredInk, surface, background) { ensureContrast(authoredInk, listOf(surface, background), 4.5) }
+    val swatches =
+        remember(colors) {
+            listOf("primary" to colors.primary, "secondary" to colors.secondary, "tertiary" to colors.tertiary, "onSurface" to colors.onSurface)
+        }
+    Column(
+        modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(background)
+            .padding(6.dp)
+            .testTag("link_preview_palette_$mode"),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(label, color = ink, style = MaterialTheme.typography.labelMedium)
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(4.dp))
+                .background(surface)
+                .padding(6.dp),
+        ) {
+            Text("motd", color = ink, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+            Text("Hello!", color = ink, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            swatches.forEach { (role, hex) ->
+                val color = remember(hex) { Color(hex.toColorInt()) }
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(14.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(color)
+                        .semantics { contentDescription = "$label $role $hex" },
                 )
             }
         }

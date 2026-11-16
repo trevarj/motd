@@ -4,6 +4,7 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import io.github.trevarj.motd.data.prefs.PaletteColors
 
 private fun mix(
     a: Color,
@@ -17,7 +18,7 @@ private fun mix(
         alpha = 1f,
     )
 
-private fun darkEditorScheme(
+internal fun darkEditorScheme(
     background: Long,
     surface: Long,
     foreground: Long,
@@ -25,9 +26,13 @@ private fun darkEditorScheme(
     primary: Long,
     secondary: Long,
     tertiary: Long,
+    surfaceContainer: Long? = null,
+    onBackground: Long = foreground,
+    outlineVariant: Long? = null,
 ): ColorScheme {
     val bg = Color(background)
     val sf = Color(surface)
+    val container = surfaceContainer?.let { Color(it) } ?: sf
     val fg = Color(foreground)
     val mt = Color(muted)
     val p = Color(primary)
@@ -47,22 +52,22 @@ private fun darkEditorScheme(
         tertiaryContainer = mix(bg, t, .16f),
         onTertiaryContainer = fg,
         background = bg,
-        onBackground = fg,
+        onBackground = Color(onBackground),
         surface = sf,
         onSurface = fg,
         surfaceVariant = mix(sf, fg, .12f),
         onSurfaceVariant = mt,
-        outline = mix(bg, mt, .65f),
-        outlineVariant = mix(bg, mt, .35f),
-        surfaceContainerLowest = mix(bg, Color.Black, .18f),
-        surfaceContainerLow = mix(bg, sf, .45f),
-        surfaceContainer = sf,
-        surfaceContainerHigh = mix(sf, fg, .07f),
-        surfaceContainerHighest = mix(sf, fg, .13f),
+        outline = outlineVariant?.let { Color(it) } ?: mix(bg, mt, .65f),
+        outlineVariant = outlineVariant?.let { Color(it) } ?: mix(bg, mt, .35f),
+        surfaceContainerLowest = mix(if (surfaceContainer == null) bg else container, Color.Black, .18f),
+        surfaceContainerLow = mix(bg, container, .45f),
+        surfaceContainer = container,
+        surfaceContainerHigh = mix(container, fg, .07f),
+        surfaceContainerHighest = mix(container, fg, .13f),
     )
 }
 
-private fun lightEditorScheme(
+internal fun lightEditorScheme(
     background: Long,
     surface: Long,
     foreground: Long,
@@ -70,9 +75,13 @@ private fun lightEditorScheme(
     primary: Long,
     secondary: Long,
     tertiary: Long,
+    surfaceContainer: Long? = null,
+    onBackground: Long = foreground,
+    outlineVariant: Long? = null,
 ): ColorScheme {
     val bg = Color(background)
     val sf = Color(surface)
+    val container = surfaceContainer?.let { Color(it) } ?: sf
     val fg = Color(foreground)
     val mt = Color(muted)
     val p = Color(primary)
@@ -92,40 +101,79 @@ private fun lightEditorScheme(
         tertiaryContainer = mix(bg, t, .15f),
         onTertiaryContainer = fg,
         background = bg,
-        onBackground = fg,
+        onBackground = Color(onBackground),
         surface = sf,
         onSurface = fg,
         surfaceVariant = mix(sf, fg, .09f),
         onSurfaceVariant = mt,
-        outline = mix(bg, mt, .65f),
-        outlineVariant = mix(bg, mt, .30f),
-        surfaceContainerLowest = mix(bg, Color.White, .65f),
-        surfaceContainerLow = mix(bg, fg, .025f),
-        surfaceContainer = sf,
-        surfaceContainerHigh = mix(sf, fg, .06f),
-        surfaceContainerHighest = mix(sf, fg, .11f),
+        outline = outlineVariant?.let { Color(it) } ?: mix(bg, mt, .65f),
+        outlineVariant = outlineVariant?.let { Color(it) } ?: mix(bg, mt, .30f),
+        surfaceContainerLowest = mix(if (surfaceContainer == null) bg else container, Color.White, .65f),
+        surfaceContainerLow = mix(if (surfaceContainer == null) bg else container, fg, .025f),
+        surfaceContainer = container,
+        surfaceContainerHigh = mix(container, fg, .06f),
+        surfaceContainerHighest = mix(container, fg, .11f),
     )
 }
 
+/** Authored roles only; callers apply accessibility and optional true black once. */
+internal fun PaletteColors.toRawColorScheme(dark: Boolean): ColorScheme {
+    fun String.argb(): Long = 0xFF000000L or substring(1).toLong(16)
+    return if (dark) {
+        darkEditorScheme(
+            background = background.argb(),
+            surface = surface.argb(),
+            foreground = onSurface.argb(),
+            muted = onSurfaceVariant.argb(),
+            primary = primary.argb(),
+            secondary = secondary.argb(),
+            tertiary = tertiary.argb(),
+            surfaceContainer = surfaceContainer.argb(),
+            onBackground = onBackground.argb(),
+            outlineVariant = outlineVariant.argb(),
+        )
+    } else {
+        lightEditorScheme(
+            background = background.argb(),
+            surface = surface.argb(),
+            foreground = onSurface.argb(),
+            muted = onSurfaceVariant.argb(),
+            primary = primary.argb(),
+            secondary = secondary.argb(),
+            tertiary = tertiary.argb(),
+            surfaceContainer = surfaceContainer.argb(),
+            onBackground = onBackground.argb(),
+            outlineVariant = outlineVariant.argb(),
+        )
+    }
+}
+
+// Aligned source roles: Noctalia c1a7283a50b6ce8d0459b8864d8713289597bae9;
+// Everforest Alt, Kanagawa Dragon and Rose Pine Moon use community-palettes
+// 1c43e2c66c2cd07a58ae07007a88cbdd0705cda2. Unmatched variants retain MOTD's roles.
 val AyuDarkScheme =
     darkEditorScheme(
-        0xFF0A0E14,
-        0xFF11151C,
-        0xFFB3B1AD,
-        0xFF8A9199,
-        0xFF59C2FF,
-        0xFFAAD94C,
-        0xFFFFB454,
+        background = 0xFF0B0E14,
+        surface = 0xFF0B0E14,
+        foreground = 0xFFD1D1C7,
+        muted = 0xFF8E959E,
+        primary = 0xFFE6B450,
+        secondary = 0xFFAAD94C,
+        tertiary = 0xFF39BAE6,
+        surfaceContainer = 0xFF1E222A,
+        outlineVariant = 0xFF565B66,
     )
 val AyuLightScheme =
     lightEditorScheme(
-        0xFFFAFAFA,
-        0xFFF3F4F5,
-        0xFF4C5761,
-        0xFF667581,
-        0xFF399EE6,
-        0xFF86B300,
-        0xFFF2AE49,
+        background = 0xFFF8F9FA,
+        surface = 0xFFF8F9FA,
+        foreground = 0xFF42474C,
+        muted = 0xFF6E757C,
+        primary = 0xFFFF8F40,
+        secondary = 0xFF86B300,
+        tertiary = 0xFF55B4D4,
+        surfaceContainer = 0xFFE4E6E9,
+        outlineVariant = 0xFF8A9199,
     )
 val AyuMirageScheme =
     darkEditorScheme(
@@ -140,54 +188,64 @@ val AyuMirageScheme =
 
 val EverforestDarkScheme =
     darkEditorScheme(
-        0xFF2D353B,
-        0xFF343F44,
-        0xFFD3C6AA,
-        0xFF9DA9A0,
-        0xFF7FBBB3,
-        0xFFA7C080,
-        0xFFE69875,
+        background = 0xFF2D353B,
+        surface = 0xFF2D353B,
+        foreground = 0xFFD3C6AA,
+        muted = 0xFFD3C6AA,
+        primary = 0xFFA7C080,
+        secondary = 0xFF7FBBB3,
+        tertiary = 0xFFE69875,
+        surfaceContainer = 0xFF3D484D,
+        outlineVariant = 0xFF7A8478,
     )
 val EverforestLightScheme =
     lightEditorScheme(
-        0xFFFDF6E3,
-        0xFFF4F0D9,
-        0xFF5C6A72,
-        0xFF829181,
-        0xFF3A94C5,
-        0xFF8DA101,
-        0xFFF57D26,
+        background = 0xFFFFFBEF,
+        surface = 0xFFFFFBEF,
+        foreground = 0xFF5C6A72,
+        muted = 0xFF5C6A72,
+        primary = 0xFF8DA101,
+        secondary = 0xFF3A94C5,
+        tertiary = 0xFFF57D26,
+        surfaceContainer = 0xFFF2EFDB,
+        outlineVariant = 0xFFA6B0A0,
     )
 
 val KanagawaWaveScheme =
     darkEditorScheme(
-        0xFF1F1F28,
-        0xFF2A2A37,
-        0xFFDCD7BA,
-        0xFF9CABCA,
-        0xFF7E9CD8,
-        0xFF98BB6C,
-        0xFFE6C384,
+        background = 0xFF1F1F28,
+        surface = 0xFF1F1F28,
+        foreground = 0xFFC8C093,
+        muted = 0xFF717C7C,
+        primary = 0xFF76946A,
+        secondary = 0xFFC0A36E,
+        tertiary = 0xFF7E9CD8,
+        surfaceContainer = 0xFF2A2A37,
+        outlineVariant = 0xFF363646,
     )
 val KanagawaDragonScheme =
     darkEditorScheme(
-        0xFF181616,
-        0xFF282727,
-        0xFFC5C9C5,
-        0xFF9E9B93,
-        0xFF8BA4B0,
-        0xFF87A987,
-        0xFFC4B28A,
+        background = 0xFF181616,
+        surface = 0xFF181616,
+        foreground = 0xFFC5C9C5,
+        muted = 0xFFC8C093,
+        primary = 0xFF8A9A7B,
+        secondary = 0xFF8EA4A2,
+        tertiary = 0xFFC4746E,
+        surfaceContainer = 0xFF282727,
+        outlineVariant = 0xFF625E5A,
     )
 val KanagawaLotusScheme =
     lightEditorScheme(
-        0xFFF2ECBC,
-        0xFFE7DDB5,
-        0xFF545464,
-        0xFF716E61,
-        0xFF4D699B,
-        0xFF6F894E,
-        0xFFB35B79,
+        background = 0xFFF2ECBC,
+        surface = 0xFFF2ECBC,
+        foreground = 0xFF545464,
+        muted = 0xFF8A8980,
+        primary = 0xFF6F894E,
+        secondary = 0xFF77713F,
+        tertiary = 0xFF4D699B,
+        surfaceContainer = 0xFFE5DDB0,
+        outlineVariant = 0xFFCFC49C,
     )
 
 val ModusOperandiScheme =
@@ -297,33 +355,39 @@ val OneDarkScheme =
 
 val RosePineScheme =
     darkEditorScheme(
-        0xFF191724,
-        0xFF1F1D2E,
-        0xFFE0DEF4,
-        0xFF908CAA,
-        0xFF9CCFD8,
-        0xFF31748F,
-        0xFFC4A7E7,
+        background = 0xFF191724,
+        surface = 0xFF191724,
+        foreground = 0xFFE0DEF4,
+        muted = 0xFF908CAA,
+        primary = 0xFFEBBCBA,
+        secondary = 0xFF9CCFD8,
+        tertiary = 0xFF31748F,
+        surfaceContainer = 0xFF26233A,
+        outlineVariant = 0xFF403D52,
     )
 val RosePineMoonScheme =
     darkEditorScheme(
-        0xFF232136,
-        0xFF2A273F,
-        0xFFE0DEF4,
-        0xFF908CAA,
-        0xFF9CCFD8,
-        0xFF3E8FB0,
-        0xFFC4A7E7,
+        background = 0xFF232136,
+        surface = 0xFF232136,
+        foreground = 0xFFE0DEF4,
+        muted = 0xFF908CAA,
+        primary = 0xFFEA9A97,
+        secondary = 0xFF9CCFD8,
+        tertiary = 0xFF32758F,
+        surfaceContainer = 0xFF393552,
+        outlineVariant = 0xFF44415A,
     )
 val RosePineDawnScheme =
     lightEditorScheme(
-        0xFFFAF4ED,
-        0xFFFFFAF3,
-        0xFF575279,
-        0xFF797593,
-        0xFF286983,
-        0xFF56949F,
-        0xFF907AA9,
+        background = 0xFFFFFAF3,
+        surface = 0xFFFFFAF3,
+        foreground = 0xFF575279,
+        muted = 0xFF797593,
+        primary = 0xFFD7827E,
+        secondary = 0xFF56949F,
+        tertiary = 0xFF286983,
+        surfaceContainer = 0xFFF2E9E1,
+        outlineVariant = 0xFFDFDAD9,
     )
 
 val ZenburnScheme =

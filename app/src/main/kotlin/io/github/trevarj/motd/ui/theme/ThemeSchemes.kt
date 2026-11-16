@@ -21,14 +21,14 @@ private const val TEXT_CONTRAST = 4.5
 private const val NON_TEXT_CONTRAST = 3.0
 internal const val BUBBLE_CONTAINER_CONTRAST = 1.30
 
-private val MotdLightRaw =
+internal val MotdLightRaw =
     lightColorScheme(
         primary = MotdTeal,
         secondary = MotdOrchid,
         tertiary = MotdCoral,
     )
 
-private val MotdDarkRaw =
+internal val MotdDarkRaw =
     darkColorScheme(
         primary = MotdTeal,
         secondary = MotdOrchid,
@@ -256,6 +256,7 @@ private val RawFixedSchemes: Map<ColorThemePreset, ColorScheme> by lazy {
         ColorThemePreset.CATPPUCCIN_LATTE to CatppuccinLatteScheme,
         ColorThemePreset.CATPPUCCIN_MOCHA to CatppuccinMochaScheme,
         ColorThemePreset.DRACULA to DraculaScheme,
+        ColorThemePreset.DRACULA_LIGHT to DraculaLightScheme,
         ColorThemePreset.EVERFOREST_DARK to EverforestDarkScheme,
         ColorThemePreset.EVERFOREST_LIGHT to EverforestLightScheme,
         ColorThemePreset.GRUVBOX_DARK to GruvboxDarkScheme,
@@ -281,9 +282,13 @@ private val RawFixedSchemes: Map<ColorThemePreset, ColorScheme> by lazy {
         ColorThemePreset.SOLARIZED_DARK to SolarizedDarkScheme,
         ColorThemePreset.SOLARIZED_LIGHT to SolarizedLightScheme,
         ColorThemePreset.TOKYO_NIGHT to TokyoNightScheme,
+        ColorThemePreset.TOKYO_NIGHT_LIGHT to TokyoNightLightScheme,
         ColorThemePreset.ZENBURN to ZenburnScheme,
     )
 }
+
+/** Unfitted source roles for cloning; meta presets have no fixed raw palette. */
+internal fun rawFixedThemeScheme(preset: ColorThemePreset): ColorScheme? = RawFixedSchemes[preset]
 
 // Normalize only the requested palette/text mode; eager catalog normalization delays first paint.
 private val FixedSchemes = java.util.concurrent.ConcurrentHashMap<ColorThemePreset, ColorScheme>()

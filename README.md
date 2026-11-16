@@ -61,7 +61,7 @@ them in motion on the [landing page](https://trevs.site/motd/).
 - **Read incoming chats aloud** — opt-in Android TTS with installed voice choices, speed, pitch, and message gap in Settings → Chat → Voice and audio → TTS Reader; previous, pause/resume, skip, latest, and stop controls; previews never enable chat reading
 - **CTCP VERSION** — identifies motd and the running app version when a request reaches the client
 - **Full-text search** — across all history or one buffer, with jump-to-message
-- **Theming** — Material You dynamic color plus curated editor/terminal palettes (Ayu, Gruvbox, Catppuccin, Modus, and more); independent input, avatar, chat-card, and media shape presets with live previews; selectable Material (default) or Lucide interface icons
+- **Theming** — Material You device colors, curated editor/terminal families (Ayu, Gruvbox, Catppuccin, Modus, and more), and editable, shareable local palettes with separate System/Light/Dark mode; independent input, avatar, chat-card, and media shape presets with live previews; selectable Material (default) or Lucide interface icons
 - **Readable menus and settings** — palette-accented headings, neutral value pills, distinct selected options, and contextual notes; adaptive labels show resolved values, including the device’s current time format
 - **Hardened transport** — TLS with SASL PLAIN/EXTERNAL, client certificates, IRCv3 STS pinning, and optional SOCKS5/Tor/VLESS obfuscation
 
@@ -140,6 +140,27 @@ automatically. The action reuses your Libera connection, including soju or ZNC,
 and opens the channel if already joined. Ambiguous connections require a choice;
 offline or missing connections lead to explicit connection/setup options rather
 than silently creating a direct connection.
+
+### Palette contributions
+
+Create a palette in **Appearance → Palette**, then export its file from **Yours**.
+Local palettes can have one mode; community submissions require complete light
+and dark modes. Community refresh uses direct device HTTPS; installed copies work
+offline.
+
+Add `palettes/<id>/<revision>.motd-palette.json`, with matching ID and revision.
+Never alter or remove published revisions; new revisions must exceed the previous
+maximum for that ID. Regenerate and check the index:
+
+```sh
+nix develop -c python3 tools/palette-catalog.py --write
+nix develop -c python3 tools/palette-catalog.py --check --base origin/main
+nix develop -c python3 -m unittest discover -s tools -p test_palette_catalog.py
+```
+
+Submit the palette and generated index for review under the repository's existing
+license terms, preserving supplied license and notice data. **Contribute** opens
+the repository and offers file export; nothing is uploaded automatically.
 
 ## License
 

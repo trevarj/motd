@@ -6,7 +6,9 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
-import io.github.trevarj.motd.data.prefs.resolveAutoPalette
+import io.github.trevarj.motd.data.prefs.PaletteMode
+import io.github.trevarj.motd.data.prefs.paletteSelection
+import io.github.trevarj.motd.data.prefs.selectedCustomPalette
 import io.github.trevarj.motd.data.prefs.systemPartner
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
@@ -251,35 +253,25 @@ class GestureActionDispatcher internal constructor(
         return GestureActionResult.Done
     }
 
-    /**
-     * Swap the palette for its light/dark partner.
-     *
-     * `ColorThemePreset` does encode the pairs (`systemPartner`), so this is a real swap rather than
-     * a guess — but only for paired families: a dark-only palette such as Dracula reports
-     * [GestureActionResult.Unavailable] instead of being dragged to an unrelated theme.
-     *
-     * The swap is computed from the palette that is *on screen*, not from the stored preset: with
-     * system-following on, `MotdTheme` renders `resolveAutoPalette(theme, followSystem, systemDark)`,
-     * so a stored `GRUVBOX_LIGHT` under a dark OS is showing `GRUVBOX_DARK`. Toggling the stored side
-     * there would pin the palette already being displayed and the press would look like a no-op.
-     *
-     * The stock `SYSTEM` preset has no partner of its own, and a leaf that did nothing on a fresh
-     * install would be a broken default. It is resolved against what the OS is actually showing and
-     * pinned to the opposite side, which is what "toggle" means from an unpinned state. Pinning is
-     * also why system-following is switched off: left on, the OS would re-decide the pair on the
-     * next frame and the swap would look like nothing happened.
-     */
+    /** Pin the opposite of the displayed mode without changing palette identity. */
     private suspend fun toggleTheme(): GestureActionResult {
         val config = appearance.config.first()
-        val shown =
-            if (config.theme == ColorThemePreset.SYSTEM) {
-                if (systemDark()) ColorThemePreset.DARK else ColorThemePreset.LIGHT
-            } else {
-                resolveAutoPalette(config.theme, config.followSystem, systemDark())
+        val selection = config.paletteSelection
+        val custom = config.selectedCustomPalette
+        if (custom != null) {
+            if (custom.light == null || custom.dark == null) return GestureActionResult.Unavailable
+        } else if (selection.builtin != ColorThemePreset.SYSTEM &&
+            selection.builtin.systemPartner == null
+        ) {
+            return GestureActionResult.Unavailable
+        }
+        val dark =
+            when (selection.mode) {
+                PaletteMode.SYSTEM -> systemDark()
+                PaletteMode.LIGHT -> false
+                PaletteMode.DARK -> true
             }
-        val partner = shown.systemPartner ?: return GestureActionResult.Unavailable
-        if (config.followSystem) appearance.setFollowSystem(false)
-        appearance.setTheme(partner)
+        appearance.selectPalette(selection.copy(mode = if (dark) PaletteMode.LIGHT else PaletteMode.DARK))
         return GestureActionResult.Done
     }
 

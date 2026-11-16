@@ -11,8 +11,12 @@ import androidx.compose.ui.text.buildAnnotatedString
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
+import io.github.trevarj.motd.data.prefs.PaletteColors
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.decodePalette
 import io.github.trevarj.motd.data.prefs.isDark
+import io.github.trevarj.motd.data.repo.LinkPreview
+import io.github.trevarj.motd.data.repo.LinkPreviewKind
 import io.github.trevarj.motd.ui.theme.MotdDarkScheme
 import io.github.trevarj.motd.ui.theme.MotdDarkThemeTextScheme
 import io.github.trevarj.motd.ui.theme.MotdLightScheme
@@ -23,6 +27,7 @@ import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.fixedThemeScheme
 import io.github.trevarj.motd.ui.theme.readingInk
 import io.github.trevarj.motd.ui.theme.semanticColors
+import io.github.trevarj.motd.ui.theme.toRawColorScheme
 import io.github.trevarj.motd.ui.theme.withTrueBlackSurfaces
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -30,6 +35,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MessageBubbleLayoutTest {
+    @Test fun typedPaletteCardUsesAvailableStateAndRetainsAwaitingLoadingAndFailureFootprints() {
+        val palette = decodePalette(javaClass.getResourceAsStream("/palettes/duplicate-last-valid.motd-palette.json")!!.use { it.readBytes() })
+        val preview = LinkPreview("https://example.org/test.motd-palette.json", null, null, null, null, LinkPreviewKind.PALETTE, palette = palette)
+        assertTrue(shouldShowLinkPreview(preview, loading = false, resolved = false))
+        assertEquals(LinkPreviewRenderState.Available(preview), resolveLinkPreviewRenderState(preview, loading = false))
+        assertEquals(LinkPreviewRenderState.Loading, resolveLinkPreviewRenderState(preview, loading = true))
+        assertEquals(LinkPreviewRenderState.Awaiting, resolveLinkPreviewRenderState(null, loading = false, awaiting = true))
+        assertEquals(LinkPreviewRenderState.Failed, resolveLinkPreviewRenderState(null, loading = false, failed = true))
+        assertEquals(LinkPreviewTransitionKey.AVAILABLE, resolveLinkPreviewRenderState(preview, loading = false).transitionKey)
+    }
+
     @Test fun bubbleWidth_usesItsPaneAndCapsWideLayouts() {
         assertEquals(344, bubbleMaxWidthPx(420, 560))
         assertEquals(560, bubbleMaxWidthPx(1_000, 560))
@@ -188,6 +204,14 @@ internal fun messageContrastSchemes(useThemeTextColors: Boolean = false): List<T
             ColorThemePreset.entries.mapNotNull { preset ->
                 fixedThemeScheme(preset, useThemeTextColors)?.let { Triple(preset.name, it, preset.isDark) }
             }
+    val custom =
+        listOf(false, true).map { dark ->
+            Triple(
+                "Custom ${if (dark) "dark" else "light"}",
+                accessibleColorScheme(customContrastPalette(dark).toRawColorScheme(dark), dark, useThemeTextColors),
+                dark,
+            )
+        }
     // Representative Material You roles, normalized at the same boundary as Android dynamic colors.
     val dynamic =
         listOf(
@@ -230,11 +254,25 @@ internal fun messageContrastSchemes(useThemeTextColors: Boolean = false): List<T
                 true,
             ),
         )
-    return (fixed + dynamic).flatMap { (name, scheme, dark) ->
+    return (fixed + dynamic + custom).flatMap { (name, scheme, dark) ->
         listOf(Triple(name, scheme, dark)) +
             if (dark) listOf(Triple("$name true black", scheme.withTrueBlackSurfaces(), true)) else emptyList()
     }
 }
+
+internal fun customContrastPalette(dark: Boolean): PaletteColors =
+    PaletteColors(
+        primary = "#9B4F96",
+        secondary = "#347E85",
+        tertiary = "#C06D35",
+        background = if (dark) "#17121D" else "#F8EFF5",
+        surface = if (dark) "#201829" else "#F3EEF8",
+        surfaceContainer = if (dark) "#30263B" else "#E8DDEC",
+        onBackground = if (dark) "#66536F" else "#ADA0B0",
+        onSurface = if (dark) "#705F79" else "#A396A8",
+        onSurfaceVariant = if (dark) "#5D5067" else "#B4A7BD",
+        outlineVariant = if (dark) "#42354A" else "#D3C7DB",
+    )
 
 internal fun assertReadingContrast(
     label: String,

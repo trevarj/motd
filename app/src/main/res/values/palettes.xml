@@ -1,0 +1,31 @@
+<resources>
+    <string name="palette_title">Palette</string>
+    <string name="palette_preview_action">Preview palette</string>
+    <string name="palette_color_mode">Color mode</string>
+    <string name="palette_mode_system">System</string>
+    <string name="palette_mode_light">Light</string>
+    <string name="palette_mode_dark">Dark</string>
+    <string name="palette_single_mode_explanation">This palette has one color mode. Add another mode in the editor to enable System.</string>
+    <string name="palette_builtin">Built-in</string>
+    <string name="palette_yours">Yours</string>
+    <string name="palette_community">Community</string>
+    <string name="palette_search">Search palettes</string>
+    <string name="palette_create">Create palette</string>
+    <string name="palette_import">Import</string>
+    <string name="palette_device_colors">Device colors</string>
+    <string name="palette_brand">MOTD</string>
+    <string name="palette_back">Back</string>
+    <string name="palette_empty_yours">No saved palettes. Create one or import a MOTD palette file.</string>
+    <string name="palette_empty_community">No community palettes are available yet. Create a palette with light and dark modes to contribute.</string>
+    <string name="palette_contribution">Export a palette with both light and dark modes, then submit its file through the MOTD palettes repository. Nothing is uploaded automatically.</string>
+    <string name="palette_contribute">Contribute</string>
+    <string name="palette_delete_title">Delete palette?</string>
+    <string name="palette_delete_active">This palette is active. Deleting it switches to Device colors in System mode.</string>
+    <string name="palette_delete">Delete</string>
+    <string name="palette_cancel">Cancel</string>
+    <string name="palette_edit">Edit</string>
+    <string name="palette_duplicate">Duplicate</string>
+    <string name="palette_share">Share file</string>
+    <string name="palette_export">Save file</string>
+    <string name="palette_storage_error">Saved palettes could not be read. Choose a built-in palette safely, or restore a validated settings backup to recover.</string>
+</resources>

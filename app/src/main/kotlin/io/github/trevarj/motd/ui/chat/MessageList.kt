@@ -109,8 +109,10 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.PaletteDocument
 import io.github.trevarj.motd.data.repo.CachedLinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreview
+import io.github.trevarj.motd.data.repo.paletteLinkTarget
 import io.github.trevarj.motd.data.sync.COMMAND_RESPONSE_PAYLOAD_PREFIX
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
@@ -350,6 +352,7 @@ fun MessageList(
     showImages: Boolean,
     showLinkPreviews: Boolean,
     onOpenLink: (String) -> Unit,
+    onOpenPalette: (PaletteDocument, String) -> Unit,
     cachedPreview: (String, Long?) -> CachedLinkPreview? = { _, _ -> null },
     loadAudioMetadata: suspend (String, Long?) -> AudioMetadata? = { _, _ -> null },
     cachedAudioMetadata: (String) -> CachedAudioMetadata? = { null },
@@ -814,7 +817,7 @@ fun MessageList(
                         loadPreview = loadPreview,
                         showImages = showImages,
                         showLinkPreviews = showLinkPreviews,
-                        canStartNewRichContentWork = canStartNewRichContentWork,
+                        canStartNewRichContentWork = canStartNewRichContentWork && outgoingFlight?.matches(msg) != true,
                         cachedPreview = cachedPreview,
                         loadAudioMetadata = loadAudioMetadata,
                         cachedAudioMetadata = cachedAudioMetadata,
@@ -830,6 +833,7 @@ fun MessageList(
                         onVoiceTranscribe = onVoiceTranscribe,
                         onVoiceTranscriptionCancel = onVoiceTranscriptionCancel,
                         onOpenLink = onOpenLink,
+                        onOpenPalette = onOpenPalette,
                         onSenderClick = onSenderClick,
                         onMentionClick = onSenderClick.takeIf { selectionMessageId == null },
                         replyPreview = replyPreview,
@@ -1827,6 +1831,7 @@ private fun MessageRow(
     onVoiceTranscribe: (AudioPlaybackRequest, Boolean) -> Unit,
     onVoiceTranscriptionCancel: (String) -> Unit,
     onOpenLink: (String) -> Unit,
+    onOpenPalette: (PaletteDocument, String) -> Unit,
     onSenderClick: (String) -> Unit,
     onMentionClick: ((String) -> Unit)?,
     replyPreview: (ReplyTarget) -> StateFlow<ReplyPreviewData?>,
@@ -1950,7 +1955,7 @@ private fun MessageRow(
         }
     val headCandidates =
         remember(msg.id, msg.text, showLinkPreviews) {
-            if (showLinkPreviews) extensionlessAudioCandidates(msg.text) else emptyList()
+            if (showLinkPreviews) extensionlessAudioCandidates(msg.text).filter { paletteLinkTarget(it) == null } else emptyList()
         }
     var headAudio by remember(msg.id, headCandidates) {
         mutableStateOf(
@@ -2178,7 +2183,9 @@ private fun MessageRow(
                                 }
 
                                 else -> {
-                                    if (preview?.imageUrl == preview?.url && preview?.description?.startsWith("image/", ignoreCase = true) == true) {
+                                    if (preview?.palette != null) {
+                                        if (!selecting) linkUrl?.let { onOpenPalette(preview.palette, it) }
+                                    } else if (preview?.imageUrl == preview?.url && preview?.description?.startsWith("image/", ignoreCase = true) == true) {
                                         onImageClick(preview.url)
                                     } else {
                                         linkUrl?.let(onOpenLink)

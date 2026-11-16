@@ -157,6 +157,20 @@ enum class NetworkSettingsTarget { CONNECTION, AUTHENTICATION, OBFUSCATION, AVAT
     val target: SettingsTarget? = null,
 )
 
+@Serializable data object PaletteHubRoute
+
+@Serializable data class PaletteEditorRoute(
+    val paletteJson: String,
+    val editingInstalledId: String? = null,
+)
+
+@Serializable data class PalettePreviewRoute(
+    val paletteJson: String,
+    val sourceLink: String? = null,
+    val catalogId: String? = null,
+    val targetInstalledId: String? = null,
+)
+
 @Serializable data class SurfaceEffectsRoute(
     val target: SettingsTarget? = null,
 )

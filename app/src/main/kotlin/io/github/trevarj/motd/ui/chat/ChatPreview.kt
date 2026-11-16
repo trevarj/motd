@@ -110,6 +110,7 @@ fun ChatContentPreviewBody(
     val items = flowOf(PagingData.from(messages)).collectAsLazyPagingItems()
 
     ChatContent(
+        onOpenPalette = { _, _ -> },
         state =
             ChatState(
                 buffer =

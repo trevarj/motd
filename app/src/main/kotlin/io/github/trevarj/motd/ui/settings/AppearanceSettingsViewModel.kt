@@ -10,7 +10,6 @@ import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
-import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.ComposerStyle
@@ -22,6 +21,7 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
+import io.github.trevarj.motd.data.prefs.PaletteSelection
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.TimeFormat
@@ -78,11 +78,9 @@ class AppearanceSettingsViewModel
             combine(settingsRepository.settings, appearancePrefs.config, ::AppearanceSettingsUiState)
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppearanceSettingsUiState())
 
-        fun setThemePreset(value: ColorThemePreset) = launch { appearancePrefs.setTheme(value) }
+        fun selectPalette(value: PaletteSelection) = launch { appearancePrefs.selectPalette(value) }
 
         fun setTrueBlack(value: Boolean) = launch { appearancePrefs.setTrueBlack(value) }
-
-        fun setFollowSystem(value: Boolean) = launch { appearancePrefs.setFollowSystem(value) }
 
         fun setUseThemeTextColors(value: Boolean) = launch { appearancePrefs.setUseThemeTextColors(value) }
 

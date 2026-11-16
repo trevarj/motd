@@ -6,6 +6,8 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.decodePalette
+import io.github.trevarj.motd.data.prefs.encodePalette
 import io.github.trevarj.motd.diagnostics.RecordingDiagnostics
 import io.github.trevarj.motd.service.PinningTrustManager
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +22,7 @@ import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
+import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -29,11 +32,13 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.ByteArrayOutputStream
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.security.KeyStore
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPOutputStream
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 
@@ -393,6 +398,265 @@ class LinkPreviewRoutingTest {
             assertTrue(event.fields.values.none { it?.toString()?.contains("private") == true })
             assertTrue(event.fields.values.none { it?.toString()?.contains("secret") == true })
         }
+
+    @Test
+    fun palette_single_mode_uses_owning_tls_route_original_cache_key_and_no_auxiliary_requests() =
+        runBlocking {
+            val pin = enableYoutubeTls()
+            val repository =
+                LinkPreviewRepositoryImpl(
+                    prefs,
+                    { id -> route(id, proxy = server.toProxyAddress(), authorizationHeader = "Basic secret", host = "www.youtube.com", pin = pin) },
+                    LinkPreviewFetchPolicy(),
+                    this,
+                    Dispatchers.IO,
+                )
+            val document = paletteFixture().copy(light = null)
+            val url = "https://www.youtube.com/shared.MOTD-PALETTE.JSON?download=1#sample"
+            enqueueYoutubeResponse(MockResponse().setHeader("Content-Type", "application/octet-stream").setBody(encodePalette(document).decodeToString()))
+            val first = async { repository.preview(url, NETWORK_ID) }
+            val joined = async { repository.preview(url, NETWORK_ID) }
+            val preview = first.await()!!
+            assertEquals(preview, joined.await())
+            assertEquals(document, preview.palette)
+            assertEquals(LinkPreviewKind.PALETTE, preview.kind)
+            assertEquals(url, preview.url)
+            assertNull(preview.description)
+            assertNull(preview.imageUrl)
+            assertEquals(preview, repository.preview(url, NETWORK_ID))
+            assertNull(repository.cachedPreview(paletteLinkTarget(url)!!.fetchUrl, NETWORK_ID))
+            prefs.setShowLinkPreviews(false)
+            assertNull(repository.preview(url, NETWORK_ID))
+            prefs.setShowLinkPreviews(true)
+            enqueueYoutubeResponse(MockResponse().setBody(encodePalette(document).decodeToString()))
+            assertEquals(document, repository.preview(url, NETWORK_ID + 1)?.palette)
+            assertEquals(4, server.requestCount)
+            repeat(2) {
+                assertYoutubeTunnel()
+                val request = server.takeRequest()
+                assertEquals("GET", request.method)
+                assertEquals("/shared.MOTD-PALETTE.JSON?download=1", request.path)
+                assertNull(request.getHeader("Authorization"))
+                assertNull(request.getHeader("Proxy-Authorization"))
+            }
+        }
+
+    @Test
+    fun palette_invalid_oversize_gzip_and_unsupported_are_unavailable_without_metadata_fallback() =
+        runBlocking {
+            val pin = enableYoutubeTls()
+            val repository =
+                LinkPreviewRepositoryImpl(
+                    prefs,
+                    { id -> route(id, proxy = server.toProxyAddress(), host = "www.youtube.com", pin = pin) },
+                    LinkPreviewFetchPolicy(),
+                    this,
+                    Dispatchers.IO,
+                )
+            val valid = encodePalette(paletteFixture()).decodeToString()
+            val oversized = valid + " ".repeat(16 * 1024)
+            val gzip = ByteArrayOutputStream().also { out -> GZIPOutputStream(out).use { it.write(oversized.toByteArray()) } }.toByteArray()
+            val responses =
+                listOf(
+                    MockResponse().setBody("{\"format\":\"motd-palette\"}"),
+                    MockResponse().setBody(valid.replace("\"version\":1", "\"version\":2")),
+                    MockResponse().setBody(oversized),
+                    MockResponse().setHeader("Content-Encoding", "gzip").setBody(Buffer().write(gzip)),
+                    MockResponse().setBody("<html><title>Not a palette</title></html>"),
+                    MockResponse().setBody(Buffer().write(byteArrayOf(0xC3.toByte(), 0x28))),
+                )
+            responses.forEachIndexed { index, response ->
+                val url = "https://www.youtube.com/$index.motd-palette.json"
+                enqueueYoutubeResponse(response)
+                assertNull(repository.preview(url, NETWORK_ID))
+                assertNotNull(repository.cachedPreview(url, NETWORK_ID))
+                assertNull(repository.preview(url, NETWORK_ID))
+            }
+            assertEquals(responses.size * 2, server.requestCount)
+        }
+
+    @Test
+    fun palette_transient_transport_and_route_failures_remain_retryable() =
+        runBlocking {
+            val pin = enableYoutubeTls()
+            var proxyDown = true
+            val repository =
+                LinkPreviewRepositoryImpl(
+                    prefs,
+                    { id -> route(id, proxy = server.toProxyAddress(), proxyError = "down".takeIf { proxyDown }, host = "www.youtube.com", pin = pin) },
+                    LinkPreviewFetchPolicy(),
+                    this,
+                    Dispatchers.IO,
+                )
+            val url = "https://www.youtube.com/retry.motd-palette.json"
+            assertRetryable { repository.preview(url, NETWORK_ID) }
+            assertRetryable { repository.preview(url, null) }
+            assertEquals(0, server.requestCount)
+            proxyDown = false
+            for (status in listOf(403, 429, 503)) {
+                enqueueYoutubeResponse(MockResponse().setResponseCode(status))
+                assertRetryable { repository.preview(url, NETWORK_ID) }
+                assertNull(repository.cachedPreview(url, NETWORK_ID))
+            }
+            val compressed =
+                ByteArrayOutputStream()
+                    .also { out ->
+                        GZIPOutputStream(out).use { it.write(encodePalette(paletteFixture())) }
+                    }.toByteArray()
+            enqueueYoutubeResponse(
+                MockResponse()
+                    .setHeader("Content-Encoding", "gzip")
+                    .setBody(Buffer().write(compressed.copyOf(compressed.size - 4))),
+            )
+            assertRetryable { repository.preview(url, NETWORK_ID) }
+            assertNull(repository.cachedPreview(url, NETWORK_ID))
+            enqueueYoutubeResponse(MockResponse().setBody(encodePalette(paletteFixture()).decodeToString()))
+            assertNotNull(repository.preview(url, NETWORK_ID)?.palette)
+            assertEquals(10, server.requestCount)
+        }
+
+    @Test
+    fun community_blob_and_raw_fetch_canonical_raw_paired_snapshot_and_reject_path_escape() =
+        runBlocking {
+            val pin = enableYoutubeTls()
+            val repository =
+                LinkPreviewRepositoryImpl(
+                    prefs,
+                    { id -> route(id, proxy = server.toProxyAddress(), host = "raw.githubusercontent.com", pin = pin) },
+                    LinkPreviewFetchPolicy(),
+                    this,
+                    Dispatchers.IO,
+                )
+            val raw = "https://raw.githubusercontent.com/trevarj/motd/main/palettes/duplicate-fixture/1.motd-palette.json"
+            val blob = raw.replace("raw.githubusercontent.com/trevarj/motd/", "github.com/trevarj/motd/blob/")
+            for (url in listOf(blob, raw)) {
+                enqueueYoutubeResponse(MockResponse().setBody(encodePalette(paletteFixture()).decodeToString()))
+                assertEquals(paletteFixture(), repository.preview(url, NETWORK_ID)?.palette)
+                assertEquals(url, repository.cachedPreview(url, NETWORK_ID)?.preview?.url)
+                assertEquals("CONNECT raw.githubusercontent.com:443 HTTP/1.1", server.takeRequest().requestLine)
+                assertEquals("/trevarj/motd/main/palettes/duplicate-fixture/1.motd-palette.json", server.takeRequest().path)
+            }
+            val single = raw.replace("/1.", "/2.")
+            enqueueYoutubeResponse(MockResponse().setBody(encodePalette(paletteFixture().copy(light = null)).decodeToString()))
+            assertNull(repository.preview(single, NETWORK_ID))
+            server.takeRequest()
+            server.takeRequest()
+            for ((index, destination) in listOf(
+                "https://example.org/escape.motd-palette.json",
+                raw.replace("/main/", "/other/"),
+                "$raw?escape=1",
+                "https://127.0.0.1/private",
+            ).withIndex()) {
+                enqueueYoutubeResponse(MockResponse().setResponseCode(302).setHeader("Location", destination))
+                assertNull(repository.preview(raw.replace("/1.", "/${index + 3}."), NETWORK_ID))
+                server.takeRequest()
+                server.takeRequest()
+                assertNull(server.takeRequest(100, TimeUnit.MILLISECONDS))
+            }
+            assertEquals(14, server.requestCount)
+        }
+
+    @Test
+    fun external_palette_redirects_keep_query_and_validate_each_hop_without_fallback() =
+        runBlocking {
+            val pin = enableYoutubeTls()
+            val repository =
+                LinkPreviewRepositoryImpl(
+                    prefs,
+                    { id -> route(id, proxy = server.toProxyAddress(), host = "www.youtube.com", pin = pin) },
+                    LinkPreviewFetchPolicy(),
+                    this,
+                    Dispatchers.IO,
+                )
+            enqueueYoutubeResponse(MockResponse().setResponseCode(302).setHeader("Location", "/actual?download=1"))
+            enqueueYoutubeResponse(MockResponse().setBody(encodePalette(paletteFixture()).decodeToString()))
+            assertNotNull(repository.preview("https://www.youtube.com/redirect.motd-palette.json", NETWORK_ID)?.palette)
+            assertYoutubeTunnel()
+            server.takeRequest()
+            assertYoutubeTunnel()
+            assertEquals("/actual?download=1", server.takeRequest().path)
+            for ((index, destination) in listOf("https://127.0.0.1/private", "http://www.youtube.com/cleartext", "https://user:secret@www.youtube.com/private").withIndex()) {
+                enqueueYoutubeResponse(MockResponse().setResponseCode(302).setHeader("Location", destination))
+                assertNull(repository.preview("https://www.youtube.com/unsafe$index.motd-palette.json", NETWORK_ID))
+                assertYoutubeTunnel()
+                server.takeRequest()
+                assertNull(server.takeRequest(100, TimeUnit.MILLISECONDS))
+            }
+            assertEquals(10, server.requestCount)
+        }
+
+    @Test
+    fun palette_gzip_valid_body_and_redirect_cap_use_one_bounded_request_pipeline() =
+        runBlocking {
+            val pin = enableYoutubeTls()
+            val repository =
+                LinkPreviewRepositoryImpl(
+                    prefs,
+                    { id -> route(id, proxy = server.toProxyAddress(), host = "www.youtube.com", pin = pin) },
+                    LinkPreviewFetchPolicy(),
+                    this,
+                    Dispatchers.IO,
+                )
+            val gzip = ByteArrayOutputStream().also { out -> GZIPOutputStream(out).use { it.write(encodePalette(paletteFixture())) } }.toByteArray()
+            enqueueYoutubeResponse(MockResponse().setHeader("Content-Encoding", "gzip").setBody(Buffer().write(gzip)))
+            assertEquals(paletteFixture(), repository.preview("https://www.youtube.com/gzip.motd-palette.json", NETWORK_ID)?.palette)
+            assertYoutubeTunnel()
+            server.takeRequest()
+            repeat(5) { index ->
+                enqueueYoutubeResponse(MockResponse().setResponseCode(302).setHeader("Location", "/hop${index + 1}"))
+            }
+            assertNull(repository.preview("https://www.youtube.com/loop.motd-palette.json", NETWORK_ID))
+            repeat(5) {
+                assertYoutubeTunnel()
+                server.takeRequest()
+            }
+            assertEquals(12, server.requestCount)
+            assertNull(server.takeRequest(100, TimeUnit.MILLISECONDS))
+        }
+
+    @Test
+    fun palette_fetches_share_concurrency_permits_and_whole_operation_deadline() =
+        runBlocking {
+            val pin = enableYoutubeTls()
+            val resolver = MediaRouteResolver { id -> route(id, proxy = server.toProxyAddress(), host = "www.youtube.com", pin = pin) }
+            val repository =
+                LinkPreviewRepositoryImpl(
+                    prefs,
+                    resolver,
+                    LinkPreviewFetchPolicy(maxConcurrentFetches = 1),
+                    this,
+                    Dispatchers.IO,
+                )
+            enqueueYoutubeResponse(MockResponse().setBody(encodePalette(paletteFixture()).decodeToString()).setHeadersDelay(1_500, TimeUnit.MILLISECONDS))
+            enqueueYoutubeResponse(MockResponse().setBody(encodePalette(paletteFixture()).decodeToString()))
+            val first = async(Dispatchers.IO) { repository.preview("https://www.youtube.com/one.motd-palette.json", NETWORK_ID) }
+            assertYoutubeTunnel()
+            assertNotNull(server.takeRequest(5, TimeUnit.SECONDS))
+            val second = async(Dispatchers.IO) { repository.preview("https://www.youtube.com/two.motd-palette.json", NETWORK_ID) }
+            assertNull(server.takeRequest(300, TimeUnit.MILLISECONDS))
+            assertNotNull(first.await()?.palette)
+            assertNotNull(second.await()?.palette)
+            assertYoutubeTunnel()
+            server.takeRequest()
+            val deadlineRepository =
+                LinkPreviewRepositoryImpl(
+                    prefs,
+                    resolver,
+                    LinkPreviewFetchPolicy(fetchDeadlineMs = 700),
+                    this,
+                    Dispatchers.IO,
+                )
+            enqueueYoutubeResponse(MockResponse().setBody(encodePalette(paletteFixture()).decodeToString()).throttleBody(1, 200, TimeUnit.MILLISECONDS))
+            val started = System.nanoTime()
+            assertRetryable { deadlineRepository.preview("https://www.youtube.com/slow.motd-palette.json", NETWORK_ID) }
+            assertTrue((System.nanoTime() - started) / 1_000_000 < 10_000)
+            assertNull(deadlineRepository.cachedPreview("https://www.youtube.com/slow.motd-palette.json", NETWORK_ID))
+        }
+
+    private fun paletteFixture() =
+        decodePalette(
+            javaClass.getResourceAsStream("/palettes/duplicate-last-valid.motd-palette.json")!!.use { it.readBytes() },
+        )
 
     private suspend fun assertRetryable(block: suspend () -> Unit) {
         try {

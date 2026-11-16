@@ -1,6 +1,8 @@
 package io.github.trevarj.motd.data.backup
 
 import android.content.Context
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
@@ -25,6 +27,7 @@ import io.github.trevarj.motd.data.prefs.ChatSoundPrefs
 import io.github.trevarj.motd.data.prefs.ChatSoundTone
 import io.github.trevarj.motd.data.prefs.ChatSoundVoice
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
@@ -37,10 +40,17 @@ import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
+import io.github.trevarj.motd.data.prefs.InstalledPalette
 import io.github.trevarj.motd.data.prefs.LauncherIcon
+import io.github.trevarj.motd.data.prefs.MAX_INSTALLED_PALETTE_BYTES
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
+import io.github.trevarj.motd.data.prefs.PaletteColors
+import io.github.trevarj.motd.data.prefs.PaletteDocument
+import io.github.trevarj.motd.data.prefs.PaletteMode
+import io.github.trevarj.motd.data.prefs.PaletteReadError
+import io.github.trevarj.motd.data.prefs.PaletteSelection
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
@@ -49,6 +59,10 @@ import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.appearanceDataStore
+import io.github.trevarj.motd.data.prefs.paletteSelection
+import io.github.trevarj.motd.data.prefs.settingsDataStore
+import io.github.trevarj.motd.data.prefs.validateInstalledPalettes
 import io.github.trevarj.motd.data.repo.ChatFolderRepository
 import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.gesture.GestureMenuConfig
@@ -59,7 +73,11 @@ import io.github.trevarj.motd.gesture.updateNode
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -1229,6 +1247,490 @@ class ConfigurationBackupRepositoryTest {
                     .normalizedPrefix,
             )
         }
+
+    @Test
+    fun selectedCustomPaletteRoundTripsAndReplaceRemovesObsoleteDefinitions() =
+        runTest {
+            withPaletteBackupState { context ->
+                val prefs = AppearancePrefsImpl(context)
+                val selected = backupPalette("installed-copy", tracked = true)
+                val selection = PaletteSelection(ColorThemePreset.NORD, selected.document.id, PaletteMode.LIGHT)
+                prefs.restorePalettes(listOf(selected), selection)
+                val sourceDb = inMemoryDb()
+                val targetDb = inMemoryDb()
+                try {
+                    val backup = repository(sourceDb)
+                    val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                    prefs.restorePalettes(listOf(backupPalette("obsolete")), PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.SYSTEM))
+                    repository(targetDb).import(raw, importMode = BackupImportMode.REPLACE)
+                    val restored = AppearancePrefsImpl(context).config.first()
+                    assertEquals(listOf(selected), restored.customPalettes)
+                    assertEquals(selection, restored.paletteSelection)
+                    val encrypted =
+                        repository(targetDb).exportToString(
+                            BackupExportMode.ENCRYPTED_WITH_CREDENTIALS,
+                            password = "palette backup password",
+                            nowEpochMillis = 1_000L,
+                        )
+                    assertTrue(backup.isEncrypted(encrypted))
+                    prefs.restorePalettes(emptyList(), PaletteSelection(ColorThemePreset.DARK, null, PaletteMode.DARK))
+                    repository(targetDb).import(encrypted, password = "palette backup password", importMode = BackupImportMode.REPLACE)
+                    assertEquals(listOf(selected), AppearancePrefsImpl(context).config.first().customPalettes)
+                    assertEquals(selection, prefs.config.first().paletteSelection)
+                } finally {
+                    sourceDb.close()
+                    targetDb.close()
+                }
+            }
+        }
+
+    @Test
+    fun paletteMergeRekeysConflictsOncePreservesOriginsAndReusesIdenticalRecords() =
+        runTest {
+            withPaletteBackupState { context ->
+                val prefs = AppearancePrefsImpl(context)
+                val incoming = backupPalette("shared-id", tracked = true)
+                val identical = backupPalette("identical", tracked = true)
+                val originOnly = backupPalette("same-document", tracked = true)
+                val localOrigin = originOnly.copy(catalogId = "local-origin", sourceLink = "https://local.example/hosted.motd-palette.json")
+                val local =
+                    incoming.copy(
+                        document = incoming.document.copy(name = "Local authored version", revision = 8),
+                        catalogId = "another-upstream",
+                        catalogRevision = 8,
+                        sourceLink = "https://local.example/original.motd-palette.json",
+                    )
+                val db = inMemoryDb()
+                try {
+                    val backup = repository(db)
+                    prefs.restorePalettes(listOf(incoming, identical, originOnly), PaletteSelection(ColorThemePreset.NORD, "shared-id", PaletteMode.DARK))
+                    val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                    prefs.restorePalettes(listOf(local, identical, localOrigin), PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.SYSTEM))
+                    backup.import(raw, importMode = BackupImportMode.MERGE)
+                    val restored = AppearancePrefsImpl(context).config.first()
+                    assertEquals(5, restored.customPalettes.size)
+                    assertEquals(local, restored.customPalettes.single { it.document.id == "shared-id" })
+                    assertEquals(identical, restored.customPalettes.single { it.document.id == "identical" })
+                    assertEquals(localOrigin, restored.customPalettes.single { it.document.id == "same-document" })
+                    val rekeyed = restored.customPalettes.single { it.document.name == incoming.document.name }
+                    val rekeyedOrigin = restored.customPalettes.single { it.document.id != "same-document" && it.document.name == originOnly.document.name }
+                    assertEquals(originOnly, rekeyedOrigin.copy(document = rekeyedOrigin.document.copy(id = originOnly.document.id)))
+                    assertEquals(incoming, rekeyed.copy(document = rekeyed.document.copy(id = incoming.document.id)))
+                    assertEquals(PaletteSelection(ColorThemePreset.NORD, rekeyed.document.id, PaletteMode.DARK), restored.paletteSelection)
+                } finally {
+                    db.close()
+                }
+            }
+        }
+
+    @Test
+    fun singleModeLocalPaletteBackupRestoresAuthoredValuesAndExplicitMode() =
+        runTest {
+            withPaletteBackupState { context ->
+                val prefs = AppearancePrefsImpl(context)
+                val base = backupPalette("dark-only")
+                val local = base.copy(document = base.document.copy(light = null))
+                val selection = PaletteSelection(ColorThemePreset.DRACULA, "dark-only", PaletteMode.DARK)
+                val db = inMemoryDb()
+                try {
+                    prefs.restorePalettes(listOf(local), selection)
+                    val backup = repository(db)
+                    val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                    prefs.restorePalettes(emptyList(), PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.SYSTEM))
+                    backup.import(raw, importMode = BackupImportMode.REPLACE)
+                    val restored = AppearancePrefsImpl(context).config.first()
+                    assertEquals(listOf(local), restored.customPalettes)
+                    assertEquals(selection, restored.paletteSelection)
+                } finally {
+                    db.close()
+                }
+            }
+        }
+
+    @Test
+    fun legacyPaletteBackupsPreserveDefinitionsAndMigrateHistoricalModes() =
+        runTest {
+            withPaletteBackupState { context ->
+                val prefs = AppearancePrefsImpl(context)
+                val local = backupPalette("keep-local")
+                val db = inMemoryDb()
+                try {
+                    val backup = repository(db)
+                    val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                    val cases =
+                        listOf(
+                            Triple(ColorThemePreset.NORD_LIGHT, true, PaletteSelection(ColorThemePreset.NORD, null, PaletteMode.SYSTEM)),
+                            Triple(ColorThemePreset.NORD_LIGHT, false, PaletteSelection(ColorThemePreset.NORD, null, PaletteMode.LIGHT)),
+                            Triple(ColorThemePreset.DRACULA, true, PaletteSelection(ColorThemePreset.DRACULA, null, PaletteMode.DARK)),
+                            Triple(ColorThemePreset.TOKYO_NIGHT, true, PaletteSelection(ColorThemePreset.TOKYO_NIGHT, null, PaletteMode.DARK)),
+                            Triple(ColorThemePreset.AMOLED, false, PaletteSelection(ColorThemePreset.DARK, null, PaletteMode.DARK)),
+                        )
+                    for (mode in BackupImportMode.entries) {
+                        for ((theme, followSystem, expected) in cases) {
+                            prefs.restorePalettes(listOf(local), PaletteSelection(ColorThemePreset.SYSTEM, "keep-local", PaletteMode.LIGHT))
+                            val legacy =
+                                editBackupAppearance(raw) {
+                                    JsonObject(
+                                        (it - "paletteMode" - "customPaletteId" - "customPalettes" - "trueBlack") +
+                                            mapOf(
+                                                "theme" to JsonPrimitive(theme.name),
+                                                "followSystem" to JsonPrimitive(followSystem),
+                                            ),
+                                    )
+                                }
+                            val nullableLegacy =
+                                editBackupAppearance(legacy) {
+                                    JsonObject(
+                                        it +
+                                            mapOf(
+                                                "paletteMode" to JsonNull,
+                                                "customPaletteId" to JsonNull,
+                                                "customPalettes" to JsonNull,
+                                            ),
+                                    )
+                                }
+                            val emptyLegacy =
+                                editBackupAppearance(nullableLegacy) {
+                                    JsonObject(it + ("customPalettes" to JsonArray(emptyList())))
+                                }
+                            for (document in listOf(legacy, nullableLegacy, emptyLegacy)) {
+                                backup.import(document, importMode = mode)
+                                val restored = AppearancePrefsImpl(context).config.first()
+                                assertEquals(listOf(local), restored.customPalettes)
+                                assertEquals(expected, restored.paletteSelection)
+                                assertEquals(theme == ColorThemePreset.AMOLED, restored.trueBlack)
+                            }
+                        }
+                    }
+                } finally {
+                    db.close()
+                }
+            }
+        }
+
+    @Test
+    fun invalidPaletteBackupFieldsRejectBeforeGeneralAppearanceOrNetworkMutation() =
+        runTest {
+            withPaletteBackupState { context ->
+                val prefs = AppearancePrefsImpl(context)
+                val db = inMemoryDb()
+                try {
+                    prefs.restorePalettes(listOf(backupPalette("incoming")), PaletteSelection(ColorThemePreset.NORD, "incoming", PaletteMode.LIGHT))
+                    val backup = repository(db)
+                    DataStoreSettingsRepository(context).setNickMentionStyle(NickMentionStyle.CHIP)
+                    db.networkDao().insert(secretNetwork(null).copy(name = "imported", host = "incoming.example"))
+                    val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                    val mutations: List<(JsonObject) -> JsonObject> =
+                        listOf(
+                            { JsonObject(it + ("customPaletteId" to JsonPrimitive("missing"))) },
+                            { JsonObject((it - "customPaletteId") + ("customPalettes" to JsonNull)) },
+                            { JsonObject(it + ("paletteMode" to JsonPrimitive("SIDEWAYS"))) },
+                            { JsonObject(it + ("paletteMode" to JsonNull)) },
+                            { JsonObject(it - "paletteMode") },
+                            { JsonObject(it + ("paletteMode" to JsonPrimitive(true))) },
+                            { mutateBackupRecord(it) { record -> JsonObject(record + ("surprise" to JsonPrimitive(true))) } },
+                            { mutateBackupRecord(it) { record -> JsonObject(record + ("catalogRevision" to JsonPrimitive("3"))) } },
+                            { mutateBackupRecord(it) { record -> JsonObject(record + ("catalogId" to JsonPrimitive("unpaired-tracking"))) } },
+                            {
+                                mutateBackupRecord(it) { record ->
+                                    JsonObject(record + mapOf("catalogId" to JsonPrimitive("upstream"), "catalogRevision" to JsonPrimitive(4)))
+                                }
+                            },
+                            {
+                                mutateBackupRecord(it) { record ->
+                                    val document = JsonObject(record.getValue("document").jsonObject + ("dark" to JsonNull))
+                                    JsonObject(record + mapOf("document" to document, "catalogId" to JsonPrimitive("upstream"), "catalogRevision" to JsonPrimitive(3)))
+                                }
+                            },
+                            { mutateBackupDocument(it) { doc -> JsonObject(doc + ("unknownRole" to JsonPrimitive("#123456"))) } },
+                            { mutateBackupDocument(it) { doc -> JsonObject(doc + ("revision" to JsonPrimitive(true))) } },
+                            { mutateBackupDocument(it) { doc -> JsonObject(doc + ("version" to JsonPrimitive(99))) } },
+                            { mutateBackupDocument(it) { doc -> JsonObject(doc + ("light" to JsonNull)) } },
+                            { mutateBackupDocument(it) { doc -> JsonObject(doc + ("sourceUrl" to JsonPrimitive("http://insecure.example/palette"))) } },
+                            {
+                                mutateBackupDocument(it) { doc ->
+                                    JsonObject(doc + ("light" to JsonObject(doc.getValue("light").jsonObject + ("unsupported" to JsonPrimitive("#123456")))))
+                                }
+                            },
+                            {
+                                mutateBackupDocument(it) { doc ->
+                                    JsonObject(doc + ("light" to JsonObject(doc.getValue("light").jsonObject - "primary")))
+                                }
+                            },
+                            {
+                                mutateBackupDocument(it) { doc ->
+                                    JsonObject(doc + ("light" to JsonObject(doc.getValue("light").jsonObject + ("primary" to JsonPrimitive("#1234")))))
+                                }
+                            },
+                            { appearance ->
+                                val record =
+                                    appearance
+                                        .getValue("customPalettes")
+                                        .jsonArray
+                                        .single()
+                                        .jsonObject
+                                val records =
+                                    (0..64).map { n ->
+                                        JsonObject(record + ("document" to JsonObject(record.getValue("document").jsonObject + ("id" to JsonPrimitive("overflow-$n")))))
+                                    }
+                                JsonObject(appearance + ("customPalettes" to JsonArray(records)) + ("customPaletteId" to JsonPrimitive("overflow-0")))
+                            },
+                            { appearance -> JsonObject(appearance + ("customPalettes" to JsonArray(emptyList()))) },
+                        )
+                    DataStoreSettingsRepository(context).setNickMentionStyle(NickMentionStyle.NONE)
+                    prefs.restorePalettes(listOf(backupPalette("destination")), PaletteSelection(ColorThemePreset.DARK, "destination", PaletteMode.DARK))
+                    db.networkDao().deleteLocalTree(
+                        db
+                            .networkDao()
+                            .allNow()
+                            .single()
+                            .id,
+                    )
+                    db.networkDao().insert(secretNetwork(null).copy(name = "retained", host = "retained.example"))
+                    for (mutation in mutations) {
+                        for (mode in BackupImportMode.entries) {
+                            assertPaletteImportRejectedWithoutMutation(context, db, editBackupAppearance(raw, mutation), mode)
+                        }
+                    }
+                } finally {
+                    db.close()
+                }
+            }
+        }
+
+    @Test
+    fun paletteMergeCountAndByteLimitsFailBeforeAnySettingsOrNetworksChange() =
+        runTest {
+            withPaletteBackupState { context ->
+                val prefs = AppearancePrefsImpl(context)
+                val sourceDb = inMemoryDb()
+                val targetDb = inMemoryDb()
+                try {
+                    val source = repository(sourceDb)
+                    sourceDb.networkDao().insert(secretNetwork(null).copy(host = "incoming.example"))
+                    DataStoreSettingsRepository(context).setNickMentionStyle(NickMentionStyle.CHIP)
+                    prefs.restorePalettes(listOf(backupPalette("new")), PaletteSelection(ColorThemePreset.NORD, "new", PaletteMode.LIGHT))
+                    val countRaw = source.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                    val largeIncoming = (0 until 32).map { largeBackupPalette("incoming-$it") }
+                    prefs.restorePalettes(largeIncoming, PaletteSelection(ColorThemePreset.NORD, "incoming-0", PaletteMode.LIGHT))
+                    val byteRaw = source.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                    DataStoreSettingsRepository(context).setNickMentionStyle(NickMentionStyle.NONE)
+                    targetDb.networkDao().insert(secretNetwork(null).copy(name = "retained", host = "retained.example"))
+                    val full = (0 until 64).map { backupPalette("local-$it") }
+                    prefs.restorePalettes(full, PaletteSelection(ColorThemePreset.DARK, "local-0", PaletteMode.DARK))
+                    assertPaletteImportRejectedWithoutMutation(context, targetDb, countRaw, BackupImportMode.MERGE)
+                    val largeLocal = (0 until 32).map { largeBackupPalette("local-$it") }
+                    prefs.restorePalettes(largeLocal, PaletteSelection(ColorThemePreset.DARK, "local-0", PaletteMode.DARK))
+                    assertTrue(runCatching { validateInstalledPalettes(largeLocal + largeIncoming) }.isFailure)
+                    assertPaletteImportRejectedWithoutMutation(context, targetDb, byteRaw, BackupImportMode.MERGE)
+                    val oversizedIncoming =
+                        editBackupAppearance(byteRaw) { appearance ->
+                            val original = appearance.getValue("customPalettes").jsonArray
+                            val extra =
+                                original.mapIndexed { index, element ->
+                                    val record = element.jsonObject
+                                    JsonObject(record + ("document" to JsonObject(record.getValue("document").jsonObject + ("id" to JsonPrimitive("extra-$index")))))
+                                }
+                            JsonObject(appearance + ("customPalettes" to JsonArray(original + extra)))
+                        }
+                    assertPaletteImportRejectedWithoutMutation(context, targetDb, oversizedIncoming, BackupImportMode.REPLACE)
+                } finally {
+                    sourceDb.close()
+                    targetDb.close()
+                }
+            }
+        }
+
+    @Test
+    fun corruptPaletteCollectionRefusesExportAndMergeButModernReplaceRecovers() =
+        runTest {
+            withPaletteBackupState { context ->
+                val prefs = AppearancePrefsImpl(context)
+                val db = inMemoryDb()
+                try {
+                    val installed = backupPalette("recovered", tracked = true)
+                    val selection = PaletteSelection(ColorThemePreset.NORD, "recovered", PaletteMode.LIGHT)
+                    prefs.restorePalettes(listOf(installed), selection)
+                    val backup = repository(db)
+                    DataStoreSettingsRepository(context).setNickMentionStyle(NickMentionStyle.CHIP)
+                    db.networkDao().insert(secretNetwork(null).copy(name = "imported", host = "incoming.example"))
+                    val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                    val legacy = editBackupAppearance(raw) { JsonObject(it - "paletteMode" - "customPaletteId" - "customPalettes") }
+                    for ((corrupt, error) in listOf(
+                        "{broken" to PaletteReadError.INVALID,
+                        " ".repeat(MAX_INSTALLED_PALETTE_BYTES + 1) to PaletteReadError.TOO_LARGE,
+                    )) {
+                        DataStoreSettingsRepository(context).setNickMentionStyle(NickMentionStyle.NONE)
+                        db.networkDao().allNow().forEach { db.networkDao().deleteLocalTree(it.id) }
+                        db.networkDao().insert(secretNetwork(null).copy(name = "retained", host = "retained.example"))
+                        context.appearanceDataStore.edit { it[stringPreferencesKey("custom_palettes_v1")] = corrupt }
+                        assertEquals(error, AppearancePrefsImpl(context).config.first().customPaletteReadError)
+                        assertTrue(runCatching { backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED) }.isFailure)
+                        assertTrue(runCatching { backup.exportToString(BackupExportMode.ENCRYPTED_WITH_CREDENTIALS, password = "password") }.isFailure)
+                        assertPaletteImportRejectedWithoutMutation(context, db, raw, BackupImportMode.MERGE)
+                        assertPaletteImportRejectedWithoutMutation(context, db, legacy, BackupImportMode.REPLACE)
+                        backup.import(raw, importMode = BackupImportMode.REPLACE)
+                        val recovered = AppearancePrefsImpl(context).config.first()
+                        assertNull(recovered.customPaletteReadError)
+                        assertEquals(listOf(installed), recovered.customPalettes)
+                        assertEquals(selection, recovered.paletteSelection)
+                        assertEquals(NickMentionStyle.CHIP, DataStoreSettingsRepository(context).settings.first().nickMentionStyle)
+                        assertEquals(
+                            "incoming.example",
+                            db
+                                .networkDao()
+                                .allNow()
+                                .single()
+                                .host,
+                        )
+                    }
+                } finally {
+                    db.close()
+                }
+            }
+        }
+
+    @Test
+    fun absentAppearancePreservesHealthyOrCorruptPaletteStateWhileRestoringGeneralSettings() =
+        runTest {
+            withPaletteBackupState { context ->
+                val prefs = AppearancePrefsImpl(context)
+                val settings = DataStoreSettingsRepository(context)
+                val db = inMemoryDb()
+                try {
+                    settings.setNickMentionStyle(NickMentionStyle.CHIP)
+                    val backup = repository(db)
+                    val raw =
+                        editBackupAppearance(
+                            backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L),
+                        ) { null }
+                    prefs.restorePalettes(listOf(backupPalette("retained")), PaletteSelection(ColorThemePreset.NORD, "retained", PaletteMode.DARK))
+                    prefs.setTrueBlack(true)
+                    prefs.setFontChoice(FontChoice.JETBRAINS_MONO)
+                    for (corrupt in listOf(false, true)) {
+                        if (corrupt) context.appearanceDataStore.edit { it[stringPreferencesKey("custom_palettes_v1")] = "{broken" }
+                        for (mode in BackupImportMode.entries) {
+                            settings.setNickMentionStyle(NickMentionStyle.NONE)
+                            val before = context.appearanceDataStore.data.first()
+                            val config = prefs.config.first()
+                            backup.import(raw, importMode = mode)
+                            assertEquals(NickMentionStyle.CHIP, settings.settings.first().nickMentionStyle)
+                            assertEquals(before, context.appearanceDataStore.data.first())
+                            assertEquals(config, AppearancePrefsImpl(context).config.first())
+                        }
+                    }
+                } finally {
+                    db.close()
+                }
+            }
+        }
+
+    private suspend fun withPaletteBackupState(block: suspend (Context) -> Unit) {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val appearance = context.appearanceDataStore.data.first()
+        val settings = context.settingsDataStore.data.first()
+        try {
+            context.appearanceDataStore.edit { it.clear() }
+            context.settingsDataStore.edit { it.clear() }
+            block(context)
+        } finally {
+            context.appearanceDataStore.updateData { appearance.toMutablePreferences() }
+            context.settingsDataStore.updateData { settings.toMutablePreferences() }
+        }
+    }
+
+    private fun backupPalette(
+        id: String,
+        tracked: Boolean = false,
+    ): InstalledPalette {
+        val dark =
+            PaletteColors(
+                "#AABBCC",
+                "#DDAACC",
+                "#33BB99",
+                "#111111",
+                "#222222",
+                "#333333",
+                "#EEEEEE",
+                "#FFFFFF",
+                "#BBBBBB",
+                "#777777",
+                listOf("#FF7766", "#66BBCC"),
+            )
+        val light = dark.copy(background = "#FAFAFA", surface = "#EFEFEF", onBackground = "#141414", onSurface = "#151515")
+        return InstalledPalette(
+            PaletteDocument(
+                id,
+                "Authored $id",
+                3,
+                light,
+                dark,
+                sourceUrl = "https://source.example/palette",
+                license = "Existing license",
+                notices = "Preserved supplied notice",
+            ),
+            catalogId = if (tracked) "distinct-upstream-id" else null,
+            catalogRevision = if (tracked) 3 else null,
+            sourceLink = "https://files.example/$id.motd-palette.json",
+        )
+    }
+
+    private fun largeBackupPalette(id: String): InstalledPalette {
+        val palette = backupPalette(id)
+        return palette.copy(
+            document =
+                palette.document.copy(
+                    notices = "n".repeat(4096),
+                    sourceUrl = "https://source.example/" + "s".repeat(1970),
+                    license = "l".repeat(128),
+                ),
+            sourceLink = "https://files.example/" + "p".repeat(1970),
+        )
+    }
+
+    private fun editBackupAppearance(
+        raw: String,
+        transform: (JsonObject) -> JsonObject?,
+    ): String {
+        val envelope = Json.parseToJsonElement(raw).jsonObject
+        val payload = envelope.getValue("payload").jsonObject
+        val settings = payload.getValue("settings").jsonObject
+        val replacement = transform(settings.getValue("appearance").jsonObject)
+        val updated = if (replacement == null) settings - "appearance" else settings + ("appearance" to replacement)
+        return JsonObject(envelope + ("payload" to JsonObject(payload + ("settings" to JsonObject(updated))))).toString()
+    }
+
+    private fun mutateBackupRecord(
+        appearance: JsonObject,
+        transform: (JsonObject) -> JsonObject,
+    ): JsonObject {
+        val records = appearance.getValue("customPalettes").jsonArray
+        return JsonObject(appearance + ("customPalettes" to JsonArray(listOf(transform(records.single().jsonObject)))))
+    }
+
+    private fun mutateBackupDocument(
+        appearance: JsonObject,
+        transform: (JsonObject) -> JsonObject,
+    ): JsonObject =
+        mutateBackupRecord(appearance) { record ->
+            JsonObject(record + ("document" to transform(record.getValue("document").jsonObject)))
+        }
+
+    private suspend fun assertPaletteImportRejectedWithoutMutation(
+        context: Context,
+        db: io.github.trevarj.motd.data.db.MotdDatabase,
+        raw: String,
+        mode: BackupImportMode,
+    ) {
+        val appearance = context.appearanceDataStore.data.first()
+        val settings = context.settingsDataStore.data.first()
+        val networks = db.networkDao().allNow()
+        val result = runCatching { repository(db).import(raw, importMode = mode) }
+        assertTrue("Expected $mode palette preflight rejection", result.isFailure)
+        assertEquals(appearance, context.appearanceDataStore.data.first())
+        assertEquals(settings, context.settingsDataStore.data.first())
+        assertEquals(networks, db.networkDao().allNow())
+    }
 
     private fun repository(db: io.github.trevarj.motd.data.db.MotdDatabase): ConfigurationBackupRepositoryImpl {
         val context = ApplicationProvider.getApplicationContext<Context>()

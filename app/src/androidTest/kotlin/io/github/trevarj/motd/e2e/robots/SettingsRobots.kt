@@ -523,26 +523,107 @@ internal class SettingsRobot(
     fun networks() = scrollToAndClick("settings_category_networks")
 }
 
-internal class ThemeSheetRobot(
+internal class PaletteRobot(
     compose: ComposeTestRule,
 ) : BaseRobot(compose) {
     fun selectAyuDarkAndTrueBlack() {
-        click("settings_theme_picker")
-        scrollContainerTo("settings_theme_list", "settings_theme_ayu_dark")
-        click("settings_theme_ayu_dark")
-        click("settings_switch_true_black")
+        scrollToAndClick("settings_palette_hub")
+        scrollContainerTo("palette_list", "palette_builtin_ayu_dark")
+        click("palette_builtin_ayu_dark")
+        click("palette_back")
+        scrollToAndClick("settings_color_mode_dark")
+        scrollToAndClick("settings_switch_true_black")
     }
 
-    fun dismiss() {
-        val themeSheet = hasTestTag("settings_theme_sheet")
-        val dismissAction =
-            SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and
-                (themeSheet or hasAnyAncestor(themeSheet))
-        compose
-            .onAllNodes(dismissAction, useUnmergedTree = true)[0]
-            .performSemanticsAction(SemanticsActions.Dismiss)
-        awaitTagGone("settings_theme_sheet")
-        awaitTag("settings_avatar_style_picker")
+    fun createPalette(
+        name: String,
+        apply: Boolean,
+    ) {
+        scrollToAndClick("settings_palette_hub")
+        click("palette_create")
+        replace("palette_editor_name", name)
+        click(if (apply) "palette_editor_save_apply" else "palette_editor_save")
+        awaitTag("palette_hub")
+        click("palette_back")
+        awaitTag("settings_palette_hub")
+    }
+
+    fun shareInstalledPaletteToMotd(name: String) {
+        scrollToAndClick("settings_palette_hub")
+        compose.onNodeWithText("Yours").performClick()
+        replace("palette_search", name)
+        compose.onNodeWithText("Share", substring = false).performScrollTo().performClick()
+        val instrumentation =
+            androidx.test.platform.app.InstrumentationRegistry
+                .getInstrumentation()
+        val context = instrumentation.targetContext
+        val label = context.applicationInfo.loadLabel(context.packageManager).toString()
+        val deadline = android.os.SystemClock.uptimeMillis() + 15_000
+        var selected = false
+
+        fun findText(
+            node: android.view.accessibility.AccessibilityNodeInfo?,
+            text: String,
+        ): android.view.accessibility.AccessibilityNodeInfo? {
+            if (node == null) return null
+            if (node.text?.toString().equals(text, ignoreCase = true)) return node
+            for (index in 0 until node.childCount) findText(node.getChild(index), text)?.let { return it }
+            return null
+        }
+
+        fun clickText(
+            root: android.view.accessibility.AccessibilityNodeInfo?,
+            text: String,
+        ): Boolean {
+            var node = findText(root, text)
+            while (node != null && !node.isClickable) node = node.parent
+            return node?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK) == true
+        }
+        // Drive the real Android chooser; the receiver reads the production FileProvider grant.
+        while (android.os.SystemClock.uptimeMillis() < deadline) {
+            val root = instrumentation.uiAutomation.rootInActiveWindow
+            if (selected && root?.packageName?.toString() == context.packageName) break
+            if (!selected) {
+                selected = clickText(root, label)
+            } else {
+                clickText(root, "Just once")
+            }
+            android.os.SystemClock.sleep(100)
+        }
+        org.junit.Assert.assertTrue("Android chooser offers MOTD for the shared JSON file", selected)
+        awaitTag("palette_preview_apply")
+    }
+
+    fun cancelSharedPreview() {
+        click("palette_preview_cancel")
+        awaitTag("palette_hub")
+        click("palette_back")
+        awaitTag("settings_palette_hub")
+    }
+
+    fun applySharedPreview() {
+        click("palette_preview_apply")
+        awaitTag("palette_hub")
+        click("palette_back")
+        awaitTag("settings_palette_hub")
+    }
+
+    fun loadLinkedPalette() {
+        click("link_preview_awaiting")
+        awaitTag("link_preview_palette")
+        assertDisplayed("link_preview_palette_light")
+        assertDisplayed("link_preview_palette_dark")
+    }
+
+    fun openLinkedPreview() {
+        click("link_preview_palette")
+        awaitTag("palette_preview_apply")
+    }
+
+    fun closeLinkedPreview(apply: Boolean) {
+        click(if (apply) "palette_preview_apply" else "palette_preview_cancel")
+        awaitTag("chat_timeline")
+        awaitTagGone("palette_preview_apply")
     }
 }
 

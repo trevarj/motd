@@ -1,5 +1,6 @@
 package io.github.trevarj.motd
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
@@ -24,6 +25,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
@@ -32,8 +34,11 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
+import io.github.trevarj.motd.data.prefs.decodePalette
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewKind
 import io.github.trevarj.motd.ui.components.LinkPreviewCard
@@ -41,6 +46,7 @@ import io.github.trevarj.motd.ui.components.LinkPreviewTransitionKey
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
 import io.github.trevarj.motd.ui.components.LocalNetworkMediaHttp
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
+import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.RoutedInlineMediaFixture
 import io.github.trevarj.motd.ui.components.assertMediaCornerPixels
 import io.github.trevarj.motd.ui.components.solidMediaResponse
@@ -54,6 +60,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.io.File
 import kotlin.math.roundToInt
 
 @RunWith(RobolectricTestRunner::class)
@@ -64,6 +71,111 @@ class LinkPreviewCardUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test fun paletteCardRendersAuthoredModesAndInkWithoutRequestingItsRemoteImage() {
+        RoutedInlineMediaFixture().use { fixture ->
+            val paired = decodePalette(javaClass.getResourceAsStream("/palettes/duplicate-last-valid.motd-palette.json")!!.use { it.readBytes() })
+            val document = mutableStateOf(paired)
+            compose.setContent {
+                MotdTheme(dynamicColor = false) {
+                    CompositionLocalProvider(LocalAutomaticRemoteMedia provides true, LocalNetworkMediaHttp provides fixture.http) {
+                        Box(Modifier.width(320.dp)) {
+                            LinkPreviewCard(
+                                LinkPreview(
+                                    url = "https://example.test/palette.motd-palette.json",
+                                    title = "Ignored metadata",
+                                    description = "Not a metadata card",
+                                    imageUrl = "http://media.invalid/palette-must-not-load.png",
+                                    siteName = null,
+                                    kind = LinkPreviewKind.PALETTE,
+                                    palette = document.value,
+                                ),
+                                loading = false,
+                                networkId = fixture.networkId,
+                                onClick = {},
+                            )
+                        }
+                    }
+                }
+            }
+            for ((name, palette) in listOf("paired" to paired, "light" to paired.copy(dark = null), "dark" to paired.copy(light = null))) {
+                compose.runOnIdle { document.value = palette }
+                compose.onNodeWithText(palette.name, useUnmergedTree = true).assertIsDisplayed()
+                compose.onNodeWithText("Preview palette", useUnmergedTree = true).assertIsDisplayed()
+                for ((mode, colors) in listOf("light" to palette.light, "dark" to palette.dark)) {
+                    val sample = compose.onNodeWithTag("link_preview_palette_$mode", useUnmergedTree = true)
+                    if (colors == null) {
+                        sample.assertDoesNotExist()
+                    } else {
+                        sample.assertIsDisplayed()
+                        val label = if (mode == "light") "Light" else "Dark"
+                        compose.onNodeWithContentDescription("$label onSurface ${colors.onSurface}", useUnmergedTree = true).assertIsDisplayed()
+                        val bitmap = sample.captureToImage().asAndroidBitmap()
+                        assertTrue("$mode authored background", bitmapHasColor(bitmap, android.graphics.Color.parseColor(colors.background)))
+                        assertTrue("$mode authored ink swatch", bitmapHasColor(bitmap, android.graphics.Color.parseColor(colors.onSurface)))
+                    }
+                }
+                compose.onNodeWithTag("link_preview_thumbnail", useUnmergedTree = true).assertDoesNotExist()
+                compose.onNodeWithText("Not a metadata card", useUnmergedTree = true).assertDoesNotExist()
+                compose.onNodeWithText("Apply", useUnmergedTree = true).assertDoesNotExist()
+                val card = compose.onNodeWithTag("link_preview_palette")
+                card.assertHasClickAction()
+                val png = File("build/reports/palettes/link-card-$name.png").apply { parentFile!!.mkdirs() }
+                png.outputStream().use { card.captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }
+            }
+            assertEquals("Native palette cards must not load image metadata", 0, fixture.server.requestCount)
+        }
+    }
+
+    @Test fun everySharedMessageLayoutAndActionKeepsTheNativePaletteCardWithoutInlineImages() {
+        val palette = decodePalette(javaClass.getResourceAsStream("/palettes/duplicate-last-valid.motd-palette.json")!!.use { it.readBytes() })
+        val layout = mutableStateOf(LayoutDensity.COMFORTABLE)
+        val kind = mutableStateOf(MessageKind.PRIVMSG)
+        val preview = LinkPreview("https://example.test/p.motd-palette.json", null, null, null, null, LinkPreviewKind.PALETTE, palette = palette)
+        compose.setContent {
+            MotdTheme(dynamicColor = false, layoutDensity = layout.value) {
+                CompositionLocalProvider(LocalAutomaticRemoteMedia provides false) {
+                    Box(Modifier.width(360.dp)) {
+                        MessageBubble(
+                            sender = "alice",
+                            text = preview.url,
+                            timeMs = 0,
+                            formattedTime = "12:00",
+                            isSelf = false,
+                            kind = kind.value,
+                            showSender = true,
+                            mediaUrls = emptyList(),
+                            linkPreview = preview,
+                            linkPreviewResolved = true,
+                        )
+                    }
+                }
+            }
+        }
+        for (density in LayoutDensity.entries) {
+            for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.ACTION)) {
+                compose.runOnIdle {
+                    layout.value = density
+                    kind.value = messageKind
+                }
+                compose.onNodeWithTag("link_preview_palette").assertIsDisplayed()
+                compose.onNodeWithTag("link_preview_palette_light", useUnmergedTree = true).assertIsDisplayed()
+                compose.onNodeWithTag("link_preview_palette_dark", useUnmergedTree = true).assertIsDisplayed()
+            }
+        }
+    }
+
+    private fun bitmapHasColor(
+        bitmap: Bitmap,
+        color: Int,
+    ): Boolean {
+        for (y in 0 until bitmap.height) {
+            for (x in 0 until bitmap.width) {
+                if (bitmap.getPixel(x, y) == color) return true
+            }
+        }
+        return false
+    }
 
     @Test fun mediaCornerPresetsClipEveryStateAndLoadedAndSkeletonThumbnailsAndRestoreDefault() {
         RoutedInlineMediaFixture().use { fixture ->
@@ -228,7 +340,7 @@ class LinkPreviewCardUiTest {
         }
         for (theme in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
             for (themed in listOf(false, true)) {
-                for (previewKind in LinkPreviewKind.entries) {
+                for (previewKind in LinkPreviewKind.entries.filter { it != LinkPreviewKind.PALETTE }) {
                     for (contrasting in listOf(false, true)) {
                         compose.runOnIdle {
                             preset.value = theme

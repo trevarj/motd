@@ -55,6 +55,34 @@ flowchart TD
   go through `ConnectionManager` instead of constructing IRC clients in screens.
 - Fixed theme contrast normalization is cached on demand per preset and text-color
   mode. `SYSTEM`, `LIGHT`, `DARK`, and `AMOLED` never warm the fixed palette catalog.
+- Appearance stores palette identity and System/Light/Dark mode separately. Only
+  Device colors uses Material You; custom palettes reuse the existing readability
+  and dark-only true-black pipeline. Draft/custom fitting is remembered by actual
+  colors and text mode, never in a global slider-value cache.
+- The strict UTF-8 palette codec caps each document at 16 KiB. Appearance DataStore
+  commits definitions and selection together, with 64-entry/512 KiB collection
+  limits and non-destructive corrupt-storage reporting.
+- Palette editors own bounded saveable drafts and invalid-field state. Native chat,
+  chat-list and control samples stay contained, without remote media or system-bar
+  changes. Full previews carry validated immutable document snapshots; only explicit
+  Save/Apply/Update writes appearance preferences.
+- File intake classifies bounded owned bytes before ordinary chat sharing. Latest
+  delivery ownership and source-matched consumption survive recreation; generic
+  unmarked JSON shares remain attachments. SAF and narrow FileProvider exports
+  preserve authored data without retaining provider URIs as installed palette data.
+- Community refresh uses explicit direct HTTPS and an atomically replaced,
+  validated last-good cache, never an IRC connection's proxy. Only gallery
+  installation grants catalog tracking; updates compare the chosen installed
+  record within the same DataStore edit.
+- Native IRC palette cards reuse owning-network preview consent, routing and
+  caching. Card taps pass bounded validated snapshots to full preview without
+  refetching or granting catalog tracking. Overlong optional source links are
+  omitted from installation metadata without truncating queries or palette data.
+- Configuration imports preflight complete palette targets, conflict-ID remaps
+  and quotas before any settings/network mutation. Definitions and selection
+  restore atomically; the overall cross-store import is not atomic. Legacy
+  backups preserve installed definitions; only modern REPLACE recovers corrupt
+  palette storage.
 - Utility canvases and unscrolled utility top bars use `surfaceContainerLowest`; grouped
   panels and menus use `surfaceContainerLow`, with primary section headings and meaningful icons.
   Short noninteractive metadata uses the wrapping neutral `MetadataPill`; addresses, fingerprints,

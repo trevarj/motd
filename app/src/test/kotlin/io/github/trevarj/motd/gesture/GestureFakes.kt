@@ -22,10 +22,13 @@ import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncDepth
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
+import io.github.trevarj.motd.data.prefs.InstalledPalette
 import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
+import io.github.trevarj.motd.data.prefs.PaletteMode
+import io.github.trevarj.motd.data.prefs.PaletteSelection
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
@@ -35,6 +38,9 @@ import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.normalizePaletteSelection
+import io.github.trevarj.motd.data.prefs.paletteSelection
+import io.github.trevarj.motd.data.prefs.validateInstalledPalettes
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.gesture.radial.OrbPlacement
@@ -251,14 +257,80 @@ internal class FakeAppearance(
     val state = MutableStateFlow(initial)
     override val config: Flow<AppearanceConfig> = state
 
-    override suspend fun setTheme(theme: ColorThemePreset) {
-        state.value = state.value.copy(theme = theme)
+    override suspend fun selectPalette(selection: PaletteSelection) {
+        val current = state.value
+        val normalized = normalizePaletteSelection(selection, current.customPalettes)
+        state.value = current.withSelection(normalized)
     }
 
-    override suspend fun setTrueBlack(enabled: Boolean) = Unit
+    override suspend fun savePalette(
+        palette: InstalledPalette,
+        apply: Boolean,
+        mode: PaletteMode,
+        targetInstalledId: String?,
+        expectedTarget: InstalledPalette?,
+    ) {
+        val current = state.value
+        check(current.customPaletteReadError == null)
+        if (targetInstalledId != null) {
+            require(targetInstalledId == palette.document.id && current.customPalettes.any { it.document.id == targetInstalledId })
+        }
+        require(
+            expectedTarget == null || (
+                targetInstalledId != null &&
+                    current.customPalettes.find { it.document.id == targetInstalledId } == expectedTarget
+            ),
+        )
+        val target = current.customPalettes.filterNot { it.document.id == palette.document.id } + palette
+        validateInstalledPalettes(target)
+        val selection =
+            if (apply) {
+                current.paletteSelection.copy(installedId = palette.document.id, mode = mode)
+            } else {
+                current.paletteSelection
+            }
+        state.value =
+            current
+                .copy(customPalettes = target)
+                .withSelection(normalizePaletteSelection(selection, target))
+    }
 
-    override suspend fun setFollowSystem(enabled: Boolean) {
-        state.value = state.value.copy(followSystem = enabled)
+    override suspend fun removePalette(id: String) {
+        val current = state.value
+        check(current.customPaletteReadError == null)
+        val target = current.customPalettes.filterNot { it.document.id == id }
+        validateInstalledPalettes(target)
+        val selection =
+            if (current.paletteSelection.installedId == id) {
+                PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.SYSTEM)
+            } else {
+                current.paletteSelection
+            }
+        state.value = current.copy(customPalettes = target).withSelection(selection)
+    }
+
+    override suspend fun restorePalettes(
+        palettes: List<InstalledPalette>,
+        selection: PaletteSelection,
+    ) {
+        validateInstalledPalettes(palettes)
+        val normalized = normalizePaletteSelection(selection, palettes)
+        state.value =
+            state.value
+                .copy(customPalettes = palettes, customPaletteReadError = null)
+                .withSelection(normalized)
+    }
+
+    private fun AppearanceConfig.withSelection(selection: PaletteSelection) =
+        copy(
+            theme = selection.builtin,
+            customPaletteId = selection.installedId,
+            paletteMode = selection.mode,
+            followSystem = false,
+        )
+
+    override suspend fun setTrueBlack(enabled: Boolean) {
+        state.value = state.value.copy(trueBlack = enabled)
     }
 
     override suspend fun setUseThemeTextColors(enabled: Boolean) {

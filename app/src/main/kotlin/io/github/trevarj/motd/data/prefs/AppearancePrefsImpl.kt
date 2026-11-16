@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.prefs
 
 import android.content.Context
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -8,10 +9,16 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -19,6 +26,9 @@ internal val Context.appearanceDataStore by preferencesDataStore("appearance")
 private val THEME = stringPreferencesKey("theme_preset_v1")
 private val TRUE_BLACK = booleanPreferencesKey("true_black_v1")
 private val FOLLOW_SYSTEM = booleanPreferencesKey("follow_system_v1")
+private val PALETTE_MODE = stringPreferencesKey("palette_mode_v1")
+private val CUSTOM_PALETTE_ID = stringPreferencesKey("custom_palette_id_v1")
+private val CUSTOM_PALETTES = stringPreferencesKey("custom_palettes_v1")
 private val USE_THEME_TEXT_COLORS = booleanPreferencesKey("use_theme_text_colors_v1")
 private val WALLPAPER = stringPreferencesKey("wallpaper_preset_v1")
 private val WALLPAPER_INTENSITY = intPreferencesKey("wallpaper_intensity_v1")
@@ -75,6 +85,82 @@ internal fun resolveStoredTheme(
     )
 }
 
+const val MAX_INSTALLED_PALETTES = 64
+const val MAX_INSTALLED_PALETTE_BYTES = 512 * 1024
+private val installedPaletteJson = Json { encodeDefaults = true }
+
+private fun canonicalInstalledPalette(palette: InstalledPalette): InstalledPalette {
+    validateInstalledPalette(palette)
+    return palette.copy(document = decodePalette(encodePalette(palette.document)))
+}
+
+/** Shared preflight for storage and backup targets. Never drops invalid entries. */
+fun validateInstalledPalettes(palettes: List<InstalledPalette>) {
+    encodeInstalledPalettes(palettes)
+}
+
+private fun encodeInstalledPalettes(palettes: List<InstalledPalette>): String {
+    if (palettes.size > MAX_INSTALLED_PALETTES) {
+        throw PaletteException(PaletteError.TOO_LARGE, "Too many installed palettes")
+    }
+    if (palettes.map { it.document.id }.toSet().size != palettes.size) {
+        throw PaletteException(PaletteError.INVALID, "Duplicate installed palette ID")
+    }
+    val text = installedPaletteJson.encodeToString(palettes.map(::canonicalInstalledPalette))
+    if (text.toByteArray(Charsets.UTF_8).size > MAX_INSTALLED_PALETTE_BYTES) {
+        throw PaletteException(PaletteError.TOO_LARGE, "Installed palettes exceed byte limit")
+    }
+    return text
+}
+
+private fun decodeInstalledPalettes(raw: String?): List<InstalledPalette> {
+    if (raw == null) return emptyList()
+    if (raw.toByteArray(Charsets.UTF_8).size > MAX_INSTALLED_PALETTE_BYTES) {
+        throw PaletteException(PaletteError.TOO_LARGE, "Installed palettes exceed byte limit")
+    }
+    val array =
+        installedPaletteJson.parseToJsonElement(raw) as? JsonArray
+            ?: throw PaletteException(PaletteError.INVALID, "Installed palettes must be an array")
+    if (array.size > MAX_INSTALLED_PALETTES) throw PaletteException(PaletteError.TOO_LARGE, "Too many installed palettes")
+    val palettes =
+        array.map { element ->
+            val entry = element as? JsonObject ?: throw PaletteException(PaletteError.INVALID, "Invalid installed palette")
+            for (key in listOf("catalogId", "sourceLink")) {
+                val value = entry[key]
+                if (value != null && value != JsonNull && (value !is JsonPrimitive || !value.isString)) {
+                    throw PaletteException(PaletteError.INVALID, "Invalid $key")
+                }
+            }
+            val revision = entry["catalogRevision"]
+            if (revision != null && revision != JsonNull &&
+                (revision !is JsonPrimitive || revision.isString || !Regex("[1-9][0-9]*").matches(revision.content))
+            ) {
+                throw PaletteException(PaletteError.INVALID, "Invalid catalog revision")
+            }
+            val document = entry["document"] ?: throw PaletteException(PaletteError.INVALID, "Missing palette document")
+            val decoded = installedPaletteJson.decodeFromJsonElement<InstalledPalette>(entry)
+            canonicalInstalledPalette(decoded.copy(document = decodePalette(document.toString().toByteArray(Charsets.UTF_8))))
+        }
+    validateInstalledPalettes(palettes)
+    return palettes
+}
+
+private fun Preferences.storedPaletteSelection(palettes: List<InstalledPalette>): PaletteSelection =
+    AppearanceConfig(
+        theme = resolveStoredTheme(this[THEME], this[TRUE_BLACK]).theme,
+        followSystem = this[FOLLOW_SYSTEM] ?: false,
+        paletteMode = this[PALETTE_MODE]?.let { runCatching { PaletteMode.valueOf(it) }.getOrNull() },
+        customPaletteId = this[CUSTOM_PALETTE_ID],
+        customPalettes = palettes,
+    ).paletteSelection
+
+private fun MutablePreferences.writePaletteSelection(selection: PaletteSelection) {
+    this[THEME] = selection.builtin.name
+    this[PALETTE_MODE] = selection.mode.name
+    selection.installedId?.let { this[CUSTOM_PALETTE_ID] = it } ?: remove(CUSTOM_PALETTE_ID)
+    remove(FOLLOW_SYSTEM)
+}
+
 @Singleton
 class AppearancePrefsImpl
     @Inject
@@ -82,10 +168,37 @@ class AppearancePrefsImpl
         @ApplicationContext context: Context,
     ) : AppearancePrefs {
         private val store = context.appearanceDataStore
+        private var cachedPaletteRaw: String? = null
+        private var cachedPalettes: List<InstalledPalette> = emptyList()
+        private var cachedPaletteError: PaletteReadError? = null
+
+        @Synchronized
+        private fun readPalettes(raw: String?): Pair<List<InstalledPalette>, PaletteReadError?> {
+            if (raw == cachedPaletteRaw) return cachedPalettes to cachedPaletteError
+            var readError: PaletteReadError? = null
+            val palettes =
+                try {
+                    decodeInstalledPalettes(raw)
+                } catch (error: Exception) {
+                    if (error is CancellationException) throw error
+                    readError =
+                        if (error is PaletteException && error.error == PaletteError.TOO_LARGE) {
+                            PaletteReadError.TOO_LARGE
+                        } else {
+                            PaletteReadError.INVALID
+                        }
+                    emptyList()
+                }
+            cachedPaletteRaw = raw
+            cachedPalettes = palettes
+            cachedPaletteError = readError
+            return palettes to readError
+        }
 
         override val config: Flow<AppearanceConfig> =
             store.data.map { prefs ->
                 val storedTheme = resolveStoredTheme(prefs[THEME], prefs[TRUE_BLACK])
+                val (palettes, paletteReadError) = readPalettes(prefs[CUSTOM_PALETTES])
                 AppearanceConfig(
                     theme = storedTheme.theme,
                     wallpaper =
@@ -162,26 +275,89 @@ class AppearancePrefsImpl
                             ?.let { runCatching { SplashScreenAnimation.valueOf(it) }.getOrNull() }
                             ?: SplashScreenAnimation.EDGE_TRACE,
                     customFontName = prefs[CUSTOM_FONT_NAME] ?: "",
+                    paletteMode = prefs[PALETTE_MODE]?.let { runCatching { PaletteMode.valueOf(it) }.getOrNull() },
+                    customPaletteId = prefs[CUSTOM_PALETTE_ID],
+                    customPalettes = palettes,
+                    customPaletteReadError = paletteReadError,
                 )
             }
 
-        override suspend fun setTheme(theme: ColorThemePreset) {
-            store.edit {
-                if (theme == ColorThemePreset.AMOLED) {
-                    it[THEME] = ColorThemePreset.DARK.name
-                    it[TRUE_BLACK] = true
-                } else {
-                    it[THEME] = theme.name
+        override suspend fun selectPalette(selection: PaletteSelection) {
+            store.edit { prefs ->
+                val palettes = if (selection.installedId == null) emptyList() else decodeInstalledPalettes(prefs[CUSTOM_PALETTES])
+                prefs.writePaletteSelection(normalizePaletteSelection(selection, palettes))
+                if (selection.builtin == ColorThemePreset.AMOLED) prefs[TRUE_BLACK] = true
+            }
+        }
+
+        override suspend fun savePalette(
+            palette: InstalledPalette,
+            apply: Boolean,
+            mode: PaletteMode,
+            targetInstalledId: String?,
+            expectedTarget: InstalledPalette?,
+        ) {
+            store.edit { prefs ->
+                val palettes = decodeInstalledPalettes(prefs[CUSTOM_PALETTES])
+                val canonical = canonicalInstalledPalette(palette)
+                val existing = palettes.find { it.document.id == canonical.document.id }
+                if (targetInstalledId != null) {
+                    require(targetInstalledId == canonical.document.id && existing != null) { "Update target is no longer installed" }
                 }
+                require(expectedTarget == null || (targetInstalledId != null && existing == expectedTarget)) {
+                    "Update target has changed"
+                }
+                val saved = canonical
+                val target =
+                    if (existing == null) {
+                        palettes + saved
+                    } else {
+                        palettes.map {
+                            if (it.document.id == saved.document.id) saved else it
+                        }
+                    }
+                val selection = prefs.storedPaletteSelection(palettes)
+                val nextSelection =
+                    if (apply) {
+                        normalizePaletteSelection(selection.copy(installedId = saved.document.id, mode = mode), target)
+                    } else if (selection.installedId == saved.document.id) {
+                        normalizePaletteSelection(selection, target)
+                    } else {
+                        selection
+                    }
+                val encoded = encodeInstalledPalettes(target)
+                prefs[CUSTOM_PALETTES] = encoded
+                if (apply || selection.installedId == saved.document.id) prefs.writePaletteSelection(nextSelection)
+            }
+        }
+
+        override suspend fun removePalette(id: String) {
+            store.edit { prefs ->
+                val palettes = decodeInstalledPalettes(prefs[CUSTOM_PALETTES])
+                val target = palettes.filterNot { it.document.id == id }
+                val encoded = encodeInstalledPalettes(target)
+                prefs[CUSTOM_PALETTES] = encoded
+                if (prefs[CUSTOM_PALETTE_ID] == id) {
+                    prefs.writePaletteSelection(PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.SYSTEM))
+                }
+            }
+        }
+
+        override suspend fun restorePalettes(
+            palettes: List<InstalledPalette>,
+            selection: PaletteSelection,
+        ) {
+            store.edit { prefs ->
+                val encoded = encodeInstalledPalettes(palettes)
+                val normalized = normalizePaletteSelection(selection, palettes)
+                prefs[CUSTOM_PALETTES] = encoded
+                prefs.writePaletteSelection(normalized)
+                if (selection.builtin == ColorThemePreset.AMOLED) prefs[TRUE_BLACK] = true
             }
         }
 
         override suspend fun setTrueBlack(enabled: Boolean) {
             store.edit { it[TRUE_BLACK] = enabled }
-        }
-
-        override suspend fun setFollowSystem(enabled: Boolean) {
-            store.edit { it[FOLLOW_SYSTEM] = enabled }
         }
 
         override suspend fun setUseThemeTextColors(enabled: Boolean) {

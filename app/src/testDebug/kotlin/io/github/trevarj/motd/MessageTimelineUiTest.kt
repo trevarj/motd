@@ -3,17 +3,22 @@ package io.github.trevarj.motd
 import android.graphics.Bitmap
 import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.updateTransition
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -22,6 +27,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
@@ -38,14 +44,17 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.text.TextLayoutResult
@@ -56,10 +65,22 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModelStore
+import androidx.navigation.NavDestination.Companion.hasRoute
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
 import androidx.paging.PagingData
+import androidx.paging.cachedIn
 import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.ai.text.TextTermination
 import io.github.trevarj.motd.ai.text.TextTransformResult
+import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioPlaybackRequest
 import io.github.trevarj.motd.data.db.DccAddressKind
 import io.github.trevarj.motd.data.db.DccDirection
@@ -71,11 +92,14 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.history.TimelineSeam
+import io.github.trevarj.motd.data.prefs.*
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
+import io.github.trevarj.motd.data.repo.LinkPreview
+import io.github.trevarj.motd.data.repo.LinkPreviewKind
 import io.github.trevarj.motd.data.sync.COMMAND_RESPONSE_PAYLOAD_PREFIX
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
@@ -85,16 +109,29 @@ import io.github.trevarj.motd.ui.ai.AiTextSource
 import io.github.trevarj.motd.ui.ai.AiTextUiState
 import io.github.trevarj.motd.ui.chat.InlineTranslation
 import io.github.trevarj.motd.ui.chat.MessageList
+import io.github.trevarj.motd.ui.chat.MessageUrlCache
+import io.github.trevarj.motd.ui.chat.OutgoingFlight
 import io.github.trevarj.motd.ui.chat.ReplyTarget
 import io.github.trevarj.motd.ui.chat.TimelineSeamState
 import io.github.trevarj.motd.ui.chat.isSystemRunChunkBoundary
+import io.github.trevarj.motd.ui.chat.messageUrls
+import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
+import io.github.trevarj.motd.ui.nav.ChatRoute
+import io.github.trevarj.motd.ui.nav.PalettePreviewRoute
+import io.github.trevarj.motd.ui.settings.PalettePreviewScreen
+import io.github.trevarj.motd.ui.settings.PalettePreviewViewModel
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -105,6 +142,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.io.File
 import kotlin.math.abs
 
 @RunWith(RobolectricTestRunner::class)
@@ -115,6 +153,345 @@ class MessageTimelineUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test fun collapsedPaletteLinkDoesNotStartPreviewOrAudioWork() {
+        var previews = 0
+        var probes = 0
+        val row =
+            message(
+                1,
+                100,
+                MessageKind.PRIVMSG,
+                "https://files.example/private.motd-palette.json https://files.example/audio",
+            )
+        render(
+            flowOf(PagingData.from(listOf(row))),
+            fools = setOf(row.sender),
+            richContentReady = true,
+            showLinkPreviews = true,
+            automaticRemoteMedia = true,
+            loadPreview = { _, _ ->
+                previews++
+                null
+            },
+            loadAudioMetadata = { _, _ ->
+                probes++
+                null
+            },
+        )
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Preview palette", true).assertDoesNotExist()
+        assertEquals(0, previews)
+        assertEquals(0, probes)
+    }
+
+    @Test fun flightHiddenPaletteRowDefersPreviewAndAudioUntilLanding() {
+        var previews = 0
+        var probes = 0
+        val audio = "https://files.example/flight-audio"
+        val row =
+            message(
+                1,
+                100,
+                MessageKind.PRIVMSG,
+                "https://files.example/flight.motd-palette.json $audio",
+                self = true,
+                pending = true,
+            )
+        var flight by mutableStateOf<OutgoingFlight?>(
+            OutgoingFlight(token = 1, text = row.text, launchedAtMs = 100, eventIds = setOf(row.id)),
+        )
+        MessageUrlCache.put(row.text, messageUrls(row.text))
+        render(
+            flowOf(PagingData.from(listOf(row))),
+            richContentReady = true,
+            showLinkPreviews = true,
+            automaticRemoteMedia = true,
+            outgoingFlight = { flight },
+            loadPreview = { _, _ ->
+                previews++
+                null
+            },
+            loadAudioMetadata = { url, _ ->
+                assertEquals(audio, url)
+                probes++
+                null
+            },
+        )
+        compose.runOnIdle {
+            assertEquals("Flight-hidden palette must not fetch a preview", 0, previews)
+            assertEquals("Flight-hidden palette must not start auxiliary audio work", 0, probes)
+            flight = null
+        }
+        compose.waitUntil(10_000) {
+            compose.waitForIdle()
+            previews == 1 && probes == 1
+        }
+        assertEquals(1, previews)
+        assertEquals(1, probes)
+    }
+
+    @Test fun disabledPalettePreviewsSuppressEvenCachedCards() {
+        val document =
+            decodePalette(
+                requireNotNull(
+                    javaClass.getResourceAsStream(
+                        "/palettes/duplicate-last-valid.motd-palette.json",
+                    ),
+                ).use { it.readBytes() },
+            )
+        val url = "https://files.example/private.motd-palette.json"
+        var requests = 0
+        render(
+            flowOf(PagingData.from(listOf(message(1, 100, MessageKind.PRIVMSG, url)))),
+            richContentReady = true,
+            cachedPreview = { _, _ ->
+                io.github.trevarj.motd.data.repo.CachedLinkPreview(
+                    LinkPreview(url, document.name, null, null, null, LinkPreviewKind.PALETTE, document),
+                )
+            },
+            loadPreview = { _, _ ->
+                requests++
+                null
+            },
+        )
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Preview palette", true).assertDoesNotExist()
+        assertEquals(0, requests)
+    }
+
+    @Test fun selectedPaletteCardCannotOpenPreview() {
+        val document =
+            decodePalette(
+                requireNotNull(
+                    javaClass.getResourceAsStream(
+                        "/palettes/duplicate-last-valid.motd-palette.json",
+                    ),
+                ).use { it.readBytes() },
+            )
+        val url = "https://files.example/selected.motd-palette.json"
+        var opens = 0
+        render(
+            flowOf(PagingData.from(listOf(message(1, 100, MessageKind.PRIVMSG, url)))),
+            richContentReady = true,
+            showLinkPreviews = true,
+            selectionMessageId = 1,
+            cachedPreview = { _, _ ->
+                io.github.trevarj.motd.data.repo.CachedLinkPreview(
+                    LinkPreview(url, document.name, null, null, null, LinkPreviewKind.PALETTE, document),
+                )
+            },
+            onOpenPalette = { _, _ -> opens++ },
+        )
+        compose.waitUntil(10_000) {
+            compose.waitForIdle()
+            compose.onAllNodesWithTag("link_preview_palette", true).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("link_preview_palette", true).performTouchInput { click() }
+        compose.runOnIdle { assertEquals(0, opens) }
+    }
+
+    @Test fun comfortablePaletteCardLoadsPreviewsCancelsAndApplies() = paletteJourney(LayoutDensity.COMFORTABLE)
+
+    @Test fun compactPaletteCardLoadsPreviewsCancelsAndApplies() = paletteJourney(LayoutDensity.COMPACT)
+
+    @Test fun twoLinePaletteCardLoadsPreviewsCancelsAndApplies() = paletteJourney(LayoutDensity.TWO_LINE)
+
+    @Test fun actionPaletteCardLoadsPreviewsCancelsAndApplies() = paletteJourney(LayoutDensity.COMFORTABLE, MessageKind.ACTION)
+
+    private fun paletteJourney(
+        layout: LayoutDensity,
+        kind: MessageKind = MessageKind.PRIVMSG,
+    ) {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = AppearancePrefsImpl(context)
+        val settings = DataStoreSettingsRepository(context)
+        val original = runBlocking { context.appearanceDataStore.data.first() }
+        val models = ViewModelStore()
+        val pagingScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val document =
+            decodePalette(
+                requireNotNull(
+                    javaClass.getResourceAsStream(
+                        "/palettes/duplicate-last-valid.motd-palette.json",
+                    ),
+                ).use { it.readBytes() },
+            )
+        val url = "https://files.example/${document.id}.motd-palette.json?download=1"
+        val preview = LinkPreview(url, document.name, null, null, null, LinkPreviewKind.PALETTE, document)
+        var loads = 0
+        var probes = 0
+        var openedUrls = 0
+        lateinit var nav: NavHostController
+        lateinit var source: androidx.navigation.NavBackStackEntry
+        lateinit var timeline: LazyListState
+        var cached: LinkPreview? = null
+
+        fun await(condition: () -> Boolean) =
+            compose.waitUntil(10_000) {
+                compose.waitForIdle()
+                condition()
+            }
+
+        fun current() = runBlocking { prefs.config.first() }
+
+        fun capture(name: String) {
+            val file = File("build/reports/palettes/irc-${layout.name.lowercase()}-${kind.name.lowercase()}-$name.png")
+            file.parentFile!!.mkdirs()
+            file.outputStream().use {
+                compose
+                    .onRoot()
+                    .captureToImage()
+                    .asAndroidBitmap()
+                    .compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+        }
+        try {
+            runBlocking { context.appearanceDataStore.edit { it.clear() } }
+            val baseline = current()
+            val rows =
+                (40L downTo 1L).map { id ->
+                    message(
+                        id,
+                        id * 100,
+                        if (id == 26L) kind else MessageKind.PRIVMSG,
+                        if (id == 26L) url else "History message $id",
+                    )
+                }
+            val pages = flowOf(PagingData.from(rows)).cachedIn(pagingScope)
+            compose.setContent {
+                val appearance by prefs.config.collectAsState(AppearanceConfig())
+                MotdTheme(
+                    themePreset = appearance.paletteSelection.builtin,
+                    paletteMode = appearance.paletteSelection.mode,
+                    customPalette = appearance.selectedCustomPalette,
+                    layoutDensity = layout,
+                    dynamicColor = false,
+                    syncSystemBars = false,
+                ) {
+                    nav = rememberNavController()
+                    NavHost(nav, startDestination = ChatRoute(42)) {
+                        composable<ChatRoute> { entry ->
+                            source = entry
+                            var draft by rememberSaveable { mutableStateOf("") }
+                            timeline = rememberLazyListState()
+                            Column {
+                                CompositionLocalProvider(LocalAutomaticRemoteMedia provides false) {
+                                    MessageList(
+                                        items = pages.collectAsLazyPagingItems(Dispatchers.Main.immediate),
+                                        listState = timeline,
+                                        networkId = 1,
+                                        readMarkerTime = null,
+                                        modifier = Modifier.weight(1f),
+                                        onLongPress = {},
+                                        onReply = {},
+                                        onReact = { _, _ -> },
+                                        onImageClick = {},
+                                        onRetry = {},
+                                        loadPreview = { _, _ ->
+                                            loads++
+                                            preview.also { cached = it }
+                                        },
+                                        cachedPreview = { _, _ ->
+                                            cached?.let {
+                                                io.github.trevarj.motd.data.repo
+                                                    .CachedLinkPreview(it)
+                                            }
+                                        },
+                                        loadAudioMetadata = { _, _ ->
+                                            probes++
+                                            null
+                                        },
+                                        richContentReady = true,
+                                        showImages = false,
+                                        showLinkPreviews = true,
+                                        onOpenLink = { openedUrls++ },
+                                        onOpenPalette = { palette, originalUrl ->
+                                            nav.navigate(PalettePreviewRoute(encodePalette(palette).decodeToString(), sourceLink = originalUrl))
+                                        },
+                                    )
+                                }
+                                TextField(draft, { draft = it }, Modifier.testTag("palette_source_composer"))
+                            }
+                        }
+                        composable<PalettePreviewRoute> { entry ->
+                            val route = entry.toRoute<PalettePreviewRoute>()
+                            val model =
+                                remember(entry) {
+                                    PalettePreviewViewModel(
+                                        SavedStateHandle(
+                                            mapOf(
+                                                "paletteJson" to route.paletteJson,
+                                                "sourceLink" to route.sourceLink,
+                                            ),
+                                        ),
+                                        prefs,
+                                        settings,
+                                    ).also { models.put(entry.id, it) }
+                                }
+                            PalettePreviewScreen(onBack = { nav.popBackStack() }, onInstalled = { nav.popBackStack() }, viewModel = model)
+                        }
+                    }
+                }
+            }
+            await { compose.onAllNodesWithTag("chat_timeline", true).fetchSemanticsNodes().isNotEmpty() }
+            compose.runOnIdle { runBlocking { timeline.scrollToItem(12, 23) } }
+            await { compose.onAllNodesWithTag("link_preview_awaiting", true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("palette_source_composer").performTextInput("unsent source draft")
+            val sourceEntry = source
+            assertEquals(0, loads)
+            compose.onNodeWithTag("link_preview_awaiting", true).performClick()
+            await { compose.onAllNodesWithContentDescription("Preview palette", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            capture("card")
+            assertEquals(1, loads)
+            assertEquals(0, probes)
+            val sourceViewport = timeline.firstVisibleItemIndex to timeline.firstVisibleItemScrollOffset
+            assertTrue("Exercise a scrolled source channel", sourceViewport.first > 0 && sourceViewport.second > 0)
+            compose.onNodeWithContentDescription("Preview palette", true).performClick()
+            await { nav.currentDestination?.hasRoute<PalettePreviewRoute>() == true }
+            await { compose.onAllNodesWithText(document.name).fetchSemanticsNodes().isNotEmpty() }
+            assertEquals(baseline, current())
+            compose.onNodeWithTag("palette_preview_list").performScrollToNode(hasTestTag("palette_preview_sample_light"))
+            compose.onNodeWithTag("palette_preview_sample_light", true).assertIsDisplayed()
+            capture("preview-light")
+            compose.onNodeWithTag("palette_preview_list").performScrollToNode(hasTestTag("palette_preview_sample_dark"))
+            compose.onNodeWithTag("palette_preview_sample_dark", true).assertIsDisplayed()
+            capture("preview-dark")
+            compose.onNodeWithTag("palette_preview_cancel").performClick()
+            await { nav.currentDestination?.hasRoute<ChatRoute>() == true }
+            assertTrue(sourceEntry === nav.currentBackStackEntry)
+            compose.onNodeWithTag("palette_source_composer").assertTextEquals("unsent source draft")
+            assertEquals(sourceViewport, timeline.firstVisibleItemIndex to timeline.firstVisibleItemScrollOffset)
+            compose.onNodeWithContentDescription("Preview palette", true).performClick()
+            await { nav.currentDestination?.hasRoute<PalettePreviewRoute>() == true }
+            await { compose.onAllNodesWithText(document.name).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("palette_preview_apply").performClick()
+            await { nav.currentDestination?.hasRoute<ChatRoute>() == true }
+            assertEquals(document, current().selectedCustomPalette)
+            val installed = current().customPalettes.single()
+            assertEquals(url, installed.sourceLink)
+            assertEquals(null, installed.catalogId)
+            assertEquals(null, installed.catalogRevision)
+            assertTrue(sourceEntry === nav.currentBackStackEntry)
+            compose.onNodeWithTag("palette_source_composer").assertTextEquals("unsent source draft")
+            assertEquals(sourceViewport, timeline.firstVisibleItemIndex to timeline.firstVisibleItemScrollOffset)
+            assertEquals(1, loads)
+            assertEquals(0, probes)
+            assertEquals(0, openedUrls)
+        } finally {
+            models.clear()
+            pagingScope.cancel()
+            runBlocking {
+                context.appearanceDataStore.edit { target ->
+                    target.clear()
+                    original.asMap().forEach { (key, value) ->
+                        @Suppress("UNCHECKED_CAST")
+                        target[key as Preferences.Key<Any>] = value
+                    }
+                }
+            }
+        }
+    }
 
     @Test
     fun canonicalVariantsRenderOnceInTimelineOrder() {
@@ -1489,11 +1866,20 @@ class MessageTimelineUiTest {
         listState: LazyListState? = null,
         liveEntryIds: () -> Set<Long> = { emptySet() },
         timelineSeams: () -> TimelineSeamState = { TimelineSeamState() },
+        showLinkPreviews: Boolean = false,
+        loadPreview: suspend (String, Long?) -> LinkPreview? = { _, _ -> null },
+        cachedPreview: (String, Long?) -> io.github.trevarj.motd.data.repo.CachedLinkPreview? = { _, _ -> null },
+        selectionMessageId: Long? = null,
+        onOpenPalette: (PaletteDocument, String) -> Unit = { _, _ -> },
+        automaticRemoteMedia: Boolean = false,
+        loadAudioMetadata: suspend (String, Long?) -> AudioMetadata? = { _, _ -> null },
+        outgoingFlight: () -> OutgoingFlight? = { null },
     ) {
         compose.setContent {
             var ai by androidx.compose.runtime.remember { mutableStateOf<AiTextUiState>(AiTextUiState.Closed) }
             CompositionLocalProvider(
                 LocalDickordLabsEnabled provides dickordEnabled,
+                LocalAutomaticRemoteMedia provides automaticRemoteMedia,
                 LocalDensity provides (fontScale?.let { Density(LocalDensity.current.density, it) } ?: LocalDensity.current),
                 LocalLayoutDirection provides layoutDirection(),
             ) {
@@ -1526,6 +1912,7 @@ class MessageTimelineUiTest {
                         modifier = paneWidth?.let { Modifier.width(it) } ?: Modifier,
                         items = collected,
                         listState = timelineState,
+                        selectionMessageId = selectionMessageId,
                         liveEntryIds = liveEntryIds(),
                         networkId = 1,
                         bufferId = 1,
@@ -1557,11 +1944,15 @@ class MessageTimelineUiTest {
                         onReact = { _, _ -> },
                         onImageClick = {},
                         onRetry = {},
-                        loadPreview = { _, _ -> null },
+                        loadPreview = loadPreview,
+                        cachedPreview = cachedPreview,
+                        loadAudioMetadata = loadAudioMetadata,
+                        outgoingFlight = outgoingFlight(),
                         richContentReady = richContentReady,
                         showImages = false,
-                        showLinkPreviews = false,
+                        showLinkPreviews = showLinkPreviews,
                         onOpenLink = {},
+                        onOpenPalette = onOpenPalette,
                         onAudioToggle = onAudioToggle,
                         fools = fools,
                         foolsMode = foolsMode,

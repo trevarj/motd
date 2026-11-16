@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chat
 
+import io.github.trevarj.motd.data.prefs.decodePalette
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewKind
 import org.junit.Assert.assertEquals
@@ -7,6 +8,32 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ContentPreviewPolicyTest {
+    @Test fun palette_snapshot_survives_image_gate_but_disabled_links_remove_candidate() {
+        val palette =
+            decodePalette(
+                requireNotNull(
+                    javaClass.getResourceAsStream(
+                        "/palettes/duplicate-last-valid.motd-palette.json",
+                    ),
+                ).use { it.readBytes() },
+            )
+        val url = "https://example.test/pair.motd-palette.json"
+        val preview =
+            LinkPreview(
+                url = url,
+                title = palette.name,
+                description = null,
+                imageUrl = null,
+                siteName = null,
+                kind = LinkPreviewKind.PALETTE,
+                palette = palette,
+            )
+        assertEquals(preview, preview.withImageGate(showImages = false))
+        assertEquals(palette, preview.withImageGate(showImages = false).palette)
+        assertEquals(MessageUrls.Empty, messageUrls(url).gated(showImages = false, showLinkPreviews = false))
+        assertEquals(url, messageUrls(url).gated(showImages = false, showLinkPreviews = true).linkUrl)
+    }
+
     private val urls =
         MessageUrls(
             mediaUrls = listOf("https://example.test/image.png", "https://example.test/second.webp"),

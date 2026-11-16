@@ -3018,7 +3018,9 @@ class ChatViewModel
                         command.result.complete(persisted)
                     }
 
-                    is DraftCommand.ClearSubmission -> withContext(NonCancellable) { clearPersistedSubmission(command) }
+                    is DraftCommand.ClearSubmission -> {
+                        withContext(NonCancellable) { clearPersistedSubmission(command) }
+                    }
                 }
             }
         }
@@ -3165,17 +3167,18 @@ class ChatViewModel
         private suspend fun clearDraftSubmission(submission: PreparedDraftSubmission) {
             val result = CompletableDeferred<Unit>()
             val command = DraftCommand.ClearSubmission(submission.persisted, result)
-            val queued = synchronized(draftStateLock) {
-                // Acceptance transfers this revision to the outbox, even if disk cleanup loses a CAS.
-                if (_composerDraft.value.revision == submission.snapshot.revision) {
-                    currentDraftText = ""
-                    currentReplyToEventId = null
-                    replyTo.value = null
-                    replySenderNotInChannel.value = false
-                    advanceDraftRevisionLocked(hydrated = true)
+            val queued =
+                synchronized(draftStateLock) {
+                    // Acceptance transfers this revision to the outbox, even if disk cleanup loses a CAS.
+                    if (_composerDraft.value.revision == submission.snapshot.revision) {
+                        currentDraftText = ""
+                        currentReplyToEventId = null
+                        replyTo.value = null
+                        replySenderNotInChannel.value = false
+                        advanceDraftRevisionLocked(hydrated = true)
+                    }
+                    draftCommands.trySend(command).isSuccess
                 }
-                draftCommands.trySend(command).isSuccess
-            }
             if (!queued) withContext(NonCancellable) { clearPersistedSubmission(command) }
             result.await()
         }

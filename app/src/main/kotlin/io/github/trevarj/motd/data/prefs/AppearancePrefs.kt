@@ -48,6 +48,8 @@ enum class ColorThemePreset {
     SOLARIZED_LIGHT,
     TOKYO_NIGHT,
     ZENBURN,
+    DRACULA_LIGHT,
+    TOKYO_NIGHT_LIGHT,
 }
 
 val ColorThemePreset.isFixedPalette: Boolean
@@ -69,6 +71,7 @@ val ColorThemePreset.isDark: Boolean
             ColorThemePreset.LIGHT,
             ColorThemePreset.AYU_LIGHT,
             ColorThemePreset.CATPPUCCIN_LATTE,
+            ColorThemePreset.DRACULA_LIGHT,
             ColorThemePreset.EVERFOREST_LIGHT,
             ColorThemePreset.GRUVBOX_LIGHT,
             ColorThemePreset.KANAGAWA_LOTUS,
@@ -79,6 +82,7 @@ val ColorThemePreset.isDark: Boolean
             ColorThemePreset.NORD_LIGHT,
             ColorThemePreset.ROSE_PINE_DAWN,
             ColorThemePreset.SOLARIZED_LIGHT,
+            ColorThemePreset.TOKYO_NIGHT_LIGHT,
             -> false
 
             else -> true
@@ -97,6 +101,8 @@ val ColorThemePreset.systemPartner: ColorThemePreset?
             ColorThemePreset.AYU_DARK -> ColorThemePreset.AYU_LIGHT
             ColorThemePreset.CATPPUCCIN_LATTE -> ColorThemePreset.CATPPUCCIN_MOCHA
             ColorThemePreset.CATPPUCCIN_MOCHA -> ColorThemePreset.CATPPUCCIN_LATTE
+            ColorThemePreset.DRACULA -> ColorThemePreset.DRACULA_LIGHT
+            ColorThemePreset.DRACULA_LIGHT -> ColorThemePreset.DRACULA
             ColorThemePreset.EVERFOREST_LIGHT -> ColorThemePreset.EVERFOREST_DARK
             ColorThemePreset.EVERFOREST_DARK -> ColorThemePreset.EVERFOREST_LIGHT
             ColorThemePreset.GRUVBOX_LIGHT -> ColorThemePreset.GRUVBOX_DARK
@@ -117,18 +123,99 @@ val ColorThemePreset.systemPartner: ColorThemePreset?
             ColorThemePreset.ROSE_PINE -> ColorThemePreset.ROSE_PINE_DAWN
             ColorThemePreset.SOLARIZED_LIGHT -> ColorThemePreset.SOLARIZED_DARK
             ColorThemePreset.SOLARIZED_DARK -> ColorThemePreset.SOLARIZED_LIGHT
+            ColorThemePreset.TOKYO_NIGHT -> ColorThemePreset.TOKYO_NIGHT_LIGHT
+            ColorThemePreset.TOKYO_NIGHT_LIGHT -> ColorThemePreset.TOKYO_NIGHT
             else -> null
         }
 
-/** Resolve a paired family against the OS only when the user opted into system-mode following. */
-fun resolveAutoPalette(
+/** Stable family identity, independent of the currently displayed mode. */
+val ColorThemePreset.canonicalPalette: ColorThemePreset
+    get() =
+        when {
+            this == ColorThemePreset.AMOLED -> ColorThemePreset.DARK
+            this == ColorThemePreset.SYSTEM || isDark -> this
+            else -> systemPartner ?: this
+        }
+
+fun resolvePalettePreset(
     themePreset: ColorThemePreset,
-    followSystem: Boolean,
+    mode: PaletteMode,
     systemDark: Boolean,
 ): ColorThemePreset {
-    if (!followSystem) return themePreset
-    val partner = themePreset.systemPartner ?: return themePreset
-    return listOf(themePreset, partner).first { it.isDark == systemDark }
+    val builtin = themePreset.canonicalPalette
+    if (builtin == ColorThemePreset.SYSTEM) return builtin
+    val dark =
+        when (mode) {
+            PaletteMode.SYSTEM -> systemDark
+            PaletteMode.DARK -> true
+            PaletteMode.LIGHT -> false
+        }
+    return if (builtin.isDark == dark) builtin else builtin.systemPartner ?: builtin
+}
+
+fun normalizePaletteSelection(
+    selection: PaletteSelection,
+    palettes: List<InstalledPalette>,
+): PaletteSelection {
+    val builtin = selection.builtin.canonicalPalette
+    val document =
+        selection.installedId?.let { id ->
+            requireNotNull(palettes.find { it.document.id == id }) { "Selected palette is not installed" }.document
+        }
+    val mode =
+        if (document != null) {
+            require(document.light != null || document.dark != null) { "Palette needs at least one mode" }
+            when {
+                document.light == null -> PaletteMode.DARK
+                document.dark == null -> PaletteMode.LIGHT
+                else -> selection.mode
+            }
+        } else if (builtin != ColorThemePreset.SYSTEM && builtin.systemPartner == null) {
+            if (builtin.isDark) PaletteMode.DARK else PaletteMode.LIGHT
+        } else {
+            selection.mode
+        }
+    return selection.copy(builtin = builtin, mode = mode)
+}
+
+enum class PaletteReadError { INVALID, TOO_LARGE }
+
+val AppearanceConfig.paletteSelection: PaletteSelection
+    get() {
+        val fallback = PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.SYSTEM)
+        if (customPaletteId != null &&
+            (customPaletteReadError != null || customPalettes.none { it.document.id == customPaletteId })
+        ) {
+            return fallback
+        }
+        val mode =
+            paletteMode ?: when {
+                theme == ColorThemePreset.SYSTEM -> PaletteMode.SYSTEM
+
+                followSystem && (theme.systemPartner != null || theme == ColorThemePreset.AMOLED) &&
+                    theme !in listOf(ColorThemePreset.DRACULA, ColorThemePreset.TOKYO_NIGHT) -> PaletteMode.SYSTEM
+
+                theme.isDark -> PaletteMode.DARK
+
+                else -> PaletteMode.LIGHT
+            }
+        return normalizePaletteSelection(PaletteSelection(theme, customPaletteId, mode), customPalettes)
+    }
+
+val AppearanceConfig.selectedCustomPalette: PaletteDocument?
+    get() = paletteSelection.installedId?.let { id -> customPalettes.find { it.document.id == id }?.document }
+
+/** Editor-only revision handling; importing/replacing a snapshot keeps its supplied revision. */
+fun prepareLocalPaletteSave(
+    original: PaletteDocument,
+    draft: PaletteDocument,
+): PaletteDocument {
+    require(original.id == draft.id) { "Local edit must retain its palette ID" }
+    val previous = decodePalette(encodePalette(original))
+    val candidate = decodePalette(encodePalette(draft.copy(revision = original.revision)))
+    if (encodePalette(previous).contentEquals(encodePalette(candidate))) return previous
+    require(original.revision < Int.MAX_VALUE) { "Revision limit reached; duplicate this palette" }
+    return decodePalette(encodePalette(candidate.copy(revision = original.revision + 1)))
 }
 
 @Serializable(with = ChatWallpaperPresetSerializer::class)
@@ -322,16 +409,33 @@ data class AppearanceConfig(
     val collapseTitleBar: Boolean = true,
     val mediaCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
     val uiIconSet: UiIconSet = UiIconSet.MATERIAL,
+    val paletteMode: PaletteMode? = null,
+    val customPaletteId: String? = null,
+    val customPalettes: List<InstalledPalette> = emptyList(),
+    @Transient val customPaletteReadError: PaletteReadError? = null,
 )
 
 interface AppearancePrefs {
     val config: Flow<AppearanceConfig>
 
-    suspend fun setTheme(theme: ColorThemePreset)
+    suspend fun selectPalette(selection: PaletteSelection)
+
+    suspend fun savePalette(
+        palette: InstalledPalette,
+        apply: Boolean,
+        mode: PaletteMode,
+        targetInstalledId: String? = null,
+        expectedTarget: InstalledPalette? = null,
+    )
+
+    suspend fun removePalette(id: String)
+
+    suspend fun restorePalettes(
+        palettes: List<InstalledPalette>,
+        selection: PaletteSelection,
+    )
 
     suspend fun setTrueBlack(enabled: Boolean)
-
-    suspend fun setFollowSystem(enabled: Boolean)
 
     suspend fun setUseThemeTextColors(enabled: Boolean)
 

@@ -32,13 +32,17 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
+import androidx.core.graphics.toColorInt
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.toRoute
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
-import io.github.trevarj.motd.data.prefs.resolveAutoPalette
+import io.github.trevarj.motd.data.prefs.PaletteMode
+import io.github.trevarj.motd.data.prefs.paletteSelection
+import io.github.trevarj.motd.data.prefs.resolvePalettePreset
+import io.github.trevarj.motd.data.prefs.selectedCustomPalette
 import io.github.trevarj.motd.gesture.GestureAction
 import io.github.trevarj.motd.gesture.GestureNavRequest
 import io.github.trevarj.motd.ui.nav.ChannelInfoRoute
@@ -242,17 +246,25 @@ internal fun GestureOrbSurface(
     }
 }
 
-/**
- * The theme's own accent for the selected slice.
- *
- * Taken from the published identity palette rather than synthesized, and resolved against the
- * palette actually on screen (`followSystem` can be showing the dark half of a stored light preset).
- * Themes that publish no palette fall back to the scheme's primary.
- */
+/** Use the selected palette's identity rather than a stale builtin accent. */
 @Composable
 private fun gestureAccent(appearance: AppearanceConfig): Color {
     val systemDark = isSystemInDarkTheme()
-    val shown = resolveAutoPalette(appearance.theme, appearance.followSystem, systemDark)
+    val selection = appearance.paletteSelection
+    val custom = appearance.selectedCustomPalette
+    if (custom != null) {
+        val dark =
+            when (selection.mode) {
+                PaletteMode.SYSTEM -> systemDark
+                PaletteMode.LIGHT -> false
+                PaletteMode.DARK -> true
+            }
+        val colors = if (dark) custom.dark else custom.light
+        return remember(colors) {
+            colors?.let { Color((it.nicknameColors.firstOrNull() ?: it.primary).toColorInt()) }
+        } ?: MaterialTheme.colorScheme.primary
+    }
+    val shown = resolvePalettePreset(selection.builtin, selection.mode, systemDark)
     val palette = remember(shown) { themeIdentityPalette(shown) }
     return palette.firstOrNull() ?: MaterialTheme.colorScheme.primary
 }

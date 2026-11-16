@@ -40,7 +40,7 @@ fun parseSharedContent(intent: Intent?): PendingShare? {
     return text?.let(PendingShare::Text)
 }
 
-private fun Intent.streamExtra(): Uri? =
+internal fun Intent.streamExtra(): Uri? =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
     } else {

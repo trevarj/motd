@@ -34,6 +34,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import io.github.trevarj.motd.agentwire.AgentwireGateScreen
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
+import io.github.trevarj.motd.data.prefs.encodePalette
 import io.github.trevarj.motd.dickord.DickordPortalRowLookup
 import io.github.trevarj.motd.dickord.DickordPortalScreen
 import io.github.trevarj.motd.dickord.DickordPortalViewModel
@@ -75,6 +76,9 @@ import io.github.trevarj.motd.ui.settings.NetworkToolsScreen
 import io.github.trevarj.motd.ui.settings.NetworksSettingsScreen
 import io.github.trevarj.motd.ui.settings.NickListKind
 import io.github.trevarj.motd.ui.settings.NotificationSettingsScreen
+import io.github.trevarj.motd.ui.settings.PaletteEditorScreen
+import io.github.trevarj.motd.ui.settings.PaletteHubScreen
+import io.github.trevarj.motd.ui.settings.PalettePreviewScreen
 import io.github.trevarj.motd.ui.settings.SecuritySettingsScreen
 import io.github.trevarj.motd.ui.settings.SettingsScreen
 import io.github.trevarj.motd.ui.settings.SettingsSearchDestination
@@ -87,6 +91,8 @@ import io.github.trevarj.motd.ui.settings.labs.AiLabsScreen
 import io.github.trevarj.motd.ui.settings.labs.AiModelLibraryScreen
 import io.github.trevarj.motd.ui.settings.labs.GestureMenuEditorScreen
 import io.github.trevarj.motd.ui.settings.labs.LabsScreen
+import io.github.trevarj.motd.ui.share.IncomingContentNavigation
+import io.github.trevarj.motd.ui.share.PaletteIntentIntake
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.SharePickerScreen
 import io.github.trevarj.motd.ui.theme.MotdMotion
@@ -109,19 +115,20 @@ fun MotdNavGraph(
     // Notification-tap deep-link: open the buffer and jump to the message. Null when absent.
     notificationTarget: NotificationTarget? = null,
     onNotificationTargetHandled: () -> Unit = {},
-    // Inbound ACTION_SEND payload: route to the chat picker. Null when absent.
-    pendingShare: PendingShare? = null,
-    onPendingShareHandled: () -> Unit = {},
-    // External motd://invite payload, already syntax-validated by MainActivity. Empty renders error.
-    pendingJoinInvite: String? = null,
-    onPendingJoinInviteHandled: () -> Unit = {},
+    isNotificationTargetCurrent: () -> Boolean = { true },
+    notificationSource: android.content.Intent? = null,
+    incomingIntake: PaletteIntentIntake? = null,
+    onIncomingShare: (PendingShare) -> Unit = {},
+    onIncomingConsumed: (android.content.Intent) -> Unit = {},
 ) {
+    val incomingActive = incomingIntake?.active?.collectAsStateWithLifecycle()?.value == true
     // Route a notification tap to ChatRoute so the existing jump path (local resolve → CHATHISTORY
     // AROUND fallback) scrolls to and highlights the message. Runs for both cold start (target
     // seeded before first composition) and warm start (target updated by onNewIntent). Clearing the
     // target after navigating lets a subsequent identical tap re-trigger (null → value transition).
-    LaunchedEffect(notificationTarget) {
+    LaunchedEffect(notificationTarget, notificationSource) {
         val target = notificationTarget ?: return@LaunchedEffect
+        if (!isNotificationTargetCurrent()) return@LaunchedEffect
         // Replace an existing chat entry so a warm notification tap for the already-open buffer
         // receives a fresh route-scoped ViewModel and resolves the requested message. A
         // single-top navigation would retain the old ViewModel and silently ignore new jump args.
@@ -136,17 +143,8 @@ fun MotdNavGraph(
         )
         onNotificationTargetHandled()
     }
-    // The payload itself lives in PendingShareStore; this state only triggers the navigation, so
-    // clearing it after routing lets a subsequent share re-trigger (null → value transition).
-    LaunchedEffect(pendingShare) {
-        if (pendingShare == null) return@LaunchedEffect
-        navController.navigate(SharePickerRoute) { launchSingleTop = true }
-        onPendingShareHandled()
-    }
-    LaunchedEffect(pendingJoinInvite) {
-        val payload = pendingJoinInvite ?: return@LaunchedEffect
-        navController.navigate(JoinInviteRoute(payload)) { launchSingleTop = true }
-        onPendingJoinInviteHandled()
+    incomingIntake?.let {
+        IncomingContentNavigation(it, navController, onIncomingShare, onIncomingConsumed)
     }
     val presentations = remember(navController) { ChatPresentationRegistry() }
     NavHost(
@@ -198,8 +196,8 @@ fun MotdNavGraph(
                     ChatListPane(
                         navController = navController,
                         viewModel = chatListViewModel,
-                        appContentVisible = appContentVisible && notificationTarget == null && pendingShare == null,
-                        suppressOnboarding = pendingJoinInvite != null,
+                        appContentVisible = appContentVisible && notificationTarget == null && !incomingActive,
+                        suppressOnboarding = incomingActive,
                         onDefaultBufferAvailable = { bufferId ->
                             if (twoPane && !openedDefault) {
                                 openedDefault = true
@@ -324,6 +322,11 @@ fun MotdNavGraph(
                                 onOpenImage = { url, networkId ->
                                     navController.navigate(ImageViewerRoute(url, networkId))
                                 },
+                                onOpenPalette = { palette, sourceLink ->
+                                    navController.navigate(
+                                        PalettePreviewRoute(encodePalette(palette).decodeToString(), sourceLink = sourceLink),
+                                    )
+                                },
                                 // /msg and /query replace the detail on wide layouts and push on phones.
                                 onOpenBuffer = {
                                     navController.openChat(ChatRoute(it), replaceCurrentChat = !showBack)
@@ -425,10 +428,34 @@ fun MotdNavGraph(
                 target = if (openedEffectsTarget && route.target in listOf(SettingsTarget.SURFACE_EFFECTS, SettingsTarget.MESSAGE_BACKGROUND_OPACITY, SettingsTarget.MESSAGE_BACKGROUND_BLUR)) null else route.target,
                 onBack = { navController.popBackStack() },
                 onOpenNickColors = { navController.navigate(NickColorsRoute) },
+                onOpenPalettes = { navController.navigate(PaletteHubRoute) },
                 onOpenSurfaceEffects = {
                     openedEffectsTarget = true
                     navController.navigate(SurfaceEffectsRoute(it))
                 },
+            )
+        }
+        composable<PaletteHubRoute> {
+            PaletteHubScreen(
+                onBack = { navController.popBackStack() },
+                onEdit = { palette, editingId ->
+                    navController.navigate(PaletteEditorRoute(encodePalette(palette).decodeToString(), editingId))
+                },
+                onPreview = { palette, sourceLink, catalogId, targetInstalledId ->
+                    navController.navigate(PalettePreviewRoute(encodePalette(palette).decodeToString(), sourceLink, catalogId, targetInstalledId))
+                },
+            )
+        }
+        composable<PaletteEditorRoute> {
+            PaletteEditorScreen(
+                onBack = { navController.popBackStack() },
+                onSaved = { navController.popBackStack() },
+            )
+        }
+        composable<PalettePreviewRoute> {
+            PalettePreviewScreen(
+                onBack = { navController.popBackStack() },
+                onInstalled = { navController.popBackStack() },
             )
         }
         composable<SurfaceEffectsRoute> { entry ->

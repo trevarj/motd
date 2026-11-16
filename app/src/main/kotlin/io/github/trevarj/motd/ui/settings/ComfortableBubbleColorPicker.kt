@@ -51,6 +51,8 @@ import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.paletteSelection
+import io.github.trevarj.motd.data.prefs.selectedCustomPalette
 import io.github.trevarj.motd.ui.chat.ColorComponentSlider
 import io.github.trevarj.motd.ui.chat.ColorWheel
 import io.github.trevarj.motd.ui.chat.parseColorHex
@@ -200,11 +202,13 @@ private fun AppearanceBubbleColorOptions(
     appearance: AppearanceConfig,
     content: @Composable () -> Unit,
 ) {
+    val selection = appearance.paletteSelection
     MotdTheme(
-        themePreset = appearance.theme,
+        themePreset = selection.builtin,
+        paletteMode = selection.mode,
+        customPalette = appearance.selectedCustomPalette,
         trueBlack = appearance.trueBlack,
         dynamicColor = settings.dynamicColor,
-        followSystem = appearance.followSystem,
         useThemeTextColors = appearance.useThemeTextColors,
         compactNickBrackets = settings.compactNickBrackets,
         nickMentionStyle = settings.nickMentionStyle,
@@ -218,11 +222,13 @@ private fun AppearanceBubblePreview(
     appearance: AppearanceConfig,
     customFontFile: File?,
 ) {
+    val selection = appearance.paletteSelection
     MotdTheme(
-        themePreset = appearance.theme,
+        themePreset = selection.builtin,
+        paletteMode = selection.mode,
+        customPalette = appearance.selectedCustomPalette,
         trueBlack = appearance.trueBlack,
         dynamicColor = settings.dynamicColor,
-        followSystem = appearance.followSystem,
         useThemeTextColors = appearance.useThemeTextColors,
         layoutDensity = LayoutDensity.COMFORTABLE,
         compactNickBrackets = settings.compactNickBrackets,

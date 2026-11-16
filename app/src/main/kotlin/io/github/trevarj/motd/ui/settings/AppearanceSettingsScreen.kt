@@ -12,7 +12,6 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,7 +32,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -98,12 +96,16 @@ import io.github.trevarj.motd.data.prefs.MIN_FONT_SCALE_PERCENT
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
+import io.github.trevarj.motd.data.prefs.PaletteMode
+import io.github.trevarj.motd.data.prefs.PaletteSelection
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
-import io.github.trevarj.motd.data.prefs.isDark
+import io.github.trevarj.motd.data.prefs.normalizePaletteSelection
+import io.github.trevarj.motd.data.prefs.paletteSelection
+import io.github.trevarj.motd.data.prefs.selectedCustomPalette
 import io.github.trevarj.motd.data.prefs.systemPartner
 import io.github.trevarj.motd.ui.chat.ChatWallpaperPicker
 import io.github.trevarj.motd.ui.chatlist.FolderLayoutPreview
@@ -115,7 +117,6 @@ import io.github.trevarj.motd.ui.components.densityLabel
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.ConversationTypography
 import io.github.trevarj.motd.ui.theme.MotdMotion
-import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.TimestampConfig
@@ -132,6 +133,7 @@ import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 fun AppearanceSettingsScreen(
     onBack: () -> Unit = {},
     onOpenNickColors: () -> Unit = {},
+    onOpenPalettes: () -> Unit,
     onOpenSurfaceEffects: (SettingsTarget?) -> Unit = {},
     target: SettingsTarget? = null,
     viewModel: AppearanceSettingsViewModel = hiltViewModel(),
@@ -168,10 +170,10 @@ fun AppearanceSettingsScreen(
         customFontFile = customFontFile,
         onBack = onBack,
         onOpenNickColors = onOpenNickColors,
+        onOpenPalettes = onOpenPalettes,
         onOpenSurfaceEffects = onOpenSurfaceEffects,
-        onThemePreset = viewModel::setThemePreset,
+        onSelectPalette = viewModel::selectPalette,
         onTrueBlack = viewModel::setTrueBlack,
-        onFollowSystem = viewModel::setFollowSystem,
         onDynamicColor = viewModel::setDynamicColor,
         onUseThemeTextColors = viewModel::setUseThemeTextColors,
         onLayoutDensity = viewModel::setLayoutDensity,
@@ -218,9 +220,9 @@ fun AppearanceSettingsContent(
     appearance: io.github.trevarj.motd.data.prefs.AppearanceConfig,
     onBack: () -> Unit,
     onOpenNickColors: () -> Unit,
-    onThemePreset: (ColorThemePreset) -> Unit,
+    onOpenPalettes: () -> Unit,
+    onSelectPalette: (PaletteSelection) -> Unit,
     onTrueBlack: (Boolean) -> Unit,
-    onFollowSystem: (Boolean) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
     onUseThemeTextColors: (Boolean) -> Unit,
     onLayoutDensity: (LayoutDensity) -> Unit,
@@ -286,7 +288,6 @@ fun AppearanceSettingsContent(
             lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
         }
     }
-    var showThemeSheet by rememberSaveable { mutableStateOf(false) }
     var showFontSheet by rememberSaveable { mutableStateOf(false) }
     var showBubbleColorSheet by rememberSaveable { mutableStateOf(false) }
     var choiceSheet by rememberSaveable { mutableStateOf<AppearanceChoice?>(null) }
@@ -316,12 +317,18 @@ fun AppearanceSettingsContent(
             previewAppearance = previewAppearance.copy(wallpaper = it)
         }
     }
-    val followSystemAvailable = appearance.theme.systemPartner != null
+    val selection = previewAppearance.paletteSelection
+    val customPalette = previewAppearance.selectedCustomPalette
+    val followSystemAvailable =
+        if (customPalette != null) {
+            customPalette.light != null && customPalette.dark != null
+        } else {
+            selection.builtin == ColorThemePreset.SYSTEM || selection.builtin.systemPartner != null
+        }
     val nickPaletteUsed = previewSettings.nickColorsEnabled || previewSettings.nickMentionStyle == NickMentionStyle.CHIP
     val trueBlackAvailable =
-        appearance.theme == ColorThemePreset.SYSTEM ||
-            appearance.theme.isDark || (appearance.followSystem && followSystemAvailable)
-    val dynamicColorAvailable = appearance.theme == ColorThemePreset.SYSTEM
+        selection.mode != PaletteMode.LIGHT
+    val dynamicColorAvailable = selection.installedId == null && selection.builtin == ColorThemePreset.SYSTEM
     SettingsScaffold(
         title = stringResource(R.string.settings_appearance),
         onBack = onBack,
@@ -335,33 +342,41 @@ fun AppearanceSettingsContent(
             ) { targetModifier ->
                 SettingsNavigationRow(
                     icon = Icons.Outlined.Palette,
-                    title = stringResource(R.string.settings_theme),
-                    value = themePresetLabel(appearance.theme),
-                    onClick = { showThemeSheet = true },
-                    modifier = targetModifier.testTag("settings_theme_picker"),
+                    title = stringResource(R.string.palette_title),
+                    value = customPalette?.name ?: paletteBuiltinName(selection.builtin),
+                    onClick = onOpenPalettes,
+                    modifier = targetModifier.testTag("settings_palette_hub"),
                 )
             }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsTarget(target?.name, SettingsTarget.FOLLOW_SYSTEM.name) { targetModifier ->
-                SwitchRow(
-                    title = stringResource(R.string.settings_follow_system),
-                    subtitle =
-                        stringResource(
-                            when {
-                                appearance.theme == ColorThemePreset.SYSTEM -> R.string.settings_follow_system_system_desc
-                                followSystemAvailable -> R.string.settings_follow_system_desc
-                                else -> R.string.settings_follow_system_unavailable_desc
+                Column(targetModifier.testTag("settings_color_mode")) {
+                    Text(stringResource(R.string.palette_color_mode), modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                    PaletteMode.entries.forEach { mode ->
+                        val available = followSystemAvailable || mode == selection.mode
+                        RadioRow(
+                            label =
+                                stringResource(
+                                    when (mode) {
+                                        PaletteMode.SYSTEM -> R.string.palette_mode_system
+                                        PaletteMode.LIGHT -> R.string.palette_mode_light
+                                        PaletteMode.DARK -> R.string.palette_mode_dark
+                                    },
+                                ),
+                            selected = selection.mode == mode,
+                            enabled = available,
+                            onClick = {
+                                val selected = normalizePaletteSelection(selection.copy(mode = mode), previewAppearance.customPalettes)
+                                previewAppearance = previewAppearance.copy(theme = selected.builtin, customPaletteId = selected.installedId, paletteMode = selected.mode)
+                                onSelectPalette(selected)
                             },
-                        ),
-                    checked = appearance.followSystem,
-                    onCheckedChange = {
-                        previewAppearance = previewAppearance.copy(followSystem = it)
-                        onFollowSystem(it)
-                    },
-                    switchTag = "settings_switch_follow_system",
-                    enabled = followSystemAvailable,
-                    modifier = targetModifier,
-                )
+                            modifier = Modifier.testTag("settings_color_mode_${mode.name.lowercase()}"),
+                        )
+                    }
+                    if (!followSystemAvailable) {
+                        Text(stringResource(R.string.palette_single_mode_explanation), modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsTarget(target?.name, SettingsTarget.TRUE_BLACK.name) { targetModifier ->
@@ -784,19 +799,6 @@ fun AppearanceSettingsContent(
             }
         }
     }
-    if (showThemeSheet) {
-        ThemePickerSheet(
-            current = previewAppearance.theme,
-            trueBlack = previewAppearance.trueBlack,
-            dynamicColor = previewSettings.dynamicColor,
-            useThemeTextColors = previewAppearance.useThemeTextColors,
-            onSelect = {
-                previewAppearance = previewAppearance.copy(theme = it)
-                onThemePreset(it)
-            },
-            onDismiss = { showThemeSheet = false },
-        )
-    }
     choiceSheet?.let { choice ->
         AppearanceChoiceSheet(
             choice = choice,
@@ -926,11 +928,13 @@ internal fun AppearanceChatLayoutPreview(
     tagPrefix: String,
     modifier: Modifier = Modifier,
 ) {
+    val selection = appearance.paletteSelection
     MotdTheme(
-        themePreset = appearance.theme,
+        themePreset = selection.builtin,
+        paletteMode = selection.mode,
+        customPalette = appearance.selectedCustomPalette,
         trueBlack = appearance.trueBlack,
         dynamicColor = settings.dynamicColor,
-        followSystem = appearance.followSystem,
         useThemeTextColors = appearance.useThemeTextColors,
         layoutDensity = density,
         compactNickBrackets = settings.compactNickBrackets,
@@ -987,11 +991,13 @@ private fun ComposerStylePreview(
     val sample = stringResource(R.string.settings_chat_preview_message)
     var draft by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(sample)) }
     val styleLabel = composerStyleLabel(appearance.composerStyle)
+    val selection = appearance.paletteSelection
     MotdTheme(
-        themePreset = appearance.theme,
+        themePreset = selection.builtin,
+        paletteMode = selection.mode,
+        customPalette = appearance.selectedCustomPalette,
         trueBlack = appearance.trueBlack,
         dynamicColor = settings.dynamicColor,
-        followSystem = appearance.followSystem,
         useThemeTextColors = appearance.useThemeTextColors,
         layoutDensity = settings.layoutDensity,
         nickColorsEnabled = settings.nickColorsEnabled,
@@ -1666,144 +1672,6 @@ private fun FontScaleSlider(
     }
 }
 
-@Composable
-@OptIn(ExperimentalMaterial3Api::class)
-private fun ThemePickerSheet(
-    current: ColorThemePreset,
-    trueBlack: Boolean,
-    dynamicColor: Boolean,
-    useThemeTextColors: Boolean,
-    onSelect: (ColorThemePreset) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var query by remember { mutableStateOf("") }
-    val normalized = query.trim().lowercase()
-    val systemLabel = themePresetLabel(ColorThemePreset.SYSTEM)
-
-    fun filtered(items: List<ColorThemePreset>) =
-        items.filter {
-            (if (it == ColorThemePreset.SYSTEM) "$systemLabel device system default" else themePresetLabelText(it)).lowercase().contains(normalized)
-        }
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        modifier = Modifier.testTag("settings_theme_sheet"),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-    ) {
-        SheetSystemBars()
-        LazyColumn(
-            Modifier
-                .testTag("settings_theme_list")
-                .selectableGroup()
-                .heightIn(max = 680.dp)
-                .padding(bottom = 24.dp),
-        ) {
-            item {
-                Text(stringResource(R.string.settings_theme), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(16.dp))
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
-                    placeholder = { Text(stringResource(R.string.settings_theme_search)) },
-                    modifier = Modifier.padding(horizontal = 16.dp).testTag("settings_theme_search"),
-                )
-            }
-            val groups =
-                listOf(
-                    R.string.settings_theme_system_group to filtered(listOf(ColorThemePreset.SYSTEM)),
-                    R.string.settings_theme_light_group to filtered(LIGHT_THEME_PRESETS),
-                    R.string.settings_theme_dark_group to filtered(DARK_THEME_PRESETS),
-                )
-            groups.forEach { (title, modes) ->
-                if (modes.isNotEmpty()) {
-                    item { SubLabel(stringResource(title)) }
-                    items(modes.size) { index ->
-                        val mode = modes[index]
-                        ThemeRadioRow(
-                            mode,
-                            current == mode,
-                            trueBlack,
-                            dynamicColor,
-                            useThemeTextColors,
-                            onSelect,
-                        )
-                    }
-                }
-            }
-            if (groups.all { it.second.isEmpty() }) {
-                item { Text(stringResource(R.string.settings_theme_no_results), modifier = Modifier.padding(24.dp)) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ThemeRadioRow(
-    mode: ColorThemePreset,
-    selected: Boolean,
-    trueBlack: Boolean,
-    dynamicColor: Boolean,
-    useThemeTextColors: Boolean,
-    onSelect: (ColorThemePreset) -> Unit,
-) {
-    RadioRow(
-        label = themePresetLabel(mode),
-        selected = selected,
-        enabled = true,
-        onClick = { onSelect(mode) },
-        modifier = Modifier.testTag("settings_theme_${mode.name.lowercase()}"),
-        supportingContent = {
-            MotdTheme(themePreset = mode, trueBlack = trueBlack, dynamicColor = dynamicColor, useThemeTextColors = useThemeTextColors, syncSystemBars = false) {
-                val scheme = MaterialTheme.colorScheme
-                Surface(
-                    color = scheme.background,
-                    shape = MotdShapes.tag,
-                    border = BorderStroke(1.dp, scheme.outline),
-                    modifier =
-                        Modifier
-                            .width(100.dp)
-                            .heightIn(min = 42.dp)
-                            .testTag("settings_theme_preview_${mode.name.lowercase()}"),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                    ) {
-                        Text("Aa", color = scheme.onBackground, style = MaterialTheme.typography.labelSmall)
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(3.dp),
-                        ) {
-                            Box(
-                                Modifier
-                                    .fillMaxWidth(0.72f)
-                                    .height(7.dp)
-                                    .background(scheme.surfaceContainerHigh, MotdShapes.pill),
-                            )
-                            Box(
-                                Modifier
-                                    .fillMaxWidth(0.86f)
-                                    .height(7.dp)
-                                    .background(scheme.primaryContainer, MotdShapes.pill),
-                            )
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .height(7.dp)
-                                    .background(scheme.secondaryContainer, MotdShapes.pill),
-                            )
-                        }
-                        Box(Modifier.width(5.dp).height(24.dp).background(scheme.tertiary, MotdShapes.pill))
-                    }
-                }
-            }
-        },
-    )
-}
-
 /** Mime types accepted by the custom-font document picker; broad because OEM providers vary. */
 private val CUSTOM_FONT_MIME_TYPES =
     arrayOf(
@@ -1923,14 +1791,6 @@ private fun fontChoiceLabel(choice: FontChoice): String =
         },
     )
 
-@Composable
-internal fun themePresetLabel(mode: ColorThemePreset): String =
-    if (mode == ColorThemePreset.SYSTEM) {
-        stringResource(R.string.settings_theme_system, stringResource(if (androidx.compose.foundation.isSystemInDarkTheme()) R.string.settings_theme_dark else R.string.settings_theme_light))
-    } else {
-        stringResource(themePresetLabelRes(mode))
-    }
-
 internal fun themePresetLabelText(mode: ColorThemePreset): String =
     when (mode) {
         ColorThemePreset.SYSTEM -> "Device appearance"
@@ -1943,6 +1803,7 @@ internal fun themePresetLabelText(mode: ColorThemePreset): String =
         ColorThemePreset.CATPPUCCIN_LATTE -> "Catppuccin Latte"
         ColorThemePreset.CATPPUCCIN_MOCHA -> "Catppuccin Mocha"
         ColorThemePreset.DRACULA -> "Dracula"
+        ColorThemePreset.DRACULA_LIGHT -> "Dracula Light"
         ColorThemePreset.EVERFOREST_DARK -> "Everforest Dark"
         ColorThemePreset.EVERFOREST_LIGHT -> "Everforest Light"
         ColorThemePreset.GRUVBOX_DARK -> "Gruvbox Dark"
@@ -1968,57 +1829,9 @@ internal fun themePresetLabelText(mode: ColorThemePreset): String =
         ColorThemePreset.SOLARIZED_DARK -> "Solarized Dark"
         ColorThemePreset.SOLARIZED_LIGHT -> "Solarized Light"
         ColorThemePreset.TOKYO_NIGHT -> "Tokyo Night"
+        ColorThemePreset.TOKYO_NIGHT_LIGHT -> "Tokyo Night Light"
         ColorThemePreset.ZENBURN -> "Zenburn"
     }
-
-private fun themePresetLabelRes(mode: ColorThemePreset): Int =
-    when (mode) {
-        ColorThemePreset.SYSTEM -> R.string.settings_theme_system
-        ColorThemePreset.LIGHT -> R.string.settings_theme_light
-        ColorThemePreset.DARK -> R.string.settings_theme_dark
-        ColorThemePreset.AMOLED -> R.string.settings_theme_amoled
-        ColorThemePreset.AYU_DARK -> R.string.settings_theme_ayu_dark
-        ColorThemePreset.AYU_LIGHT -> R.string.settings_theme_ayu_light
-        ColorThemePreset.AYU_MIRAGE -> R.string.settings_theme_ayu_mirage
-        ColorThemePreset.CATPPUCCIN_LATTE -> R.string.settings_theme_catppuccin_latte
-        ColorThemePreset.CATPPUCCIN_MOCHA -> R.string.settings_theme_catppuccin_mocha
-        ColorThemePreset.DRACULA -> R.string.settings_theme_dracula
-        ColorThemePreset.EVERFOREST_DARK -> R.string.settings_theme_everforest_dark
-        ColorThemePreset.EVERFOREST_LIGHT -> R.string.settings_theme_everforest_light
-        ColorThemePreset.GRUVBOX_DARK -> R.string.settings_theme_gruvbox_dark
-        ColorThemePreset.GRUVBOX_LIGHT -> R.string.settings_theme_gruvbox_light
-        ColorThemePreset.KANAGAWA_DRAGON -> R.string.settings_theme_kanagawa_dragon
-        ColorThemePreset.KANAGAWA_LOTUS -> R.string.settings_theme_kanagawa_lotus
-        ColorThemePreset.KANAGAWA_WAVE -> R.string.settings_theme_kanagawa_wave
-        ColorThemePreset.MODUS_OPERANDI -> R.string.settings_theme_modus_operandi
-        ColorThemePreset.MODUS_VIVENDI -> R.string.settings_theme_modus_vivendi
-        ColorThemePreset.MODUS_OPERANDI_TINTED -> R.string.settings_theme_modus_operandi_tinted
-        ColorThemePreset.MODUS_VIVENDI_TINTED -> R.string.settings_theme_modus_vivendi_tinted
-        ColorThemePreset.MODUS_OPERANDI_DEUTERANOPIA -> R.string.settings_theme_modus_operandi_deuteranopia
-        ColorThemePreset.MODUS_VIVENDI_DEUTERANOPIA -> R.string.settings_theme_modus_vivendi_deuteranopia
-        ColorThemePreset.MODUS_OPERANDI_TRITANOPIA -> R.string.settings_theme_modus_operandi_tritanopia
-        ColorThemePreset.MODUS_VIVENDI_TRITANOPIA -> R.string.settings_theme_modus_vivendi_tritanopia
-        ColorThemePreset.MONOKAI -> R.string.settings_theme_monokai
-        ColorThemePreset.NORD -> R.string.settings_theme_nord
-        ColorThemePreset.NORD_LIGHT -> R.string.settings_theme_nord_light
-        ColorThemePreset.ONE_DARK -> R.string.settings_theme_one_dark
-        ColorThemePreset.ROSE_PINE -> R.string.settings_theme_rose_pine
-        ColorThemePreset.ROSE_PINE_DAWN -> R.string.settings_theme_rose_pine_dawn
-        ColorThemePreset.ROSE_PINE_MOON -> R.string.settings_theme_rose_pine_moon
-        ColorThemePreset.SOLARIZED_DARK -> R.string.settings_theme_solarized_dark
-        ColorThemePreset.SOLARIZED_LIGHT -> R.string.settings_theme_solarized_light
-        ColorThemePreset.TOKYO_NIGHT -> R.string.settings_theme_tokyo_night
-        ColorThemePreset.ZENBURN -> R.string.settings_theme_zenburn
-    }
-
-internal val LIGHT_THEME_PRESETS =
-    ColorThemePreset.entries
-        .filter { !it.isDark && it != ColorThemePreset.SYSTEM }
-        .sortedBy(::themePresetLabelText)
-internal val DARK_THEME_PRESETS =
-    ColorThemePreset.entries
-        .filter { it.isDark && it != ColorThemePreset.AMOLED }
-        .sortedBy(::themePresetLabelText)
 
 private fun launcherIconLabelRes(icon: LauncherIcon): Int =
     when (icon) {
@@ -2042,9 +1855,9 @@ private fun AppearanceSettingsPreview() {
                     .AppearanceConfig(theme = ColorThemePreset.DARK),
             onBack = {},
             onOpenNickColors = {},
-            onThemePreset = {},
+            onOpenPalettes = {},
+            onSelectPalette = {},
             onTrueBlack = {},
-            onFollowSystem = {},
             onDynamicColor = {},
             onUseThemeTextColors = {},
             onLayoutDensity = {},
@@ -2079,9 +1892,9 @@ private fun AppearanceSettingsMinTextPreview() {
                     .AppearanceConfig(uiFontScalePercent = 80),
             onBack = {},
             onOpenNickColors = {},
-            onThemePreset = {},
+            onOpenPalettes = {},
+            onSelectPalette = {},
             onTrueBlack = {},
-            onFollowSystem = {},
             onDynamicColor = {},
             onUseThemeTextColors = {},
             onLayoutDensity = {},
@@ -2116,9 +1929,9 @@ private fun AppearanceSettingsMaxTextPreview() {
                     .AppearanceConfig(uiFontScalePercent = 140),
             onBack = {},
             onOpenNickColors = {},
-            onThemePreset = {},
+            onOpenPalettes = {},
+            onSelectPalette = {},
             onTrueBlack = {},
-            onFollowSystem = {},
             onDynamicColor = {},
             onUseThemeTextColors = {},
             onLayoutDensity = {},

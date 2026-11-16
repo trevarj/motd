@@ -8,9 +8,14 @@ import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.NickColorPalette
+import io.github.trevarj.motd.data.prefs.PaletteColors
+import io.github.trevarj.motd.data.prefs.PaletteDocument
+import io.github.trevarj.motd.data.prefs.PaletteMode
+import io.github.trevarj.motd.data.prefs.decodePalette
+import io.github.trevarj.motd.data.prefs.encodePalette
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.prefs.isFixedPalette
-import io.github.trevarj.motd.data.prefs.resolveAutoPalette
+import io.github.trevarj.motd.data.prefs.resolvePalettePreset
 import io.github.trevarj.motd.data.prefs.systemPartner
 import io.github.trevarj.motd.ui.components.messageContrastSchemes
 import io.github.trevarj.motd.ui.components.onColorFor
@@ -66,6 +71,23 @@ class ThemeCatalogTest {
         }
     }
 
+    @Test fun newlyPairedPalettes_resolveBothModes() {
+        listOf(
+            ColorThemePreset.DRACULA to ColorThemePreset.DRACULA_LIGHT,
+            ColorThemePreset.TOKYO_NIGHT to ColorThemePreset.TOKYO_NIGHT_LIGHT,
+        ).forEach { (dark, light) ->
+            assertTrue(dark.isDark)
+            assertTrue(!light.isDark)
+            assertEquals(light, dark.systemPartner)
+            assertEquals(dark, light.systemPartner)
+            assertEquals(light, resolvePalettePreset(dark, PaletteMode.SYSTEM, systemDark = false))
+            assertEquals(dark, resolvePalettePreset(light, PaletteMode.SYSTEM, systemDark = true))
+            assertNotNull(rawFixedThemeScheme(dark))
+            assertNotNull(rawFixedThemeScheme(light))
+            assertNotEquals(fixedThemeScheme(dark)!!.background, fixedThemeScheme(light)!!.background)
+        }
+    }
+
     @Test fun systemPartners_resolveToOppositeModeSchemeAndAreSymmetric() {
         ColorThemePreset.entries.forEach { preset ->
             val partner = preset.systemPartner
@@ -91,10 +113,8 @@ class ThemeCatalogTest {
             setOf(
                 ColorThemePreset.SYSTEM,
                 ColorThemePreset.AMOLED,
-                ColorThemePreset.DRACULA,
                 ColorThemePreset.MONOKAI,
                 ColorThemePreset.ONE_DARK,
-                ColorThemePreset.TOKYO_NIGHT,
                 ColorThemePreset.ZENBURN,
                 ColorThemePreset.AYU_MIRAGE,
                 ColorThemePreset.KANAGAWA_DRAGON,
@@ -103,29 +123,36 @@ class ThemeCatalogTest {
         neverPaired.forEach { assertNull("$it must not auto-swap", it.systemPartner) }
     }
 
-    @Test fun resolveAutoPalette_keepsExplicitVariantWhenSystemFollowingIsDisabled() {
+    @Test fun explicitModes_ignoreSystemModeAndResolveTheRequestedVariant() {
         assertEquals(
             ColorThemePreset.KANAGAWA_WAVE,
-            resolveAutoPalette(ColorThemePreset.KANAGAWA_WAVE, followSystem = false, systemDark = false),
+            resolvePalettePreset(ColorThemePreset.KANAGAWA_WAVE, PaletteMode.DARK, systemDark = false),
         )
         assertEquals(
             ColorThemePreset.GRUVBOX_LIGHT,
-            resolveAutoPalette(ColorThemePreset.GRUVBOX_LIGHT, followSystem = false, systemDark = true),
+            resolvePalettePreset(ColorThemePreset.GRUVBOX_DARK, PaletteMode.LIGHT, systemDark = true),
         )
     }
 
-    @Test fun resolveAutoPalette_swapsPairedFamiliesAndIgnoresDarkOnlyThemes() {
-        assertEquals(ColorThemePreset.KANAGAWA_LOTUS, resolveAutoPalette(ColorThemePreset.KANAGAWA_WAVE, followSystem = true, systemDark = false))
-        assertEquals(ColorThemePreset.KANAGAWA_WAVE, resolveAutoPalette(ColorThemePreset.KANAGAWA_WAVE, followSystem = true, systemDark = true))
-        assertEquals(ColorThemePreset.GRUVBOX_DARK, resolveAutoPalette(ColorThemePreset.GRUVBOX_LIGHT, followSystem = true, systemDark = true))
-        assertEquals(ColorThemePreset.GRUVBOX_LIGHT, resolveAutoPalette(ColorThemePreset.GRUVBOX_LIGHT, followSystem = true, systemDark = false))
-        assertEquals(ColorThemePreset.DARK, resolveAutoPalette(ColorThemePreset.LIGHT, followSystem = true, systemDark = true))
-        assertEquals(ColorThemePreset.LIGHT, resolveAutoPalette(ColorThemePreset.DARK, followSystem = true, systemDark = false))
-        assertEquals(ColorThemePreset.NORD_LIGHT, resolveAutoPalette(ColorThemePreset.NORD, followSystem = true, systemDark = false))
-        // Dark-only palettes have no partner and stay dark in both OS modes.
-        assertEquals(ColorThemePreset.DRACULA, resolveAutoPalette(ColorThemePreset.DRACULA, followSystem = true, systemDark = false))
-        assertEquals(ColorThemePreset.DRACULA, resolveAutoPalette(ColorThemePreset.DRACULA, followSystem = true, systemDark = true))
-        assertEquals(ColorThemePreset.SYSTEM, resolveAutoPalette(ColorThemePreset.SYSTEM, followSystem = true, systemDark = true))
+    @Test fun systemMode_swapsPairedFamiliesAndKeepsSingleModePalettes() {
+        ColorThemePreset.entries.forEach { preset ->
+            val partner = preset.systemPartner
+            if (partner != null) {
+                val light = if (preset.isDark) partner else preset
+                val dark = if (preset.isDark) preset else partner
+                assertEquals(light, resolvePalettePreset(preset, PaletteMode.SYSTEM, systemDark = false))
+                assertEquals(dark, resolvePalettePreset(preset, PaletteMode.SYSTEM, systemDark = true))
+            } else if (preset != ColorThemePreset.SYSTEM && preset != ColorThemePreset.AMOLED) {
+                PaletteMode.entries.forEach { mode ->
+                    assertEquals(preset, resolvePalettePreset(preset, mode, systemDark = false))
+                    assertEquals(preset, resolvePalettePreset(preset, mode, systemDark = true))
+                }
+            }
+        }
+        PaletteMode.entries.forEach { mode ->
+            assertEquals(ColorThemePreset.SYSTEM, resolvePalettePreset(ColorThemePreset.SYSTEM, mode, systemDark = true))
+            assertEquals(ColorThemePreset.SYSTEM, resolvePalettePreset(ColorThemePreset.SYSTEM, mode, systemDark = false))
+        }
     }
 
     @Test fun everyStaticPalette_meetsReadableRoleContrast() {
@@ -261,8 +288,66 @@ class ThemeCatalogTest {
         }
     }
 
+    @Test fun customAuthoredRoles_surviveExportWhileBothTextModesAndTrueBlackStayReadable() {
+        for (dark in listOf(false, true)) {
+            val authored =
+                PaletteColors(
+                    primary = "#826CA0",
+                    secondary = "#648A80",
+                    tertiary = "#AA8070",
+                    background = if (dark) "#202020" else "#FAFAFA",
+                    surface = if (dark) "#242424" else "#F7F7F7",
+                    surfaceContainer = if (dark) "#303030" else "#EEEEEE",
+                    onBackground = if (dark) "#555050" else "#AAAAA0",
+                    onSurface = if (dark) "#565151" else "#ABABA1",
+                    onSurfaceVariant = if (dark) "#575252" else "#ACACA2",
+                    outlineVariant = "#888080",
+                )
+            val document =
+                PaletteDocument(
+                    id = "authored-gray",
+                    name = "Authored gray",
+                    revision = 1,
+                    light = authored.takeUnless { dark },
+                    dark = authored.takeIf { dark },
+                )
+            val exported = decodePalette(encodePalette(document))
+            val colors = requireNotNull(if (dark) exported.dark else exported.light)
+            val raw = colors.toRawColorScheme(dark)
+            assertTrue("authored low contrast is not fitted on export", contrastRatio(raw.onBackground, raw.background) < 4.5)
+            assertNotEquals(raw.background, raw.surface)
+            assertEquals(authored.onBackground, colors.onBackground)
+            for (themeText in listOf(false, true)) {
+                val applied = accessibleColorScheme(raw, dark, themeText)
+                assertEquals(raw.background, applied.background)
+                assertEquals(raw.surface, applied.surface)
+                assertNotEquals(raw.onBackground, applied.onBackground)
+                if (themeText) {
+                    assertEquals(ensureContrast(raw.onBackground, neutralSurfaces(applied)), applied.onBackground)
+                    assertEquals(ensureContrast(raw.onSurfaceVariant, neutralSurfaces(applied)), applied.onSurfaceVariant)
+                } else {
+                    assertEquals(applied.onBackground, applied.onSurface)
+                    assertEquals(applied.onSurface, applied.onSurfaceVariant)
+                    assertEquals(applied.onSurface.red, applied.onSurface.green, 0.00001f)
+                }
+                val variants = if (dark) listOf(applied, applied.withTrueBlackSurfaces()) else listOf(applied)
+                for (variant in variants) {
+                    if (variant !== applied) assertEquals(Color.Black, variant.background)
+                    neutralSurfaces(variant).forEach { fill ->
+                        listOf(variant.onBackground, variant.onSurface, variant.onSurfaceVariant).forEach { ink ->
+                            assertTrue("custom $dark/$themeText ink", contrastRatio(ink, fill) >= 4.5)
+                        }
+                        assertTrue("custom outline", contrastRatio(variant.outlineVariant, fill) >= 3.0)
+                    }
+                }
+            }
+            // Applying either preference never mutates the shareable authored document.
+            assertEquals(exported, decodePalette(encodePalette(document)))
+        }
+    }
+
     @Test fun trueBlack_preservesPaletteIdentityAndContrastForEveryDarkPalette() {
-        staticSchemes().filter { it.first.isDark }.forEach { (preset, source) ->
+        listOf(false, true).flatMap { staticSchemes(it) }.filter { it.first.isDark }.forEach { (preset, source) ->
             val scheme = source.withTrueBlackSurfaces()
             assertEquals("$preset true-black background", Color.Black, scheme.background)
             assertEquals("$preset true-black surface", Color.Black, scheme.surface)
@@ -325,12 +410,12 @@ class ThemeCatalogTest {
         }
     }
 
-    private fun staticSchemes(): List<Pair<ColorThemePreset, ColorScheme>> =
+    private fun staticSchemes(useThemeTextColors: Boolean = false): List<Pair<ColorThemePreset, ColorScheme>> =
         buildList {
-            add(ColorThemePreset.LIGHT to MotdLightScheme)
-            add(ColorThemePreset.DARK to MotdDarkScheme)
+            add(ColorThemePreset.LIGHT to if (useThemeTextColors) MotdLightThemeTextScheme else MotdLightScheme)
+            add(ColorThemePreset.DARK to if (useThemeTextColors) MotdDarkThemeTextScheme else MotdDarkScheme)
             ColorThemePreset.entries.filter { it.isFixedPalette }.forEach { preset ->
-                add(preset to requireNotNull(fixedThemeScheme(preset)))
+                add(preset to requireNotNull(fixedThemeScheme(preset, useThemeTextColors)))
             }
         }
 

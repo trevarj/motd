@@ -47,6 +47,42 @@ class LinkPreviewSsrfTest {
     }
 
     @Test
+    fun palette_candidates_use_exact_community_grammar_and_public_https_file_suffixes() {
+        val raw = "https://raw.githubusercontent.com/trevarj/motd/main/palettes/example/1.motd-palette.json"
+        assertEquals(PaletteLinkTarget(raw, true), paletteLinkTarget("https://github.com/trevarj/motd/blob/main/palettes/example/1.motd-palette.json?raw=1#sample"))
+        assertEquals(PaletteLinkTarget(raw, true), paletteLinkTarget(raw))
+        val commit = "a".repeat(40)
+        assertTrue(paletteLinkTarget(raw.replace("/main/", "/$commit/"))!!.community)
+        val external = "https://files.example.org/a.MOTD-PALETTE.JSON?download=1"
+        assertEquals(PaletteLinkTarget(external, false), paletteLinkTarget("$external#sample"))
+        assertFalse(paletteLinkTarget(raw.replace("trevarj/motd", "lookalike/motd"))!!.community)
+        for (url in listOf(
+            "http://example.org/a.motd-palette.json",
+            "https://user:password@example.org/a.motd-palette.json",
+            "https://example.org/a.json",
+            "https://github.com/other/repo/blob/main/a.motd-palette.json",
+            "https://github.com/trevarj/motd/blob/branch/palettes/example/1.motd-palette.json",
+            "https://github.com/trevarj/motd/blob/main/palettes/example/../1.motd-palette.json",
+            "https://example.org/a.motd-palette.json\n",
+        )) {
+            assertNull(url, paletteLinkTarget(url))
+        }
+    }
+
+    @Test
+    fun palette_candidates_do_not_bypass_destination_safety() {
+        for (url in listOf(
+            "https://127.0.0.1/a.motd-palette.json",
+            "https://10.1.2.3/a.motd-palette.json",
+            "https://[fc00::1]/a.motd-palette.json",
+        )) {
+            assertNotNull(paletteLinkTarget(url))
+            assertFalse(LinkPreviewRepositoryImpl.isAllowedDestination(URL(url), resolveDns = false))
+        }
+        assertFalse(LinkPreviewRepositoryImpl.isAllowedDestination(URL("https://user:secret@example.org/a.motd-palette.json"), resolveDns = false))
+    }
+
+    @Test
     fun destination_policy_requires_https() {
         assertFalse(LinkPreviewRepositoryImpl.isAllowedDestination(URL("http://example.com/"), resolveDns = true))
         assertFalse(LinkPreviewRepositoryImpl.isAllowedDestination(URL("http://example.com/"), resolveDns = false))

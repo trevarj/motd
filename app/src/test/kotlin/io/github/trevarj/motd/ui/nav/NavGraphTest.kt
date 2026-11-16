@@ -11,8 +11,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.createGraph
 import androidx.navigation.toRoute
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.data.prefs.decodePalette
+import io.github.trevarj.motd.data.prefs.encodePalette
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -21,6 +24,59 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class NavGraphTest {
     private val chatRouteName = requireNotNull(ChatRoute::class.qualifiedName)
+
+    @Test
+    fun `palette snapshot routes restore and return to the original chat draft`() {
+        fun controller() =
+            NavHostController(ApplicationProvider.getApplicationContext<Context>()).apply {
+                setLifecycleOwner(ResumedOwner())
+                setViewModelStore(ViewModelStore())
+                navigatorProvider.addNavigator(ComposeNavigator())
+            }
+
+        fun NavHostController.installGraph() {
+            graph =
+                createGraph(startDestination = ChatListRoute) {
+                    composable<ChatListRoute> {}
+                    composable<ChatRoute> {}
+                    composable<PaletteHubRoute> {}
+                    composable<PaletteEditorRoute> {}
+                    composable<PalettePreviewRoute> {}
+                }
+        }
+        val document = decodePalette(requireNotNull(javaClass.getResourceAsStream("/palettes/duplicate-last-valid.motd-palette.json")).use { it.readBytes() })
+        val snapshot = encodePalette(document).decodeToString()
+        val original = controller().apply { installGraph() }
+        original.navigate(ChatRoute(42))
+        original.currentBackStackEntry!!.savedStateHandle["draft"] = "unsent composer"
+        val preview = PalettePreviewRoute(snapshot, "https://example.org/theme.motd-palette.json")
+        original.navigate(preview)
+        val restored =
+            controller().apply {
+                restoreState(original.saveState())
+                installGraph()
+            }
+        assertEquals(preview, restored.currentBackStackEntry!!.toRoute<PalettePreviewRoute>())
+        assertNull(restored.currentBackStackEntry!!.toRoute<PalettePreviewRoute>().catalogId)
+        assertNull(restored.currentBackStackEntry!!.toRoute<PalettePreviewRoute>().targetInstalledId)
+        assertEquals(
+            document,
+            decodePalette(
+                restored.currentBackStackEntry!!
+                    .toRoute<PalettePreviewRoute>()
+                    .paletteJson
+                    .encodeToByteArray(),
+            ),
+        )
+        assertTrue(restored.popBackStack())
+        assertEquals(ChatRoute(42), restored.currentBackStackEntry!!.toRoute<ChatRoute>())
+        assertEquals("unsent composer", restored.currentBackStackEntry!!.savedStateHandle.get<String>("draft"))
+        restored.navigate(PaletteHubRoute)
+        restored.navigate(PaletteEditorRoute(snapshot, document.id))
+        assertEquals(document.id, restored.currentBackStackEntry!!.toRoute<PaletteEditorRoute>().editingInstalledId)
+        assertTrue(restored.popBackStack())
+        assertEquals(PaletteHubRoute, restored.currentBackStackEntry!!.toRoute<PaletteHubRoute>())
+    }
 
     @Test
     fun `chat destination patterns use the drawer style transition`() {

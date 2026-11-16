@@ -1011,21 +1011,52 @@ phase_f() {
   step "Theme: True black"
   tap_tag settings_category_appearance
   wait_for_text "Appearance" 6 || true
-  assert_tag_present settings_theme_picker
-  tap_tag settings_theme_picker
-  # The exact visible label remains inside the search field as well as the filtered result. Theme
-  # sheet tags are not exported through UIAutomator, so target the last matching text node.
-  wait_for_text "Search themes" 6 || true
-  assert_text "Search themes"
-  input_by_text_label "Search themes" "Ayu Dark"
-  wait_for_text "Ayu Dark" 6 || true
-  tap_text_last "Ayu Dark"
-  # Theme selection is intentionally non-dismissing so users can compare palettes in place.
-  adb_shell input keyevent 4
+  assert_tag_present settings_palette_hub
+  tap_tag settings_palette_hub
+  wait_for_text "Search palettes" 6 || true
+  input_by_text_label "Search palettes" "Ayu"
+  wait_for_text "Ayu" 6 || true
+  tap_tag palette_builtin_ayu_dark
+  tap_tag palette_back
   wait_for_text "Appearance" 6 || true
+  tap_tag settings_color_mode_dark
   tap_tag settings_switch_true_black
   screencap_step "amoled_background"   # color-only oracle
   ok "enabled true black on Ayu Dark (background asserted via screencap only)"
+  assert_no_crash
+
+  step "Palette: save, share file, cancel import, then apply"
+  local palette_file_name="File palette $(date +%s)"
+  tap_tag settings_palette_hub
+  tap_tag palette_create
+  wait_for_tag palette_editor_name 8 || true
+  input_tag palette_editor_name "$palette_file_name"
+  tap_tag palette_editor_save
+  wait_for_tag palette_hub 8 || true
+  tap_text "Yours"
+  input_tag palette_search "$palette_file_name"
+  local palette_preview_action
+  for palette_preview_action in palette_preview_cancel palette_preview_apply; do
+    tap_text "Share"
+    # Real Android chooser + FileProvider stream, not an injected activity result.
+    wait_for_text "motd (debug)" 10 || true
+    tap_text "motd (debug)"
+    if wait_for_text "Just once" 2; then tap_text "Just once"; fi
+    wait_for_tag palette_preview_apply 10 || true
+    assert_tag_present palette_preview_apply
+    screencap_step "$palette_preview_action"
+    tap_tag "$palette_preview_action"
+    wait_for_tag palette_hub 8 || true
+    assert_tag_present palette_hub
+  done
+  ok "shared a real local palette file; Cancel returned, then explicit Apply completed"
+  # Restore the phase's selected family without deleting the saved local document.
+  tap_text "Built-in"
+  input_tag palette_search "Ayu"
+  tap_tag palette_builtin_ayu_dark
+  tap_tag palette_back
+  wait_for_text "Appearance" 6 || true
+  tap_tag settings_color_mode_dark
   assert_no_crash
 
   # 46. Colored nicknames off/on.
@@ -1763,35 +1794,18 @@ _showcase_apply_theme() {
   wait_for_text "Settings" 8 || true
   tap_tag settings_category_appearance
   wait_for_text "Appearance" 8 || true
-  tap_tag settings_theme_picker
-  wait_for_text "Search themes" 6 || true
-  # "Ayu" leaves only the three Ayu rows, well inside the sheet's 680dp fold.
-  # The list is a LazyColumn, so an off-screen row is absent from the semantics
-  # tree entirely and no amount of waiting finds it; the short filter keeps the
-  # target composed.
-  input_by_text_label "Search themes" "Ayu"
-  # Address the row by text, not testTag. The sheet is its own Compose window,
-  # so the Activity root's testTagsAsResourceId never reaches it and every node
-  # inside dumps with an empty resource-id. UIAutomator matches text exactly,
-  # so "Ayu Light" / "Ayu Dark" cannot collide with "Ayu Mirage" nor with the
-  # search field now holding "Ayu".
-  wait_for_text "$theme_row" 10 || true
-  tap_text "$theme_row"
-  # The sheet is a separate Compose window. Do not start scrolling the
-  # underlying Appearance page until its close affordance has disappeared.
-  local _theme_wait
-  for _theme_wait in 1 2 3 4 5 6; do
-    dump || true
-    [ -z "$(bounds_of_desc "Close sheet")" ] && break
-    sleep 1
-  done
+  tap_tag settings_palette_hub
+  wait_for_text "Search palettes" 6 || true
+  input_by_text_label "Search palettes" "Ayu"
+  tap_tag palette_builtin_ayu_dark
+  tap_tag palette_back
   wait_for_text "Appearance" 6 || true
-  # Phase A cleared app data, so the production defaults already pin comfortable bubbles and IRC
-  # sprites. State only what happened. This line used to claim the theme was
-  # selected even on a run whose tap had already failed, which read as success
-  # next to wrongly-themed frames. The tap_tag above is the real gate: it fails
-  # the run, and a failed run never reaches the upload.
-  note "theme sheet dismissed; showcase presentation defaults left at their post-wipe values"
+  if [ "$night" = yes ]; then
+    tap_tag settings_color_mode_dark
+  else
+    tap_tag settings_color_mode_light
+  fi
+  note "selected Ayu family and explicit showcase color mode"
   sleep 1
   [ "$restart" = restart ] && adb_shell am force-stop "$MOTD_PKG"
   # Align the OS night mode with the selected palette (recreates the activity,
