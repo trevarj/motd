@@ -1021,6 +1021,8 @@ class RequiredHeadlessE2eTest {
                 robot.awaitTag("link_preview_awaiting")
                 fixture.assertRequests(0)
                 runBlocking {
+                    bootstrap.seams.connections().disconnect(network.childId)
+                    bootstrap.seams.connections().disconnect(network.rootId)
                     bootstrap.seams.certTrust().pin(fixture.host, root.port, fixture.fingerprint)
                     bootstrap.seams.networks().updateNetwork(
                         root.copy(host = fixture.host, obfsMode = ObfsMode.SOCKS5, proxyHost = "127.0.0.1", proxyPort = fixture.port),
@@ -1082,6 +1084,12 @@ class RequiredHeadlessE2eTest {
                     previews.setShowLinkPreviews(originalPreviews.showLinkPreviews)
                     previews.setAutoLoadOnMetered(originalPreviews.autoLoadOnMetered)
                     previews.setAutoLoadOnUnmetered(originalPreviews.autoLoadOnUnmetered)
+                    val connections = bootstrap.seams.connections()
+                    val probe = ConnectionProbe(connections, milestones)
+                    connections.connect(network.rootId)
+                    probe.awaitReady(network.rootId, emptySet())
+                    connections.connect(network.childId)
+                    probe.awaitReady(network.childId, emptySet())
                 }
             }
         }
