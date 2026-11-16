@@ -65,7 +65,8 @@ flowchart TD
 - Palette editors own bounded saveable drafts and invalid-field state. Native chat,
   chat-list and control samples stay contained, without remote media or system-bar
   changes. Full previews carry validated immutable document snapshots; only explicit
-  Save/Apply/Update writes appearance preferences.
+  Save/Apply/Update writes appearance preferences. Preview chrome reserves status
+  and navigation bar insets so its actions remain reachable edge-to-edge.
 - File intake classifies bounded owned bytes before ordinary chat sharing. Latest
   delivery ownership and source-matched consumption survive recreation; generic
   unmarked JSON shares remain attachments. SAF and narrow FileProvider exports

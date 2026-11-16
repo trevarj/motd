@@ -8,8 +8,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -53,7 +55,7 @@ fun PalettePreviewScreen(
     BackHandler(enabled = state.saving) { }
     Scaffold(
         topBar = {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
                 Text("Palette preview", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                 TextButton(onClick = onBack, enabled = !state.saving, modifier = Modifier.testTag("palette_preview_cancel")) {
                     Text("Cancel")
@@ -61,7 +63,7 @@ fun PalettePreviewScreen(
             }
         },
         bottomBar = {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (state.document != null) {
                     if (state.targetInstalledId != null) {
                         Button(
