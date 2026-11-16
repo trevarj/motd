@@ -81,15 +81,12 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
   '<fully-qualified-class.method>' --stacktrace`, or `:irc:test` for protocol
   changes. Filters narrow execution, not compilation of test sources and
   dependencies. Robolectric Compose tests are local unit-tier checks.
-- Before committing or pushing, assemble each changed module and follow the command
-  matrix: root `ktlintCheck`
-  for any Kotlin/Gradle change; compile affected source sets, including app
-  `compileDebugKotlin` and `compileDebugUnitTestKotlin` for main/API changes and
-  `compileE2eAndroidTestKotlin` for affected instrumentation consumers. Debug
-  assembly does not cover those test boundaries. Use `tools/android-lint.sh`
-  for production release lint, adding debug lint when `tools/ci-paths.sh` selects
-  it. Keep editing checks targeted; the installed pre-push hook runs full applicable
-  suites before pushing.
+- Before committing or pushing, follow the command
+  matrix: root `ktlintCheck` for Kotlin/Gradle changes and affected production
+  compilation. Hosted CI owns full tests, test/E2E source compilation, Android
+  lint, APK/native packaging and verification, and emulator journeys; expensive
+  local checks are explicit/on-demand. Keep editing checks targeted; the light
+  pre-push hook does not replace behavior regressions or authorized device smoke.
   A failed earlier task leaves trailing tasks unverified; skipped checks and
   delegated source-only reviews are not verification.
 - For database changes, run the nearest database unit regression and review/commit
@@ -97,8 +94,11 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
 - Direct pushes require the repository-local hook installed with
   `nix develop -c bash tools/install-pre-push-hook.sh`. Do not bypass it with
   `--no-verify`. It checks a clean committed `HEAD` against the actual pushed
-  remote bases using the shared CI classifier, including full selected local
-  suites and packaging checks. Emulator journeys remain required in hosted CI.
+  remote bases using the shared CI classifier. It runs cheap syntax/palette/harness
+  validation, root formatting and affected production Kotlin compilation, not full
+  suites or packaging. Its single Gradle invocation uses one worker, no parallelism,
+  a 2 GiB heap, one active processor, in-process Kotlin and a single-use daemon.
+  The heap cap is not a total-RAM guarantee. Hosted CI retains full validation.
 - Do not push known failures or unrelated changes while CI is red. Check corrective
   fixes locally before pushing them. Require all applicable hosted `Required CI / gate` checks for that
   exact commit before merge/release or declaring CI green. When an individual

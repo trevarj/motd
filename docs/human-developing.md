@@ -88,15 +88,17 @@ narrow execution, not compilation of test sources and dependencies. The command
 above assumes the Nix shell; alternatively use
 `nix develop -c ./gradlew :app:testDebugUnitTest --tests '<fully-qualified-class.method>' --stacktrace`.
 
-Run root `ktlintCheck` for Kotlin/Gradle changes and the affected compilation,
-assembly and lint checks in the command matrix. Keep iterative tests targeted;
-the installed pre-push hook runs the full applicable non-emulator gate.
+Run root `ktlintCheck` for Kotlin/Gradle changes and affected production
+compilation. The installed light pre-push hook does not run behavior tests.
+Full suites, Android lint, APK/native packaging and verification, test/E2E
+compilation, and emulator journeys remain required in hosted CI; expensive local
+checks in the command matrix are explicit/on-demand.
 
 For database changes, run the nearest database regression and review/commit
-generated `app/schemas` changes. Compile affected instrumentation journeys with
-`:app:compileE2eAndroidTestKotlin`. Run `:app:assembleDebug` when resources,
-manifest, packaging, or an actual APK require it. No routine local emulator or
-physical-device runs.
+generated `app/schemas` changes. Targeted tests still apply before handoff.
+For UI changes, perform an authorized actual-device smoke check and inspect a fresh
+screencapture when a device is available; otherwise report visual testing unverified.
+Use the serial-targeted install workflow above; do not start a routine emulator.
 
 Install automatic repository-local push checks once per clone:
 
@@ -104,10 +106,15 @@ Install automatic repository-local push checks once per clone:
 nix develop -c bash tools/install-pre-push-hook.sh
 ```
 
-Normal direct pushes then require a clean committed `HEAD` and run the local tiers
-selected by the shared CI classifier, including full affected suites and signed
-test packaging. The hook checks actual pushed remote bases; new or unavailable
-bases select all tiers. It never starts an emulator or installs to a phone.
+Normal direct pushes require a clean committed `HEAD` and check actual pushed
+remote bases using the shared CI classifier; new or unavailable bases select all
+light checks. The hook runs cheap shell/workflow syntax, palette/Python checker
+regressions and applicable harness validation, then root formatting and affected
+production Kotlin compilation in one Gradle invocation. It uses one worker, no
+parallel execution, a 2 GiB Gradle heap, one active processor, in-process Kotlin,
+and a single-use daemon, preserving Nix SDK/aapt2 flags. These hook-only limits do
+not cap total RAM or change hosted CI. No tests, test/E2E compilation, Android lint,
+APK signing/builds, native verification, device installs or emulators run in the hook.
 Do not bypass it with `--no-verify`; Git hooks are local safeguards, not server policy.
 
 For manual diagnostics, use `nix develop -c bash tools/prepush.sh [BASE ...]`.

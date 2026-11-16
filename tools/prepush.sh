@@ -49,8 +49,6 @@ while IFS='=' read -r tier selected; do
   esac
 done <<< "$classification"
 
-gradle() { nix develop -c bash ./gradlew "$@" --stacktrace; }
-export MOTD_FUZZ_PROFILE=pr MOTD_FUZZ_SEED="$candidate"
 changed_shell=()
 for path in "${changed[@]}"; do
   [[ "$path" == *.sh && -f "$path" ]] && changed_shell+=("$path")
@@ -66,28 +64,22 @@ if "$harness"; then
   nix develop -c actionlint
   nix develop -c bash ./test/e2e/validate.sh
 fi
+gradle_tasks=()
+if "$runtime"; then
+  gradle_tasks+=(ktlintCheck)
+fi
 if "$irc"; then
-  gradle :irc:ktlintCheck :irc:test
+  gradle_tasks+=(:irc:compileKotlin)
 fi
-if "$app"; then
-  gradle ktlintCheck
-  gradle :app:testDebugUnitTest
-  git diff --exit-code -- app/schemas
-  test -z "$(git ls-files --others --exclude-standard -- app/schemas)"
-  # Keep producer failure distinct from grep's ordinary no-match status.
-  dependencies="$(nix develop -c bash ./gradlew :app:dependencies --configuration releaseRuntimeClasspath)"
-  if grep -Ei 'firebase|play-services' <<< "$dependencies"; then
-    echo "Google-only dependencies reached the FOSS runtime classpath" >&2
-    exit 1
-  fi
-  nix develop -c bash ./tools/build-signed-release.sh --ci-key
-  MOTD_LINT_DEBUG="$debug_lint" MOTD_LINT_LOG=app/build/reports/android-lint.log \
-    nix develop -c bash ./tools/android-lint.sh
-  gradle --no-daemon --no-parallel --max-workers=2 :app:verifyAiNativeArtifacts
+if "$app" || "$device"; then
+  gradle_tasks+=(:app:compileDebugKotlin)
 fi
-if "$device"; then
-  gradle :app:assembleE2e :app:assembleE2eAndroidTest
-  echo "Emulator journey runtime remains required in hosted CI; no local device is started or installed."
+if [ "${#gradle_tasks[@]}" -gt 0 ]; then
+  nix develop -c env JAVA_TOOL_OPTIONS=-XX:ActiveProcessorCount=1 bash ./gradlew \
+    --no-daemon --no-parallel --max-workers=1 \
+    "-Dorg.gradle.jvmargs=-Xmx2g -XX:ActiveProcessorCount=1 -Dfile.encoding=UTF-8" \
+    -Pkotlin.compiler.execution.strategy=in-process \
+    "${gradle_tasks[@]}" --stacktrace
 fi
 [ "$(git rev-parse --verify 'HEAD^{commit}')" = "$candidate" ] || {
   echo "HEAD changed during pre-push checks" >&2

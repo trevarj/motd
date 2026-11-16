@@ -5,8 +5,8 @@ Run all Gradle commands through the repository Nix shell with
 Run the nearest relevant unit test method in each affected module. Changed
 behavior needs a new or updated regression unless an existing named test already
 exercises that branch. Keep iterative checks targeted; the installed pre-push hook
-runs full applicable non-emulator CI tiers before pushing. Do not automatically
-start an emulator suite for routine development.
+runs light validation and affected production compilation, not behavior tests.
+Do not automatically start an emulator suite for routine development.
 
 For UI changes, if a device is available, install the changed debug build using
 the [serial-targeted debug install workflow](../docs/human-developing.md#debug-device-install),
@@ -23,16 +23,16 @@ runs it.
    just edited source files.
    Shared rendering or paging changes must include existing consumer regressions,
    not only newly added tests for the changed feature.
-2. Compile every affected source set and run the nearest behavior regressions.
-   App main compilation or `assembleDebug` alone does not compile `test`,
-   `testDebug`, or E2E instrumentation. Test filters narrow execution, not
-   compilation; source inspection or a delegated "source-only" review is not
-   verification.
+2. Run the nearest behavior regressions before handoff. Hosted CI compiles every
+   affected source set, including `test`, `testDebug`, and E2E instrumentation;
+   production compilation alone does not cover them. Test filters narrow execution,
+   not compilation. Source inspection or delegated source-only review is not
+   behavior verification.
 3. For Kotlin/Gradle changes run **root** `ktlintCheck`, not only
    `:app:ktlintCheck`: other modules and root scripts can fail Required CI.
-   Use root `ktlintFormat` to apply enforced style. Run applicable lint below.
-   Run formatting in a separate Gradle invocation before checks; independent
-   source-set tasks can otherwise check pre-format inputs.
+   Use root `ktlintFormat` to apply enforced style before checks, in a separate
+   invocation so checks cannot read pre-format inputs. Expensive assembly, lint,
+   and additional compilation below are explicit on-demand diagnostics, not hook tasks.
    Run `git diff --check` and, for staged changes, `git diff --cached --check`.
 4. Record which checks actually completed. If an earlier Gradle task fails,
    trailing tasks are not verified; fix it and run the remaining checks.
@@ -42,18 +42,22 @@ runs it.
    exact candidate's complete hosted `Required CI / gate` before merge/release
    or declaring CI green. Local checks never replace that gate.
 
-The local Nix development shells limit Gradle to two workers without cross-project
-parallelism, JVM processor-sized pools to two CPUs, and each native Ninja build to
-a shared two-job compile/link pool. Gradle and Kotlin daemon heaps remain capped
-at 4 GiB each. These limits leave desktop headroom, not an aggregate OS resource
-quota; hosted builds without the shell environment retain their existing settings.
+Ordinary local Nix development shells limit Gradle to two workers without
+cross-project parallelism, JVM processor-sized pools to two CPUs, and each native
+Ninja build to a shared two-job compile/link pool. Their Gradle and Kotlin daemon
+heaps remain capped at 4 GiB each. The light hook overrides these defaults only
+for its invocation with the tighter limits below. Neither policy is an aggregate
+OS resource quota; hosted builds retain their existing settings.
 
 ## Command matrix
 
 All Gradle tasks below use `nix develop -c bash ./gradlew <tasks> --stacktrace`.
-Rows are additive; select every affected boundary, including downstream callers.
+Rows are additive; include downstream callers. Run targeted behavior regressions
+before handoff. Full suites, Android lint, APK/native packaging, and test/E2E
+compilation remain required in hosted CI; their commands below are available for
+explicit on-demand local diagnosis, not routine pre-push execution.
 
-| Changed surface | Required local checks before commit/push |
+| Changed surface | Targeted checks and hosted/on-demand coverage |
 | --- | --- |
 | Documentation only | `git diff --check`; verify links, commands, and referenced paths |
 | Kotlin or Gradle, any module | Root `ktlintCheck` plus the relevant rows below |
@@ -66,7 +70,7 @@ Rows are additive; select every affected boundary, including downstream callers.
 | Other Android modules | Changed module's `:ai-whisper:assembleDebug` or `:ai-text:assembleDebug` and corresponding `lintDebug`; nearest affected behavior method |
 | Room entities/schema/migrations | Nearest database unit regression; review and commit generated `app/schemas` changes |
 | Compose Kotlin / ordinary app journey | Nearest Robolectric behavior method in `testDebug` |
-| Cross-module or release-sensitive work | Nearest affected unit methods in each module; signed packaging/native-artifact checks below when affected |
+| Cross-module or release-sensitive work | Nearest affected unit methods in each module; hosted signed packaging/native-artifact checks below, available locally on demand |
 | Cutting a release | Nearest local checks plus focused actual-emulator visual verification below and [`releases.md`](releases.md) preflight |
 
 For hosted journey changes, inspect `test/e2e/hermetic-stack.sh` and its
@@ -120,17 +124,27 @@ it automatically before pushes. Do not use `--no-verify` to bypass it.
 The hook validates the actual pushed refs, peels tags, and requires each candidate
 to match the current clean committed `HEAD`. It checks the union of exact remote-old
 endpoint diffs, not a merge-base or potentially stale `origin/main`. New refs or
-unavailable remote commits select all tiers; deletions need no build.
+unavailable remote commits select all light checks; deletions need no build.
 
-`tools/ci-paths.sh` selects the same local tiers as Required CI: full applicable
-IRC/app unit suites, formatting, FOSS dependencies, CI-key signed packaging,
-Android lint, native artifacts, harness validation and E2E APK compilation.
-Emulator journeys remain hosted-only; the hook never starts or installs to a device.
-Release unit tests duplicate shared coverage and are not added.
+`tools/ci-paths.sh` scopes the light local checks without changing hosted CI.
+The hook keeps shell/workflow syntax checks, palette validation and Python checker
+regressions, and applicable cheap harness validators. Kotlin/runtime changes run
+root formatting checks and affected production compilation (`:irc:compileKotlin`
+and/or `:app:compileDebugKotlin`) in one Gradle invocation.
+That invocation uses one worker, no parallel execution, a 2 GiB Gradle heap,
+`ActiveProcessorCount=1`, in-process Kotlin compilation, and a single-use daemon
+with no persistent Gradle or separate Kotlin daemon. These hook-only overrides
+retain the Nix SDK/aapt2 flags; the heap cap is not a total-RAM guarantee.
+
+Full tests, Android lint, APK/native packaging and verification, test/E2E source
+compilation, and emulator journeys remain hosted CI responsibilities. The hook
+never builds or signs an APK, installs to a device, or starts an emulator.
+Targeted behavior tests and authorized actual-device UI smoke checks before
+handoff remain required as described above; the hook does not replace them.
 
 Manual diagnostics use `nix develop -c bash tools/prepush.sh [BASE ...]`.
 Without bases, `MOTD_PREFLIGHT_BASE` or `origin/main` is used; `--all` forces every
-tier. Failed checks stop the push. Fix and commit failures before trying again.
+light check. Failed checks stop the push. Fix and commit failures before trying again.
 
 
 Require all applicable hosted `Required CI / gate` checks for the exact candidate
@@ -141,8 +155,8 @@ confirm it.
 
 ## Signed release packaging
 
-For release-build changes or packaging-failure diagnosis, exercise the same
-bounded signed build that Required CI and publication use:
+For explicit on-demand release-build or packaging-failure diagnosis, exercise the
+same bounded signed build that Required CI and publication use:
 
 ```sh
 nix develop -c bash ./tools/build-signed-release.sh --ci-key
@@ -152,14 +166,14 @@ The explicit CI mode creates and removes a disposable keystore and refuses an
 existing signing environment. Its APK is test-signed, not for distribution.
 Without `--ci-key`, all four production signing variables are required. The helper
 builds only the release variant, verifies its native contents and cryptographic
-signature, and rejects forbidden signing-block metadata. The enforced pre-push gate
-runs it for app-tier changes; it is not a routine editing or UI-handoff check.
+signature, and rejects forbidden signing-block metadata. Hosted CI runs it for
+app-tier changes; the light pre-push hook does not.
 
 The hosted Android tier has a 45-minute wall-clock budget for sequential cold
 release packaging, lint, debug/E2E artifact builds, and cleanup; all checks remain
 required.
 
-Keep the existing debug/E2E artifact coverage in a separate invocation:
+Hosted CI retains separate debug/E2E artifact coverage. For explicit local diagnosis:
 
 ```sh
 nix develop -c bash ./gradlew --no-daemon --no-parallel --max-workers=2 \

@@ -25,7 +25,7 @@ if kind == "git":
         os.chdir(a[1])
         a = a[2:]
 with (root / "calls").open("a") as f:
-    f.write(json.dumps([kind, a, os.environ.get("MOTD_FUZZ_SEED"), os.environ.get("MOTD_LINT_DEBUG"), os.getcwd()]) + "\n")
+    f.write(json.dumps([kind, a, {key: os.environ.get(key) for key in ("GRADLE_OPTS", "JAVA_TOOL_OPTIONS", "MOTD_FUZZ_PROFILE", "MOTD_FUZZ_SEED")}, None, os.getcwd()]) + "\n")
 if kind == "nix":
     if a == ["develop", "-c", "bash", "-c", 'printf "%s\\n" "$BASH"']:
         print(os.environ["TEST_BASH"])
@@ -33,8 +33,6 @@ if kind == "nix":
         text = " ".join(a)
         if s.get("fail") and s["fail"] in text:
             sys.exit(23)
-        if ":app:dependencies" in a:
-            print(s.get("dependencies", "org.example:foss:1"))
     sys.exit(0)
 if a[0] == "check-ref-format":
     sys.exit(0 if a[1].startswith("refs/") and ".." not in a[1] and " " not in a[1] else 1)
@@ -51,13 +49,16 @@ if a[0] == "rev-parse":
         print(root / ".git/hooks/pre-push")
         sys.exit(0)
     ref = a[-1].removesuffix("^{commit}")
-    commits = {"HEAD": s["head"], "origin/main": s["other"], s["head"]: s["head"], s["old"]: s["old"], s["other"]: s["other"], s["tag"]: s["head"]}
+    checked = any(json.loads(line)[0] == "nix" for line in (root / "calls").read_text().splitlines())
+    head = s["other"] if checked and s.get("head_after_checks") else s["head"]
+    commits = {"HEAD": head, "origin/main": s["other"], s["head"]: s["head"], s["old"]: s["old"], s["other"]: s["other"], s["tag"]: s["head"]}
     if ref in commits:
         print(commits[ref])
         sys.exit(0)
     sys.exit(1)
 if a[0] == "status":
-    print(" M tracked" if s.get("dirty") else "", end="")
+    checked = any(json.loads(line)[0] == "nix" for line in (root / "calls").read_text().splitlines())
+    print(" M tracked" if s.get("dirty") or (checked and s.get("dirty_after_checks")) else "", end="")
     sys.exit(0)
 if a[0] == "diff":
     if s.get("diff_failure") and s["diff_failure"] in a:
@@ -86,6 +87,12 @@ def main():
         env = dict(os.environ, FIXTURE=str(root), TEST_BASH=BASH,
                    PATH=str(root / "bin") + os.pathsep + os.environ["PATH"])
         env.pop("MOTD_PREFLIGHT_BASE", None)
+        env.update(GRADLE_OPTS='-Dorg.gradle.project.android.aapt2FromMavenOverride=/nix/sdk/aapt2 '
+                   '"-Dorg.gradle.jvmargs=-Xmx4g -XX:ActiveProcessorCount=2" '
+                   '"-Dorg.gradle.project.kotlin.daemon.jvmargs=-Xmx4g -XX:ActiveProcessorCount=2"',
+                   JAVA_TOOL_OPTIONS="-XX:ActiveProcessorCount=2")
+        env.pop("MOTD_FUZZ_PROFILE", None)
+        env.pop("MOTD_FUZZ_SEED", None)
         state = dict(head=HEAD, old=OLD, other=OTHER, tag=TAG,
                      paths={OLD: ["irc/src/test/Example.kt"], OTHER: ["README.md"]})
 
@@ -104,14 +111,40 @@ def main():
         def checks(calls):
             return [" ".join(call[1]) for call in calls if call[0] == "nix"]
 
+        def light_gradle(calls, tasks):
+            invocations = [call for call in calls if call[0] == "nix" and "./gradlew" in call[1]]
+            assert len(invocations) == 1, checks(calls)
+            call = invocations[0]
+            args = call[1]
+            options = args[args.index("./gradlew") + 1:]
+            assert {arg for arg in options if not arg.startswith("-")} == set(tasks), options
+            assert {"--no-daemon", "--no-parallel", "--max-workers=1",
+                    "-Dorg.gradle.jvmargs=-Xmx2g -XX:ActiveProcessorCount=1 -Dfile.encoding=UTF-8",
+                    "-Pkotlin.compiler.execution.strategy=in-process"} <= set(options), options
+            launcher = args[:args.index("./gradlew")]
+            assert {"env", "JAVA_TOOL_OPTIONS=-XX:ActiveProcessorCount=1", "bash"} <= set(launcher)
+            assert call[2]["GRADLE_OPTS"] == env["GRADLE_OPTS"]
+            assert call[2]["JAVA_TOOL_OPTIONS"] == "-XX:ActiveProcessorCount=2"
+            assert all(call[2][key] is None for key in ("MOTD_FUZZ_PROFILE", "MOTD_FUZZ_SEED"))
+            assert all(not any(banned in command for banned in
+                              ("build-signed-release", "android-lint", "adb", "emulator"))
+                       for command in checks(calls)), checks(calls)
+
         result, calls = run("pre-push-hook.sh", update())
-        assert any(":irc:test" in command for command in checks(calls))
-        assert not any(":app:" in command for command in checks(calls))
-        assert all(call[2] == HEAD for call in calls if call[0] == "nix")
+        light_gradle(calls, {"ktlintCheck", ":irc:compileKotlin"})
         assert ["diff", "--name-only", "-z", OLD, HEAD] in [call[1] for call in calls]
         assert not any("..." in arg for call in calls for arg in call[1])
         assert any("python3 tools/palette-catalog.py --check --base " + OLD in command for command in checks(calls))
         assert any("python3 -m unittest discover -s tools -p test_palette_catalog.py" in command for command in checks(calls))
+        for paths, tasks in (
+            (["app/src/testDebug/Example.kt"], {"ktlintCheck", ":app:compileDebugKotlin"}),
+            (["app/src/androidTest/Example.kt"], {"ktlintCheck", ":app:compileDebugKotlin"}),
+            (["irc/src/main/Example.kt"], {"ktlintCheck", ":irc:compileKotlin", ":app:compileDebugKotlin"}),
+            (["test/e2e/example.sh"], {"ktlintCheck"}),
+        ):
+            state["paths"][OLD] = paths
+            result, calls = run("pre-push-hook.sh", update())
+            light_gradle(calls, tasks)
         state["paths"][OLD] = ["palettes/index.json", "tools/palette-catalog.py", "tools/test_palette_catalog.py"]
         result, calls = run("pre-push-hook.sh", update())
         commands = checks(calls)
@@ -119,12 +152,14 @@ def main():
         assert not any("gradlew" in command or "actionlint" in command or "validate.sh" in command for command in commands)
         for failure in ("tools/palette-catalog.py --check", "-m unittest discover -s tools -p test_palette_catalog.py"):
             state["fail"] = failure
-            run("pre-push-hook.sh", update(), success=False)
+            result, calls = run("pre-push-hook.sh", update(), success=False)
+            assert result.returncode == 23
         del state["fail"]
         state["paths"][OLD] = ["irc/src/test/Example.kt"]
 
-        state["fail"] = ":irc:test"
-        run("pre-push-hook.sh", update(), success=False)
+        state["fail"] = ":irc:compileKotlin"
+        result, calls = run("pre-push-hook.sh", update(), success=False)
+        assert result.returncode == 23
         del state["fail"]
         for prerequisite in ("--check", "--name-only"):
             state["diff_failure"] = prerequisite
@@ -133,9 +168,10 @@ def main():
         del state["diff_failure"]
         classifier = root / "tools/ci-paths.sh"
         classifier_source = classifier.read_text()
-        classifier.write_text("exit 25\n")
-        result, calls = run("pre-push-hook.sh", update(), success=False)
-        assert not checks(calls)
+        for invalid in ("exit 25\n", "printf 'runtime=maybe\\n'\n"):
+            classifier.write_text(invalid)
+            result, calls = run("pre-push-hook.sh", update(), success=False)
+            assert not checks(calls)
         classifier.write_text(classifier_source)
         result, calls = run("pre-push-hook.sh", update(local=OTHER), success=False)
         assert "check out pushed commit" in result.stderr and not checks(calls)
@@ -145,16 +181,16 @@ def main():
         del state["dirty"]
         result, calls = run("pre-push-hook.sh", f"(delete) {ZERO} refs/heads/old {OLD}\n")
         assert not checks(calls) and not any(call[1][0] == "status" for call in calls)
-        run("pre-push-hook.sh", "refs/heads/main garbage refs/heads/main garbage\n", success=False)
-        run("pre-push-hook.sh", update().rstrip() + " extra\n", success=False)
+        for malformed in ("refs/heads/main garbage refs/heads/main garbage\n",
+                          update().rstrip() + " extra\n"):
+            result, calls = run("pre-push-hook.sh", malformed, success=False)
+            assert not checks(calls)
         run("pre-push-hook.sh", update(local=TAG, ref="refs/tags/signed"))
 
         # Union all pushed deltas once, rather than checking only the first ref.
         state["paths"][OTHER] = ["app/src/debug/Example.kt"]
         result, calls = run("pre-push-hook.sh", update() + update(old=OTHER))
-        assert sum(":irc:test" in command for command in checks(calls)) == 1
-        assert sum(":app:testDebugUnitTest" in command for command in checks(calls)) == 1
-        assert any(call[3] == "true" for call in calls if "./tools/android-lint.sh" in call[1])
+        light_gradle(calls, {"ktlintCheck", ":irc:compileKotlin", ":app:compileDebugKotlin"})
         catalog_checks = [call[1] for call in calls if call[0] == "nix" and "tools/palette-catalog.py" in call[1]]
         assert len(catalog_checks) == 1
         assert catalog_checks[0].count("--base") == 2
@@ -162,22 +198,22 @@ def main():
         state["paths"][OTHER] = ["README.md"]
 
         required = ("tools/palette-catalog.py --check", "-m unittest discover -s tools -p test_palette_catalog.py",
-                    ":irc:test", "ktlintCheck", ":app:testDebugUnitTest", ":app:dependencies",
-                    "build-signed-release.sh --ci-key", "android-lint.sh",
-                    ":app:verifyAiNativeArtifacts", ":app:assembleE2e :app:assembleE2eAndroidTest", "actionlint", "validate.sh")
+                    ":irc:compileKotlin", "ktlintCheck", ":app:compileDebugKotlin", "actionlint", "validate.sh")
         for old in (ZERO, MISSING):
             result, calls = run("pre-push-hook.sh", update(old=old))
             commands = checks(calls)
             assert all(any(expected in command for command in commands) for expected in required), commands
-            assert "runtime remains required in hosted CI" in result.stdout
-            assert not any("adb" in command or "emulator" in command for command in commands)
+            light_gradle(calls, {"ktlintCheck", ":irc:compileKotlin", ":app:compileDebugKotlin"})
         for failure in required:
             state["fail"] = failure
-            run("pre-push-hook.sh", update(old=ZERO), success=False)
+            result, calls = run("pre-push-hook.sh", update(old=ZERO), success=False)
+            assert result.returncode == 23
         del state["fail"]
-        state["dependencies"] = "com.google.firebase:firebase-core:1"
-        run("pre-push-hook.sh", update(old=ZERO), success=False)
-        del state["dependencies"]
+        for mutation in ("head_after_checks", "dirty_after_checks"):
+            state[mutation] = True
+            result, calls = run("pre-push-hook.sh", update(), success=False)
+            assert "changed" in result.stderr
+            del state[mutation]
 
         # Installer leaves custom configuration/hooks untouched and is idempotent.
         run("install-pre-push-hook.sh")
@@ -198,7 +234,7 @@ def main():
         assert pushed.returncode == 0, pushed.stderr
         calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
         assert checks(calls) and all(call[4] == str(linked) for call in calls if call[0] == "nix")
-        state["fail"] = ":irc:test"
+        state["fail"] = ":irc:compileKotlin"
         (root / "state").write_text(json.dumps(state))
         pushed = subprocess.run([str(hook), "origin", "unused"], input=update(), text=True,
                                 capture_output=True, cwd=root, env=env)

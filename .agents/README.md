@@ -30,9 +30,10 @@ connection ownership, or module boundaries.
 4. Add or update tests at the same boundary. For UI changes, include semantics
    or stable tags when the interaction belongs in the device harness.
 5. Follow [`testing.md`](testing.md): run the nearest relevant unit test method
-   in each affected module. Before committing implementation changes, build each
-   changed module and run its formatting and lint checks. Keep iterative checks
-   targeted; the installed pre-push hook runs full applicable non-emulator suites.
+   in each affected module. Before committing implementation changes, run root
+   formatting and affected production compilation.
+   Keep iterative checks targeted; the installed pre-push hook is light, not a
+   full-suite or packaging gate. Expensive local checks are explicit/on-demand.
    For UI changes, if a device is available, install the changed debug build using
    the [serial-targeted debug install workflow](../docs/human-developing.md#debug-device-install),
    check it with ADB, and inspect a fresh screencapture; otherwise leave visual
@@ -41,8 +42,12 @@ connection ownership, or module boundaries.
    affected `RequiredHeadlessE2eTest` journeys; hosted CI runs E2E coverage.
    Follow [`releases.md`](releases.md) for release-specific verification.
    Install the repository-local pre-push hook as described in `testing.md`; it
-   enforces local checks for direct pushes. Hosted `Required CI / gate` still owns
-   emulator coverage. Inspect failures promptly and report checks not run.
+   enforces cheap validation, formatting and affected production compilation for
+   direct pushes, using one worker, no parallelism, a 2 GiB heap, one active processor,
+   in-process Kotlin and a single-use Gradle daemon (not a total-RAM quota).
+   Hosted `Required CI / gate` retains full tests, Android lint, APK/native packaging,
+   test/E2E compilation and emulator journeys. Targeted behavior tests and authorized
+   device smoke remain handoff requirements. Report checks not run.
 
 ## Gradle and Kotlin agent tools
 

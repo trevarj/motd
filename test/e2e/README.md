@@ -39,8 +39,15 @@ automatic loading and images disabled it checks manual Load, native light/dark
 swatches, full preview Cancel and Apply, unchanged preferences before Apply,
 one HTTPS request across both previews, and source composer/viewport retention.
 The existing create/save/share/import journey remains in the same test.
-Execute these journeys only in hosted CI; local implementation verification is
-`:app:compileE2eAndroidTestKotlin`, not a device/emulator run.
+Execute these journeys only in hosted CI. The light local pre-push hook runs cheap
+validation, formatting and affected production Kotlin compilation, not test/E2E
+compilation, full tests, Android lint, APK/native packaging or emulator journeys.
+Its one Gradle invocation uses one worker, no parallelism, a 2 GiB heap, one active
+processor, in-process Kotlin and a single-use daemon; this is not a total-RAM quota.
+Hosted CI retains all full validation. Expensive local checks, including
+`:app:compileE2eAndroidTestKotlin`, are explicit/on-demand diagnostics.
+Targeted behavior tests and authorized actual-device smoke before UI handoff still
+apply; follow the serial-targeted install workflow in the development guide.
 
 Unread entry checks the persisted boundary at the unobscured viewport top: the
 timeline extends behind the header, and the entry row can include a history seam
