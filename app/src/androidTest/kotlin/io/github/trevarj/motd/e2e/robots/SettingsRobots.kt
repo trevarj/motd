@@ -552,7 +552,7 @@ internal class PaletteRobot(
         scrollToAndClick("settings_palette_hub")
         compose.onNodeWithText("Yours").performClick()
         replace("palette_search", name)
-        compose.onNodeWithText("Share", substring = false).performScrollTo().performClick()
+        scrollToAndClick("palette_share")
         val instrumentation =
             androidx.test.platform.app.InstrumentationRegistry
                 .getInstrumentation()

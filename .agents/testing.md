@@ -99,8 +99,8 @@ to inspect native toolbar windows on SDK 26; `WindowInspector` requires API 29.
 
 ## Behavior-test arrangements
 
-Arrange the state needed for the behavior under test. Select typed navigation
-targets rather than translated display labels. Give generic editor operations
+Arrange the state needed for the behavior under test. Use stable action tags and
+typed navigation targets rather than translated display labels. Give generic editor operations
 explicit input trees; rely on stock defaults only in default/reset tests. Reuse
 existing local helpers rather than adding a second generic fixture framework.
 Before holding repository reads for a later `ChatViewModel` action, await

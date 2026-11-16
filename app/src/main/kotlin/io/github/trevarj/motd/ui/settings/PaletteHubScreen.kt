@@ -207,7 +207,7 @@ fun PaletteHubScreen(
                                 FlowRow(Modifier.padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     TextButton(onClick = { edit(if (installed.catalogId != null) null else document.id) { if (installed.catalogId != null) localPaletteFork(document) else document } }) { Text(stringResource(R.string.palette_edit)) }
                                     TextButton(onClick = { edit(null) { duplicatePalette(document) } }) { Text(stringResource(R.string.palette_duplicate)) }
-                                    TextButton(onClick = { launchAction { sharePaletteFile(context, document) } }) { Text(stringResource(R.string.palette_share)) }
+                                    TextButton(onClick = { launchAction { sharePaletteFile(context, document) } }, modifier = Modifier.testTag("palette_share")) { Text(stringResource(R.string.palette_share)) }
                                     val hostedLink = installed.catalogId?.let { id -> installed.catalogRevision?.let { catalogPaletteLink(id, it) } } ?: installed.sourceLink
                                     if (hostedLink != null) TextButton(onClick = { copyLink(hostedLink) }) { Text("Copy link") }
                                     TextButton(onClick = {
