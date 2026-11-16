@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "paradise",
+  "name": "Paradise",
+  "revision": 1,
+  "light": {
+    "primary": "#334B5F",
+    "secondary": "#3B7873",
+    "tertiary": "#A1548A",
+    "background": "#F5F5F5",
+    "surface": "#F5F5F5",
+    "surfaceContainer": "#E0E0E0",
+    "onBackground": "#151515",
+    "onSurface": "#151515",
+    "onSurfaceVariant": "#414141",
+    "outlineVariant": "#8A8A8A",
+    "nicknameColors": [
+      "#B66467",
+      "#8C977D",
+      "#D9BC8C",
+      "#8DA3B9",
+      "#A988B0",
+      "#8AA6A2"
+    ]
+  },
+  "dark": {
+    "primary": "#8DA3B9",
+    "secondary": "#8AA6A2",
+    "tertiary": "#A988B0",
+    "background": "#151515",
+    "surface": "#151515",
+    "surfaceContainer": "#222222",
+    "onBackground": "#E8E3E3",
+    "onSurface": "#E8E3E3",
+    "onSurfaceVariant": "#B0B0B0",
+    "outlineVariant": "#414141",
+    "nicknameColors": [
+      "#B66467",
+      "#8C977D",
+      "#D9BC8C",
+      "#8DA3B9",
+      "#A988B0",
+      "#8AA6A2"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Paradise/Paradise.json"
+}

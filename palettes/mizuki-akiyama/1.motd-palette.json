@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "mizuki-akiyama",
+  "name": "Mizuki-Akiyama",
+  "revision": 1,
+  "light": {
+    "primary": "#B72F78",
+    "secondary": "#6F4BBB",
+    "tertiary": "#006A90",
+    "background": "#FFF7FB",
+    "surface": "#FFF7FB",
+    "surfaceContainer": "#F4DDEA",
+    "onBackground": "#21101C",
+    "onSurface": "#21101C",
+    "onSurfaceVariant": "#6C5363",
+    "outlineVariant": "#D6B9CB",
+    "nicknameColors": [
+      "#C13D5D",
+      "#247F68",
+      "#8A6414",
+      "#006A90",
+      "#B72F78",
+      "#007D71"
+    ]
+  },
+  "dark": {
+    "primary": "#E6A6C8",
+    "secondary": "#AFA2D8",
+    "tertiary": "#7FB6D6",
+    "background": "#10111B",
+    "surface": "#10111B",
+    "surfaceContainer": "#1D1A2A",
+    "onBackground": "#EEE7F0",
+    "onSurface": "#EEE7F0",
+    "onSurfaceVariant": "#C8B9CA",
+    "outlineVariant": "#4D465C",
+    "nicknameColors": [
+      "#F08A9B",
+      "#8FD0B8",
+      "#D9B874",
+      "#7FB6D6",
+      "#D8A2CB",
+      "#7CCED9"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Mizuki-Akiyama/Mizuki-Akiyama.json"
+}

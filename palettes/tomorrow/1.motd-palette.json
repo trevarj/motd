@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "tomorrow",
+  "name": "Tomorrow",
+  "revision": 1,
+  "light": {
+    "primary": "#4271AE",
+    "secondary": "#8959A8",
+    "tertiary": "#E5740B",
+    "background": "#FFFFFF",
+    "surface": "#FFFFFF",
+    "surfaceContainer": "#E8E8E8",
+    "onBackground": "#4D4D4C",
+    "onSurface": "#4D4D4C",
+    "onSurfaceVariant": "#7A7D78",
+    "outlineVariant": "#D6D6D6",
+    "nicknameColors": [
+      "#C82829",
+      "#718C00",
+      "#EAB700",
+      "#4271AE",
+      "#8959A8",
+      "#3E999F"
+    ]
+  },
+  "dark": {
+    "primary": "#81A2BE",
+    "secondary": "#B294BB",
+    "tertiary": "#DE935F",
+    "background": "#1D1F21",
+    "surface": "#1D1F21",
+    "surfaceContainer": "#282A2E",
+    "onBackground": "#C5C8C6",
+    "onSurface": "#C5C8C6",
+    "onSurfaceVariant": "#969896",
+    "outlineVariant": "#373B41",
+    "nicknameColors": [
+      "#CC6666",
+      "#B5BD68",
+      "#F0C674",
+      "#81A2BE",
+      "#B294BB",
+      "#8ABEB7"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Tomorrow/Tomorrow.json"
+}

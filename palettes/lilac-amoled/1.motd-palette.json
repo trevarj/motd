@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "lilac-amoled",
+  "name": "Lilac AMOLED",
+  "revision": 1,
+  "light": {
+    "primary": "#8A56D4",
+    "secondary": "#A074FF",
+    "tertiary": "#B375FF",
+    "background": "#FBF8FF",
+    "surface": "#FBF8FF",
+    "surfaceContainer": "#E8E0F8",
+    "onBackground": "#1A1428",
+    "onSurface": "#1A1428",
+    "onSurfaceVariant": "#8A56D4",
+    "outlineVariant": "#9B85C2",
+    "nicknameColors": [
+      "#FF6F9B",
+      "#6FB58F",
+      "#C79AFF",
+      "#8A56D4",
+      "#A074FF",
+      "#B89FFF"
+    ]
+  },
+  "dark": {
+    "primary": "#B58FFF",
+    "secondary": "#C79AFF",
+    "tertiary": "#D8B4FF",
+    "background": "#000000",
+    "surface": "#000000",
+    "surfaceContainer": "#110D1A",
+    "onBackground": "#E8D8FF",
+    "onSurface": "#E8D8FF",
+    "onSurfaceVariant": "#B58FFF",
+    "outlineVariant": "#4C3A70",
+    "nicknameColors": [
+      "#FF6F9B",
+      "#A8E6CF",
+      "#D8B4FF",
+      "#B58FFF",
+      "#C79AFF",
+      "#E0C1FF"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Lilac%20AMOLED/Lilac%20AMOLED.json"
+}

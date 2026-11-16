@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "atuel",
+  "name": "Atuel",
+  "revision": 1,
+  "light": {
+    "primary": "#1A3673",
+    "secondary": "#4E6BA6",
+    "tertiary": "#0F1B40",
+    "background": "#D9E2F7",
+    "surface": "#D9E2F7",
+    "surfaceContainer": "#BFCCEB",
+    "onBackground": "#0A1126",
+    "onSurface": "#0A1126",
+    "onSurfaceVariant": "#0A1126",
+    "outlineVariant": "#7084B0",
+    "nicknameColors": [
+      "#A63D37",
+      "#2B4F36",
+      "#695328",
+      "#1A3673",
+      "#523669",
+      "#2C477A"
+    ]
+  },
+  "dark": {
+    "primary": "#99B6F2",
+    "secondary": "#5581D9",
+    "tertiary": "#4E6BA6",
+    "background": "#0A1126",
+    "surface": "#0A1126",
+    "surfaceContainer": "#0F1B40",
+    "onBackground": "#E1E7F5",
+    "onSurface": "#E1E7F5",
+    "onSurfaceVariant": "#99B6F2",
+    "outlineVariant": "#212C4D",
+    "nicknameColors": [
+      "#D98886",
+      "#86B393",
+      "#E3CFA8",
+      "#5581D9",
+      "#BDA6DB",
+      "#99B6F2"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Atuel/Atuel.json"
+}

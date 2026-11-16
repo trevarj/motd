@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "adw-green",
+  "name": "ADW-green",
+  "revision": 1,
+  "light": {
+    "primary": "#3A944A",
+    "secondary": "#2E3436",
+    "tertiary": "#26A269",
+    "background": "#FAFAFA",
+    "surface": "#FAFAFA",
+    "surfaceContainer": "#FFFFFF",
+    "onBackground": "#2E3436",
+    "onSurface": "#2E3436",
+    "onSurfaceVariant": "#2E3436",
+    "outlineVariant": "#D6D6D6",
+    "nicknameColors": [
+      "#C01C28",
+      "#26A269",
+      "#A2734C",
+      "#12488B",
+      "#A347BA",
+      "#2AA1B3"
+    ]
+  },
+  "dark": {
+    "primary": "#3A944A",
+    "secondary": "#15772E",
+    "tertiary": "#FFFFFF",
+    "background": "#242424",
+    "surface": "#242424",
+    "surfaceContainer": "#1E1E1E",
+    "onBackground": "#FFFFFF",
+    "onSurface": "#FFFFFF",
+    "onSurfaceVariant": "#FFFFFF",
+    "outlineVariant": "#3D3846",
+    "nicknameColors": [
+      "#C01C28",
+      "#2EC27E",
+      "#F5C211",
+      "#1E78E4",
+      "#9841BB",
+      "#0AB9DC"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/ADW-green/ADW-green.json"
+}

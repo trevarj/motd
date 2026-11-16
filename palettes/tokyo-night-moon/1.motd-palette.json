@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "tokyo-night-moon",
+  "name": "Tokyo Night Moon",
+  "revision": 1,
+  "light": {
+    "primary": "#4E70C2",
+    "secondary": "#85539C",
+    "tertiary": "#4C663B",
+    "background": "#F0F2F7",
+    "surface": "#F0F2F7",
+    "surfaceContainer": "#DBDFEA",
+    "onBackground": "#4E70C2",
+    "onSurface": "#4E70C2",
+    "onSurfaceVariant": "#444B6A",
+    "outlineVariant": "#C8CCD8",
+    "nicknameColors": [
+      "#E55561",
+      "#4C663B",
+      "#9E8C6B",
+      "#4E70C2",
+      "#85539C",
+      "#569B9F"
+    ]
+  },
+  "dark": {
+    "primary": "#7A88CF",
+    "secondary": "#D7729F",
+    "tertiary": "#9CD58A",
+    "background": "#1F2335",
+    "surface": "#1F2335",
+    "surfaceContainer": "#2C314A",
+    "onBackground": "#A9B1D6",
+    "onSurface": "#A9B1D6",
+    "onSurfaceVariant": "#C0CAF5",
+    "outlineVariant": "#4B517A",
+    "nicknameColors": [
+      "#F7768E",
+      "#9CD58A",
+      "#E6C384",
+      "#7A88CF",
+      "#D7729F",
+      "#7BB0C0"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Tokyo%20Night%20Moon/Tokyo%20Night%20Moon.json"
+}

@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "inabakumori",
+  "name": "Inabakumori",
+  "revision": 1,
+  "light": {
+    "primary": "#333333",
+    "secondary": "#B2B2B2",
+    "tertiary": "#777777",
+    "background": "#DDDDDD",
+    "surface": "#DDDDDD",
+    "surfaceContainer": "#B2B2B2",
+    "onBackground": "#333333",
+    "onSurface": "#333333",
+    "onSurfaceVariant": "#333333",
+    "outlineVariant": "#222222",
+    "nicknameColors": [
+      "#AA4444",
+      "#338833",
+      "#DD7755",
+      "#3377BB",
+      "#BB33BB",
+      "#3377AA"
+    ]
+  },
+  "dark": {
+    "primary": "#B2B2B2",
+    "secondary": "#777777",
+    "tertiary": "#DDDDDD",
+    "background": "#333333",
+    "surface": "#333333",
+    "surfaceContainer": "#222222",
+    "onBackground": "#DDDDDD",
+    "onSurface": "#DDDDDD",
+    "onSurfaceVariant": "#DDDDDD",
+    "outlineVariant": "#777777",
+    "nicknameColors": [
+      "#AA4444",
+      "#338833",
+      "#BBBB55",
+      "#3377BB",
+      "#BB33BB",
+      "#33AAAA"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Inabakumori/Inabakumori.json"
+}

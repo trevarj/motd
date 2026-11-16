@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "cherry-blossom",
+  "name": "Cherry Blossom",
+  "revision": 1,
+  "light": {
+    "primary": "#6F4E63",
+    "secondary": "#F2C1D4",
+    "tertiary": "#8F6A7C",
+    "background": "#F7E6EE",
+    "surface": "#F7E6EE",
+    "surfaceContainer": "#F9EDF3",
+    "onBackground": "#2A1B21",
+    "onSurface": "#2A1B21",
+    "onSurfaceVariant": "#6F4E63",
+    "outlineVariant": "#2A1B21",
+    "nicknameColors": [
+      "#F52A65",
+      "#587539",
+      "#8C6C3E",
+      "#2E7DE9",
+      "#9854F1",
+      "#007197"
+    ]
+  },
+  "dark": {
+    "primary": "#F2C1D4",
+    "secondary": "#FFD6E2",
+    "tertiary": "#D4A3BD",
+    "background": "#2A1922",
+    "surface": "#2A1922",
+    "surfaceContainer": "#4D3745",
+    "onBackground": "#F3C7D7",
+    "onSurface": "#F3C7D7",
+    "onSurfaceVariant": "#EFDCE8",
+    "outlineVariant": "#5C1A28",
+    "nicknameColors": [
+      "#E64572",
+      "#89D36A",
+      "#D7A23A",
+      "#4F8FFF",
+      "#9D6DFF",
+      "#43C9FF"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Cherry%20Blossom/Cherry%20Blossom.json"
+}

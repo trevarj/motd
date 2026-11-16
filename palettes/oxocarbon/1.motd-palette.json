@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "oxocarbon",
+  "name": "Oxocarbon",
+  "revision": 1,
+  "light": {
+    "primary": "#0F62FE",
+    "secondary": "#37A054",
+    "tertiary": "#673AB7",
+    "background": "#F2F4F8",
+    "surface": "#F2F4F8",
+    "surfaceContainer": "#DDE1E6",
+    "onBackground": "#161616",
+    "onSurface": "#161616",
+    "onSurfaceVariant": "#393939",
+    "outlineVariant": "#525252",
+    "nicknameColors": [
+      "#EE5396",
+      "#42BE65",
+      "#FFAB91",
+      "#0F62FE",
+      "#BE95FF",
+      "#08BDBA"
+    ]
+  },
+  "dark": {
+    "primary": "#33B1FF",
+    "secondary": "#42BE65",
+    "tertiary": "#BE95FF",
+    "background": "#161616",
+    "surface": "#161616",
+    "surfaceContainer": "#262626",
+    "onBackground": "#F2F4F8",
+    "onSurface": "#F2F4F8",
+    "onSurfaceVariant": "#DDE1E6",
+    "outlineVariant": "#525252",
+    "nicknameColors": [
+      "#EE5396",
+      "#42BE65",
+      "#82CFFF",
+      "#33B1FF",
+      "#FF7EB6",
+      "#3DDBD9"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Oxocarbon/Oxocarbon.json"
+}

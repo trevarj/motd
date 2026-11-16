@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "solarized-osaka",
+  "name": "Solarized Osaka",
+  "revision": 1,
+  "light": {
+    "primary": "#29A298",
+    "secondary": "#DB302D",
+    "tertiary": "#B28500",
+    "background": "#FDF5E2",
+    "surface": "#FDF5E2",
+    "surfaceContainer": "#EDE7D3",
+    "onBackground": "#576D74",
+    "onSurface": "#576D74",
+    "onSurfaceVariant": "#576D74",
+    "outlineVariant": "#ADB7B7",
+    "nicknameColors": [
+      "#DB302D",
+      "#849900",
+      "#B28500",
+      "#268BD3",
+      "#D23681",
+      "#29A298"
+    ]
+  },
+  "dark": {
+    "primary": "#29A298",
+    "secondary": "#DB302D",
+    "tertiary": "#B28500",
+    "background": "#001419",
+    "surface": "#001419",
+    "surfaceContainer": "#002C38",
+    "onBackground": "#839395",
+    "onSurface": "#839395",
+    "onSurfaceVariant": "#637981",
+    "outlineVariant": "#576D74",
+    "nicknameColors": [
+      "#DB302D",
+      "#849900",
+      "#B28500",
+      "#268BD3",
+      "#D23681",
+      "#29A298"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Solarized%20Osaka/Solarized%20Osaka.json"
+}

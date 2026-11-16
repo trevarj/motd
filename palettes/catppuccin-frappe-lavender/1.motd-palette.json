@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "catppuccin-frappe-lavender",
+  "name": "Catppuccin Frappe Lavender",
+  "revision": 1,
+  "light": {
+    "primary": "#7287FD",
+    "secondary": "#1E66F5",
+    "tertiary": "#8839EF",
+    "background": "#EFF1F5",
+    "surface": "#EFF1F5",
+    "surfaceContainer": "#CCD0DA",
+    "onBackground": "#4C4F69",
+    "onSurface": "#4C4F69",
+    "onSurfaceVariant": "#6C6F85",
+    "outlineVariant": "#9CA0B0",
+    "nicknameColors": [
+      "#D20F39",
+      "#40A02B",
+      "#DF8E1D",
+      "#1E66F5",
+      "#EA76CB",
+      "#179299"
+    ]
+  },
+  "dark": {
+    "primary": "#BABBF1",
+    "secondary": "#8CAAEE",
+    "tertiary": "#CA9EE6",
+    "background": "#303446",
+    "surface": "#303446",
+    "surfaceContainer": "#414559",
+    "onBackground": "#C6D0F5",
+    "onSurface": "#C6D0F5",
+    "onSurfaceVariant": "#A5ADCE",
+    "outlineVariant": "#737994",
+    "nicknameColors": [
+      "#E78284",
+      "#A6D189",
+      "#E5C890",
+      "#8CAAEE",
+      "#F4B8E4",
+      "#81C8BE"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Catppuccin%20Frappe%20Lavender/Catppuccin%20Frappe%20Lavender.json"
+}

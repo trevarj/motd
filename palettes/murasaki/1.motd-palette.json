@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "murasaki",
+  "name": "Murasaki",
+  "revision": 1,
+  "light": {
+    "primary": "#8E0CC6",
+    "secondary": "#EBC5FC",
+    "tertiary": "#BCFBE8",
+    "background": "#F7E7FE",
+    "surface": "#F7E7FE",
+    "surfaceContainer": "#E8BCFB",
+    "onBackground": "#6F099A",
+    "onSurface": "#6F099A",
+    "onSurfaceVariant": "#50066F",
+    "outlineVariant": "#CA65F6",
+    "nicknameColors": [
+      "#E80E4F",
+      "#CB62F8",
+      "#E8A70E",
+      "#BC39F3",
+      "#E80EBC",
+      "#A70EE8"
+    ]
+  },
+  "dark": {
+    "primary": "#E8BCFB",
+    "secondary": "#8E0CC6",
+    "tertiary": "#066F50",
+    "background": "#300443",
+    "surface": "#300443",
+    "surfaceContainer": "#50066F",
+    "onBackground": "#FEF7E7",
+    "onSurface": "#FEF7E7",
+    "onSurfaceVariant": "#E8BCFB",
+    "outlineVariant": "#8E0CC6",
+    "nicknameColors": [
+      "#E80E4F",
+      "#CB62F8",
+      "#E8A70E",
+      "#BC39F3",
+      "#E80EBC",
+      "#A70EE8"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Murasaki/Murasaki.json"
+}

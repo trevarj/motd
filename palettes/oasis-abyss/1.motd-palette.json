@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "oasis-abyss",
+  "name": "Oasis Abyss",
+  "revision": 1,
+  "light": {
+    "primary": "#7D2B2B",
+    "secondary": "#AB5807",
+    "tertiary": "#696223",
+    "background": "#E8E0D8",
+    "surface": "#E8E0D8",
+    "surfaceContainer": "#F3EFEB",
+    "onBackground": "#7C4734",
+    "onSurface": "#7C4734",
+    "onSurfaceVariant": "#555555",
+    "outlineVariant": "#978E88",
+    "nicknameColors": [
+      "#A44040",
+      "#306C4C",
+      "#696223",
+      "#155EC0",
+      "#7F30DD",
+      "#376A62"
+    ]
+  },
+  "dark": {
+    "primary": "#D06666",
+    "secondary": "#FFA247",
+    "tertiary": "#F0E68C",
+    "background": "#1A1A1A",
+    "surface": "#1A1A1A",
+    "surfaceContainer": "#080808",
+    "onBackground": "#FFDACC",
+    "onSurface": "#FFDACC",
+    "onSurfaceVariant": "#F0EBE6",
+    "outlineVariant": "#5E5148",
+    "nicknameColors": [
+      "#D06666",
+      "#53D390",
+      "#F0E68C",
+      "#519BFF",
+      "#C28EFF",
+      "#5ABAAE"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Oasis%20Abyss/Oasis%20Abyss.json"
+}

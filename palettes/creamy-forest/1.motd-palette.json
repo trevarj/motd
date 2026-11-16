@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "creamy-forest",
+  "name": "Creamy Forest",
+  "revision": 1,
+  "light": {
+    "primary": "#4C573C",
+    "secondary": "#6E674B",
+    "tertiary": "#385249",
+    "background": "#F4F6EB",
+    "surface": "#F4F6EB",
+    "surfaceContainer": "#E5E9D6",
+    "onBackground": "#1C1E1A",
+    "onSurface": "#1C1E1A",
+    "onSurfaceVariant": "#1C1E1A",
+    "outlineVariant": "#787F6E",
+    "nicknameColors": [
+      "#A6423A",
+      "#4C573C",
+      "#73623D",
+      "#2D4657",
+      "#70474B",
+      "#285446"
+    ]
+  },
+  "dark": {
+    "primary": "#A2B08D",
+    "secondary": "#948E74",
+    "tertiary": "#6E857B",
+    "background": "#1C1E1A",
+    "surface": "#1C1E1A",
+    "surfaceContainer": "#252722",
+    "onBackground": "#F4F6EB",
+    "onSurface": "#F4F6EB",
+    "onSurfaceVariant": "#A2B08D",
+    "outlineVariant": "#343730",
+    "nicknameColors": [
+      "#CE7A71",
+      "#A2B08D",
+      "#C7AE81",
+      "#6F8796",
+      "#B89094",
+      "#7CB3A0"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Creamy%20Forest/Creamy%20Forest.json"
+}

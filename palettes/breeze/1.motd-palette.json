@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "breeze",
+  "name": "Breeze",
+  "revision": 1,
+  "light": {
+    "primary": "#3DAEE9",
+    "secondary": "#2980B9",
+    "tertiary": "#9B59B6",
+    "background": "#FFFFFF",
+    "surface": "#FFFFFF",
+    "surfaceContainer": "#EFF0F1",
+    "onBackground": "#232629",
+    "onSurface": "#232629",
+    "onSurfaceVariant": "#707D8A",
+    "outlineVariant": "#E3E5E7",
+    "nicknameColors": [
+      "#CD5C60",
+      "#39855F",
+      "#B87E3C",
+      "#2683B5",
+      "#845A84",
+      "#48A9A9"
+    ]
+  },
+  "dark": {
+    "primary": "#3DAEE9",
+    "secondary": "#1D99F3",
+    "tertiary": "#9B59B6",
+    "background": "#202224",
+    "surface": "#202224",
+    "surfaceContainer": "#292D32",
+    "onBackground": "#FCFCFC",
+    "onSurface": "#FCFCFC",
+    "onSurfaceVariant": "#A1A9B1",
+    "outlineVariant": "#707D8A",
+    "nicknameColors": [
+      "#ED1515",
+      "#11D116",
+      "#F67400",
+      "#1D99F3",
+      "#9B59B6",
+      "#1ABC9C"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Breeze/Breeze.json"
+}

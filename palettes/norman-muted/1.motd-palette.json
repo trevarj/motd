@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "norman-muted",
+  "name": "Norman Muted",
+  "revision": 1,
+  "light": {
+    "primary": "#4DB391",
+    "secondary": "#D9CC8C",
+    "tertiary": "#D98C99",
+    "background": "#CCCCCC",
+    "surface": "#CCCCCC",
+    "surfaceContainer": "#B3B3B3",
+    "onBackground": "#262626",
+    "onSurface": "#262626",
+    "onSurfaceVariant": "#262626",
+    "outlineVariant": "#808080",
+    "nicknameColors": [
+      "#BF5540",
+      "#40BF55",
+      "#BFAA40",
+      "#4055BF",
+      "#BF40AA",
+      "#66CCCC"
+    ]
+  },
+  "dark": {
+    "primary": "#4DB391",
+    "secondary": "#D9CC8C",
+    "tertiary": "#D98C99",
+    "background": "#262626",
+    "surface": "#262626",
+    "surfaceContainer": "#404040",
+    "onBackground": "#CCCCCC",
+    "onSurface": "#CCCCCC",
+    "onSurfaceVariant": "#CCCCCC",
+    "outlineVariant": "#808080",
+    "nicknameColors": [
+      "#BF5540",
+      "#40BF55",
+      "#BFAA40",
+      "#4055BF",
+      "#BF40AA",
+      "#66CCCC"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Norman%20Muted/Norman%20Muted.json"
+}

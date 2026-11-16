@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "oxide",
+  "name": "Oxide",
+  "revision": 1,
+  "light": {
+    "primary": "#B85A30",
+    "secondary": "#6B8050",
+    "tertiary": "#BD8838",
+    "background": "#F2E8D8",
+    "surface": "#F2E8D8",
+    "surfaceContainer": "#F7F0E5",
+    "onBackground": "#3A2E25",
+    "onSurface": "#3A2E25",
+    "onSurfaceVariant": "#6A5D51",
+    "outlineVariant": "#D8CCBA",
+    "nicknameColors": [
+      "#AD4433",
+      "#6B8050",
+      "#BD8838",
+      "#B85A30",
+      "#9A6860",
+      "#A07058"
+    ]
+  },
+  "dark": {
+    "primary": "#B85A30",
+    "secondary": "#8B9A5A",
+    "tertiary": "#D8A657",
+    "background": "#231D1B",
+    "surface": "#231D1B",
+    "surfaceContainer": "#2E2623",
+    "onBackground": "#E6DBD3",
+    "onSurface": "#E6DBD3",
+    "onSurfaceVariant": "#B8ACA2",
+    "outlineVariant": "#3E3532",
+    "nicknameColors": [
+      "#C25D4E",
+      "#8B9A5A",
+      "#D8A657",
+      "#B85A30",
+      "#CC8977",
+      "#C4856A"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Oxide/Oxide.json"
+}

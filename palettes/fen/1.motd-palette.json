@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "fen",
+  "name": "Fen",
+  "revision": 1,
+  "light": {
+    "primary": "#526E2D",
+    "secondary": "#326A59",
+    "tertiary": "#8A5C2D",
+    "background": "#EFF1DE",
+    "surface": "#EFF1DE",
+    "surfaceContainer": "#DEE5CE",
+    "onBackground": "#102329",
+    "onSurface": "#102329",
+    "onSurfaceVariant": "#455D52",
+    "outlineVariant": "#788C7A",
+    "nicknameColors": [
+      "#914638",
+      "#526E2D",
+      "#7C622A",
+      "#365E69",
+      "#79564E",
+      "#386F61"
+    ]
+  },
+  "dark": {
+    "primary": "#A8C86B",
+    "secondary": "#5A8F78",
+    "tertiary": "#D4B071",
+    "background": "#0B1824",
+    "surface": "#0B1824",
+    "surfaceContainer": "#12282F",
+    "onBackground": "#E8E6C8",
+    "onSurface": "#E8E6C8",
+    "onSurfaceVariant": "#ADB99B",
+    "outlineVariant": "#3B5E59",
+    "nicknameColors": [
+      "#B85F4D",
+      "#789B4E",
+      "#B99B59",
+      "#3A6370",
+      "#986A62",
+      "#4F8879"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Fen/Fen.json"
+}

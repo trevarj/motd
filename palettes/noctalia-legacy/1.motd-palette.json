@@ -1,0 +1,44 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "noctalia-legacy",
+  "name": "Noctalia legacy",
+  "revision": 1,
+  "light": {
+    "primary": "#9B59BA",
+    "secondary": "#784999",
+    "tertiary": "#C17093",
+    "background": "#F5F1FA",
+    "surface": "#F5F1FA",
+    "surfaceContainer": "#E7DFEE",
+    "onBackground": "#1C1822",
+    "onSurface": "#1C1822",
+    "onSurfaceVariant": "#4A3D59",
+    "outlineVariant": "#CEBEDC",
+    "nicknameColors": [
+      "#E9899D",
+      "#C17093",
+      "#9B59BA",
+      "#784999"
+    ]
+  },
+  "dark": {
+    "primary": "#C7A1D8",
+    "secondary": "#9F75BD",
+    "tertiary": "#E0B7C9",
+    "background": "#1C1822",
+    "surface": "#1C1822",
+    "surfaceContainer": "#262130",
+    "onBackground": "#E9E4F0",
+    "onSurface": "#E9E4F0",
+    "onSurfaceVariant": "#A79AB0",
+    "outlineVariant": "#3E364E",
+    "nicknameColors": [
+      "#E9899D",
+      "#E0B7C9",
+      "#C7A1D8",
+      "#A984C4"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Noctalia%20legacy/Noctalia%20legacy.json"
+}

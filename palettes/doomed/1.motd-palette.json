@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "doomed",
+  "name": "Doomed",
+  "revision": 1,
+  "light": {
+    "primary": "#4078F2",
+    "secondary": "#EA9558",
+    "tertiary": "#50A14F",
+    "background": "#F0F0F0",
+    "surface": "#F0F0F0",
+    "surfaceContainer": "#FAFAFA",
+    "onBackground": "#383A42",
+    "onSurface": "#383A42",
+    "onSurfaceVariant": "#2E2E2E",
+    "outlineVariant": "#C6C7C7",
+    "nicknameColors": [
+      "#E45649",
+      "#50A14F",
+      "#986801",
+      "#4078F2",
+      "#A626A4",
+      "#0184BC"
+    ]
+  },
+  "dark": {
+    "primary": "#51AFEF",
+    "secondary": "#F2C481",
+    "tertiary": "#98BE65",
+    "background": "#1C1E1E",
+    "surface": "#1C1E1E",
+    "surfaceContainer": "#282C34",
+    "onBackground": "#FFFCF8",
+    "onSurface": "#FFFCF8",
+    "onSurfaceVariant": "#BBC2CF",
+    "outlineVariant": "#3F444A",
+    "nicknameColors": [
+      "#FF6B5A",
+      "#98BE65",
+      "#F2C481",
+      "#51AFEF",
+      "#DC8EF3",
+      "#46D9FF"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Doomed/Doomed.json"
+}

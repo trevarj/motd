@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "gruber-darker",
+  "name": "Gruber Darker",
+  "revision": 1,
+  "light": {
+    "primary": "#5F627F",
+    "secondary": "#4A8A14",
+    "tertiary": "#7A6EA8",
+    "background": "#F5F5F5",
+    "surface": "#F5F5F5",
+    "surfaceContainer": "#E4E4EF",
+    "onBackground": "#181818",
+    "onSurface": "#181818",
+    "onSurfaceVariant": "#453D41",
+    "outlineVariant": "#C8C8D0",
+    "nicknameColors": [
+      "#C73C3F",
+      "#4A8A14",
+      "#9A6E00",
+      "#5F627F",
+      "#7A6EA8",
+      "#5A7A6A"
+    ]
+  },
+  "dark": {
+    "primary": "#FFDD33",
+    "secondary": "#96A6C8",
+    "tertiary": "#9E95C7",
+    "background": "#181818",
+    "surface": "#181818",
+    "surfaceContainer": "#282828",
+    "onBackground": "#E4E4EF",
+    "onSurface": "#E4E4EF",
+    "onSurfaceVariant": "#95A99F",
+    "outlineVariant": "#484848",
+    "nicknameColors": [
+      "#F43841",
+      "#73C936",
+      "#FFDD33",
+      "#96A6C8",
+      "#9E95C7",
+      "#95A99F"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Gruber%20Darker/Gruber%20Darker.json"
+}

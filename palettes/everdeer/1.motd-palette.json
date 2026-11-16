@@ -1,0 +1,46 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "everdeer",
+  "name": "Everdeer",
+  "revision": 1,
+  "light": {
+    "primary": "#A03218",
+    "secondary": "#8A4E40",
+    "tertiary": "#755B00",
+    "background": "#FFF8F6",
+    "surface": "#FFF8F6",
+    "surfaceContainer": "#FFE9E4",
+    "onBackground": "#251916",
+    "onSurface": "#251916",
+    "onSurfaceVariant": "#58423C",
+    "outlineVariant": "#DFC0B8",
+    "nicknameColors": [
+      "#FFB4AB",
+      "#FFB4A3",
+      "#DBC58C",
+      "#FFDAD2",
+      "#E7BDB4"
+    ]
+  },
+  "dark": {
+    "primary": "#FFB4A3",
+    "secondary": "#FFB4A3",
+    "tertiary": "#E9C258",
+    "background": "#1C110E",
+    "surface": "#1C110E",
+    "surfaceContainer": "#291D1A",
+    "onBackground": "#F4DED9",
+    "onSurface": "#F4DED9",
+    "onSurfaceVariant": "#DFC0B8",
+    "outlineVariant": "#58423C",
+    "nicknameColors": [
+      "#FFB4AB",
+      "#FFB4A3",
+      "#DBC58C",
+      "#FFDAD2",
+      "#E7BDB4"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Everdeer/Everdeer.json"
+}

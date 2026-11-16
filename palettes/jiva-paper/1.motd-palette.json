@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "jiva-paper",
+  "name": "Jiva Paper",
+  "revision": 1,
+  "light": {
+    "primary": "#666666",
+    "secondary": "#666666",
+    "tertiary": "#707070",
+    "background": "#EBE7DD",
+    "surface": "#EBE7DD",
+    "surfaceContainer": "#DBD7CC",
+    "onBackground": "#666666",
+    "onSurface": "#666666",
+    "onSurfaceVariant": "#666666",
+    "outlineVariant": "#C9C9C1",
+    "nicknameColors": [
+      "#F92672",
+      "#A6E22E",
+      "#F4BF75",
+      "#66D9EF",
+      "#AE81FF",
+      "#A1EFE4"
+    ]
+  },
+  "dark": {
+    "primary": "#BFC0DE",
+    "secondary": "#BFC0DE",
+    "tertiary": "#CECFEB",
+    "background": "#212226",
+    "surface": "#212226",
+    "surfaceContainer": "#2C2E33",
+    "onBackground": "#E1E2E5",
+    "onSurface": "#E1E2E5",
+    "onSurfaceVariant": "#E1E2E5",
+    "outlineVariant": "#68686E",
+    "nicknameColors": [
+      "#F92672",
+      "#A6E22E",
+      "#F4BF75",
+      "#66D9EF",
+      "#AE81FF",
+      "#A1EFE4"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Jiva%20Paper/Jiva%20Paper.json"
+}

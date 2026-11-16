@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "solarized",
+  "name": "Solarized",
+  "revision": 1,
+  "light": {
+    "primary": "#A37A00",
+    "secondary": "#D33682",
+    "tertiary": "#CB4B16",
+    "background": "#FDF6E3",
+    "surface": "#FDF6E3",
+    "surfaceContainer": "#EEE8D5",
+    "onBackground": "#657B83",
+    "onSurface": "#657B83",
+    "onSurfaceVariant": "#738587",
+    "outlineVariant": "#DFD4B1",
+    "nicknameColors": [
+      "#DC322F",
+      "#859900",
+      "#B58900",
+      "#268BD2",
+      "#D33682",
+      "#2AA198"
+    ]
+  },
+  "dark": {
+    "primary": "#B58900",
+    "secondary": "#D33682",
+    "tertiary": "#CB4B16",
+    "background": "#002B36",
+    "surface": "#002B36",
+    "surfaceContainer": "#06313C",
+    "onBackground": "#839496",
+    "onSurface": "#839496",
+    "onSurfaceVariant": "#657B83",
+    "outlineVariant": "#0C5C70",
+    "nicknameColors": [
+      "#DC322F",
+      "#859900",
+      "#B58900",
+      "#268BD2",
+      "#D33682",
+      "#2AA198"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Solarized/Solarized.json"
+}

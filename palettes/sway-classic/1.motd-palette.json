@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "sway-classic",
+  "name": "Sway Classic",
+  "revision": 1,
+  "light": {
+    "primary": "#285577",
+    "secondary": "#1A6EA8",
+    "tertiary": "#5F676A",
+    "background": "#F5F5F5",
+    "surface": "#F5F5F5",
+    "surfaceContainer": "#DCDCDC",
+    "onBackground": "#222222",
+    "onSurface": "#222222",
+    "onSurfaceVariant": "#484E50",
+    "outlineVariant": "#9E9E9E",
+    "nicknameColors": [
+      "#900000",
+      "#5F8700",
+      "#AF8700",
+      "#285577",
+      "#5F5F87",
+      "#1A6EA8"
+    ]
+  },
+  "dark": {
+    "primary": "#4C7899",
+    "secondary": "#2E9EF4",
+    "tertiary": "#5F676A",
+    "background": "#222222",
+    "surface": "#222222",
+    "surfaceContainer": "#333333",
+    "onBackground": "#F0F0F0",
+    "onSurface": "#F0F0F0",
+    "onSurfaceVariant": "#888888",
+    "outlineVariant": "#484E50",
+    "nicknameColors": [
+      "#900000",
+      "#5F8700",
+      "#AF8700",
+      "#285577",
+      "#5F5F87",
+      "#2E9EF4"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Sway%20Classic/Sway%20Classic.json"
+}

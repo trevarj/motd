@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "seoul256",
+  "name": "Seoul256",
+  "revision": 1,
+  "light": {
+    "primary": "#A9824B",
+    "secondary": "#88B0D5",
+    "tertiary": "#376361",
+    "background": "#DADADA",
+    "surface": "#DADADA",
+    "surfaceContainer": "#C6C6C6",
+    "onBackground": "#444444",
+    "onSurface": "#444444",
+    "onSurfaceVariant": "#444444",
+    "outlineVariant": "#5F5F5F",
+    "nicknameColors": [
+      "#BA3C38",
+      "#5D8760",
+      "#A9824B",
+      "#78A0C5",
+      "#CD5985",
+      "#418F8C"
+    ]
+  },
+  "dark": {
+    "primary": "#D5A55F",
+    "secondary": "#88B0D5",
+    "tertiary": "#61AFAC",
+    "background": "#3A3A3A",
+    "surface": "#3A3A3A",
+    "surfaceContainer": "#444444",
+    "onBackground": "#D0D0D0",
+    "onSurface": "#D0D0D0",
+    "onSurfaceVariant": "#DADADA",
+    "outlineVariant": "#626262",
+    "nicknameColors": [
+      "#BA3C38",
+      "#5D8760",
+      "#D5A55F",
+      "#78A0C5",
+      "#CD5B6D",
+      "#61AFAC"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Seoul256/Seoul256.json"
+}

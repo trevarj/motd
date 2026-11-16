@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "zenbones",
+  "name": "Zenbones",
+  "revision": 1,
+  "light": {
+    "primary": "#2C363C",
+    "secondary": "#CFC1BA",
+    "tertiary": "#8C7F78",
+    "background": "#F0EDEC",
+    "surface": "#F0EDEC",
+    "surfaceContainer": "#CFC1BA",
+    "onBackground": "#2C363C",
+    "onSurface": "#2C363C",
+    "onSurfaceVariant": "#6B6B6B",
+    "outlineVariant": "#CFC1BA",
+    "nicknameColors": [
+      "#A8334C",
+      "#4F6C31",
+      "#944927",
+      "#286486",
+      "#88507D",
+      "#3B8992"
+    ]
+  },
+  "dark": {
+    "primary": "#B4BDC3",
+    "secondary": "#888F94",
+    "tertiary": "#9F948F",
+    "background": "#1C1917",
+    "surface": "#1C1917",
+    "surfaceContainer": "#403833",
+    "onBackground": "#B4BDC3",
+    "onSurface": "#B4BDC3",
+    "onSurfaceVariant": "#888F94",
+    "outlineVariant": "#888F94",
+    "nicknameColors": [
+      "#DE6E7C",
+      "#819B69",
+      "#B77E64",
+      "#6099C0",
+      "#B279A7",
+      "#66A5AD"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Zenbones/Zenbones.json"
+}

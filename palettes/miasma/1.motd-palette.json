@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "miasma",
+  "name": "Miasma",
+  "revision": 1,
+  "light": {
+    "primary": "#AB8836",
+    "secondary": "#B36D43",
+    "tertiary": "#BB7744",
+    "background": "#FAFAF5",
+    "surface": "#FAFAF5",
+    "surfaceContainer": "#E8E8E0",
+    "onBackground": "#222222",
+    "onSurface": "#222222",
+    "onSurfaceVariant": "#B36D43",
+    "outlineVariant": "#999980",
+    "nicknameColors": [
+      "#A08070",
+      "#8FB38F",
+      "#D0B090",
+      "#A8B87A",
+      "#D8A088",
+      "#E0D0A0"
+    ]
+  },
+  "dark": {
+    "primary": "#C9A554",
+    "secondary": "#B36D43",
+    "tertiary": "#BB7744",
+    "background": "#222222",
+    "surface": "#222222",
+    "surfaceContainer": "#2A2A2A",
+    "onBackground": "#C2C2B0",
+    "onSurface": "#C2C2B0",
+    "onSurfaceVariant": "#C9A554",
+    "outlineVariant": "#666666",
+    "nicknameColors": [
+      "#685742",
+      "#5F875F",
+      "#B36D43",
+      "#78824B",
+      "#BB7744",
+      "#C9A554"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Miasma/Miasma.json"
+}

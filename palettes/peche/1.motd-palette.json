@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "peche",
+  "name": "Peche",
+  "revision": 1,
+  "light": {
+    "primary": "#50957E",
+    "secondary": "#D36C50",
+    "tertiary": "#CA6F44",
+    "background": "#E8EFF2",
+    "surface": "#E8EFF2",
+    "surfaceContainer": "#CFD9DE",
+    "onBackground": "#738A92",
+    "onSurface": "#738A92",
+    "onSurfaceVariant": "#435860",
+    "outlineVariant": "#C2CFD6",
+    "nicknameColors": [
+      "#D68F6E",
+      "#5AA68D",
+      "#6DB09A",
+      "#74A8C2",
+      "#E8B8A8",
+      "#A7CCE1"
+    ]
+  },
+  "dark": {
+    "primary": "#9DD2C0",
+    "secondary": "#FADDD2",
+    "tertiary": "#E8B8A8",
+    "background": "#0E1214",
+    "surface": "#0E1214",
+    "surfaceContainer": "#192024",
+    "onBackground": "#ABBCC4",
+    "onSurface": "#ABBCC4",
+    "onSurfaceVariant": "#DBE2E6",
+    "outlineVariant": "#212B30",
+    "nicknameColors": [
+      "#E8B8A8",
+      "#9DD2C0",
+      "#C7E5DB",
+      "#A7CCE1",
+      "#B4E1E4",
+      "#FADDD2"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Peche/Peche.json"
+}

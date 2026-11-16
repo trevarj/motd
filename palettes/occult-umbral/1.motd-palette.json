@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "occult-umbral",
+  "name": "Occult Umbral",
+  "revision": 1,
+  "light": {
+    "primary": "#8B2E2E",
+    "secondary": "#5A1F6F",
+    "tertiary": "#3F1C4A",
+    "background": "#EFE6DA",
+    "surface": "#EFE6DA",
+    "surfaceContainer": "#D2B48C",
+    "onBackground": "#0A0A12",
+    "onSurface": "#0A0A12",
+    "onSurfaceVariant": "#0A0A12",
+    "outlineVariant": "#8B2E2E",
+    "nicknameColors": [
+      "#8B2E2E",
+      "#2F5A3A",
+      "#8A5A12",
+      "#26325E",
+      "#5A1F6F",
+      "#2F5A58"
+    ]
+  },
+  "dark": {
+    "primary": "#BB3535",
+    "secondary": "#8BAA82",
+    "tertiary": "#9A7398",
+    "background": "#0A0A12",
+    "surface": "#0A0A12",
+    "surfaceContainer": "#14141E",
+    "onBackground": "#E4DED2",
+    "onSurface": "#E4DED2",
+    "onSurfaceVariant": "#F2EADF",
+    "outlineVariant": "#3A3A4A",
+    "nicknameColors": [
+      "#C25B5B",
+      "#8BAA82",
+      "#E6C27A",
+      "#6270A8",
+      "#9A7398",
+      "#95B3B0"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Occult%20Umbral/Occult%20Umbral.json"
+}

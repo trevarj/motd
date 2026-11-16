@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "nord-aurora",
+  "name": "Nord Aurora",
+  "revision": 1,
+  "light": {
+    "primary": "#C87056",
+    "secondary": "#A77B9C",
+    "tertiary": "#4E7449",
+    "background": "#ECEFF4",
+    "surface": "#ECEFF4",
+    "surfaceContainer": "#E5E9F0",
+    "onBackground": "#2E3440",
+    "onSurface": "#2E3440",
+    "onSurfaceVariant": "#3B4252",
+    "outlineVariant": "#D8DEE9",
+    "nicknameColors": [
+      "#BF616A",
+      "#A3BE8C",
+      "#EBCB8B",
+      "#5E81AC",
+      "#B48EAD",
+      "#8FBCBB"
+    ]
+  },
+  "dark": {
+    "primary": "#B48EAD",
+    "secondary": "#A3BE8C",
+    "tertiary": "#EBCB8B",
+    "background": "#2E3440",
+    "surface": "#2E3440",
+    "surfaceContainer": "#3B4252",
+    "onBackground": "#ECEFF4",
+    "onSurface": "#ECEFF4",
+    "onSurfaceVariant": "#E5E9F0",
+    "outlineVariant": "#434C5E",
+    "nicknameColors": [
+      "#BF616A",
+      "#A3BE8C",
+      "#EBCB8B",
+      "#5E81AC",
+      "#F4B8E4",
+      "#8FBCBB"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Nord%20Aurora/Nord%20Aurora.json"
+}

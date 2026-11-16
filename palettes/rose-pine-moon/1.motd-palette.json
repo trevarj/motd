@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "rose-pine-moon",
+  "name": "Rose Pine Moon",
+  "revision": 1,
+  "light": {
+    "primary": "#D1706B",
+    "secondary": "#56949F",
+    "tertiary": "#286983",
+    "background": "#FFFAF3",
+    "surface": "#FFFAF3",
+    "surfaceContainer": "#F2E9E1",
+    "onBackground": "#575279",
+    "onSurface": "#575279",
+    "onSurfaceVariant": "#797593",
+    "outlineVariant": "#DFDAD9",
+    "nicknameColors": [
+      "#B4637A",
+      "#286983",
+      "#EA9D34",
+      "#56949F",
+      "#907AA9",
+      "#D7827E"
+    ]
+  },
+  "dark": {
+    "primary": "#EA9A97",
+    "secondary": "#9CCFD8",
+    "tertiary": "#32758F",
+    "background": "#232136",
+    "surface": "#232136",
+    "surfaceContainer": "#393552",
+    "onBackground": "#E0DEF4",
+    "onSurface": "#E0DEF4",
+    "onSurfaceVariant": "#908CAA",
+    "outlineVariant": "#44415A",
+    "nicknameColors": [
+      "#EB6F92",
+      "#3E8FB0",
+      "#F6C177",
+      "#9CCFD8",
+      "#C4A7E7",
+      "#EA9A97"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Rose%20Pine%20Moon/Rose%20Pine%20Moon.json"
+}

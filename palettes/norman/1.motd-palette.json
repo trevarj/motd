@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "norman",
+  "name": "Norman",
+  "revision": 1,
+  "light": {
+    "primary": "#33CC99",
+    "secondary": "#F0DB75",
+    "tertiary": "#F0758A",
+    "background": "#F2F2F2",
+    "surface": "#F2F2F2",
+    "surfaceContainer": "#CCCCCC",
+    "onBackground": "#0D0D0D",
+    "onSurface": "#0D0D0D",
+    "onSurfaceVariant": "#0D0D0D",
+    "outlineVariant": "#808080",
+    "nicknameColors": [
+      "#BF5540",
+      "#40BF55",
+      "#BFAA40",
+      "#4055BF",
+      "#BF40AA",
+      "#66CCCC"
+    ]
+  },
+  "dark": {
+    "primary": "#33CC99",
+    "secondary": "#F0DB75",
+    "tertiary": "#F0758A",
+    "background": "#0D0D0D",
+    "surface": "#0D0D0D",
+    "surfaceContainer": "#333333",
+    "onBackground": "#F2F2F2",
+    "onSurface": "#F2F2F2",
+    "onSurfaceVariant": "#F2F2F2",
+    "outlineVariant": "#808080",
+    "nicknameColors": [
+      "#BF5540",
+      "#40BF55",
+      "#BFAA40",
+      "#4055BF",
+      "#BF40AA",
+      "#66CCCC"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Norman/Norman.json"
+}

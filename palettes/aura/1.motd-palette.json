@@ -1,0 +1,46 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "aura",
+  "name": "Aura",
+  "revision": 1,
+  "light": {
+    "primary": "#6F4BB8",
+    "secondary": "#167A5E",
+    "tertiary": "#8A6200",
+    "background": "#F8F7FB",
+    "surface": "#F8F7FB",
+    "surfaceContainer": "#EEEAF5",
+    "onBackground": "#15141B",
+    "onSurface": "#15141B",
+    "onSurfaceVariant": "#4A4358",
+    "outlineVariant": "#756B86",
+    "nicknameColors": [
+      "#B3261E",
+      "#167A5E",
+      "#8A6200",
+      "#6F4BB8",
+      "#8A4DB5",
+      "#177C8F"
+    ]
+  },
+  "dark": {
+    "primary": "#A277FF",
+    "secondary": "#61FFCA",
+    "tertiary": "#FFCA85",
+    "background": "#15141B",
+    "surface": "#15141B",
+    "surfaceContainer": "#29263C",
+    "onBackground": "#EDECEE",
+    "onSurface": "#EDECEE",
+    "onSurfaceVariant": "#EDECEE",
+    "outlineVariant": "#6D6D6D",
+    "nicknameColors": [
+      "#FF6767",
+      "#61FFCA",
+      "#FFCA85",
+      "#A277FF"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Aura/Aura.json"
+}

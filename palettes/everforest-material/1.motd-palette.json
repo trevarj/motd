@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "everforest-material",
+  "name": "Everforest Material",
+  "revision": 1,
+  "light": {
+    "primary": "#8DA101",
+    "secondary": "#3A94C5",
+    "tertiary": "#F57D26",
+    "background": "#FFFBEF",
+    "surface": "#FFFBEF",
+    "surfaceContainer": "#F8F5E4",
+    "onBackground": "#5C6A72",
+    "onSurface": "#5C6A72",
+    "onSurfaceVariant": "#5C6A72",
+    "outlineVariant": "#A6B0A0",
+    "nicknameColors": [
+      "#F85552",
+      "#8DA101",
+      "#DFA000",
+      "#3A94C5",
+      "#DF69BA",
+      "#35A77C"
+    ]
+  },
+  "dark": {
+    "primary": "#A7C080",
+    "secondary": "#DBBC7F",
+    "tertiary": "#7FBBB3",
+    "background": "#161616",
+    "surface": "#161616",
+    "surfaceContainer": "#202020",
+    "onBackground": "#D3C6AA",
+    "onSurface": "#D3C6AA",
+    "onSurfaceVariant": "#D3C6AA",
+    "outlineVariant": "#414B50",
+    "nicknameColors": [
+      "#E67E80",
+      "#A7C080",
+      "#DBBC7F",
+      "#7FBBB3",
+      "#D699B6",
+      "#83C092"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Everforest%20Material/Everforest%20Material.json"
+}

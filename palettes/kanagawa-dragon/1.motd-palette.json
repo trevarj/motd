@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "kanagawa-dragon",
+  "name": "Kanagawa Dragon",
+  "revision": 1,
+  "light": {
+    "primary": "#606D54",
+    "secondary": "#6D8886",
+    "tertiary": "#AE4E47",
+    "background": "#C5C9C5",
+    "surface": "#C5C9C5",
+    "surfaceContainer": "#C8C093",
+    "onBackground": "#181616",
+    "onSurface": "#181616",
+    "onSurfaceVariant": "#181616",
+    "outlineVariant": "#8A9A7B",
+    "nicknameColors": [
+      "#C4746E",
+      "#8A9A7B",
+      "#C4B28A",
+      "#8BA4B0",
+      "#A292A3",
+      "#8EA4A2"
+    ]
+  },
+  "dark": {
+    "primary": "#8A9A7B",
+    "secondary": "#8EA4A2",
+    "tertiary": "#C4746E",
+    "background": "#181616",
+    "surface": "#181616",
+    "surfaceContainer": "#282727",
+    "onBackground": "#C5C9C5",
+    "onSurface": "#C5C9C5",
+    "onSurfaceVariant": "#C8C093",
+    "outlineVariant": "#625E5A",
+    "nicknameColors": [
+      "#C4746E",
+      "#8A9A7B",
+      "#C4B28A",
+      "#8BA4B0",
+      "#A292A3",
+      "#8EA4A2"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Kanagawa%20Dragon/Kanagawa%20Dragon.json"
+}

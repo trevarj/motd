@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "flexoki",
+  "name": "Flexoki",
+  "revision": 1,
+  "light": {
+    "primary": "#879A39",
+    "secondary": "#4385BE",
+    "tertiary": "#8B7EC8",
+    "background": "#FFFCF0",
+    "surface": "#FFFCF0",
+    "surfaceContainer": "#F2F0E5",
+    "onBackground": "#100F0F",
+    "onSurface": "#100F0F",
+    "onSurfaceVariant": "#6F6E69",
+    "outlineVariant": "#E6E4D9",
+    "nicknameColors": [
+      "#AF3029",
+      "#66800B",
+      "#AD8301",
+      "#205EA6",
+      "#5E409D",
+      "#24837B"
+    ]
+  },
+  "dark": {
+    "primary": "#879A39",
+    "secondary": "#4385BE",
+    "tertiary": "#8B7EC8",
+    "background": "#100F0F",
+    "surface": "#100F0F",
+    "surfaceContainer": "#1C1B1A",
+    "onBackground": "#CECDC3",
+    "onSurface": "#CECDC3",
+    "onSurfaceVariant": "#878580",
+    "outlineVariant": "#282726",
+    "nicknameColors": [
+      "#D14D41",
+      "#879A39",
+      "#D0A215",
+      "#4385BE",
+      "#8B7EC8",
+      "#3AA99F"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Flexoki/Flexoki.json"
+}

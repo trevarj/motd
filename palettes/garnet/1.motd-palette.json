@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "garnet",
+  "name": "Garnet",
+  "revision": 1,
+  "light": {
+    "primary": "#990000",
+    "secondary": "#B08040",
+    "tertiary": "#7A0000",
+    "background": "#F7F2F2",
+    "surface": "#F7F2F2",
+    "surfaceContainer": "#ECE6E6",
+    "onBackground": "#1A1414",
+    "onSurface": "#1A1414",
+    "onSurfaceVariant": "#4A4040",
+    "outlineVariant": "#D8D0D0",
+    "nicknameColors": [
+      "#990000",
+      "#2E7D32",
+      "#B8860B",
+      "#1565C0",
+      "#8E2350",
+      "#00838F"
+    ]
+  },
+  "dark": {
+    "primary": "#990000",
+    "secondary": "#C8962A",
+    "tertiary": "#7A0000",
+    "background": "#121212",
+    "surface": "#121212",
+    "surfaceContainer": "#181616",
+    "onBackground": "#E8E0E0",
+    "onSurface": "#E8E0E0",
+    "onSurfaceVariant": "#C4BCBC",
+    "outlineVariant": "#2A2424",
+    "nicknameColors": [
+      "#B30000",
+      "#5A9E5A",
+      "#C9A227",
+      "#4A7FB5",
+      "#A85A7A",
+      "#4AA3A3"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Garnet/Garnet.json"
+}

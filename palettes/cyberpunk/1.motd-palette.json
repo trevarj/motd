@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "cyberpunk",
+  "name": "Cyberpunk",
+  "revision": 1,
+  "light": {
+    "primary": "#00B8B3",
+    "secondary": "#D957A0",
+    "tertiary": "#45D395",
+    "background": "#DAE6E8",
+    "surface": "#DAE6E8",
+    "surfaceContainer": "#C8DEE6",
+    "onBackground": "#1A1914",
+    "onSurface": "#1A1914",
+    "onSurfaceVariant": "#1A1914",
+    "outlineVariant": "#7B52AB",
+    "nicknameColors": [
+      "#F52A65",
+      "#587539",
+      "#8C6C3E",
+      "#2E7DE9",
+      "#9854F1",
+      "#007197"
+    ]
+  },
+  "dark": {
+    "primary": "#C4A82E",
+    "secondary": "#D14358",
+    "tertiary": "#00A66C",
+    "background": "#0C1017",
+    "surface": "#0C1017",
+    "surfaceContainer": "#11151D",
+    "onBackground": "#5C8AC4",
+    "onSurface": "#5C8AC4",
+    "onSurfaceVariant": "#9B6BC1",
+    "outlineVariant": "#45A0D6",
+    "nicknameColors": [
+      "#E64572",
+      "#89D36A",
+      "#D7A23A",
+      "#4F8FFF",
+      "#9D6DFF",
+      "#43C9FF"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Cyberpunk/Cyberpunk.json"
+}

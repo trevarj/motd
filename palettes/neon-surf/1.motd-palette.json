@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "neon-surf",
+  "name": "Neon Surf",
+  "revision": 1,
+  "light": {
+    "primary": "#0284C7",
+    "secondary": "#0891B2",
+    "tertiary": "#0D9CDE",
+    "background": "#F0FAFF",
+    "surface": "#F0FAFF",
+    "surfaceContainer": "#D8EEF8",
+    "onBackground": "#06101A",
+    "onSurface": "#06101A",
+    "onSurfaceVariant": "#0284C7",
+    "outlineVariant": "#80C0D8",
+    "nicknameColors": [
+      "#8A3068",
+      "#0E7A89",
+      "#8A6914",
+      "#0284C7",
+      "#5B50CC",
+      "#0891B2"
+    ]
+  },
+  "dark": {
+    "primary": "#00A8F4",
+    "secondary": "#22D3EE",
+    "tertiary": "#0EA5E9",
+    "background": "#000000",
+    "surface": "#000000",
+    "surfaceContainer": "#06101A",
+    "onBackground": "#80C8F4",
+    "onSurface": "#80C8F4",
+    "onSurfaceVariant": "#00A8F4",
+    "outlineVariant": "#0A2030",
+    "nicknameColors": [
+      "#FF4466",
+      "#0E7A89",
+      "#F7C475",
+      "#00A8F4",
+      "#726AFD",
+      "#22D3EE"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Neon%20Surf/Neon%20Surf.json"
+}

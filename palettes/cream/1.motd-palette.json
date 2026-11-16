@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "cream",
+  "name": "Cream",
+  "revision": 1,
+  "light": {
+    "primary": "#4B5E37",
+    "secondary": "#8C6F39",
+    "tertiary": "#A86439",
+    "background": "#E5D8BE",
+    "surface": "#E5D8BE",
+    "surfaceContainer": "#D1C5B2",
+    "onBackground": "#2D2622",
+    "onSurface": "#2D2622",
+    "onSurfaceVariant": "#54473F",
+    "outlineVariant": "#9E8E7A",
+    "nicknameColors": [
+      "#A6464B",
+      "#4B5E37",
+      "#8C6F39",
+      "#A86439",
+      "#7D4F5B",
+      "#335E53"
+    ]
+  },
+  "dark": {
+    "primary": "#A2B574",
+    "secondary": "#DFB26C",
+    "tertiary": "#E09260",
+    "background": "#161311",
+    "surface": "#161311",
+    "surfaceContainer": "#26211E",
+    "onBackground": "#E6DFD3",
+    "onSurface": "#E6DFD3",
+    "onSurfaceVariant": "#C4B4A1",
+    "outlineVariant": "#453A35",
+    "nicknameColors": [
+      "#E37874",
+      "#A2B574",
+      "#DFB26C",
+      "#E09260",
+      "#CCA1B2",
+      "#92BFA6"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Cream/Cream.json"
+}

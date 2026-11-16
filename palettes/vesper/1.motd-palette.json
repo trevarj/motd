@@ -1,0 +1,47 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "vesper",
+  "name": "Vesper",
+  "revision": 1,
+  "light": {
+    "primary": "#FFB170",
+    "secondary": "#00CC99",
+    "tertiary": "#FBADFF",
+    "background": "#F2F2F2",
+    "surface": "#F2F2F2",
+    "surfaceContainer": "#E5E5E5",
+    "onBackground": "#0C0C0C",
+    "onSurface": "#0C0C0C",
+    "onSurfaceVariant": "#282828",
+    "outlineVariant": "#505050",
+    "nicknameColors": [
+      "#FF8080",
+      "#00CC99",
+      "#FFC799",
+      "#004A77",
+      "#FBADFF",
+      "#006B57"
+    ]
+  },
+  "dark": {
+    "primary": "#FFC799",
+    "secondary": "#99FFE4",
+    "tertiary": "#FBADFF",
+    "background": "#0C0C0C",
+    "surface": "#0C0C0C",
+    "surfaceContainer": "#1C1C1C",
+    "onBackground": "#FFFFFF",
+    "onSurface": "#FFFFFF",
+    "onSurfaceVariant": "#A0A0A0",
+    "outlineVariant": "#505050",
+    "nicknameColors": [
+      "#FF8080",
+      "#99FFE4",
+      "#FFC799",
+      "#80B3FF",
+      "#FBADFF"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Vesper/Vesper.json"
+}

@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "naysayer",
+  "name": "NaySayer",
+  "revision": 1,
+  "light": {
+    "primary": "#28A485",
+    "secondary": "#8CDE94",
+    "tertiary": "#7AD0C6",
+    "background": "#FFFFFF",
+    "surface": "#FFFFFF",
+    "surfaceContainer": "#F0F0F0",
+    "onBackground": "#062329",
+    "onSurface": "#062329",
+    "onSurfaceVariant": "#126367",
+    "outlineVariant": "#C1D1E3",
+    "nicknameColors": [
+      "#F92672",
+      "#44B340",
+      "#E6DB74",
+      "#66D9EF",
+      "#FD5FF0",
+      "#2EC09C"
+    ]
+  },
+  "dark": {
+    "primary": "#2EC09C",
+    "secondary": "#8CDE94",
+    "tertiary": "#318C81",
+    "background": "#062329",
+    "surface": "#062329",
+    "surfaceContainer": "#0B3335",
+    "onBackground": "#D1B897",
+    "onSurface": "#D1B897",
+    "onSurfaceVariant": "#C1D1E3",
+    "outlineVariant": "#126367",
+    "nicknameColors": [
+      "#F92672",
+      "#44B340",
+      "#E6DB74",
+      "#66D9EF",
+      "#FD5FF0",
+      "#2EC09C"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/NaySayer/NaySayer.json"
+}

@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "one-dark-warmer",
+  "name": "One Dark Warmer",
+  "revision": 1,
+  "light": {
+    "primary": "#4078F2",
+    "secondary": "#A626A4",
+    "tertiary": "#50A14F",
+    "background": "#FAFAFA",
+    "surface": "#FAFAFA",
+    "surfaceContainer": "#F0F0F0",
+    "onBackground": "#383A42",
+    "onSurface": "#383A42",
+    "onSurfaceVariant": "#818387",
+    "outlineVariant": "#DCDCDC",
+    "nicknameColors": [
+      "#E45649",
+      "#50A14F",
+      "#986801",
+      "#4078F2",
+      "#A626A4",
+      "#0184BC"
+    ]
+  },
+  "dark": {
+    "primary": "#57A5E5",
+    "secondary": "#BB70D2",
+    "tertiary": "#8FB573",
+    "background": "#232326",
+    "surface": "#232326",
+    "surfaceContainer": "#2C2D31",
+    "onBackground": "#A7AAB0",
+    "onSurface": "#A7AAB0",
+    "onSurfaceVariant": "#818387",
+    "outlineVariant": "#37383D",
+    "nicknameColors": [
+      "#DE5D68",
+      "#8FB573",
+      "#DBB671",
+      "#57A5E5",
+      "#BB70D2",
+      "#51A8B3"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/One%20Dark%20Warmer/One%20Dark%20Warmer.json"
+}

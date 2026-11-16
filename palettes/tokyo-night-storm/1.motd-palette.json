@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "tokyo-night-storm",
+  "name": "Tokyo Night Storm",
+  "revision": 1,
+  "light": {
+    "primary": "#4E70C2",
+    "secondary": "#85539C",
+    "tertiary": "#4C663B",
+    "background": "#F0F2F7",
+    "surface": "#F0F2F7",
+    "surfaceContainer": "#DBDFEA",
+    "onBackground": "#4E70C2",
+    "onSurface": "#4E70C2",
+    "onSurfaceVariant": "#444B6A",
+    "outlineVariant": "#C8CCD8",
+    "nicknameColors": [
+      "#E55561",
+      "#4C663B",
+      "#9E8C6B",
+      "#4E70C2",
+      "#85539C",
+      "#569B9F"
+    ]
+  },
+  "dark": {
+    "primary": "#7AA2F7",
+    "secondary": "#BB9AF7",
+    "tertiary": "#73DACA",
+    "background": "#24283B",
+    "surface": "#24283B",
+    "surfaceContainer": "#1F2335",
+    "onBackground": "#C0CAF5",
+    "onSurface": "#C0CAF5",
+    "onSurfaceVariant": "#787C99",
+    "outlineVariant": "#565F89",
+    "nicknameColors": [
+      "#F7768E",
+      "#73DACA",
+      "#E0AF68",
+      "#7AA2F7",
+      "#BB9AF7",
+      "#7DCFFF"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Tokyo%20Night%20Storm/Tokyo%20Night%20Storm.json"
+}

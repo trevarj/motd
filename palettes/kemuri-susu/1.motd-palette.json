@@ -1,0 +1,46 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "kemuri-susu",
+  "name": "Kemuri Susu",
+  "revision": 1,
+  "light": {
+    "primary": "#262524",
+    "secondary": "#736B5E",
+    "tertiary": "#A89682",
+    "background": "#D4C1A8",
+    "surface": "#D4C1A8",
+    "surfaceContainer": "#C5B29A",
+    "onBackground": "#262524",
+    "onSurface": "#262524",
+    "onSurfaceVariant": "#262524",
+    "outlineVariant": "#A89682",
+    "nicknameColors": [
+      "#736C5F",
+      "#594F46",
+      "#A89682",
+      "#262524"
+    ]
+  },
+  "dark": {
+    "primary": "#CABAAA",
+    "secondary": "#73685F",
+    "tertiary": "#594F46",
+    "background": "#1E1D1B",
+    "surface": "#1E1D1B",
+    "surfaceContainer": "#282624",
+    "onBackground": "#F0EDE6",
+    "onSurface": "#F0EDE6",
+    "onSurfaceVariant": "#CABAAA",
+    "outlineVariant": "#34312D",
+    "nicknameColors": [
+      "#CF7670",
+      "#8CA38A",
+      "#BFA67A",
+      "#78909C",
+      "#B38F99",
+      "#7FA39A"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Kemuri%20Susu/Kemuri%20Susu.json"
+}

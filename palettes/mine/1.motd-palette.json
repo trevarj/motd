@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "mine",
+  "name": "Mine",
+  "revision": 1,
+  "light": {
+    "primary": "#3A3A34",
+    "secondary": "#E6E4E8",
+    "tertiary": "#F0EEF2",
+    "background": "#FFFFFF",
+    "surface": "#FFFFFF",
+    "surfaceContainer": "#F3F2F5",
+    "onBackground": "#1D1B1D",
+    "onSurface": "#1D1B1D",
+    "onSurfaceVariant": "#3A3A3A",
+    "outlineVariant": "#B8B6BB",
+    "nicknameColors": [
+      "#D94A59",
+      "#2EA043",
+      "#C99700",
+      "#1F6FEB",
+      "#7B2CBF",
+      "#0EA5A5"
+    ]
+  },
+  "dark": {
+    "primary": "#E1E2D5",
+    "secondary": "#2D2A2E",
+    "tertiary": "#2D2A2E",
+    "background": "#1D1B1D",
+    "surface": "#1D1B1D",
+    "surfaceContainer": "#262427",
+    "onBackground": "#E1E2D5",
+    "onSurface": "#E1E2D5",
+    "onSurfaceVariant": "#E1E2D5",
+    "outlineVariant": "#000023",
+    "nicknameColors": [
+      "#D94A59",
+      "#3DCC61",
+      "#FFD400",
+      "#4EA8DE",
+      "#5A189A",
+      "#04A6C2"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Mine/Mine.json"
+}

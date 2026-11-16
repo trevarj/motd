@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "shien",
+  "name": "Shien",
+  "revision": 1,
+  "light": {
+    "primary": "#5D507C",
+    "secondary": "#7866A3",
+    "tertiary": "#15131B",
+    "background": "#EFEEF1",
+    "surface": "#EFEEF1",
+    "surfaceContainer": "#D4D1DB",
+    "onBackground": "#15131B",
+    "onSurface": "#15131B",
+    "onSurfaceVariant": "#15131B",
+    "outlineVariant": "#7866A3",
+    "nicknameColors": [
+      "#944D5C",
+      "#4C6B65",
+      "#786D52",
+      "#342E42",
+      "#5D507C",
+      "#463D5C"
+    ]
+  },
+  "dark": {
+    "primary": "#9B8BC1",
+    "secondary": "#7866A3",
+    "tertiary": "#5D507C",
+    "background": "#15131B",
+    "surface": "#15131B",
+    "surfaceContainer": "#24202C",
+    "onBackground": "#BFB3DB",
+    "onSurface": "#BFB3DB",
+    "onSurfaceVariant": "#BFB3DB",
+    "outlineVariant": "#463D5C",
+    "nicknameColors": [
+      "#B87A87",
+      "#7AA89F",
+      "#C4B794",
+      "#463D5C",
+      "#7866A3",
+      "#9B8BC1"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Shien/Shien.json"
+}

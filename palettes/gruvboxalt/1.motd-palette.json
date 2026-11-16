@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "gruvboxalt",
+  "name": "GruvboxAlt",
+  "revision": 1,
+  "light": {
+    "primary": "#3C3836",
+    "secondary": "#689D6A",
+    "tertiary": "#458588",
+    "background": "#FBF1C7",
+    "surface": "#FBF1C7",
+    "surfaceContainer": "#EBDDB2",
+    "onBackground": "#3C3836",
+    "onSurface": "#3C3836",
+    "onSurfaceVariant": "#7C6F64",
+    "outlineVariant": "#BDAE93",
+    "nicknameColors": [
+      "#CC241D",
+      "#98971A",
+      "#D79921",
+      "#458588",
+      "#B16286",
+      "#689D6A"
+    ]
+  },
+  "dark": {
+    "primary": "#EBDBB2",
+    "secondary": "#8EC07C",
+    "tertiary": "#83A598",
+    "background": "#282828",
+    "surface": "#282828",
+    "surfaceContainer": "#3C3836",
+    "onBackground": "#FBF1C7",
+    "onSurface": "#FBF1C7",
+    "onSurfaceVariant": "#EBDBB2",
+    "outlineVariant": "#57514E",
+    "nicknameColors": [
+      "#CC241D",
+      "#98971A",
+      "#D79921",
+      "#458588",
+      "#B16286",
+      "#689D6A"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/GruvboxAlt/GruvboxAlt.json"
+}

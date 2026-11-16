@@ -1,0 +1,47 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "horizon",
+  "name": "Horizon",
+  "revision": 1,
+  "light": {
+    "primary": "#1D8991",
+    "secondary": "#8931B9",
+    "tertiary": "#F77D26",
+    "background": "#FADAD1",
+    "surface": "#FADAD1",
+    "surfaceContainer": "#F9CBBE",
+    "onBackground": "#16161C",
+    "onSurface": "#16161C",
+    "onSurfaceVariant": "#AF5427",
+    "outlineVariant": "#F9CEC3",
+    "nicknameColors": [
+      "#DA103F",
+      "#1D8991",
+      "#F77D26",
+      "#26A6A6",
+      "#8931B9"
+    ]
+  },
+  "dark": {
+    "primary": "#25B2BC",
+    "secondary": "#B877DB",
+    "tertiary": "#FAB795",
+    "background": "#1A1C23",
+    "surface": "#1A1C23",
+    "surfaceContainer": "#232530",
+    "onBackground": "#FDF0ED",
+    "onSurface": "#FDF0ED",
+    "onSurfaceVariant": "#6C6F93",
+    "outlineVariant": "#2E303E",
+    "nicknameColors": [
+      "#E95678",
+      "#29D398",
+      "#FAB795",
+      "#26BBD9",
+      "#EE64AC",
+      "#59E1E3"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Horizon/Horizon.json"
+}

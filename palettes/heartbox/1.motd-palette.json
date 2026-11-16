@@ -1,0 +1,46 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "heartbox",
+  "name": "Heartbox",
+  "revision": 1,
+  "light": {
+    "primary": "#E02030",
+    "secondary": "#5EC8E8",
+    "tertiary": "#E86A9A",
+    "background": "#FFF8F0",
+    "surface": "#FFF8F0",
+    "surfaceContainer": "#F4EBE0",
+    "onBackground": "#1A1214",
+    "onSurface": "#1A1214",
+    "onSurfaceVariant": "#4A3A3E",
+    "outlineVariant": "#B8C0C8",
+    "nicknameColors": [
+      "#E02030",
+      "#5FBF4A",
+      "#E8D45A",
+      "#5EC8E8",
+      "#E86A9A"
+    ]
+  },
+  "dark": {
+    "primary": "#E02030",
+    "secondary": "#5EC8E8",
+    "tertiary": "#E86A9A",
+    "background": "#1A1214",
+    "surface": "#1A1214",
+    "surfaceContainer": "#2C1F22",
+    "onBackground": "#F4EBE0",
+    "onSurface": "#F4EBE0",
+    "onSurfaceVariant": "#8A6E78",
+    "outlineVariant": "#B8C0C8",
+    "nicknameColors": [
+      "#E02030",
+      "#5FBF4A",
+      "#E8D45A",
+      "#5EC8E8",
+      "#E86A9A"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Heartbox/Heartbox.json"
+}

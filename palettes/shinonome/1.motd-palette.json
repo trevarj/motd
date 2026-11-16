@@ -1,0 +1,47 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "shinonome",
+  "name": "Shinonome",
+  "revision": 1,
+  "light": {
+    "primary": "#424B54",
+    "secondary": "#8C4351",
+    "tertiary": "#8F623F",
+    "background": "#EBCFB2",
+    "surface": "#EBCFB2",
+    "surfaceContainer": "#C5BAAF",
+    "onBackground": "#3D3732",
+    "onSurface": "#3D3732",
+    "onSurfaceVariant": "#3D3732",
+    "outlineVariant": "#62727D",
+    "nicknameColors": [
+      "#8C4351",
+      "#4E6B5C",
+      "#8F623F",
+      "#424B54",
+      "#7A515D",
+      "#38575E"
+    ]
+  },
+  "dark": {
+    "primary": "#D5ACA9",
+    "secondary": "#B38D97",
+    "tertiary": "#C5BAAF",
+    "background": "#1A1D20",
+    "surface": "#1A1D20",
+    "surfaceContainer": "#2D3339",
+    "onBackground": "#EBCFB2",
+    "onSurface": "#EBCFB2",
+    "onSurfaceVariant": "#EBCFB2",
+    "outlineVariant": "#424B54",
+    "nicknameColors": [
+      "#B38D97",
+      "#D5ACA9",
+      "#EBCFB2",
+      "#97A7B5",
+      "#C5BAAF"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Shinonome/Shinonome.json"
+}

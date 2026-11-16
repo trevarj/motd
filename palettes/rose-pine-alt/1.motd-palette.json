@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "rose-pine-alt",
+  "name": "Rose Pine Alt",
+  "revision": 1,
+  "light": {
+    "primary": "#907AA9",
+    "secondary": "#C67C15",
+    "tertiary": "#56949F",
+    "background": "#FFFAF3",
+    "surface": "#FFFAF3",
+    "surfaceContainer": "#F2E9E1",
+    "onBackground": "#575279",
+    "onSurface": "#575279",
+    "onSurfaceVariant": "#797593",
+    "outlineVariant": "#DFDAD9",
+    "nicknameColors": [
+      "#B4637A",
+      "#286983",
+      "#EA9D34",
+      "#56949F",
+      "#907AA9",
+      "#D7827E"
+    ]
+  },
+  "dark": {
+    "primary": "#C4A7E7",
+    "secondary": "#F6C177",
+    "tertiary": "#9CCFD8",
+    "background": "#191724",
+    "surface": "#191724",
+    "surfaceContainer": "#26233A",
+    "onBackground": "#E0DEF4",
+    "onSurface": "#E0DEF4",
+    "onSurfaceVariant": "#908CAA",
+    "outlineVariant": "#403D52",
+    "nicknameColors": [
+      "#EB6F92",
+      "#31748F",
+      "#F6C177",
+      "#9CCFD8",
+      "#C4A7E7",
+      "#EBBCBA"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Rose%20Pine%20Alt/Rose%20Pine%20Alt.json"
+}

@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "espresso-cream",
+  "name": "Espresso Cream",
+  "revision": 1,
+  "light": {
+    "primary": "#8E5A44",
+    "secondary": "#9C704C",
+    "tertiary": "#596153",
+    "background": "#DFD3C3",
+    "surface": "#DFD3C3",
+    "surfaceContainer": "#CFC2B2",
+    "onBackground": "#241D17",
+    "onSurface": "#241D17",
+    "onSurfaceVariant": "#5E5246",
+    "outlineVariant": "#8C7E70",
+    "nicknameColors": [
+      "#9C4C4C",
+      "#596153",
+      "#9C704C",
+      "#385366",
+      "#6E526E",
+      "#3D5C4E"
+    ]
+  },
+  "dark": {
+    "primary": "#E29578",
+    "secondary": "#DDB892",
+    "tertiary": "#A3B19B",
+    "background": "#1A120B",
+    "surface": "#1A120B",
+    "surfaceContainer": "#2C1E13",
+    "onBackground": "#EDE0D4",
+    "onSurface": "#EDE0D4",
+    "onSurfaceVariant": "#B5A496",
+    "outlineVariant": "#5C4738",
+    "nicknameColors": [
+      "#C97A7A",
+      "#A3B19B",
+      "#DDB892",
+      "#8DA9C4",
+      "#BCA0BC",
+      "#94B0A1"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Espresso%20Cream/Espresso%20Cream.json"
+}

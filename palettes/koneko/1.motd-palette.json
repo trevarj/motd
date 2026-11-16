@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "koneko",
+  "name": "Koneko",
+  "revision": 1,
+  "light": {
+    "primary": "#CC7E8B",
+    "secondary": "#745873",
+    "tertiary": "#4D758E",
+    "background": "#DAC6C8",
+    "surface": "#DAC6C8",
+    "surfaceContainer": "#C8AEB9",
+    "onBackground": "#000000",
+    "onSurface": "#000000",
+    "onSurfaceVariant": "#52504A",
+    "outlineVariant": "#202020",
+    "nicknameColors": [
+      "#B64966",
+      "#417A4F",
+      "#AE5937",
+      "#466A81",
+      "#5D465C",
+      "#537279"
+    ]
+  },
+  "dark": {
+    "primary": "#CC7E8B",
+    "secondary": "#C9AFBA",
+    "tertiary": "#D4A2AC",
+    "background": "#232323",
+    "surface": "#232323",
+    "surfaceContainer": "#292929",
+    "onBackground": "#C2C2C2",
+    "onSurface": "#C2C2C2",
+    "onSurfaceVariant": "#929292",
+    "outlineVariant": "#3C3C3C",
+    "nicknameColors": [
+      "#D5A2AB",
+      "#B8E1A3",
+      "#FBDBC0",
+      "#8DA8B9",
+      "#BFB1C2",
+      "#AAC2C5"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Koneko/Koneko.json"
+}

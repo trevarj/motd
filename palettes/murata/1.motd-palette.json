@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "murata",
+  "name": "Murata",
+  "revision": 1,
+  "light": {
+    "primary": "#BF5A5A",
+    "secondary": "#94765A",
+    "tertiary": "#5C8286",
+    "background": "#FDF8F2",
+    "surface": "#FDF8F2",
+    "surfaceContainer": "#F2EBE4",
+    "onBackground": "#1A1B1C",
+    "onSurface": "#1A1B1C",
+    "onSurfaceVariant": "#545556",
+    "outlineVariant": "#969798",
+    "nicknameColors": [
+      "#BF5A5A",
+      "#637D55",
+      "#94765A",
+      "#4E7377",
+      "#825C7B",
+      "#4E7766"
+    ]
+  },
+  "dark": {
+    "primary": "#DB6D6D",
+    "secondary": "#D1B394",
+    "tertiary": "#8FAEB1",
+    "background": "#1A1B1C",
+    "surface": "#1A1B1C",
+    "surfaceContainer": "#252627",
+    "onBackground": "#CDC5BD",
+    "onSurface": "#CDC5BD",
+    "onSurfaceVariant": "#A69D96",
+    "outlineVariant": "#5A5B5C",
+    "nicknameColors": [
+      "#DB6D6D",
+      "#91AD83",
+      "#D1B394",
+      "#8FAEB1",
+      "#B892B1",
+      "#8FB8A7"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Murata/Murata.json"
+}

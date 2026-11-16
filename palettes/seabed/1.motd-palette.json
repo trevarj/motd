@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "seabed",
+  "name": "SeaBed",
+  "revision": 1,
+  "light": {
+    "primary": "#427876",
+    "secondary": "#436781",
+    "tertiary": "#5E734E",
+    "background": "#CAE9E5",
+    "surface": "#CAE9E5",
+    "surfaceContainer": "#DBF1EC",
+    "onBackground": "#2B444A",
+    "onSurface": "#2B444A",
+    "onSurfaceVariant": "#516D73",
+    "outlineVariant": "#A5CECD",
+    "nicknameColors": [
+      "#8D613B",
+      "#5E734E",
+      "#78633E",
+      "#436781",
+      "#785B82",
+      "#427876"
+    ]
+  },
+  "dark": {
+    "primary": "#87E1DC",
+    "secondary": "#7FB1D4",
+    "tertiary": "#A2BF8D",
+    "background": "#0E2231",
+    "surface": "#0E2231",
+    "surfaceContainer": "#2D273E",
+    "onBackground": "#E9F0F2",
+    "onSurface": "#E9F0F2",
+    "onSurfaceVariant": "#A9A7BC",
+    "outlineVariant": "#4D4462",
+    "nicknameColors": [
+      "#CFA372",
+      "#A2BF8D",
+      "#D8BD8F",
+      "#7FB1D4",
+      "#D2A7E1",
+      "#87E1DC"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/SeaBed/SeaBed.json"
+}

@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "osaka-jade",
+  "name": "Osaka jade",
+  "revision": 1,
+  "light": {
+    "primary": "#3B7561",
+    "secondary": "#526E4A",
+    "tertiary": "#4A8069",
+    "background": "#AEC2B4",
+    "surface": "#AEC2B4",
+    "surfaceContainer": "#95AD9C",
+    "onBackground": "#2C3D35",
+    "onSurface": "#2C3D35",
+    "onSurfaceVariant": "#263731",
+    "outlineVariant": "#5C7A6A",
+    "nicknameColors": [
+      "#E67E80",
+      "#9AB373",
+      "#C1A266",
+      "#7FBBB3",
+      "#D699B6",
+      "#83C092"
+    ]
+  },
+  "dark": {
+    "primary": "#1A7F67",
+    "secondary": "#167A63",
+    "tertiary": "#166050",
+    "background": "#081512",
+    "surface": "#081512",
+    "surfaceContainer": "#0F251F",
+    "onBackground": "#A6B5B1",
+    "onSurface": "#A6B5B1",
+    "onSurfaceVariant": "#99A8A4",
+    "outlineVariant": "#1B6352",
+    "nicknameColors": [
+      "#E57474",
+      "#8CCF7E",
+      "#E5C76B",
+      "#67B0E8",
+      "#C47FD5",
+      "#6CBFBF"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Osaka%20jade/Osaka%20jade.json"
+}

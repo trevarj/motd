@@ -1,0 +1,44 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "kitten",
+  "name": "Kitten",
+  "revision": 1,
+  "light": {
+    "primary": "#5D5D5D",
+    "secondary": "#726F6F",
+    "tertiary": "#83827E",
+    "background": "#DED9CA",
+    "surface": "#DED9CA",
+    "surfaceContainer": "#D6D0C1",
+    "onBackground": "#696969",
+    "onSurface": "#696969",
+    "onSurfaceVariant": "#52504A",
+    "outlineVariant": "#C3C3C3",
+    "nicknameColors": [
+      "#222222",
+      "#333333",
+      "#555555",
+      "#505058"
+    ]
+  },
+  "dark": {
+    "primary": "#B7B7B7",
+    "secondary": "#939393",
+    "tertiary": "#999999",
+    "background": "#232323",
+    "surface": "#232323",
+    "surfaceContainer": "#292929",
+    "onBackground": "#828282",
+    "onSurface": "#828282",
+    "onSurfaceVariant": "#909090",
+    "outlineVariant": "#3C3C3C",
+    "nicknameColors": [
+      "#DDDDDD",
+      "#CCCCCC",
+      "#AAAAAA",
+      "#A7A7A7"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Kitten/Kitten.json"
+}

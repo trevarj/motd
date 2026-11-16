@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "alpenglow",
+  "name": "Alpenglow",
+  "revision": 1,
+  "light": {
+    "primary": "#C8703A",
+    "secondary": "#4A7A2A",
+    "tertiary": "#A88A3A",
+    "background": "#FDF6EE",
+    "surface": "#FDF6EE",
+    "surfaceContainer": "#E8D8C8",
+    "onBackground": "#2A2028",
+    "onSurface": "#2A2028",
+    "onSurfaceVariant": "#5A4A52",
+    "outlineVariant": "#A89890",
+    "nicknameColors": [
+      "#B84A4A",
+      "#4A7A2A",
+      "#A88A3A",
+      "#5A6A8A",
+      "#9A6A8A",
+      "#3A8A82"
+    ]
+  },
+  "dark": {
+    "primary": "#E8A87C",
+    "secondary": "#8FBF6A",
+    "tertiary": "#E8C87A",
+    "background": "#1E1A24",
+    "surface": "#1E1A24",
+    "surfaceContainer": "#3A3040",
+    "onBackground": "#F5EDE6",
+    "onSurface": "#F5EDE6",
+    "onSurfaceVariant": "#C8B8A8",
+    "outlineVariant": "#6B5A62",
+    "nicknameColors": [
+      "#D96B6B",
+      "#7AAD5A",
+      "#E8C87A",
+      "#8A9AB8",
+      "#C89AB8",
+      "#8AC8C0"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Alpenglow/Alpenglow.json"
+}

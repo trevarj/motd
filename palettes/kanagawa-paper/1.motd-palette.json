@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "kanagawa-paper",
+  "name": "Kanagawa Paper",
+  "revision": 1,
+  "light": {
+    "primary": "#6B7F9F",
+    "secondary": "#6F8795",
+    "tertiary": "#8B6E86",
+    "background": "#F2F1EC",
+    "surface": "#F2F1EC",
+    "surfaceContainer": "#E4E1D8",
+    "onBackground": "#4F5357",
+    "onSurface": "#4F5357",
+    "onSurfaceVariant": "#666B70",
+    "outlineVariant": "#8E8A80",
+    "nicknameColors": [
+      "#C27672",
+      "#7B958E",
+      "#A7956A",
+      "#809BA7",
+      "#9E7E98",
+      "#7E8FAF"
+    ]
+  },
+  "dark": {
+    "primary": "#C4B28A",
+    "secondary": "#8EA49E",
+    "tertiary": "#938AA9",
+    "background": "#1F1F28",
+    "surface": "#1F1F28",
+    "surfaceContainer": "#2A2A37",
+    "onBackground": "#DCD7BA",
+    "onSurface": "#DCD7BA",
+    "onSurfaceVariant": "#C8C093",
+    "outlineVariant": "#435965",
+    "nicknameColors": [
+      "#C4746E",
+      "#699469",
+      "#C4B28A",
+      "#435965",
+      "#A292A3",
+      "#8EA49E"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Kanagawa%20Paper/Kanagawa%20Paper.json"
+}

@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "matecito",
+  "name": "Matecito",
+  "revision": 1,
+  "light": {
+    "primary": "#4A5944",
+    "secondary": "#85583B",
+    "tertiary": "#3B4D52",
+    "background": "#E3DCCF",
+    "surface": "#E3DCCF",
+    "surfaceContainer": "#D1C9BB",
+    "onBackground": "#1F2421",
+    "onSurface": "#1F2421",
+    "onSurfaceVariant": "#545C56",
+    "outlineVariant": "#7D857F",
+    "nicknameColors": [
+      "#8A4444",
+      "#4A5944",
+      "#85583B",
+      "#283B45",
+      "#5E4759",
+      "#284239"
+    ]
+  },
+  "dark": {
+    "primary": "#8DA383",
+    "secondary": "#CB9B7C",
+    "tertiary": "#7F9193",
+    "background": "#1E2320",
+    "surface": "#1E2320",
+    "surfaceContainer": "#272E2A",
+    "onBackground": "#D3CDC3",
+    "onSurface": "#D3CDC3",
+    "onSurfaceVariant": "#9DA49A",
+    "outlineVariant": "#4A534D",
+    "nicknameColors": [
+      "#C27979",
+      "#8DA383",
+      "#CB9B7C",
+      "#728A96",
+      "#A48FA1",
+      "#7A998D"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Matecito/Matecito.json"
+}

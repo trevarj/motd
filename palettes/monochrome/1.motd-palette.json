@@ -1,0 +1,44 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "monochrome",
+  "name": "Monochrome",
+  "revision": 1,
+  "light": {
+    "primary": "#555555",
+    "secondary": "#505058",
+    "tertiary": "#333333",
+    "background": "#D4D4D4",
+    "surface": "#D4D4D4",
+    "surfaceContainer": "#EDEDED",
+    "onBackground": "#696969",
+    "onSurface": "#696969",
+    "onSurfaceVariant": "#878787",
+    "outlineVariant": "#C3C3C3",
+    "nicknameColors": [
+      "#222222",
+      "#333333",
+      "#555555",
+      "#505058"
+    ]
+  },
+  "dark": {
+    "primary": "#AAAAAA",
+    "secondary": "#A7A7A7",
+    "tertiary": "#CCCCCC",
+    "background": "#111111",
+    "surface": "#111111",
+    "surfaceContainer": "#121212",
+    "onBackground": "#828282",
+    "onSurface": "#828282",
+    "onSurfaceVariant": "#636363",
+    "outlineVariant": "#3C3C3C",
+    "nicknameColors": [
+      "#DDDDDD",
+      "#CCCCCC",
+      "#AAAAAA",
+      "#A7A7A7"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Monochrome/Monochrome.json"
+}

@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "macaron",
+  "name": "Macaron",
+  "revision": 1,
+  "light": {
+    "primary": "#B574B2",
+    "secondary": "#4F9696",
+    "tertiary": "#A08654",
+    "background": "#F2F2F2",
+    "surface": "#F2F2F2",
+    "surfaceContainer": "#E0E0E0",
+    "onBackground": "#2C2C2E",
+    "onSurface": "#2C2C2E",
+    "onSurfaceVariant": "#2C2C2E",
+    "outlineVariant": "#B8B8B8",
+    "nicknameColors": [
+      "#B5666A",
+      "#74B574",
+      "#B59E74",
+      "#66788F",
+      "#B574B2",
+      "#74B5B5"
+    ]
+  },
+  "dark": {
+    "primary": "#E5B4E2",
+    "secondary": "#B4E5E5",
+    "tertiary": "#E5D0B4",
+    "background": "#18181A",
+    "surface": "#18181A",
+    "surfaceContainer": "#242426",
+    "onBackground": "#D4D4D4",
+    "onSurface": "#D4D4D4",
+    "onSurfaceVariant": "#D4D4D4",
+    "outlineVariant": "#3A3A3D",
+    "nicknameColors": [
+      "#E59A9E",
+      "#B4E5B4",
+      "#E5D0B4",
+      "#A1B3CB",
+      "#E5B4E2",
+      "#B4E5E5"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Macaron/Macaron.json"
+}

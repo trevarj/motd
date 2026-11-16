@@ -1,0 +1,40 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "spiderman",
+  "name": "Spiderman",
+  "revision": 1,
+  "light": {
+    "primary": "#C9282E",
+    "secondary": "#5C8FEF",
+    "tertiary": "#C9282E",
+    "background": "#24478A",
+    "surface": "#24478A",
+    "surfaceContainer": "#1D3D75",
+    "onBackground": "#F8FAFF",
+    "onSurface": "#F8FAFF",
+    "onSurfaceVariant": "#C3D2EC",
+    "outlineVariant": "#3A5FA3",
+    "nicknameColors": [
+      "#A82430",
+      "#C9282E"
+    ]
+  },
+  "dark": {
+    "primary": "#F5453F",
+    "secondary": "#3D7EFF",
+    "tertiary": "#F5453F",
+    "background": "#0B2454",
+    "surface": "#0B2454",
+    "surfaceContainer": "#102D63",
+    "onBackground": "#EAF0FB",
+    "onSurface": "#EAF0FB",
+    "onSurfaceVariant": "#9BB4DC",
+    "outlineVariant": "#4E71A8",
+    "nicknameColors": [
+      "#C93D45",
+      "#F5453F"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Spiderman/Spiderman.json"
+}

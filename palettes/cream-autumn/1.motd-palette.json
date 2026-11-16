@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "cream-autumn",
+  "name": "Cream Autumn",
+  "revision": 1,
+  "light": {
+    "primary": "#B56839",
+    "secondary": "#8F6830",
+    "tertiary": "#4E5C3E",
+    "background": "#E5D8BE",
+    "surface": "#E5D8BE",
+    "surfaceContainer": "#D6C8AD",
+    "onBackground": "#3A322D",
+    "onSurface": "#3A322D",
+    "onSurfaceVariant": "#5C5047",
+    "outlineVariant": "#A89984",
+    "nicknameColors": [
+      "#A64248",
+      "#4E5C3E",
+      "#8F6830",
+      "#B56839",
+      "#804B5C",
+      "#3B5C54"
+    ]
+  },
+  "dark": {
+    "primary": "#E5C799",
+    "secondary": "#CBABA0",
+    "tertiary": "#9AA887",
+    "background": "#161311",
+    "surface": "#161311",
+    "surfaceContainer": "#231E1A",
+    "onBackground": "#DCD8CD",
+    "onSurface": "#DCD8CD",
+    "onSurfaceVariant": "#BFAE9B",
+    "outlineVariant": "#3A3028",
+    "nicknameColors": [
+      "#CF767C",
+      "#9AA887",
+      "#E5C799",
+      "#B5A895",
+      "#CBABA0",
+      "#96B3AA"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Cream%20Autumn/Cream%20Autumn.json"
+}

@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "hexa34c",
+  "name": "Hexa34C",
+  "revision": 1,
+  "light": {
+    "primary": "#346940",
+    "secondary": "#506351",
+    "tertiary": "#39656D",
+    "background": "#D7DBD3",
+    "surface": "#D7DBD3",
+    "surfaceContainer": "#F6FBF2",
+    "onBackground": "#181D18",
+    "onSurface": "#181D18",
+    "onSurfaceVariant": "#414941",
+    "outlineVariant": "#727970",
+    "nicknameColors": [
+      "#BA1A1A",
+      "#346940",
+      "#39656D",
+      "#00210A",
+      "#0E1F11",
+      "#506351"
+    ]
+  },
+  "dark": {
+    "primary": "#9AD4A1",
+    "secondary": "#B7CCB6",
+    "tertiary": "#A1CED8",
+    "background": "#101510",
+    "surface": "#101510",
+    "surfaceContainer": "#101510",
+    "onBackground": "#DFE4DC",
+    "onSurface": "#DFE4DC",
+    "onSurfaceVariant": "#C1C9BE",
+    "outlineVariant": "#8B9389",
+    "nicknameColors": [
+      "#FFB4AB",
+      "#9AD4A1",
+      "#A1CED8",
+      "#B5F1BC",
+      "#D3E8D2",
+      "#B7CCB6"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Hexa34C/Hexa34C.json"
+}

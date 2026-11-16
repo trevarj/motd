@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "one",
+  "name": "One",
+  "revision": 1,
+  "light": {
+    "primary": "#4078F2",
+    "secondary": "#A626A4",
+    "tertiary": "#4A9348",
+    "background": "#E8E8E8",
+    "surface": "#E8E8E8",
+    "surfaceContainer": "#E5E5E6",
+    "onBackground": "#383A42",
+    "onSurface": "#383A42",
+    "onSurfaceVariant": "#383A42",
+    "outlineVariant": "#4078F2",
+    "nicknameColors": [
+      "#B64439",
+      "#50A14F",
+      "#C18401",
+      "#4078F2",
+      "#A626A4",
+      "#0184BC"
+    ]
+  },
+  "dark": {
+    "primary": "#61AFEF",
+    "secondary": "#C678DD",
+    "tertiary": "#98C379",
+    "background": "#1E2127",
+    "surface": "#1E2127",
+    "surfaceContainer": "#282C34",
+    "onBackground": "#CDD4E1",
+    "onSurface": "#CDD4E1",
+    "onSurfaceVariant": "#61AFEF",
+    "outlineVariant": "#3E4451",
+    "nicknameColors": [
+      "#E06C75",
+      "#98C379",
+      "#E5C07B",
+      "#61AFEF",
+      "#C678DD",
+      "#56B6C2"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/One/One.json"
+}

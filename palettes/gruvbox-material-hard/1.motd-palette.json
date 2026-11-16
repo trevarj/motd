@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "gruvbox-material-hard",
+  "name": "Gruvbox Material Hard",
+  "revision": 1,
+  "light": {
+    "primary": "#6C782E",
+    "secondary": "#C35E0A",
+    "tertiary": "#4C7A5D",
+    "background": "#F9F5D7",
+    "surface": "#F9F5D7",
+    "surfaceContainer": "#F5EDCA",
+    "onBackground": "#654735",
+    "onSurface": "#654735",
+    "onSurfaceVariant": "#4F3829",
+    "outlineVariant": "#F5EDCA",
+    "nicknameColors": [
+      "#C14A4A",
+      "#6C782E",
+      "#B47109",
+      "#45707A",
+      "#945E80",
+      "#4C7A5D"
+    ]
+  },
+  "dark": {
+    "primary": "#A9B665",
+    "secondary": "#E78A4E",
+    "tertiary": "#89B482",
+    "background": "#1D2021",
+    "surface": "#1D2021",
+    "surfaceContainer": "#282828",
+    "onBackground": "#D4BE98",
+    "onSurface": "#D4BE98",
+    "onSurfaceVariant": "#D4BE98",
+    "outlineVariant": "#282828",
+    "nicknameColors": [
+      "#EA6962",
+      "#A9B665",
+      "#D8A657",
+      "#7DAEA3",
+      "#D3869B",
+      "#89B482"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Gruvbox%20Material%20Hard/Gruvbox%20Material%20Hard.json"
+}

@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "kanagawa-kasumi",
+  "name": "Kanagawa Kasumi",
+  "revision": 1,
+  "light": {
+    "primary": "#936B53",
+    "secondary": "#4F6878",
+    "tertiary": "#667858",
+    "background": "#D9D1BA",
+    "surface": "#D9D1BA",
+    "surfaceContainer": "#C7BFA6",
+    "onBackground": "#1A2026",
+    "onSurface": "#1A2026",
+    "onSurfaceVariant": "#1A2026",
+    "outlineVariant": "#9E9783",
+    "nicknameColors": [
+      "#A64F4F",
+      "#667858",
+      "#A67A61",
+      "#4F6878",
+      "#8A5969",
+      "#547875"
+    ]
+  },
+  "dark": {
+    "primary": "#D9A78B",
+    "secondary": "#7794A6",
+    "tertiary": "#8BA37A",
+    "background": "#1A2026",
+    "surface": "#1A2026",
+    "surfaceContainer": "#20272E",
+    "onBackground": "#D9D1BA",
+    "onSurface": "#D9D1BA",
+    "onSurfaceVariant": "#D9D1BA",
+    "outlineVariant": "#313C47",
+    "nicknameColors": [
+      "#D96C6C",
+      "#8BA37A",
+      "#D9A78B",
+      "#7794A6",
+      "#B87A8E",
+      "#77A3A0"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Kanagawa%20Kasumi/Kanagawa%20Kasumi.json"
+}

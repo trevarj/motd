@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "one-dark-two",
+  "name": "One Dark Two",
+  "revision": 1,
+  "light": {
+    "primary": "#99C5CC",
+    "secondary": "#9A7D4C",
+    "tertiary": "#658255",
+    "background": "#E6E6E6",
+    "surface": "#E6E6E6",
+    "surfaceContainer": "#DDDEDF",
+    "onBackground": "#282C34",
+    "onSurface": "#282C34",
+    "onSurfaceVariant": "#393E47",
+    "outlineVariant": "#C9CCD3",
+    "nicknameColors": [
+      "#B4656E",
+      "#7C9D68",
+      "#BAA072",
+      "#5F96C4",
+      "#A073B1",
+      "#5497A2"
+    ]
+  },
+  "dark": {
+    "primary": "#62BAC6",
+    "secondary": "#EAC786",
+    "tertiary": "#98C379",
+    "background": "#21252B",
+    "surface": "#21252B",
+    "surfaceContainer": "#282C34",
+    "onBackground": "#C9CCD3",
+    "onSurface": "#C9CCD3",
+    "onSurfaceVariant": "#78C4CE",
+    "outlineVariant": "#393E47",
+    "nicknameColors": [
+      "#E27881",
+      "#98C379",
+      "#EAC786",
+      "#71B9F4",
+      "#C88BDA",
+      "#62BAC6"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/One%20Dark%20Two/One%20Dark%20Two.json"
+}

@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "ayu-green",
+  "name": "Ayu Green",
+  "revision": 1,
+  "light": {
+    "primary": "#86B300",
+    "secondary": "#FF8F40",
+    "tertiary": "#55B4D4",
+    "background": "#F8F9FA",
+    "surface": "#F8F9FA",
+    "surfaceContainer": "#E4E6E9",
+    "onBackground": "#42474C",
+    "onSurface": "#42474C",
+    "onSurfaceVariant": "#6E757C",
+    "outlineVariant": "#8A9199",
+    "nicknameColors": [
+      "#EA6C6D",
+      "#6CBF43",
+      "#ECA944",
+      "#3199E1",
+      "#9E75C7",
+      "#46BA94"
+    ]
+  },
+  "dark": {
+    "primary": "#AAD94C",
+    "secondary": "#E6B450",
+    "tertiary": "#39BAE6",
+    "background": "#0B0E14",
+    "surface": "#0B0E14",
+    "surfaceContainer": "#1E222A",
+    "onBackground": "#D1D1C7",
+    "onSurface": "#D1D1C7",
+    "onSurfaceVariant": "#8E959E",
+    "outlineVariant": "#565B66",
+    "nicknameColors": [
+      "#ED8274",
+      "#87D96C",
+      "#FACC6E",
+      "#6DCBFA",
+      "#DABAFA",
+      "#90E1C6"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Ayu%20Green/Ayu%20Green.json"
+}

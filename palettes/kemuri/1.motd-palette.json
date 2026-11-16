@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "kemuri",
+  "name": "Kemuri",
+  "revision": 1,
+  "light": {
+    "primary": "#864A2D",
+    "secondary": "#6B5F50",
+    "tertiary": "#596655",
+    "background": "#DDD7CA",
+    "surface": "#DDD7CA",
+    "surfaceContainer": "#CAC1AF",
+    "onBackground": "#242120",
+    "onSurface": "#242120",
+    "onSurfaceVariant": "#242120",
+    "outlineVariant": "#8A7E74",
+    "nicknameColors": [
+      "#9C4940",
+      "#596655",
+      "#864A2D",
+      "#455860",
+      "#78525F",
+      "#4F6B62"
+    ]
+  },
+  "dark": {
+    "primary": "#CB9168",
+    "secondary": "#A69680",
+    "tertiary": "#8DA388",
+    "background": "#242120",
+    "surface": "#242120",
+    "surfaceContainer": "#36312F",
+    "onBackground": "#E5DEC9",
+    "onSurface": "#E5DEC9",
+    "onSurfaceVariant": "#E5DEC9",
+    "outlineVariant": "#665C58",
+    "nicknameColors": [
+      "#C6685D",
+      "#839C7A",
+      "#CB9168",
+      "#67808A",
+      "#A27886",
+      "#769F93"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Kemuri/Kemuri.json"
+}

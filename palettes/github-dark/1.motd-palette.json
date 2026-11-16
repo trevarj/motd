@@ -1,0 +1,48 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "github-dark",
+  "name": "GitHub Dark",
+  "revision": 1,
+  "light": {
+    "primary": "#0969DA",
+    "secondary": "#1A7F37",
+    "tertiary": "#8250DF",
+    "background": "#FFFFFF",
+    "surface": "#FFFFFF",
+    "surfaceContainer": "#F6F8FA",
+    "onBackground": "#1F2328",
+    "onSurface": "#1F2328",
+    "onSurfaceVariant": "#656D76",
+    "outlineVariant": "#D0D7DE",
+    "nicknameColors": [
+      "#CF222E",
+      "#1A7F37",
+      "#9A6700",
+      "#0969DA",
+      "#8250DF",
+      "#0550AE"
+    ]
+  },
+  "dark": {
+    "primary": "#58A6FF",
+    "secondary": "#BC8CFF",
+    "tertiary": "#BC8CFF",
+    "background": "#010409",
+    "surface": "#010409",
+    "surfaceContainer": "#161B22",
+    "onBackground": "#C9D1D9",
+    "onSurface": "#C9D1D9",
+    "onSurfaceVariant": "#8B949E",
+    "outlineVariant": "#30363D",
+    "nicknameColors": [
+      "#FF7B72",
+      "#3FB950",
+      "#D29922",
+      "#58A6FF",
+      "#BC8CFF",
+      "#39C5CF"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/GitHub%20Dark/GitHub%20Dark.json"
+}

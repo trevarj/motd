@@ -1,0 +1,47 @@
+{
+  "format": "motd-palette",
+  "version": 1,
+  "id": "rosey-amoled",
+  "name": "Rosey AMOLED",
+  "revision": 1,
+  "light": {
+    "primary": "#E3648E",
+    "secondary": "#FF0066",
+    "tertiary": "#FF528B",
+    "background": "#FFF5FA",
+    "surface": "#FFF5FA",
+    "surfaceContainer": "#FAEAF1",
+    "onBackground": "#2C1822",
+    "onSurface": "#2C1822",
+    "onSurfaceVariant": "#DE4A7B",
+    "outlineVariant": "#B38099",
+    "nicknameColors": [
+      "#FF99B8",
+      "#E599B3",
+      "#FFB3CC",
+      "#E57399",
+      "#FFB8D1"
+    ]
+  },
+  "dark": {
+    "primary": "#FF8CB3",
+    "secondary": "#FFB3CC",
+    "tertiary": "#FFCCE0",
+    "background": "#000000",
+    "surface": "#000000",
+    "surfaceContainer": "#1A0F16",
+    "onBackground": "#FFE0EB",
+    "onSurface": "#FFE0EB",
+    "onSurfaceVariant": "#FF8CB3",
+    "outlineVariant": "#5A3F4D",
+    "nicknameColors": [
+      "#FF99B8",
+      "#FFCCDD",
+      "#FFCCE0",
+      "#FF8CB3",
+      "#FFB3CC",
+      "#FFD6E8"
+    ]
+  },
+  "sourceUrl": "https://github.com/noctalia-dev/community-palettes/blob/1c43e2c66c2cd07a58ae07007a88cbdd0705cda2/Rosey%20AMOLED/Rosey%20AMOLED.json"
+}
