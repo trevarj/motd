@@ -596,6 +596,7 @@ internal class PaletteRobot(
         }
         // Drive the real Android chooser; the receiver reads the production FileProvider grant.
         while (android.os.SystemClock.uptimeMillis() < deadline) {
+            compose.mainClock.advanceTimeByFrame()
             val root = instrumentation.uiAutomation.rootInActiveWindow
             if (selected && root?.packageName?.toString() == context.packageName) break
             if (!selected) {

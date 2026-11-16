@@ -282,7 +282,8 @@ does not capture screenshots, raw logcat, arbitrary semantics text, credentials,
 addresses, nicks, channels, or message content.
 
 Palette sharing waits for the actual import preview, not a chooser click return
-flag. Unconfirmed selection captures public chooser labels, bounded node
+flag. Native chooser polling pumps Compose's test clock while the platform UI is
+active. Unconfirmed selection captures public chooser labels, bounded node
 structure, resolved targets, and window/power state under `chooser-failure/`;
 payload strings and text from editable or password fields are excluded.
 
