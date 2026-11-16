@@ -1378,7 +1378,7 @@ class ChatViewModelTest {
             val source = seedTranslationSource()
             val messages = HeldTranslationRepository(seamRepository())
             val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
-            runCurrent()
+            vm.entryPreparationReady.first { it }
             val held = messages.holdNextRead()
             val selection = async { vm.beginExternalTranslation(source) }
             held.started.await()
@@ -1399,7 +1399,7 @@ class ChatViewModelTest {
             val source = seedTranslationSource()
             val messages = HeldTranslationRepository(seamRepository())
             val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
-            runCurrent()
+            vm.entryPreparationReady.first { it }
             val held = messages.holdNextRead()
             val olderSelection = async { vm.beginExternalTranslation(source) }
             held.started.await()
@@ -1419,7 +1419,7 @@ class ChatViewModelTest {
             val source = seedTranslationSource()
             val messages = HeldTranslationRepository(seamRepository())
             val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
-            runCurrent()
+            vm.entryPreparationReady.first { it }
             requireNotNull(vm.beginExternalTranslation(source))
             val held = messages.holdNextRead()
             vm.completeExternalTranslation("First callback")
@@ -1446,7 +1446,7 @@ class ChatViewModelTest {
             val source = seedTranslationSource()
             val messages = HeldTranslationRepository(seamRepository())
             val vm = viewModel(channel, FakeConnectionManager(network.id), messages = messages)
-            runCurrent()
+            vm.entryPreparationReady.first { it }
             val first = requireNotNull(vm.beginExternalTranslation(source))
             val oldRead = messages.holdNextRead(nonCancellable = true)
             vm.completeExternalTranslation("Old result")
