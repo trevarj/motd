@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.data.prefs
 
+import androidx.annotation.Keep
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
@@ -58,6 +59,7 @@ data class InstalledPalette(
     val sourceLink: String? = null,
 )
 
+@Keep
 @Serializable
 enum class PaletteMode { SYSTEM, LIGHT, DARK }
 
