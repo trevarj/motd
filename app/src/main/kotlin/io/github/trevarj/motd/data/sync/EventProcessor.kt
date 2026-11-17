@@ -665,6 +665,7 @@ class EventProcessor
                         "sender_fp" to diagnostics.fingerprint(e.source.nick),
                     )
                 }
+                if (origin.isHistorical) activeHistoryChatRoutes[networkId]?.removeFirstOrNull()
                 return
             }
             val route =

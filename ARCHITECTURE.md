@@ -42,6 +42,9 @@ flowchart TD
 - `EventProcessor` is the only component that writes IRC-derived state to Room.
   Feature-local persistence, such as preferences and upload history, remains
   behind its own repository or preference contract.
+- History and reconnect playback consume each precomputed chat route even when
+  a network ignore drops its message, keeping subsequent authors, bodies and
+  self-attribution aligned.
 - A late IRC `001` after bouncer fallback Ready updates `IrcClient`'s self nick
   before mapping following JOINs. Exact identity changes publish `Registered`
   with current CAP/ISUPPORT snapshots for persistence; the welcome remains `Raw`,

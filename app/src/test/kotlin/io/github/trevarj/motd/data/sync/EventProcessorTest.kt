@@ -229,6 +229,59 @@ class EventProcessorTest {
         }
 
     @Test
+    fun ignoredNetworkSender_preservesHistoryAndReplayAttribution() =
+        runTest {
+            db.networkIgnoreDao().upsert(
+                NetworkIgnoreEntity(networkId = networkId, pattern = "alice!*@*", createdAt = 1),
+            )
+
+            for (batch in listOf("history", "replay")) {
+                val target = "#$batch"
+                val messages =
+                    listOf("alice", "bob", "alice", "carol", "me").mapIndexed { index, nick ->
+                        IrcEvent.ChatMessage(
+                            ctx =
+                                ctx(
+                                    msgid = "$batch-$index",
+                                    time = 1000L + index,
+                                    account = "$nick-account",
+                                ).copy(batchId = batch),
+                            kind = IrcEvent.ChatKind.PRIVMSG,
+                            source = Prefix(nick, "user", "host"),
+                            target = target,
+                            text = "$batch-body-$index",
+                            isSelf = nick == "me",
+                            replyToMsgid = null,
+                        )
+                    }
+                processor.process(
+                    networkId,
+                    if (batch == "history") {
+                        IrcEvent.HistoryBatch(target, messages)
+                    } else {
+                        IrcEvent.ReplayBatch(target, messages)
+                    },
+                )
+
+                val buffer = db.bufferDao().byName(networkId, target)!!
+                val rows = pagingList(buffer.id)
+                val accepted = messages.filterNot { it.source.nick == "alice" }
+                assertEquals(accepted.map { it.ctx.msgid }.toSet(), rows.map { it.msgid }.toSet())
+                assertEquals(accepted.size, rows.size)
+                for (event in accepted) {
+                    val row = rows.single { it.msgid == event.ctx.msgid }
+                    assertEquals(event.source.nick, row.sender)
+                    assertEquals(event.ctx.account, row.senderAccount)
+                    assertEquals(event.text, row.text)
+                    assertEquals(event.ctx.serverTime, row.serverTime)
+                    assertEquals(event.isSelf, row.isSelf)
+                }
+                val ignoredBodies = messages.filter { it.source.nick == "alice" }.map { it.text }
+                assertTrue(rows.none { it.text in ignoredBodies })
+            }
+        }
+
+    @Test
     fun `only live peer chat revives an unmuted archive`() =
         runTest {
             val room =
