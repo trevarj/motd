@@ -102,13 +102,7 @@ fun HistoryGapDivider(
     // The tag identifies the variant, so it is applied after the caller's modifier: E2E must be able
     // to tell a seam history can still cross from an expired one no matter who composes it.
     val tag = if (interactive) CHAT_GAP_DIVIDER_TAG else CHAT_GAP_DIVIDER_UNRECOVERABLE_TAG
-    // Failed and Idle are the two tappable shapes, so both reserve a 48 dp touch target. A loading
-    // seam is a progress statement, not a control, so it stays as slim as the permanent one.
-    val sizing =
-        when (state) {
-            HistoryGapState.Failed, HistoryGapState.Idle -> Modifier.heightIn(min = 48.dp)
-            HistoryGapState.Loading, HistoryGapState.Unrecoverable -> Modifier
-        }
+    val sizing = if (interactive) Modifier.heightIn(min = 48.dp) else Modifier
     val interaction =
         when (state) {
             // The only two controls the timeline offers: a retry after something broke, or a plain tap

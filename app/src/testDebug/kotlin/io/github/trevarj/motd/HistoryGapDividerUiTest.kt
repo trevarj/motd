@@ -1,5 +1,6 @@
 package io.github.trevarj.motd
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertHeightIsAtLeast
@@ -51,6 +52,31 @@ class HistoryGapDividerUiTest {
 
         compose.onNodeWithTag(CHAT_GAP_DIVIDER_TAG).assertIsDisplayed()
         compose.onNodeWithTag(CHAT_GAP_DIVIDER_LOADING_TAG, useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun idleToLoadingPreservesMeasuredHeight() {
+        val state = mutableStateOf<HistoryGapState>(HistoryGapState.Idle)
+        compose.setContent {
+            MotdTheme {
+                HistoryGapDivider(
+                    state = state.value,
+                    onLoad = { state.value = HistoryGapState.Loading },
+                )
+            }
+        }
+
+        val divider = compose.onNodeWithTag(CHAT_GAP_DIVIDER_TAG)
+        val idleHeight = divider.fetchSemanticsNode().boundsInRoot.height
+        divider.performClick()
+        divider.assertHasNoClickAction()
+        compose.onNodeWithTag(CHAT_GAP_DIVIDER_LOADING_TAG, useUnmergedTree = true).assertIsDisplayed()
+        assertEquals(
+            "Starting a history load must preserve the seam height",
+            idleHeight,
+            divider.fetchSemanticsNode().boundsInRoot.height,
+            0f,
+        )
     }
 
     @Test

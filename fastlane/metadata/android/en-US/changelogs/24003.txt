@@ -1,7 +1,8 @@
 - Create, import, export and share custom light/dark palettes.
-- Browse and install 114 community themes, with cached browsing offline.
-- Avoid false errors when community theme loading is cancelled.
-- Align built-in theme colors and add Dracula and Tokyo Night light palettes.
-- Use consistent back arrows and compact community palette cards.
-- Customize nickname mention styling and open profile links from mention chips.
+- Browse and install 114 community themes with offline caching.
+- Avoid false errors on cancelled community theme loads.
+- Align built-in colors; add Dracula and Tokyo Night light palettes.
+- Use back arrows and compact community palette cards.
+- Style nickname mentions; open profile links from mention chips.
+- Keep unread markers steady while missing history loads.
 - Improve chat interactions, upload recents and edge fades.
