@@ -1,0 +1,4 @@
+- Fix a release-build crash when opening chats.
+- Choose independent palettes for light and dark modes.
+- Optionally show channel privilege prefixes beside nicknames.
+- Improve IRC reaction compatibility with draft reply tags.
