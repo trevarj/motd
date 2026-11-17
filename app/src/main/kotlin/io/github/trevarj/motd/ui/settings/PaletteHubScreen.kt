@@ -47,8 +47,8 @@ import java.util.UUID
 @Composable
 fun PaletteHubScreen(
     onBack: () -> Unit,
-    onEdit: (PaletteDocument, String?) -> Unit,
-    onPreview: (PaletteDocument, String?, String?, String?) -> Unit,
+    onEdit: (PaletteDocument, String?, PaletteMode) -> Unit,
+    onPreview: (PaletteDocument, String?, String?, String?, PaletteMode) -> Unit,
     viewModel: PaletteHubViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -62,6 +62,8 @@ fun PaletteHubScreen(
     var contribution by remember { mutableStateOf(false) }
     var choosingTarget by remember { mutableStateOf<PaletteDocument?>(null) }
     val selection = state.appearance.paletteSelection
+    var target by rememberSaveable { mutableStateOf(PaletteMode.LIGHT) }
+    val choice = selection.choiceFor(target == PaletteMode.DARK)
     val dynamic = state.settings.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val deviceLight = remember(context, dynamic) { if (dynamic) dynamicLightColorScheme(context) else MotdLightRaw }
     val deviceDark = remember(context, dynamic) { if (dynamic) dynamicDarkColorScheme(context) else MotdDarkRaw }
@@ -83,7 +85,7 @@ fun PaletteHubScreen(
         document: () -> PaletteDocument,
     ) {
         try {
-            onEdit(decodePalette(encodePalette(document())), installedId)
+            onEdit(decodePalette(encodePalette(document())), installedId, target)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
@@ -93,14 +95,15 @@ fun PaletteHubScreen(
 
     fun openCatalog(
         document: PaletteDocument,
-        target: InstalledPalette? = null,
+        installedTarget: InstalledPalette? = null,
     ) {
-        val reusable = target?.takeIf { it.catalogRevision == document.revision }
+        val reusable = installedTarget?.takeIf { it.catalogRevision == document.revision }
         onPreview(
             reusable?.document ?: document,
             catalogPaletteLink(document.id, document.revision),
             document.id,
-            target?.document?.id?.takeIf { reusable == null },
+            installedTarget?.document?.id?.takeIf { reusable == null },
+            target,
         )
     }
 
@@ -118,7 +121,7 @@ fun PaletteHubScreen(
     }
     val importer =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri != null) launchAction { onPreview(readPaletteFile(context, uri), null, null, null) }
+            if (uri != null) launchAction { onPreview(readPaletteFile(context, uri), null, null, null, target) }
         }
     val exporter =
         rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -147,9 +150,9 @@ fun PaletteHubScreen(
                 ) {
                     Button(modifier = Modifier.weight(1f).testTag("palette_create"), onClick = {
                         edit(null) {
-                            val selected = state.appearance.selectedCustomPalette
+                            val selected = state.appearance.customPalette(choice)
                             selected?.let { localPaletteFork(it.copy(name = "New palette")) }
-                                ?: builtinPaletteDocument(selection.builtin, "New palette", deviceLight, deviceDark)
+                                ?: builtinPaletteDocument(choice.builtin, "New palette", deviceLight, deviceDark)
                         }
                     }) { Text(stringResource(R.string.palette_create)) }
                     OutlinedButton(onClick = { importer.launch(arrayOf("application/json", "text/*", "*/*")) }, modifier = Modifier.testTag("palette_import")) { Text(stringResource(R.string.palette_import)) }
@@ -158,6 +161,16 @@ fun PaletteHubScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(PaletteMode.LIGHT, PaletteMode.DARK).forEach { mode ->
+                    FilterChip(
+                        selected = target == mode,
+                        onClick = { target = mode },
+                        label = { Text(stringResource(if (mode == PaletteMode.LIGHT) R.string.palette_mode_light else R.string.palette_mode_dark)) },
+                        modifier = Modifier.testTag("palette_target_${mode.name.lowercase(Locale.ROOT)}"),
+                    )
+                }
+            }
             PrimaryTabRow(selectedTabIndex = tab) {
                 listOf(R.string.palette_builtin, R.string.palette_yours, R.string.palette_community).forEachIndexed { index, label ->
                     Tab(selected = tab == index, onClick = {
@@ -182,28 +195,28 @@ fun PaletteHubScreen(
                             ColorThemePreset.entries
                                 .map { it.canonicalPalette }
                                 .distinct()
-                                .filter { paletteBuiltinNameText(it).contains(query, true) },
+                                .filter { paletteBuiltinNameText(it).contains(query, true) && PaletteChoice(builtin = it).supportsMode(target == PaletteMode.DARK) },
                             key = { it.name },
                         ) { preset ->
                             val document = remember(preset, deviceLight, deviceDark) { builtinPaletteDocument(preset, paletteBuiltinNameText(preset), deviceLight, deviceDark) }
                             PaletteHubRow(
                                 paletteBuiltinName(preset),
                                 document,
-                                selection.installedId == null && selection.builtin == preset,
+                                choice.installedId == null && choice.builtin == preset,
                                 Modifier.testTag("palette_builtin_${preset.name.lowercase(Locale.ROOT)}"),
-                                onSelect = { viewModel.select(selection.copy(builtin = preset, installedId = null)) },
+                                onSelect = { viewModel.select(selection.withChoice(PaletteChoice(builtin = preset), target)) },
                             )
                             TextButton(onClick = { edit(null) { localPaletteFork(document) } }) { Text(stringResource(R.string.palette_edit)) }
                         }
                     }
 
                     1 -> {
-                        val palettes = state.appearance.customPalettes.filter { it.document.name.contains(query, true) }
+                        val palettes = state.appearance.customPalettes.filter { it.document.name.contains(query, true) && PaletteChoice(installedId = it.document.id).supportsMode(target == PaletteMode.DARK, state.appearance.customPalettes) }
                         if (palettes.isEmpty()) item { Text(stringResource(R.string.palette_empty_yours)) }
                         items(palettes, key = { it.document.id }) { installed ->
                             val document = installed.document
                             Card {
-                                PaletteHubRow(document.name, document, selection.installedId == document.id, onSelect = { viewModel.select(selection.copy(installedId = document.id)) })
+                                PaletteHubRow(document.name, document, choice.installedId == document.id, onSelect = { viewModel.select(selection.withChoice(PaletteChoice(installedId = document.id), target, state.appearance.customPalettes)) })
                                 FlowRow(Modifier.padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     TextButton(onClick = { edit(if (installed.catalogId != null) null else document.id) { if (installed.catalogId != null) localPaletteFork(document) else document } }) { Text(stringResource(R.string.palette_edit)) }
                                     TextButton(onClick = { edit(null) { duplicatePalette(document) } }) { Text(stringResource(R.string.palette_duplicate)) }
@@ -221,7 +234,7 @@ fun PaletteHubScreen(
                                             viewModel.reportError(failure)
                                         }
                                     }) { Text(stringResource(R.string.palette_export)) }
-                                    TextButton(onClick = { if (selection.installedId == document.id) deleting = installed else viewModel.remove(document.id) }) { Text(stringResource(R.string.palette_delete)) }
+                                    TextButton(onClick = { if (selection.usesInstalled(document.id)) deleting = installed else viewModel.remove(document.id) }) { Text(stringResource(R.string.palette_delete)) }
                                 }
                             }
                         }
@@ -242,7 +255,7 @@ fun PaletteHubScreen(
                                 if (!state.catalog.loading && state.catalog.palettes.isEmpty()) Text(stringResource(R.string.palette_empty_community), Modifier.testTag("palette_catalog_empty"))
                             }
                         }
-                        val matches = state.catalog.palettes.filter { it.name.contains(query, true) }
+                        val matches = state.catalog.palettes.filter { it.name.contains(query, true) && (if (target == PaletteMode.DARK) it.dark != null else it.light != null) }
                         if (matches.isEmpty() && state.catalog.palettes.isNotEmpty()) item { Text("No matching palettes") }
                         items(matches, key = { it.id }) { document ->
                             val tracked = state.appearance.customPalettes.filter { it.catalogId == document.id }

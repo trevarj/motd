@@ -40,9 +40,9 @@ import androidx.navigation.toRoute
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.PaletteMode
+import io.github.trevarj.motd.data.prefs.customPalette
 import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.data.prefs.resolvePalettePreset
-import io.github.trevarj.motd.data.prefs.selectedCustomPalette
 import io.github.trevarj.motd.gesture.GestureAction
 import io.github.trevarj.motd.gesture.GestureNavRequest
 import io.github.trevarj.motd.ui.nav.ChannelInfoRoute
@@ -52,6 +52,7 @@ import io.github.trevarj.motd.ui.nav.SearchRoute
 import io.github.trevarj.motd.ui.nav.isChatRoutePattern
 import io.github.trevarj.motd.ui.nav.openChat
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import io.github.trevarj.motd.ui.theme.resolvedMode
 import io.github.trevarj.motd.ui.theme.themeIdentityPalette
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -248,23 +249,20 @@ internal fun GestureOrbSurface(
 
 /** Use the selected palette's identity rather than a stale builtin accent. */
 @Composable
-private fun gestureAccent(appearance: AppearanceConfig): Color {
+internal fun gestureAccent(appearance: AppearanceConfig): Color {
     val systemDark = isSystemInDarkTheme()
     val selection = appearance.paletteSelection
-    val custom = appearance.selectedCustomPalette
+    val mode = selection.resolvedMode(systemDark)
+    val dark = mode == PaletteMode.DARK
+    val choice = selection.choiceFor(dark)
+    val custom = appearance.customPalette(choice)
     if (custom != null) {
-        val dark =
-            when (selection.mode) {
-                PaletteMode.SYSTEM -> systemDark
-                PaletteMode.LIGHT -> false
-                PaletteMode.DARK -> true
-            }
         val colors = if (dark) custom.dark else custom.light
         return remember(colors) {
             colors?.let { Color((it.nicknameColors.firstOrNull() ?: it.primary).toColorInt()) }
         } ?: MaterialTheme.colorScheme.primary
     }
-    val shown = resolvePalettePreset(selection.builtin, selection.mode, systemDark)
+    val shown = resolvePalettePreset(choice.builtin, mode, systemDark)
     val palette = remember(shown) { themeIdentityPalette(shown) }
     return palette.firstOrNull() ?: MaterialTheme.colorScheme.primary
 }

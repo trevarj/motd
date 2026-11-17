@@ -36,6 +36,7 @@ data class PalettePreviewUiState(
     val settings: Settings = Settings(),
     val appearance: AppearanceConfig = AppearanceConfig(),
     val mode: PaletteMode = PaletteMode.SYSTEM,
+    val assignmentTarget: PaletteMode = PaletteMode.SYSTEM,
     val sourceHostname: String? = null,
     val targetInstalledId: String? = null,
     val previousDocument: PaletteDocument? = null,
@@ -116,10 +117,11 @@ class PalettePreviewViewModel
                 val restoredMode =
                     savedStateHandle.get<String>("previewMode")?.let { value ->
                         PaletteMode.entries.find { it.name == value }
-                    } ?: appearance.paletteSelection.mode
+                    } ?: route.assignmentTarget ?: PaletteMode.SYSTEM
                 PalettePreviewUiState(
                     document = document,
                     mode = supportedMode(document, restoredMode),
+                    assignmentTarget = supportedMode(document, savedStateHandle.get<String>("previewAssignmentTarget")?.let(PaletteMode::valueOf) ?: route.assignmentTarget ?: PaletteMode.SYSTEM),
                     sourceHostname = route.sourceLink?.let { URI(it).host },
                     targetInstalledId = route.targetInstalledId,
                     previousDocument = target?.document,
@@ -134,6 +136,13 @@ class PalettePreviewViewModel
             if (local.value.saving || supportedMode(document, mode) != mode) return
             savedStateHandle["previewMode"] = mode.name
             local.value = local.value.copy(mode = mode)
+        }
+
+        fun selectAssignmentTarget(mode: PaletteMode) {
+            val document = snapshot?.document ?: return
+            if (local.value.saving || supportedMode(document, mode) != mode) return
+            savedStateHandle["previewAssignmentTarget"] = mode.name
+            local.value = local.value.copy(assignmentTarget = mode)
         }
 
         fun apply() = save(apply = true)
@@ -182,7 +191,8 @@ class PalettePreviewViewModel
                                     .let { matches ->
                                         matches.find { it.document.id == incoming.document.id }
                                             ?: existing?.takeIf { it.catalogId == null && sameCatalogDocument(it.document, incoming.document) }
-                                            ?: matches.find { it.document.id == appearance.paletteSelection.installedId }
+                                            ?: matches.find { it.document.id == appearance.paletteSelection.choiceFor(local.value.assignmentTarget == PaletteMode.DARK).installedId }
+                                            ?: matches.find { appearance.paletteSelection.usesInstalled(it.document.id) }
                                             ?: matches.firstOrNull()
                                     }
                                     ?: appearance.customPalettes.find { it.catalogId == null && sameCatalogDocument(it.document, incoming.document) }
@@ -229,7 +239,7 @@ class PalettePreviewViewModel
                         appearancePrefs.savePalette(
                             saved,
                             apply,
-                            local.value.mode,
+                            local.value.assignmentTarget,
                             targetInstalledId = destination?.document?.id?.takeIf { identical || choice == PaletteConflictChoice.REPLACE },
                         )
                     }

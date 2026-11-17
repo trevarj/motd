@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material3.MaterialTheme
@@ -42,8 +43,10 @@ import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.prefs.customPalette
 import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.di.NotificationPermissionStatus
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
@@ -77,6 +80,7 @@ import io.github.trevarj.motd.ui.splash.shouldShowStartupSplash
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SystemBarThemeHost
 import io.github.trevarj.motd.ui.theme.TimestampConfig
+import io.github.trevarj.motd.ui.theme.resolvedMode
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -187,10 +191,9 @@ class MainActivity :
             val settings = uiState.settings
             val appearance = uiState.appearance
             val paletteSelection = appearance.paletteSelection
-            val customPalette =
-                paletteSelection.installedId?.let { id ->
-                    appearance.customPalettes.find { it.document.id == id }?.document
-                }
+            val paletteMode = paletteSelection.resolvedMode(isSystemInDarkTheme())
+            val paletteChoice = paletteSelection.choiceFor(paletteMode == PaletteMode.DARK)
+            val customPalette = appearance.customPalette(paletteChoice)
             // Re-check the on-disk font whenever the imported name changes (a fresh import or a
             // backup restore that cleared it), or when CustomFontStore's revision bumps (a
             // same-name re-import changes no persisted state, so the name alone would miss it).
@@ -207,10 +210,10 @@ class MainActivity :
                 onFinished = ::finishStartupSplash,
             ) {
                 MotdTheme(
-                    themePreset = paletteSelection.builtin,
+                    themePreset = paletteChoice.builtin,
                     trueBlack = appearance.trueBlack,
                     dynamicColor = settings.dynamicColor,
-                    paletteMode = paletteSelection.mode,
+                    paletteMode = paletteMode,
                     customPalette = customPalette,
                     useThemeTextColors = appearance.useThemeTextColors,
                     layoutDensity = settings.layoutDensity,

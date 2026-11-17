@@ -163,6 +163,7 @@ enum class NetworkSettingsTarget { CONNECTION, AUTHENTICATION, OBFUSCATION, AVAT
 @Serializable data class PaletteEditorRoute(
     val paletteJson: String,
     val editingInstalledId: String? = null,
+    val assignmentTarget: io.github.trevarj.motd.data.prefs.PaletteMode? = null,
 )
 
 @Serializable data class PalettePreviewRoute(
@@ -170,6 +171,7 @@ enum class NetworkSettingsTarget { CONNECTION, AUTHENTICATION, OBFUSCATION, AVAT
     val sourceLink: String? = null,
     val catalogId: String? = null,
     val targetInstalledId: String? = null,
+    val assignmentTarget: io.github.trevarj.motd.data.prefs.PaletteMode? = null,
 )
 
 @Serializable data class SurfaceEffectsRoute(

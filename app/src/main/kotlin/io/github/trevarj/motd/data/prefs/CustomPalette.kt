@@ -62,11 +62,36 @@ data class InstalledPalette(
 enum class PaletteMode { SYSTEM, LIGHT, DARK }
 
 @Serializable
-data class PaletteSelection(
-    val builtin: ColorThemePreset,
-    val installedId: String?,
-    val mode: PaletteMode,
+data class PaletteChoice(
+    val builtin: ColorThemePreset = ColorThemePreset.SYSTEM,
+    val installedId: String? = null,
 )
+
+@Serializable
+data class PaletteSelection(
+    val light: PaletteChoice = PaletteChoice(),
+    val dark: PaletteChoice = PaletteChoice(),
+    val mode: PaletteMode = PaletteMode.SYSTEM,
+) {
+    fun choiceFor(dark: Boolean): PaletteChoice = if (dark) this.dark else light
+
+    fun usesInstalled(id: String): Boolean = light.installedId == id || dark.installedId == id
+
+    fun withChoice(
+        choice: PaletteChoice,
+        mode: PaletteMode,
+        palettes: List<InstalledPalette> = emptyList(),
+    ): PaletteSelection {
+        require(choice.supportsMode(false, palettes) || choice.supportsMode(true, palettes)) { "Selected palette is unavailable" }
+        if (mode != PaletteMode.SYSTEM) {
+            require(choice.supportsMode(mode == PaletteMode.DARK, palettes)) { "Palette does not support selected mode" }
+        }
+        return copy(
+            light = if (mode != PaletteMode.DARK && choice.supportsMode(false, palettes)) choice else light,
+            dark = if (mode != PaletteMode.LIGHT && choice.supportsMode(true, palettes)) choice else dark,
+        )
+    }
+}
 
 enum class PaletteError { READ, TOO_LARGE, INVALID, UNSUPPORTED_VERSION }
 

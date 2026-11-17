@@ -3,11 +3,6 @@ package io.github.trevarj.motd.ui.settings
 import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
-import io.github.trevarj.motd.data.prefs.ColorThemePreset
-import io.github.trevarj.motd.data.prefs.PaletteMode
-import io.github.trevarj.motd.data.prefs.PaletteSelection
-import io.github.trevarj.motd.data.prefs.canonicalPalette
-import io.github.trevarj.motd.data.prefs.normalizePaletteSelection
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
 import io.github.trevarj.motd.ui.onboarding.ServerForm
@@ -56,17 +51,6 @@ class SettingsUiModelsTest {
     fun `history size planner accepts both decimal separators`() {
         assertEquals(12.5, parseMegabytes("12.5")!!, 0.0)
         assertEquals(12.5, parseMegabytes("12,5")!!, 0.0)
-    }
-
-    @Test
-    fun `paired variants share one family and retain explicit mode`() {
-        assertEquals(ColorThemePreset.AYU_DARK.canonicalPalette, ColorThemePreset.AYU_LIGHT.canonicalPalette)
-        assertEquals(
-            PaletteSelection(ColorThemePreset.AYU_DARK, null, PaletteMode.LIGHT),
-            normalizePaletteSelection(PaletteSelection(ColorThemePreset.AYU_LIGHT, null, PaletteMode.LIGHT), emptyList()),
-        )
-        assertEquals(ColorThemePreset.SYSTEM, ColorThemePreset.SYSTEM.canonicalPalette)
-        assertEquals(ColorThemePreset.DARK, ColorThemePreset.LIGHT.canonicalPalette)
     }
 
     @Test

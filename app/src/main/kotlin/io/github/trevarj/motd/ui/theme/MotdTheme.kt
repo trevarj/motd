@@ -42,6 +42,7 @@ import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.PaletteDocument
 import io.github.trevarj.motd.data.prefs.PaletteMode
+import io.github.trevarj.motd.data.prefs.PaletteSelection
 import io.github.trevarj.motd.data.prefs.SurfaceEffects
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
@@ -253,6 +254,12 @@ fun SheetSystemBars() {
         controller.isAppearanceLightNavigationBars = !darkBars
     }
 }
+
+fun PaletteSelection.resolvedMode(systemDark: Boolean): PaletteMode =
+    when (mode) {
+        PaletteMode.SYSTEM -> if (systemDark) PaletteMode.DARK else PaletteMode.LIGHT
+        else -> mode
+    }
 
 @Composable
 fun MotdTheme(

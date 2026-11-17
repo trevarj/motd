@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,9 +51,10 @@ import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.customPalette
 import io.github.trevarj.motd.data.prefs.paletteSelection
-import io.github.trevarj.motd.data.prefs.selectedCustomPalette
 import io.github.trevarj.motd.ui.chat.ColorComponentSlider
 import io.github.trevarj.motd.ui.chat.ColorWheel
 import io.github.trevarj.motd.ui.chat.parseColorHex
@@ -66,6 +68,7 @@ import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.resolveComfortableBubbleColor
+import io.github.trevarj.motd.ui.theme.resolvedMode
 import java.io.File
 import kotlin.math.roundToInt
 import android.graphics.Color as AndroidColor
@@ -203,10 +206,12 @@ private fun AppearanceBubbleColorOptions(
     content: @Composable () -> Unit,
 ) {
     val selection = appearance.paletteSelection
+    val mode = selection.resolvedMode(isSystemInDarkTheme())
+    val choice = selection.choiceFor(mode == PaletteMode.DARK)
     MotdTheme(
-        themePreset = selection.builtin,
-        paletteMode = selection.mode,
-        customPalette = appearance.selectedCustomPalette,
+        themePreset = choice.builtin,
+        paletteMode = mode,
+        customPalette = appearance.customPalette(choice),
         trueBlack = appearance.trueBlack,
         dynamicColor = settings.dynamicColor,
         useThemeTextColors = appearance.useThemeTextColors,
@@ -223,10 +228,12 @@ private fun AppearanceBubblePreview(
     customFontFile: File?,
 ) {
     val selection = appearance.paletteSelection
+    val mode = selection.resolvedMode(isSystemInDarkTheme())
+    val choice = selection.choiceFor(mode == PaletteMode.DARK)
     MotdTheme(
-        themePreset = selection.builtin,
-        paletteMode = selection.mode,
-        customPalette = appearance.selectedCustomPalette,
+        themePreset = choice.builtin,
+        paletteMode = mode,
+        customPalette = appearance.customPalette(choice),
         trueBlack = appearance.trueBlack,
         dynamicColor = settings.dynamicColor,
         useThemeTextColors = appearance.useThemeTextColors,

@@ -55,13 +55,15 @@ flowchart TD
   go through `ConnectionManager` instead of constructing IRC clients in screens.
 - Fixed theme contrast normalization is cached on demand per preset and text-color
   mode. `SYSTEM`, `LIGHT`, `DARK`, and `AMOLED` never warm the fixed palette catalog.
-- Appearance stores palette identity and System/Light/Dark mode separately. Only
-  Device colors uses Material You; custom palettes reuse the existing readability
-  and dark-only true-black pipeline. Draft/custom fitting is remembered by actual
-  colors and text mode, never in a global slider-value cache.
+- Appearance stores independent light and dark palette identities plus System/Light/Dark
+  mode. Legacy single selections migrate to their supported variants; an unsupported
+  opposite slot uses Device colors. Only Device colors uses Material You; custom
+  palettes reuse the existing readability and dark-only true-black pipeline.
+  Draft/custom fitting is remembered by actual colors and text mode, never in a
+  global slider-value cache.
 - The strict UTF-8 palette codec caps each document at 16 KiB. Appearance DataStore
-  commits definitions and selection together, with 64-entry/512 KiB collection
-  limits and non-destructive corrupt-storage reporting.
+  commits definitions and both selections together, with 64-entry/512 KiB collection
+  limits and non-destructive per-slot corrupt-storage recovery.
 - Palette editors own bounded saveable drafts and invalid-field state. Native chat,
   chat-list and control samples stay contained, without remote media or system-bar
   changes. Full previews carry validated immutable document snapshots; only explicit
@@ -81,7 +83,7 @@ flowchart TD
   refetching or granting catalog tracking. Overlong optional source links are
   omitted from installation metadata without truncating queries or palette data.
 - Configuration imports preflight complete palette targets, conflict-ID remaps
-  and quotas before any settings/network mutation. Definitions and selection
+  and quotas before any settings/network mutation. Definitions and both selections
   restore atomically; the overall cross-store import is not atomic. Legacy
   backups preserve installed definitions; only modern REPLACE recovers corrupt
   palette storage.

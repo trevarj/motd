@@ -3,6 +3,7 @@ package io.github.trevarj.motd
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -42,12 +43,17 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.avatar.IrcSpriteV2Renderer
 import io.github.trevarj.motd.avatar.IrcSpriteV2Theme
+import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.InstalledPalette
 import io.github.trevarj.motd.data.prefs.NickColorPalette
+import io.github.trevarj.motd.data.prefs.PaletteChoice
 import io.github.trevarj.motd.data.prefs.PaletteColors
 import io.github.trevarj.motd.data.prefs.PaletteDocument
 import io.github.trevarj.motd.data.prefs.PaletteMode
+import io.github.trevarj.motd.data.prefs.customPalette
 import io.github.trevarj.motd.data.prefs.isDark
+import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.ui.components.IrcSpriteV2Avatar
 import io.github.trevarj.motd.ui.components.isAppliedThemeDark
 import io.github.trevarj.motd.ui.theme.LocalNickColors
@@ -56,6 +62,7 @@ import io.github.trevarj.motd.ui.theme.NickColorScheme
 import io.github.trevarj.motd.ui.theme.accessibleColorScheme
 import io.github.trevarj.motd.ui.theme.fixedThemeScheme
 import io.github.trevarj.motd.ui.theme.paletteNickFill
+import io.github.trevarj.motd.ui.theme.resolvedMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -304,6 +311,107 @@ class ThemeStateRetentionUiTest {
         assertRetainedAndRendered("custom-true-black")
         assertEquals(Color.Black, scheme.background)
         assertEquals(Color.Black, scheme.surface)
+    }
+
+    @Test
+    fun independentBuiltinAndCustomSlots_followModeWithoutResettingConversation() {
+        val darkDocument = customPalette().copy(light = null)
+        var appearance by mutableStateOf(
+            AppearanceConfig(
+                lightPalette = PaletteChoice(ColorThemePreset.GRUVBOX_LIGHT),
+                darkPalette = PaletteChoice(installedId = darkDocument.id),
+                customPalettes = listOf(InstalledPalette(darkDocument)),
+                paletteMode = PaletteMode.SYSTEM,
+            ),
+        )
+        var osDark by mutableStateOf(false)
+        var trueBlack by mutableStateOf(false)
+        lateinit var scheme: ColorScheme
+        lateinit var listState: LazyListState
+        var nick = Color.Unspecified
+        var appliedDark = false
+        var expectedAvatar: Bitmap? = null
+        compose.setContent {
+            val configuration =
+                Configuration(LocalConfiguration.current).apply {
+                    uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                        if (osDark) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+                }
+            CompositionLocalProvider(LocalConfiguration provides configuration) {
+                val selection = appearance.paletteSelection
+                val mode = selection.resolvedMode(isSystemInDarkTheme())
+                val choice = selection.choiceFor(mode == PaletteMode.DARK)
+                MotdTheme(
+                    themePreset = choice.builtin,
+                    paletteMode = mode,
+                    customPalette = appearance.customPalette(choice),
+                    trueBlack = trueBlack,
+                    syncSystemBars = false,
+                ) {
+                    var draft by remember { mutableStateOf("") }
+                    val list = rememberLazyListState()
+                    val current = MaterialTheme.colorScheme
+                    val accent = LocalNickColors.current.avatar("alice")
+                    val dark = isAppliedThemeDark()
+                    val context = LocalContext.current
+                    val size = with(LocalDensity.current) { 48.dp.roundToPx() }
+                    SideEffect {
+                        scheme = current
+                        nick = accent
+                        appliedDark = dark
+                        listState = list
+                        expectedAvatar =
+                            IrcSpriteV2Renderer.render(
+                                context = context,
+                                name = "alice",
+                                accent = accent.toArgb(),
+                                sizePx = size,
+                                baseColor = (if (dark) current.surfaceContainerHighest else current.surfaceContainerHigh).toArgb(),
+                                ringColor = accent.copy(alpha = 0.52f).toArgb(),
+                                theme = if (dark) IrcSpriteV2Theme.DARK else IrcSpriteV2Theme.LIGHT,
+                            )
+                    }
+                    Column {
+                        IrcSpriteV2Avatar("alice", 48.dp, Modifier.testTag("paired_avatar"))
+                        LazyColumn(state = list, modifier = Modifier.height(120.dp).testTag("paired_list")) {
+                            items(40) { Text("Message $it", Modifier.height(30.dp)) }
+                        }
+                        OutlinedTextField(draft, { draft = it }, Modifier.testTag("paired_draft"))
+                    }
+                }
+            }
+        }
+        compose.onNodeWithTag("paired_draft").performTextInput("keep me")
+        compose.onNodeWithTag("paired_list").performScrollToIndex(12)
+        for (mode in PaletteMode.entries) {
+            for (systemDark in listOf(false, true)) {
+                compose.runOnUiThread {
+                    appearance = appearance.copy(paletteMode = mode)
+                    osDark = systemDark
+                }
+                compose.waitForIdle()
+                val dark = mode == PaletteMode.DARK || (mode == PaletteMode.SYSTEM && systemDark)
+                assertEquals(dark, appliedDark)
+                if (dark) {
+                    assertEquals(Color(0xFF18212B), scheme.background)
+                    assertEquals(Color(0xFFEEAA44), nick)
+                } else {
+                    assertSchemeMatches(fixedThemeScheme(ColorThemePreset.GRUVBOX_LIGHT), scheme)
+                }
+                compose.onNodeWithTag("paired_draft").assertTextEquals("keep me")
+                compose.runOnIdle { assertEquals(12, listState.firstVisibleItemIndex) }
+                val actual = compose.onNodeWithTag("paired_avatar").captureToImage().asAndroidBitmap()
+                val expected = requireNotNull(expectedAvatar)
+                assertEquals(expected.getPixel(expected.width / 2, expected.height / 2), actual.getPixel(actual.width / 2, actual.height / 2))
+            }
+        }
+        compose.runOnUiThread { trueBlack = true }
+        compose.waitForIdle()
+        assertEquals(Color.Black, scheme.background)
+        compose.runOnUiThread { appearance = appearance.copy(paletteMode = PaletteMode.LIGHT) }
+        compose.waitForIdle()
+        assertSchemeMatches(fixedThemeScheme(ColorThemePreset.GRUVBOX_LIGHT), scheme)
+        compose.onNodeWithTag("paired_draft").assertTextEquals("keep me")
     }
 
     @Test

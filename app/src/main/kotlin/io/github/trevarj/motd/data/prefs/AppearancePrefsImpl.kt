@@ -29,6 +29,8 @@ private val FOLLOW_SYSTEM = booleanPreferencesKey("follow_system_v1")
 private val PALETTE_MODE = stringPreferencesKey("palette_mode_v1")
 private val CUSTOM_PALETTE_ID = stringPreferencesKey("custom_palette_id_v1")
 private val CUSTOM_PALETTES = stringPreferencesKey("custom_palettes_v1")
+private val LIGHT_PALETTE = stringPreferencesKey("light_palette_v1")
+private val DARK_PALETTE = stringPreferencesKey("dark_palette_v1")
 private val USE_THEME_TEXT_COLORS = booleanPreferencesKey("use_theme_text_colors_v1")
 private val WALLPAPER = stringPreferencesKey("wallpaper_preset_v1")
 private val WALLPAPER_INTENSITY = intPreferencesKey("wallpaper_intensity_v1")
@@ -145,6 +147,21 @@ private fun decodeInstalledPalettes(raw: String?): List<InstalledPalette> {
     return palettes
 }
 
+private fun decodeStoredPaletteChoice(
+    raw: String?,
+    dark: Boolean,
+    palettes: List<InstalledPalette>,
+): PaletteChoice? {
+    if (raw == null) return null
+    val choice =
+        try {
+            installedPaletteJson.decodeFromString<PaletteChoice>(raw)
+        } catch (_: IllegalArgumentException) {
+            return PaletteChoice()
+        }
+    return choice.takeIf { it.supportsMode(dark, palettes) } ?: PaletteChoice()
+}
+
 private fun Preferences.storedPaletteSelection(palettes: List<InstalledPalette>): PaletteSelection =
     AppearanceConfig(
         theme = resolveStoredTheme(this[THEME], this[TRUE_BLACK]).theme,
@@ -152,12 +169,17 @@ private fun Preferences.storedPaletteSelection(palettes: List<InstalledPalette>)
         paletteMode = this[PALETTE_MODE]?.let { runCatching { PaletteMode.valueOf(it) }.getOrNull() },
         customPaletteId = this[CUSTOM_PALETTE_ID],
         customPalettes = palettes,
+        lightPalette = decodeStoredPaletteChoice(this[LIGHT_PALETTE], false, palettes),
+        darkPalette = decodeStoredPaletteChoice(this[DARK_PALETTE], true, palettes),
     ).paletteSelection
 
 private fun MutablePreferences.writePaletteSelection(selection: PaletteSelection) {
-    this[THEME] = selection.builtin.name
+    val legacy = selection.choiceFor(selection.mode == PaletteMode.DARK)
+    this[THEME] = legacy.builtin.name
     this[PALETTE_MODE] = selection.mode.name
-    selection.installedId?.let { this[CUSTOM_PALETTE_ID] = it } ?: remove(CUSTOM_PALETTE_ID)
+    legacy.installedId?.let { this[CUSTOM_PALETTE_ID] = it } ?: remove(CUSTOM_PALETTE_ID)
+    this[LIGHT_PALETTE] = installedPaletteJson.encodeToString(selection.light)
+    this[DARK_PALETTE] = installedPaletteJson.encodeToString(selection.dark)
     remove(FOLLOW_SYSTEM)
 }
 
@@ -278,15 +300,17 @@ class AppearancePrefsImpl
                     paletteMode = prefs[PALETTE_MODE]?.let { runCatching { PaletteMode.valueOf(it) }.getOrNull() },
                     customPaletteId = prefs[CUSTOM_PALETTE_ID],
                     customPalettes = palettes,
+                    lightPalette = decodeStoredPaletteChoice(prefs[LIGHT_PALETTE], false, palettes),
+                    darkPalette = decodeStoredPaletteChoice(prefs[DARK_PALETTE], true, palettes),
                     customPaletteReadError = paletteReadError,
                 )
             }
 
         override suspend fun selectPalette(selection: PaletteSelection) {
             store.edit { prefs ->
-                val palettes = if (selection.installedId == null) emptyList() else decodeInstalledPalettes(prefs[CUSTOM_PALETTES])
+                val palettes = if (selection.light.installedId == null && selection.dark.installedId == null) emptyList() else decodeInstalledPalettes(prefs[CUSTOM_PALETTES])
                 prefs.writePaletteSelection(normalizePaletteSelection(selection, palettes))
-                if (selection.builtin == ColorThemePreset.AMOLED) prefs[TRUE_BLACK] = true
+                if (selection.light.builtin == ColorThemePreset.AMOLED || selection.dark.builtin == ColorThemePreset.AMOLED) prefs[TRUE_BLACK] = true
             }
         }
 
@@ -317,29 +341,36 @@ class AppearancePrefsImpl
                         }
                     }
                 val selection = prefs.storedPaletteSelection(palettes)
+                val repaired =
+                    selection.copy(
+                        light = selection.light.takeIf { it.supportsMode(false, target) } ?: PaletteChoice(),
+                        dark = selection.dark.takeIf { it.supportsMode(true, target) } ?: PaletteChoice(),
+                    )
                 val nextSelection =
                     if (apply) {
-                        normalizePaletteSelection(selection.copy(installedId = saved.document.id, mode = mode), target)
-                    } else if (selection.installedId == saved.document.id) {
-                        normalizePaletteSelection(selection, target)
+                        repaired.withChoice(PaletteChoice(installedId = saved.document.id), mode, target)
                     } else {
-                        selection
+                        repaired
                     }
                 val encoded = encodeInstalledPalettes(target)
                 prefs[CUSTOM_PALETTES] = encoded
-                if (apply || selection.installedId == saved.document.id) prefs.writePaletteSelection(nextSelection)
+                prefs.writePaletteSelection(normalizePaletteSelection(nextSelection, target))
             }
         }
 
         override suspend fun removePalette(id: String) {
             store.edit { prefs ->
                 val palettes = decodeInstalledPalettes(prefs[CUSTOM_PALETTES])
+                val selection = prefs.storedPaletteSelection(palettes)
                 val target = palettes.filterNot { it.document.id == id }
                 val encoded = encodeInstalledPalettes(target)
                 prefs[CUSTOM_PALETTES] = encoded
-                if (prefs[CUSTOM_PALETTE_ID] == id) {
-                    prefs.writePaletteSelection(PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.SYSTEM))
-                }
+                prefs.writePaletteSelection(
+                    selection.copy(
+                        light = selection.light.takeUnless { it.installedId == id } ?: PaletteChoice(),
+                        dark = selection.dark.takeUnless { it.installedId == id } ?: PaletteChoice(),
+                    ),
+                )
             }
         }
 
@@ -352,7 +383,7 @@ class AppearancePrefsImpl
                 val normalized = normalizePaletteSelection(selection, palettes)
                 prefs[CUSTOM_PALETTES] = encoded
                 prefs.writePaletteSelection(normalized)
-                if (selection.builtin == ColorThemePreset.AMOLED) prefs[TRUE_BLACK] = true
+                if (selection.light.builtin == ColorThemePreset.AMOLED || selection.dark.builtin == ColorThemePreset.AMOLED) prefs[TRUE_BLACK] = true
             }
         }
 

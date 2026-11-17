@@ -26,6 +26,8 @@ import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.InstalledPalette
+import io.github.trevarj.motd.data.prefs.PaletteChoice
+import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.PaletteSelection
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
@@ -37,6 +39,7 @@ import io.github.trevarj.motd.data.prefs.decodePaletteTree
 import io.github.trevarj.motd.data.prefs.encodePalette
 import io.github.trevarj.motd.data.prefs.normalizePaletteSelection
 import io.github.trevarj.motd.data.prefs.paletteSelection
+import io.github.trevarj.motd.data.prefs.supportsMode
 import io.github.trevarj.motd.data.prefs.validateInstalledPalette
 import io.github.trevarj.motd.data.prefs.validateInstalledPalettes
 import io.github.trevarj.motd.data.repo.ChatFolderRepository
@@ -373,10 +376,28 @@ class ConfigurationBackupRepositoryImpl
             require(appearance.customPaletteReadError == null) { "Installed palettes cannot be read." }
             validateInstalledPalettes(appearance.customPalettes)
             val selection = appearance.paletteSelection
+            val fallback =
+                when (selection.mode) {
+                    PaletteMode.LIGHT -> {
+                        selection.light
+                    }
+
+                    PaletteMode.DARK -> {
+                        selection.dark
+                    }
+
+                    PaletteMode.SYSTEM -> {
+                        listOf(selection.light, selection.dark).firstOrNull {
+                            it.supportsMode(false, appearance.customPalettes) && it.supportsMode(true, appearance.customPalettes)
+                        } ?: PaletteChoice()
+                    }
+                }
             return appearance.copy(
-                theme = selection.builtin,
-                customPaletteId = selection.installedId,
+                theme = fallback.builtin,
+                customPaletteId = fallback.installedId,
                 paletteMode = selection.mode,
+                lightPalette = selection.light,
+                darkPalette = selection.dark,
                 customPalettes = appearance.customPalettes.map(::canonicalPalette),
                 trueBlack = appearance.trueBlack || (appearance.paletteMode == null && appearance.theme == ColorThemePreset.AMOLED),
             )
@@ -387,7 +408,7 @@ class ConfigurationBackupRepositoryImpl
             importMode: BackupImportMode,
         ): PaletteRestore? {
             if (appearance == null) return null
-            val modern = appearance.paletteMode != null
+            val modern = appearance.paletteMode != null || appearance.lightPalette != null
             val incoming = appearance.customPalettes.map(::canonicalPalette)
             val selection = appearance.paletteSelection
             if (modern && importMode == BackupImportMode.REPLACE) {
@@ -423,7 +444,11 @@ class ConfigurationBackupRepositoryImpl
                 }
             }
             validateInstalledPalettes(target)
-            val remapped = selection.copy(installedId = remaps[selection.installedId] ?: selection.installedId)
+            val remapped =
+                selection.copy(
+                    light = selection.light.copy(installedId = remaps[selection.light.installedId] ?: selection.light.installedId),
+                    dark = selection.dark.copy(installedId = remaps[selection.dark.installedId] ?: selection.dark.installedId),
+                )
             return PaletteRestore(target, normalizePaletteSelection(remapped, target))
         }
 
@@ -471,6 +496,24 @@ class ConfigurationBackupRepositoryImpl
                 val payload = tree as? JsonObject ?: throw BackupFormatException()
                 val settings = payload["settings"] as? JsonObject ?: return tree
                 val appearance = settings["appearance"] as? JsonObject ?: return tree
+                val light = appearance["lightPalette"]
+                val dark = appearance["darkPalette"]
+                require((light == null) == (dark == null)) { "Both palette slots must be present together." }
+                if (light != null) {
+                    require(light is JsonObject && dark is JsonObject) { "Palette slots must be objects." }
+                    require(appearance["paletteMode"] != null && appearance["paletteMode"] != JsonNull) {
+                        "Palette slots require an explicit mode."
+                    }
+                    for (slot in listOf(light, dark)) {
+                        for (key in listOf("builtin", "installedId")) {
+                            val value = slot[key]
+                            require(
+                                value == null || (key == "installedId" && value == JsonNull) ||
+                                    (value is JsonPrimitive && value.isString),
+                            ) { "Invalid palette slot $key." }
+                        }
+                    }
+                }
                 for (key in listOf("paletteMode", "customPaletteId")) {
                     val value = appearance[key]
                     require(value == null || value == JsonNull || (value is JsonPrimitive && value.isString)) { "Invalid $key." }
@@ -519,12 +562,23 @@ class ConfigurationBackupRepositoryImpl
             require(payload.version == FORMAT_VERSION) { "Unsupported payload version ${payload.version}." }
             payload.settings.appearance?.let { appearance ->
                 validateInstalledPalettes(appearance.customPalettes)
-                if (appearance.paletteMode == null) {
+                appearance.paletteMode?.let { mode ->
+                    val fallback = PaletteChoice(appearance.theme, appearance.customPaletteId)
+                    require(
+                        (mode == PaletteMode.DARK || fallback.supportsMode(false, appearance.customPalettes)) &&
+                            (mode == PaletteMode.LIGHT || fallback.supportsMode(true, appearance.customPalettes)),
+                    ) { "Selected fallback palette does not support this mode." }
+                }
+                require((appearance.lightPalette == null) == (appearance.darkPalette == null)) { "Both palette slots are required." }
+                if (appearance.lightPalette != null) {
+                    normalizePaletteSelection(
+                        PaletteSelection(appearance.lightPalette, requireNotNull(appearance.darkPalette), requireNotNull(appearance.paletteMode)),
+                        appearance.customPalettes,
+                    )
+                } else if (appearance.paletteMode == null) {
                     require(appearance.customPalettes.isEmpty() && appearance.customPaletteId == null) { "Palette state requires an explicit mode." }
                 } else {
-                    val selection = PaletteSelection(appearance.theme, appearance.customPaletteId, appearance.paletteMode)
-                    val normalized = normalizePaletteSelection(selection, appearance.customPalettes)
-                    require(normalized.mode == selection.mode) { "Selected palette does not support this mode." }
+                    appearance.paletteSelection
                 }
             }
             require(payload.networks.size <= MAX_NETWORKS) { "Too many networks in backup." }

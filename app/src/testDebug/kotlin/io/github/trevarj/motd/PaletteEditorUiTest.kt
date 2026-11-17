@@ -2,6 +2,7 @@ package io.github.trevarj.motd
 
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -80,7 +81,7 @@ class PaletteEditorUiTest {
             originalSettings = context.settingsDataStore.data.first()
             context.appearanceDataStore.edit { it.clear() }
             context.settingsDataStore.edit { it.clear() }
-            prefs.selectPalette(PaletteSelection(ColorThemePreset.DARK, null, PaletteMode.DARK))
+            prefs.selectPalette(PaletteSelection(dark = PaletteChoice(ColorThemePreset.DARK), mode = PaletteMode.DARK))
             settings.setNickColorsEnabled(true)
             settings.setNickColorPalette(NickColorPalette.THEME)
             prefs.setUseThemeTextColors(true)
@@ -107,7 +108,8 @@ class PaletteEditorUiTest {
 
     @Test fun rawDraftEditsStayContained_untilAtomicApply_andReloadRetainsState() {
         val base = rawDraft()
-        val handle = editorHandle(base)
+        val selectionBefore = current().paletteSelection
+        val handle = editorHandle(base, assignmentTarget = PaletteMode.DARK)
         editor = editorModel(handle)
         mount()
         compose.onNodeWithTag("palette_editor_preview_dark").performClick()
@@ -156,14 +158,19 @@ class PaletteEditorUiTest {
         awaitUi { editor == null }
         compose.onNodeWithTag("retained_composer").assertTextEquals("unsent channel draft")
         val saved = current()
-        assertEquals(base.id, saved.paletteSelection.installedId)
-        assertEquals("#FF5500", saved.selectedCustomPalette!!.dark!!.primary)
+        assertEquals(base.id, saved.paletteSelection.dark.installedId)
+        assertEquals(selectionBefore.light, saved.paletteSelection.light)
+        assertEquals(selectionBefore.mode, saved.paletteSelection.mode)
+        val savedDocument = saved.customPalette(saved.paletteSelection.dark)!!
+        assertEquals("#FF5500", savedDocument.dark!!.primary)
         assertNotEquals(rootBefore, rootPrimary)
-        assertEquals(saved.selectedCustomPalette, runBlocking { AppearancePrefsImpl(context).config.first() }.selectedCustomPalette)
-        assertEquals(base.license, saved.selectedCustomPalette!!.license)
-        assertEquals(base.notices, saved.selectedCustomPalette!!.notices)
-        assertEquals(base.sourceUrl, saved.selectedCustomPalette!!.sourceUrl)
-        compose.runOnIdle { editor = editorModel(editorHandle(saved.selectedCustomPalette!!, base.id)) }
+        val reloaded = runBlocking { AppearancePrefsImpl(context).config.first() }
+        assertEquals(saved.paletteSelection, reloaded.paletteSelection)
+        assertEquals(savedDocument, reloaded.customPalette(reloaded.paletteSelection.dark))
+        assertEquals(base.license, savedDocument.license)
+        assertEquals(base.notices, savedDocument.notices)
+        assertEquals(base.sourceUrl, savedDocument.sourceUrl)
+        compose.runOnIdle { editor = editorModel(editorHandle(savedDocument, base.id)) }
         awaitLoaded()
         compose.onNodeWithTag("palette_editor_back").performClick()
         awaitUi { editor == null }
@@ -271,7 +278,8 @@ class PaletteEditorUiTest {
         compose.onNodeWithTag("palette_editor_save").assertIsNotEnabled()
         compose.runOnIdle { editor!!.save(true) }
         assertTrue(current().customPalettes.isEmpty())
-        assertNull(current().paletteSelection.installedId)
+        assertEquals(PaletteChoice(), current().paletteSelection.light)
+        assertNull(current().paletteSelection.dark.installedId)
         compose.onNodeWithTag("palette_editor_name").performTextReplacement("Corrected name")
         compose.onNodeWithTag("palette_editor_save").assertIsEnabled().performClick()
         awaitUi { editor == null }
@@ -301,7 +309,8 @@ class PaletteEditorUiTest {
                 .single()
                 .document.dark,
         )
-        assertNull(saved.paletteSelection.installedId)
+        assertEquals(PaletteChoice(), saved.paletteSelection.light)
+        assertNull(saved.paletteSelection.dark.installedId)
     }
 
     @Test fun nativeEditorLightDarkAndTrueBlack_renderAuthoredSample_notRootTheme() {
@@ -348,8 +357,11 @@ class PaletteEditorUiTest {
         preview = previewModel(base)
         mount()
         assertTrue(current().customPalettes.isEmpty())
-        assertNull(current().paletteSelection.installedId)
-        assertEquals(PaletteMode.DARK, preview!!.uiState.value.mode)
+        assertEquals(PaletteChoice(), current().paletteSelection.light)
+        assertNull(current().paletteSelection.dark.installedId)
+        assertEquals(PaletteMode.SYSTEM, preview!!.uiState.value.mode)
+        assertEquals(PaletteMode.SYSTEM, preview!!.uiState.value.assignmentTarget)
+        assertEquals(PaletteMode.DARK, current().paletteSelection.mode)
         capture("full-preview-light.png")
         compose.onNodeWithTag("palette_preview_list").performScrollToNode(hasText("Dark preview"))
         capture("full-preview-dark.png")
@@ -358,9 +370,11 @@ class PaletteEditorUiTest {
         assertTrue(current().customPalettes.isEmpty())
         compose.runOnIdle { preview = previewModel(base) }
         awaitLoaded()
+        compose.onNodeWithTag("palette_assign_dark").performClick()
         compose.onNodeWithTag("palette_preview_apply").performClick()
         awaitUi { preview == null }
-        assertEquals(base.id, current().paletteSelection.installedId)
+        assertEquals(base.id, current().paletteSelection.dark.installedId)
+        assertEquals(PaletteChoice(), current().paletteSelection.light)
         assertEquals(PaletteMode.DARK, current().paletteSelection.mode)
         val altered = base.copy(name = "Different snapshot", dark = base.dark!!.copy(primary = "#00AACC"))
         compose.runOnIdle { preview = previewModel(altered) }
@@ -372,7 +386,7 @@ class PaletteEditorUiTest {
         awaitUi { preview == null }
         assertEquals(2, current().customPalettes.size)
         assertEquals(base, current().customPalettes.single { it.document.id == base.id }.document)
-        assertEquals(base.id, current().paletteSelection.installedId)
+        assertEquals(base.id, current().paletteSelection.dark.installedId)
         compose.runOnIdle { preview = previewModel(altered) }
         awaitLoaded()
         compose.onNodeWithTag("palette_preview_save").performClick()
@@ -381,7 +395,7 @@ class PaletteEditorUiTest {
         compose.onNodeWithTag("palette_preview_confirm_conflict").performClick()
         awaitUi { preview == null }
         assertEquals(2, current().customPalettes.size)
-        assertEquals(altered, current().selectedCustomPalette)
+        assertEquals(altered, current().customPalette(current().paletteSelection.dark))
     }
 
     @Test fun overlongOptionalSourceLink_doesNotInvalidatePreviewOrAppliedDocument() {
@@ -392,9 +406,10 @@ class PaletteEditorUiTest {
         mount()
         compose.onNodeWithText(document.name).assertIsDisplayed()
         assertEquals(before, current())
+        compose.onNodeWithTag("palette_assign_dark").performClick()
         compose.onNodeWithTag("palette_preview_apply").performClick()
         awaitUi { preview == null }
-        assertEquals(document, current().selectedCustomPalette)
+        assertEquals(document, current().customPalette(current().paletteSelection.dark))
         assertEquals(before.paletteSelection.mode, current().paletteSelection.mode)
         val installed = current().customPalettes.single()
         assertNull(installed.sourceLink)
@@ -411,7 +426,8 @@ class PaletteEditorUiTest {
         compose.runOnIdle { preview!!.saveWithoutApplying() }
         awaitUi { !preview!!.uiState.value.saving && preview!!.uiState.value.error != null }
         assertTrue(current().customPalettes.isEmpty())
-        assertNull(current().paletteSelection.installedId)
+        assertEquals(PaletteChoice(), current().paletteSelection.light)
+        assertNull(current().paletteSelection.dark.installedId)
     }
 
     @Test fun nearLimitDuplicateReportsError_withoutNavigatingOrChangingInstalledData() {
@@ -431,22 +447,26 @@ class PaletteEditorUiTest {
                 .state.value.appearance.customPalettes.size == 1
         }
         compose.onNodeWithText(context.getString(R.string.palette_yours)).performClick()
+        compose.onNodeWithTag("palette_target_dark").performClick()
         compose.onNodeWithText(context.getString(R.string.palette_duplicate)).performScrollTo().performClick()
         awaitUi { hub!!.state.value.error != null }
         compose.onNodeWithText(requireNotNull(hub!!.state.value.error)).assertIsDisplayed()
         assertNull(editor)
         assertEquals(listOf(InstalledPalette(nearLimit)), current().customPalettes)
-        assertNull(current().paletteSelection.installedId)
+        assertEquals(PaletteChoice(), current().paletteSelection.light)
+        assertNull(current().paletteSelection.dark.installedId)
     }
 
     private fun mount() {
         restoration.setContent {
             val appearance by prefs.config.collectAsState(AppearanceConfig())
             val selection = appearance.paletteSelection
+            val dark = selection.mode == PaletteMode.DARK || (selection.mode == PaletteMode.SYSTEM && isSystemInDarkTheme())
+            val choice = selection.choiceFor(dark)
             MotdTheme(
-                themePreset = selection.builtin,
-                paletteMode = selection.mode,
-                customPalette = appearance.selectedCustomPalette,
+                themePreset = choice.builtin,
+                paletteMode = if (dark) PaletteMode.DARK else PaletteMode.LIGHT,
+                customPalette = appearance.customPalette(choice),
                 trueBlack = appearance.trueBlack,
                 dynamicColor = false,
                 useThemeTextColors = appearance.useThemeTextColors,
@@ -485,12 +505,12 @@ class PaletteEditorUiTest {
                             activeHub != null -> {
                                 PaletteHubScreen(
                                     onBack = { hub = null },
-                                    onEdit = { document, id ->
-                                        editor = editorModel(editorHandle(document, id))
+                                    onEdit = { document, id, target ->
+                                        editor = editorModel(editorHandle(document, id, target))
                                         hub = null
                                     },
-                                    onPreview = { document, _, _, id ->
-                                        preview = previewModel(document, id)
+                                    onPreview = { document, _, _, id, target ->
+                                        preview = previewModel(document, id, assignmentTarget = target)
                                         hub = null
                                     },
                                     viewModel = activeHub,
@@ -523,9 +543,10 @@ class PaletteEditorUiTest {
     private fun editorHandle(
         document: PaletteDocument,
         installedId: String? = null,
+        assignmentTarget: PaletteMode = PaletteMode.DARK,
     ): SavedStateHandle {
-        val route = PaletteEditorRoute(encodePalette(document).decodeToString(), installedId)
-        return SavedStateHandle(mapOf("paletteJson" to route.paletteJson, "editingInstalledId" to route.editingInstalledId))
+        val route = PaletteEditorRoute(encodePalette(document).decodeToString(), installedId, assignmentTarget)
+        return SavedStateHandle(mapOf("paletteJson" to route.paletteJson, "editingInstalledId" to route.editingInstalledId, "assignmentTarget" to assignmentTarget))
     }
 
     private fun editorModel(handle: SavedStateHandle) = PaletteEditorViewModel(handle, prefs, settings).also { viewModels.put("editor-${nextViewModel++}", it) }
@@ -534,6 +555,7 @@ class PaletteEditorUiTest {
         document: PaletteDocument,
         target: String? = null,
         sourceLink: String? = null,
+        assignmentTarget: PaletteMode? = null,
     ): PalettePreviewViewModel {
         val route =
             PalettePreviewRoute(
@@ -541,6 +563,7 @@ class PaletteEditorUiTest {
                 sourceLink = sourceLink,
                 catalogId = document.id.takeIf { target != null },
                 targetInstalledId = target,
+                assignmentTarget = assignmentTarget,
             )
         return PalettePreviewViewModel(
             SavedStateHandle(
@@ -549,6 +572,7 @@ class PaletteEditorUiTest {
                     "sourceLink" to route.sourceLink,
                     "catalogId" to route.catalogId,
                     "targetInstalledId" to route.targetInstalledId,
+                    "assignmentTarget" to route.assignmentTarget,
                 ),
             ),
             prefs,

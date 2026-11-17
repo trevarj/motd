@@ -5,11 +5,8 @@ import android.content.res.Configuration
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
-import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.paletteSelection
-import io.github.trevarj.motd.data.prefs.selectedCustomPalette
-import io.github.trevarj.motd.data.prefs.systemPartner
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -257,14 +254,6 @@ class GestureActionDispatcher internal constructor(
     private suspend fun toggleTheme(): GestureActionResult {
         val config = appearance.config.first()
         val selection = config.paletteSelection
-        val custom = config.selectedCustomPalette
-        if (custom != null) {
-            if (custom.light == null || custom.dark == null) return GestureActionResult.Unavailable
-        } else if (selection.builtin != ColorThemePreset.SYSTEM &&
-            selection.builtin.systemPartner == null
-        ) {
-            return GestureActionResult.Unavailable
-        }
         val dark =
             when (selection.mode) {
                 PaletteMode.SYSTEM -> systemDark()

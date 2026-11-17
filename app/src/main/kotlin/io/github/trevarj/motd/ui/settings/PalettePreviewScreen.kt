@@ -141,6 +141,41 @@ fun PalettePreviewScreen(
                         Text("Readability adjustments, neutral text, true black and nickname preferences still apply.")
                     }
                 }
+                if (state.targetInstalledId == null) {
+                    item {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                            Text(stringResource(R.string.palette_assignment))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.selectableGroup()) {
+                                listOf(PaletteMode.LIGHT, PaletteMode.DARK, PaletteMode.SYSTEM).forEach { target ->
+                                    val supported =
+                                        when (target) {
+                                            PaletteMode.LIGHT -> document.light != null
+                                            PaletteMode.DARK -> document.dark != null
+                                            PaletteMode.SYSTEM -> document.light != null && document.dark != null
+                                        }
+                                    FilterChip(
+                                        selected = state.assignmentTarget == target,
+                                        onClick = { viewModel.selectAssignmentTarget(target) },
+                                        enabled = supported && !state.saving,
+                                        label = {
+                                            Text(
+                                                stringResource(
+                                                    when (target) {
+                                                        PaletteMode.LIGHT -> R.string.palette_mode_light
+                                                        PaletteMode.DARK -> R.string.palette_mode_dark
+                                                        PaletteMode.SYSTEM -> R.string.palette_both
+                                                    },
+                                                ),
+                                            )
+                                        },
+                                        modifier = Modifier.testTag("palette_assign_${target.name.lowercase()}"),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                item { Text(stringResource(R.string.palette_preview_mode), Modifier.padding(horizontal = 16.dp)) }
                 item {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp).selectableGroup(),
@@ -157,14 +192,24 @@ fun PalettePreviewScreen(
                                 selected = state.mode == mode,
                                 onClick = { viewModel.selectMode(mode) },
                                 enabled = supported && !state.saving,
-                                label = { Text(mode.name.lowercase().replaceFirstChar { it.titlecase() }) },
+                                label = {
+                                    Text(
+                                        stringResource(
+                                            when (mode) {
+                                                PaletteMode.LIGHT -> R.string.palette_mode_light
+                                                PaletteMode.DARK -> R.string.palette_mode_dark
+                                                PaletteMode.SYSTEM -> R.string.palette_both
+                                            },
+                                        ),
+                                    )
+                                },
                                 modifier = Modifier.testTag("palette_preview_mode_${mode.name.lowercase()}"),
                             )
                         }
                     }
                 }
                 listOf(PaletteMode.LIGHT to document.light, PaletteMode.DARK to document.dark).forEach { (mode, colors) ->
-                    if (colors != null) {
+                    if (colors != null && (state.mode == PaletteMode.SYSTEM || state.mode == mode)) {
                         item {
                             Column(Modifier.padding(horizontal = 16.dp).testTag("palette_preview_sample_${mode.name.lowercase()}"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(if (mode == PaletteMode.LIGHT) "Light preview" else "Dark preview", style = MaterialTheme.typography.titleMedium)

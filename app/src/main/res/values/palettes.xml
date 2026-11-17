@@ -5,7 +5,6 @@
     <string name="palette_mode_system">System</string>
     <string name="palette_mode_light">Light</string>
     <string name="palette_mode_dark">Dark</string>
-    <string name="palette_single_mode_explanation">This palette has one color mode. Add another mode in the editor to enable System.</string>
     <string name="palette_builtin">Built-in</string>
     <string name="palette_yours">Yours</string>
     <string name="palette_community">Community</string>
@@ -19,7 +18,7 @@
     <string name="palette_contribution">Export a palette with both light and dark modes, then submit its file through the MOTD palettes repository. Nothing is uploaded automatically.</string>
     <string name="palette_contribute">Contribute</string>
     <string name="palette_delete_title">Delete palette?</string>
-    <string name="palette_delete_active">This palette is active. Deleting it switches to Device colors in System mode.</string>
+    <string name="palette_delete_active">This palette is selected. Deleting it resets only its assigned light or dark palettes to Device colors. Your color mode stays unchanged.</string>
     <string name="palette_delete">Delete</string>
     <string name="palette_cancel">Cancel</string>
     <string name="palette_edit">Edit</string>

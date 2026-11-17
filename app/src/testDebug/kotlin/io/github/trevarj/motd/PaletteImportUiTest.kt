@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -105,7 +106,7 @@ class PaletteImportUiTest {
             originalSettings = context.settingsDataStore.data.first()
             context.appearanceDataStore.edit { it.clear() }
             context.settingsDataStore.edit { it.clear() }
-            prefs.selectPalette(PaletteSelection(ColorThemePreset.DARK, null, PaletteMode.DARK))
+            prefs.selectPalette(PaletteSelection(dark = PaletteChoice(ColorThemePreset.DARK), mode = PaletteMode.DARK))
             baseline = current()
             provider.attachInfo(context, ProviderInfo().apply { authority = "palette-import.test" })
             ShadowContentResolver.registerProviderInternal("palette-import.test", provider)
@@ -515,10 +516,13 @@ class PaletteImportUiTest {
     private fun mount() {
         restoration.setContent {
             val appearance by prefs.config.collectAsState(AppearanceConfig())
+            val selection = appearance.paletteSelection
+            val dark = selection.mode == PaletteMode.DARK || (selection.mode == PaletteMode.SYSTEM && isSystemInDarkTheme())
+            val choice = selection.choiceFor(dark)
             MotdTheme(
-                themePreset = appearance.paletteSelection.builtin,
-                paletteMode = appearance.paletteSelection.mode,
-                customPalette = appearance.selectedCustomPalette,
+                themePreset = choice.builtin,
+                paletteMode = if (dark) PaletteMode.DARK else PaletteMode.LIGHT,
+                customPalette = appearance.customPalette(choice),
                 dynamicColor = false,
                 syncSystemBars = false,
             ) {
@@ -537,6 +541,7 @@ class PaletteImportUiTest {
                                                 "sourceLink" to route.sourceLink,
                                                 "catalogId" to route.catalogId,
                                                 "targetInstalledId" to route.targetInstalledId,
+                                                "assignmentTarget" to route.assignmentTarget,
                                             ),
                                         ),
                                         prefs,

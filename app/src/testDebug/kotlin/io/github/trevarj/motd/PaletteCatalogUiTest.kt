@@ -3,6 +3,7 @@ package io.github.trevarj.motd
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -84,7 +85,7 @@ class PaletteCatalogUiTest {
             originalSettings = context.settingsDataStore.data.first()
             context.appearanceDataStore.edit { it.clear() }
             context.settingsDataStore.edit { it.clear() }
-            prefs.selectPalette(PaletteSelection(ColorThemePreset.DARK, null, PaletteMode.DARK))
+            prefs.selectPalette(PaletteSelection(dark = PaletteChoice(ColorThemePreset.DARK), mode = PaletteMode.DARK))
             baseline = current()
             catalogFiles =
                 File.createTempFile("catalog-ui-", "", context.cacheDir).apply {
@@ -120,6 +121,66 @@ class PaletteCatalogUiTest {
             }
             catalogFiles.deleteRecursively()
         }
+
+    @Test fun hubAssignsIndependentLightAndDarkIdentities_withoutChangingOtherSlotOrDisplayMode() {
+        val light = document.copy(id = "light-only", name = "Independent light", dark = null)
+        val dark = document.copy(id = "dark-only", name = "Independent dark", light = null)
+        runBlocking {
+            prefs.savePalette(InstalledPalette(light), apply = false, mode = PaletteMode.LIGHT)
+            prefs.savePalette(InstalledPalette(dark), apply = false, mode = PaletteMode.DARK)
+            prefs.selectPalette(baseline.paletteSelection.copy(mode = PaletteMode.SYSTEM))
+        }
+        val before = current().paletteSelection
+        mount()
+        await { hub.state.value.appearance.customPalettes.size == 2 }
+        compose.onNodeWithText(context.getString(R.string.palette_yours)).performClick()
+        compose.onNodeWithTag("palette_target_light").performClick().assertIsSelected()
+        compose.onNodeWithText(dark.name).assertDoesNotExist()
+        compose.onNodeWithText(light.name).performClick()
+        await { current().paletteSelection.light.installedId == light.id }
+        compose.onNodeWithText(light.name).assertIsSelected()
+        assertEquals(before.dark, current().paletteSelection.dark)
+        assertEquals(before.mode, current().paletteSelection.mode)
+
+        compose.onNodeWithTag("palette_target_dark").performClick().assertIsSelected()
+        compose.onNodeWithText(light.name).assertDoesNotExist()
+        compose.onNodeWithText(dark.name).performClick()
+        await { current().paletteSelection.dark.installedId == dark.id }
+        compose.onNodeWithText(dark.name).assertIsSelected()
+        assertEquals(PaletteChoice(installedId = light.id), current().paletteSelection.light)
+        assertEquals(before.mode, current().paletteSelection.mode)
+
+        compose.onNodeWithTag("palette_target_light").performClick()
+        compose.onNodeWithText(light.name).assertIsSelected()
+        compose.onNodeWithText(context.getString(R.string.palette_builtin)).performClick()
+        compose.onNodeWithTag("palette_builtin_system").performClick()
+        await { current().paletteSelection.light == PaletteChoice() }
+        compose.onNodeWithTag("palette_builtin_system").assertIsSelected()
+        assertEquals(PaletteChoice(installedId = dark.id), current().paletteSelection.dark)
+        assertEquals(before.mode, current().paletteSelection.mode)
+        assertEquals(setOf(InstalledPalette(light), InstalledPalette(dark)), current().customPalettes.toSet())
+    }
+
+    @Test fun darkOnlyBuiltinsAreHiddenForLight_andApplyOnlyToDark() {
+        mount()
+        await { hub.state.value.appearance.paletteSelection == baseline.paletteSelection }
+        compose.onNodeWithTag("palette_search").performTextReplacement("Ayu Mirage")
+        compose.onNodeWithTag("palette_target_light").assertIsSelected()
+        compose.onNodeWithTag("palette_builtin_ayu_mirage").assertDoesNotExist()
+
+        compose.onNodeWithTag("palette_target_dark").performClick()
+        compose.onNodeWithTag("palette_builtin_ayu_mirage").performClick()
+        await { current().paletteSelection.dark == PaletteChoice(ColorThemePreset.AYU_MIRAGE) }
+        compose.onNodeWithTag("palette_builtin_ayu_mirage").assertIsSelected()
+        assertEquals(baseline.paletteSelection.light, current().paletteSelection.light)
+        assertEquals(baseline.paletteSelection.mode, current().paletteSelection.mode)
+
+        compose.onNodeWithTag("palette_target_light").performClick()
+        compose.onNodeWithTag("palette_builtin_ayu_mirage").assertDoesNotExist()
+        assertEquals(PaletteChoice(ColorThemePreset.AYU_MIRAGE), current().paletteSelection.dark)
+        assertEquals(baseline.paletteSelection.light, current().paletteSelection.light)
+        assertEquals(baseline.paletteSelection.mode, current().paletteSelection.mode)
+    }
 
     @Test fun communityEntryAndRefresh_fetchEmptyThenLive_searchAndOfflineSnapshotInstall() {
         server.enqueue(response(index()).setBodyDelay(1, TimeUnit.SECONDS))
@@ -166,15 +227,19 @@ class PaletteCatalogUiTest {
         assertEquals(document, preview!!.uiState.value.document)
         assertEquals(baseline, current())
         assertEquals(primaryBefore, rootPrimary)
+        compose.onNodeWithTag("palette_assign_dark").performClick()
         compose.onNodeWithTag("palette_preview_apply").performClick()
         await { preview == null && current().customPalettes.size == 1 }
         val installed = current().customPalettes.single()
         assertEquals(document, installed.document)
         assertEquals(document.id, installed.catalogId)
         assertEquals(document.revision, installed.catalogRevision)
-        assertEquals(document.id, current().paletteSelection.installedId)
+        assertEquals(document.id, current().paletteSelection.dark.installedId)
+        assertEquals(baseline.paletteSelection.light, current().paletteSelection.light)
         assertEquals(PaletteMode.DARK, current().paletteSelection.mode)
-        assertEquals(current().selectedCustomPalette, runBlocking { AppearancePrefsImpl(context).config.first() }.selectedCustomPalette)
+        val reloaded = runBlocking { AppearancePrefsImpl(context).config.first() }
+        assertEquals(current().paletteSelection, reloaded.paletteSelection)
+        assertEquals(document, reloaded.customPalette(reloaded.paletteSelection.dark))
         compose.onNodeWithTag("palette_list").performScrollToNode(hasText("Installed"))
         compose.onNodeWithText("Installed").assertIsDisplayed()
     }
@@ -235,7 +300,7 @@ class PaletteCatalogUiTest {
         assertEquals(before.paletteSelection, after.paletteSelection)
         assertEquals(2, after.customPalettes.size)
         assertEquals(other, after.customPalettes.single { it.document.id == other.document.id })
-        assertEquals(newer.copy(id = old.document.id), after.selectedCustomPalette)
+        assertEquals(newer.copy(id = old.document.id), after.customPalette(after.paletteSelection.light))
         assertEquals(document.id, after.customPalettes.single { it.document.id == old.document.id }.catalogId)
         compose.runOnIdle { submitted.saveWithoutApplying() }
         compose.waitForIdle()
@@ -261,10 +326,12 @@ class PaletteCatalogUiTest {
         compose.onNodeWithTag("palette_preview_apply").assertIsEnabled()
         assertEquals(chosen.document, preview!!.uiState.value.document)
         assertEquals(before, current())
+        compose.onNodeWithTag("palette_assign_light").performClick()
         compose.onNodeWithTag("palette_preview_apply").performClick()
-        await { preview == null && current().paletteSelection.installedId == chosen.document.id }
+        await { preview == null && current().paletteSelection.light.installedId == chosen.document.id }
         assertEquals(before.customPalettes, current().customPalettes)
-        assertEquals(PaletteMode.LIGHT, current().paletteSelection.mode)
+        assertEquals(before.paletteSelection.dark, current().paletteSelection.dark)
+        assertEquals(before.paletteSelection.mode, current().paletteSelection.mode)
     }
 
     @Test fun identicalUntrackedId_gainsCatalogTracking_insteadOfSelectingAnotherTrackedCopy() {
@@ -279,11 +346,13 @@ class PaletteCatalogUiTest {
         await { catalog.state.value.palettes.size == 1 && !catalog.state.value.loading }
         compose.onNodeWithTag(rowTag()).performClick()
         awaitPreview()
+        compose.onNodeWithTag("palette_assign_light").performClick()
         compose.onNodeWithTag("palette_preview_apply").performClick()
         await { preview == null }
         val after = current()
-        assertEquals(document.id, after.paletteSelection.installedId)
-        assertEquals(PaletteMode.LIGHT, after.paletteSelection.mode)
+        assertEquals(document.id, after.paletteSelection.light.installedId)
+        assertEquals(PaletteMode.DARK, after.paletteSelection.mode)
+        assertEquals(PaletteChoice(ColorThemePreset.DARK), after.paletteSelection.dark)
         assertEquals(2, after.customPalettes.size)
         assertEquals(other, after.customPalettes.single { it.document.id == other.document.id })
         val installed = after.customPalettes.single { it.document.id == document.id }
@@ -349,10 +418,13 @@ class PaletteCatalogUiTest {
         compose.setContent {
             val appearance by prefs.config.collectAsState(AppearanceConfig())
             val destinations = rememberSaveableStateHolder()
+            val selection = appearance.paletteSelection
+            val dark = selection.mode == PaletteMode.DARK || (selection.mode == PaletteMode.SYSTEM && isSystemInDarkTheme())
+            val choice = selection.choiceFor(dark)
             MotdTheme(
-                themePreset = appearance.paletteSelection.builtin,
-                paletteMode = appearance.paletteSelection.mode,
-                customPalette = appearance.selectedCustomPalette,
+                themePreset = choice.builtin,
+                paletteMode = if (dark) PaletteMode.DARK else PaletteMode.LIGHT,
+                customPalette = appearance.customPalette(choice),
                 dynamicColor = false,
                 syncSystemBars = false,
             ) {
@@ -366,8 +438,8 @@ class PaletteCatalogUiTest {
                         destinations.SaveableStateProvider("hub") {
                             PaletteHubScreen(
                                 onBack = {},
-                                onEdit = { _, _ -> error("Unexpected editor navigation") },
-                                onPreview = { document, sourceLink, catalogId, targetInstalledId ->
+                                onEdit = { _, _, _ -> error("Unexpected editor navigation") },
+                                onPreview = { document, sourceLink, catalogId, targetInstalledId, assignmentTarget ->
                                     preview =
                                         PalettePreviewViewModel(
                                             SavedStateHandle(
@@ -376,6 +448,7 @@ class PaletteCatalogUiTest {
                                                     "sourceLink" to sourceLink,
                                                     "catalogId" to catalogId,
                                                     "targetInstalledId" to targetInstalledId,
+                                                    "assignmentTarget" to assignmentTarget,
                                                 ),
                                             ),
                                             prefs,

@@ -15,6 +15,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -103,10 +104,9 @@ import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.customPalette
 import io.github.trevarj.motd.data.prefs.normalizePaletteSelection
 import io.github.trevarj.motd.data.prefs.paletteSelection
-import io.github.trevarj.motd.data.prefs.selectedCustomPalette
-import io.github.trevarj.motd.data.prefs.systemPartner
 import io.github.trevarj.motd.ui.chat.ChatWallpaperPicker
 import io.github.trevarj.motd.ui.chatlist.FolderLayoutPreview
 import io.github.trevarj.motd.ui.components.ChatLayoutPreview
@@ -122,6 +122,7 @@ import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.TimestampConfig
 import io.github.trevarj.motd.ui.theme.fontFamily
 import io.github.trevarj.motd.ui.theme.rememberAppFontFamily
+import io.github.trevarj.motd.ui.theme.resolvedMode
 import java.io.File
 import kotlin.math.roundToInt
 import android.provider.Settings as AndroidSettings
@@ -320,17 +321,12 @@ fun AppearanceSettingsContent(
         }
     }
     val selection = previewAppearance.paletteSelection
-    val customPalette = previewAppearance.selectedCustomPalette
-    val followSystemAvailable =
-        if (customPalette != null) {
-            customPalette.light != null && customPalette.dark != null
-        } else {
-            selection.builtin == ColorThemePreset.SYSTEM || selection.builtin.systemPartner != null
-        }
+    val mode = selection.resolvedMode(isSystemInDarkTheme())
+    val choice = selection.choiceFor(mode == PaletteMode.DARK)
     val nickPaletteUsed = previewSettings.nickColorsEnabled || previewSettings.nickMentionStyle == NickMentionStyle.CHIP
     val trueBlackAvailable =
         selection.mode != PaletteMode.LIGHT
-    val dynamicColorAvailable = selection.installedId == null && selection.builtin == ColorThemePreset.SYSTEM
+    val dynamicColorAvailable = choice.installedId == null && choice.builtin == ColorThemePreset.SYSTEM
     SettingsScaffold(
         title = stringResource(R.string.settings_appearance),
         onBack = onBack,
@@ -345,7 +341,7 @@ fun AppearanceSettingsContent(
                 SettingsNavigationRow(
                     icon = Icons.Outlined.Palette,
                     title = stringResource(R.string.palette_title),
-                    value = customPalette?.name ?: paletteBuiltinName(selection.builtin),
+                    value = appearancePaletteSummary(previewAppearance),
                     onClick = onOpenPalettes,
                     modifier = targetModifier.testTag("settings_palette_hub"),
                 )
@@ -355,7 +351,6 @@ fun AppearanceSettingsContent(
                 Column(targetModifier.testTag("settings_color_mode")) {
                     Text(stringResource(R.string.palette_color_mode), modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                     PaletteMode.entries.forEach { mode ->
-                        val available = followSystemAvailable || mode == selection.mode
                         RadioRow(
                             label =
                                 stringResource(
@@ -366,17 +361,14 @@ fun AppearanceSettingsContent(
                                     },
                                 ),
                             selected = selection.mode == mode,
-                            enabled = available,
+                            enabled = true,
                             onClick = {
                                 val selected = normalizePaletteSelection(selection.copy(mode = mode), previewAppearance.customPalettes)
-                                previewAppearance = previewAppearance.copy(theme = selected.builtin, customPaletteId = selected.installedId, paletteMode = selected.mode)
+                                previewAppearance = previewAppearance.copy(lightPalette = selected.light, darkPalette = selected.dark, paletteMode = selected.mode)
                                 onSelectPalette(selected)
                             },
                             modifier = Modifier.testTag("settings_color_mode_${mode.name.lowercase()}"),
                         )
-                    }
-                    if (!followSystemAvailable) {
-                        Text(stringResource(R.string.palette_single_mode_explanation), modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -387,7 +379,7 @@ fun AppearanceSettingsContent(
                     subtitle =
                         stringResource(
                             when {
-                                appearance.theme == ColorThemePreset.SYSTEM -> R.string.settings_true_black_system_desc
+                                choice.installedId == null && choice.builtin == ColorThemePreset.SYSTEM -> R.string.settings_true_black_system_desc
                                 trueBlackAvailable -> R.string.settings_true_black_desc
                                 appearance.trueBlack -> R.string.settings_true_black_saved_desc
                                 else -> R.string.settings_true_black_unavailable_desc
@@ -930,6 +922,16 @@ fun AppearanceSettingsContent(
 private enum class AppearanceChoice { PALETTE, NICK_MENTION_STYLE, ICONS, FOLDER_LAYOUT, CHAT_CARD_SHAPE, DENSITY, COMPOSER_STYLE, INPUT_SHAPE, MEDIA_SHAPE, AVATAR, AVATAR_SHAPE, TIME, SPACING, BUBBLES, LAUNCHER }
 
 @Composable
+internal fun appearancePaletteSummary(appearance: AppearanceConfig): String {
+    val selection = appearance.paletteSelection
+    return stringResource(
+        R.string.palette_pair_summary,
+        appearance.customPalette(selection.light)?.name ?: paletteBuiltinName(selection.light.builtin),
+        appearance.customPalette(selection.dark)?.name ?: paletteBuiltinName(selection.dark.builtin),
+    )
+}
+
+@Composable
 internal fun AppearanceChatLayoutPreview(
     settings: Settings,
     appearance: io.github.trevarj.motd.data.prefs.AppearanceConfig,
@@ -942,10 +944,12 @@ internal fun AppearanceChatLayoutPreview(
     modifier: Modifier = Modifier,
 ) {
     val selection = appearance.paletteSelection
+    val mode = selection.resolvedMode(isSystemInDarkTheme())
+    val choice = selection.choiceFor(mode == PaletteMode.DARK)
     MotdTheme(
-        themePreset = selection.builtin,
-        paletteMode = selection.mode,
-        customPalette = appearance.selectedCustomPalette,
+        themePreset = choice.builtin,
+        paletteMode = mode,
+        customPalette = appearance.customPalette(choice),
         trueBlack = appearance.trueBlack,
         dynamicColor = settings.dynamicColor,
         useThemeTextColors = appearance.useThemeTextColors,
@@ -1005,10 +1009,12 @@ private fun ComposerStylePreview(
     var draft by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(sample)) }
     val styleLabel = composerStyleLabel(appearance.composerStyle)
     val selection = appearance.paletteSelection
+    val mode = selection.resolvedMode(isSystemInDarkTheme())
+    val choice = selection.choiceFor(mode == PaletteMode.DARK)
     MotdTheme(
-        themePreset = selection.builtin,
-        paletteMode = selection.mode,
-        customPalette = appearance.selectedCustomPalette,
+        themePreset = choice.builtin,
+        paletteMode = mode,
+        customPalette = appearance.customPalette(choice),
         trueBlack = appearance.trueBlack,
         dynamicColor = settings.dynamicColor,
         useThemeTextColors = appearance.useThemeTextColors,

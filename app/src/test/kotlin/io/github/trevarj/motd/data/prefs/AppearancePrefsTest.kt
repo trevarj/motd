@@ -481,7 +481,7 @@ class AppearancePrefsTest {
 
     @Test fun themeAndWallpaper_roundTrip() =
         runTest {
-            prefs.selectPalette(PaletteSelection(ColorThemePreset.KANAGAWA_WAVE, null, PaletteMode.SYSTEM))
+            prefs.selectPalette(PaletteSelection(light = PaletteChoice(ColorThemePreset.KANAGAWA_WAVE, null), dark = PaletteChoice(ColorThemePreset.KANAGAWA_WAVE, null), mode = PaletteMode.SYSTEM))
             prefs.setTrueBlack(true)
             prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.INTERNET_ODDITIES, 73))
             assertEquals(ColorThemePreset.KANAGAWA_WAVE, prefs.config.first().theme)
@@ -571,13 +571,13 @@ class AppearancePrefsTest {
 
                                 else -> PaletteMode.LIGHT
                             }
-                        assertEquals(theme.canonicalPalette, saved.paletteSelection.builtin)
+                        assertEquals(theme.canonicalPalette, saved.paletteSelection.choiceFor(theme.isDark).builtin)
                         assertEquals(expectedMode, saved.paletteSelection.mode)
                         assertEquals(theme == ColorThemePreset.AMOLED, saved.trueBlack)
                     }
                 }
                 context.appearanceDataStore.edit { it[stringPreferencesKey("theme_preset_v1")] = "unknown" }
-                assertEquals(PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.SYSTEM), prefs.config.first().paletteSelection)
+                assertEquals(PaletteSelection(light = PaletteChoice(ColorThemePreset.SYSTEM, null), dark = PaletteChoice(ColorThemePreset.SYSTEM, null), mode = PaletteMode.SYSTEM), prefs.config.first().paletteSelection)
             }
         }
 
@@ -595,7 +595,7 @@ class AppearancePrefsTest {
     @Test fun amoledSelectionNormalizesAndRetainsTrueBlack() =
         runTest {
             withPaletteStore {
-                prefs.selectPalette(PaletteSelection(ColorThemePreset.AMOLED, null, PaletteMode.DARK))
+                prefs.selectPalette(PaletteSelection(light = PaletteChoice(ColorThemePreset.AMOLED, null), dark = PaletteChoice(ColorThemePreset.AMOLED, null), mode = PaletteMode.DARK))
                 assertEquals(ColorThemePreset.DARK, prefs.config.first().theme)
                 assertEquals(true, prefs.config.first().trueBlack)
             }
@@ -713,7 +713,7 @@ class AppearancePrefsTest {
             assertEquals(DEFAULT_FONT_SCALE_PERCENT, prefs.config.first().conversationFontScalePercent)
         }
 
-    private val paletteKeys = listOf("theme_preset_v1", "palette_mode_v1", "custom_palette_id_v1", "custom_palettes_v1").map(::stringPreferencesKey)
+    private val paletteKeys = listOf("theme_preset_v1", "palette_mode_v1", "custom_palette_id_v1", "custom_palettes_v1", "light_palette_v1", "dark_palette_v1").map(::stringPreferencesKey)
     private val legacyPaletteKeys = listOf("true_black_v1", "follow_system_v1").map(::booleanPreferencesKey)
 
     private suspend fun withPaletteStore(block: suspend () -> Unit) {
@@ -756,23 +756,157 @@ class AppearancePrefsTest {
 
     @Test fun pairedFamiliesAndSingleModeSelectionsResolveWithoutDynamicIdentityConfusion() {
         for (builtin in ColorThemePreset.entries) {
-            val selected = normalizePaletteSelection(PaletteSelection(builtin, null, PaletteMode.SYSTEM), emptyList())
-            assertEquals(builtin.canonicalPalette, selected.builtin)
-            if (builtin == ColorThemePreset.SYSTEM) {
-                assertEquals(ColorThemePreset.SYSTEM, resolvePalettePreset(builtin, PaletteMode.DARK, false))
-            } else if (builtin.canonicalPalette.systemPartner != null) {
-                assertEquals(false, resolvePalettePreset(builtin, PaletteMode.SYSTEM, false).isDark)
-                assertEquals(true, resolvePalettePreset(builtin, PaletteMode.SYSTEM, true).isDark)
-            } else {
-                assertEquals(if (builtin.isDark) PaletteMode.DARK else PaletteMode.LIGHT, selected.mode)
+            val selected = AppearanceConfig(theme = builtin, followSystem = true).paletteSelection
+            for (dark in listOf(false, true)) {
+                val choice = selected.choiceFor(dark)
+                assertTrue(choice.supportsMode(dark))
+                if (builtin.canonicalPalette.systemPartner != null || builtin == ColorThemePreset.SYSTEM || builtin.isDark == dark) {
+                    assertEquals(builtin.canonicalPalette, choice.builtin)
+                } else {
+                    assertEquals(PaletteChoice(), choice)
+                }
             }
         }
-        assertEquals(ColorThemePreset.DARK, ColorThemePreset.LIGHT.canonicalPalette)
-        assertEquals(PaletteMode.DARK, normalizePaletteSelection(PaletteSelection(ColorThemePreset.SYSTEM, "local", PaletteMode.LIGHT), listOf(palette(paired = false))).mode)
+        val pair = PaletteSelection(PaletteChoice(ColorThemePreset.AYU_DARK), PaletteChoice(ColorThemePreset.MONOKAI))
+        for (mode in PaletteMode.entries) {
+            val selected = normalizePaletteSelection(pair.copy(mode = mode), emptyList())
+            assertEquals(pair.light, selected.choiceFor(false))
+            assertEquals(pair.dark, selected.choiceFor(true))
+            assertEquals(ColorThemePreset.AYU_LIGHT, resolvePalettePreset(selected.light.builtin, PaletteMode.LIGHT, true))
+            assertEquals(ColorThemePreset.MONOKAI, resolvePalettePreset(selected.dark.builtin, PaletteMode.DARK, false))
+        }
+        val darkOnly = palette(paired = false)
+        assertEquals(PaletteMode.DARK, AppearanceConfig(customPalettes = listOf(darkOnly), customPaletteId = "local", paletteMode = PaletteMode.LIGHT).paletteSelection.mode)
         assertThrows(IllegalArgumentException::class.java) {
-            normalizePaletteSelection(PaletteSelection(ColorThemePreset.SYSTEM, "missing", PaletteMode.SYSTEM), emptyList())
+            normalizePaletteSelection(pair.copy(light = PaletteChoice(ColorThemePreset.MONOKAI)), emptyList())
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            normalizePaletteSelection(pair.copy(light = PaletteChoice(installedId = "local")), listOf(darkOnly))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            normalizePaletteSelection(pair.copy(dark = PaletteChoice(installedId = "missing")), emptyList())
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            AppearanceConfig(lightPalette = PaletteChoice(ColorThemePreset.MONOKAI)).paletteSelection
         }
     }
+
+    @Test fun legacyCustomModesMigrateAndAssignmentsPreserveOtherSlotAndDisplayMode() =
+        runTest {
+            withPaletteStore {
+                val store = ApplicationProvider.getApplicationContext<Context>().appearanceDataStore
+                for (document in listOf(palette(), palette(paired = false), palette().let { it.copy(document = it.document.copy(dark = null)) })) {
+                    store.edit {
+                        it[stringPreferencesKey("custom_palettes_v1")] = jsonWithDefaults.encodeToString(listOf(document))
+                        it[stringPreferencesKey("custom_palette_id_v1")] = "local"
+                        it[stringPreferencesKey("palette_mode_v1")] = PaletteMode.SYSTEM.name
+                        it.remove(stringPreferencesKey("light_palette_v1"))
+                        it.remove(stringPreferencesKey("dark_palette_v1"))
+                    }
+                    val migrated = prefs.config.first().paletteSelection
+                    val expected =
+                        PaletteSelection(
+                            light = if (document.document.light != null) PaletteChoice(installedId = "local") else PaletteChoice(),
+                            dark = if (document.document.dark != null) PaletteChoice(installedId = "local") else PaletteChoice(),
+                            mode =
+                                if (document.document.light == null) {
+                                    PaletteMode.DARK
+                                } else if (document.document.dark == null) {
+                                    PaletteMode.LIGHT
+                                } else {
+                                    PaletteMode.SYSTEM
+                                },
+                        )
+                    assertEquals(expected, migrated)
+                    val backup = AppearanceConfig(customPalettes = listOf(document), customPaletteId = "local", paletteMode = PaletteMode.SYSTEM)
+                    assertEquals(expected, Json.decodeFromString<AppearanceConfig>(jsonWithDefaults.encodeToString(backup)).paletteSelection)
+                    prefs.selectPalette(migrated)
+                    assertEquals(expected, AppearancePrefsImpl(ApplicationProvider.getApplicationContext<Context>()).config.first().paletteSelection)
+                }
+                val darkOnly = palette(paired = false)
+                val base = PaletteSelection(light = PaletteChoice(ColorThemePreset.AYU_DARK), mode = PaletteMode.LIGHT)
+                val assigned = base.withChoice(PaletteChoice(installedId = "local"), PaletteMode.SYSTEM, listOf(darkOnly))
+                assertEquals(base.light, assigned.light)
+                assertEquals(base.mode, assigned.mode)
+                assertTrue(assigned.usesInstalled("local"))
+                assertEquals(PaletteChoice(installedId = "local"), assigned.dark)
+                assertEquals(base.dark, base.withChoice(PaletteChoice(ColorThemePreset.DRACULA), PaletteMode.LIGHT).dark)
+            }
+        }
+
+    @Test fun unsupportedExplicitSlotsRejectAtomicallyAndUpdatesRepairOnlyLostMode() =
+        runTest {
+            withPaletteStore {
+                val local = palette()
+                val custom = PaletteChoice(installedId = "local")
+                for (mode in PaletteMode.entries) {
+                    for (lostDark in listOf(false, true)) {
+                        val selected = PaletteSelection(custom, custom, mode)
+                        prefs.restorePalettes(listOf(local), selected)
+                        val single =
+                            local.copy(
+                                document =
+                                    local.document.copy(
+                                        light = local.document.light.takeUnless { !lostDark },
+                                        dark = local.document.dark.takeUnless { lostDark },
+                                    ),
+                            )
+                        prefs.savePalette(single, false, PaletteMode.SYSTEM)
+                        val repaired = if (lostDark) selected.copy(dark = PaletteChoice()) else selected.copy(light = PaletteChoice())
+                        assertEquals(repaired, prefs.config.first().paletteSelection)
+                        rejectedWithoutMutation { prefs.selectPalette(selected) }
+                        rejectedWithoutMutation { prefs.restorePalettes(listOf(single), selected) }
+                        prefs.removePalette("local")
+                        assertEquals(PaletteSelection(mode = mode), prefs.config.first().paletteSelection)
+                    }
+                }
+                rejectedWithoutMutation { prefs.selectPalette(PaletteSelection(light = PaletteChoice(ColorThemePreset.MONOKAI))) }
+            }
+        }
+
+    @Test fun corruptStoredSlotsFallBackIndependentlyWithoutRewritingRawPreferences() =
+        runTest {
+            withPaletteStore {
+                val context = ApplicationProvider.getApplicationContext<Context>()
+                val store = context.appearanceDataStore
+                for (dark in listOf(false, true)) {
+                    val local =
+                        palette().let {
+                            it.copy(document = if (dark) it.document.copy(dark = null) else it.document.copy(light = null))
+                        }
+                    val selected =
+                        PaletteSelection(
+                            light = PaletteChoice(ColorThemePreset.AYU_DARK),
+                            dark = PaletteChoice(ColorThemePreset.DRACULA),
+                            mode = PaletteMode.DARK,
+                        )
+                    prefs.restorePalettes(listOf(local), selected)
+                    val key = stringPreferencesKey(if (dark) "dark_palette_v1" else "light_palette_v1")
+                    for (raw in listOf(
+                        "not-json",
+                        "null",
+                        """{"builtin":"UNKNOWN"}""",
+                        """{"installedId":123}""",
+                        """{"installedId":"missing"}""",
+                        """{"installedId":"local"}""",
+                    )) {
+                        store.edit { it[key] = raw }
+                        val before = store.data.first()
+                        val expected = if (dark) selected.copy(dark = PaletteChoice()) else selected.copy(light = PaletteChoice())
+                        assertEquals(expected, AppearancePrefsImpl(context).config.first().paletteSelection)
+                        assertEquals(expected, prefs.config.first().paletteSelection)
+                        assertEquals(before, store.data.first())
+                    }
+                    prefs.savePalette(palette("other"), false, PaletteMode.SYSTEM)
+                    assertEquals(
+                        selected.mode,
+                        prefs.config
+                            .first()
+                            .paletteSelection.mode,
+                    )
+                }
+            }
+        }
 
     @Test fun saveReloadEditRemoveAndSelectionAreAtomic() =
         runTest {
@@ -781,30 +915,29 @@ class AppearancePrefsTest {
                 prefs.setTrueBlack(true)
                 val local = palette()
                 prefs.savePalette(local, apply = false, mode = PaletteMode.LIGHT)
-                assertEquals(
-                    null,
-                    prefs.config
-                        .first()
-                        .paletteSelection.installedId,
-                )
-                prefs.selectPalette(PaletteSelection(ColorThemePreset.AYU_LIGHT, "local", PaletteMode.LIGHT))
+                assertEquals(PaletteSelection(), prefs.config.first().paletteSelection)
+                val pair =
+                    PaletteSelection(
+                        light = PaletteChoice(ColorThemePreset.AYU_DARK),
+                        dark = PaletteChoice(installedId = "local"),
+                        mode = PaletteMode.LIGHT,
+                    )
+                prefs.selectPalette(pair)
                 val reloaded = AppearancePrefsImpl(context).config.first()
-                assertEquals(PaletteSelection(ColorThemePreset.AYU_DARK, "local", PaletteMode.LIGHT), reloaded.paletteSelection)
-                assertEquals("Local", reloaded.selectedCustomPalette?.name)
-                assertEquals("#AABBCC", reloaded.selectedCustomPalette?.dark?.primary)
+                assertEquals(pair, reloaded.paletteSelection)
+                assertEquals("Local", reloaded.customPalette(pair.dark)?.name)
+                assertEquals("#AABBCC", reloaded.customPalette(pair.dark)?.dark?.primary)
+                assertEquals(pair, Json.decodeFromString<AppearanceConfig>(jsonWithDefaults.encodeToString(reloaded)).paletteSelection)
+                prefs.savePalette(local, true, PaletteMode.LIGHT)
+                assertEquals(pair.copy(light = pair.dark), prefs.config.first().paletteSelection)
                 val edited = local.copy(document = prepareLocalPaletteSave(local.document, local.document.copy(light = null)))
                 prefs.savePalette(edited, apply = false, mode = PaletteMode.SYSTEM)
-                assertEquals(
-                    PaletteMode.DARK,
-                    prefs.config
-                        .first()
-                        .paletteSelection.mode,
-                )
+                assertEquals(pair.copy(light = PaletteChoice()), prefs.config.first().paletteSelection)
                 assertEquals(
                     2,
                     prefs.config
                         .first()
-                        .selectedCustomPalette
+                        .customPalette(pair.dark)
                         ?.revision,
                 )
                 prefs.savePalette(edited, apply = false, mode = PaletteMode.SYSTEM)
@@ -812,43 +945,21 @@ class AppearancePrefsTest {
                     2,
                     prefs.config
                         .first()
-                        .selectedCustomPalette
+                        .customPalette(pair.dark)
                         ?.revision,
                 )
-                prefs.savePalette(local.copy(document = local.document.copy(id = "inactive")), false, PaletteMode.SYSTEM)
-                assertEquals(
-                    "local",
-                    prefs.config
-                        .first()
-                        .paletteSelection.installedId,
-                )
-                prefs.removePalette("inactive")
-                assertEquals(
-                    "local",
-                    prefs.config
-                        .first()
-                        .paletteSelection.installedId,
-                )
+                rejectedWithoutMutation { prefs.savePalette(edited, true, PaletteMode.LIGHT) }
+                prefs.selectPalette(pair)
+                prefs.savePalette(palette("other"), true, PaletteMode.LIGHT)
+                val mixed = pair.copy(light = PaletteChoice(installedId = "other"))
+                assertEquals(mixed, prefs.config.first().paletteSelection)
                 prefs.removePalette("local")
-                assertEquals(PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.SYSTEM), prefs.config.first().paletteSelection)
+                assertEquals(mixed.copy(dark = PaletteChoice()), AppearancePrefsImpl(context).config.first().paletteSelection)
+                prefs.removePalette("other")
+                assertEquals(PaletteSelection(mode = PaletteMode.LIGHT), prefs.config.first().paletteSelection)
                 assertEquals(true, prefs.config.first().trueBlack)
-                prefs.savePalette(palette(paired = false), true, PaletteMode.SYSTEM)
-                assertEquals(
-                    PaletteMode.DARK,
-                    prefs.config
-                        .first()
-                        .paletteSelection.mode,
-                )
-                prefs.savePalette(local, false, PaletteMode.SYSTEM)
-                assertEquals(
-                    PaletteMode.DARK,
-                    prefs.config
-                        .first()
-                        .paletteSelection.mode,
-                )
-                prefs.selectPalette(PaletteSelection(ColorThemePreset.DRACULA_LIGHT, null, PaletteMode.LIGHT))
-                assertEquals(null, prefs.config.first().customPaletteId)
-                assertEquals(ColorThemePreset.DRACULA, prefs.config.first().theme)
+                prefs.savePalette(edited, true, PaletteMode.SYSTEM)
+                assertEquals(pair.copy(light = PaletteChoice()), prefs.config.first().paletteSelection)
             }
         }
 
@@ -867,48 +978,54 @@ class AppearancePrefsTest {
                     jsonWithDefaults.encodeToString(listOf(palette())).replace("\"format\":\"motd-palette\",", "") to PaletteReadError.INVALID,
                 )) {
                     store.edit {
+                        it.remove(stringPreferencesKey("light_palette_v1"))
+                        it.remove(stringPreferencesKey("dark_palette_v1"))
                         it[key] = raw
                         it[stringPreferencesKey("custom_palette_id_v1")] = "local"
                     }
                     val config = prefs.config.first()
                     assertEquals(error, config.customPaletteReadError)
                     assertEquals(emptyList<InstalledPalette>(), config.customPalettes)
-                    assertEquals(PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.SYSTEM), config.paletteSelection)
+                    assertEquals(PaletteSelection(light = PaletteChoice(ColorThemePreset.SYSTEM, null), dark = PaletteChoice(ColorThemePreset.SYSTEM, null), mode = PaletteMode.SYSTEM), config.paletteSelection)
                     rejectedWithoutMutation { prefs.savePalette(palette(), false, PaletteMode.DARK) }
                     rejectedWithoutMutation { prefs.removePalette("local") }
-                    rejectedWithoutMutation { prefs.selectPalette(PaletteSelection(ColorThemePreset.SYSTEM, "local", PaletteMode.DARK)) }
-                    prefs.selectPalette(PaletteSelection(ColorThemePreset.NORD, null, PaletteMode.LIGHT))
+                    rejectedWithoutMutation { prefs.selectPalette(PaletteSelection(light = PaletteChoice(ColorThemePreset.SYSTEM, "local"), dark = PaletteChoice(ColorThemePreset.SYSTEM, "local"), mode = PaletteMode.DARK)) }
+                    prefs.selectPalette(PaletteSelection(light = PaletteChoice(ColorThemePreset.NORD, null), dark = PaletteChoice(ColorThemePreset.NORD, null), mode = PaletteMode.LIGHT))
                     assertEquals(
                         ColorThemePreset.NORD,
                         prefs.config
                             .first()
-                            .paletteSelection.builtin,
+                            .paletteSelection.light.builtin,
                     )
                     assertEquals(raw, store.data.first()[key])
                     assertEquals(error, prefs.config.first().customPaletteReadError)
                     assertEquals(null, Json.decodeFromString<AppearanceConfig>(jsonWithDefaults.encodeToString(config)).customPaletteReadError)
-                    prefs.restorePalettes(listOf(palette()), PaletteSelection(ColorThemePreset.SYSTEM, "local", PaletteMode.LIGHT))
+                    prefs.restorePalettes(listOf(palette()), PaletteSelection(light = PaletteChoice(ColorThemePreset.SYSTEM, "local"), dark = PaletteChoice(ColorThemePreset.SYSTEM, "local"), mode = PaletteMode.LIGHT))
                     assertEquals(null, prefs.config.first().customPaletteReadError)
                     assertEquals(
                         "local",
                         prefs.config
                             .first()
-                            .paletteSelection.installedId,
+                            .paletteSelection.dark.installedId,
                     )
                 }
-                store.edit { it[stringPreferencesKey("custom_palette_id_v1")] = "missing" }
-                assertEquals(PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.SYSTEM), prefs.config.first().paletteSelection)
+                store.edit {
+                    it.remove(stringPreferencesKey("light_palette_v1"))
+                    it.remove(stringPreferencesKey("dark_palette_v1"))
+                    it[stringPreferencesKey("custom_palette_id_v1")] = "missing"
+                }
+                assertEquals(PaletteSelection(light = PaletteChoice(ColorThemePreset.SYSTEM, null), dark = PaletteChoice(ColorThemePreset.SYSTEM, null), mode = PaletteMode.SYSTEM), prefs.config.first().paletteSelection)
             }
         }
 
     @Test fun limitsTrackingAndReferencesRejectBeforeAnyMutation() =
         runTest {
             withPaletteStore {
-                val selection = PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.SYSTEM)
+                val selection = PaletteSelection(light = PaletteChoice(ColorThemePreset.SYSTEM, null), dark = PaletteChoice(ColorThemePreset.SYSTEM, null), mode = PaletteMode.SYSTEM)
                 prefs.restorePalettes(List(64) { palette("p-$it") }, selection)
                 rejectedWithoutMutation { prefs.savePalette(palette(), true, PaletteMode.LIGHT) }
                 rejectedWithoutMutation { prefs.restorePalettes(listOf(palette(), palette()), selection) }
-                rejectedWithoutMutation { prefs.restorePalettes(emptyList(), selection.copy(installedId = "missing")) }
+                rejectedWithoutMutation { prefs.restorePalettes(emptyList(), selection.copy(dark = PaletteChoice(installedId = "missing"))) }
                 rejectedWithoutMutation { prefs.restorePalettes(listOf(palette().copy(catalogId = "catalog")), selection) }
                 rejectedWithoutMutation { prefs.restorePalettes(listOf(palette(paired = false).copy(catalogId = "catalog", catalogRevision = 1)), selection) }
                 rejectedWithoutMutation { prefs.restorePalettes(listOf(palette().copy(catalogId = "catalog", catalogRevision = 2)), selection) }
@@ -918,7 +1035,7 @@ class AppearancePrefsTest {
                         palette("p-$index").let { it.copy(document = it.document.copy(notices = "😀".repeat(2100))) }
                     }
                 rejectedWithoutMutation { prefs.restorePalettes(large, selection) }
-                prefs.restorePalettes(listOf(palette().copy(catalogId = "upstream", catalogRevision = 1)), selection.copy(installedId = "local"))
+                prefs.restorePalettes(listOf(palette().copy(catalogId = "upstream", catalogRevision = 1)), selection.copy(dark = PaletteChoice(installedId = "local")))
                 assertEquals(
                     "upstream",
                     prefs.config
@@ -987,7 +1104,7 @@ class AppearancePrefsTest {
                     "local",
                     prefs.config
                         .first()
-                        .paletteSelection.installedId,
+                        .paletteSelection.dark.installedId,
                 )
                 assertEquals(
                     "Retain this",
@@ -1025,8 +1142,11 @@ class AppearancePrefsTest {
                     2,
                     prefs.config
                         .first()
-                        .selectedCustomPalette
-                        ?.revision,
+                        .customPalette(
+                            prefs.config
+                                .first()
+                                .paletteSelection.dark,
+                        )?.revision,
                 )
                 assertEquals(
                     PaletteMode.SYSTEM,
@@ -1035,16 +1155,17 @@ class AppearancePrefsTest {
                         .paletteSelection.mode,
                 )
                 val lightOnly = fork.copy(document = fork.document.copy(light = fork.document.dark, dark = null))
-                prefs.savePalette(lightOnly, true, PaletteMode.DARK)
+                rejectedWithoutMutation { prefs.savePalette(lightOnly, true, PaletteMode.DARK) }
+                prefs.savePalette(lightOnly, true, PaletteMode.LIGHT)
                 assertEquals(
-                    PaletteMode.LIGHT,
+                    PaletteMode.SYSTEM,
                     prefs.config
                         .first()
                         .paletteSelection.mode,
                 )
                 prefs.savePalette(fork, false, PaletteMode.SYSTEM)
                 assertEquals(
-                    PaletteMode.LIGHT,
+                    PaletteMode.SYSTEM,
                     prefs.config
                         .first()
                         .paletteSelection.mode,
@@ -1068,15 +1189,18 @@ class AppearancePrefsTest {
                     "Updated",
                     prefs.config
                         .first()
-                        .selectedCustomPalette
-                        ?.name,
+                        .customPalette(
+                            prefs.config
+                                .first()
+                                .paletteSelection.dark,
+                        )?.name,
                 )
                 prefs.removePalette("local")
                 rejectedWithoutMutation {
                     prefs.savePalette(installed, true, PaletteMode.LIGHT, targetInstalledId = "local")
                 }
                 assertEquals(emptyList<InstalledPalette>(), prefs.config.first().customPalettes)
-                assertEquals(PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.SYSTEM), prefs.config.first().paletteSelection)
+                assertEquals(PaletteSelection(light = PaletteChoice(ColorThemePreset.SYSTEM, null), dark = PaletteChoice(ColorThemePreset.SYSTEM, null), mode = PaletteMode.SYSTEM), prefs.config.first().paletteSelection)
             }
         }
 
@@ -1142,7 +1266,7 @@ class AppearancePrefsTest {
                         catalogId = "upstream",
                         catalogRevision = 2,
                     )
-                val selection = PaletteSelection(ColorThemePreset.NORD, "local", PaletteMode.LIGHT)
+                val selection = PaletteSelection(light = PaletteChoice(installedId = "local"), dark = PaletteChoice(installedId = "local"), mode = PaletteMode.LIGHT)
                 for (existing in listOf(palette(), palette().copy(catalogId = "other-catalog", catalogRevision = 1))) {
                     prefs.restorePalettes(listOf(existing), selection)
                     prefs.savePalette(incoming, false, PaletteMode.DARK, targetInstalledId = "local")

@@ -40,10 +40,13 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.PaletteChoice
+import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.e2e.BootstrappedNetwork
 import io.github.trevarj.motd.e2e.BufferProbe
@@ -896,9 +899,12 @@ class RequiredHeadlessE2eTest {
             returnToRoot()
             appearance()
         }
-        PaletteRobot(compose).selectAyuDarkAndTrueBlack()
+        PaletteRobot(compose).selectIndependentPalettesAndTrueBlack()
         val palettePrefs = AppearancePrefsImpl(InstrumentationRegistry.getInstrumentation().targetContext)
         val beforeDraftSave = runBlocking { palettePrefs.config.first() }.paletteSelection
+        assertEquals(PaletteChoice(builtin = ColorThemePreset.CATPPUCCIN_MOCHA), beforeDraftSave.light)
+        assertEquals(PaletteChoice(builtin = ColorThemePreset.AYU_DARK), beforeDraftSave.dark)
+        assertEquals(PaletteMode.DARK, beforeDraftSave.mode)
         val savedPaletteName = "$token saved palette"
         PaletteRobot(compose).createPalette(savedPaletteName, apply = false)
         val afterDraftSave = runBlocking { palettePrefs.config.first() }
@@ -911,10 +917,13 @@ class RequiredHeadlessE2eTest {
             appliedPalette.customPalettes
                 .single { it.document.name == appliedPaletteName }
                 .document.id
-        assertEquals(appliedId, appliedPalette.paletteSelection.installedId)
         assertEquals(
-            appliedId,
-            runBlocking { AppearancePrefsImpl(InstrumentationRegistry.getInstrumentation().targetContext).config.first() }.paletteSelection.installedId,
+            beforeDraftSave.copy(dark = PaletteChoice(installedId = appliedId)),
+            appliedPalette.paletteSelection,
+        )
+        assertEquals(
+            appliedPalette.paletteSelection,
+            runBlocking { AppearancePrefsImpl(InstrumentationRegistry.getInstrumentation().targetContext).config.first() }.paletteSelection,
         )
         val paletteRobot = PaletteRobot(compose)
         paletteRobot.shareInstalledPaletteToMotd(savedPaletteName, artifacts.artifactPrefix())
@@ -930,11 +939,14 @@ class RequiredHeadlessE2eTest {
             afterDraftSave.customPalettes
                 .single { it.document.name == savedPaletteName }
                 .document.id
-        assertEquals(savedId, importedPalette.paletteSelection.installedId)
+        assertEquals(
+            appliedPalette.paletteSelection.copy(dark = PaletteChoice(installedId = savedId)),
+            importedPalette.paletteSelection,
+        )
         assertEquals(appliedPalette.customPalettes, importedPalette.customPalettes)
         assertEquals(
-            savedId,
-            runBlocking { AppearancePrefsImpl(InstrumentationRegistry.getInstrumentation().targetContext).config.first() }.paletteSelection.installedId,
+            importedPalette.paletteSelection,
+            runBlocking { AppearancePrefsImpl(InstrumentationRegistry.getInstrumentation().targetContext).config.first() }.paletteSelection,
         )
         SettingsRobot(compose).selectThemeTextColors()
         SettingsRobot(compose).selectIrcSprites()
@@ -1086,7 +1098,10 @@ class RequiredHeadlessE2eTest {
                 robot.closeLinkedPreview(apply = true)
                 assertSourceRestored()
                 val applied = runBlocking { appearance.config.first() }
-                assertEquals(fixture.document.id, applied.paletteSelection.installedId)
+                assertEquals(
+                    before.paletteSelection.copy(light = PaletteChoice(installedId = fixture.document.id)),
+                    applied.paletteSelection,
+                )
                 val installed = applied.customPalettes.single { it.document.id == fixture.document.id }
                 assertEquals(fixture.document, installed.document)
                 assertEquals(fixture.url, installed.sourceLink)

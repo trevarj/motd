@@ -28,6 +28,7 @@ data class PaletteEditorState(
     val fields: Map<String, String> = emptyMap(),
     val settings: Settings = Settings(),
     val appearance: AppearanceConfig = AppearanceConfig(),
+    val assignmentTarget: PaletteMode = PaletteMode.SYSTEM,
     val dirty: Boolean = false,
     val saving: Boolean = false,
     val saved: Boolean = false,
@@ -58,6 +59,7 @@ class PaletteEditorViewModel
         val state = mutableState.asStateFlow()
         private var original: PaletteDocument? = null
         private var editingId: String? = null
+        private var assignmentTarget: PaletteMode = PaletteMode.SYSTEM
 
         init {
             viewModelScope.launch {
@@ -66,6 +68,7 @@ class PaletteEditorViewModel
                     val routeJson = route?.paletteJson ?: savedStateHandle.get<String>("paletteJson") ?: error("Missing palette draft")
                     val incoming = decodePalette(routeJson.toByteArray(Charsets.UTF_8))
                     editingId = route?.editingInstalledId ?: savedStateHandle["editingInstalledId"]
+                    assignmentTarget = route?.assignmentTarget ?: PaletteMode.SYSTEM
                     val appearance = appearancePrefs.config.first()
                     val installed = editingId?.let { id -> appearance.customPalettes.find { it.document.id == id } ?: error("The palette being edited no longer exists") }
                     val local = installed?.takeIf { it.catalogId == null }
@@ -99,7 +102,7 @@ class PaletteEditorViewModel
                             .also { keys ->
                                 require(keys.size <= 69 && keys.all { it.length <= 40 }) { "Invalid rejected draft fields" }
                             }.toSet()
-                    mutableState.value = PaletteEditorState(draft, fields, appearance = appearance, dirty = savedStateHandle["palette_editor_dirty"] ?: false, rejectedFields = rejectedFields)
+                    mutableState.value = PaletteEditorState(draft, fields, appearance = appearance, assignmentTarget = assignmentTarget, dirty = savedStateHandle["palette_editor_dirty"] ?: false, rejectedFields = rejectedFields)
                     persist()
                     launch { appearancePrefs.config.collect { mutableState.value = mutableState.value.copy(appearance = it) } }
                     launch { settingsRepository.settings.collect { mutableState.value = mutableState.value.copy(settings = it) } }
@@ -264,16 +267,10 @@ class PaletteEditorViewModel
                             snapshot
                         }
                     snapshot = decodePalette(encodePalette(snapshot))
-                    val chosenMode = mode ?: current.appearance.paletteSelection.mode
-                    val supportedMode =
-                        if (snapshot.light == null) {
-                            PaletteMode.DARK
-                        } else if (snapshot.dark == null) {
-                            PaletteMode.LIGHT
-                        } else {
-                            chosenMode
-                        }
-                    appearancePrefs.savePalette(InstalledPalette(snapshot), apply, supportedMode, if (duplicate) null else editingId)
+                    val chosenMode = mode ?: assignmentTarget
+                    require(!apply || chosenMode != PaletteMode.LIGHT || snapshot.light != null) { "Add a light variant before applying to Light" }
+                    require(!apply || chosenMode != PaletteMode.DARK || snapshot.dark != null) { "Add a dark variant before applying to Dark" }
+                    appearancePrefs.savePalette(InstalledPalette(snapshot), apply, chosenMode, if (duplicate) null else editingId)
                     mutableState.value = mutableState.value.copy(draft = snapshot, saved = true, saving = false, dirty = false)
                     persist()
                 } catch (failure: Exception) {

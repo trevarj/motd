@@ -153,40 +153,44 @@ fun resolvePalettePreset(
     return if (builtin.isDark == dark) builtin else builtin.systemPartner ?: builtin
 }
 
+fun PaletteChoice.supportsMode(
+    dark: Boolean,
+    palettes: List<InstalledPalette> = emptyList(),
+): Boolean {
+    if (installedId != null) {
+        val document = palettes.find { it.document.id == installedId }?.document ?: return false
+        return if (dark) document.dark != null else document.light != null
+    }
+    val preset = builtin.canonicalPalette
+    return preset == ColorThemePreset.SYSTEM || preset.isDark == dark || preset.systemPartner != null
+}
+
 fun normalizePaletteSelection(
     selection: PaletteSelection,
     palettes: List<InstalledPalette>,
 ): PaletteSelection {
-    val builtin = selection.builtin.canonicalPalette
-    val document =
-        selection.installedId?.let { id ->
-            requireNotNull(palettes.find { it.document.id == id }) { "Selected palette is not installed" }.document
-        }
-    val mode =
-        if (document != null) {
-            require(document.light != null || document.dark != null) { "Palette needs at least one mode" }
-            when {
-                document.light == null -> PaletteMode.DARK
-                document.dark == null -> PaletteMode.LIGHT
-                else -> selection.mode
-            }
-        } else if (builtin != ColorThemePreset.SYSTEM && builtin.systemPartner == null) {
-            if (builtin.isDark) PaletteMode.DARK else PaletteMode.LIGHT
+    fun normalize(
+        choice: PaletteChoice,
+        dark: Boolean,
+    ): PaletteChoice {
+        require(choice.supportsMode(dark, palettes)) { "Selected palette is unavailable for this mode" }
+        return if (choice.installedId == null) {
+            choice.copy(builtin = choice.builtin.canonicalPalette)
         } else {
-            selection.mode
+            choice.copy(builtin = ColorThemePreset.SYSTEM)
         }
-    return selection.copy(builtin = builtin, mode = mode)
+    }
+    return selection.copy(light = normalize(selection.light, false), dark = normalize(selection.dark, true))
 }
 
 enum class PaletteReadError { INVALID, TOO_LARGE }
 
 val AppearanceConfig.paletteSelection: PaletteSelection
     get() {
-        val fallback = PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.SYSTEM)
-        if (customPaletteId != null &&
+        if (lightPalette == null && darkPalette == null && customPaletteId != null &&
             (customPaletteReadError != null || customPalettes.none { it.document.id == customPaletteId })
         ) {
-            return fallback
+            return PaletteSelection()
         }
         val mode =
             paletteMode ?: when {
@@ -199,11 +203,34 @@ val AppearanceConfig.paletteSelection: PaletteSelection
 
                 else -> PaletteMode.LIGHT
             }
-        return normalizePaletteSelection(PaletteSelection(theme, customPaletteId, mode), customPalettes)
+        val legacy = PaletteChoice(theme, customPaletteId)
+        val legacyMode =
+            if (lightPalette != null || darkPalette != null) {
+                mode
+            } else {
+                when {
+                    !legacy.supportsMode(false, customPalettes) -> PaletteMode.DARK
+                    !legacy.supportsMode(true, customPalettes) -> PaletteMode.LIGHT
+                    else -> mode
+                }
+            }
+
+        fun slot(
+            explicit: PaletteChoice?,
+            dark: Boolean,
+        ): PaletteChoice {
+            if (customPaletteReadError != null && explicit?.installedId != null) return PaletteChoice()
+            if (explicit != null) return explicit
+            val choice = legacy
+            return if (choice.supportsMode(dark, customPalettes)) choice else PaletteChoice()
+        }
+        return normalizePaletteSelection(
+            PaletteSelection(slot(lightPalette, false), slot(darkPalette, true), legacyMode),
+            customPalettes,
+        )
     }
 
-val AppearanceConfig.selectedCustomPalette: PaletteDocument?
-    get() = paletteSelection.installedId?.let { id -> customPalettes.find { it.document.id == id }?.document }
+fun AppearanceConfig.customPalette(choice: PaletteChoice): PaletteDocument? = choice.installedId?.let { id -> customPalettes.find { it.document.id == id }?.document }
 
 /** Editor-only revision handling; importing/replacing a snapshot keeps its supplied revision. */
 fun prepareLocalPaletteSave(
@@ -412,6 +439,8 @@ data class AppearanceConfig(
     val paletteMode: PaletteMode? = null,
     val customPaletteId: String? = null,
     val customPalettes: List<InstalledPalette> = emptyList(),
+    val lightPalette: PaletteChoice? = null,
+    val darkPalette: PaletteChoice? = null,
     @Transient val customPaletteReadError: PaletteReadError? = null,
 )
 

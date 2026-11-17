@@ -438,11 +438,11 @@ fun MotdNavGraph(
         composable<PaletteHubRoute> {
             PaletteHubScreen(
                 onBack = { navController.popBackStack() },
-                onEdit = { palette, editingId ->
-                    navController.navigate(PaletteEditorRoute(encodePalette(palette).decodeToString(), editingId))
+                onEdit = { palette, editingId, target ->
+                    navController.navigate(PaletteEditorRoute(encodePalette(palette).decodeToString(), editingId, target))
                 },
-                onPreview = { palette, sourceLink, catalogId, targetInstalledId ->
-                    navController.navigate(PalettePreviewRoute(encodePalette(palette).decodeToString(), sourceLink, catalogId, targetInstalledId))
+                onPreview = { palette, sourceLink, catalogId, targetInstalledId, target ->
+                    navController.navigate(PalettePreviewRoute(encodePalette(palette).decodeToString(), sourceLink, catalogId, targetInstalledId, target))
                 },
             )
         }

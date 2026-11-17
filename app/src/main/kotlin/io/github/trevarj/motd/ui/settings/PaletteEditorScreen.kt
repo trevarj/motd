@@ -42,6 +42,7 @@ fun PaletteEditorScreen(
     val state by viewModel.state.collectAsState()
     var previewDark by rememberSaveable { mutableStateOf(false) }
     var editingDark by rememberSaveable { mutableStateOf(false) }
+    var targetInitialized by rememberSaveable { mutableStateOf(false) }
     var layoutName by rememberSaveable { mutableStateOf(LayoutDensity.COMFORTABLE.name) }
     var advanced by rememberSaveable { mutableStateOf(false) }
     var discard by rememberSaveable { mutableStateOf(false) }
@@ -55,6 +56,13 @@ fun PaletteEditorScreen(
     BackHandler { back() }
     LaunchedEffect(state.saved) { if (state.saved) onSaved() }
     val draft = state.draft
+    LaunchedEffect(draft?.id) {
+        if (draft != null && !targetInitialized) {
+            previewDark = state.assignmentTarget == PaletteMode.DARK
+            editingDark = previewDark
+            targetInitialized = true
+        }
+    }
     Scaffold(
         modifier = Modifier.imePadding(),
         topBar = {
@@ -81,6 +89,29 @@ fun PaletteEditorScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (draft != null) {
+                Text(
+                    stringResource(R.string.palette_assignment) + ": " +
+                        stringResource(
+                            when (state.assignmentTarget) {
+                                PaletteMode.LIGHT -> {
+                                    R.string.palette_mode_light
+                                }
+
+                                PaletteMode.DARK -> {
+                                    R.string.palette_mode_dark
+                                }
+
+                                PaletteMode.SYSTEM -> {
+                                    when {
+                                        draft.light == null -> R.string.palette_mode_dark
+                                        draft.dark == null -> R.string.palette_mode_light
+                                        else -> R.string.palette_both
+                                    }
+                                }
+                            },
+                        ),
+                    Modifier.padding(horizontal = 12.dp),
+                )
                 val sampleMode =
                     if (draft.light == null) {
                         PaletteMode.DARK

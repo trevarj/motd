@@ -3,6 +3,7 @@ package io.github.trevarj.motd
 import android.graphics.Bitmap
 import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.updateTransition
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.systemGestures
@@ -122,6 +123,7 @@ import io.github.trevarj.motd.ui.nav.PalettePreviewRoute
 import io.github.trevarj.motd.ui.settings.PalettePreviewScreen
 import io.github.trevarj.motd.ui.settings.PalettePreviewViewModel
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.resolvedMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -361,10 +363,13 @@ class MessageTimelineUiTest {
             val pages = flowOf(PagingData.from(rows)).cachedIn(pagingScope)
             compose.setContent {
                 val appearance by prefs.config.collectAsState(AppearanceConfig())
+                val selection = appearance.paletteSelection
+                val mode = selection.resolvedMode(isSystemInDarkTheme())
+                val choice = selection.choiceFor(mode == PaletteMode.DARK)
                 MotdTheme(
-                    themePreset = appearance.paletteSelection.builtin,
-                    paletteMode = appearance.paletteSelection.mode,
-                    customPalette = appearance.selectedCustomPalette,
+                    themePreset = choice.builtin,
+                    paletteMode = mode,
+                    customPalette = appearance.customPalette(choice),
                     layoutDensity = layout,
                     dynamicColor = false,
                     syncSystemBars = false,
@@ -467,7 +472,10 @@ class MessageTimelineUiTest {
             await { compose.onAllNodesWithText(document.name).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("palette_preview_apply").performClick()
             await { nav.currentDestination?.hasRoute<ChatRoute>() == true }
-            assertEquals(document, current().selectedCustomPalette)
+            val applied = current()
+            assertEquals(document.id, applied.paletteSelection.light.installedId)
+            assertEquals(document.id, applied.paletteSelection.dark.installedId)
+            assertEquals(baseline.paletteSelection.mode, applied.paletteSelection.mode)
             val installed = current().customPalettes.single()
             assertEquals(url, installed.sourceLink)
             assertEquals(null, installed.catalogId)

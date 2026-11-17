@@ -1,8 +1,13 @@
 package io.github.trevarj.motd.gesture
 
+import android.content.res.Configuration
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
@@ -16,6 +21,13 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.up
 import io.github.trevarj.motd.UiDispatcherResetRule
+import io.github.trevarj.motd.data.prefs.AppearanceConfig
+import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.InstalledPalette
+import io.github.trevarj.motd.data.prefs.PaletteChoice
+import io.github.trevarj.motd.data.prefs.PaletteColors
+import io.github.trevarj.motd.data.prefs.PaletteDocument
+import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.gesture.radial.GESTURE_MENU_A11Y_DIALOG_TAG
 import io.github.trevarj.motd.gesture.radial.GESTURE_MENU_SCRIM_TAG
 import io.github.trevarj.motd.gesture.radial.GESTURE_ORB_TAG
@@ -23,9 +35,11 @@ import io.github.trevarj.motd.gesture.radial.GestureMenuPreview
 import io.github.trevarj.motd.gesture.radial.GestureOrbSurface
 import io.github.trevarj.motd.gesture.radial.OrbPlacement
 import io.github.trevarj.motd.gesture.radial.RadialEntry
+import io.github.trevarj.motd.gesture.radial.gestureAccent
 import io.github.trevarj.motd.gesture.radial.gestureMenuSliceTag
 import io.github.trevarj.motd.ui.settings.labs.IconPickerDialog
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.themeIdentityPalette
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -86,6 +100,61 @@ class GestureOrbUiTest {
                     onExecute = { executed += it },
                     onPlacementChange = {},
                     accessible = accessible,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun accentFollowsIndependentActiveSlotInForcedAndSystemModes() {
+        val colors =
+            PaletteColors(
+                primary = "#336699",
+                secondary = "#663399",
+                tertiary = "#996633",
+                background = "#101010",
+                surface = "#202020",
+                surfaceContainer = "#303030",
+                onBackground = "#FFFFFF",
+                onSurface = "#FFFFFF",
+                onSurfaceVariant = "#CCCCCC",
+                outlineVariant = "#888888",
+                nicknameColors = listOf("#EEAA44"),
+            )
+        val appearance =
+            mutableStateOf(
+                AppearanceConfig(
+                    lightPalette = PaletteChoice(ColorThemePreset.GRUVBOX_LIGHT),
+                    darkPalette = PaletteChoice(installedId = "orb-dark"),
+                    customPalettes = listOf(InstalledPalette(PaletteDocument("orb-dark", "Orb", 1, dark = colors))),
+                ),
+            )
+        val osDark = mutableStateOf(false)
+        var accent = Color.Unspecified
+        compose.setContent {
+            val configuration =
+                Configuration(LocalConfiguration.current).apply {
+                    uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                        if (osDark.value) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+                }
+            CompositionLocalProvider(LocalConfiguration provides configuration) {
+                MotdTheme(dynamicColor = false) {
+                    val current = gestureAccent(appearance.value)
+                    SideEffect { accent = current }
+                }
+            }
+        }
+        for (mode in PaletteMode.entries) {
+            for (systemDark in listOf(false, true)) {
+                compose.runOnUiThread {
+                    appearance.value = appearance.value.copy(paletteMode = mode)
+                    osDark.value = systemDark
+                }
+                compose.waitForIdle()
+                val dark = mode == PaletteMode.DARK || (mode == PaletteMode.SYSTEM && systemDark)
+                assertEquals(
+                    if (dark) Color(0xFFEEAA44) else themeIdentityPalette(ColorThemePreset.GRUVBOX_LIGHT).first(),
+                    accent,
                 )
             }
         }

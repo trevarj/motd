@@ -92,6 +92,26 @@ change is required for these defaulted additive fields.
 The appearance `collapseTitleBar` flag also round-trips, defaulting to `true`
 for older appearance objects. An absent appearance object preserves its local value.
 
+Appearance stores independent `lightPalette` and `darkPalette` choices (`builtin`
+and nullable `installedId`), their installed definitions, and the unchanged global
+`paletteMode` (`SYSTEM`, `LIGHT`, or `DARK`). Both slots must be present as objects
+or both absent. Imports validate their field types, installed references, and
+light/dark variant support before changing any settings or networks. Palette
+definitions and both selections restore together. Merge reuses identical records
+and assigns new IDs to conflicting records, remapping both slots (including when
+both reference the same record); replace removes obsolete definitions. Collection
+count and byte limits apply to the resulting collection before restoration.
+
+Backups without the slots migrate the legacy single selection into every supported
+slot, using Device colors for an unsupported opposite variant and preserving the
+legacy display mode. Backups predating installed palettes keep local definitions.
+New exports retain a single-selection fallback for older readers: the selected
+slot for forced Light/Dark, or the first Light/Dark choice supporting both variants
+for System (otherwise Device colors). Older readers cannot preserve mixed pairs.
+An unreadable local palette collection blocks export and merge; a valid modern
+replace can recover it. An absent appearance section leaves even corrupt local
+palette state untouched.
+
 Legacy `splashScreenAnimation` values (`EDGE_TRACE`, `SOFT_WASH`, `TRAVELING_PULSE`,
 `STATIC`) still round-trip and restore for compatibility, although startup now
 uses a single non-configurable spark cut. Missing fields default to `EDGE_TRACE`;

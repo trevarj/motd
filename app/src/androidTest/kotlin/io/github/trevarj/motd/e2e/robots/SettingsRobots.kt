@@ -534,8 +534,14 @@ internal class SettingsRobot(
 internal class PaletteRobot(
     compose: ComposeTestRule,
 ) : BaseRobot(compose) {
-    fun selectAyuDarkAndTrueBlack() {
+    fun selectIndependentPalettesAndTrueBlack() {
         scrollToAndClick("settings_palette_hub")
+        click("palette_target_light")
+        compose.onNodeWithTag("palette_target_light").assertIsSelected()
+        scrollContainerTo("palette_list", "palette_builtin_catppuccin_mocha")
+        click("palette_builtin_catppuccin_mocha")
+        click("palette_target_dark")
+        compose.onNodeWithTag("palette_target_dark").assertIsSelected()
         scrollContainerTo("palette_list", "palette_builtin_ayu_dark")
         click("palette_builtin_ayu_dark")
         click("palette_back")
@@ -548,6 +554,7 @@ internal class PaletteRobot(
         apply: Boolean,
     ) {
         scrollToAndClick("settings_palette_hub")
+        click("palette_target_dark")
         click("palette_create")
         replace("palette_editor_name", name)
         click(if (apply) "palette_editor_save_apply" else "palette_editor_save")
@@ -724,6 +731,7 @@ internal class PaletteRobot(
     }
 
     fun applySharedPreview() {
+        scrollToAndClick("palette_assign_dark")
         click("palette_preview_apply")
         awaitTag("palette_hub")
         click("palette_back")
@@ -743,6 +751,7 @@ internal class PaletteRobot(
     }
 
     fun closeLinkedPreview(apply: Boolean) {
+        if (apply) scrollToAndClick("palette_assign_light")
         click(if (apply) "palette_preview_apply" else "palette_preview_cancel")
         awaitTag("chat_timeline")
         awaitTagGone("palette_preview_apply")

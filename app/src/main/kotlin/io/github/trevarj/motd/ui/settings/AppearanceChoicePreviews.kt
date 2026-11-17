@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.settings
 import android.content.ComponentName
 import android.content.pm.PackageManager
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -38,10 +39,11 @@ import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.LauncherIcon
+import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.customPalette
 import io.github.trevarj.motd.data.prefs.paletteSelection
-import io.github.trevarj.motd.data.prefs.selectedCustomPalette
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
 import io.github.trevarj.motd.ui.components.Avatar
@@ -56,6 +58,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.TimestampConfig
 import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
 import io.github.trevarj.motd.ui.theme.UiIcon
+import io.github.trevarj.motd.ui.theme.resolvedMode
 import java.io.File
 import java.util.Calendar
 
@@ -68,10 +71,12 @@ internal fun AppearanceSampleTheme(
 ) {
     val avatars = remember { RemoteAvatarState() }
     val selection = appearance.paletteSelection
+    val mode = selection.resolvedMode(isSystemInDarkTheme())
+    val choice = selection.choiceFor(mode == PaletteMode.DARK)
     MotdTheme(
-        themePreset = selection.builtin,
-        paletteMode = selection.mode,
-        customPalette = appearance.selectedCustomPalette,
+        themePreset = choice.builtin,
+        paletteMode = mode,
+        customPalette = appearance.customPalette(choice),
         trueBlack = appearance.trueBlack,
         dynamicColor = settings.dynamicColor,
         useThemeTextColors = appearance.useThemeTextColors,

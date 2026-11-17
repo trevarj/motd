@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.settings
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -69,6 +70,7 @@ import io.github.trevarj.motd.data.prefs.FontChoice
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
+import io.github.trevarj.motd.data.prefs.PaletteChoice
 import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.PaletteSelection
 import io.github.trevarj.motd.data.prefs.Settings
@@ -76,6 +78,8 @@ import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.customPalette
+import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.ui.components.FolderIcon
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
@@ -87,6 +91,7 @@ import io.github.trevarj.motd.ui.theme.UiIcon
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.fixedThemeScheme
+import io.github.trevarj.motd.ui.theme.resolvedMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -685,13 +690,18 @@ class AppearanceFolderLayoutUiTest {
     @Test
     fun colorModeRetainsPaletteBeforePersistenceEmits() {
         val selected = mutableListOf<PaletteSelection>()
+        val light = PaletteChoice(ColorThemePreset.AYU_DARK)
+        val dark = PaletteChoice(ColorThemePreset.MONOKAI)
         setContent(
-            appearance = AppearanceConfig(theme = ColorThemePreset.AYU_DARK, paletteMode = PaletteMode.DARK),
+            appearance = AppearanceConfig(lightPalette = light, darkPalette = dark, paletteMode = PaletteMode.DARK),
             onSelectPalette = selected::add,
         )
         compose.onNodeWithTag("settings_color_mode_light").performScrollTo().performClick()
-        assertEquals(PaletteSelection(ColorThemePreset.AYU_DARK, null, PaletteMode.LIGHT), selected.single())
+        assertEquals(PaletteSelection(light, dark, PaletteMode.LIGHT), selected.single())
         compose.onNodeWithTag("settings_color_mode_light").assertIsSelected()
+        compose.onNodeWithTag("settings_color_mode_system").performScrollTo().performClick()
+        assertEquals(PaletteSelection(light, dark, PaletteMode.SYSTEM), selected.last())
+        compose.onNodeWithTag("settings_color_mode_system").assertIsSelected()
     }
 
     @Test
@@ -704,15 +714,23 @@ class AppearanceFolderLayoutUiTest {
     }
 
     @Test
-    fun singleModeDisablesUnsupportedColorModes() {
-        setContent(appearance = AppearanceConfig(theme = ColorThemePreset.MONOKAI, paletteMode = PaletteMode.DARK))
-        compose.onNodeWithTag("settings_color_mode_system").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithTag("settings_color_mode_light").performScrollTo().assertIsNotEnabled()
-        compose
-            .onNodeWithTag("settings_color_mode_dark")
-            .performScrollTo()
-            .assertIsEnabled()
-            .assertIsSelected()
+    fun mixedPaletteSlotsKeepAllColorModesAvailable() {
+        val light = PaletteChoice(ColorThemePreset.AYU_DARK)
+        val dark = PaletteChoice(ColorThemePreset.MONOKAI)
+        val selected = mutableListOf<PaletteSelection>()
+        setContent(
+            appearance = AppearanceConfig(lightPalette = light, darkPalette = dark, paletteMode = PaletteMode.DARK),
+            onSelectPalette = selected::add,
+        )
+        for (mode in listOf(PaletteMode.SYSTEM, PaletteMode.LIGHT, PaletteMode.DARK)) {
+            compose
+                .onNodeWithTag("settings_color_mode_${mode.name.lowercase()}")
+                .performScrollTo()
+                .assertIsEnabled()
+                .performClick()
+                .assertIsSelected()
+            assertEquals(PaletteSelection(light, dark, mode), selected.last())
+        }
     }
 
     @Test
@@ -1427,9 +1445,14 @@ class AppearanceFolderLayoutUiTest {
         compose.setContent {
             val currentAppearance = appearanceProvider()
             val currentSettings = settingsProvider()
+            val selection = currentAppearance.paletteSelection
+            val mode = selection.resolvedMode(isSystemInDarkTheme())
+            val choice = selection.choiceFor(mode == PaletteMode.DARK)
             MotdTheme(
                 dynamicColor = false,
-                themePreset = currentAppearance.theme,
+                themePreset = choice.builtin,
+                paletteMode = mode,
+                customPalette = currentAppearance.customPalette(choice),
                 trueBlack = currentAppearance.trueBlack,
                 useThemeTextColors = currentAppearance.useThemeTextColors,
                 uiFontScalePercent = currentAppearance.uiFontScalePercent,

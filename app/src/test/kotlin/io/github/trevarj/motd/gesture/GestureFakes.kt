@@ -27,6 +27,7 @@ import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
+import io.github.trevarj.motd.data.prefs.PaletteChoice
 import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.PaletteSelection
 import io.github.trevarj.motd.data.prefs.PresenceMode
@@ -40,6 +41,7 @@ import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.prefs.normalizePaletteSelection
 import io.github.trevarj.motd.data.prefs.paletteSelection
+import io.github.trevarj.motd.data.prefs.supportsMode
 import io.github.trevarj.motd.data.prefs.validateInstalledPalettes
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
@@ -283,12 +285,15 @@ internal class FakeAppearance(
         )
         val target = current.customPalettes.filterNot { it.document.id == palette.document.id } + palette
         validateInstalledPalettes(target)
-        val selection =
-            if (apply) {
-                current.paletteSelection.copy(installedId = palette.document.id, mode = mode)
-            } else {
-                current.paletteSelection
+        val repaired =
+            current.paletteSelection.let {
+                it.copy(
+                    light = it.light.takeIf { choice -> choice.supportsMode(false, target) } ?: PaletteChoice(),
+                    dark = it.dark.takeIf { choice -> choice.supportsMode(true, target) } ?: PaletteChoice(),
+                )
             }
+        val selection =
+            if (apply) repaired.withChoice(PaletteChoice(installedId = palette.document.id), mode, target) else repaired
         state.value =
             current
                 .copy(customPalettes = target)
@@ -301,10 +306,11 @@ internal class FakeAppearance(
         val target = current.customPalettes.filterNot { it.document.id == id }
         validateInstalledPalettes(target)
         val selection =
-            if (current.paletteSelection.installedId == id) {
-                PaletteSelection(ColorThemePreset.SYSTEM, null, PaletteMode.SYSTEM)
-            } else {
-                current.paletteSelection
+            current.paletteSelection.let {
+                it.copy(
+                    light = it.light.takeUnless { choice -> choice.installedId == id } ?: PaletteChoice(),
+                    dark = it.dark.takeUnless { choice -> choice.installedId == id } ?: PaletteChoice(),
+                )
             }
         state.value = current.copy(customPalettes = target).withSelection(selection)
     }
@@ -323,8 +329,8 @@ internal class FakeAppearance(
 
     private fun AppearanceConfig.withSelection(selection: PaletteSelection) =
         copy(
-            theme = selection.builtin,
-            customPaletteId = selection.installedId,
+            lightPalette = selection.light,
+            darkPalette = selection.dark,
             paletteMode = selection.mode,
             followSystem = false,
         )
