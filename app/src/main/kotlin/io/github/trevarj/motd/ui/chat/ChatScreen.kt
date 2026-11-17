@@ -1328,6 +1328,7 @@ internal fun ChatContent(
     val globalCompactNickBrackets = LocalCompactNickBrackets.current
     val wallpaperSource = rememberSurfaceBackdropSource()
     val pageBackdrop = rememberSurfaceBackdropSource(wallpaperSource)
+    val listState = presentation?.listState ?: rememberLazyListState()
     // Scope the page before deriving UI state: capturing the entire derived screen exceeds JVM parameter slots.
     SurfaceBackdropPage(pageBackdrop) {
         val dickordEnabled = LocalDickordLabsEnabled.current
@@ -1357,7 +1358,6 @@ internal fun ChatContent(
                     buffer.displayName
                 }
             }
-        val listState = presentation?.listState ?: rememberLazyListState()
         val presentationVisit = presentationLease?.presentationVisitIdentity
         var restoringHiddenFools by remember(presentationVisit) { mutableStateOf(false) }
         var restoreDispatched by remember(presentationVisit) { mutableStateOf(false) }

@@ -177,6 +177,20 @@ builds only the release variant, verifies its native contents and cryptographic
 signature, and rejects forbidden signing-block metadata. Hosted CI runs it for
 app-tier changes; the light pre-push hook does not.
 
+Packaging and debuggable E2E journeys do not prove that ART accepts release DEX.
+On an authorized connected device, check the actual non-debug APK without
+installing it or clearing app data:
+
+```sh
+nix develop -c bash tools/verify-release-dex.sh "$SERIAL" app/build/outputs/apk/release/app-release.apk
+```
+
+The check loads `ChatScreenKt` through device ART using temporary shell-owned
+files. A known-bad APK must reproduce its specific verifier error before using
+this as differential regression evidence. This is class-verification coverage,
+not a full chat UI journey; updating the official installation requires its
+production signing key.
+
 The hosted Android tier has a 45-minute wall-clock budget for sequential cold
 release packaging, lint, debug/E2E artifact builds, and cleanup; all checks remain
 required.
