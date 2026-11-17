@@ -62,11 +62,21 @@ fun PaletteHubScreen(
     var contribution by remember { mutableStateOf(false) }
     var choosingTarget by remember { mutableStateOf<PaletteDocument?>(null) }
     val selection = state.appearance.paletteSelection
-    var target by rememberSaveable { mutableStateOf(PaletteMode.LIGHT) }
+    var target by rememberSaveable { mutableStateOf(PaletteMode.SYSTEM) }
     val choice = selection.choiceFor(target == PaletteMode.DARK)
     val dynamic = state.settings.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val deviceLight = remember(context, dynamic) { if (dynamic) dynamicLightColorScheme(context) else MotdLightRaw }
     val deviceDark = remember(context, dynamic) { if (dynamic) dynamicDarkColorScheme(context) else MotdDarkRaw }
+
+    fun isSelected(
+        candidate: PaletteChoice,
+        document: PaletteDocument,
+    ): Boolean =
+        if (target == PaletteMode.SYSTEM) {
+            (document.light == null || selection.light == candidate) && (document.dark == null || selection.dark == candidate)
+        } else {
+            choice == candidate
+        }
 
     fun launchAction(action: suspend () -> Unit) {
         scope.launch {
@@ -162,11 +172,21 @@ fun PaletteHubScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(PaletteMode.LIGHT, PaletteMode.DARK).forEach { mode ->
+                listOf(PaletteMode.SYSTEM, PaletteMode.LIGHT, PaletteMode.DARK).forEach { mode ->
                     FilterChip(
                         selected = target == mode,
                         onClick = { target = mode },
-                        label = { Text(stringResource(if (mode == PaletteMode.LIGHT) R.string.palette_mode_light else R.string.palette_mode_dark)) },
+                        label = {
+                            Text(
+                                stringResource(
+                                    when (mode) {
+                                        PaletteMode.SYSTEM -> R.string.palette_both
+                                        PaletteMode.LIGHT -> R.string.palette_mode_light
+                                        PaletteMode.DARK -> R.string.palette_mode_dark
+                                    },
+                                ),
+                            )
+                        },
                         modifier = Modifier.testTag("palette_target_${mode.name.lowercase(Locale.ROOT)}"),
                     )
                 }
@@ -195,14 +215,14 @@ fun PaletteHubScreen(
                             ColorThemePreset.entries
                                 .map { it.canonicalPalette }
                                 .distinct()
-                                .filter { paletteBuiltinNameText(it).contains(query, true) && PaletteChoice(builtin = it).supportsMode(target == PaletteMode.DARK) },
+                                .filter { paletteBuiltinNameText(it).contains(query, true) && (target == PaletteMode.SYSTEM || PaletteChoice(builtin = it).supportsMode(target == PaletteMode.DARK)) },
                             key = { it.name },
                         ) { preset ->
                             val document = remember(preset, deviceLight, deviceDark) { builtinPaletteDocument(preset, paletteBuiltinNameText(preset), deviceLight, deviceDark) }
                             PaletteHubRow(
                                 paletteBuiltinName(preset),
                                 document,
-                                choice.installedId == null && choice.builtin == preset,
+                                isSelected(PaletteChoice(builtin = preset), document),
                                 Modifier.testTag("palette_builtin_${preset.name.lowercase(Locale.ROOT)}"),
                                 onSelect = { viewModel.select(selection.withChoice(PaletteChoice(builtin = preset), target)) },
                             )
@@ -211,12 +231,12 @@ fun PaletteHubScreen(
                     }
 
                     1 -> {
-                        val palettes = state.appearance.customPalettes.filter { it.document.name.contains(query, true) && PaletteChoice(installedId = it.document.id).supportsMode(target == PaletteMode.DARK, state.appearance.customPalettes) }
+                        val palettes = state.appearance.customPalettes.filter { it.document.name.contains(query, true) && (target == PaletteMode.SYSTEM || PaletteChoice(installedId = it.document.id).supportsMode(target == PaletteMode.DARK, state.appearance.customPalettes)) }
                         if (palettes.isEmpty()) item { Text(stringResource(R.string.palette_empty_yours)) }
                         items(palettes, key = { it.document.id }) { installed ->
                             val document = installed.document
                             Card {
-                                PaletteHubRow(document.name, document, choice.installedId == document.id, onSelect = { viewModel.select(selection.withChoice(PaletteChoice(installedId = document.id), target, state.appearance.customPalettes)) })
+                                PaletteHubRow(document.name, document, isSelected(PaletteChoice(installedId = document.id), document), onSelect = { viewModel.select(selection.withChoice(PaletteChoice(installedId = document.id), target, state.appearance.customPalettes)) })
                                 FlowRow(Modifier.padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     TextButton(onClick = { edit(if (installed.catalogId != null) null else document.id) { if (installed.catalogId != null) localPaletteFork(document) else document } }) { Text(stringResource(R.string.palette_edit)) }
                                     TextButton(onClick = { edit(null) { duplicatePalette(document) } }) { Text(stringResource(R.string.palette_duplicate)) }
@@ -255,7 +275,7 @@ fun PaletteHubScreen(
                                 if (!state.catalog.loading && state.catalog.palettes.isEmpty()) Text(stringResource(R.string.palette_empty_community), Modifier.testTag("palette_catalog_empty"))
                             }
                         }
-                        val matches = state.catalog.palettes.filter { it.name.contains(query, true) && (if (target == PaletteMode.DARK) it.dark != null else it.light != null) }
+                        val matches = state.catalog.palettes.filter { it.name.contains(query, true) && (target == PaletteMode.SYSTEM || (if (target == PaletteMode.DARK) it.dark != null else it.light != null)) }
                         if (matches.isEmpty() && state.catalog.palettes.isNotEmpty()) item { Text("No matching palettes") }
                         items(matches, key = { it.id }) { document ->
                             val tracked = state.appearance.customPalettes.filter { it.catalogId == document.id }

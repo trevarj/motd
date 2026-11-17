@@ -122,6 +122,28 @@ class PaletteCatalogUiTest {
             catalogFiles.deleteRecursively()
         }
 
+    @Test fun defaultBothAssignsPairedBuiltinToBothSlots_withoutChangingDisplayMode_orSelectingMixedPair() {
+        val ayu = PaletteChoice(ColorThemePreset.AYU_DARK)
+        val mixed = baseline.paletteSelection.copy(light = ayu)
+        runBlocking { prefs.selectPalette(mixed) }
+        mount()
+        await { hub.state.value.appearance.paletteSelection == mixed }
+        compose.onNodeWithTag("palette_target_system").assertIsSelected()
+        compose.onNodeWithTag("palette_target_light").assertIsNotSelected()
+        compose.onNodeWithTag("palette_target_dark").assertIsNotSelected()
+        capture("hub-default-both.png")
+        compose.onNodeWithTag("palette_search").performTextReplacement("Ayu")
+        compose.onNodeWithTag("palette_builtin_ayu_dark").assertIsNotSelected()
+        compose.onNodeWithTag("palette_target_light").performClick()
+        compose.onNodeWithTag("palette_builtin_ayu_dark").assertIsSelected()
+        compose.onNodeWithTag("palette_target_system").performClick()
+        compose.onNodeWithTag("palette_builtin_ayu_dark").assertIsNotSelected().performClick()
+        val expected = PaletteSelection(light = ayu, dark = ayu, mode = mixed.mode)
+        await { current().paletteSelection == expected }
+        compose.onNodeWithTag("palette_builtin_ayu_dark").assertIsSelected()
+        assertEquals(expected, runBlocking { AppearancePrefsImpl(context).config.first() }.paletteSelection)
+    }
+
     @Test fun hubAssignsIndependentLightAndDarkIdentities_withoutChangingOtherSlotOrDisplayMode() {
         val light = document.copy(id = "light-only", name = "Independent light", dark = null)
         val dark = document.copy(id = "dark-only", name = "Independent dark", light = null)
@@ -134,6 +156,9 @@ class PaletteCatalogUiTest {
         mount()
         await { hub.state.value.appearance.customPalettes.size == 2 }
         compose.onNodeWithText(context.getString(R.string.palette_yours)).performClick()
+        compose.onNodeWithTag("palette_target_system").assertIsSelected()
+        compose.onNodeWithText(light.name).assertExists()
+        compose.onNodeWithText(dark.name).assertExists()
         compose.onNodeWithTag("palette_target_light").performClick().assertIsSelected()
         compose.onNodeWithText(dark.name).assertDoesNotExist()
         compose.onNodeWithText(light.name).performClick()
@@ -149,6 +174,9 @@ class PaletteCatalogUiTest {
         compose.onNodeWithText(dark.name).assertIsSelected()
         assertEquals(PaletteChoice(installedId = light.id), current().paletteSelection.light)
         assertEquals(before.mode, current().paletteSelection.mode)
+        compose.onNodeWithTag("palette_target_system").performClick()
+        compose.onNodeWithText(light.name).assertIsSelected()
+        compose.onNodeWithText(dark.name).assertIsSelected()
 
         compose.onNodeWithTag("palette_target_light").performClick()
         compose.onNodeWithText(light.name).assertIsSelected()
@@ -161,25 +189,30 @@ class PaletteCatalogUiTest {
         assertEquals(setOf(InstalledPalette(light), InstalledPalette(dark)), current().customPalettes.toSet())
     }
 
-    @Test fun darkOnlyBuiltinsAreHiddenForLight_andApplyOnlyToDark() {
+    @Test fun darkOnlyBuiltinsApplyUnderBoth_preserveLight_andRemainFilteredForExplicitTargets() {
         mount()
         await { hub.state.value.appearance.paletteSelection == baseline.paletteSelection }
         compose.onNodeWithTag("palette_search").performTextReplacement("Ayu Mirage")
-        compose.onNodeWithTag("palette_target_light").assertIsSelected()
-        compose.onNodeWithTag("palette_builtin_ayu_mirage").assertDoesNotExist()
-
-        compose.onNodeWithTag("palette_target_dark").performClick()
-        compose.onNodeWithTag("palette_builtin_ayu_mirage").performClick()
-        await { current().paletteSelection.dark == PaletteChoice(ColorThemePreset.AYU_MIRAGE) }
+        compose.onNodeWithTag("palette_target_system").assertIsSelected()
+        compose.onNodeWithTag("palette_builtin_ayu_mirage").assertIsNotSelected().performClick()
+        val expected = baseline.paletteSelection.copy(dark = PaletteChoice(ColorThemePreset.AYU_MIRAGE))
+        await { current().paletteSelection == expected }
         compose.onNodeWithTag("palette_builtin_ayu_mirage").assertIsSelected()
-        assertEquals(baseline.paletteSelection.light, current().paletteSelection.light)
-        assertEquals(baseline.paletteSelection.mode, current().paletteSelection.mode)
+        assertEquals(expected, runBlocking { AppearancePrefsImpl(context).config.first() }.paletteSelection)
 
         compose.onNodeWithTag("palette_target_light").performClick()
         compose.onNodeWithTag("palette_builtin_ayu_mirage").assertDoesNotExist()
-        assertEquals(PaletteChoice(ColorThemePreset.AYU_MIRAGE), current().paletteSelection.dark)
-        assertEquals(baseline.paletteSelection.light, current().paletteSelection.light)
-        assertEquals(baseline.paletteSelection.mode, current().paletteSelection.mode)
+        assertEquals(expected, current().paletteSelection)
+
+        runBlocking { prefs.selectPalette(baseline.paletteSelection) }
+        await { hub.state.value.appearance.paletteSelection == baseline.paletteSelection }
+        compose.onNodeWithTag("palette_target_dark").performClick()
+        compose.onNodeWithTag("palette_builtin_ayu_mirage").assertIsNotSelected().performClick()
+        await { current().paletteSelection == expected }
+        compose.onNodeWithTag("palette_builtin_ayu_mirage").assertIsSelected()
+        compose.onNodeWithTag("palette_target_system").performClick()
+        compose.onNodeWithTag("palette_builtin_ayu_mirage").assertIsSelected()
+        assertEquals(expected, current().paletteSelection)
     }
 
     @Test fun communityEntryAndRefresh_fetchEmptyThenLive_searchAndOfflineSnapshotInstall() {
