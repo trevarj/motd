@@ -41,6 +41,21 @@ fallback, and actionable errors. **Retry** re-runs endpoint registration without
 delivery-mode choice. If more than one distributor is installed, choose one explicitly; **Change
 distributor** safely cleans up the previous instances before requesting replacements.
 
+## Chat alert quiet window
+
+Socket and push delivery share the same alert policy: the first eligible new notification in a
+chat requests its normal Android channel alert. Further eligible new messages in that chat are
+retained in the notification but update silently until there have been 30 seconds without one.
+Each successfully posted eligible new message restarts that quiet interval, including silent ones.
+Other chats are independent; ordinary messages and mentions in the same chat share one window.
+Duplicates, recovery/refresh updates, suppressed messages and denied notification permission do
+not extend it.
+
+Reading or dismissing a notification does not reset an unexpired window. It normally survives
+app/process restarts, but resets after a device reboot. If Android's boot identity is unavailable,
+only the current notifier's in-memory window is used. Android channel settings and Do Not Disturb
+still determine whether a requested alert actually makes sound or vibrates.
+
 ## Use a self-hosted ntfy server
 
 Self-hosting is optional. In the ntfy app, open **Settings**, change the default server to your

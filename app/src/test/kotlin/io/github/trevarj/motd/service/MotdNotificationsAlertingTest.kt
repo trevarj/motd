@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.database.Cursor
 import android.os.CancellationSignal
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.room.Room
 import androidx.room.RoomDatabase
@@ -61,6 +62,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowSystemClock
+import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
@@ -69,8 +72,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Pins the channel-governed alerting contract for message/mention notifications:
  *
- * - the first presentation of a newly notified body alerts through its notification channel
- *   (heads-up, per-channel sound/vibration, and Do Not Disturb are user-governed);
+ * - the first eligible new body after 30 seconds of quiet requests an alert through its channel;
+ *   further eligible bodies update silently and extend that window (sound/DND remain user-governed);
  * - a crash-recovery repost from [MotdNotifications.recoverCanonicalNotifications] never
  *   re-alerts for state the user may already have been alerted about;
  * - an identity-upgrade re-post of an already-notified body (transient msgid-less push followed
@@ -95,6 +98,12 @@ class MotdNotificationsAlertingTest {
     @Before
     fun setUp() =
         runTest {
+            context
+                .getSharedPreferences("notification_alert_windows", Context.MODE_PRIVATE)
+                .edit()
+                .clear()
+                .commit()
+            Settings.Global.putInt(context.contentResolver, Settings.Global.BOOT_COUNT, 10)
             openDatabase()
         }
 
@@ -363,6 +372,142 @@ class MotdNotificationsAlertingTest {
         assertNull(notification.group)
         assertEquals(NotificationCompat.GROUP_ALERT_ALL, notification.groupAlertBehavior)
     }
+
+    @Test
+    fun eligibleBodies_slideQuietWindowToExactThirtySecondBoundary() =
+        runTest {
+            val processor = EventProcessor(db, TypingTrackerImpl(), notifications)
+            processor.onRegistered(networkId, "me", emptyMap())
+            processor.process(networkId, chat("alert-peer", "first", "quiet-first"))
+            assertAlerting(lane(null))
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(20))
+            processor.process(networkId, chat("alert-peer", "burst", "quiet-burst", 2_000))
+            assertSilent(lane(null))
+            ShadowSystemClock.advanceBy(Duration.ofMillis(29_999))
+            processor.process(networkId, chat("alert-peer", "still burst", "quiet-last", 3_000))
+            assertSilent(lane(null))
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(30))
+            processor.process(networkId, chat("alert-peer", "rearmed", "quiet-next", 4_000))
+            assertAlerting(lane(null))
+            assertEquals(listOf("first", "burst", "still burst", "rearmed"), bodies(lane(null)))
+        }
+
+    @Test
+    fun fullBufferIds_haveIndependentWindowsEvenWithSameNotificationId() =
+        runTest {
+            val otherId = dmBufferId + (1L shl 60)
+            db.bufferDao().insert(
+                BufferEntity(id = otherId, networkId = networkId, name = "other-peer", displayName = "other-peer", type = BufferType.QUERY),
+            )
+            notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "first"))
+            assertAlerting(lane(null))
+            notifications.onIncoming(networkId, otherId, BufferType.QUERY, false, chat("other-peer", "other"))
+            assertAlerting(lane(null))
+            notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "burst"))
+            assertSilent(lane(null))
+        }
+
+    @Test
+    fun duplicateRecoveryAndFilteredBodies_doNotExtendQuietWindow() =
+        runTest {
+            val processor = EventProcessor(db, TypingTrackerImpl(), notifications)
+            processor.onRegistered(networkId, "me", emptyMap())
+            val first = chat("alert-peer", "first", "nonextending-first")
+            processor.process(networkId, first)
+            val firstPosted = lane(null)
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(20))
+            processor.process(networkId, first)
+            val event = requireNotNull(db.messageDao().byMsgid(dmBufferId, "nonextending-first"))
+            notifications.onCanonicalIncoming(networkId, dmBufferId, BufferType.QUERY, false, event.id, first, watched = false, refreshOnly = true)
+            assertSame(firstPosted, lane(null))
+            notifications.onCanonicalIncoming(networkId, dmBufferId, BufferType.QUERY, false, event.id, first, watched = false, refreshOnly = false)
+            assertSilent(lane(null))
+            val interrupted = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier)
+            interrupted.onRegistered(networkId, "me", emptyMap())
+            interrupted.process(networkId, chat("alert-peer", "recovered", "nonextending-recovered", 1_500))
+            notifications.recoverCanonicalNotifications()
+            assertSilent(lane(null))
+            repo.setFool("alert-fool", true)
+            val filtered = chat("alert-peer", "filtered", "filtered", 2_000)
+            processor.process(networkId, filtered.copy(ctx = filtered.ctx.copy(account = "alert-fool")))
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(10))
+            processor.process(networkId, chat("alert-peer", "rearmed", "nonextending-next", 3_000))
+            assertAlerting(lane(null))
+        }
+
+    @Test
+    @org.robolectric.annotation.Config(sdk = [33])
+    fun deniedPermission_doesNotConsumeOrExtendQuietWindow() =
+        runTest {
+            val app = shadowOf(context as android.app.Application)
+            app.denyPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+            notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "denied first"))
+            app.grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+            notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "allowed first"))
+            assertAlerting(lane(null))
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(20))
+            app.denyPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+            notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "denied burst"))
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(10))
+            app.grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+            notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "rearmed"))
+            assertAlerting(lane(null))
+        }
+
+    @Test
+    fun readDismissalAndNotifierRecreation_preserveWindowButRebootResetsIt() =
+        runTest {
+            var processor = EventProcessor(db, TypingTrackerImpl(), notifications)
+            processor.onRegistered(networkId, "me", emptyMap())
+            processor.process(networkId, chat("alert-peer", "first", "lifecycle-first"))
+            val first = requireNotNull(db.messageDao().byMsgid(dmBufferId, "lifecycle-first"))
+            notifications.onRead(dmBufferId, TimelineAnchor(first.serverTime, first.id, first.timelineOrder))
+            context.getSystemService(android.app.NotificationManager::class.java).cancelAll()
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(10))
+            processor.process(networkId, chat("alert-peer", "after read", "lifecycle-read", 1_500))
+            assertSilent(lane(null))
+            context.getSystemService(android.app.NotificationManager::class.java).cancelAll()
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            processor = EventProcessor(db, TypingTrackerImpl(), notifications)
+            processor.onRegistered(networkId, "me", emptyMap())
+            processor.process(networkId, chat("alert-peer", "after restart", "lifecycle-next", 2_000))
+            assertSilent(lane(null))
+            Settings.Global.putInt(context.contentResolver, Settings.Global.BOOT_COUNT, 11)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "after reboot", "lifecycle-reboot", 3_000))
+            assertAlerting(lane(null))
+        }
+
+    @Test
+    fun roomMerge_carriesNewestWindowAndRemovesLoserAcrossRecreation() =
+        runTest {
+            val loserId =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = networkId, name = "loser", displayName = "loser", type = BufferType.QUERY),
+                )
+            notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "winner"))
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(20))
+            notifications.onIncoming(networkId, loserId, BufferType.QUERY, false, chat("loser", "latest"))
+            notifications.onRoomsMerged(dmBufferId, loserId)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(10))
+            notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "merged"))
+            assertSilent(postedNotifications().single { it.id == MotdNotifications.messageNotificationId(dmBufferId) }.notification)
+            notifications.onIncoming(networkId, loserId, BufferType.QUERY, false, chat("loser", "new loser"))
+            assertAlerting(postedNotifications().single { it.id == MotdNotifications.messageNotificationId(loserId) }.notification)
+        }
+
+    @Test
+    fun unavailableBootIdentity_ignoresDiskButKeepsInMemoryWindow() =
+        runTest {
+            notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "persisted"))
+            Settings.Global.putString(context.contentResolver, Settings.Global.BOOT_COUNT, null)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "without boot"))
+            assertAlerting(lane(null))
+            notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "in memory"))
+            assertSilent(lane(null))
+        }
 
     private suspend fun mutedChannel(name: String = "#chan"): Long =
         db.bufferDao().insert(
@@ -851,17 +996,17 @@ class MotdNotificationsAlertingTest {
             assertAlerting(lane(null))
             processor.process(networkId, chat("alert-peer", "me: ping", "mention", 2_000).copy(target = "#chan"))
             val firstMention = lane("channel_mentions")
-            assertAlerting(firstMention)
+            assertSilent(firstMention)
             assertEquals(listOf("before"), bodies(lane(null)))
             processor.process(networkId, chat("alert-peer", "after", "after", 3_000).copy(target = "#chan"))
             assertSame(firstMention, lane("channel_mentions"))
-            assertAlerting(lane(null))
+            assertSilent(lane(null))
             assertEquals(listOf("before", "after"), bodies(lane(null)))
             val ordinary = lane(null)
             processor.process(networkId, chat("alert-peer", "me: again", "again", 4_000).copy(target = "#chan"))
             assertSame(ordinary, lane(null))
             assertEquals(listOf("me: ping", "me: again"), bodies(lane("channel_mentions")))
-            assertAlerting(lane("channel_mentions"))
+            assertSilent(lane("channel_mentions"))
             assertEquals(
                 setOf(null to MotdNotifications.messageNotificationId(channelId), "channel_mentions" to MotdNotifications.messageNotificationId(channelId)),
                 postedNotifications().map { it.tag to it.id }.toSet(),
@@ -928,7 +1073,7 @@ class MotdNotificationsAlertingTest {
         assertEquals(listOf("later ordinary"), bodies(lane(null)))
         assertEquals(listOf(historical.text), bodies(lane("channel_mentions")))
         assertSilent(lane(null))
-        assertAlerting(lane("channel_mentions"))
+        assertSilent(lane("channel_mentions"))
         assertLaneAnchor(lane(null), later)
         assertLaneAnchor(lane("channel_mentions"), promoted)
         assertEquals(true, promoted.hasMention)
@@ -1326,7 +1471,7 @@ class MotdNotificationsAlertingTest {
         assertEquals(listOf("me: normal", "me: latest"), bodies(updated))
         val latest = requireNotNull(db.messageDao().byMsgid(channelId, "latest"))
         assertLaneAnchor(updated, latest)
-        assertAlerting(updated)
+        assertSilent(updated)
         assertEquals(
             listOf(requireNotNull(db.messageDao().byMsgid(channelId, "normal")).id, latest.id),
             updated.extras.getLongArray("motd.notificationEventIds")?.toList(),
@@ -1368,7 +1513,7 @@ class MotdNotificationsAlertingTest {
 
         assertEquals(listOf("new normal DM"), bodies(lane(null)))
         assertLaneAnchor(lane(null), requireNotNull(db.messageDao().byMsgid(dmBufferId, "identity-third")))
-        assertAlerting(lane(null))
+        assertSilent(lane(null))
     }
 
     @Test

@@ -6,11 +6,14 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
+import androidx.core.content.edit
 import androidx.core.net.toUri
 import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -52,6 +55,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
+import android.provider.Settings as AndroidSettings
 
 /**
  * Final notification suppression decision. Pure and unit-tested.
@@ -97,6 +101,53 @@ class MotdNotifications
         private val history = HashMap<NotificationThreadKey, NotificationCompat.MessagingStyle>()
         private val historyKeys = HashMap<NotificationThreadKey, MutableList<NotificationMessageKey>>()
         private val dickordBatches = HashMap<NotificationThreadKey, Boolean>()
+        private val alertWindowPrefs by lazy { context.getSharedPreferences("notification_alert_windows", Context.MODE_PRIVATE) }
+        private val alertWindowBoot by lazy {
+            runCatching { AndroidSettings.Global.getInt(context.contentResolver, AndroidSettings.Global.BOOT_COUNT) }.getOrNull()
+        }
+        private val lastEligiblePost by lazy {
+            val boot = alertWindowBoot
+            val prefs = alertWindowPrefs
+            val stored = prefs.all
+            val times = HashMap<Long, Long>()
+            if (boot != null && stored["boot"] == boot) {
+                stored.forEach { (key, value) ->
+                    key.removePrefix("buffer:").toLongOrNull()?.let { id ->
+                        if (key.startsWith("buffer:") && value is Long) times[id] = value
+                    }
+                }
+            } else {
+                prefs.edit {
+                    clear()
+                    if (boot != null) putInt("boot", boot)
+                }
+            }
+            times
+        }
+
+        private fun pruneAlertWindows(now: Long) {
+            var editor: SharedPreferences.Editor? = null
+            val iterator = lastEligiblePost.iterator()
+            while (iterator.hasNext()) {
+                val (bufferId, time) = iterator.next()
+                if (time > now || now - time >= ALERT_QUIET_WINDOW_MS) {
+                    iterator.remove()
+                    if (alertWindowBoot != null) {
+                        if (editor == null) editor = alertWindowPrefs.edit()
+                        editor.remove("buffer:$bufferId")
+                    }
+                }
+            }
+            editor?.apply()
+        }
+
+        private fun recordEligiblePost(
+            bufferId: Long,
+            now: Long,
+        ) {
+            lastEligiblePost[bufferId] = now
+            if (alertWindowBoot != null) alertWindowPrefs.edit { putLong("buffer:$bufferId", now) }
+        }
 
         // Guarded by history; no presentation lock may span a Room read inside playback's transaction.
         private var historyRevision = 0L
@@ -570,9 +621,14 @@ class MotdNotifications
                         ?.toLongArray()
                 val latestAnchor = resolveLatestNotificationAnchor(db, bufferId, notificationEventIds.toList())
                 val latestEvent = latestAnchor?.let { db.messageDao().byCanonicalId(it.eventId) }
+                var requestedAlert = false
                 val canPost =
                     synchronized(history) {
                         if (historyRevision != revision) return@synchronized null
+                        val eligibleNewBody = firstPresentation && addedNewBody
+                        val now = SystemClock.elapsedRealtime()
+                        if (eligibleNewBody) pruneAlertWindows(now)
+                        requestedAlert = eligibleNewBody && lastEligiblePost[bufferId] == null
                         // FLAG_UPDATE_CURRENT mutates already-posted action anchors, so build only
                         // after validation and commit both lanes without another presentation interleaving.
                         val notification =
@@ -585,7 +641,7 @@ class MotdNotifications
                                 if (latestEvent != null) latestEvent.msgid else message.ctx.msgid,
                                 latestAnchor?.serverTime ?: canonicalEventTime,
                                 latestAnchor?.eventId ?: canonicalEventId,
-                                silent = !(firstPresentation && addedNewBody),
+                                silent = !requestedAlert,
                             )
                         val ordinaryNotification =
                             promotedOrdinary?.takeIf { it.keys.isNotEmpty() }?.let { staged ->
@@ -622,7 +678,9 @@ class MotdNotifications
                                 postMessageNotification(ordinary, ordinaryNotification)
                             }
                         }
-                        postMessageNotification(thread, notification)
+                        postMessageNotification(thread, notification).also { posted ->
+                            if (posted && eligibleNewBody) recordEligiblePost(bufferId, SystemClock.elapsedRealtime())
+                        }
                     } ?: continue
                 diagnostics.record("notifications", "message_post_finished") {
                     mapOf(
@@ -630,7 +688,7 @@ class MotdNotifications
                         "msgid_fp" to diagnostics.fingerprint(message.ctx.msgid),
                         "body_fp" to diagnostics.fingerprint(message.text),
                         "permission" to canPost,
-                        "alerted" to (firstPresentation && addedNewBody),
+                        "alerted" to (canPost && requestedAlert),
                     )
                 }
                 return
@@ -965,6 +1023,13 @@ class MotdNotifications
         ) {
             synchronized(history) {
                 historyRevision++
+                pruneAlertWindows(SystemClock.elapsedRealtime())
+                val loserTime = lastEligiblePost.remove(loserId)
+                val winnerTime = lastEligiblePost[winnerId]
+                if (loserTime != null && (winnerTime == null || loserTime > winnerTime)) {
+                    recordEligiblePost(winnerId, loserTime)
+                }
+                if (alertWindowBoot != null) alertWindowPrefs.edit { remove("buffer:$loserId") }
                 for (thread in listOf(NotificationThreadKey(loserId, false), NotificationThreadKey(loserId, true))) {
                     history.remove(thread)
                     historyKeys.remove(thread)
@@ -1260,6 +1325,7 @@ class MotdNotifications
             const val CHANNEL_SEND_FAILURES = "send_failures"
             private const val CHANNEL_MENTION_TAG = "channel_mentions"
             private const val MAX_NOTIFICATION_MESSAGES = 25
+            private const val ALERT_QUIET_WINDOW_MS = 30_000L
             private val MESSAGE_CHANNELS = setOf(CHANNEL_MESSAGES, CHANNEL_MENTIONS)
             private val RESETTABLE_CHANNELS =
                 setOf(

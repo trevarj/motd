@@ -637,6 +637,17 @@ flowchart TD
   A shared history revision rejects stale staging; one short synchronous commit validates it before
   constructing PendingIntents, publishing both lane histories and posting/canceling Android rows.
   Read clears and room retirement advance the same revision and cancel within their commit.
+  Socket and push message alerts share a fixed 30-second sliding quiet window per full buffer ID,
+  across ordinary/mention lanes. Only successfully posted eligible new bodies advance it; duplicate,
+  refresh, recovery and suppressed/permission-denied posts do not. New burst bodies remain in the
+  notification silently; a gap of at least 30 seconds re-arms the channel-governed alert request.
+  Read/dismissal preserves the window; room merges retain the newest valid winner/loser timestamp.
+  The history lock guards monotonic elapsed-realtime metadata, persisted in private native
+  SharedPreferences scoped to Settings.Global.BOOT_COUNT and pruned on eligible posts/merges.
+  Normal process recreation restores recent windows; reboot invalidates them. If boot identity
+  is unavailable, persisted windows are ignored and only the notifier's in-memory map is used.
+  Native asynchronous persistence is not atomic with Android posting; channel/DND settings still
+  govern actual sound/vibration.
   Android Auto support is notification-only in the same Google-free APK: DMs and channel
   mentions expose no-UI semantic reply/mark-read actions. Ordinary `ALL`/watch channel
   messages use disjoint local-only rows; body histories and canonical read/open anchors
