@@ -523,6 +523,16 @@ flowchart TD
 - IRC TCP/TLS uses okio over `Socket`/`SSLSocket`. App-side WebSocket transport
   uses the pinned OkHttp dependency. Link metadata and attachment uploads retain
   their `HttpURLConnection`-based streaming implementations.
+- Hosted uploads and outgoing DCC prepare byte-sniffed, size-bounded private copies
+  before opening a connection or advertising an offer. Images retain compressed
+  pixels and animation with only required presentation metadata; native AV remuxing
+  copies allowlisted track fields, and Ogg processing removes vendor/user comments.
+  Sanitized names and actual sizes flow through transport and history. Unsupported
+  originals require per-attempt consent; malformed supported media never falls back.
+  Consent retains the matching file/network through screen recreation, not a global
+  preference. Voice plaintext is sanitized before encryption. Temporary files have
+  explicit success/error/cancellation ownership, with bounded buffers rather than
+  bitmap decoding, transcoding or whole-file in-memory copies.
 - Network-owned images, avatars, icons, video, and image Save use `NetworkMediaHttp`
   with `routeForNetwork`, native OkHttp/Coil caching scoped by network, and Media3's
   OkHttp adapter for streaming/range requests. The route lease lasts through

@@ -50,6 +50,30 @@ The editable size limit is enforced by the app, not a verified service capacity.
 File upload → Recents → Clear history confirms before removing local upload records
 and saved deletion tokens. Hosted files and active uploads are unaffected.
 
+## Upload privacy
+
+File uploads and outgoing DCC transfers remove private metadata from supported
+media before sending anything. This also covers camera captures, shared files
+and voice recordings, including plaintext before voice encryption. Originals
+are not modified; sanitized files use a generated filename.
+
+JPEG, PNG/APNG, GIF and WebP processing preserves compressed image content,
+orientation and animation. Supported MP4/M4A/3GP and WebM audio/video is remuxed,
+not re-encoded; single-stream Ogg Opus/Vorbis comments are removed. Presentation
+data such as orientation, color parameters and playback timing is retained.
+
+Unsupported files require **Send original** confirmation for that attempt only.
+This includes PDFs, Office documents, archives, images with embedded ICC profiles
+or unsupported HDR data, and unsupported media codecs or subtitle tracks.
+Cancel sends nothing. Malformed supported files, read errors and size-limit
+failures stop the upload rather than falling back to original bytes.
+
+Processing uses bounded buffers and temporary private files, removed on completion,
+error or cancellation. Native media samples are capped at 4 MiB; Ogg comments at
+1 MiB. Device codec/container support can further limit remuxing. This removes
+supported file/container metadata, not identifying details visible or audible in
+the content, or arbitrary data hidden inside compressed samples.
+
 ## Chat navigation
 
 The drawer's Networks header shows total mentions, not total unread messages.

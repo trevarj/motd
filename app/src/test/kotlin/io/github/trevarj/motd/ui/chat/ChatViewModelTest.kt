@@ -191,6 +191,7 @@ class ChatViewModelTest {
             settings: SettingsRepository = FakeSettingsRepository(),
             messages: MessageRepository? = null,
             scrollPositions: ChatScrollPositionStore = ChatScrollPositionStore(),
+            dccTransfers: DccTransferController = FakeDccTransferController(),
         ): ChatViewModel {
             val foreground = FakeForegroundBufferTracker()
             val processor = EventProcessor(db, TypingTrackerImpl(), io.github.trevarj.motd.data.sync.MessageNotifier.Noop)
@@ -209,7 +210,7 @@ class ChatViewModelTest {
                 networkDao = db.networkDao(),
                 networkIdentityDao = db.networkIdentityDao(),
                 dccTransferDao = db.dccTransferDao(),
-                dccTransferController = FakeDccTransferController(),
+                dccTransferController = dccTransfers,
                 connectionManager =
                     FakeConnectionManager(
                         buffer.networkId,
@@ -327,6 +328,70 @@ class ChatViewModelTest {
         db.close()
         Dispatchers.resetMain()
     }
+
+    @Test
+    fun dccOriginalConsentIsBoundToOneAttemptAndNeverOfferedForOtherFailures() =
+        runTest(dispatcher) {
+            val calls = mutableListOf<Triple<Long, Uri, Boolean>>()
+            var failure: Exception? =
+                io.github.trevarj.motd.attachment
+                    .MetadataNotSupportedException()
+            val controller =
+                FakeDccTransferController { bufferId, uri, allowOriginal ->
+                    calls += Triple(bufferId, uri, allowOriginal)
+                    failure?.let { throw it }
+                }
+            val vm = externalTranslationFixture(db, query, backgroundScope, dccTransfers = controller)
+            val first = Uri.parse("content://files/first")
+            val second = Uri.parse("content://files/second")
+            try {
+                vm.sendDccFile(first)
+                runCurrent()
+                val consent = requireNotNull(vm.dccSendFailure.value)
+                assertTrue(consent.canSendOriginal)
+                failure = null
+                vm.sendDccOriginal(consent)
+                vm.sendDccOriginal(consent)
+                runCurrent()
+                assertEquals(listOf(Triple(query.id, first, false), Triple(query.id, first, true)), calls)
+                assertNull(vm.dccSendFailure.value)
+
+                failure =
+                    io.github.trevarj.motd.attachment
+                        .MetadataNotSupportedException()
+                vm.sendDccFile(second)
+                runCurrent()
+                val nextConsent = requireNotNull(vm.dccSendFailure.value)
+                vm.sendDccOriginal(consent)
+                runCurrent()
+                assertEquals(3, calls.size)
+                assertEquals(Triple(query.id, second, false), calls.last())
+                assertSame(nextConsent, vm.dccSendFailure.value)
+
+                failure = IllegalStateException("Cannot prepare file")
+                vm.sendDccOriginal(nextConsent)
+                runCurrent()
+                val error = requireNotNull(vm.dccSendFailure.value)
+                assertFalse(error.canSendOriginal)
+                vm.sendDccOriginal(error)
+                runCurrent()
+                assertEquals(4, calls.size)
+                vm.dismissDccSendFailure(error)
+                assertNull(vm.dccSendFailure.value)
+
+                vm.sendDccFile(first)
+                runCurrent()
+                assertFalse(requireNotNull(vm.dccSendFailure.value).canSendOriginal)
+                assertEquals(Triple(query.id, first, false), calls.last())
+
+                failure = CancellationException("Cancelled")
+                vm.sendDccFile(second)
+                runCurrent()
+                assertNull(vm.dccSendFailure.value)
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
 
     @Test
     fun forwardPayloadQuotesEveryPhysicalLineWithOptionalSender() {
@@ -7119,7 +7184,9 @@ class ChatViewModelTest {
         val emoji: String,
     )
 
-    private class FakeDccTransferController : DccTransferController {
+    private class FakeDccTransferController(
+        private val onSendFile: suspend (Long, Uri, Boolean) -> Unit = { _, _, _ -> },
+    ) : DccTransferController {
         override fun observeAll(): Flow<List<DccTransferEntity>> = flowOf(emptyList())
 
         override fun observeForNetwork(networkId: Long): Flow<List<DccTransferEntity>> = flowOf(emptyList())
@@ -7140,7 +7207,8 @@ class ChatViewModelTest {
             bufferId: Long,
             sourceUri: Uri,
             secure: Boolean,
-        ) = Unit
+            allowOriginalMetadata: Boolean,
+        ) = onSendFile(bufferId, sourceUri, allowOriginalMetadata)
     }
 
     private class FakeConnectionManager(

@@ -460,6 +460,7 @@ fun ChatScreen(
     val externalTranslationInFlight by viewModel.externalTranslationInFlight.collectAsStateWithLifecycle()
     val forwardState by viewModel.forwardState.collectAsStateWithLifecycle()
     val forwardTargets by viewModel.forwardTargets.collectAsStateWithLifecycle()
+    val dccSendFailure by viewModel.dccSendFailure.collectAsStateWithLifecycle()
     // The visit owns the lease; the root host owns native items and viewport across its disposal.
     // A pending descriptor is not an empty PagingData and must never reset a retained viewport.
     val pagingGeneration by androidx.compose.runtime.produceState<ChatPagingGeneration?>(null, viewModel, pageCache) {
@@ -884,6 +885,42 @@ fun ChatScreen(
     )
     if (managingAiStyles && aiTextState is AiTextUiState.Choosing) {
         AiCustomStylesSheet(aiLabsState.customStyles, aiTextViewModel::upsertCustomStyle, aiTextViewModel::deleteCustomStyle, { managingAiStyles = false })
+    }
+
+    dccSendFailure?.let { failure ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissDccSendFailure(failure) },
+            title = { Text(if (failure.canSendOriginal) "Send original file?" else "Could not send file") },
+            text = {
+                Text(
+                    if (failure.canSendOriginal) {
+                        "Metadata cannot be removed from this file. Sending the original may expose location, author, or other private information."
+                    } else {
+                        "The file could not be prepared or sent. Please try again."
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (failure.canSendOriginal) {
+                            viewModel.sendDccOriginal(failure)
+                        } else {
+                            viewModel.dismissDccSendFailure(failure)
+                        }
+                    },
+                ) {
+                    Text(if (failure.canSendOriginal) "Send original" else "OK")
+                }
+            },
+            dismissButton = {
+                if (failure.canSendOriginal) {
+                    TextButton(onClick = { viewModel.dismissDccSendFailure(failure) }) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
+                }
+            },
+        )
     }
 
     contextPreparation?.let { result ->

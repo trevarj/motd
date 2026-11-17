@@ -7,6 +7,7 @@ import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
 import io.github.trevarj.motd.attachment.AttachmentUploader
+import io.github.trevarj.motd.attachment.MetadataNotSupportedException
 import io.github.trevarj.motd.attachment.OffHostUploadException
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.UploadProgress
@@ -24,6 +25,14 @@ import javax.inject.Inject
 data class AttachmentError(
     val message: String,
     val offHostNetworkId: Long? = null,
+    val metadataNotSupported: Boolean = false,
+)
+
+data class AttachmentAttempt(
+    val source: AttachmentSource,
+    val config: PasteBackendConfig,
+    val context: AttachmentUploadContext,
+    val replaceDraft: Boolean,
 )
 
 @HiltViewModel
@@ -39,16 +48,21 @@ class AttachmentViewModel
         val progress: StateFlow<UploadProgress?> = _progress.asStateFlow()
         private val _error = MutableStateFlow<AttachmentError?>(null)
         val error: StateFlow<AttachmentError?> = _error.asStateFlow()
+        private val _attempt = MutableStateFlow<AttachmentAttempt?>(null)
+        val attempt: StateFlow<AttachmentAttempt?> = _attempt.asStateFlow()
         private var job: Job? = null
 
         fun upload(
             source: AttachmentSource,
             override: PasteBackendConfig = config.value,
             context: AttachmentUploadContext = AttachmentUploadContext(),
+            replaceDraft: Boolean = false,
             onComplete: (UploadRecord) -> Unit,
         ) {
             job?.cancel()
             _error.value = null
+            _attempt.value = AttachmentAttempt(source, override, context.copy(allowOriginalMetadata = false), replaceDraft)
+            _progress.value = UploadProgress.Transferring(0, null)
             job =
                 viewModelScope.launch {
                     try {
@@ -56,6 +70,7 @@ class AttachmentViewModel
                             _progress.value = update
                             if (update is UploadProgress.Complete) {
                                 prefs.addUpload(update.record)
+                                _attempt.value = null
                                 onComplete(update.record)
                             }
                         }
@@ -66,6 +81,7 @@ class AttachmentViewModel
                             AttachmentError(
                                 failure.message ?: "Upload failed",
                                 (failure as? OffHostUploadException)?.networkId,
+                                failure is MetadataNotSupportedException,
                             )
                     } finally {
                         _progress.value = null
@@ -74,16 +90,22 @@ class AttachmentViewModel
         }
 
         fun fail(message: String) {
+            _attempt.value = null
             _error.value = AttachmentError(message)
         }
 
         fun cancel() {
             job?.cancel()
             _progress.value = null
+            _attempt.value = null
         }
 
         fun clearError() {
             _error.value = null
+        }
+
+        fun clearAttempt(expected: AttachmentAttempt? = _attempt.value) {
+            if (_attempt.value === expected) _attempt.value = null
         }
 
         fun clearHistory() =

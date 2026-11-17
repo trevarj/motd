@@ -6,6 +6,8 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.core.net.toUri
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.attachment.AttachmentSource
+import io.github.trevarj.motd.attachment.UploadMetadataSanitizer
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.DccDirection
 import io.github.trevarj.motd.data.db.DccTransferDao
@@ -69,6 +71,7 @@ interface DccTransferController {
         bufferId: Long,
         sourceUri: Uri,
         secure: Boolean = false,
+        allowOriginalMetadata: Boolean = false,
     )
 }
 
@@ -81,6 +84,7 @@ class DccTransferControllerImpl
         private val connectionManager: ConnectionManager,
         private val localSocksProvider: LocalSocksProvider,
         @param:ApplicationScope private val applicationScope: CoroutineScope,
+        private val metadataSanitizer: UploadMetadataSanitizer,
     ) : DccTransferController {
         private val transfers: DccTransferDao get() = db.dccTransferDao()
         private val resultCache = EbooksResultCache(context)
@@ -179,54 +183,68 @@ class DccTransferControllerImpl
             bufferId: Long,
             sourceUri: Uri,
             secure: Boolean,
+            allowOriginalMetadata: Boolean,
         ) {
             val buffer = db.bufferDao().observeById(bufferId) ?: return
             if (buffer.type != BufferType.QUERY) return
             val endpointNetwork = effectiveNetworkFor(buffer.networkId) ?: return
             val meta = queryMeta(sourceUri)
-            val filename = sanitizeDccDisplayFilename(meta.name)
-            val now = System.currentTimeMillis()
-            val token =
-                UUID
-                    .randomUUID()
-                    .toString()
-                    .replace("-", "")
-                    .take(16)
-            val id =
-                transfers.insertIgnore(
-                    DccTransferEntity(
-                        networkId = buffer.networkId,
-                        timelineEventId = null,
-                        offerKey = "dcc:outgoing:$token",
-                        direction = DccDirection.OUTGOING,
-                        protocol = DccTransferProtocol.SEND,
-                        peerNick = buffer.displayName,
-                        normalizedPeer = buffer.name,
-                        filename = filename,
-                        displayFilename = filename,
-                        address = "0",
-                        addressKind = io.github.trevarj.motd.data.db.DccAddressKind.IPV4_INTEGER,
-                        port = 0,
-                        sizeBytes = meta.sizeBytes,
-                        token = token,
-                        state = DccTransferState.ACCEPTING,
-                        createdAt = now,
-                        expiresAt = now + OUTGOING_OFFER_TIMEOUT_MS,
-                        acceptedAt = now,
-                        updatedAt = now,
-                    ),
+            val prepared =
+                metadataSanitizer.prepare(
+                    AttachmentSource.Document(sourceUri, meta.name, context.contentResolver.getType(sourceUri), meta.sizeBytes),
+                    MAX_DCC_FILE_SIZE_BYTES,
+                    allowOriginalMetadata,
                 )
-            if (id <= 0) return
-            launchTransfer(id) {
-                // Outgoing SSEND needs a user-manageable TLS server identity. Until that UX exists,
-                // outgoing offers are plaintext SEND; incoming SSEND remains supported as a client.
-                sendOutgoing(
-                    transferId = id,
-                    endpointNetwork = endpointNetwork,
-                    clientNetworkId = buffer.networkId,
-                    peerTarget = buffer.ircTarget,
-                    sourceUri = sourceUri,
-                )
+            var handedOff = false
+            try {
+                val source = prepared.source as AttachmentSource.LocalFile
+                val filename = sanitizeDccDisplayFilename(source.name)
+                val now = System.currentTimeMillis()
+                val token =
+                    UUID
+                        .randomUUID()
+                        .toString()
+                        .replace("-", "")
+                        .take(16)
+                val id =
+                    transfers.insertIgnore(
+                        DccTransferEntity(
+                            networkId = buffer.networkId,
+                            timelineEventId = null,
+                            offerKey = "dcc:outgoing:$token",
+                            direction = DccDirection.OUTGOING,
+                            protocol = DccTransferProtocol.SEND,
+                            peerNick = buffer.displayName,
+                            normalizedPeer = buffer.name,
+                            filename = filename,
+                            displayFilename = filename,
+                            address = "0",
+                            addressKind = io.github.trevarj.motd.data.db.DccAddressKind.IPV4_INTEGER,
+                            port = 0,
+                            sizeBytes = source.size,
+                            token = token,
+                            state = DccTransferState.ACCEPTING,
+                            createdAt = now,
+                            expiresAt = now + OUTGOING_OFFER_TIMEOUT_MS,
+                            acceptedAt = now,
+                            updatedAt = now,
+                        ),
+                    )
+                if (id <= 0) return
+                withContext(NonCancellable) {
+                    launchTransfer(id, onComplete = { prepared.close() }) {
+                        sendOutgoing(
+                            transferId = id,
+                            endpointNetwork = endpointNetwork,
+                            clientNetworkId = buffer.networkId,
+                            peerTarget = buffer.ircTarget,
+                            sourceUri = source.file.toUri(),
+                        )
+                    }
+                    handedOff = true
+                }
+            } finally {
+                if (!handedOff) prepared.close()
             }
         }
 
@@ -452,10 +470,12 @@ class DccTransferControllerImpl
 
         private suspend fun launchTransfer(
             transferId: Long,
+            onComplete: (() -> Unit)? = null,
             block: suspend () -> Unit,
         ) {
             cancelJob(transferId)
             val job = applicationScope.launch { block() }
+            onComplete?.let { cleanup -> job.invokeOnCompletion { cleanup() } }
             jobLock.withLock { jobs[transferId] = job }
         }
 

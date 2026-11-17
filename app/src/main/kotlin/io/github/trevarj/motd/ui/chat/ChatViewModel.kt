@@ -11,6 +11,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.agentwire.AgentwirePrefs
 import io.github.trevarj.motd.agentwire.prepareAgentwireContext
 import io.github.trevarj.motd.ai.isValidAiText
+import io.github.trevarj.motd.attachment.MetadataNotSupportedException
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioMetadataRepository
@@ -2026,9 +2027,52 @@ class ChatViewModel
             dccTransferController.saveToDownloads(transferId)
         }
 
+        internal data class DccSendFailure(
+            val attemptId: Long,
+            val bufferId: Long,
+            val source: Uri,
+            val canSendOriginal: Boolean,
+        )
+
+        private var dccSendAttemptId = 0L
+        private val _dccSendFailure = MutableStateFlow<DccSendFailure?>(null)
+        internal val dccSendFailure: StateFlow<DccSendFailure?> = _dccSendFailure.asStateFlow()
+
         fun sendDccFile(source: Uri) {
+            val request = DccSendFailure(++dccSendAttemptId, operationalBufferId.value, source, false)
+            _dccSendFailure.value = null
+            launchDccSend(request, allowOriginalMetadata = false)
+        }
+
+        internal fun dismissDccSendFailure(failure: DccSendFailure) {
+            _dccSendFailure.compareAndSet(failure, null)
+        }
+
+        internal fun sendDccOriginal(failure: DccSendFailure) {
+            if (!failure.canSendOriginal || failure.attemptId != dccSendAttemptId) return
+            if (!_dccSendFailure.compareAndSet(failure, null)) return
+            launchDccSend(failure, allowOriginalMetadata = true)
+        }
+
+        private fun launchDccSend(
+            request: DccSendFailure,
+            allowOriginalMetadata: Boolean,
+        ) {
             viewModelScope.launch {
-                dccTransferController.sendFile(operationalBufferId.value, source)
+                try {
+                    dccTransferController.sendFile(
+                        request.bufferId,
+                        request.source,
+                        allowOriginalMetadata = allowOriginalMetadata,
+                    )
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    if (request.attemptId == dccSendAttemptId) {
+                        _dccSendFailure.value =
+                            request.copy(canSendOriginal = !allowOriginalMetadata && failure is MetadataNotSupportedException)
+                    }
+                }
             }
         }
 

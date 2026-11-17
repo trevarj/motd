@@ -2595,4 +2595,7 @@
     <string name="read_aloud_gap_name">Gap after completion</string>
     <string name="read_aloud_gap_value">%1$d ms</string>
     <string name="agentwire_collaboration_standard">Standard collaboration</string>
+    <string name="upload_metadata_warning_title">Send original file?</string>
+    <string name="upload_metadata_warning_body">Metadata removal is not supported for this file. The original may include private information such as location, author or device details.</string>
+    <string name="upload_send_original">Send original</string>
 </resources>

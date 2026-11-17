@@ -152,6 +152,7 @@ class SojuFileHostBindingTest {
                 ApplicationProvider.getApplicationContext<Context>(),
                 FakeConnectionManager(IrcClientState.Ready("me", emptySet(), isupport)),
                 MediaRouteResolver { id -> route(id, networkHost, vlessHost, trustedFileHost, role) },
+                UploadMetadataSanitizer(ApplicationProvider.getApplicationContext<Context>()),
             )
         uploader
             .upload(

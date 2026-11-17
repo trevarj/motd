@@ -71,6 +71,7 @@ class AttachmentUploaderImpl
         // The narrow seam rather than the provider itself, so the file-host binding below is testable
         // without standing up Room.
         private val routeProvider: MediaRouteResolver,
+        private val metadataSanitizer: UploadMetadataSanitizer,
     ) : AttachmentUploader {
         private val resolver: ContentResolver = context.contentResolver
 
@@ -87,38 +88,41 @@ class AttachmentUploaderImpl
                 val knownSize = source.sizeOrNull()
                 if (knownSize != null && knownSize > safe.sizeLimitBytes) throw UploadException("File exceeds the configured upload limit")
                 require(safe.backend.supports(source)) { "${safe.backend.label} does not support this attachment type" }
-                val progress: suspend (Long, Long?) -> Unit = { sent, total ->
-                    emit(UploadProgress.Transferring(sent, total))
-                }
-                when (safe.protocol) {
-                    PasteProtocol.TERMBIN -> {
-                        emit(uploadTermbin(source as AttachmentSource.Text, safe))
+                metadataSanitizer.prepare(source, safe.sizeLimitBytes, context.allowOriginalMetadata).use { prepared ->
+                    val sanitized = prepared.source
+                    val progress: suspend (Long, Long?) -> Unit = { sent, total ->
+                        emit(UploadProgress.Transferring(sent, total))
                     }
+                    when (safe.protocol) {
+                        PasteProtocol.TERMBIN -> {
+                            emit(uploadTermbin(sanitized as AttachmentSource.Text, safe))
+                        }
 
-                    PasteProtocol.MULTIPART_0X0 -> {
-                        emit(
-                            if (safe.backend == AttachmentBackend.CUSTOM_0X0) {
-                                uploadCustom(source, safe, progress)
-                            } else {
-                                upload0x0(source, safe, progress)
-                            },
-                        )
-                    }
+                        PasteProtocol.MULTIPART_0X0 -> {
+                            emit(
+                                if (safe.backend == AttachmentBackend.CUSTOM_0X0) {
+                                    uploadCustom(sanitized, safe, progress)
+                                } else {
+                                    upload0x0(sanitized, safe, progress)
+                                },
+                            )
+                        }
 
-                    PasteProtocol.RAW_CNET -> {
-                        emit(uploadCNet(source, safe, progress))
-                    }
+                        PasteProtocol.RAW_CNET -> {
+                            emit(uploadCNet(sanitized, safe, progress))
+                        }
 
-                    PasteProtocol.MULTIPART_UGUU -> {
-                        emit(uploadUguu(source, safe, progress))
-                    }
+                        PasteProtocol.MULTIPART_UGUU -> {
+                            emit(uploadUguu(sanitized, safe, progress))
+                        }
 
-                    PasteProtocol.MULTIPART_CATBOX -> {
-                        emit(uploadCatbox(source, safe, progress))
-                    }
+                        PasteProtocol.MULTIPART_CATBOX -> {
+                            emit(uploadCatbox(sanitized, safe, progress))
+                        }
 
-                    PasteProtocol.SOJU_FILEHOST -> {
-                        emit(uploadSojuFileHost(source, safe, context, progress))
+                        PasteProtocol.SOJU_FILEHOST -> {
+                            emit(uploadSojuFileHost(sanitized, safe, context, progress))
+                        }
                     }
                 }
             }.flowOn(Dispatchers.IO)

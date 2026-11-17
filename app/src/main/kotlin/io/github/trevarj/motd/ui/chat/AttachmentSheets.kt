@@ -214,7 +214,8 @@ fun AttachmentSheets(
     val error by viewModel.error.collectAsStateWithLifecycle()
     var flow by remember { mutableStateOf<AttachmentFlow>(AttachmentFlow.Idle) }
     var pasteText by remember { mutableStateOf("") }
-    var lastAttempt by remember { mutableStateOf<AttachmentFlow.Confirm?>(null) }
+    val attempt by viewModel.attempt.collectAsStateWithLifecycle()
+    val lastAttempt = attempt?.let { AttachmentFlow.Confirm(it.source, it.replaceDraft, it.config) }
     var capturePath by rememberSaveable { mutableStateOf<String?>(null) }
     var deleteTarget by remember { mutableStateOf<UploadRecord?>(null) }
     var backendPickerRequest by remember { mutableStateOf<AttachmentFlow.Confirm?>(null) }
@@ -298,7 +299,7 @@ fun AttachmentSheets(
         photo: Boolean,
     ) {
         if (!uri.isLocalMediaUri()) {
-            lastAttempt = null
+            viewModel.clearAttempt()
             flow = AttachmentFlow.Sources
             viewModel.fail(localMediaRequiredError)
             return
@@ -321,18 +322,21 @@ fun AttachmentSheets(
             preferSojuFileHost,
         )
 
-    fun startUpload(request: AttachmentFlow.Confirm) {
+    fun startUpload(
+        request: AttachmentFlow.Confirm,
+        allowOriginalMetadata: Boolean = false,
+        uploadContext: AttachmentUploadContext = AttachmentUploadContext(networkId),
+    ) {
         val config = uploadConfig(request)
-        lastAttempt = request.copy(config = config)
         flow = AttachmentFlow.Idle
         viewModel.upload(
             request.source,
             config,
-            AttachmentUploadContext(networkId),
+            uploadContext.copy(allowOriginalMetadata = allowOriginalMetadata),
+            replaceDraft = request.replaceDraft,
         ) { record ->
             if (request.replaceDraft) onReplaceDraft(record.url) else onInsertUrl(record.url)
             if (request.source.deleteCameraCapture()) capturePath = null
-            lastAttempt = null
             onDismiss()
         }
     }
@@ -505,8 +509,9 @@ fun AttachmentSheets(
         UploadProgressSheet(
             progress = update,
             onCancel = {
+                val request = lastAttempt
                 viewModel.cancel()
-                lastAttempt?.let { flow = it }
+                request?.let { flow = it }
             },
         )
     }
@@ -516,12 +521,25 @@ fun AttachmentSheets(
             onDismissRequest = {
                 viewModel.clearError()
                 lastAttempt?.let { flow = it }
+                viewModel.clearAttempt(attempt)
             },
             icon = { Icon(Icons.Outlined.CloudUpload, null) },
-            title = { Text(stringResource(R.string.upload_failed)) },
+            title = {
+                Text(
+                    if (failure.metadataNotSupported) {
+                        stringResource(R.string.upload_metadata_warning_title)
+                    } else {
+                        stringResource(R.string.upload_failed)
+                    },
+                )
+            },
             text = {
                 Column {
-                    Text(failure.message)
+                    if (failure.metadataNotSupported) {
+                        Text(stringResource(R.string.upload_metadata_warning_body))
+                    } else {
+                        Text(failure.message)
+                    }
                     failure.offHostNetworkId?.let { id ->
                         Spacer(Modifier.height(8.dp))
                         Text(stringResource(R.string.upload_soju_off_host_override))
@@ -538,12 +556,24 @@ fun AttachmentSheets(
             confirmButton = {
                 lastAttempt?.let { request ->
                     TextButton(onClick = {
+                        val retry = attempt ?: return@TextButton
+                        if (viewModel.attempt.value !== retry || viewModel.error.value !== failure) return@TextButton
                         viewModel.clearError()
-                        startUpload(request)
+                        startUpload(
+                            request,
+                            allowOriginalMetadata = failure.metadataNotSupported,
+                            uploadContext = retry.context,
+                        )
                     }) {
-                        Icon(Icons.Outlined.Refresh, null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.upload_retry))
+                        if (!failure.metadataNotSupported) {
+                            Icon(Icons.Outlined.Refresh, null)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text(
+                            stringResource(
+                                if (failure.metadataNotSupported) R.string.upload_send_original else R.string.upload_retry,
+                            ),
+                        )
                     }
                 } ?: TextButton(onClick = viewModel::clearError) { Text(stringResource(R.string.action_ok)) }
             },
@@ -553,7 +583,10 @@ fun AttachmentSheets(
                         TextButton(onClick = {
                             viewModel.clearError()
                             lastAttempt?.let { flow = it }
-                        }) { Text(stringResource(R.string.action_back)) }
+                            viewModel.clearAttempt(attempt)
+                        }) {
+                            Text(stringResource(if (failure.metadataNotSupported) R.string.action_cancel else R.string.action_back))
+                        }
                     }
                 } else {
                     null

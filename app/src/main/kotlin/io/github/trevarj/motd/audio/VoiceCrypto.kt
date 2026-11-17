@@ -42,26 +42,37 @@ class VoiceCrypto
     ) {
         private val random = SecureRandom()
 
-        fun encrypt(input: File): VoiceEncryptionResult {
-            val keyBytes = ByteArray(KEY_BYTES).also(random::nextBytes)
-            val nonce = ByteArray(NONCE_BYTES).also(random::nextBytes)
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(GCM_TAG_BITS, nonce))
-            cipher.updateAAD(AAD)
+        suspend fun encrypt(input: File): VoiceEncryptionResult {
             val output = cacheStore.tempFile("voice-encrypted-", ".motdvoice")
-            output.outputStream().use { out ->
-                out.write(MAGIC)
-                out.write(nonce)
-                input.inputStream().use { source ->
-                    javax.crypto.CipherOutputStream(out, cipher).use { encrypted ->
-                        source.copyTo(encrypted)
+            try {
+                return withContext(Dispatchers.IO) {
+                    val keyBytes = ByteArray(KEY_BYTES).also(random::nextBytes)
+                    val nonce = ByteArray(NONCE_BYTES).also(random::nextBytes)
+                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                    cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(GCM_TAG_BITS, nonce))
+                    cipher.updateAAD(AAD)
+                    output.outputStream().use { out ->
+                        out.write(MAGIC)
+                        out.write(nonce)
+                        input.inputStream().use { source ->
+                            javax.crypto.CipherOutputStream(out, cipher).use { encrypted ->
+                                val buffer = ByteArray(CRYPTO_BUFFER_BYTES)
+                                while (true) {
+                                    currentCoroutineContext().ensureActive()
+                                    val count = source.read(buffer)
+                                    if (count < 0) break
+                                    if (count > 0) encrypted.write(buffer, 0, count)
+                                }
+                            }
+                        }
                     }
+                    currentCoroutineContext().ensureActive()
+                    VoiceEncryptionResult(output, "motd-key=${B64.encodeToString(keyBytes)}")
                 }
+            } catch (failure: Throwable) {
+                output.delete()
+                throw failure
             }
-            return VoiceEncryptionResult(
-                file = output,
-                keyFragment = "motd-key=${B64.encodeToString(keyBytes)}",
-            )
         }
 
         suspend fun decrypt(

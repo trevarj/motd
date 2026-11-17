@@ -105,6 +105,7 @@ data class UploadRecord(
 
 data class AttachmentUploadContext(
     val networkId: Long? = null,
+    val allowOriginalMetadata: Boolean = false,
 )
 
 sealed interface UploadProgress {
