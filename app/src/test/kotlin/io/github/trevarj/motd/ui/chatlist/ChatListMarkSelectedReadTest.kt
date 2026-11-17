@@ -158,6 +158,10 @@ class ChatListMarkSelectedReadTest {
             settings.value = settings.value.copy(compactNickBrackets = value)
         }
 
+        override suspend fun setShowChannelPrefixes(enabled: Boolean) {
+            settings.value = settings.value.copy(showChannelPrefixes = enabled)
+        }
+
         override suspend fun setNickMentionStyle(value: io.github.trevarj.motd.data.prefs.NickMentionStyle) {
             settings.value = settings.value.copy(nickMentionStyle = value)
         }

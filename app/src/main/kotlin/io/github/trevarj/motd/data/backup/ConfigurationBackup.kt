@@ -648,6 +648,7 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setDeliveryMode(it.deliveryMode)
                 settingsRepository.setLayoutDensity(it.layoutDensity)
                 settingsRepository.setCompactNickBrackets(it.compactNickBrackets)
+                settingsRepository.setShowChannelPrefixes(it.showChannelPrefixes)
                 settingsRepository.setFolderDisplayMode(it.folderDisplayMode)
                 settingsRepository.setShowFolderChatsInAll(it.showFolderChatsInAll)
                 settingsRepository.setChatListSwipeAction(it.chatListSwipeAction)

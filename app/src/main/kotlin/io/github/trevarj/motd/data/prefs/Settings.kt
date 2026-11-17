@@ -298,6 +298,7 @@ data class Settings(
     // Round 4
     val layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
     val compactNickBrackets: CompactNickBrackets = CompactNickBrackets.ANGLE,
+    val showChannelPrefixes: Boolean = false,
     val nickColorsEnabled: Boolean = true,
     val nickColorPalette: NickColorPalette = NickColorPalette.THEME,
     val nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
@@ -390,6 +391,8 @@ interface SettingsRepository {
     suspend fun setLayoutDensity(d: LayoutDensity)
 
     suspend fun setCompactNickBrackets(value: CompactNickBrackets)
+
+    suspend fun setShowChannelPrefixes(enabled: Boolean)
 
     suspend fun setFolderDisplayMode(mode: FolderDisplayMode) {}
 

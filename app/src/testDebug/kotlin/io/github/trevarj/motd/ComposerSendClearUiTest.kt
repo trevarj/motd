@@ -520,6 +520,8 @@ class ComposerSendClearUiTest {
         composerStyle: () -> ComposerStyle = { ComposerStyle.COMFORTABLE },
         memberNicks: List<String> = emptyList(),
         knownNicks: Set<String> = emptySet(),
+        channelSenderPrefixes: () -> Map<String, Char> = { emptyMap() },
+        identityRules: IrcIdentityRules = IrcIdentityRules(),
         nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
         nickColorsEnabled: Boolean = true,
         contentHeight: () -> Dp? = { null },
@@ -536,6 +538,7 @@ class ComposerSendClearUiTest {
             val ownerDraft = chatViewModel?.composerDraft?.collectAsState()?.value
             val ownerTranslations = chatViewModel?.externalTranslations?.collectAsState()?.value
             val ownerInFlight = chatViewModel?.externalTranslationInFlight?.collectAsState()?.value
+            val ownerSenderPrefixes = chatViewModel?.channelSenderPrefixes?.collectAsState()?.value
             val forwardingOwner = chatViewModel.takeIf { forwardEnabled }
             val ownerForward = forwardingOwner?.forwardState?.collectAsState()?.value
             val ownerForwardTargets = forwardingOwner?.forwardTargets?.collectAsState()?.value
@@ -625,6 +628,8 @@ class ComposerSendClearUiTest {
                             collapseTitleBar = collapseTitleBar(),
                             memberNicks = memberNicks,
                             knownNicks = knownNicks,
+                            channelSenderPrefixes = ownerSenderPrefixes ?: channelSenderPrefixes(),
+                            identityRules = identityRules,
                             voiceState = voiceState(),
                             onViewportRefreshAnchor = onViewportRefreshAnchor,
                         )
@@ -632,6 +637,103 @@ class ComposerSendClearUiTest {
                     }
                 }
             }
+        }
+    }
+
+    @Test
+    fun comfortableSenderPrefixesToggleAndUpdateWithoutChangingClickIdentity() = assertLiveSenderPrefixes(LayoutDensity.COMFORTABLE)
+
+    @Test
+    fun compactSenderPrefixesToggleAndUpdateWithoutChangingClickIdentity() = assertLiveSenderPrefixes(LayoutDensity.COMPACT)
+
+    @Test
+    fun ircSenderPrefixesToggleAndUpdateWithoutChangingClickIdentity() = assertLiveSenderPrefixes(LayoutDensity.TWO_LINE)
+
+    private fun assertLiveSenderPrefixes(density: LayoutDensity) {
+        val rules = IrcIdentityRules()
+        val rows =
+            listOf(
+                translationMessage().copy(id = 801, serverTime = 500_000, sender = "Peer[", text = "Ordinary message", dedupKey = "prefix-peer"),
+                translationMessage().copy(id = 802, serverTime = 400_000, sender = "Peer[", kind = MessageKind.ACTION, text = "waves hello", dedupKey = "prefix-action"),
+                translationMessage().copy(id = 803, serverTime = 300_000, sender = "me", isSelf = true, text = "Own message", dedupKey = "prefix-self"),
+                translationMessage().copy(id = 804, serverTime = 200_000, sender = "me", isSelf = true, kind = MessageKind.ACTION, text = "waves back", dedupKey = "prefix-self-action"),
+                translationMessage().copy(id = 805, serverTime = 100_000, sender = "Unknown", text = "Not in the roster", dedupKey = "prefix-unknown"),
+            )
+        var prefixes by mutableStateOf<Map<String, Char>>(emptyMap())
+        val senderClicks = mutableListOf<String>()
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            pages = flowOf(PagingData.from(rows)),
+            layoutDensity = { density },
+            channelSenderPrefixes = { prefixes },
+            identityRules = rules,
+            onSenderClick = { senderClicks += it },
+            onSubmit = {},
+        )
+
+        fun senderNode(
+            row: MessageEntity,
+            label: String,
+        ) = compose.onNode(
+            hasText(label, substring = true) and hasAnyAncestor(hasTestTag(timelineMessageTag(row.msgid, row.id))),
+            useUnmergedTree = true,
+        )
+
+        fun assertLabels(prefix: Char?) {
+            for (row in rows) {
+                compose
+                    .onNodeWithTag("chat_timeline", useUnmergedTree = true)
+                    .performScrollToNode(hasTestTag(timelineMessageTag(row.msgid, row.id)))
+                val label = if (prefix != null && row.sender != "Unknown") "$prefix${row.sender}" else row.sender
+                senderNode(row, label).assertIsDisplayed()
+                for (other in listOf('@', '+').filter { it != prefix || row.sender == "Unknown" }) {
+                    senderNode(row, "$other${row.sender}").assertDoesNotExist()
+                }
+            }
+        }
+
+        fun clickSender(
+            row: MessageEntity,
+            label: String,
+        ) {
+            compose
+                .onNodeWithTag("chat_timeline", useUnmergedTree = true)
+                .performScrollToNode(hasTestTag(timelineMessageTag(row.msgid, row.id)))
+            val sender = senderNode(row, label)
+            val layouts = mutableListOf<TextLayoutResult>()
+            sender.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val layout = layouts.single()
+            val point =
+                layout
+                    .getBoundingBox(
+                        layout.layoutInput.text.text
+                            .indexOf(label) + 1,
+                    ).center
+            sender.performTouchInput { click(point) }
+        }
+
+        assertLabels(null)
+        compose.runOnIdle { prefixes = mapOf(rules.normalize("PEER{") to '@', rules.normalize("me") to '@') }
+        assertLabels('@')
+        clickSender(rows[1], "@Peer[")
+        if (density == LayoutDensity.COMFORTABLE) clickSender(rows[0], "@Peer[")
+        clickSender(rows[3], "@me")
+        compose.runOnIdle {
+            assertEquals(List(if (density == LayoutDensity.COMFORTABLE) 2 else 1) { "Peer[" }, senderClicks)
+            prefixes = mapOf(rules.normalize("PEER{") to '+', rules.normalize("me") to '+')
+        }
+        assertLabels('+')
+        clickSender(rows[1], "+Peer[")
+        compose.runOnIdle {
+            assertEquals("Peer[", senderClicks.last())
+            assertEquals(if (density == LayoutDensity.COMFORTABLE) 3 else 2, senderClicks.size)
+            prefixes = emptyMap()
+        }
+        assertLabels(null)
+        clickSender(rows[1], "Peer[")
+        compose.runOnIdle {
+            assertEquals("Peer[", senderClicks.last())
+            assertEquals(if (density == LayoutDensity.COMFORTABLE) 4 else 3, senderClicks.size)
         }
     }
 

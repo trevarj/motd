@@ -91,6 +91,35 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class ConfigurationBackupRepositoryTest {
     @Test
+    fun channelPrefixesRoundTripAndOldSettingsDefaultToFalse() =
+        runTest {
+            val settings = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())
+            val original = settings.settings.first().showChannelPrefixes
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                for (selected in listOf(true, false)) {
+                    settings.setShowChannelPrefixes(selected)
+                    val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                    assertTrue(raw.contains("\"showChannelPrefixes\": $selected"))
+
+                    settings.setShowChannelPrefixes(!selected)
+                    backup.import(raw, importMode = BackupImportMode.MERGE)
+                    assertEquals(selected, settings.settings.first().showChannelPrefixes)
+
+                    val legacy = raw.replace(Regex(""",?\s*"showChannelPrefixes"\s*:\s*$selected"""), "")
+                    assertFalse(legacy.contains("showChannelPrefixes"))
+                    settings.setShowChannelPrefixes(true)
+                    backup.import(legacy, importMode = BackupImportMode.MERGE)
+                    assertFalse(settings.settings.first().showChannelPrefixes)
+                }
+            } finally {
+                settings.setShowChannelPrefixes(original)
+                db.close()
+            }
+        }
+
+    @Test
     fun nickMentionStylesRoundTripAndOldSettingsDefaultToBold() =
         runTest {
             val settings = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())

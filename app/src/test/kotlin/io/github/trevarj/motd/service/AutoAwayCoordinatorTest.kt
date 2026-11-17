@@ -279,6 +279,10 @@ class AutoAwayCoordinatorTest {
             state.value = state.value.copy(compactNickBrackets = value)
         }
 
+        override suspend fun setShowChannelPrefixes(enabled: Boolean) {
+            state.value = state.value.copy(showChannelPrefixes = enabled)
+        }
+
         override suspend fun setNickMentionStyle(value: io.github.trevarj.motd.data.prefs.NickMentionStyle) {
             state.value = state.value.copy(nickMentionStyle = value)
         }

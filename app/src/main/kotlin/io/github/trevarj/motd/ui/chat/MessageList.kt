@@ -123,6 +123,7 @@ import io.github.trevarj.motd.dcc.dccEndpointRisk
 import io.github.trevarj.motd.dcc.resolveDccAddress
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.dickord.dickordNickLabel
+import io.github.trevarj.motd.dickord.isDickordRelayNick
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
 import io.github.trevarj.motd.ui.components.DaySeparator
@@ -395,6 +396,7 @@ fun MessageList(
     // Normalized nicks known in the current buffer (member list). Drives @mention coloring in the
     // message bodies; passed straight through to each MessageBubble.
     knownNicks: Set<String> = emptySet(),
+    channelSenderPrefixes: Map<String, Char> = emptyMap(),
     // Behavioral settings threaded from viewModel.settings. Style-only
     // concerns (density, nick color) flow through CompositionLocals instead.
     friends: Set<String> = emptySet(),
@@ -804,6 +806,7 @@ fun MessageList(
                         senderIsFriend = !msg.isSelf && msg.matchesConfiguredActor(friends, identityRules),
                         reactions = msg.msgid?.let(reactionChips).orEmpty(),
                         knownNicks = knownNicks,
+                        channelSenderPrefixes = channelSenderPrefixes,
                         identityRules = identityRules,
                         onLongPress = onLongPress,
                         onReadMessage = onReadMessage,
@@ -1802,6 +1805,7 @@ private fun MessageRow(
     senderIsFriend: Boolean,
     reactions: List<ReactionChip>,
     knownNicks: Set<String>,
+    channelSenderPrefixes: Map<String, Char>,
     identityRules: IrcIdentityRules,
     onLongPress: (MessageEntity) -> Unit,
     onReadMessage: ((MessageEntity) -> Unit)?,
@@ -1869,7 +1873,9 @@ private fun MessageRow(
     val spacing = LocalSpacing.current
     val showSender = showsSender(msg, older)
     val rawSender = msg.sender.ifBlank { fallbackSender.orEmpty() }
-    val displaySender = dickordNickLabel(rawSender, dickordEnabled)
+    val senderLabel = dickordNickLabel(rawSender, dickordEnabled)
+    val prefix = channelSenderPrefixes[identityRules.normalize(rawSender)].takeUnless { dickordEnabled && isDickordRelayNick(rawSender) }
+    val displaySender = prefix?.let { "$it$senderLabel" } ?: senderLabel
     val gap = bubbleGap(showSender, older != null, spacing)
     contentMetrics?.let { metrics ->
         val leadingGapPx = with(LocalDensity.current) { if (seam == null && !showDay && !showNewDivider) gap.roundToPx() else 0 }

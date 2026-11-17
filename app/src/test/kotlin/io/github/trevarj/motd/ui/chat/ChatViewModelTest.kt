@@ -2286,6 +2286,126 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun `channel sender prefixes track authoritative roster identity order and preference`() =
+        runTest {
+            val settings = FakeSettingsRepository()
+            val buffers =
+                FakeBufferRepository(channel.copy(joined = true)).apply {
+                    members.value = listOf(MemberEntity(channel.id, "Nick[", prefixes = "@+"), MemberEntity(channel.id, "plain"))
+                }
+            val manager =
+                FakeConnectionManager(network.id, IrcClientState.Ready("me", emptySet(), mapOf("PREFIX" to "(vo)+@", "CASEMAPPING" to "rfc1459")))
+            val vm = viewModel(channel, manager, buffers = buffers, settings = settings)
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.channelSenderPrefixes.collect() }
+            vm.state.first { it.buffer != null }
+            runCurrent()
+            assertEquals(0, buffers.memberObservations)
+            assertTrue(manager.memberRequests.isEmpty())
+
+            settings.setShowChannelPrefixes(true)
+            buffers.members.subscriptionCount.first { it > 0 }
+            assertTrue(vm.channelSenderPrefixes.value.isEmpty())
+            manager.rosterStates.value = mapOf(channel.id to RosterLoadState.LOADED)
+            assertEquals(mapOf("nick{" to '+'), vm.channelSenderPrefixes.first { it.isNotEmpty() })
+            assertEquals(listOf(channel.id), manager.memberRequests)
+
+            buffers.members.value = listOf(MemberEntity(channel.id, "Nick[", prefixes = "@"))
+            assertEquals(mapOf("nick{" to '@'), vm.channelSenderPrefixes.first { it["nick{"] == '@' })
+            manager.rosterStates.value = mapOf(channel.id to RosterLoadState.NOT_LOADED)
+            vm.channelSenderPrefixes.first { it.isEmpty() }
+            manager.rosterStates.value = mapOf(channel.id to RosterLoadState.LOADED)
+            vm.channelSenderPrefixes.first { it.isNotEmpty() }
+            buffers.members.value = listOf(MemberEntity(channel.id, "Nick[", prefixes = "@+"))
+            vm.channelSenderPrefixes.first { it["nick{"] == '+' }
+
+            manager.connectionActivity.value =
+                manager.connectionActivity.value.copy(
+                    states = mapOf(network.id to IrcClientState.Ready("me", emptySet(), mapOf("PREFIX" to "(ov)@+", "CASEMAPPING" to "ascii"))),
+                )
+            assertEquals(mapOf("nick[" to '@'), vm.channelSenderPrefixes.first { "nick[" in it })
+            buffers.members.value = emptyList()
+            vm.channelSenderPrefixes.first { it.isEmpty() }
+            buffers.members.value = listOf(MemberEntity(channel.id, "Nick[", prefixes = "+"))
+            vm.channelSenderPrefixes.first { it.isNotEmpty() }
+            val ready = manager.connectionActivity.value.states
+            manager.connectionActivity.value = manager.connectionActivity.value.copy(states = mapOf(network.id to IrcClientState.Disconnected))
+            vm.channelSenderPrefixes.first { it.isEmpty() }
+            buffers.members.subscriptionCount.first { it == 0 }
+            manager.connectionActivity.value = manager.connectionActivity.value.copy(states = ready)
+            vm.channelSenderPrefixes.first { it.isNotEmpty() }
+            settings.setShowChannelPrefixes(false)
+            vm.channelSenderPrefixes.first { it.isEmpty() }
+            buffers.members.subscriptionCount.first { it == 0 }
+            assertEquals(listOf(channel.id, channel.id), manager.memberRequests)
+        }
+
+    @Test
+    fun `channel sender prefixes never request query or server membership`() =
+        runTest {
+            for (room in listOf(query, channel.copy(type = BufferType.SERVER))) {
+                val settings = FakeSettingsRepository().apply { setShowChannelPrefixes(true) }
+                val buffers = FakeBufferRepository(room)
+                val manager = FakeConnectionManager(network.id)
+                val vm = viewModel(room, manager, buffers = buffers, settings = settings)
+                backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.channelSenderPrefixes.collect() }
+                vm.state.first { it.buffer != null }
+                runCurrent()
+                assertTrue(vm.channelSenderPrefixes.value.isEmpty())
+                assertEquals(0, buffers.memberObservations)
+                assertTrue(manager.memberRequests.isEmpty())
+            }
+        }
+
+    @Test
+    fun `channel sender prefixes refresh after invalidation and same room rejoin without request loops`() =
+        runTest {
+            val room = channel.copy(joined = true)
+            val buffers =
+                FakeBufferRepository(room).apply {
+                    members.value = listOf(MemberEntity(room.id, "alice", prefixes = "@"))
+                }
+            val settings = FakeSettingsRepository().apply { setShowChannelPrefixes(true) }
+            val manager =
+                FakeConnectionManager(network.id).apply {
+                    rosterStates.value = mapOf(room.id to RosterLoadState.NOT_LOADED)
+                    memberRequestGate = CompletableDeferred()
+                }
+            val vm = viewModel(room, manager, buffers = buffers, settings = settings)
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.channelSenderPrefixes.collect() }
+            assertEquals(room.id, manager.memberRequestEvents.receive())
+
+            manager.rosterStates.value = mapOf(room.id to RosterLoadState.LOADING)
+            runCurrent()
+            manager.rosterStates.value = mapOf(room.id to RosterLoadState.LOADED)
+            vm.channelSenderPrefixes.first { it["alice"] == '@' }
+            runCurrent()
+            manager.rosterStates.value = mapOf(room.id to RosterLoadState.NOT_LOADED)
+            assertEquals(room.id, manager.memberRequestEvents.receive())
+            vm.channelSenderPrefixes.first { it.isEmpty() }
+            manager.rosterStates.value = mapOf(room.id to RosterLoadState.LOADING)
+            runCurrent()
+            manager.rosterStates.value = mapOf(room.id to RosterLoadState.FAILED)
+            runCurrent()
+            manager.memberRequestGate?.complete(Unit)
+            runCurrent()
+            assertTrue(manager.memberRequestEvents.tryReceive().isFailure)
+            assertEquals(2, manager.memberRequests.size)
+
+            buffers.update(room.copy(joined = false))
+            buffers.members.subscriptionCount.first { it == 0 }
+            manager.rosterStates.value = mapOf(room.id to RosterLoadState.NOT_LOADED)
+            runCurrent()
+            assertTrue(manager.memberRequestEvents.tryReceive().isFailure)
+            buffers.update(room)
+            assertEquals(room.id, manager.memberRequestEvents.receive())
+            manager.rosterStates.value = mapOf(room.id to RosterLoadState.LOADED)
+            vm.channelSenderPrefixes.first { it["alice"] == '@' }
+            runCurrent()
+            assertEquals(3, manager.memberRequests.size)
+            assertTrue(manager.memberRequestEvents.tryReceive().isFailure)
+        }
+
+    @Test
     fun `conversation layout inherits global then persists and clears an override`() =
         runTest {
             val settings = FakeSettingsRepository()
@@ -7077,6 +7197,8 @@ class ChatViewModelTest {
         val messageAttempts = mutableListOf<SentMessage>()
         val typingSent = CompletableDeferred<Unit>()
         val memberRequests = mutableListOf<Long>()
+        val memberRequestEvents = Channel<Long>(Channel.UNLIMITED)
+        var memberRequestGate: CompletableDeferred<Unit>? = null
         var clientForCalls = 0
 
         fun replaceClient(client: IrcClient?) {
@@ -7240,6 +7362,8 @@ class ChatViewModelTest {
             force: Boolean,
         ) {
             memberRequests += bufferId
+            memberRequestEvents.send(bufferId)
+            memberRequestGate?.await()
         }
     }
 
@@ -7310,6 +7434,7 @@ class ChatViewModelTest {
         val historySyncWrites = mutableListOf<Pair<Long, HistorySyncMode?>>()
         var historySyncWriteResult = true
         val memberNicks = MutableStateFlow<List<String>>(emptyList())
+        val members = MutableStateFlow<List<MemberEntity>>(emptyList())
         var memberObservations = 0
         var memberNickObservations = 0
 
@@ -7323,7 +7448,7 @@ class ChatViewModelTest {
 
         override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> {
             memberObservations += 1
-            return flowOf(emptyList())
+            return members
         }
 
         override fun observeMemberNicks(bufferId: Long): Flow<List<String>> {
@@ -7585,6 +7710,10 @@ class ChatViewModelTest {
         }
 
         override suspend fun setNickColorsEnabled(enabled: Boolean) = Unit
+
+        override suspend fun setShowChannelPrefixes(enabled: Boolean) {
+            settings.value = settings.value.copy(showChannelPrefixes = enabled)
+        }
 
         override suspend fun setNickColorPalette(p: NickColorPalette) = Unit
 

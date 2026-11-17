@@ -479,6 +479,7 @@ fun ChatScreen(
         }
     val memberNicks by viewModel.memberNicks.collectAsStateWithLifecycle()
     val knownNicks by viewModel.knownNicks.collectAsStateWithLifecycle()
+    val channelSenderPrefixes by viewModel.channelSenderPrefixes.collectAsStateWithLifecycle()
     val joinedChannels by viewModel.joinedChannels.collectAsStateWithLifecycle()
     val channelNotifications by viewModel.channelNotifications.collectAsStateWithLifecycle()
     val readAloudState by viewModel.readAloudState.collectAsStateWithLifecycle()
@@ -668,6 +669,7 @@ fun ChatScreen(
         onSendDccFile = viewModel::sendDccFile,
         memberNicks = memberNicks,
         knownNicks = knownNicks,
+        channelSenderPrefixes = channelSenderPrefixes,
         identityRules = identityRules,
         unreadEntrySnapshot = unreadEntrySnapshot,
         agentwireEnabled = agentwireEnabled,
@@ -1165,6 +1167,7 @@ internal fun ChatContent(
     onSendDccFile: (Uri) -> Unit = {},
     memberNicks: List<String> = emptyList(),
     knownNicks: Set<String> = emptySet(),
+    channelSenderPrefixes: Map<String, Char> = emptyMap(),
     identityRules: IrcIdentityRules = IrcIdentityRules(),
     friends: Set<String> = emptySet(),
     fools: Set<String> = emptySet(),
@@ -4289,6 +4292,7 @@ internal fun ChatContent(
                                                 highlightMsgid = highlightMsgid,
                                                 highlightEventId = highlightEventId,
                                                 knownNicks = knownNicks,
+                                                channelSenderPrefixes = channelSenderPrefixes.takeIf { state.buffer?.type == BufferType.CHANNEL }.orEmpty(),
                                                 friends = friends,
                                                 fools = fools,
                                                 foolsMode = foolsMode,

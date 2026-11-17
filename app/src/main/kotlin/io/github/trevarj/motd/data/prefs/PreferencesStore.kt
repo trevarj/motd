@@ -43,6 +43,7 @@ internal object PrefKeys {
     // Round 4
     val LAYOUT_DENSITY = stringPreferencesKey("layout_density")
     val COMPACT_NICK_BRACKETS = stringPreferencesKey("compact_nick_brackets")
+    val SHOW_CHANNEL_PREFIXES = stringPreferencesKey("show_channel_prefixes")
     val FOLDER_DISPLAY_MODE = stringPreferencesKey("folder_display_mode")
     val SHOW_FOLDER_CHATS_IN_ALL = stringPreferencesKey("show_folder_chats_in_all")
     val CHAT_LIST_SWIPE_ACTION = stringPreferencesKey("chat_list_swipe_action")
@@ -190,6 +191,7 @@ class DataStoreSettingsRepository
                     compactNickBrackets =
                         prefs[PrefKeys.COMPACT_NICK_BRACKETS]?.let { runCatching { CompactNickBrackets.valueOf(it) }.getOrNull() }
                             ?: CompactNickBrackets.ANGLE,
+                    showChannelPrefixes = prefs[PrefKeys.SHOW_CHANNEL_PREFIXES]?.toBooleanStrictOrNull() ?: false,
                     nickColorsEnabled = prefs[PrefKeys.NICK_COLORS_ENABLED]?.toBooleanStrictOrNull() ?: true,
                     nickColorPalette = nickColorPaletteFromPreference(prefs[PrefKeys.NICK_COLOR_PALETTE]),
                     nickMentionStyle = nickMentionStyleFromPreference(prefs[PrefKeys.NICK_MENTION_STYLE]),
@@ -261,6 +263,10 @@ class DataStoreSettingsRepository
 
         override suspend fun setCompactNickBrackets(value: CompactNickBrackets) {
             store.edit { it[PrefKeys.COMPACT_NICK_BRACKETS] = value.name }
+        }
+
+        override suspend fun setShowChannelPrefixes(enabled: Boolean) {
+            store.edit { it[PrefKeys.SHOW_CHANNEL_PREFIXES] = enabled.toString() }
         }
 
         override suspend fun setFolderDisplayMode(mode: FolderDisplayMode) {

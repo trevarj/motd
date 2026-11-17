@@ -1583,6 +1583,58 @@ class ChatViewModel
                 .flowOn(Dispatchers.Default)
                 .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
+        val channelSenderPrefixes: StateFlow<Map<String, Char>> =
+            combine(buffer, settingsRepository.settings, connState) { room, preferences, connection ->
+                room?.id?.takeIf { room.type == BufferType.CHANNEL && room.joined && preferences.showChannelPrefixes && connection is IrcClientState.Ready }
+            }.distinctUntilChanged()
+                .flatMapLatest { roomId ->
+                    if (roomId == null) {
+                        flowOf(emptyMap())
+                    } else {
+                        flow {
+                            emit(emptyMap())
+                            coroutineScope {
+                                launch {
+                                    connectionManager.rosterStates
+                                        .map { it[roomId] }
+                                        .distinctUntilChanged()
+                                        .collect { rosterState ->
+                                            if (rosterState == null || rosterState == RosterLoadState.NOT_LOADED) {
+                                                launch { connectionManager.requestMembers(roomId) }
+                                            }
+                                        }
+                                }
+                                emitAll(
+                                    combine(
+                                        bufferRepository.observeMembers(bufferId),
+                                        connectionManager.rosterStates,
+                                        connState,
+                                        identityRules,
+                                    ) { members, rosters, connection, rules ->
+                                        if (rosters[roomId] != RosterLoadState.LOADED || connection !is IrcClientState.Ready) {
+                                            emptyMap()
+                                        } else {
+                                            val support =
+                                                io.github.trevarj.motd.irc.proto
+                                                    .Isupport()
+                                            connection.isupport["PREFIX"]?.let { support.update(listOf("PREFIX=$it")) }
+                                            val order =
+                                                io.github.trevarj.motd.ui.channelinfo
+                                                    .prefixOrderFrom(support.prefixModes)
+                                            buildMap {
+                                                for (member in members) {
+                                                    order.firstOrNull { it in member.prefixes }?.let { put(rules.normalize(member.nick), it) }
+                                                }
+                                            }
+                                        }
+                                    }.flowOn(Dispatchers.Default),
+                                )
+                            }
+                        }
+                    }
+                }.distinctUntilChanged()
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(0, 0), emptyMap())
+
         val historyAvailability: StateFlow<HistoryAvailability> =
             combine(buffer, connState) { current, connection ->
                 when {

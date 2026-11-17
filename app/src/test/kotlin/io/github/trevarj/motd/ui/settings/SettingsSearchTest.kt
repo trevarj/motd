@@ -46,6 +46,7 @@ class SettingsSearchTest {
             "mentions drawer" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.MENTIONS_LOCATION),
             "ircv3 typing" to SettingsSearchDestination.Page(SettingsSearchPage.SECURITY, SettingsTarget.SEND_TYPING),
             "blur reveal" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.FOOLS_MODE),
+            "channel privilege prefixes" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.CHANNEL_PREFIXES),
         ).forEach { (query, destination) ->
             assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
         }

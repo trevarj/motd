@@ -70,6 +70,7 @@ enum class SettingsTarget {
     THEME_TEXT_COLORS,
     UI_ICON_SET,
     NICK_COLORS,
+    CHANNEL_PREFIXES,
     NICK_MENTION_STYLE,
     NICK_PALETTE,
     NICK_OVERRIDES,

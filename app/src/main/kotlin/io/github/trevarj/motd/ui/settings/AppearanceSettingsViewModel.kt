@@ -106,6 +106,8 @@ class AppearanceSettingsViewModel
 
         fun setCompactNickBrackets(value: CompactNickBrackets) = launch { settingsRepository.setCompactNickBrackets(value) }
 
+        fun setShowChannelPrefixes(enabled: Boolean) = launch { settingsRepository.setShowChannelPrefixes(enabled) }
+
         fun setComposerStyle(value: ComposerStyle) = launch { appearancePrefs.setComposerStyle(value) }
 
         fun setInputCornerStyle(value: UiCornerStyle) = launch { appearancePrefs.setInputCornerStyle(value) }

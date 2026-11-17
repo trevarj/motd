@@ -178,6 +178,7 @@ fun AppearanceSettingsScreen(
         onUseThemeTextColors = viewModel::setUseThemeTextColors,
         onLayoutDensity = viewModel::setLayoutDensity,
         onCompactNickBrackets = viewModel::setCompactNickBrackets,
+        onShowChannelPrefixes = viewModel::setShowChannelPrefixes,
         onComposerStyle = viewModel::setComposerStyle,
         onInputCornerStyle = viewModel::setInputCornerStyle,
         onAvatarShape = viewModel::setAvatarShape,
@@ -228,6 +229,7 @@ fun AppearanceSettingsContent(
     onLayoutDensity: (LayoutDensity) -> Unit,
     onComposerStyle: (ComposerStyle) -> Unit,
     onCompactNickBrackets: (CompactNickBrackets) -> Unit = {},
+    onShowChannelPrefixes: (Boolean) -> Unit = {},
     onInputCornerStyle: (UiCornerStyle) -> Unit = {},
     onAvatarShape: (AvatarShape) -> Unit = {},
     onChatCardCornerStyle: (UiCornerStyle) -> Unit = {},
@@ -631,6 +633,17 @@ fun AppearanceSettingsContent(
             )
         }
         SettingsGroup(title = stringResource(R.string.settings_appearance_nicknames_section)) {
+            SettingsTarget(target?.name, SettingsTarget.CHANNEL_PREFIXES.name) { targetModifier ->
+                SwitchRow(
+                    title = stringResource(R.string.settings_channel_prefixes),
+                    subtitle = stringResource(R.string.settings_channel_prefixes_desc),
+                    checked = settings.showChannelPrefixes,
+                    onCheckedChange = onShowChannelPrefixes,
+                    switchTag = "settings_switch_channel_prefixes",
+                    modifier = targetModifier,
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsTarget(target?.name, SettingsTarget.NICK_COLORS.name) { targetModifier ->
                 SwitchRow(
                     title = stringResource(R.string.settings_nick_colors),

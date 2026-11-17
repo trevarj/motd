@@ -1084,6 +1084,8 @@
     <string name="settings_chat">Chat</string>
     <string name="settings_nick_colors">Colored nicknames</string>
     <string name="settings_nick_colors_desc">Color sender names in chats.</string>
+    <string name="settings_channel_prefixes">Channel privilege prefixes</string>
+    <string name="settings_channel_prefixes_desc">Show the highest current channel privilege next to message senders</string>
     <string name="settings_palette_theme">Theme palette</string>
     <string name="settings_palette_classic">Classic palette</string>
     <string name="settings_palette_vivid">Vivid palette</string>

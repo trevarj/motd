@@ -78,6 +78,10 @@ reveal. Search previews and opted-in Mentions rows use the same choice; notifica
 remain independent. Server search applies account identity tags as well as nicknames; untagged
 results retain nickname matching.
 
+The general `showChannelPrefixes` setting round-trips with chat preferences. Older
+settings objects without it restore `false`; omitting general settings leaves the
+local value unchanged.
+
 Appearance includes independent input, avatar, chat-card, and media corner presets.
 Older appearance objects without these fields restore all four to `DEFAULT`;
 backups without an appearance object leave local appearance settings untouched.
