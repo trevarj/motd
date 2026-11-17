@@ -37,10 +37,20 @@ fun validChannelContext(
         ?.takeIf(isChannel)
 }
 
+fun preferredReplyTag(
+    caps: Set<String>,
+    isupport: Map<String, String>,
+): String? =
+    when {
+        canSendClientTag(caps, isupport, "+reply") -> "+reply"
+        canSendClientTag(caps, isupport, "+draft/reply") -> "+draft/reply"
+        else -> null
+    }
+
 fun canSendReactionTags(
     caps: Set<String>,
     isupport: Map<String, String>,
     remove: Boolean,
 ): Boolean =
-    canSendClientTag(caps, isupport, "+reply") &&
+    preferredReplyTag(caps, isupport) != null &&
         canSendClientTag(caps, isupport, if (remove) "+draft/unreact" else "+draft/react")

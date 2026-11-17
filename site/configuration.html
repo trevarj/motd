@@ -106,6 +106,7 @@
 
         <h2 id="chat-and-uploads">Chat and uploads</h2>
         <p>Choose a conversation layout and adjust chat behavior, previews, and replies. The chat view includes a unified chat list, grouped bubbles, day separators, event pills, inline images, and link previews. The composer supports nick autocomplete, replies, reactions, typing indicators, and slash commands; IRCv3 features depend on what your server supports.</p>
+        <p>Reactions support servers using either <code>+reply</code> or the older <code>+draft/reply</code> tag. Reaction removal is available only when the server also allows <code>+draft/unreact</code>.</p>
         <p>The attachment chooser can share a photo, a file, your current draft as a link, or a new text paste. Review the destination and its privacy and expiry information before uploading. Public uploads must not contain sensitive information; even a secret link can be opened by anyone who has it. A Soju file host uses the connected chat's authenticated network file service, with retention set by that server.</p>
         <p>See the <a href="https://github.com/trevarj/motd/blob/main/README.md#features">documented chat features</a>. Chat preferences and upload backend configuration are included in <a href="https://github.com/trevarj/motd/blob/main/docs/configuration-backup.md#included">configuration exports</a>, but uploaded files and upload history are not transferred by a configuration backup.</p>
 

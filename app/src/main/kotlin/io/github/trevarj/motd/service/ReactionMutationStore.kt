@@ -48,12 +48,13 @@ internal fun reactionTagMessage(
     targetMsgid: String,
     emoji: String,
     kind: ReactionMutationKind,
+    replyTag: String,
 ): IrcMessage =
     IrcMessage(
         tags =
             mapOf(
                 (if (kind == ReactionMutationKind.REMOVE) "+draft/unreact" else "+draft/react") to emoji,
-                "+reply" to targetMsgid,
+                replyTag to targetMsgid,
             ),
         command = "TAGMSG",
         params = listOf(target),

@@ -945,6 +945,42 @@ class IrcClientTest {
         }
 
     @Test
+    fun `reaction sends select allowed reply tag and respect tag policy changes`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registered(ft)
+
+            ft.feed(":srv 005 motd CLIENTTAGDENY=*,-draft/react,-draft/reply :are supported")
+            runCurrent()
+            client.sendReact("#chan", "parent-1", "👍")
+            runCurrent()
+            assertEquals("@+draft/react=👍;+draft/reply=parent-1 TAGMSG #chan", ft.sent.last())
+
+            ft.feed(":srv 005 motd CLIENTTAGDENY=*,-draft/react,-draft/reply,-reply :are supported")
+            runCurrent()
+            client.sendReact("#chan", "parent-2", "👍")
+            runCurrent()
+            assertEquals("@+draft/react=👍;+reply=parent-2 TAGMSG #chan", ft.sent.last())
+
+            for (policy in listOf("*,-draft/react", "*,-reply,-draft/reply")) {
+                ft.feed(":srv 005 motd CLIENTTAGDENY=$policy :are supported")
+                runCurrent()
+                val before = ft.sent.toList()
+                client.sendReact("#chan", "blocked", "👍")
+                runCurrent()
+                assertEquals(before, ft.sent)
+            }
+
+            ft.feed(":srv 005 motd CLIENTTAGDENY=*,-draft/react,-draft/reply :are supported")
+            ft.feed(":srv CAP motd DEL :message-tags")
+            runCurrent()
+            val before = ft.sent.toList()
+            client.sendReact("#chan", "blocked", "👍")
+            runCurrent()
+            assertEquals(before, ft.sent)
+        }
+
+    @Test
     fun `private messages attach only valid allowed channel context`() =
         runTest {
             val ft = FakeTransport()

@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.data.db.ReactionEntity
+import io.github.trevarj.motd.irc.client.preferredReplyTag
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -64,15 +65,20 @@ class ReactionMutationStoreTest {
         }
 
     @Test
-    fun `reaction mutation serializer uses ratified reply reference`() {
-        assertEquals(
-            "@+draft/react=👍;+reply=m1 TAGMSG #chan",
-            reactionTagMessage("#chan", "m1", "👍", ReactionMutationKind.ADD).serialize(),
-        )
-        assertEquals(
-            "@+draft/unreact=👍;+reply=m1 TAGMSG #chan",
-            reactionTagMessage("#chan", "m1", "👍", ReactionMutationKind.REMOVE).serialize(),
-        )
+    fun `reaction mutation serializer uses the selected reply reference`() {
+        for (policy in listOf("*,-reply,-draft/reply", "*,-draft/reply")) {
+            val replyTag =
+                checkNotNull(preferredReplyTag(setOf("message-tags"), mapOf("CLIENTTAGDENY" to policy)))
+            val expectedTag = if (policy.contains(",-reply")) "+reply" else "+draft/reply"
+            assertEquals(
+                "@+draft/react=👍;$expectedTag=m1 TAGMSG #chan",
+                reactionTagMessage("#chan", "m1", "👍", ReactionMutationKind.ADD, replyTag).serialize(),
+            )
+            assertEquals(
+                "@+draft/unreact=👍;$expectedTag=m1 TAGMSG #chan",
+                reactionTagMessage("#chan", "m1", "👍", ReactionMutationKind.REMOVE, replyTag).serialize(),
+            )
+        }
     }
 
     @Test

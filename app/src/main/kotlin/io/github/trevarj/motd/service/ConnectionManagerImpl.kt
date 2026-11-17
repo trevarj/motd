@@ -60,6 +60,7 @@ import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.client.hasMessageRedactionCap
 import io.github.trevarj.motd.irc.client.preferredExtendedMonitor
 import io.github.trevarj.motd.irc.client.preferredNoImplicitNames
+import io.github.trevarj.motd.irc.client.preferredReplyTag
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.ext.MonitorCommands
@@ -2994,6 +2995,7 @@ class ConnectionManagerImpl
             // Recheck at the mutation boundary so a stale sheet cannot create local-only state after a
             // capability or CLIENTTAGDENY change.
             if (!canSendReactionTags(ready.caps, ready.isupport, removing)) return
+            val replyTag = preferredReplyTag(ready.caps, ready.isupport) ?: return
 
             val reaction =
                 ReactionEntity(
@@ -3005,11 +3007,7 @@ class ConnectionManagerImpl
                     serverTime = System.currentTimeMillis(),
                 )
             mutateReaction(reactionMutations, previous, reaction) { kind ->
-                if (kind == ReactionMutationKind.REMOVE) {
-                    client.send(reactionTagMessage(buffer.ircTarget, msgid, emoji, kind))
-                } else {
-                    client.sendReact(buffer.ircTarget, msgid, emoji)
-                }
+                client.send(reactionTagMessage(buffer.ircTarget, msgid, emoji, kind, replyTag))
             }
         }
 

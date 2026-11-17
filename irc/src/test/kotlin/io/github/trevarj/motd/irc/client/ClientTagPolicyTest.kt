@@ -43,6 +43,23 @@ class ClientTagPolicyTest {
         val caps = setOf("message-tags")
         assertTrue(canSendReactionTags(caps, emptyMap(), remove = false))
         assertFalse(canSendReactionTags(emptySet(), emptyMap(), remove = false))
+        assertEquals("+reply", preferredReplyTag(caps, emptyMap()))
+        assertNull(preferredReplyTag(emptySet(), emptyMap()))
+        val draftOnly = mapOf("CLIENTTAGDENY" to "*,-draft/react,-draft/reply")
+        assertEquals("+draft/reply", preferredReplyTag(caps, draftOnly))
+        assertTrue(canSendReactionTags(caps, draftOnly, remove = false))
+        assertFalse(canSendReactionTags(caps, draftOnly, remove = true))
+        assertFalse(canSendReactionTags(emptySet(), draftOnly, remove = false))
+        val both = mapOf("CLIENTTAGDENY" to "*,-reply,-draft/reply,-draft/react,-draft/unreact")
+        assertEquals("+reply", preferredReplyTag(caps, both))
+        assertTrue(canSendReactionTags(caps, both, remove = true))
+        val neither = mapOf("CLIENTTAGDENY" to "*,-draft/react,-draft/unreact")
+        assertNull(preferredReplyTag(caps, neither))
+        assertFalse(canSendReactionTags(caps, neither, remove = false))
+        assertFalse(canSendReactionTags(caps, neither, remove = true))
+        val removeOnly = mapOf("CLIENTTAGDENY" to "*,-draft/reply,-draft/unreact")
+        assertFalse(canSendReactionTags(caps, removeOnly, remove = false))
+        assertTrue(canSendReactionTags(caps, removeOnly, remove = true))
         assertFalse(
             canSendReactionTags(
                 caps,

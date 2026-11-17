@@ -1229,11 +1229,14 @@ class IrcClient(
         msgid: String,
         emoji: String,
     ) {
-        if (!hasCap("message-tags")) return
+        val caps = ackedCaps.get()
+        val isupport = isupportToMap(_isupport.get())
+        val replyTag = preferredReplyTag(caps, isupport) ?: return
+        if (!canSendClientTag(caps, isupport, "+draft/react")) return
         val t = transport ?: return
         val msg =
             IrcMessage(
-                tags = mapOf("+draft/react" to emoji, "+reply" to msgid),
+                tags = mapOf("+draft/react" to emoji, replyTag to msgid),
                 command = "TAGMSG",
                 params = listOf(target),
             )
