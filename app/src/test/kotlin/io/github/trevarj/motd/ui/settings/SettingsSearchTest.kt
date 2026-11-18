@@ -47,6 +47,7 @@ class SettingsSearchTest {
             "ircv3 typing" to SettingsSearchDestination.Page(SettingsSearchPage.SECURITY, SettingsTarget.SEND_TYPING),
             "blur reveal" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.FOOLS_MODE),
             "channel privilege prefixes" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.CHANNEL_PREFIXES),
+            "exif" to SettingsSearchDestination.Page(SettingsSearchPage.UPLOADS, SettingsTarget.UPLOAD_METADATA),
         ).forEach { (query, destination) ->
             assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
         }
@@ -266,6 +267,9 @@ class SettingsSearchTest {
         assertFalse(SettingsTarget.UPLOAD_PRIVACY in catbox)
         assertTrue(SettingsTarget.UPLOAD_PROVIDER in catbox)
         assertTrue(SettingsTarget.UPLOAD_LIMIT in catbox)
+        AttachmentBackend.entries.forEach { backend ->
+            assertTrue(SettingsTarget.UPLOAD_METADATA in targets(backend))
+        }
     }
 
     private fun entry(

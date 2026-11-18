@@ -15,6 +15,7 @@ import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.SendAcceptance
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.last
 import kotlinx.coroutines.flow.onEach
 import java.io.File
@@ -65,20 +66,23 @@ class VoiceMessageSenderImpl
     ) : VoiceMessageSender {
         override fun send(request: VoiceSendRequest): Flow<VoiceSendProgress> =
             channelFlow {
+                val stripMetadata = attachmentPrefs.config.first().stripMetadata
                 val buffer =
                     db.bufferDao().observeById(request.bufferId)
                         ?: throw VoiceSendException("Conversation no longer exists.")
                 val delivery = request.forConversation(buffer.type, buffer.displayName)
+                val selected =
+                    normalizedConfig(
+                        delivery.destination ?: PasteBackendConfig(backend = AttachmentBackend.SOJU_FILEHOST),
+                    ).copy(stripMetadata = stripMetadata)
                 val encrypted =
                     if (delivery.encrypt) {
-                        val limit =
-                            normalizedConfig(
-                                delivery.destination ?: PasteBackendConfig(backend = AttachmentBackend.SOJU_FILEHOST),
-                            ).sizeLimitBytes
+                        val limit = selected.sizeLimitBytes
                         metadataSanitizer
                             .prepare(
                                 AttachmentSource.LocalFile(request.file, voiceFileName(request, false), request.mimeType),
                                 limit,
+                                stripMetadata = stripMetadata,
                             ).use { prepared ->
                                 crypto.encrypt((prepared.source as AttachmentSource.LocalFile).file)
                             }
@@ -96,8 +100,7 @@ class VoiceMessageSenderImpl
                             name = uploadName,
                             mimeType = uploadMime,
                             sizeBytes = uploadFile.length(),
-                            destination = delivery.destination,
-                            allowOriginalMetadata = encrypted != null,
+                            destination = selected.copy(stripMetadata = encrypted == null && stripMetadata),
                             progress = { sent, total -> send(VoiceSendProgress.Uploading(sent, total)) },
                         )
                     } finally {
@@ -146,18 +149,15 @@ class VoiceMessageSenderImpl
             name: String,
             mimeType: String,
             sizeBytes: Long,
-            destination: PasteBackendConfig?,
-            allowOriginalMetadata: Boolean,
+            destination: PasteBackendConfig,
             progress: suspend (Long, Long?) -> Unit,
         ): VoiceUploadRecord {
-            val selected =
-                destination?.let(::normalizedConfig)
-                    ?: normalizedConfig(PasteBackendConfig(backend = AttachmentBackend.SOJU_FILEHOST))
+            val selected = destination
             val source = AttachmentSource.LocalFile(file, name, mimeType, sizeBytes)
             val result =
                 try {
                     attachmentUploader
-                        .upload(source, selected, AttachmentUploadContext(networkId, allowOriginalMetadata))
+                        .upload(source, selected, AttachmentUploadContext(networkId))
                         .onEach { update ->
                             if (update is UploadProgress.Transferring) progress(update.bytesSent, update.totalBytes)
                         }.last()

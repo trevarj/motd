@@ -7,13 +7,17 @@ import io.github.trevarj.motd.audio.MediaRouteResolver
 import io.github.trevarj.motd.audio.NetworkMediaRoute
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.ConnectionManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -80,7 +84,7 @@ class AttachmentUploaderImpl
             config: PasteBackendConfig,
             context: AttachmentUploadContext,
         ): Flow<UploadProgress> =
-            flow {
+            channelFlow {
                 val safe = normalizedConfig(config)
                 if (safe.backend == AttachmentBackend.CUSTOM_0X0 && validateEndpoint(safe.endpoint) == null) {
                     throw UploadException("Configure a valid Custom HTTPS URL in Settings › Uploads.")
@@ -88,18 +92,18 @@ class AttachmentUploaderImpl
                 val knownSize = source.sizeOrNull()
                 if (knownSize != null && knownSize > safe.sizeLimitBytes) throw UploadException("File exceeds the configured upload limit")
                 require(safe.backend.supports(source)) { "${safe.backend.label} does not support this attachment type" }
-                metadataSanitizer.prepare(source, safe.sizeLimitBytes, context.allowOriginalMetadata).use { prepared ->
+                metadataSanitizer.prepare(source, safe.sizeLimitBytes, allowOriginal = context.allowOriginalMetadata, stripMetadata = safe.stripMetadata).use { prepared ->
                     val sanitized = prepared.source
                     val progress: suspend (Long, Long?) -> Unit = { sent, total ->
-                        emit(UploadProgress.Transferring(sent, total))
+                        send(UploadProgress.Transferring(sent, total))
                     }
                     when (safe.protocol) {
                         PasteProtocol.TERMBIN -> {
-                            emit(uploadTermbin(sanitized as AttachmentSource.Text, safe))
+                            send(uploadTermbin(sanitized as AttachmentSource.Text, safe))
                         }
 
                         PasteProtocol.MULTIPART_0X0 -> {
-                            emit(
+                            send(
                                 if (safe.backend == AttachmentBackend.CUSTOM_0X0) {
                                     uploadCustom(sanitized, safe, progress)
                                 } else {
@@ -109,19 +113,19 @@ class AttachmentUploaderImpl
                         }
 
                         PasteProtocol.RAW_CNET -> {
-                            emit(uploadCNet(sanitized, safe, progress))
+                            send(uploadCNet(sanitized, safe, progress))
                         }
 
                         PasteProtocol.MULTIPART_UGUU -> {
-                            emit(uploadUguu(sanitized, safe, progress))
+                            send(uploadUguu(sanitized, safe, progress))
                         }
 
                         PasteProtocol.MULTIPART_CATBOX -> {
-                            emit(uploadCatbox(sanitized, safe, progress))
+                            send(uploadCatbox(sanitized, safe, progress))
                         }
 
                         PasteProtocol.SOJU_FILEHOST -> {
-                            emit(uploadSojuFileHost(sanitized, safe, context, progress))
+                            send(uploadSojuFileHost(sanitized, safe, context, progress))
                         }
                     }
                 }
@@ -425,6 +429,7 @@ class AttachmentUploaderImpl
             output: java.io.OutputStream,
             progress: suspend (Long, Long?) -> Unit,
         ) {
+            currentCoroutineContext().ensureActive()
             source.open(resolver).use { input ->
                 val buffer = ByteArray(STREAM_BUFFER_BYTES)
                 val throttle = UploadProgressThrottle(System.nanoTime())
@@ -436,6 +441,7 @@ class AttachmentUploaderImpl
                     if (count < 0) break
                     sent += count
                     if (sent > config.sizeLimitBytes) throw UploadException("Upload exceeds the configured limit")
+                    currentCoroutineContext().ensureActive()
                     output.write(buffer, 0, count)
                     if (throttle.shouldEmit(sent, System.nanoTime())) progress(sent, total)
                 }
@@ -446,17 +452,27 @@ class AttachmentUploaderImpl
         private suspend fun <T> executeUpload(
             connection: HttpURLConnection,
             block: suspend () -> T,
-        ): T {
-            // HttpURLConnection uses blocking I/O. Disconnect from the cancellation callback so a
-            // dismissed progress sheet does not wait for a stalled write/read timeout.
-            val cancellationHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { connection.disconnect() }
-            return try {
-                block()
-            } finally {
-                cancellationHandle?.dispose()
-                connection.disconnect()
+        ): T =
+            suspendCancellableCoroutine { continuation ->
+                val scope = CoroutineScope(continuation.context.minusKey(Job) + Dispatchers.IO)
+                val worker =
+                    scope.launch(start = CoroutineStart.LAZY) {
+                        try {
+                            currentCoroutineContext().ensureActive()
+                            continuation.resumeWith(Result.success(block()))
+                        } catch (failure: Throwable) {
+                            continuation.resumeWith(Result.failure(failure))
+                        } finally {
+                            connection.disconnect()
+                        }
+                    }
+                continuation.invokeOnCancellation {
+                    worker.cancel()
+                    // Disconnect can itself block behind a read; detach cleanup as link previews do.
+                    scope.launch { connection.disconnect() }
+                }
+                worker.start()
             }
-        }
     }
 
 internal fun basicAuthHeader(

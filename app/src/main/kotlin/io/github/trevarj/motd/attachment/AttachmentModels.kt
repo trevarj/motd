@@ -88,6 +88,7 @@ data class PasteBackendConfig(
     val sizeLimitBytes: Long = DEFAULT_PUBLIC_LIMIT_BYTES,
     val username: String = "",
     val password: String = "",
+    val stripMetadata: Boolean = true,
 ) {
     val protocol: PasteProtocol get() = backend.protocol
 }

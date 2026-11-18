@@ -523,16 +523,21 @@ flowchart TD
 - IRC TCP/TLS uses okio over `Socket`/`SSLSocket`. App-side WebSocket transport
   uses the pinned OkHttp dependency. Link metadata and attachment uploads retain
   their `HttpURLConnection`-based streaming implementations.
-- Hosted uploads and outgoing DCC prepare byte-sniffed, size-bounded private copies
-  before opening a connection or advertising an offer. Images retain compressed
-  pixels and animation with only required presentation metadata; native AV remuxing
-  copies allowlisted track fields, and Ogg processing removes vendor/user comments.
-  Sanitized names and actual sizes flow through transport and history. Unsupported
-  originals require per-attempt consent; malformed supported media never falls back.
-  Consent retains the matching file/network through screen recreation, not a global
-  preference. Voice plaintext is sanitized before encryption. Temporary files have
-  explicit success/error/cancellation ownership, with bounded buffers rather than
-  bitmap decoding, transcoding or whole-file in-memory copies.
+- Hosted uploads and outgoing DCC prepare size-bounded private copies before opening
+  a connection or advertising an offer. Each attempt snapshots the shared, default-on
+  metadata preference; disabling it skips parsers and preserves original bytes/names
+  without bypassing size limits or local-source validation. With stripping enabled,
+  byte-sniffed images retain compressed pixels and animation with required presentation
+  metadata; native AV remuxing copies allowlisted track fields, and Ogg processing
+  removes vendor/user comments. Sanitized names and actual sizes flow through transport
+  and history. Unsupported originals require per-attempt consent; malformed supported
+  media never automatically falls back. Consent retains the matching file/network
+  through screen recreation and never changes the global preference. Voice applies
+  the captured policy before encryption, then stages ciphertext as opaque bytes.
+  Attempt/error state uses identity so equal retries cannot retain stale consent callbacks.
+  Cancellation promptly stops the owning flow and requests HTTP disconnect or closes
+  DCC sockets. Temporary files have explicit success/error/cancellation ownership,
+  with bounded buffers rather than bitmap decoding, transcoding or whole-file copies.
 - Network-owned images, avatars, icons, video, and image Save use `NetworkMediaHttp`
   with `routeForNetwork`, native OkHttp/Coil caching scoped by network, and Media3's
   OkHttp adapter for streaming/range requests. The route lease lasts through

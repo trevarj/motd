@@ -112,6 +112,7 @@ import io.github.trevarj.motd.attachment.UploadRecord
 import io.github.trevarj.motd.attachment.forBackend
 import io.github.trevarj.motd.attachment.isLocalMediaUri
 import io.github.trevarj.motd.attachment.supports
+import io.github.trevarj.motd.ui.settings.SwitchRow
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
@@ -315,12 +316,14 @@ fun AttachmentSheets(
     }
 
     fun uploadConfig(request: AttachmentFlow.Confirm): PasteBackendConfig =
-        request.config ?: preferredUploadConfig(
-            request.source,
-            defaultConfig,
-            sojuFileHostAvailable,
-            preferSojuFileHost,
-        )
+        (
+            request.config ?: preferredUploadConfig(
+                request.source,
+                defaultConfig,
+                sojuFileHostAvailable,
+                preferSojuFileHost,
+            )
+        ).copy(stripMetadata = defaultConfig.stripMetadata)
 
     fun startUpload(
         request: AttachmentFlow.Confirm,
@@ -485,6 +488,7 @@ fun AttachmentSheets(
                     closeSourceSheet()
                 },
                 onUpload = { startUpload(current) },
+                onStripMetadataChange = viewModel::setStripMetadata,
             )
         }
     }
@@ -1017,6 +1021,7 @@ internal fun ConfirmationSheet(
     onChangeDestination: () -> Unit,
     onDismiss: () -> Unit,
     onUpload: () -> Unit,
+    onStripMetadataChange: (Boolean) -> Unit = {},
 ) {
     val sourceUri =
         when (source) {
@@ -1091,6 +1096,15 @@ internal fun ConfirmationSheet(
                 )
                 Spacer(Modifier.height(12.dp))
                 UploadPrivacyCard(config)
+                if (source !is AttachmentSource.Text) {
+                    SwitchRow(
+                        title = stringResource(R.string.upload_strip_metadata),
+                        subtitle = stringResource(if (config.stripMetadata) R.string.upload_strip_metadata_description else R.string.upload_strip_metadata_off_warning),
+                        checked = config.stripMetadata,
+                        onCheckedChange = onStripMetadataChange,
+                        switchTag = "attachment_strip_metadata",
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
             }
             Column(Modifier.padding(horizontal = 16.dp)) {

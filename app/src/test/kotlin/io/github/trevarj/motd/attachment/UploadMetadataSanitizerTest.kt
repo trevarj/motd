@@ -2,6 +2,7 @@ package io.github.trevarj.motd.attachment
 
 import android.content.Context
 import android.content.ContextWrapper
+import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
@@ -61,6 +62,15 @@ class UploadMetadataSanitizerTest {
             original.writeBytes(encoded.copyOfRange(0, encoded.size - 12) + chunk + encoded.takeLast(12))
             val before = original.readBytes()
             val source = AttachmentSource.LocalFile(original, original.name, "text/plain", 1)
+            sanitizer.prepare(source, 1024 * 1024, stripMetadata = false).use { prepared ->
+                val staged = prepared.source as AttachmentSource.LocalFile
+                assertArrayEquals(before, staged.file.readBytes())
+                assertEquals(source.name, staged.name)
+                assertEquals(source.mimeType, staged.mimeType)
+                assertEquals(before.size.toLong(), staged.size)
+                assertEquals(listOf(staged.file), cache.listFiles().orEmpty().toList())
+            }
+            assertTrue(cache.listFiles().orEmpty().isEmpty())
             val prepared = sanitizer.prepare(source, 1024 * 1024)
             val clean = prepared.source as AttachmentSource.LocalFile
             assertEquals("image/png", clean.mimeType)
@@ -107,12 +117,14 @@ class UploadMetadataSanitizerTest {
             val (sanitizer, cache) = sanitizer()
             val original = temporary.newFile()
             original.writeBytes(ByteArray(2048))
-            try {
-                sanitizer.prepare(AttachmentSource.LocalFile(original, "file.bin", "application/octet-stream", 1), 1024, allowOriginal = true)
-                throw AssertionError("False source size bypassed the upload limit")
-            } catch (failure: UploadException) {
-                assertFalse(failure is MetadataNotSupportedException)
-                assertTrue(cache.listFiles().orEmpty().isEmpty())
+            for (stripMetadata in listOf(true, false)) {
+                try {
+                    sanitizer.prepare(AttachmentSource.LocalFile(original, "file.bin", "application/octet-stream", 1), 1024, allowOriginal = true, stripMetadata = stripMetadata)
+                    throw AssertionError("False source size bypassed the upload limit")
+                } catch (failure: UploadException) {
+                    assertFalse(failure is MetadataNotSupportedException)
+                    assertTrue(cache.listFiles().orEmpty().isEmpty())
+                }
             }
         }
 
@@ -122,12 +134,62 @@ class UploadMetadataSanitizerTest {
             val (sanitizer, cache) = sanitizer()
             val original = temporary.newFile("broken.png")
             original.writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 73, 72, 68, 82))
+            sanitizer.prepare(AttachmentSource.LocalFile(original, original.name, "image/png", 1), 1024, stripMetadata = false).use { prepared ->
+                val staged = prepared.source as AttachmentSource.LocalFile
+                assertArrayEquals(original.readBytes(), staged.file.readBytes())
+                assertEquals(original.name, staged.name)
+                assertEquals("image/png", staged.mimeType)
+                assertEquals(original.length(), staged.size)
+                assertEquals(listOf(staged.file), cache.listFiles().orEmpty().toList())
+            }
+            assertTrue(cache.listFiles().orEmpty().isEmpty())
             try {
                 sanitizer.prepare(AttachmentSource.LocalFile(original, original.name, "image/png"), 1024, allowOriginal = true)
                 throw AssertionError("Malformed image was sent unchanged")
             } catch (failure: java.io.IOException) {
                 assertFalse(failure is MetadataNotSupportedException)
                 assertTrue(cache.listFiles().orEmpty().isEmpty())
+            }
+        }
+
+    @Test
+    fun disablingStrippingAlsoBypassesMalformedAudioVideoParsing() =
+        runBlocking {
+            val (sanitizer, cache) = sanitizer()
+            val original = temporary.newFile("broken.mp4")
+            original.writeBytes(byteArrayOf(0, 0, 0, 32) + "ftyp".toByteArray())
+            val source = AttachmentSource.LocalFile(original, original.name, "video/mp4", 1)
+            sanitizer.prepare(source, 1024, stripMetadata = false).use { prepared ->
+                val staged = prepared.source as AttachmentSource.LocalFile
+                assertArrayEquals(original.readBytes(), staged.file.readBytes())
+                assertEquals(source.name, staged.name)
+                assertEquals(source.mimeType, staged.mimeType)
+                assertEquals(original.length(), staged.size)
+                assertEquals(listOf(staged.file), cache.listFiles().orEmpty().toList())
+            }
+            assertTrue(cache.listFiles().orEmpty().isEmpty())
+            try {
+                sanitizer.prepare(source, 1024, allowOriginal = true)
+                throw AssertionError("Malformed video was sent unchanged")
+            } catch (_: java.io.IOException) {
+                assertTrue(cache.listFiles().orEmpty().isEmpty())
+            }
+        }
+
+    @Test
+    fun disablingStrippingStillRejectsRemoteUrisAndCleansStaging() =
+        runBlocking {
+            val (sanitizer, cache) = sanitizer()
+            for (source in listOf(
+                AttachmentSource.Document(Uri.parse("https://example.com/private.png"), "private.png", "image/png", 1),
+                AttachmentSource.Photo(Uri.parse("https://example.com/private.png"), "private.png", "image/png", 1),
+            )) {
+                try {
+                    sanitizer.prepare(source, 1024, stripMetadata = false)
+                    throw AssertionError("Remote URI was accepted")
+                } catch (_: IllegalArgumentException) {
+                    assertTrue(cache.listFiles().orEmpty().isEmpty())
+                }
             }
         }
 }

@@ -174,7 +174,14 @@ class AgentwireVoiceUiTest {
         compose.onNodeWithTag("voice_preview_play").assertIsNotEnabled()
         compose.runOnIdle {
             assertEquals(1, fixture.sends)
-            assertEquals(VoiceSendProgress.Uploading(5, 10), fixture.voice.progress)
+            assertNull(fixture.voice.progress)
+            fixture.voice = fixture.voice.copy(progress = VoiceSendProgress.Uploading(5, 10))
+        }
+        compose.onNodeWithTag("voice_send").assertIsNotEnabled()
+        compose.onNodeWithTag("voice_delete").assertIsNotEnabled()
+        compose.onNodeWithTag("voice_destination").assertIsNotEnabled()
+        compose.onNodeWithTag("voice_preview_play").assertIsNotEnabled()
+        compose.runOnIdle {
             fixture.voice = VoiceMessageUiState()
         }
         compose.onNodeWithTag("voice_preview_panel").assertDoesNotExist()
@@ -321,7 +328,7 @@ class AgentwireVoiceUiTest {
                     onDelete = {},
                     onCancelRecording = {},
                     onStopRecording = {},
-                    onSend = {},
+                    onSend = { state = state.copy(sending = true) },
                     onPreview = {},
                     onPreviewSeek = { _, _ -> },
                     onToggleEncryption = { state = state.copy(staged = state.staged?.copy(encrypted = false)) },
@@ -339,6 +346,13 @@ class AgentwireVoiceUiTest {
             .onNodeWithText(
                 "Agent voice notes are sent unencrypted so Agentwire can transcribe them on the workstation.",
             ).assertDoesNotExist()
+        compose.onNodeWithTag("voice_send").performClick()
+        compose.onNodeWithTag("voice_encryption_toggle").assertIsNotEnabled()
+        compose.onNodeWithTag("voice_delete").assertIsNotEnabled()
+        compose.onNodeWithTag("voice_send").assertIsNotEnabled()
+        compose.onNodeWithTag("voice_destination").assertIsNotEnabled()
+        compose.onNodeWithTag("voice_preview_play").assertIsNotEnabled()
+        compose.runOnIdle { assertNull(state.progress) }
     }
 
     private fun show(fixture: Fixture) {
@@ -381,10 +395,10 @@ class AgentwireVoiceUiTest {
                 onVoiceHoldStop = { voice = voice.copy(recording = null, staged = note()) },
                 onVoiceHoldCancel = { voice = voice.copy(recording = null) },
                 onVoiceLock = { voice = voice.copy(recording = voice.recording?.copy(locked = true)) },
-                onVoiceDelete = { voice = voice.copy(staged = null) },
+                onVoiceDelete = { voice = voice.copy(staged = null, sending = false, progress = null) },
                 onVoiceSend = {
                     sends++
-                    voice = voice.copy(progress = VoiceSendProgress.Uploading(5, 10))
+                    voice = voice.copy(sending = true, progress = null)
                 },
                 onVoicePreview = { attachment ->
                     playback = playback.copy(activeId = attachment.playbackId, playing = !playback.playing)

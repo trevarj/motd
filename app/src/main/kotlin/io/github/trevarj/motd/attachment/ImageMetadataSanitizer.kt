@@ -201,12 +201,11 @@ private class ImageReader(
                 val components = data[5].toInt() and 255
                 requireImage(
                     components in 1..4 && size == 6 + 3 * components &&
-                        (data[1].toInt() != 0 || data[2].toInt() != 0) &&
                         (data[3].toInt() != 0 || data[4].toInt() != 0),
                 )
                 val precision = data[0].toInt() and 255
                 requireImage(precision == 8 || marker != 0xc0 && precision == 12)
-                if (precision == 12) throw UnsupportedImage()
+                if (precision == 12 || data[1].toInt() == 0 && data[2].toInt() == 0) throw UnsupportedImage()
                 frame = true
                 emit(255)
                 emit(marker)
@@ -423,7 +422,7 @@ private class ImageReader(
                 }
                 if (keep) emit(data)
             } else if (type == "fdAT") {
-                requireImage(animation && pixels && frameControl && (!firstFrameUsesIdat || frames > 1) && length > 4)
+                requireImage(animation && pixels && frameControl && (!firstFrameUsesIdat || frames > 1) && length >= 4)
                 val seq = bytes(4)
                 requireImage(seq.uint32(0) == sequence++)
                 crc.update(seq)
@@ -620,7 +619,7 @@ private class ImageReader(
                         val nested = String(bytes(4), Charsets.US_ASCII)
                         val count = le32()
                         requireImage(count + (count and 1) <= frameEnd - input.filePointer)
-                        requireImage(nested == "ALPH" || nested == "VP8 " || nested == "VP8L")
+                        if (nested != "ALPH" && nested != "VP8 " && nested != "VP8L") throw UnsupportedImage()
                         if (nested != "ALPH") {
                             requireImage(!frameImage)
                             frameImage = true

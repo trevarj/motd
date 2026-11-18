@@ -37,11 +37,12 @@ class UploadMetadataSanitizer
             source: AttachmentSource,
             limitBytes: Long,
             allowOriginal: Boolean = false,
+            stripMetadata: Boolean = true,
         ): PreparedUpload {
             var prepared: PreparedUpload? = null
             try {
                 return withContext(Dispatchers.IO) {
-                    stage(source, limitBytes, allowOriginal).also { prepared = it }
+                    stage(source, limitBytes, allowOriginal, stripMetadata).also { prepared = it }
                 }
             } catch (failure: Throwable) {
                 prepared?.close()
@@ -53,6 +54,7 @@ class UploadMetadataSanitizer
             source: AttachmentSource,
             limitBytes: Long,
             allowOriginal: Boolean,
+            stripMetadata: Boolean,
         ): PreparedUpload {
             require(limitBytes > 0)
             if (source is AttachmentSource.Text) return PreparedUpload(source)
@@ -95,15 +97,21 @@ class UploadMetadataSanitizer
                     }
                 }
                 currentCoroutineContext().ensureActive()
-                val sanitized = File.createTempFile("upload-clean-", ".tmp", context.cacheDir)
-                output = sanitized
-                val media = stripImageMetadata(input, sanitized) ?: stripAudioVideoMetadata(input, sanitized)
+                val media =
+                    if (stripMetadata) {
+                        val sanitized = File.createTempFile("upload-clean-", ".tmp", context.cacheDir)
+                        output = sanitized
+                        stripImageMetadata(input, sanitized) ?: stripAudioVideoMetadata(input, sanitized)
+                    } else {
+                        null
+                    }
                 val prepared =
                     if (media != null) {
+                        val sanitized = checkNotNull(output)
                         if (sanitized.length() > limitBytes) throw UploadException("Sanitized file exceeds the configured upload limit")
                         AttachmentSource.LocalFile(sanitized, "upload-${UUID.randomUUID()}${media.extension}", media.mimeType)
                     } else {
-                        if (!allowOriginal) throw MetadataNotSupportedException()
+                        if (stripMetadata && !allowOriginal) throw MetadataNotSupportedException()
                         val name =
                             when (source) {
                                 is AttachmentSource.Document -> source.name

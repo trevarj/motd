@@ -44,8 +44,10 @@ import io.github.trevarj.motd.audio.VoiceSendRequest
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -99,6 +101,229 @@ class VoiceMessageViewModelTest {
             assertFalse(tracker.recording.value)
             assertNull(vm.state.value.recording)
             assertNotNull(vm.state.value.error)
+        }
+
+    @Test
+    fun `send is busy before preparation reports progress and ignores duplicate sends`() =
+        voiceTest {
+            val preparing = CompletableDeferred<Unit>()
+            val releasePreparation = CompletableDeferred<Unit>()
+            var sends = 0
+            var uploads = 0
+            var messages = 0
+            val sender =
+                object : VoiceMessageSender {
+                    override fun send(request: VoiceSendRequest): Flow<VoiceSendProgress> =
+                        flow {
+                            sends++
+                            preparing.complete(Unit)
+                            releasePreparation.await()
+                            uploads++
+                            emit(VoiceSendProgress.Uploading(1, 1))
+                            messages++
+                            emit(VoiceSendProgress.Complete("https://files.test/voice.ogg"))
+                        }
+                }
+            val vm = fixture(Harness(), recorder = RecordingRecorder(), sender = sender)
+            vm.startRecording(locked = true)
+            vm.stopRecording()
+            val staged = requireNotNull(vm.state.value.staged)
+
+            vm.send()
+            assertTrue(vm.state.value.sending)
+            assertNull(vm.state.value.progress)
+            assertEquals(0, sends)
+            vm.send()
+            runCurrent()
+
+            assertTrue(preparing.isCompleted)
+            assertTrue(vm.state.value.sending)
+            assertNull(vm.state.value.progress)
+            assertTrue(staged.file.exists())
+            vm.send()
+            runCurrent()
+            assertEquals(1, sends)
+            assertEquals(0, uploads)
+            assertEquals(0, messages)
+
+            releasePreparation.complete(Unit)
+            runCurrent()
+
+            assertEquals(1, uploads)
+            assertEquals(1, messages)
+            assertFalse(vm.state.value.sending)
+            assertNull(vm.state.value.progress)
+            assertNull(vm.state.value.staged)
+            assertFalse(staged.file.exists())
+        }
+
+    @Test
+    fun `delete cancels queued and preparing sends before removing the recording`() =
+        voiceTest {
+            for (startPreparation in listOf(false, true)) {
+                val releasePreparation = CompletableDeferred<Unit>()
+                var owner: Job? = null
+                var sends = 0
+                var uploads = 0
+                var messages = 0
+                var cleanedUp = false
+                lateinit var source: File
+                val playback =
+                    object : AudioPlaybackController by FakePlaybackController() {
+                        override fun dismiss(itemId: String) {
+                            if (startPreparation) assertTrue(requireNotNull(owner).isCancelled)
+                            assertTrue("Cancellation must precede source removal", source.exists())
+                        }
+                    }
+                val sender =
+                    object : VoiceMessageSender {
+                        override fun send(request: VoiceSendRequest): Flow<VoiceSendProgress> =
+                            flow {
+                                sends++
+                                owner = currentCoroutineContext()[Job]
+                                try {
+                                    releasePreparation.await()
+                                    uploads++
+                                    emit(VoiceSendProgress.Uploading(1, 1))
+                                    messages++
+                                    emit(VoiceSendProgress.Complete("https://files.test/voice.ogg"))
+                                } finally {
+                                    cleanedUp = true
+                                }
+                            }
+                    }
+                val vm = fixture(Harness(), recorder = RecordingRecorder(), sender = sender, playback = playback)
+                vm.startRecording(locked = true)
+                vm.stopRecording()
+                source = requireNotNull(vm.state.value.staged).file
+                vm.send()
+                if (startPreparation) runCurrent()
+                assertTrue(vm.state.value.sending)
+                assertNull(vm.state.value.progress)
+                assertEquals(if (startPreparation) 1 else 0, sends)
+
+                vm.deleteStaged()
+                assertFalse(source.exists())
+                assertNull(vm.state.value.staged)
+                assertFalse(vm.state.value.sending)
+                assertNull(vm.state.value.progress)
+                releasePreparation.complete(Unit)
+                runCurrent()
+
+                assertEquals(if (startPreparation) 1 else 0, sends)
+                assertEquals(startPreparation, cleanedUp)
+                assertEquals(0, uploads)
+                assertEquals(0, messages)
+                assertNull(vm.state.value.error)
+            }
+        }
+
+    @Test
+    fun `cancelled send cleanup cannot clear a newer recordings send state`() =
+        voiceTest {
+            val cleanupStarted = CompletableDeferred<Unit>()
+            val releaseCleanup = CompletableDeferred<Unit>()
+            val releaseNewUpload = CompletableDeferred<Unit>()
+            var sends = 0
+            val sender =
+                object : VoiceMessageSender {
+                    override fun send(request: VoiceSendRequest): Flow<VoiceSendProgress> =
+                        flow {
+                            sends++
+                            if (sends == 1) {
+                                try {
+                                    awaitCancellation()
+                                } finally {
+                                    withContext(NonCancellable) {
+                                        cleanupStarted.complete(Unit)
+                                        releaseCleanup.await()
+                                        throw IOException("Cancelled preparation failed")
+                                    }
+                                }
+                            } else {
+                                emit(VoiceSendProgress.Uploading(5, 10))
+                                releaseNewUpload.await()
+                                emit(VoiceSendProgress.Complete("https://files.test/new.ogg"))
+                            }
+                        }
+                }
+            val vm = fixture(Harness(), recorder = RecordingRecorder(), sender = sender)
+            vm.startRecording(locked = true)
+            vm.stopRecording()
+            vm.send()
+            runCurrent()
+            assertEquals(1, sends)
+            vm.deleteStaged()
+            runCurrent()
+            assertTrue(cleanupStarted.isCompleted)
+
+            vm.startRecording(locked = true)
+            vm.stopRecording()
+            val staged = requireNotNull(vm.state.value.staged)
+            vm.send()
+            runCurrent()
+            assertEquals(2, sends)
+            assertTrue(vm.state.value.sending)
+            assertEquals(VoiceSendProgress.Uploading(5, 10), vm.state.value.progress)
+
+            releaseCleanup.complete(Unit)
+            runCurrent()
+
+            assertTrue(vm.state.value.sending)
+            assertEquals(VoiceSendProgress.Uploading(5, 10), vm.state.value.progress)
+            assertEquals(staged, vm.state.value.staged)
+            assertTrue(staged.file.exists())
+            assertNull(vm.state.value.error)
+            releaseNewUpload.complete(Unit)
+            runCurrent()
+            assertFalse(vm.state.value.sending)
+            assertNull(vm.state.value.staged)
+            assertFalse(staged.file.exists())
+        }
+
+    @Test
+    fun `preparation failure clears send busy and keeps the recording retryable`() =
+        voiceTest {
+            val releasePreparation = CompletableDeferred<Unit>()
+            var sends = 0
+            val sender =
+                object : VoiceMessageSender {
+                    override fun send(request: VoiceSendRequest): Flow<VoiceSendProgress> =
+                        flow {
+                            sends++
+                            if (sends == 1) {
+                                releasePreparation.await()
+                                throw IOException("Preparation failed")
+                            }
+                            emit(VoiceSendProgress.Complete("https://files.test/retry.ogg"))
+                        }
+                }
+            val vm = fixture(Harness(), recorder = RecordingRecorder(), sender = sender)
+            vm.startRecording(locked = true)
+            vm.stopRecording()
+            val staged = requireNotNull(vm.state.value.staged)
+            vm.send()
+            runCurrent()
+            assertEquals(1, sends)
+            assertTrue(vm.state.value.sending)
+            assertNull(vm.state.value.progress)
+
+            releasePreparation.complete(Unit)
+            runCurrent()
+
+            assertFalse(vm.state.value.sending)
+            assertNull(vm.state.value.progress)
+            assertEquals("Preparation failed", vm.state.value.error)
+            assertEquals(staged, vm.state.value.staged)
+            assertTrue(staged.file.exists())
+            vm.send()
+            assertTrue(vm.state.value.sending)
+            assertNull(vm.state.value.error)
+            runCurrent()
+            assertEquals(2, sends)
+            assertFalse(vm.state.value.sending)
+            assertNull(vm.state.value.staged)
+            assertFalse(staged.file.exists())
         }
 
     @Test

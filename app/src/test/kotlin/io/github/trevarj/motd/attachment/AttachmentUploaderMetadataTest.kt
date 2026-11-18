@@ -10,9 +10,13 @@ import io.github.trevarj.motd.audio.MediaRouteResolver
 import io.github.trevarj.motd.testing.NoopConnectionManager
 import io.github.trevarj.motd.ui.chat.AttachmentViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.last
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -20,8 +24,10 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -40,6 +46,7 @@ import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.File
 import java.security.KeyStore
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.zip.CRC32
 import javax.imageio.ImageIO
@@ -177,6 +184,64 @@ class AttachmentUploaderMetadataTest {
                 refuse()
                 assertEquals(2, server.requestCount)
                 assertTrue(cache.listFiles().orEmpty().isEmpty())
+
+                val malformed =
+                    temporary.newFile("private-broken.png").apply {
+                        writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 73, 72, 68, 82))
+                    }
+                val malformedSource = AttachmentSource.LocalFile(malformed, malformed.name, "image/png", 1)
+                server.enqueue(MockResponse().setBody("https://example.com/original.png"))
+                val originalRecord = (uploader.upload(malformedSource, config.copy(stripMetadata = false)).last() as UploadProgress.Complete).record
+                val malformedRequest = server.takeRequest(5, TimeUnit.SECONDS)!!
+                val originalBody = malformedRequest.body.readByteArray()
+                val originalText = originalBody.toString(Charsets.ISO_8859_1)
+                assertTrue(originalText.contains("filename=\"${malformed.name}\""))
+                assertTrue(originalText.contains("Content-Type: image/png"))
+                val originalHeaderEnd = originalText.indexOf("\r\n\r\n", originalText.indexOf("filename=")) + 4
+                assertArrayEquals(malformed.readBytes(), originalBody.copyOfRange(originalHeaderEnd, originalHeaderEnd + malformed.length().toInt()))
+                assertEquals(malformed.length(), originalRecord.sizeBytes)
+                assertEquals(malformed.name, originalRecord.displayName)
+                assertEquals(3, server.requestCount)
+                assertTrue(cache.listFiles().orEmpty().isEmpty())
+                try {
+                    uploader.upload(malformedSource, config.copy(stripMetadata = true)).last()
+                    fail("Re-enabled stripping accepted malformed media")
+                } catch (_: java.io.IOException) {
+                    assertEquals(3, server.requestCount)
+                    assertTrue(cache.listFiles().orEmpty().isEmpty())
+                }
+
+                for (stripMetadata in listOf(true, false)) {
+                    val received = CountDownLatch(1)
+                    val completions =
+                        java.util.concurrent.atomic
+                            .AtomicInteger()
+                    val releaseResponse = CountDownLatch(1)
+                    server.dispatcher =
+                        object : Dispatcher() {
+                            override fun dispatch(request: RecordedRequest): MockResponse {
+                                received.countDown()
+                                releaseResponse.await()
+                                return MockResponse().setBody("https://example.com/delayed.png")
+                            }
+                        }
+                    val stalled =
+                        launch(Dispatchers.IO) {
+                            uploader.upload(AttachmentSource.LocalFile(original, original.name, "image/png"), config.copy(stripMetadata = stripMetadata)).collect {
+                                if (it is UploadProgress.Complete) completions.incrementAndGet()
+                            }
+                        }
+                    try {
+                        assertTrue("Upload never reached the stalled response", withContext(Dispatchers.IO) { received.await(5, TimeUnit.SECONDS) })
+                        assertTrue(cache.listFiles().orEmpty().isNotEmpty())
+                        withTimeout(2_000) { stalled.cancelAndJoin() }
+                        assertTrue("Cancellation retained staged media", cache.listFiles().orEmpty().isEmpty())
+                        assertEquals("Cancelled upload emitted Complete", 0, completions.get())
+                    } finally {
+                        releaseResponse.countDown()
+                        withContext(NonCancellable) { stalled.cancelAndJoin() }
+                    }
+                }
             } finally {
                 server.shutdown()
                 HttpsURLConnection.setDefaultSSLSocketFactory(previousTls)

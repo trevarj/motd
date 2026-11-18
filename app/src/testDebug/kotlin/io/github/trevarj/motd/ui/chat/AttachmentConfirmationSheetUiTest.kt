@@ -13,6 +13,9 @@ import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.ActivityResultRegistryOwner
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -34,6 +37,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -55,15 +59,21 @@ import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
 import io.github.trevarj.motd.attachment.AttachmentUploader
+import io.github.trevarj.motd.attachment.AttachmentUploaderImpl
 import io.github.trevarj.motd.attachment.OffHostUploadException
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.SOJU_FILEHOST_TOKEN
+import io.github.trevarj.motd.attachment.UploadMetadataSanitizer
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
 import io.github.trevarj.motd.attachment.sojuFileHostAdvertised
 import io.github.trevarj.motd.audio.AudioWaveform
+import io.github.trevarj.motd.audio.MediaRouteResolver
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.testing.NoopConnectionManager
 import io.github.trevarj.motd.ui.components.Composer
+import io.github.trevarj.motd.ui.settings.AttachmentSettingsViewModel
+import io.github.trevarj.motd.ui.settings.UploadsSettingsContent
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.cancel
@@ -72,8 +82,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -84,6 +98,12 @@ import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowContentResolver
 import java.io.File
 import java.io.IOException
+import java.security.KeyStore
+import java.util.concurrent.TimeUnit
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.KeyManagerFactory
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManagerFactory
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -117,6 +137,135 @@ class AttachmentConfirmationSheetUiTest {
                 pickerRequestCode = requestCode
             }
         }
+
+    @Test
+    fun sharedMetadataPreferenceControlsRealRequestsDespiteRememberedDestinationAndRetry() {
+        val prefs = AttachmentPrefsImpl(context)
+        val password = "media-test".toCharArray()
+        val store = KeyStore.getInstance("PKCS12")
+        javaClass.getResourceAsStream("/network-media.p12")!!.use { store.load(it, password) }
+        val keys = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply { init(store, password) }
+        val trust = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply { init(store) }
+        val tls = SSLContext.getInstance("TLS").apply { init(keys.keyManagers, trust.trustManagers, null) }
+        val previousTls = HttpsURLConnection.getDefaultSSLSocketFactory()
+        val previousVerifier = HttpsURLConnection.getDefaultHostnameVerifier()
+        val server = MockWebServer()
+        server.useHttps(tls.socketFactory, false)
+        HttpsURLConnection.setDefaultSSLSocketFactory(tls.socketFactory)
+        HttpsURLConnection.setDefaultHostnameVerifier { _, _ -> true }
+        val file =
+            context.cacheDir.resolve("image-clipboard/metadata-ui-private.pdf").apply {
+                parentFile!!.mkdirs()
+                writeText("%PDF-1.7 /Author(private-location)")
+            }
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.camera", file)
+        val settings = AttachmentSettingsViewModel(prefs)
+        val attachments =
+            AttachmentViewModel(
+                prefs,
+                AttachmentUploaderImpl(context, NoopConnectionManager(), MediaRouteResolver { null }, UploadMetadataSanitizer(context)),
+            )
+        var settingsVisible by mutableStateOf(true)
+        try {
+            server.start()
+            runBlocking {
+                prefs.setConfig(PasteBackendConfig(backend = AttachmentBackend.CUSTOM_0X0, customEndpoint = server.url("/upload").toString()))
+            }
+            compose.setContent {
+                DisposableEffect(Unit) {
+                    onDispose {
+                        settings.viewModelScope.cancel()
+                        attachments.viewModelScope.cancel()
+                    }
+                }
+                MotdTheme {
+                    if (settingsVisible) {
+                        Column(Modifier.verticalScroll(rememberScrollState())) {
+                            UploadsSettingsContent(viewModel = settings)
+                        }
+                    } else {
+                        AttachmentSheets(
+                            open = true,
+                            currentDraft = "",
+                            networkId = null,
+                            sojuFileHostAvailable = false,
+                            sharedFile = PendingShare.File(uri, "application/pdf"),
+                            onDismiss = {},
+                            onInsertUrl = {},
+                            onReplaceDraft = {},
+                            onOpenNetworkSettings = {},
+                            viewModel = attachments,
+                        )
+                    }
+                }
+            }
+            compose.onNodeWithTag("settings_upload_strip_metadata_row").performClick()
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText(context.getString(R.string.upload_strip_metadata_off_warning)).fetchSemanticsNodes().isNotEmpty()
+            }
+            assertFalse(runBlocking { AttachmentPrefsImpl(context).config.first().stripMetadata })
+            compose.onNodeWithText(context.getString(R.string.upload_strip_metadata_off_warning)).assertIsDisplayed()
+            compose.runOnIdle { settingsVisible = false }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithTag("attachment_strip_metadata_row").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithTag("attachment_strip_metadata_row").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText(context.getString(R.string.upload_destination_change)).performScrollTo().performClick()
+            compose.onNodeWithText(AttachmentBackend.CUSTOM_0X0.label).performScrollTo().performClick()
+            runBlocking { prefs.updateConfig { it.copy(backend = AttachmentBackend.UGUU, stripMetadata = true) } }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText(context.getString(R.string.upload_strip_metadata_description)).fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithText(AttachmentBackend.CUSTOM_0X0.label).assertIsDisplayed()
+            compose.onNodeWithTag("attachment_strip_metadata_row").performScrollTo().performClick()
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText(context.getString(R.string.upload_strip_metadata_off_warning)).fetchSemanticsNodes().isNotEmpty()
+            }
+            assertFalse(runBlocking { prefs.config.first().stripMetadata })
+            assertEquals(AttachmentBackend.UGUU, runBlocking { prefs.config.first().backend })
+            server.enqueue(MockResponse().setResponseCode(500).setBody("Rejected"))
+            compose.onNodeWithTag("attachment_upload").performClick()
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText(context.getString(R.string.upload_retry)).fetchSemanticsNodes().isNotEmpty()
+            }
+            val request = server.takeRequest(5, TimeUnit.SECONDS)!!
+            assertEquals("/upload", request.path)
+            val body = request.body.readUtf8()
+            assertTrue(body.contains(file.readText()))
+            assertTrue(body.contains("filename=\"${file.name}\""))
+            runBlocking { prefs.updateConfig { it.copy(stripMetadata = true) } }
+            compose.onNodeWithText(context.getString(R.string.upload_retry)).performClick()
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText(context.getString(R.string.upload_send_original)).fetchSemanticsNodes().isNotEmpty()
+            }
+            assertEquals(1, server.requestCount)
+            server.enqueue(MockResponse().setResponseCode(500).setBody("Rejected again"))
+            compose.onNodeWithText(context.getString(R.string.upload_send_original)).performClick()
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText(context.getString(R.string.upload_retry)).fetchSemanticsNodes().isNotEmpty()
+            }
+            assertTrue(
+                server
+                    .takeRequest(5, TimeUnit.SECONDS)!!
+                    .body
+                    .readUtf8()
+                    .contains(file.readText()),
+            )
+            assertTrue(runBlocking { prefs.config.first().stripMetadata })
+            compose.onNodeWithText(context.getString(R.string.upload_retry)).performClick()
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText(context.getString(R.string.upload_send_original)).fetchSemanticsNodes().isNotEmpty()
+            }
+            assertEquals(2, server.requestCount)
+        } finally {
+            attachments.viewModelScope.cancel()
+            settings.viewModelScope.cancel()
+            server.shutdown()
+            HttpsURLConnection.setDefaultSSLSocketFactory(previousTls)
+            HttpsURLConnection.setDefaultHostnameVerifier(previousVerifier)
+            file.delete()
+        }
+    }
 
     @Test
     fun clearHistoryRequiresConfirmationAndClearsPersistedRecentsWithoutRemoteDeletion() {
@@ -164,6 +313,7 @@ class AttachmentConfirmationSheetUiTest {
             .onNodeWithText(context.resources.getQuantityString(R.plurals.upload_character_count, text.length, text.length))
             .assertIsDisplayed()
         compose.onNodeWithTag("attachment_upload").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithTag("attachment_strip_metadata_row").assertDoesNotExist()
     }
 
     @Test
@@ -191,6 +341,7 @@ class AttachmentConfirmationSheetUiTest {
 
         compose.onNodeWithText("selected-document.txt").assertIsDisplayed()
         compose.onNodeWithTag("attachment_upload").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithTag("attachment_strip_metadata_row").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -375,6 +526,7 @@ class AttachmentConfirmationSheetUiTest {
 
         compose.onNodeWithTag("attachment_thumbnail").assertIsDisplayed()
         compose.onNodeWithTag("attachment_upload").assertIsDisplayed()
+        compose.onNodeWithTag("attachment_strip_metadata_row").performScrollTo().assertIsDisplayed()
         file.delete()
     }
 

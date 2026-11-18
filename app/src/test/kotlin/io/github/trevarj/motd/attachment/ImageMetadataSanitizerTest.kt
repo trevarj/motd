@@ -90,14 +90,19 @@ class ImageMetadataSanitizerTest {
                 signature + pngChunk("IHDR", header) + pngChunk("acTL", intBytes(2) + intBytes(0)) +
                     pngChunk("eXIf", exif(8).copyOfRange(6, 32) + secret) + pngChunk("fcTL", control) +
                     pngChunk("IDAT", pixels) + pngChunk("tEXt", secret) + pngChunk("fcTL", secondControl) +
-                    pngChunk("fdAT", intBytes(2) + pixels) + pngChunk("iTXt", secret) + pngChunk("IEND", byteArrayOf()) + secret
+                    pngChunk("fdAT", intBytes(2)) + pngChunk("fdAT", intBytes(3) + pixels) +
+                    pngChunk("iTXt", secret) + pngChunk("IEND", byteArrayOf()) + secret
             val result = sanitize(dirty).second
             assertPrivateDataGone(result)
             assertPixelsEqual(png, result)
             val clean = pngChunks(result)
             assertEquals(2, clean.count { it.first == "fcTL" })
             assertArrayEquals(pixels, clean.single { it.first == "IDAT" }.second)
-            assertArrayEquals(intBytes(2) + pixels, clean.single { it.first == "fdAT" }.second)
+            val frameData = clean.filter { it.first == "fdAT" }.map { it.second }
+            assertEquals(2, frameData.size)
+            assertArrayEquals(intBytes(2), frameData[0])
+            assertArrayEquals(intBytes(3) + pixels, frameData[1])
+            assertArrayEquals(pixels, frameData.flatMap { it.drop(4) }.toByteArray())
             assertArrayEquals(exif(8).copyOfRange(6, 32), clean.single { it.first == "eXIf" }.second)
         }
 
@@ -142,6 +147,68 @@ class ImageMetadataSanitizerTest {
             assertTrue(contains(result.second, frame + frame))
             assertTrue(contains(result.second, webpChunk("EXIF", exif(6).copyOfRange(6, 32))))
             assertEquals(result.second.size - 8, ByteBuffer.wrap(result.second, 4, 4).order(ByteOrder.LITTLE_ENDIAN).int)
+        }
+
+    @Test fun unknownAnimatedWebpFrameChunksAreUnsupportedWithoutCreatingOutput() =
+        runBlocking {
+            val simple = Base64.getDecoder().decode("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA")
+            val unknown = webpChunk("TEST", byteArrayOf(42, 43))
+            val input = temporary.newFile()
+            val output = File(temporary.root, "unsupported-frame-chunk")
+
+            fun animatedFrame(nested: ByteArray) =
+                riff(
+                    webpChunk("VP8X", byteArrayOf(2, 0, 0, 0, 0, 0, 0, 0, 0, 0)) +
+                        webpChunk("ANIM", ByteArray(6)) +
+                        webpChunk("ANMF", ByteArray(16) + simple.copyOfRange(12, simple.size) + nested),
+                )
+            input.writeBytes(animatedFrame(unknown))
+            assertNull(stripImageMetadata(input, output))
+            assertFalse(output.exists())
+            input.writeBytes(animatedFrame(unknown.copyOf(unknown.size - 2)))
+            try {
+                stripImageMetadata(input, output)
+                throw AssertionError("Truncated nested WebP chunk accepted")
+            } catch (_: IOException) {
+                assertFalse(output.exists())
+            }
+        }
+
+    @Test fun deferredJpegHeightIsUnsupportedButInvalidFrameFieldsRemainMalformed() =
+        runBlocking {
+            val jpeg = encode("jpeg")
+            val frame = (0 until jpeg.size - 1).first { jpeg[it] == 255.toByte() && jpeg[it + 1] == 0xc0.toByte() }
+            val deferred =
+                jpeg.copyOf().also {
+                    it[frame + 5] = 0
+                    it[frame + 6] = 0
+                }
+            val input = temporary.newFile()
+            val output = File(temporary.root, "unsupported-deferred-height")
+            input.writeBytes(
+                deferred.copyOfRange(0, deferred.size - 2) + jpegSegment(0xdc, byteArrayOf(0, 2)) +
+                    deferred.copyOfRange(deferred.size - 2, deferred.size),
+            )
+            assertNull(stripImageMetadata(input, output))
+            assertFalse(output.exists())
+            val malformed =
+                listOf(
+                    deferred.copyOf().also {
+                        it[frame + 7] = 0
+                        it[frame + 8] = 0
+                    },
+                    deferred.copyOf().also { it[frame + 9] = 0 },
+                    deferred.copyOf().also { it[frame + 4] = 7 },
+                )
+            for (bytes in malformed) {
+                input.writeBytes(bytes)
+                try {
+                    stripImageMetadata(input, output)
+                    throw AssertionError("Invalid JPEG frame accepted")
+                } catch (_: IOException) {
+                    assertFalse(output.exists())
+                }
+            }
         }
 
     @Test fun unsupportedBytesAndProfilesDoNotCreateOutputAndMalformedImagesFail() =

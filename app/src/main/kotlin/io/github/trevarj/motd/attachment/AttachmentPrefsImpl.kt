@@ -8,6 +8,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -83,6 +85,7 @@ class AttachmentPrefsImpl
                 put("limit", c.sizeLimitBytes)
                 put("username", c.username)
                 put("password", c.password)
+                put("stripMetadata", c.stripMetadata)
             }.toString()
 
         private fun decodeConfig(raw: String) =
@@ -110,6 +113,7 @@ class AttachmentPrefsImpl
                         sizeLimitBytes = o["limit"]?.jsonPrimitive?.longOrNull ?: DEFAULT_PUBLIC_LIMIT_BYTES,
                         username = o["username"]?.jsonPrimitive?.content.orEmpty(),
                         password = o["password"]?.jsonPrimitive?.content.orEmpty(),
+                        stripMetadata = (o["stripMetadata"] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull ?: true,
                     ),
                 )
             }.getOrDefault(PasteBackendConfig())

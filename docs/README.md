@@ -52,10 +52,15 @@ and saved deletion tokens. Hosted files and active uploads are unaffected.
 
 ## Upload privacy
 
-File uploads and outgoing DCC transfers remove private metadata from supported
+By default, file uploads and outgoing DCC transfers remove private metadata from supported
 media before sending anything. This also covers camera captures, shared files
 and voice recordings, including plaintext before voice encryption. Originals
 are not modified; sanitized files use a generated filename.
+
+Change **Strip metadata** in **Settings → Uploads** or a non-text upload confirmation.
+This shared setting is included in configuration backups and captured once per attempt.
+Turning it off bypasses metadata parsing and sends original bytes and filenames, which
+may expose location, author or device details. Size limits and local-file checks still apply.
 
 JPEG, PNG/APNG, GIF and WebP processing preserves compressed image content,
 orientation and animation. Supported MP4/M4A/3GP and WebM audio/video is remuxed,
@@ -63,9 +68,10 @@ not re-encoded; single-stream Ogg Opus/Vorbis comments are removed. Presentation
 data such as orientation, color parameters and playback timing is retained.
 Extended Adobe JPEG headers are accepted, with their extra metadata bytes removed.
 
-Unsupported files require **Send original** confirmation for that attempt only.
+While stripping is enabled, unsupported files require **Send original** confirmation for that attempt only.
 This includes PDFs, Office documents, archives, images with embedded ICC profiles
-or unsupported HDR data, and unsupported media codecs or subtitle tracks.
+or unsupported HDR data, deferred-height JPEGs, unknown WebP animation chunks,
+and unsupported media codecs or subtitle tracks.
 Cancel sends nothing. Malformed supported files, read errors and size-limit
 failures stop the upload rather than falling back to original bytes.
 

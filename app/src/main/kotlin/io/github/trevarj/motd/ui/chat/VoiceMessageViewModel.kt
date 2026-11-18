@@ -143,6 +143,7 @@ data class VoiceMessageUiState(
     val config: VoiceConfig = VoiceConfig(),
     val recording: VoiceRecordingUi? = null,
     val staged: StagedVoiceMessage? = null,
+    val sending: Boolean = false,
     val progress: VoiceSendProgress? = null,
     val error: String? = null,
     val notice: String? = null,
@@ -377,11 +378,14 @@ class VoiceMessageViewModel
         }
 
         fun deleteStaged() {
+            val job = sendJob
+            sendJob = null
+            job?.cancel()
             _state.value.staged?.let { staged ->
                 dismissIfPreviewing(staged.file)
                 staged.file.delete()
             }
-            _state.update { it.copy(staged = null, progress = null, error = null) }
+            _state.update { it.copy(staged = null, sending = false, progress = null, error = null) }
         }
 
         fun toggleStagedPreview(attachment: AudioAttachment) {
@@ -665,9 +669,10 @@ class VoiceMessageViewModel
 
         fun send() {
             val staged = _state.value.staged ?: return
-            sendJob?.cancel()
-            sendJob =
-                viewModelScope.launch {
+            if (_state.value.sending) return
+            val job =
+                viewModelScope.launch(start = CoroutineStart.LAZY) {
+                    val owner = currentCoroutineContext()[Job]
                     try {
                         sender
                             .send(
@@ -683,6 +688,8 @@ class VoiceMessageViewModel
                                     destination = staged.destination,
                                 ),
                             ).collect { progress ->
+                                if (sendJob !== owner) return@collect
+                                currentCoroutineContext().ensureActive()
                                 _state.update { it.copy(progress = progress, error = null) }
                                 if (progress is VoiceSendProgress.Complete) {
                                     dismissIfPreviewing(staged.file)
@@ -693,21 +700,27 @@ class VoiceMessageViewModel
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (error: Exception) {
-                        _state.update {
-                            it.copy(progress = null, error = error.message ?: "Voice message failed.")
+                        if (sendJob === owner) {
+                            _state.update {
+                                it.copy(error = error.message ?: "Voice message failed.")
+                            }
+                        }
+                    } finally {
+                        if (sendJob === owner) {
+                            sendJob = null
+                            _state.update { it.copy(sending = false, progress = null) }
                         }
                     }
                 }
+            sendJob = job
+            _state.update { it.copy(sending = true, progress = null, error = null) }
+            job.start()
         }
 
         override fun onCleared() {
-            sendJob?.cancel()
+            deleteStaged()
             cancelAllTranscriptions()
             cancelRecording()
-            _state.value.staged?.let { staged ->
-                dismissIfPreviewing(staged.file)
-                staged.file.delete()
-            }
         }
 
         private fun dismissIfPreviewing(file: File) {

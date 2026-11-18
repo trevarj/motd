@@ -2597,5 +2597,8 @@
     <string name="agentwire_collaboration_standard">Standard collaboration</string>
     <string name="upload_metadata_warning_title">Send original file?</string>
     <string name="upload_metadata_warning_body">Metadata removal is not supported for this file. The original may include private information such as location, author or device details.</string>
+    <string name="upload_strip_metadata">Strip metadata</string>
+    <string name="upload_strip_metadata_description">Remove supported metadata before file uploads, direct file transfers and voice messages.</string>
+    <string name="upload_strip_metadata_off_warning">Off: sends original files, which may expose location, author or device details.</string>
     <string name="upload_send_original">Send original</string>
 </resources>

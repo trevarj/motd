@@ -214,6 +214,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_start_on_boot, R.string.settings_start_on_boot_desc, "restart reconnect", SettingsSearchPage.DELIVERY, SettingsTarget.START_ON_BOOT),
         spec(R.string.settings_battery, R.string.settings_battery_desc, "optimization background", SettingsSearchPage.DELIVERY, SettingsTarget.BATTERY),
         spec(R.string.settings_upload_destination, R.string.settings_uploads_summary, "provider backend service", SettingsSearchPage.UPLOADS, SettingsTarget.UPLOAD_PROVIDER),
+        spec(R.string.upload_strip_metadata, R.string.upload_strip_metadata_description, "metadata exif location privacy", SettingsSearchPage.UPLOADS, SettingsTarget.UPLOAD_METADATA),
         spec(R.string.settings_upload_limits, R.string.settings_upload_limit_desc_search, "size mib", SettingsSearchPage.UPLOADS, SettingsTarget.UPLOAD_LIMIT),
         spec(R.string.backup_export_title, R.string.backup_export_guidance, "save configuration credentials encrypted", SettingsSearchPage.BACKUP, SettingsTarget.EXPORT_BACKUP),
         spec(R.string.backup_import_title, R.string.backup_import_guidance, "restore merge replace", SettingsSearchPage.BACKUP, SettingsTarget.IMPORT_BACKUP),

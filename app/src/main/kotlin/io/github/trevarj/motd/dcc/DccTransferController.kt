@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.core.net.toUri
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.UploadMetadataSanitizer
 import io.github.trevarj.motd.data.db.BufferType
@@ -25,15 +26,22 @@ import io.github.trevarj.motd.service.LocalSocksProvider
 import io.github.trevarj.motd.service.resolveTransportProxy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.Closeable
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetAddress
@@ -85,6 +93,7 @@ class DccTransferControllerImpl
         private val localSocksProvider: LocalSocksProvider,
         @param:ApplicationScope private val applicationScope: CoroutineScope,
         private val metadataSanitizer: UploadMetadataSanitizer,
+        private val attachmentPrefs: AttachmentPrefs,
     ) : DccTransferController {
         private val transfers: DccTransferDao get() = db.dccTransferDao()
         private val resultCache = EbooksResultCache(context)
@@ -185,6 +194,7 @@ class DccTransferControllerImpl
             secure: Boolean,
             allowOriginalMetadata: Boolean,
         ) {
+            val stripMetadata = attachmentPrefs.config.first().stripMetadata
             val buffer = db.bufferDao().observeById(bufferId) ?: return
             if (buffer.type != BufferType.QUERY) return
             val endpointNetwork = effectiveNetworkFor(buffer.networkId) ?: return
@@ -194,6 +204,7 @@ class DccTransferControllerImpl
                     AttachmentSource.Document(sourceUri, meta.name, context.contentResolver.getType(sourceUri), meta.sizeBytes),
                     MAX_DCC_FILE_SIZE_BYTES,
                     allowOriginalMetadata,
+                    stripMetadata = stripMetadata,
                 )
             var handedOff = false
             try {
@@ -283,7 +294,7 @@ class DccTransferControllerImpl
                     } else {
                         socket
                     }
-                inputSocket.use { active ->
+                withDccSocket(inputSocket) { active ->
                     active.soTimeout = READ_TIMEOUT_MS
                     context.contentResolver.openOutputStream(destinationUri, "wt").use { output ->
                         requireNotNull(output) { "Unable to open destination" }
@@ -310,6 +321,7 @@ class DccTransferControllerImpl
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
+                currentCoroutineContext().ensureActive()
                 failTransfer(transferId, error.message ?: "DCC receive failed")
             } finally {
                 if (privateCache && !completed) {
@@ -338,7 +350,7 @@ class DccTransferControllerImpl
                     error("Direct file sending is unavailable while this network uses a proxy")
                 }
                 val server = ServerSocket(0)
-                server.use { listening ->
+                withDccSocket(server) { listening ->
                     listening.soTimeout = ACCEPT_TIMEOUT_MS
                     val advertised = chooseAdvertisedAddress()
                     if (dccEndpointRisk(advertised) != DccEndpointRisk.PUBLIC) {
@@ -364,15 +376,17 @@ class DccTransferControllerImpl
                             sizeBytes = current.sizeBytes,
                             token = current.token,
                         )
-                    sendCtcp(clientNetworkId, peerTarget, dccSendCtcp(offer))
-                    val accepted = withContext(Dispatchers.IO) { listening.accept() }
-                    accepted.use { active ->
-                        transitions(transferId) { transfer, now ->
-                            transfer.copy(state = DccTransferState.ACTIVE, error = null, updatedAt = now)
-                        }
-                        context.contentResolver.openInputStream(sourceUri).use { input ->
-                            requireNotNull(input) { "Unable to open source" }
-                            sendBytes(transferId, input, active.getOutputStream(), current.sizeBytes)
+                    check(sendCtcp(clientNetworkId, peerTarget, dccSendCtcp(offer))) { "IRC rejected the file offer" }
+                    withContext(Dispatchers.IO) {
+                        val accepted = listening.accept()
+                        withDccSocket(accepted) { active ->
+                            transitions(transferId) { transfer, now ->
+                                transfer.copy(state = DccTransferState.ACTIVE, error = null, updatedAt = now)
+                            }
+                            context.contentResolver.openInputStream(sourceUri).use { input ->
+                                requireNotNull(input) { "Unable to open source" }
+                                sendBytes(transferId, input, active.getOutputStream(), current.sizeBytes)
+                            }
                         }
                     }
                     transitions(transferId) { transfer, now ->
@@ -387,6 +401,7 @@ class DccTransferControllerImpl
                 }
             }.onFailure { error ->
                 if (error is CancellationException) throw error
+                currentCoroutineContext().ensureActive()
                 failTransfer(transferId, error.message ?: "DCC send failed")
             }
         }
@@ -431,6 +446,7 @@ class DccTransferControllerImpl
             var total = 0L
             var lastPersisted = 0L
             while (true) {
+                currentCoroutineContext().ensureActive()
                 val read = input.read(buffer)
                 if (read < 0) break
                 output.write(buffer, 0, read)
@@ -596,5 +612,27 @@ class DccTransferControllerImpl
                     }
                 SSLContext.getInstance("TLS").apply { init(null, arrayOf(trustAll), null) }.socketFactory
             }
+        }
+    }
+
+internal suspend fun <T : Closeable, R> withDccSocket(
+    socket: T,
+    block: suspend (T) -> R,
+): R =
+    coroutineScope {
+        val closeOnCancel =
+            launch(start = CoroutineStart.UNDISPATCHED) {
+                suspendCancellableCoroutine<Nothing> { continuation ->
+                    continuation.invokeOnCancellation { runCatching { socket.close() } }
+                }
+            }
+        try {
+            block(socket)
+        } catch (failure: Exception) {
+            currentCoroutineContext().ensureActive()
+            throw failure
+        } finally {
+            closeOnCancel.cancel()
+            runCatching { socket.close() }
         }
     }

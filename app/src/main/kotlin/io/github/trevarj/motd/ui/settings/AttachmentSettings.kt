@@ -123,6 +123,18 @@ fun UploadsSettingsContent(
         }
     }
 
+    SettingsGroup(title = stringResource(R.string.settings_upload_privacy)) {
+        SwitchRow(
+            title = stringResource(R.string.upload_strip_metadata),
+            subtitle = stringResource(if (config.stripMetadata) R.string.upload_strip_metadata_description else R.string.upload_strip_metadata_off_warning),
+            checked = config.stripMetadata,
+            onCheckedChange = { enabled -> onUpdate { it.copy(stripMetadata = enabled) } },
+            switchTag = "settings_upload_strip_metadata",
+            requestedTarget = target?.name,
+            targetName = SettingsTarget.UPLOAD_METADATA.name,
+        )
+    }
+
     // One animated region hosts every backend-specific block (warning, endpoint, options) so a
     // radio pick crossfades and eases the height once instead of snapping three conditionals.
     AnimatedContent(

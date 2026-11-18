@@ -5803,7 +5803,7 @@ internal fun VoiceComposerPanel(
     val previewInkSeed = MaterialTheme.colorScheme.primary
     val previewInk = remember(previewInkSeed, panelColor) { ensureContrast(previewInkSeed, listOf(panelColor)) }
     // Hold the last non-null panel models so the exit animation still has content to draw after
-    // the state field clears; live fields (state.progress, playbackState) keep reading current
+    // the state field clears; live fields (state.sending, state.progress, playbackState) keep reading current
     // state as before.
     var lastRecording by remember { mutableStateOf(state.recording) }
     state.recording?.let { lastRecording = it }
@@ -5934,10 +5934,10 @@ internal fun VoiceComposerPanel(
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                             )
                         }
-                        IconButton(onClick = { onPreview(preview) }, enabled = progress == null, modifier = Modifier.testTag("voice_preview_play")) {
+                        IconButton(onClick = { onPreview(preview) }, enabled = !state.sending, modifier = Modifier.testTag("voice_preview_play")) {
                             Icon(if (previewPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (previewPlaying) "Pause" else "Play")
                         }
-                        IconButton(onClick = onDelete, enabled = progress == null, modifier = Modifier.testTag("voice_delete")) {
+                        IconButton(onClick = onDelete, enabled = !state.sending, modifier = Modifier.testTag("voice_delete")) {
                             Icon(Icons.Filled.Delete, "Delete")
                         }
                     }
@@ -5947,7 +5947,7 @@ internal fun VoiceComposerPanel(
                             onPreviewSeek(preview, (fraction * previewDurationMs).toLong())
                         },
                         onValueChangeFinished = {},
-                        enabled = progress == null && previewActive && !playbackState.loading,
+                        enabled = !state.sending && previewActive && !playbackState.loading,
                         waveform = staged.waveform,
                         modifier = Modifier.fillMaxWidth().testTag("voice_preview_scrubber"),
                     )
@@ -5970,7 +5970,7 @@ internal fun VoiceComposerPanel(
                             Switch(
                                 checked = staged.encrypted,
                                 onCheckedChange = { onToggleEncryption() },
-                                enabled = progress == null,
+                                enabled = !state.sending,
                                 modifier = Modifier.testTag("voice_encryption_toggle"),
                             )
                         }
@@ -5995,7 +5995,7 @@ internal fun VoiceComposerPanel(
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                             )
                         }
-                        TextButton(onClick = { destinationSheet = true }, enabled = progress == null, modifier = Modifier.testTag("voice_destination")) {
+                        TextButton(onClick = { destinationSheet = true }, enabled = !state.sending, modifier = Modifier.testTag("voice_destination")) {
                             Text("Change")
                         }
                     }
@@ -6011,11 +6011,13 @@ internal fun VoiceComposerPanel(
                             }
                         }
 
-                        is VoiceSendProgress.Complete,
-                        null,
-                        -> {}
+                        null -> {
+                            if (state.sending) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+
+                        is VoiceSendProgress.Complete -> {}
                     }
-                    Button(onClick = onSend, enabled = sendEnabled && progress == null, modifier = Modifier.fillMaxWidth().testTag("voice_send")) {
+                    Button(onClick = onSend, enabled = sendEnabled && !state.sending, modifier = Modifier.fillMaxWidth().testTag("voice_send")) {
                         Icon(Icons.Outlined.CloudUpload, null)
                         Spacer(Modifier.width(6.dp))
                         Text("Send")
@@ -6027,7 +6029,7 @@ internal fun VoiceComposerPanel(
     // The sheet stays keyed to the live staged value (not the held one) so it can never outlive
     // the message it configures.
     state.staged?.let { staged ->
-        if (destinationSheet) {
+        if (destinationSheet && !state.sending) {
             VoiceDestinationSheet(
                 staged = staged,
                 config =

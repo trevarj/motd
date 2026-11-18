@@ -18,17 +18,18 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-data class AttachmentError(
+class AttachmentError(
     val message: String,
     val offHostNetworkId: Long? = null,
     val metadataNotSupported: Boolean = false,
 )
 
-data class AttachmentAttempt(
+class AttachmentAttempt(
     val source: AttachmentSource,
     val config: PasteBackendConfig,
     val context: AttachmentUploadContext,
@@ -61,12 +62,15 @@ class AttachmentViewModel
         ) {
             job?.cancel()
             _error.value = null
-            _attempt.value = AttachmentAttempt(source, override, context.copy(allowOriginalMetadata = false), replaceDraft)
+            _attempt.value = null
             _progress.value = UploadProgress.Transferring(0, null)
             job =
                 viewModelScope.launch {
                     try {
-                        uploader.upload(source, override, context).collect { update ->
+                        val snapshot = prefs.config.first()
+                        val destination = override.copy(stripMetadata = snapshot.stripMetadata)
+                        _attempt.value = AttachmentAttempt(source, destination, context.copy(allowOriginalMetadata = false), replaceDraft)
+                        uploader.upload(source, destination, context).collect { update ->
                             _progress.value = update
                             if (update is UploadProgress.Complete) {
                                 prefs.addUpload(update.record)
@@ -88,6 +92,11 @@ class AttachmentViewModel
                     }
                 }
         }
+
+        fun setStripMetadata(enabled: Boolean) =
+            viewModelScope.launch {
+                prefs.updateConfig { it.copy(stripMetadata = enabled) }
+            }
 
         fun fail(message: String) {
             _attempt.value = null

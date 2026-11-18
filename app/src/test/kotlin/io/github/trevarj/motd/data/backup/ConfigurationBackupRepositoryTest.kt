@@ -1022,6 +1022,28 @@ class ConfigurationBackupRepositoryTest {
         }
 
     @Test
+    fun uploadMetadataPolicyRoundTripsAndOldBackupsDefaultOn() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val prefs = AttachmentPrefsImpl(context)
+            val backup = repository(inMemoryDb())
+            prefs.setConfig(PasteBackendConfig(stripMetadata = false))
+            val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+            assertTrue(raw.contains("\"stripMetadata\": false"))
+            prefs.updateConfig { it.copy(stripMetadata = true) }
+            backup.import(raw, importMode = BackupImportMode.MERGE)
+            assertFalse(AttachmentPrefsImpl(context).config.first().stripMetadata)
+
+            val envelope = Json.parseToJsonElement(raw).jsonObject
+            val payload = envelope.getValue("payload").jsonObject
+            val settings = payload.getValue("settings").jsonObject
+            val attachments = settings.getValue("attachments").jsonObject
+            val legacy = JsonObject(envelope + ("payload" to JsonObject(payload + ("settings" to JsonObject(settings + ("attachments" to JsonObject(attachments - "stripMetadata"))))))).toString()
+            backup.import(legacy, importMode = BackupImportMode.MERGE)
+            assertTrue(AttachmentPrefsImpl(context).config.first().stripMetadata)
+        }
+
+    @Test
     fun uploadCredentialsOnlyRoundTripInEncryptedCredentialBackups() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()
