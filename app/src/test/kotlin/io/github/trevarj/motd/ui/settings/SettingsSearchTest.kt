@@ -88,16 +88,11 @@ class SettingsSearchTest {
     }
 
     @Test
-    fun highlightAndTypingPlacementQueriesOpenIndependentTypedAppearanceControls() {
+    fun typingPlacementQueriesOpenTypedAppearanceControl() {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
-        listOf(
-            SettingsTarget.HIGHLIGHT_TRIGGER_STYLE to listOf("highlight triggers", "matched text", "emphasis"),
-            SettingsTarget.TYPING_INDICATOR_PLACEMENT to listOf("typing position", "above composer", "header"),
-        ).forEach { (target, queries) ->
-            val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, target)
-            queries.forEach { query ->
-                assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
-            }
+        val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.TYPING_INDICATOR_PLACEMENT)
+        for (query in listOf("typing position", "above composer", "header")) {
+            assertEquals(destination, searchSettings(query, entries).single { it.destination == destination }.destination)
         }
     }
 

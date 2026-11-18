@@ -278,10 +278,10 @@ flowchart TD
   offsets; unsupported sequences retain native fallback. The Compose picker shares
   recents and sticky variants across composer/reactions without bundling artwork.
 - Receipt-time highlight nick and IRC case mapping persist with each message in Room 52.
-  The shared UTF-16 matcher styles only proven body ranges; historical unknown or
-  reply-only highlights retain the row cue without fabricated trigger spans.
-  A default-on appearance switch controls trigger bold/background independently
-  of known-nickname styling and message-level attention.
+  Recorded own-nick body matches share the roster's None/Bold/Chip pipeline, using
+  stored case mapping and normal URL/code exclusions without duplicate chips.
+  Transformed display text does not reuse source receipt provenance; historical
+  unknown or reply-only highlights retain the row cue without fabricated trigger spans.
   Received typing indicators default to the header; Above composer uses a localized
   animated surface rather than timeline rows. One author's arrival clears only
   that author, expiry collapses the surface, and idle layout reserves no gap.

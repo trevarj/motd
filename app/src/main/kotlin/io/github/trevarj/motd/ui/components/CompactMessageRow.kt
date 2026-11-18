@@ -208,6 +208,7 @@ internal fun CompactMessageRow(
                 fitMentionColor = { !nickColors.preservesAuthoredIdentity(it) },
                 highlightNick = highlightNick,
                 highlightCaseMapping = highlightCaseMapping,
+                receiptNickColor = nickColors::mention,
             ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
         }
 
@@ -327,6 +328,7 @@ internal fun buildCompactLine(
     fitMentionColor: (String) -> Boolean = { true },
     highlightNick: String? = null,
     highlightCaseMapping: String? = null,
+    receiptNickColor: (String) -> Color = { linkColor },
 ): AnnotatedString =
     buildAnnotatedString {
         val nickStyle =
@@ -387,6 +389,7 @@ internal fun buildCompactLine(
             fitMentionColor = fitMentionColor,
             highlightNick = highlightNick,
             highlightCaseMapping = highlightCaseMapping,
+            receiptNickColor = receiptNickColor,
         )
         pop()
     }

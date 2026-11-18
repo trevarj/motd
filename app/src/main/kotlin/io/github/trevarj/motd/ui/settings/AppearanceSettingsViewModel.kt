@@ -242,8 +242,6 @@ class AppearanceSettingsViewModel
 
         fun setNickMentionStyle(value: NickMentionStyle) = launch { settingsRepository.setNickMentionStyle(value) }
 
-        fun setHighlightTriggerStyleEnabled(enabled: Boolean) = launch { settingsRepository.setHighlightTriggerStyleEnabled(enabled) }
-
         fun setTypingIndicatorPlacement(placement: TypingIndicatorPlacement) = launch { settingsRepository.setTypingIndicatorPlacement(placement) }
 
         fun setNickColorPalette(value: NickColorPalette) = launch { settingsRepository.setNickColorPalette(value) }

@@ -310,7 +310,6 @@ data class Settings(
     val nickColorsEnabled: Boolean = true,
     val nickColorPalette: NickColorPalette = NickColorPalette.THEME,
     val nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
-    val highlightTriggerStyleEnabled: Boolean = true,
     val nicknameTapAction: NicknameTapAction = NicknameTapAction.MENTION,
     /** Normalized nick -> hue/position 0..359, rendered through the active palette. */
     val nickColorOverrides: Map<String, Int> = emptyMap(),
@@ -422,8 +421,6 @@ interface SettingsRepository {
     suspend fun setNickColorPalette(p: NickColorPalette)
 
     suspend fun setNickMentionStyle(value: NickMentionStyle)
-
-    suspend fun setHighlightTriggerStyleEnabled(enabled: Boolean)
 
     suspend fun setTypingIndicatorPlacement(placement: TypingIndicatorPlacement)
 

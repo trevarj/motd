@@ -287,10 +287,6 @@ class AutoAwayCoordinatorTest {
             state.value = state.value.copy(nickMentionStyle = value)
         }
 
-        override suspend fun setHighlightTriggerStyleEnabled(enabled: Boolean) {
-            state.value = state.value.copy(highlightTriggerStyleEnabled = enabled)
-        }
-
         override suspend fun setTypingIndicatorPlacement(placement: io.github.trevarj.motd.data.prefs.TypingIndicatorPlacement) {
             state.value = state.value.copy(typingIndicatorPlacement = placement)
         }

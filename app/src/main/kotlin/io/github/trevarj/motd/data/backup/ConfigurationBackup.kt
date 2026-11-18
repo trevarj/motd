@@ -745,7 +745,6 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setNickColorsEnabled(it.nickColorsEnabled)
                 settingsRepository.setNickColorPalette(it.nickColorPalette)
                 settingsRepository.setNickMentionStyle(it.nickMentionStyle)
-                settingsRepository.setHighlightTriggerStyleEnabled(it.highlightTriggerStyleEnabled)
                 settingsRepository.setNicknameTapAction(it.nicknameTapAction)
                 current.nickColorOverrides.keys
                     .filter { nick -> nick !in it.nickColorOverrides }

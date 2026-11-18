@@ -120,26 +120,6 @@ class AppearanceFolderLayoutUiTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
-    fun highlightTriggerStyleTargetChangesWithoutChangingKnownNickStyle() {
-        val settings = mutableStateOf(Settings(nickMentionStyle = NickMentionStyle.NONE))
-        setContent(
-            settingsProvider = { settings.value },
-            targetProvider = { SettingsTarget.HIGHLIGHT_TRIGGER_STYLE },
-            onHighlightTriggerStyleEnabled = { settings.value = settings.value.copy(highlightTriggerStyleEnabled = it) },
-        )
-        compose
-            .onNodeWithTag("settings_target_highlight_HIGHLIGHT_TRIGGER_STYLE")
-            .assertIsDisplayed()
-            .assertIsOn()
-            .performClick()
-            .assertIsOff()
-        compose.runOnIdle {
-            assertFalse(settings.value.highlightTriggerStyleEnabled)
-            assertEquals(NickMentionStyle.NONE, settings.value.nickMentionStyle)
-        }
-    }
-
-    @Test
     fun typingPlacementTargetSelectsAndReopensPersistedChoiceWithoutEnablingTyping() {
         val settings = mutableStateOf(Settings(showTypingIndicators = false))
         setContent(
@@ -1641,7 +1621,6 @@ class AppearanceFolderLayoutUiTest {
         onChatShadowsEnabled: (Boolean) -> Unit = {},
         onNicknameBackgroundsEnabled: (Boolean) -> Unit = {},
         onNickMentionStyle: (NickMentionStyle) -> Unit = {},
-        onHighlightTriggerStyleEnabled: (Boolean) -> Unit = {},
         onTypingIndicatorPlacement: (TypingIndicatorPlacement) -> Unit = {},
         onUseThemeTextColors: (Boolean) -> Unit = {},
         onAdjustPaletteReadability: (Boolean) -> Unit = {},
@@ -1700,7 +1679,6 @@ class AppearanceFolderLayoutUiTest {
                         onNickColorsEnabled = {},
                         onNickColorPalette = {},
                         onNickMentionStyle = onNickMentionStyle,
-                        onHighlightTriggerStyleEnabled = onHighlightTriggerStyleEnabled,
                         onTypingIndicatorPlacement = onTypingIndicatorPlacement,
                         onWallpaper = onWallpaper,
                         importedWallpaper = importedWallpaperProvider(),

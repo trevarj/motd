@@ -28,109 +28,133 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MessageBubbleTextTest {
-    @Test
-    fun receiptTriggerIsBoldAndReadableWithoutKnownNickStylingInEveryBodyRenderer() {
-        val text = "🙂 BoB, bobby and https://example.org"
-        val bodies =
-            listOf(
-                linkifiedBody(text, Color.Blue, mentionsActive = false, containerColor = Color.White, nickMentionStyle = NickMentionStyle.NONE, mentionColorsEnabled = false, highlightNick = "bob", highlightCaseMapping = "ascii"),
-                buildCompactLine("sender", text, MessageKind.PRIVMSG, Color.Red, Color.Black, Color.Blue, containerColor = Color.White, nickMentionStyle = NickMentionStyle.NONE, mentionColorsEnabled = false, highlightNick = "bob", highlightCaseMapping = "ascii"),
-                buildActionBody(text, Color.Black, Color.Blue, mentionsActive = false, containerColor = Color.White, nickMentionStyle = NickMentionStyle.NONE, mentionColorsEnabled = false, highlightNick = "bob", highlightCaseMapping = "ascii"),
-                buildActionLine("sender", text, Color.Blue, Color.Red, Color.Black, Color.Blue, mentionsActive = false, containerColor = Color.White, nickMentionStyle = NickMentionStyle.NONE, mentionColorsEnabled = false, highlightNick = "bob", highlightCaseMapping = "ascii"),
-            )
-        bodies.forEach { body ->
-            val start = body.text.indexOf("BoB")
-            val trigger = body.spanStyles.last { it.start == start && it.end == start + 3 }
-            assertEquals(FontWeight.Bold, trigger.item.fontWeight)
-            assertTrue(trigger.item.background != Color.Unspecified)
-            assertTrue(contrastRatio(trigger.item.color, trigger.item.background) >= MESSAGE_TEXT_CONTRAST)
-            val nonMatch = body.text.indexOf("bobby")
-            assertTrue(body.spanStyles.none { nonMatch in it.start until it.end && it.item.fontWeight == FontWeight.Bold })
-            assertEquals(1, body.getLinkAnnotations(0, body.length).size)
-        }
-    }
-
-    @Test
-    fun receiptTriggerPreservesRichTextOffsetsChipsAndAuthoredOtherNickInk() {
-        val body =
+    private fun nicknameBodies(
+        text: String,
+        style: NickMentionStyle,
+        roster: (String) -> Color? = { null },
+        receiptNick: String? = null,
+        mapping: String? = null,
+        colorsEnabled: Boolean = true,
+        minimumContrast: Double = MESSAGE_TEXT_CONTRAST,
+    ): List<AnnotatedString> =
+        listOf(
             linkifiedBody(
-                "🙂 \u0002BoB\u0002 `bob` @alice https://example.org",
+                text,
                 Color.Blue,
-                mentionColor = { if (it == "alice") Color.Magenta else null },
-                codeBackground = Color.Black,
-                codeColor = Color.White,
+                mentionColor = roster,
                 containerColor = Color.White,
                 contentColor = Color.Black,
-                nickMentionStyle = NickMentionStyle.CHIP,
-                highlightNick = "bob",
-                highlightCaseMapping = "ascii",
-                fitMentionColor = { false },
-            )
-        assertEquals("🙂 BoB bob @alice https://example.org", body.text)
-        for (token in listOf("BoB", "bob")) {
-            val start = body.text.indexOf(token)
-            val trigger = body.spanStyles.last { start in it.start until it.end }
-            assertEquals(start, trigger.start)
-            assertEquals(start + token.length, trigger.end)
-            assertEquals(FontWeight.Bold, trigger.item.fontWeight)
-            assertTrue(contrastRatio(trigger.item.color, trigger.item.background) >= MESSAGE_TEXT_CONTRAST)
+                nickMentionStyle = style,
+                mentionColorsEnabled = colorsEnabled,
+                highlightNick = receiptNick,
+                highlightCaseMapping = mapping,
+                receiptNickColor = { Color.Red },
+                minimumContrast = minimumContrast,
+            ),
+            buildCompactLine(
+                "bob",
+                text,
+                MessageKind.PRIVMSG,
+                Color.Magenta,
+                Color.Black,
+                Color.Blue,
+                mentionColor = roster,
+                containerColor = Color.White,
+                nickMentionStyle = style,
+                mentionColorsEnabled = colorsEnabled,
+                highlightNick = receiptNick,
+                highlightCaseMapping = mapping,
+                receiptNickColor = { Color.Red },
+                minimumContrast = minimumContrast,
+            ),
+            buildActionBody(
+                text,
+                Color.Black,
+                Color.Blue,
+                mentionColor = roster,
+                containerColor = Color.White,
+                nickMentionStyle = style,
+                mentionColorsEnabled = colorsEnabled,
+                highlightNick = receiptNick,
+                highlightCaseMapping = mapping,
+                receiptNickColor = { Color.Red },
+                minimumContrast = minimumContrast,
+            ),
+            buildActionLine(
+                "bob",
+                text,
+                Color.Blue,
+                Color.Magenta,
+                Color.Black,
+                Color.Blue,
+                mentionColor = roster,
+                containerColor = Color.White,
+                nickMentionStyle = style,
+                mentionColorsEnabled = colorsEnabled,
+                highlightNick = receiptNick,
+                highlightCaseMapping = mapping,
+                receiptNickColor = { Color.Red },
+                minimumContrast = minimumContrast,
+            ),
+        )
+
+    @Test
+    fun receiptNickUsesRosterStyleAndNeverDuplicatesChipsInEveryBodyRenderer() {
+        for (style in NickMentionStyle.entries) {
+            for (colorsEnabled in listOf(false, true)) {
+                for (minimum in listOf(MESSAGE_TEXT_CONTRAST, DIMMED_MESSAGE_TEXT_CONTRAST)) {
+                    val text = "🙂 BoB, @bob bobby `bob` https://bob/"
+                    val roster: (String) -> Color? = {
+                        if (it.equals("bob", ignoreCase = true) && (colorsEnabled || style != NickMentionStyle.NONE)) {
+                            if (colorsEnabled || style == NickMentionStyle.CHIP) Color.Red else Color.Unspecified
+                        } else {
+                            null
+                        }
+                    }
+                    val baseline = nicknameBodies(text, style, roster, colorsEnabled = colorsEnabled, minimumContrast = minimum)
+                    val receipt = nicknameBodies(text, style, receiptNick = "bob", mapping = "ascii", colorsEnabled = colorsEnabled, minimumContrast = minimum)
+                    val both = nicknameBodies(text, style, roster, "bob", "ascii", colorsEnabled, minimum)
+                    baseline.indices.forEach { index ->
+                        for (actual in listOf(receipt[index], both[index])) {
+                            val expected = baseline[index]
+                            assertEquals(expected.text, actual.text)
+                            assertEquals(expected.spanStyles, actual.spanStyles)
+                            assertEquals(expected.getStringAnnotations(NICK_CHIP_RANGE, 0, expected.length), actual.getStringAnnotations(NICK_CHIP_RANGE, 0, actual.length))
+                            assertEquals(expected.getLinkAnnotations(0, expected.length), actual.getLinkAnnotations(0, actual.length))
+                            assertEquals(if (style == NickMentionStyle.CHIP) 2 else 0, actual.getStringAnnotations(NICK_CHIP_RANGE, 0, actual.length).size)
+                            assertEquals(1, actual.getLinkAnnotations(0, actual.length).size)
+                        }
+                    }
+                }
+            }
         }
-        val chip = body.getStringAnnotations(NICK_CHIP_RANGE, 0, body.length).single()
-        assertEquals("@alice", body.text.substring(chip.start, chip.end))
-        assertEquals(Color.Magenta.value.toString(), chip.item)
-        assertEquals(1, body.getLinkAnnotations(0, body.length).size)
     }
 
     @Test
-    fun receiptProvenanceIsRequiredAndItsCaseMappingWinsOverCurrentIdentity() {
-        for ((nick, mapping) in listOf(null to "ascii", "bob" to null, null to null)) {
-            val body = linkifiedBody("bob", Color.Blue, mentionsActive = false, highlightNick = nick, highlightCaseMapping = mapping)
-            assertEquals("bob", body.text)
-            assertTrue(body.spanStyles.none { it.item.fontWeight == FontWeight.Bold })
-        }
-        for ((mapping, expected) in listOf("ascii" to false, "rfc1459" to true)) {
-            val body = linkifiedBody("{bob}", Color.Blue, mentionsActive = false, highlightNick = "[bob]", highlightCaseMapping = mapping)
-            assertEquals(expected, body.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
-        }
-    }
-
-    @Test
-    fun triggerOverlayKeepsChipAnnotationsLinksAndDimmedContrast() {
-        for (minimum in listOf(MESSAGE_TEXT_CONTRAST, DIMMED_MESSAGE_TEXT_CONTRAST)) {
-            val baseline =
-                linkifiedBody(
-                    "bob https://bob/",
-                    Color.Blue,
-                    mentionColor = { if (it == "bob") Color.Red else null },
-                    containerColor = Color.White,
-                    contentColor = Color.Black,
-                    minimumContrast = minimum,
-                    nickMentionStyle = NickMentionStyle.CHIP,
-                )
-            val body =
-                linkifiedBody(
-                    "bob https://bob/",
-                    Color.Blue,
-                    mentionColor = { if (it == "bob") Color.Red else null },
-                    containerColor = Color.White,
-                    contentColor = Color.Black,
-                    minimumContrast = minimum,
-                    nickMentionStyle = NickMentionStyle.CHIP,
-                    highlightNick = "bob",
-                    highlightCaseMapping = "ascii",
-                )
-            assertEquals("bob https://bob/", body.text)
-            assertEquals("bob", body.getStringAnnotations(NICK_CHIP_RANGE, 0, body.length).single().let { body.text.substring(it.start, it.end) })
+    fun receiptNickPreservesRichTextOffsetsAndExcludesCodeLinksAndSenderCaptions() {
+        val text = "🙂 \u0002BoB\u0002 `bob` @bob bobby https://bob/"
+        nicknameBodies(text, NickMentionStyle.CHIP, receiptNick = "bob", mapping = "ascii").forEach { body ->
+            val chips = body.getStringAnnotations(NICK_CHIP_RANGE, 0, body.length)
+            assertEquals(listOf("BoB", "@bob"), chips.map { body.text.substring(it.start, it.end) })
+            assertTrue(chips.all { it.start >= body.text.indexOf("🙂") })
+            assertEquals(Color.Red.value.toString(), chips.first().item)
             assertEquals("https://bob/", body.getLinkAnnotations(0, body.length).single().let { body.text.substring(it.start, it.end) })
-            assertEquals(baseline.getStringAnnotations(NICK_CHIP_RANGE, 0, baseline.length), body.getStringAnnotations(NICK_CHIP_RANGE, 0, body.length))
-            assertEquals(baseline.getLinkAnnotations(0, baseline.length), body.getLinkAnnotations(0, body.length))
-            val trigger = body.spanStyles.last { it.start == 0 && it.end == 3 }
-            assertEquals(FontWeight.Bold, trigger.item.fontWeight)
-            assertTrue(contrastRatio(trigger.item.color, trigger.item.background) >= minimum)
-            val withoutPreview = body.withoutPreviewUrls(listOf("https://bob/"))
-            assertEquals("bob", withoutPreview.text.trim())
-            assertEquals(trigger, withoutPreview.spanStyles.last { it.start == 0 && it.end == 3 })
-            assertEquals(body.getStringAnnotations(NICK_CHIP_RANGE, 0, body.length), withoutPreview.getStringAnnotations(NICK_CHIP_RANGE, 0, withoutPreview.length))
+            val stripped = body.withoutPreviewUrls(listOf("https://bob/"))
+            assertEquals(chips, stripped.getStringAnnotations(NICK_CHIP_RANGE, 0, stripped.length))
+        }
+    }
+
+    @Test
+    fun receiptProvenanceRequiresBothFieldsAndUsesStoredCaseMappingAndTokenBoundaries() {
+        for ((nick, mapping) in listOf(null to "ascii", "bob" to null, null to null)) {
+            nicknameBodies("bob", NickMentionStyle.BOLD, receiptNick = nick, mapping = mapping).forEachIndexed { index, body ->
+                assertEquals(nicknameBodies("bob", NickMentionStyle.BOLD)[index].spanStyles, body.spanStyles)
+            }
+        }
+        for ((mapping, expected) in listOf("ascii" to emptyList(), "rfc1459" to listOf("{old}", "@{old}"))) {
+            nicknameBodies("{old} @{old} x{old} {old}x `{old}` https://host/{old}", NickMentionStyle.CHIP, receiptNick = "[old]", mapping = mapping).forEach { body ->
+                assertEquals(expected, body.getStringAnnotations(NICK_CHIP_RANGE, 0, body.length).map { body.text.substring(it.start, it.end) })
+            }
         }
     }
 

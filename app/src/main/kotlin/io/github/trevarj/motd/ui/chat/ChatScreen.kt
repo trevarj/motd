@@ -637,7 +637,6 @@ fun ChatScreen(
         bubbleCornerStyle = appearance.bubbleCornerStyle,
         composerStyle = appearance.composerStyle,
         showComposerEmoji = settings.showComposerEmoji,
-        highlightTriggerStyleEnabled = settings.highlightTriggerStyleEnabled,
         typingIndicatorPlacement = settings.typingIndicatorPlacement,
         showComposerFormattingTools = settings.showComposerFormattingTools,
         visibleReplyPrefix = replyConfig.visibleChannelPrefix,
@@ -1180,7 +1179,6 @@ internal fun ChatContent(
     bubbleCornerStyle: io.github.trevarj.motd.data.prefs.BubbleCornerStyle =
         io.github.trevarj.motd.data.prefs.BubbleCornerStyle.ROUNDED,
     showComposerEmoji: Boolean = true,
-    highlightTriggerStyleEnabled: Boolean = true,
     typingIndicatorPlacement: io.github.trevarj.motd.data.prefs.TypingIndicatorPlacement =
         io.github.trevarj.motd.data.prefs.TypingIndicatorPlacement.HEADER,
     showComposerFormattingTools: Boolean = true,
@@ -4314,7 +4312,6 @@ internal fun ChatContent(
                                                 onOpenPalette = onOpenPalette,
                                                 highlightMsgid = highlightMsgid,
                                                 highlightEventId = highlightEventId,
-                                                highlightTriggerStyleEnabled = highlightTriggerStyleEnabled,
                                                 knownNicks = knownNicks,
                                                 channelSenderPrefixes = channelSenderPrefixes.takeIf { state.buffer?.type == BufferType.CHANNEL }.orEmpty(),
                                                 friends = friends,

@@ -285,36 +285,32 @@ class ConfigurationBackupRepositoryTest {
         }
 
     @Test
-    fun highlightAndTypingPlacementRoundTripAndLegacyBackupsResetDefaults() =
+    fun typingPlacementAndNickStyleRestoreWithLegacyUnknownHighlightSetting() =
         runTest {
             val settings = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())
             val original = settings.settings.first()
             val db = inMemoryDb()
             try {
                 val backup = repository(db)
-                settings.setHighlightTriggerStyleEnabled(false)
                 settings.setTypingIndicatorPlacement(TypingIndicatorPlacement.ABOVE_COMPOSER)
                 settings.setNickMentionStyle(NickMentionStyle.NONE)
                 val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
-                val legacy =
-                    raw
-                        .replace(Regex(""",?\s*"highlightTriggerStyleEnabled"\s*:\s*false"""), "")
-                        .replace(Regex(""",?\s*"typingIndicatorPlacement"\s*:\s*"ABOVE_COMPOSER""""), "")
+                assertFalse(raw.contains("highlightTriggerStyleEnabled"))
+                val legacy = raw.replace("\"nickMentionStyle\":", "\"highlightTriggerStyleEnabled\": false, \"nickMentionStyle\":")
+                val withoutPlacement = legacy.replace(Regex(""",?\s*"typingIndicatorPlacement"\s*:\s*"ABOVE_COMPOSER""""), "")
                 for (mode in BackupImportMode.entries) {
-                    settings.setHighlightTriggerStyleEnabled(true)
-                    settings.setTypingIndicatorPlacement(TypingIndicatorPlacement.HEADER)
-                    settings.setNickMentionStyle(NickMentionStyle.CHIP)
-                    backup.import(raw, importMode = mode)
-                    assertFalse(settings.settings.first().highlightTriggerStyleEnabled)
-                    assertEquals(TypingIndicatorPlacement.ABOVE_COMPOSER, settings.settings.first().typingIndicatorPlacement)
-                    assertEquals(NickMentionStyle.NONE, settings.settings.first().nickMentionStyle)
-                    backup.import(legacy, importMode = mode)
-                    assertTrue(settings.settings.first().highlightTriggerStyleEnabled)
+                    for (document in listOf(raw, legacy)) {
+                        settings.setTypingIndicatorPlacement(TypingIndicatorPlacement.HEADER)
+                        settings.setNickMentionStyle(NickMentionStyle.CHIP)
+                        backup.import(document, importMode = mode)
+                        assertEquals(TypingIndicatorPlacement.ABOVE_COMPOSER, settings.settings.first().typingIndicatorPlacement)
+                        assertEquals(NickMentionStyle.NONE, settings.settings.first().nickMentionStyle)
+                    }
+                    backup.import(withoutPlacement, importMode = mode)
                     assertEquals(TypingIndicatorPlacement.HEADER, settings.settings.first().typingIndicatorPlacement)
                     assertEquals(NickMentionStyle.NONE, settings.settings.first().nickMentionStyle)
                 }
             } finally {
-                settings.setHighlightTriggerStyleEnabled(original.highlightTriggerStyleEnabled)
                 settings.setTypingIndicatorPlacement(original.typingIndicatorPlacement)
                 settings.setNickMentionStyle(original.nickMentionStyle)
                 db.close()

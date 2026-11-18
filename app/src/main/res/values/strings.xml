@@ -1008,12 +1008,10 @@
     <string name="settings_nickname_backgrounds">Nickname backgrounds</string>
     <string name="settings_nickname_backgrounds_desc">Tint Compact and Two-line message backgrounds by sender. Nickname colors and mention highlights are unchanged.</string>
     <string name="settings_nick_mention_style">Nick mention style</string>
-    <string name="settings_nick_mention_style_desc">Style known nicknames inside messages. Chip uses the nickname color even when nickname colors are off.</string>
+    <string name="settings_nick_mention_style_desc">Style nicknames in message bodies, including mentions of your own nickname. Chip uses the nickname color even when nickname colors are off.</string>
     <string name="settings_nick_mention_style_none">None</string>
     <string name="settings_nick_mention_style_bold">Bold</string>
     <string name="settings_nick_mention_style_chip">Chip</string>
-    <string name="settings_highlight_trigger_style">Style highlight triggers</string>
-    <string name="settings_highlight_trigger_style_desc">Emphasize matched highlight words independently of known nickname styling.</string>
     <string name="settings_typing_indicator_placement">Typing indicator placement</string>
     <string name="settings_typing_indicator_placement_desc">Choose where received typing indicators appear.</string>
     <string name="settings_typing_indicator_placement_header">Header</string>

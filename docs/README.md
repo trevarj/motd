@@ -121,10 +121,11 @@ Mentions insert at the cursor or replace the selection. The `: ` suffix is used
 only at whole-message start, never merely because text wraps or follows an
 earlier nonblank line.
 
-Appearance's Style highlight triggers emphasizes the actual matched text with
-bold and a background, independently of known-nickname styling. Turning it off
-leaves the message-level mention cue intact. Older or reply-only highlights
-without a recorded text trigger keep that cue without inventing an inline match.
+Appearance's nickname mention style applies None, Bold, or Chip consistently to
+known nicknames and your recorded highlight nickname in message bodies, excluding
+links and inline code. The message-level mention cue remains independent.
+Older or reply-only highlights without a recorded text trigger keep that cue
+without inventing an inline match.
 
 Typing indicator placement offers Header (the default) or Above composer.
 The latter appears at the live end, where the next message belongs, then gives

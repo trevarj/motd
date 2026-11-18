@@ -107,7 +107,6 @@ fun GlobalFeedScreen(
 ) {
     val rows = viewModel.items.collectAsLazyPagingItems()
     val showNetwork by viewModel.showNetwork.collectAsStateWithLifecycle()
-    val highlightTriggerStyleEnabled by viewModel.highlightTriggerStyleEnabled.collectAsStateWithLifecycle()
     val aiState by aiTextViewModel.state.collectAsStateWithLifecycle()
     val aiLabs by aiTextViewModel.labsState.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -153,7 +152,6 @@ fun GlobalFeedScreen(
             GlobalFeedContent(
                 rows = rows,
                 showNetwork = showNetwork,
-                highlightTriggerStyleEnabled = highlightTriggerStyleEnabled,
                 onOpenMessage = onOpenMessage,
                 onTranslateMessage =
                     if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures) {
@@ -179,7 +177,6 @@ fun MentionsScreen(
 ) {
     val rows = viewModel.items.collectAsLazyPagingItems()
     val showNetwork by viewModel.showNetwork.collectAsStateWithLifecycle()
-    val highlightTriggerStyleEnabled by viewModel.highlightTriggerStyleEnabled.collectAsStateWithLifecycle()
     val visibilitySpec by viewModel.visibilitySpec.collectAsStateWithLifecycle()
     val aiState by aiTextViewModel.state.collectAsStateWithLifecycle()
     val aiLabs by aiTextViewModel.labsState.collectAsStateWithLifecycle()
@@ -234,7 +231,6 @@ fun MentionsScreen(
             GlobalFeedContent(
                 rows = rows,
                 showNetwork = showNetwork,
-                highlightTriggerStyleEnabled = highlightTriggerStyleEnabled,
                 onOpenMessage = onOpenMessage,
                 modifier = Modifier.padding(padding),
                 mentions = true,
@@ -284,7 +280,6 @@ internal fun GlobalFeedContent(
     listState: LazyListState = rememberLazyListState(),
     onTranslateMessage: ((MessageEntity) -> Unit)? = null,
     visibilitySpec: MessageVisibilitySpec = MessageVisibilitySpec(),
-    highlightTriggerStyleEnabled: Boolean = true,
 ) {
     val refresh = rows.loadState.refresh
     when {
@@ -321,7 +316,6 @@ internal fun GlobalFeedContent(
                 listState = listState,
                 onTranslateMessage = onTranslateMessage,
                 visibilitySpec = visibilitySpec,
-                highlightTriggerStyleEnabled = highlightTriggerStyleEnabled,
             )
         }
     }
@@ -337,7 +331,6 @@ private fun GlobalFeedList(
     listState: LazyListState,
     onTranslateMessage: ((MessageEntity) -> Unit)? = null,
     visibilitySpec: MessageVisibilitySpec = MessageVisibilitySpec(),
-    highlightTriggerStyleEnabled: Boolean = true,
 ) {
     // One list-scoped formatter: MessageBubble's per-row fallback ignores the app's timestamp
     // preference.
@@ -364,7 +357,6 @@ private fun GlobalFeedList(
                     mentions = mentions,
                     onTranslateMessage = onTranslateMessage,
                     visibilitySpec = visibilitySpec,
-                    highlightTriggerStyleEnabled = highlightTriggerStyleEnabled,
                 )
             }
         }
@@ -553,7 +545,6 @@ private fun GlobalFeedLineRow(
     mentions: Boolean,
     onTranslateMessage: ((MessageEntity) -> Unit)? = null,
     visibilitySpec: MessageVisibilitySpec,
-    highlightTriggerStyleEnabled: Boolean,
 ) {
     val message = row.message
     val dickordEnabled = LocalDickordLabsEnabled.current
@@ -613,7 +604,6 @@ private fun GlobalFeedLineRow(
                 hasMention = if (mentions) policy.mentionAttention(message, row.bufferType == BufferType.QUERY) else message.hasMention,
                 highlightNick = message.highlightNick,
                 highlightCaseMapping = message.highlightCaseMapping,
-                highlightTriggerStyleEnabled = highlightTriggerStyleEnabled,
                 dimmed = foolMode == FoolsMode.DIMMED,
                 // The contentType pool already splits SELF_FAILED out; the row must render it too.
                 failed = message.failed,

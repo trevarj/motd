@@ -36,36 +36,4 @@ class NickMentionStyleSettingsTest {
                 }
             }
         }
-
-    @Test
-    fun highlightTriggerStyleDefaultsOnAndPersistsIndependentlyOfKnownNickStyle() =
-        runTest {
-            val context = ApplicationProvider.getApplicationContext<Context>()
-            val repository = DataStoreSettingsRepository(context)
-            val original = context.settingsDataStore.data.first()
-            try {
-                assertEquals(true, Settings().highlightTriggerStyleEnabled)
-                assertEquals(true, Json.decodeFromString<Settings>("{}").highlightTriggerStyleEnabled)
-                context.settingsDataStore.edit { it.remove(PrefKeys.HIGHLIGHT_TRIGGER_STYLE_ENABLED) }
-                assertEquals(true, repository.settings.first().highlightTriggerStyleEnabled)
-                context.settingsDataStore.edit { it[PrefKeys.HIGHLIGHT_TRIGGER_STYLE_ENABLED] = "INVALID" }
-                assertEquals(true, repository.settings.first().highlightTriggerStyleEnabled)
-                for (style in NickMentionStyle.entries) {
-                    repository.setNickMentionStyle(style)
-                    for (enabled in listOf(false, true)) {
-                        repository.setHighlightTriggerStyleEnabled(enabled)
-                        val restored = DataStoreSettingsRepository(context).settings.first()
-                        assertEquals(enabled, restored.highlightTriggerStyleEnabled)
-                        assertEquals(style, restored.nickMentionStyle)
-                    }
-                }
-            } finally {
-                context.settingsDataStore.edit { prefs ->
-                    for (key in listOf(PrefKeys.HIGHLIGHT_TRIGGER_STYLE_ENABLED, PrefKeys.NICK_MENTION_STYLE)) {
-                        val value = original[key]
-                        if (value == null) prefs.remove(key) else prefs[key] = value
-                    }
-                }
-            }
-        }
 }

@@ -208,7 +208,6 @@ fun AppearanceSettingsScreen(
         onNickColorsEnabled = viewModel::setNickColorsEnabled,
         onNickColorPalette = viewModel::setNickColorPalette,
         onNickMentionStyle = viewModel::setNickMentionStyle,
-        onHighlightTriggerStyleEnabled = viewModel::setHighlightTriggerStyleEnabled,
         onTypingIndicatorPlacement = viewModel::setTypingIndicatorPlacement,
         onWallpaper = viewModel::setWallpaper,
         onImportWallpaper = viewModel::importWallpaper,
@@ -261,7 +260,6 @@ fun AppearanceSettingsContent(
     onNickColorsEnabled: (Boolean) -> Unit,
     onNickColorPalette: (NickColorPalette) -> Unit,
     onNickMentionStyle: (NickMentionStyle) -> Unit,
-    onHighlightTriggerStyleEnabled: (Boolean) -> Unit = {},
     onTypingIndicatorPlacement: (TypingIndicatorPlacement) -> Unit = {},
     onWallpaper: (io.github.trevarj.motd.data.prefs.WallpaperSelection) -> Unit,
     onUiFontScale: (Int) -> Unit,
@@ -719,20 +717,6 @@ fun AppearanceSettingsContent(
                     summary = stringResource(R.string.settings_nick_mention_style_desc),
                     modifier = targetModifier.testTag("settings_nick_mention_style_picker"),
                     onClick = { choiceSheet = AppearanceChoice.NICK_MENTION_STYLE },
-                )
-            }
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-            SettingsTarget(target?.name, SettingsTarget.HIGHLIGHT_TRIGGER_STYLE.name) { targetModifier ->
-                SwitchRow(
-                    title = stringResource(R.string.settings_highlight_trigger_style),
-                    subtitle = stringResource(R.string.settings_highlight_trigger_style_desc),
-                    checked = previewSettings.highlightTriggerStyleEnabled,
-                    onCheckedChange = {
-                        previewSettings = previewSettings.copy(highlightTriggerStyleEnabled = it)
-                        onHighlightTriggerStyleEnabled(it)
-                    },
-                    switchTag = "settings_switch_highlight_trigger_style",
-                    modifier = targetModifier,
                 )
             }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))

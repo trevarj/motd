@@ -153,7 +153,6 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_nick_colors, R.string.settings_nick_colors_desc, "nickname sender", SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_COLORS),
         spec(R.string.settings_channel_prefixes, R.string.settings_channel_prefixes_desc, "channel privilege prefixes nickname sender operator op voice admin owner halfop rank status", SettingsSearchPage.APPEARANCE, SettingsTarget.CHANNEL_PREFIXES),
         spec(R.string.settings_nick_mention_style, R.string.settings_nick_mention_style_desc, "nickname mentions message body none bold chip background", SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_MENTION_STYLE),
-        spec(R.string.settings_highlight_trigger_style, R.string.settings_highlight_trigger_style_desc, "highlight words triggers matched text emphasis bold mentions", SettingsSearchPage.APPEARANCE, SettingsTarget.HIGHLIGHT_TRIGGER_STYLE),
         spec(R.string.settings_typing_indicator_placement, R.string.settings_typing_indicator_placement_desc, "typing indicator location position header above composer input", SettingsSearchPage.APPEARANCE, SettingsTarget.TYPING_INDICATOR_PLACEMENT),
         spec(R.string.settings_nick_palette, R.string.settings_nick_palette_desc, "nickname colors classic vivid avatars", SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_PALETTE),
         spec(R.string.settings_nick_color_overrides, R.string.settings_nick_color_overrides_desc, "nickname hue overrides custom avatars", SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_OVERRIDES),

@@ -10,7 +10,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -46,6 +45,7 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.ui.ai.AiTextSheet
@@ -80,12 +80,12 @@ class GlobalFeedScreenTest {
     val compose = createComposeRule()
 
     @Test
-    fun feedRendersReceiptTriggerSpanAndHonorsIndependentOffWithoutInventingProvenance() {
+    fun feedUsesNicknameStyleWithoutInventingReceiptProvenance() {
         assertReceiptTriggerRendering(mentions = false)
     }
 
     @Test
-    fun mentionsRendersReceiptTriggerSpanAndHonorsIndependentOffWithoutInventingProvenance() {
+    fun mentionsUsesNicknameStyleWithoutInventingReceiptProvenance() {
         assertReceiptTriggerRendering(mentions = true)
     }
 
@@ -106,8 +106,8 @@ class GlobalFeedScreenTest {
                 it.copy(message = it.message.copy(hasMention = true, replyToMsgid = "self-message"))
             }
         val stream = flowOf(PagingData.from(listOf(receipt, historical, replyOnly)))
-        var enabled by mutableStateOf(true)
-        setContent(stream, mentions = mentions, highlightTriggerStyleEnabled = { enabled })
+        var style by mutableStateOf(NickMentionStyle.BOLD)
+        setContent(stream, mentions = mentions, nickMentionStyle = { style })
         awaitText(receipt.message.text)
 
         fun assertSpans(
@@ -121,7 +121,7 @@ class GlobalFeedScreenTest {
                 .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
             val rendered = layouts.single().layoutInput.text
             assertEquals(hit.message.text, rendered.text)
-            val triggers = rendered.spanStyles.filter { it.item.background != Color.Unspecified }
+            val triggers = rendered.spanStyles.filter { it.item.fontWeight == FontWeight.Bold }
             assertEquals(expected, triggers.map { it.start to it.end })
             triggers.forEach {
                 assertEquals(FontWeight.Bold, it.item.fontWeight)
@@ -133,11 +133,11 @@ class GlobalFeedScreenTest {
         assertSpans(receipt, listOf(start to start + "Nick[".length))
         assertSpans(historical, emptyList())
         assertSpans(replyOnly, emptyList())
-        compose.runOnIdle { enabled = false }
+        compose.runOnIdle { style = NickMentionStyle.NONE }
         assertSpans(receipt, emptyList())
         assertSpans(historical, emptyList())
         assertSpans(replyOnly, emptyList())
-        compose.runOnIdle { enabled = true }
+        compose.runOnIdle { style = NickMentionStyle.BOLD }
         assertSpans(receipt, listOf(start to start + "Nick[".length))
     }
 
@@ -256,7 +256,7 @@ class GlobalFeedScreenTest {
         showMentionsNavigation: Boolean = false,
         onMentionsViewportAtNewest: ((Boolean) -> Unit)? = null,
         visibilitySpec: () -> MessageVisibilitySpec = { MessageVisibilitySpec() },
-        highlightTriggerStyleEnabled: () -> Boolean = { true },
+        nickMentionStyle: () -> NickMentionStyle = { NickMentionStyle.BOLD },
     ) {
         compose.setContent {
             // Motion off: the caption waits on a Lottie clock a stub composition never advances.
@@ -264,7 +264,7 @@ class GlobalFeedScreenTest {
                 LocalLottieMotionEnabled provides false,
                 LocalDickordLabsEnabled provides dickordEnabled,
             ) {
-                MotdTheme(dynamicColor = false) {
+                MotdTheme(dynamicColor = false, nickMentionStyle = nickMentionStyle()) {
                     val listState = rememberLazyListState()
                     navigationListState = listState
                     Box(Modifier.fillMaxSize()) {
@@ -278,7 +278,6 @@ class GlobalFeedScreenTest {
                             mentions = mentions,
                             listState = listState,
                             visibilitySpec = visibilitySpec(),
-                            highlightTriggerStyleEnabled = highlightTriggerStyleEnabled(),
                         )
                         onMentionsViewportAtNewest?.let { callback ->
                             ReportMentionsViewportAtNewest(
