@@ -51,6 +51,20 @@ class ImageMetadataSanitizerTest {
             assertTrue(contains(result.second, exif(6)))
         }
 
+    @Test fun extendedAdobeJpegHeaderPreservesPixelsWithoutPrivateTail() =
+        runBlocking {
+            val jpeg = encode("jpeg")
+            val privateTail = "private GPS camera owner".toByteArray()
+            val adobe = byteArrayOf(65, 100, 111, 98, 101, 0, 100, 64, 0, 0, 0, 1)
+            val dirty = jpeg.copyOfRange(0, 2) + jpegSegment(0xee, adobe + privateTail) + jpeg.copyOfRange(2, jpeg.size)
+            val result = sanitize(dirty)
+            assertEquals("image/jpeg", result.first.mimeType)
+            assertFalse(contains(result.second, privateTail))
+            val cleanAdobe = byteArrayOf(65, 100, 111, 98, 101, 0, 100, 0, 0, 0, 0, 1)
+            assertTrue(contains(result.second, jpegSegment(0xee, cleanAdobe)))
+            assertPixelsEqual(dirty, result.second)
+        }
+
     @Test fun pngAndApngRetainCompressedPixelsFramesAndFreshOrientationOnly() =
         runBlocking {
             val png = encode("png")

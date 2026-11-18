@@ -186,7 +186,7 @@ private class ImageReader(
                     emit(byteArrayOf(74, 70, 73, 70, 0, 1, 2, 0, data[8], data[9], data[10], data[11], 0, 0))
                 }
                 if (marker == 0xee && data.startsWithAscii("Adobe")) {
-                    requireImage(data.size == 12 && data[11].toInt() in 0..2)
+                    requireImage(data.size >= 12 && data[11].toInt() in 0..2)
                     emit(255)
                     emit(marker)
                     emit(0)

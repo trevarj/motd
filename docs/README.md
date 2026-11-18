@@ -61,6 +61,7 @@ JPEG, PNG/APNG, GIF and WebP processing preserves compressed image content,
 orientation and animation. Supported MP4/M4A/3GP and WebM audio/video is remuxed,
 not re-encoded; single-stream Ogg Opus/Vorbis comments are removed. Presentation
 data such as orientation, color parameters and playback timing is retained.
+Extended Adobe JPEG headers are accepted, with their extra metadata bytes removed.
 
 Unsupported files require **Send original** confirmation for that attempt only.
 This includes PDFs, Office documents, archives, images with embedded ICC profiles
