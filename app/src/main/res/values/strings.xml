@@ -34,6 +34,12 @@
         <item quantity="other">Scroll to top, %1$d unread messages above</item>
     </plurals>
     <string name="chatlist_pinned">Pinned</string>
+    <string name="anchored_chats">Anchored chats</string>
+    <string name="anchor_chat">Anchor chat</string>
+    <string name="unanchor_chat">Unanchor</string>
+    <string name="move_anchor_up">Move up</string>
+    <string name="move_anchor_down">Move down</string>
+    <string name="reorder_anchor">Reorder anchored chat</string>
     <string name="chatlist_sync_syncing">Syncing history</string>
     <string name="chatlist_sync_queued">Queued for history sync</string>
     <string name="chatlist_sync_waiting">Waiting for a connection to sync history</string>
@@ -2301,7 +2307,7 @@
     <string name="upload_backend_termbin_desc">Text only · unencrypted TCP</string>
 
     <string name="backup_export_title">Export configuration</string>
-    <string name="backup_export_guidance">Exports networks, folders, and settings. Messages, history, drafts, generated push keys, cached previews, upload history, certificate pins, channel keys, and runtime state stay on this device.</string>
+    <string name="backup_export_guidance">Exports networks, folders, anchored chat order, and settings. Messages, history, drafts, generated push keys, cached previews, upload history, certificate pins, channel keys, and runtime state stay on this device.</string>
     <string name="backup_export_without_credentials">Without credentials</string>
     <string name="backup_export_without_credentials_desc">Recommended. Passwords and private connection links are excluded; client certificates always stay device-local.</string>
     <string name="backup_export_with_credentials">Encrypted with credentials</string>

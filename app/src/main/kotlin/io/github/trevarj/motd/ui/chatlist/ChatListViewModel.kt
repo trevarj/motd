@@ -708,6 +708,18 @@ class ChatListViewModel
             viewModelScope.launch { ids.forEach { bufferRepository.setPinned(it, pinned) } }
         }
 
+        fun setAnchored(
+            bufferIds: Collection<Long>,
+            anchored: Boolean,
+        ) {
+            val ids = bufferIds.distinct()
+            viewModelScope.launch { ids.forEach { bufferRepository.setAnchored(it, anchored) } }
+        }
+
+        fun reorderAnchored(orderedIds: List<Long>) {
+            viewModelScope.launch { bufferRepository.reorderAnchored(orderedIds) }
+        }
+
         fun setMuted(
             bufferId: Long,
             muted: Boolean,

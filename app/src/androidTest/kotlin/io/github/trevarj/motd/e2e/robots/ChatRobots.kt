@@ -24,6 +24,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.test.platform.app.InstrumentationRegistry
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.e2e.TimelineDiagnostics
 import io.github.trevarj.motd.ui.chat.CHAT_ENTRY_VEIL_TAG
 import io.github.trevarj.motd.ui.chat.CHAT_HISTORY_LOADING_TAG
@@ -41,6 +42,83 @@ internal class ChatListRobot(
     compose: ComposeTestRule,
 ) : BaseRobot(compose) {
     fun open(bufferId: Long) = click("chatlist_row_$bufferId")
+
+    fun selectionAction(
+        bufferId: Long,
+        actionTag: String,
+    ) {
+        scrollContainerTo("chatlist_rows", hasTestTag("chatlist_row_$bufferId"))
+        compose.onNodeWithTag("chatlist_row_$bufferId", useUnmergedTree = true).performTouchInput { longClick() }
+        click("chatlist_selection_more")
+        click(actionTag)
+        awaitTagGone("chatlist_selection_top_app_bar")
+    }
+
+    fun moveAnchor(
+        bufferId: Long,
+        up: Boolean,
+    ) {
+        val label =
+            InstrumentationRegistry.getInstrumentation().targetContext.getString(
+                if (up) R.string.move_anchor_up else R.string.move_anchor_down,
+            )
+        val action =
+            compose
+                .onNodeWithTag("chatlist_anchor_handle_$bufferId", useUnmergedTree = true)
+                .fetchSemanticsNode()
+                .config[SemanticsActions.CustomActions]
+                .single { it.label == label }
+        compose.runOnIdle { assertTrue("Reorder action must succeed", action.action()) }
+    }
+
+    fun assertAnchoredOrder(vararg bufferIds: Long) {
+        assertTagOrder(listOf("chatlist_anchored_header") + bufferIds.map { "chatlist_anchored_$it" })
+        bufferIds.forEach { id ->
+            compose.onAllNodesWithTag("chatlist_row_$id", useUnmergedTree = true).assertCountEquals(1)
+            compose
+                .onNode(
+                    hasTestTag("chatlist_row_$id") and hasAnyAncestor(hasTestTag("chatlist_anchored_$id")),
+                    useUnmergedTree = true,
+                ).assertIsDisplayed()
+        }
+    }
+
+    fun assertNormalPlacement(
+        pinnedId: Long,
+        queryId: Long,
+    ) {
+        awaitTagGone("chatlist_anchored_header")
+        listOf(pinnedId, queryId).forEach { id ->
+            compose.onAllNodesWithTag("chatlist_anchored_$id", useUnmergedTree = true).assertCountEquals(0)
+            compose.onAllNodesWithTag("chatlist_row_$id", useUnmergedTree = true).assertCountEquals(1)
+        }
+        assertTagOrder(listOf("chatlist_row_$pinnedId", "chatlist_row_$queryId"))
+        compose.waitUntil("Unanchoring preserves the channel pin", 10_000) {
+            runCatching {
+                compose
+                    .onNode(
+                        hasTestTag("chatlist_row_pin") and hasAnyAncestor(hasTestTag("chatlist_row_$pinnedId")),
+                        useUnmergedTree = true,
+                    ).assertIsDisplayed()
+            }.isSuccess
+        }
+    }
+
+    private fun assertTagOrder(tags: List<String>) {
+        compose.waitUntil("Chat list displays ordered tier: $tags", 10_000) {
+            runCatching {
+                val bounds =
+                    tags.map { tag ->
+                        compose
+                            .onNodeWithTag(tag, useUnmergedTree = true)
+                            .assertIsDisplayed()
+                            .fetchSemanticsNode()
+                            .boundsInRoot
+                    }
+                bounds.zipWithNext().all { (first, second) -> first.bottom <= second.top }
+            }.getOrDefault(false)
+        }
+    }
 }
 
 internal class ChatRobot(

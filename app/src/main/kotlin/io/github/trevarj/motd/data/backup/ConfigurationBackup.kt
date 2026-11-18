@@ -47,7 +47,9 @@ import io.github.trevarj.motd.data.repo.ChatFolderRepository
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.data.repo.FolderPortableAssignment
 import io.github.trevarj.motd.data.repo.FolderPortableDefinition
+import io.github.trevarj.motd.data.repo.PortableChatPlacement
 import io.github.trevarj.motd.data.repo.networkIdentityKey
+import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.gesture.GestureMenuConfig
 import io.github.trevarj.motd.gesture.GesturePrefs
 import kotlinx.coroutines.flow.first
@@ -78,6 +80,7 @@ private const val MAX_DECRYPTED_BYTES = 2 * 1024 * 1024
 private const val MAX_NETWORKS = 512
 private const val MAX_FOLDERS = 512
 private const val MAX_FOLDER_ASSIGNMENTS = 100_000
+private const val MAX_CHAT_PLACEMENTS = 100_000
 private const val MAX_IGNORED_AUTO_GROUP_PATTERNS = 10_000
 private const val MAX_PORTABLE_IDENTITY_LENGTH = 512
 private const val MAX_ICON_REFERENCE_LENGTH = 128
@@ -309,6 +312,15 @@ class ConfigurationBackupRepositoryImpl
                     },
                 replace = importMode == BackupImportMode.REPLACE,
             )
+            decoded.payload.chatPlacements?.let { placements ->
+                BufferStore(db).restoreChatPlacements(
+                    placements =
+                        placements.map { placement ->
+                            placement.toRepository(idMap.getValue(placement.networkExportId))
+                        },
+                    replace = importMode == BackupImportMode.REPLACE,
+                )
+            }
             applyRemappedNetworkPrefs(decoded.payload, idMap, importMode)
             return ConfigurationImportResult(
                 addedNetworks = plan.added,
@@ -337,6 +349,10 @@ class ConfigurationBackupRepositoryImpl
                 }
             return BackupPayload(
                 networks = networks.map { it.toPortable(exportIds, includeSecrets, zncIds) },
+                chatPlacements =
+                    BufferStore(db).chatPlacementSnapshot().mapNotNull { placement ->
+                        exportIds[placement.networkId]?.let { PortablePlacement.fromRepository(placement, it) }
+                    },
                 folders = folderSnapshot.folders.map(PortableFolder::fromRepository),
                 folderAssignments =
                     folderSnapshot.assignments.mapNotNull { assignment ->
@@ -605,6 +621,26 @@ class ConfigurationBackupRepositoryImpl
                 network.proxyPort?.let { require(it in 1..65535) { "Backup contains an invalid proxy port." } }
                 network.trustedFileHost?.let {
                     require(normalizeTrustedFileHost(it) == it) { "Backup contains an invalid trusted file host." }
+                }
+            }
+            require(payload.chatPlacements.orEmpty().size <= MAX_CHAT_PLACEMENTS) { "Too many chat placements in backup." }
+            val placementIdentities = mutableSetOf<List<Any>>()
+            val anchorOrders = mutableSetOf<Int>()
+            payload.chatPlacements.orEmpty().forEach { placement ->
+                require(placement.networkExportId in idSet) { "Backup contains an invalid chat placement network." }
+                require(
+                    (placement.chatType == BufferType.CHANNEL && placement.identityKind == FolderIdentityKind.CHANNEL) ||
+                        (placement.chatType == BufferType.QUERY && placement.identityKind != FolderIdentityKind.CHANNEL),
+                ) { "Backup contains an invalid chat placement type." }
+                require(
+                    placement.identityValue.isNotBlank() && placement.identityValue.length <= MAX_PORTABLE_IDENTITY_LENGTH &&
+                        placement.identityValue.none(Char::isISOControl),
+                ) { "Backup contains an invalid chat placement identity." }
+                require(placementIdentities.add(listOf(placement.networkExportId, placement.chatType, placement.identityKind, placement.identityValue))) {
+                    "Backup contains duplicate chat placements."
+                }
+                placement.anchorOrder?.let { order ->
+                    require(order in 0 until MAX_CHAT_PLACEMENTS && anchorOrders.add(order)) { "Backup contains an invalid anchor order." }
                 }
             }
             require(payload.folders.size <= MAX_FOLDERS) { "Too many folders in backup." }
@@ -947,7 +983,27 @@ private data class BackupPayload(
     val folders: List<PortableFolder> = emptyList(),
     val folderAssignments: List<PortableFolderAssignment> = emptyList(),
     val ignoredAutoGroupPatterns: List<PortableIgnoredAutoGroupPattern> = emptyList(),
+    val chatPlacements: List<PortablePlacement>? = null,
 )
+
+@Serializable
+private data class PortablePlacement(
+    val networkExportId: String,
+    val chatType: BufferType,
+    val identityKind: FolderIdentityKind,
+    val identityValue: String,
+    val pinned: Boolean = false,
+    val anchorOrder: Int? = null,
+) {
+    fun toRepository(networkId: Long) = PortableChatPlacement(networkId, chatType, identityKind, identityValue, pinned, anchorOrder)
+
+    companion object {
+        fun fromRepository(
+            placement: PortableChatPlacement,
+            networkExportId: String,
+        ) = PortablePlacement(networkExportId, placement.chatType, placement.identityKind, placement.identityValue, placement.pinned, placement.anchorOrder)
+    }
+}
 
 @Serializable
 private data class PortableFolder(

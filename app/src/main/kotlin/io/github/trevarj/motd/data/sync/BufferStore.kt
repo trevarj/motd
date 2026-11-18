@@ -5,6 +5,7 @@ import io.github.trevarj.motd.bouncer.isBouncerConsole
 import io.github.trevarj.motd.data.db.AppStateEntity
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.FolderIdentityKind
 import io.github.trevarj.motd.data.db.HistoryCursorEntity
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MemberEntity
@@ -12,10 +13,14 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.RoomAliasEntity
 import io.github.trevarj.motd.data.db.RoomAliasNamespace
+import io.github.trevarj.motd.data.db.RoomEntity
 import io.github.trevarj.motd.data.db.RoomId
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.repo.ChatFolderRepository
+import io.github.trevarj.motd.data.repo.PortableChatPlacement
 import io.github.trevarj.motd.service.NotificationRoomMergeListener
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,6 +35,222 @@ class BufferStore
         private val chatFolders: ChatFolderRepository = ChatFolderRepository(db),
         private val notificationRoomMergeListener: NotificationRoomMergeListener = NotificationRoomMergeListener.Noop,
     ) {
+        private val prefix = "pending-chat-placement:"
+
+        private suspend fun pending() =
+            db.appStateDao().keysLike("$prefix%").map { key ->
+                key to Json.decodeFromString<PortableChatPlacement>(key.removePrefix(prefix))
+            }
+
+        private suspend fun nextRevision(): Long {
+            val keys = db.appStateDao().keysLike("chat-placement-revision:%")
+            val revision = (keys.maxOfOrNull { it.substringAfterLast(':').toLong() } ?: 0L) + 1L
+            keys.forEach { db.appStateDao().delete(it) }
+            db.appStateDao().insert(AppStateEntity("chat-placement-revision:$revision"))
+            return revision
+        }
+
+        private suspend fun recordEdit(
+            roomId: Long,
+            revision: Long,
+            keyPrefix: String = "chat-placement-edit",
+        ) {
+            db.appStateDao().keysLike("$keyPrefix:$roomId:%").forEach { db.appStateDao().delete(it) }
+            db.appStateDao().insert(AppStateEntity("$keyPrefix:$roomId:$revision"))
+        }
+
+        private suspend fun editRevision(
+            roomId: Long,
+            keyPrefix: String = "chat-placement-edit",
+        ): Long =
+            db
+                .appStateDao()
+                .keysLike("$keyPrefix:$roomId:%")
+                .maxOfOrNull { it.substringAfterLast(':').toLong() } ?: 0L
+
+        suspend fun setPinned(
+            roomId: Long,
+            pinned: Boolean,
+        ) = db.withTransaction {
+            val room = db.bufferDao().observeById(roomId) ?: return@withTransaction
+            recordEdit(room.id, nextRevision(), "chat-placement-pin-edit")
+            db.bufferDao().setPinned(room.id, pinned)
+        }
+
+        suspend fun setAnchored(
+            roomId: Long,
+            anchored: Boolean,
+        ) = db.withTransaction {
+            val room = db.bufferDao().observeById(roomId) ?: return@withTransaction
+            if (room.type == BufferType.SERVER) return@withTransaction
+            recordEdit(room.id, nextRevision())
+            if (!anchored) {
+                db.bufferDao().writeAnchorOrder(room.id, null)
+            } else if (room.anchorOrder == null) {
+                val liveMax = db.bufferDao().anchoredRooms().maxOfOrNull { it.anchorOrder ?: -1 } ?: -1
+                val pendingMax = pending().maxOfOrNull { it.second.anchorOrder ?: -1 } ?: -1
+                db.bufferDao().writeAnchorOrder(room.id, maxOf(liveMax, pendingMax) + 1)
+            }
+        }
+
+        suspend fun reorderAnchored(orderedIds: List<Long>) =
+            db.withTransaction {
+                val anchored =
+                    db
+                        .bufferDao()
+                        .anchoredRooms()
+                        .map { it.id }
+                        .toSet()
+                val selected = orderedIds.distinct().filter { it in anchored }
+                val revision = nextRevision()
+                selected.forEach { recordEdit(it, revision) }
+                // Live ranks already reserve pending slots; only selected live slots are exchanged.
+                db.bufferDao().reorderAnchored(selected)
+            }
+
+        private fun PortableChatPlacement.identity() = listOf(networkId, chatType, identityKind, identityValue)
+
+        suspend fun chatPlacementSnapshot(): List<PortableChatPlacement> =
+            db.withTransaction {
+                val aliases = db.roomAliasDao().allNow().groupBy { it.roomId }
+                val rooms =
+                    db.bufferDao().chatPlacementRooms().mapNotNull { room ->
+                        val candidates = aliases[room.id].orEmpty()
+                        val identity =
+                            when (room.type) {
+                                BufferType.CHANNEL -> {
+                                    FolderIdentityKind.CHANNEL to
+                                        (candidates.firstOrNull { it.namespace == RoomAliasNamespace.CHANNEL }?.value ?: room.name.substringBefore('\u0000'))
+                                }
+
+                                BufferType.QUERY -> {
+                                    candidates
+                                        .firstOrNull { it.namespace == RoomAliasNamespace.ACCOUNT && it.verified }
+                                        ?.let { FolderIdentityKind.ACCOUNT to it.value }
+                                        ?: candidates
+                                            .firstOrNull { it.namespace == RoomAliasNamespace.VERIFIED_NICK }
+                                            ?.let { FolderIdentityKind.NICK to it.value }
+                                        ?: candidates
+                                            .firstOrNull { it.namespace == RoomAliasNamespace.PROVISIONAL_NICK }
+                                            ?.let { FolderIdentityKind.NICK to it.value }
+                                        ?: (FolderIdentityKind.NICK to room.name.substringBefore('\u0000'))
+                                }
+
+                                BufferType.SERVER -> {
+                                    null
+                                }
+                            } ?: return@mapNotNull null
+                        PortableChatPlacement(room.networkId, room.type, identity.first, identity.second, room.pinned, room.anchorOrder)
+                    }
+                val networks =
+                    db
+                        .networkDao()
+                        .allNow()
+                        .map { it.id }
+                        .toSet()
+                val placements =
+                    (rooms + pending().map { it.second }.filter { it.networkId in networks })
+                        .distinctBy { it.identity() }
+                val orders =
+                    placements
+                        .filter { it.anchorOrder != null }
+                        .sortedBy { it.anchorOrder }
+                        .mapIndexed { index, placement -> placement.identity() to index }
+                        .toMap()
+                placements.map { it.copy(anchorOrder = orders[it.identity()]) }
+            }
+
+        suspend fun restoreChatPlacements(
+            placements: List<PortableChatPlacement>,
+            replace: Boolean,
+        ) = db.withTransaction {
+            val local = chatPlacementSnapshot()
+            val importedIdentities = placements.map { it.identity() }.toSet()
+            val importedRooms = placements.mapNotNull { resolve(it)?.id }.toSet()
+            val retained =
+                if (replace) {
+                    emptyList()
+                } else {
+                    local.filter {
+                        it.identity() !in importedIdentities && resolve(it)?.id !in importedRooms
+                    }
+                }
+            val revision = nextRevision()
+            val combined = placements.map { it.copy(restoreRevision = revision) } + retained
+            val orders =
+                (
+                    placements.filter { it.anchorOrder != null }.sortedBy { it.anchorOrder } +
+                        retained.filter { it.anchorOrder != null }.sortedBy { it.anchorOrder }
+                ).mapIndexed { index, placement -> placement.identity() to index }
+                    .toMap()
+            db.bufferDao().chatPlacementRooms().forEach { room ->
+                db.bufferDao().setPinned(room.id, false)
+                db.bufferDao().writeAnchorOrder(room.id, null)
+            }
+            pending().forEach { db.appStateDao().delete(it.first) }
+            combined.forEach { placement ->
+                val normalized = placement.copy(anchorOrder = orders[placement.identity()])
+                val room = resolve(normalized)
+                if (room == null) {
+                    db.appStateDao().insert(AppStateEntity(prefix + Json.encodeToString(normalized)))
+                } else {
+                    apply(room.id, normalized)
+                }
+            }
+        }
+
+        private suspend fun resolve(placement: PortableChatPlacement): RoomEntity? {
+            val namespace =
+                when (placement.identityKind) {
+                    FolderIdentityKind.CHANNEL -> RoomAliasNamespace.CHANNEL
+                    FolderIdentityKind.ACCOUNT -> RoomAliasNamespace.ACCOUNT
+                    FolderIdentityKind.NICK -> RoomAliasNamespace.VERIFIED_NICK
+                }
+            val alias =
+                db.roomAliasDao().byValue(placement.networkId, namespace, placement.identityValue)
+                    ?: if (placement.identityKind == FolderIdentityKind.NICK) {
+                        db.roomAliasDao().byValue(placement.networkId, RoomAliasNamespace.PROVISIONAL_NICK, placement.identityValue)
+                    } else {
+                        null
+                    }
+            return alias
+                ?.let { db.bufferDao().observeById(it.roomId) }
+                ?.takeIf { it.type == placement.chatType }
+                ?: if (placement.identityKind != FolderIdentityKind.ACCOUNT) {
+                    db.bufferDao().byName(placement.networkId, placement.identityValue)?.takeIf { it.type == placement.chatType }
+                } else {
+                    null
+                }
+        }
+
+        private suspend fun claimPendingPlacement(roomId: Long) =
+            db.withTransaction {
+                val room = db.bufferDao().observeById(roomId) ?: return@withTransaction
+                val matches =
+                    pending().filter { (_, placement) ->
+                        placement.networkId == room.networkId && placement.chatType == room.type && resolve(placement)?.id == room.id
+                    }
+                // Account identity is authoritative if a nick and account both become known together.
+                matches.sortedBy { if (it.second.identityKind == FolderIdentityKind.ACCOUNT) 1 else 0 }.forEach { (key, placement) ->
+                    val editedRevision = editRevision(room.id)
+                    if (editRevision(room.id, "chat-placement-pin-edit") <= placement.restoreRevision) {
+                        db.bufferDao().setPinned(room.id, placement.pinned)
+                    }
+                    if (editedRevision <= placement.restoreRevision) {
+                        db.bufferDao().writeAnchorOrder(room.id, placement.anchorOrder)
+                    }
+                    db.appStateDao().delete(key)
+                }
+            }
+
+        private suspend fun apply(
+            roomId: Long,
+            placement: PortableChatPlacement,
+        ) {
+            db.bufferDao().setPinned(roomId, placement.pinned)
+            db.bufferDao().writeAnchorOrder(roomId, placement.anchorOrder)
+        }
+
         suspend fun getOrCreate(
             networkId: Long,
             normalizedName: String,
@@ -105,7 +326,8 @@ class BufferStore
                             ),
                         )
                         chatFolders.claimPending(promoted.id, normalizedChannel = normalizedName)
-                        return@withTransaction promoted
+                        claimPendingPlacement(promoted.id)
+                        return@withTransaction checkNotNull(dao.observeById(promoted.id))
                     }
                 }
                 val storedName =
@@ -143,7 +365,8 @@ class BufferStore
                 if (effectiveType == BufferType.CHANNEL) {
                     chatFolders.claimPending(room.id, normalizedChannel = normalizedName)
                 }
-                room
+                claimPendingPlacement(room.id)
+                checkNotNull(dao.observeById(room.id))
             }
 
         /**
@@ -253,6 +476,7 @@ class BufferStore
                     }
                 }
                 chatFolders.claimPending(room.id, account = account, normalizedNick = normalizedNick)
+                claimPendingPlacement(room.id)
                 checkNotNull(db.bufferDao().observeById(room.id))
             }
 
@@ -304,6 +528,12 @@ class BufferStore
                     if (first.id == second.id) return@withTransaction first
                     val winner = if (first.id < second.id) first else second
                     val loser = if (winner.id == first.id) second else first
+                    val editedRevision = maxOf(editRevision(winner.id), editRevision(loser.id))
+                    if (editedRevision > 0L) recordEdit(winner.id, editedRevision)
+                    db.appStateDao().keysLike("chat-placement-edit:${loser.id}:%").forEach { db.appStateDao().delete(it) }
+                    val pinEditedRevision = maxOf(editRevision(winner.id, "chat-placement-pin-edit"), editRevision(loser.id, "chat-placement-pin-edit"))
+                    if (pinEditedRevision > 0L) recordEdit(winner.id, pinEditedRevision, "chat-placement-pin-edit")
+                    db.appStateDao().keysLike("chat-placement-pin-edit:${loser.id}:%").forEach { db.appStateDao().delete(it) }
                     val rooms = listOf(winner, loser)
                     val visibleRooms = rooms.filterNot { it.dismissed }
                     val readStateRooms = visibleRooms.ifEmpty { rooms }
@@ -329,6 +559,7 @@ class BufferStore
                             joined = winner.joined || loser.joined,
                             membershipCycle = maxOf(winner.membershipCycle, loser.membershipCycle),
                             pinned = winner.pinned || loser.pinned,
+                            anchorOrder = rooms.mapNotNull { it.anchorOrder }.minOrNull(),
                             muted = winner.muted || loser.muted,
                             // The canonical winner owns the current archive decision; an older redirect must
                             // never unexpectedly hide a conversation the user has already revived.

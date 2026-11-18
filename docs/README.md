@@ -136,6 +136,13 @@ reader, so collapsed presence runs do not replace painted messages with placehol
 Chat-list tabs use the same theme surface as the title bar and chat rows.
 The selected tab retains its distinct pill highlight.
 
+Anchored chats stay in a manually ordered tier above ordinary pinned chats.
+Anchor channels or queries from their chat-list actions, then drag the dedicated
+handle or use its accessible move actions. Folder, network, and archive filters
+still apply; reordering visible anchors does not move hidden ones. Unanchoring
+restores the chat's previous pin state. Configuration export/import includes
+placement and order, while older backups without placement data leave them alone.
+
 Opening settings search focuses its input immediately. Returning from a result keeps
 the query without requesting focus again.
 

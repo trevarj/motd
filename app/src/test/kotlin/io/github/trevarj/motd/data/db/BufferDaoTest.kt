@@ -31,6 +31,69 @@ class BufferDaoTest {
     }
 
     @Test
+    fun `deleting then reviving a query does not resurrect its anchor`() =
+        runTest {
+            val dao = db.bufferDao()
+            val query = dao.insert(buffer(networkId, "alice", type = BufferType.QUERY).copy(pinned = true))
+            dao.setAnchored(query, true)
+            dao.deleteBuffer(query)
+            assertNull(dao.rawById(query)!!.anchorOrder)
+            assertTrue(dao.anchoredRooms().isEmpty())
+            dao.reviveQuery(query)
+            val revived = dao.observeChatList().first().single { it.bufferId == query }
+            assertNull(revived.anchorOrder)
+            assertFalse(revived.pinned)
+        }
+
+    @Test
+    fun `anchors append globally preserve pin state and clear to null through redirects`() =
+        runTest {
+            val dao = db.bufferDao()
+            val first = dao.insert(buffer(networkId, "#first").copy(pinned = true, ordering = 17))
+            val hidden = dao.insert(buffer(networkId, "#hidden").copy(archived = true))
+            val secondNetwork = db.networkDao().insert(network("second"))
+            val last = dao.insert(buffer(secondNetwork, "alice", type = BufferType.QUERY))
+            dao.setAnchored(first, true)
+            dao.setAnchored(hidden, true)
+            dao.setAnchored(first, true)
+            dao.setAnchored(last, true)
+            assertEquals(listOf(0, 1, 2), dao.anchoredRooms().map { it.anchorOrder })
+            assertTrue(dao.rawById(first)!!.pinned)
+            assertEquals(17, dao.rawById(first)!!.ordering)
+            val redirect = dao.insert(buffer(networkId, "#redirect").copy(redirectToRoomId = first))
+            dao.setAnchored(redirect, false)
+            assertNull(dao.rawById(first)!!.anchorOrder)
+            assertTrue(dao.rawById(first)!!.pinned)
+            dao.setAnchored(redirect, true)
+            assertEquals(3, dao.rawById(first)!!.anchorOrder)
+            assertEquals(
+                3,
+                dao
+                    .observeChatList()
+                    .first()
+                    .single { it.bufferId == first }
+                    .anchorOrder,
+            )
+        }
+
+    @Test
+    fun `scoped anchor reorder retains hidden global slots and drops stale duplicates`() =
+        runTest {
+            val dao = db.bufferDao()
+            val ids = (0..4).map { dao.insert(buffer(networkId, "#$it").copy(archived = it == 1)) }
+            ids.forEach { dao.setAnchored(it, true) }
+            val unanchored = dao.insert(buffer(networkId, "#unanchored"))
+            dao.reorderAnchored(listOf(ids[4], -1, ids[0], ids[4], unanchored, ids[2]))
+            assertEquals(listOf(ids[4], ids[1], ids[0], ids[3], ids[2]), dao.anchoredRooms().map { it.id })
+            assertEquals(listOf(0, 1, 2, 3, 4), dao.anchoredRooms().map { it.anchorOrder })
+            assertNull(dao.rawById(unanchored)!!.anchorOrder)
+            dao.setAnchored(ids[0], false)
+            dao.reorderAnchored(listOf(ids[0], ids[2], ids[4]))
+            assertEquals(listOf(ids[2], ids[1], ids[3], ids[4]), dao.anchoredRooms().map { it.id })
+            assertNull(dao.rawById(ids[0])!!.anchorOrder)
+        }
+
+    @Test
     fun `joined channel observer emits only visible raw display names`() =
         runTest {
             val joined =

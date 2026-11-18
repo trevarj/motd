@@ -444,6 +444,13 @@ class ChatListHistoryRecoveryTest {
                     pinned: Boolean,
                 ): Unit = error("Unexpected pin mutation")
 
+                override suspend fun setAnchored(
+                    id: Long,
+                    anchored: Boolean,
+                ): Unit = error("Unexpected anchor mutation")
+
+                override suspend fun reorderAnchored(orderedIds: List<Long>): Unit = error("Unexpected anchor reorder")
+
                 override suspend fun setMuted(
                     id: Long,
                     muted: Boolean,

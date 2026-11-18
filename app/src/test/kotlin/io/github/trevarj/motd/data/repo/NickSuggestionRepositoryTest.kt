@@ -101,6 +101,9 @@ class NickSuggestionRepositoryTest {
                     MessageVisibilityReader(db),
                     LocalAvatarStore(context),
                     db.networkIdentityDao(),
+                    bufferStore =
+                        io.github.trevarj.motd.data.sync
+                            .BufferStore(db),
                 )
 
             assertEquals(listOf("[anna"), repository.observeNickSuggestions(networkId, "[a", "configured-me").first())

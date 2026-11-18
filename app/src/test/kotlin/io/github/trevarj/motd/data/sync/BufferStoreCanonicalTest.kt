@@ -64,6 +64,26 @@ class BufferStoreCanonicalTest {
     fun tearDown() = db.close()
 
     @Test
+    fun `room merges retain the earliest anchor and clear redirect placement`() =
+        runTest {
+            val winner = store.getOrCreate(networkId, "alice", "Alice", BufferType.QUERY)
+            val loser = store.getOrCreate(networkId, "bob", "Bob", BufferType.QUERY)
+            db.bufferDao().setAnchored(loser.id, true)
+            db.bufferDao().setAnchored(winner.id, true)
+            db.bufferDao().setPinned(winner.id, true)
+            val merged = store.mergeRooms(winner.id, loser.id)
+            assertEquals(0, merged.anchorOrder)
+            assertTrue(merged.pinned)
+            assertEquals(listOf(winner.id), db.bufferDao().anchoredRooms().map { it.id })
+            assertEquals(null, db.bufferDao().rawById(loser.id)!!.anchorOrder)
+            db.bufferDao().setAnchored(loser.id, false)
+            assertEquals(null, db.bufferDao().rawById(winner.id)!!.anchorOrder)
+            val third = store.getOrCreate(networkId, "carol", "Carol", BufferType.QUERY)
+            db.bufferDao().setAnchored(third.id, true)
+            assertEquals(0, store.mergeRooms(winner.id, third.id).anchorOrder)
+        }
+
+    @Test
     fun `room merge retains the canonical winners archive choice`() =
         runTest {
             val winner = store.getOrCreate(networkId, "alice", "Alice", BufferType.QUERY)

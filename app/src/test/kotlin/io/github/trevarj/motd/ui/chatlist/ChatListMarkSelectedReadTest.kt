@@ -74,6 +74,13 @@ class ChatListMarkSelectedReadTest {
             pinned: Boolean,
         ) = Unit
 
+        override suspend fun setAnchored(
+            id: Long,
+            anchored: Boolean,
+        ) = Unit
+
+        override suspend fun reorderAnchored(orderedIds: List<Long>) = Unit
+
         override suspend fun setMuted(
             id: Long,
             muted: Boolean,

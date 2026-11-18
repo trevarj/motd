@@ -73,6 +73,9 @@ internal fun resolveUiIcon(
     if (iconSet == UiIconSet.MATERIAL) return material
     val icon =
         when (material.name) {
+            "Outlined.Anchor",
+            -> LucideIcon.ANCHOR
+
             "Outlined.Archive",
             -> LucideIcon.ARCHIVE
 

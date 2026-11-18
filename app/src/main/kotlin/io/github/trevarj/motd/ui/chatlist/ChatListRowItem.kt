@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Anchor
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.ColorScheme
@@ -348,6 +349,14 @@ fun ChatListRowItem(
                                 .padding(start = 4.dp)
                                 .size(14.dp),
                         tint = if (row.muted) MaterialTheme.colorScheme.onSurfaceVariant else nickColor,
+                    )
+                }
+                if (row.anchorOrder != null) {
+                    Icon(
+                        imageVector = Icons.Outlined.Anchor,
+                        contentDescription = stringResource(R.string.anchored_chats),
+                        modifier = Modifier.testTag("chatlist_row_anchor").padding(start = 4.dp).size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 if (row.pinned) {

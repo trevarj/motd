@@ -364,6 +364,8 @@ data class RoomEntity(
     val advertisedLatestTime: Long? = null,
     /** Original validated `dickord/channel` JSON; hierarchy is derived only for presentation. */
     val dickordChannelJson: String? = null,
+    /** Null leaves activity sorting intact; non-null is the global anchored-chat rank. */
+    val anchorOrder: Int? = null,
 )
 
 /** Compatibility name retained while callers migrate to the canonical room vocabulary. */

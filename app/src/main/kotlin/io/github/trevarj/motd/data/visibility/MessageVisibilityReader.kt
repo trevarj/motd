@@ -307,7 +307,9 @@ class MessageVisibilityReader
             // Same key the SQL projection orders on (stored rows only, never the advertised high-water
             // mark), so hiding a fool re-sorts the list without changing what "most recent" means.
             return resolved.sortedWith(
-                compareByDescending<ChatListRow> { it.pinned }
+                compareBy<ChatListRow> { it.anchorOrder == null }
+                    .thenBy { it.anchorOrder }
+                    .thenByDescending { it.pinned }
                     .thenBy { it.lastMessageTime == null }
                     .thenByDescending { it.lastMessageTime ?: Long.MIN_VALUE }
                     .thenByDescending { it.bufferId },

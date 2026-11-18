@@ -171,6 +171,14 @@ interface BufferRepository {
         pinned: Boolean,
     )
 
+    suspend fun setAnchored(
+        id: Long,
+        anchored: Boolean,
+    )
+
+    /** Reorders the selected anchored chats in their existing global slots. */
+    suspend fun reorderAnchored(orderedIds: List<Long>)
+
     /** Non-null when unmuting hid a backlog; see BufferDao.setMuted. */
     suspend fun setMuted(
         id: Long,

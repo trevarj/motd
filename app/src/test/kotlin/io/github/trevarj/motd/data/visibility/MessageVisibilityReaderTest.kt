@@ -66,6 +66,27 @@ class MessageVisibilityReaderTest {
     fun tearDown() = db.close()
 
     @Test
+    fun chatListVisibilityResortPreservesAnchorRanksAheadOfPinsAndActivity() =
+        runTest {
+            val second = db.bufferDao().insert(buffer(networkId, "#second").copy(pinned = true))
+            val ordinary = db.bufferDao().insert(buffer(networkId, "#ordinary").copy(pinned = true))
+            db.bufferDao().setAnchored(bufferId, true)
+            db.bufferDao().setAnchored(second, true)
+            db.messageDao().insertAll(
+                listOf(
+                    message(second, "second", sender = "bob", serverTime = 200, dedupKey = "second"),
+                    message(ordinary, "ordinary", sender = "bob", serverTime = 300, dedupKey = "ordinary"),
+                    message(bufferId, "hidden", sender = "alice", serverTime = 400, dedupKey = "hidden"),
+                ),
+            )
+            val rows = db.bufferDao().observeChatList().first()
+            assertEquals(listOf(bufferId, second, ordinary), rows.map { it.bufferId })
+            val resolved = reader.resolveChatList(rows, MessageVisibilitySpec(fools = setOf("alice")))
+            assertEquals(listOf(bufferId, second, ordinary), resolved.map { it.bufferId })
+            assertEquals(listOf(0, 1, null), resolved.map { it.anchorOrder })
+        }
+
+    @Test
     fun mixedFoolsKeepSqlUnreadAttentionAndAnchorsAlignedDuringHiddenReveal() =
         runTest {
             val ids =

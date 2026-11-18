@@ -253,6 +253,9 @@ class ChatViewModelTest {
                 settings = FakeSettingsRepository(),
                 visibilityReader = MessageVisibilityReader(db),
                 localAvatarStore = LocalAvatarStore(ApplicationProvider.getApplicationContext()),
+                bufferStore =
+                    io.github.trevarj.motd.data.sync
+                        .BufferStore(db),
             )
     }
 
@@ -2332,6 +2335,9 @@ class ChatViewModelTest {
                             settings = FakeSettingsRepository(),
                             visibilityReader = MessageVisibilityReader(db),
                             localAvatarStore = LocalAvatarStore(ApplicationProvider.getApplicationContext()),
+                            bufferStore =
+                                io.github.trevarj.motd.data.sync
+                                    .BufferStore(db),
                         ),
                 )
 
@@ -2660,6 +2666,9 @@ class ChatViewModelTest {
                     settings = FakeSettingsRepository(),
                     visibilityReader = MessageVisibilityReader(db),
                     localAvatarStore = LocalAvatarStore(ApplicationProvider.getApplicationContext()),
+                    bufferStore =
+                        io.github.trevarj.motd.data.sync
+                            .BufferStore(db),
                 )
             for ((input, expected) in listOf(-1 to 0, 37 to 37, 101 to 100)) {
                 assertTrue(repository.setMessageBackgroundOpacityOverride(channel.id, input))
@@ -2739,6 +2748,9 @@ class ChatViewModelTest {
                     settings = FakeSettingsRepository(),
                     visibilityReader = MessageVisibilityReader(db),
                     localAvatarStore = LocalAvatarStore(ApplicationProvider.getApplicationContext()),
+                    bufferStore =
+                        io.github.trevarj.motd.data.sync
+                            .BufferStore(db),
                 )
             db.bufferDao().setMessageBackgroundOpacityOverride(channel.id, 0)
             for ((input, expected) in listOf(-1 to 0, 63 to 63, 101 to 100)) {
@@ -7331,6 +7343,13 @@ class ChatViewModelTest {
             id: Long,
             pinned: Boolean,
         ) = Unit
+
+        override suspend fun setAnchored(
+            id: Long,
+            anchored: Boolean,
+        ) = Unit
+
+        override suspend fun reorderAnchored(orderedIds: List<Long>) = Unit
 
         override suspend fun setMuted(
             id: Long,

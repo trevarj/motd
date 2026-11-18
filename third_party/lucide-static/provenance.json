@@ -6,6 +6,10 @@
   "tarballSha256": "fc9981e0cac51a0baeaaacf669b6faaa0fbd2427df1b46609a858b6a75df6617",
   "conversion": "SVG primitives/path commands converted ahead of time to Compose ImageVector paths; 24 viewport, 2px round strokes. Auto-mirroring follows the corresponding Material vector.",
   "icons": {
+    "anchor": {
+      "sha256": "aa40aa7e02f208f3f2ed9b09a52d43952fb1d6a0b1a9f582accbb60d5843631d",
+      "svg": "<!-- @license lucide-static v1.69.0 - ISC -->\n<svg\n  class=\"lucide lucide-anchor\"\n  xmlns=\"http://www.w3.org/2000/svg\"\n  width=\"24\"\n  height=\"24\"\n  viewBox=\"0 0 24 24\"\n  fill=\"none\"\n  stroke=\"currentColor\"\n  stroke-width=\"2\"\n  stroke-linecap=\"round\"\n  stroke-linejoin=\"round\"\n>\n  <path d=\"M12 6v16\" />\n  <path d=\"m19 13 2-1a9 9 0 0 1-18 0l2 1\" />\n  <path d=\"M9 11h6\" />\n  <circle cx=\"12\" cy=\"4\" r=\"2\" />\n</svg>\n"
+    },
     "archive": {
       "sha256": "ae20903b28dd0ade06daeea9f0fb68938add26e8dcef0d9e496f6fd1c044d24b",
       "svg": "<!-- @license lucide-static v1.69.0 - ISC -->\n<svg\n  class=\"lucide lucide-archive\"\n  xmlns=\"http://www.w3.org/2000/svg\"\n  width=\"24\"\n  height=\"24\"\n  viewBox=\"0 0 24 24\"\n  fill=\"none\"\n  stroke=\"currentColor\"\n  stroke-width=\"2\"\n  stroke-linecap=\"round\"\n  stroke-linejoin=\"round\"\n>\n  <rect width=\"20\" height=\"5\" x=\"2\" y=\"3\" rx=\"1\" />\n  <path d=\"M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8\" />\n  <path d=\"M10 12h4\" />\n</svg>\n"

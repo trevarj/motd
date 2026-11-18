@@ -16,6 +16,28 @@ import androidx.compose.ui.unit.dp
 internal enum class LucideIcon(
     private val draw: ImageVector.Builder.() -> Unit,
 ) {
+    ANCHOR({
+        stroke {
+            moveTo(12.0f, 6.0f)
+            verticalLineToRelative(16.0f)
+        }
+        stroke {
+            moveTo(19.0f, 13.0f)
+            lineToRelative(2.0f, -1.0f)
+            arcToRelative(9.0f, 9.0f, 0.0f, false, true, -18.0f, 0.0f)
+            lineToRelative(2.0f, 1.0f)
+        }
+        stroke {
+            moveTo(9.0f, 11.0f)
+            horizontalLineToRelative(6.0f)
+        }
+        stroke {
+            moveTo(14.0f, 4.0f)
+            arcToRelative(2.0f, 2.0f, 0.0f, true, true, -4.0f, 0.0f)
+            arcToRelative(2.0f, 2.0f, 0.0f, true, true, 4.0f, 0.0f)
+            close()
+        }
+    }),
     ARCHIVE({
         stroke {
             moveTo(3.0f, 3.0f)

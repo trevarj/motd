@@ -170,6 +170,51 @@ class Migration47To48Test {
             }
         }
 
+    @Test
+    fun migration50To51LeavesExistingChatsUnanchoredAndPreservesPinsAndOrder() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            context.deleteDatabase(DB_NAME)
+            helper =
+                FrameworkSQLiteOpenHelperFactory().create(
+                    SupportSQLiteOpenHelper.Configuration
+                        .builder(context)
+                        .name(DB_NAME)
+                        .callback(
+                            object : SupportSQLiteOpenHelper.Callback(50) {
+                                override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion(db, 50)
+
+                                override fun onUpgrade(
+                                    db: SupportSQLiteDatabase,
+                                    oldVersion: Int,
+                                    newVersion: Int,
+                                ) = Unit
+                            },
+                        ).build(),
+                )
+            helper!!.writableDatabase.apply {
+                execSQL("INSERT INTO networks(id, name, role, host, port, tls, nick, username, realname, saslMechanism, autoConnect, ordering, restoreAutoConnect) VALUES (1, 'n', 'DIRECT', 'irc.example', 6697, 1, 'me', 'me', 'Me', 'NONE', 1, 0, 1)")
+                execSQL("INSERT INTO buffers(id, networkId, name, displayName, type, joined, membershipCycle, pinned, muted, archived, ordering, historyComplete, dismissed) VALUES (1, 1, '#c', '#c', 'CHANNEL', 1, 1, 1, 1, 1, 23, 0, 0)")
+            }
+            helper!!.close()
+            helper = null
+            val migrated = Room.databaseBuilder(context, MotdDatabase::class.java, DB_NAME).addMigrations(*ALL_MIGRATIONS).build()
+            try {
+                val room = requireNotNull(migrated.bufferDao().observeById(1))
+                assertNull(room.anchorOrder)
+                assertEquals(true, room.pinned)
+                assertEquals(true, room.muted)
+                assertEquals(true, room.archived)
+                assertEquals(23, room.ordering)
+                migrated.bufferDao().setAnchored(1, true)
+                assertEquals(0, migrated.bufferDao().observeById(1)?.anchorOrder)
+                migrated.bufferDao().setAnchored(1, false)
+                assertNull(migrated.bufferDao().observeById(1)?.anchorOrder)
+            } finally {
+                migrated.close()
+            }
+        }
+
     private companion object {
         const val DB_NAME = "migration-47-48-test.db"
     }

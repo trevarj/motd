@@ -74,6 +74,64 @@ class ChatListSectioningTest {
     )
 
     @Test
+    fun `anchor header leads even invitation folder and contributes no unread itself`() {
+        val anchor = row(1, "alice", unreadCount = 4).copy(anchorOrder = 0)
+        val sections = sectionChatList(listOf(anchor, row(2, "bob")), emptySet(), emptySet())
+        assertEquals("anchored-header", chatListTopItemKey(false, emptyList(), 1, sections))
+        assertEquals(0, unreadActivityBeforeDisplayIndex(sections, false, 1))
+        assertEquals(4, unreadActivityBeforeDisplayIndex(sections, false, 2))
+        assertTrue(sections.showRecentHeader)
+    }
+
+    @Test
+    fun `anchors sort by manual order then id independent of activity and membership`() {
+        val channel = row(8, "#channel", BufferType.CHANNEL).copy(anchorOrder = 1)
+        val pinnedFriend = row(3, "friend", pinned = true).copy(anchorOrder = 0)
+        val fool = row(2, "fool").copy(anchorOrder = 1)
+        val recent = row(9, "recent")
+        val inputs = listOf(channel, recent, pinnedFriend, fool)
+        for (rows in listOf(inputs, inputs.reversed())) {
+            val sections = sectionChatList(rows, setOf("friend"), setOf("fool"))
+            assertEquals(listOf(3L, 2L, 8L), sections.anchored.map { it.bufferId })
+            assertTrue(sections.pinned.isEmpty())
+            assertTrue(sections.friends.isEmpty())
+            assertTrue(sections.fools.isEmpty())
+            assertEquals(listOf(recent), sections.regular)
+        }
+        val restored = sectionChatList(listOf(pinnedFriend.copy(anchorOrder = null), recent), setOf("friend"), emptySet())
+        assertEquals(listOf(pinnedFriend.copy(anchorOrder = null)), restored.pinned)
+        assertTrue(restored.friends.isEmpty())
+        assertTrue(pinnedFriend.pinned)
+    }
+
+    @Test
+    fun `scoped anchors exclude archived chats and never duplicate nested folder children`() {
+        val folder = ChatFolderEntity(id = 7, displayName = "Work", normalizedName = "work", ordering = 0)
+        val channel = row(1, "#channel", BufferType.CHANNEL).copy(anchorOrder = 3, folderId = 7)
+        val query = row(2, "alice").copy(anchorOrder = 0, folderId = 7)
+        val archived = row(3, "old").copy(anchorOrder = 1, archived = true)
+        val hiddenNetwork = row(4, "elsewhere", networkId = 2).copy(anchorOrder = 2)
+        val regular = row(5, "#regular", BufferType.CHANNEL).copy(folderId = 7)
+        val (active, archive) = partitionArchivedRows(listOf(channel, query, archived, hiddenNetwork, regular).filter { it.networkId == 1L })
+        val presentation = presentChatFolders(active, listOf(folder), emptySet(), emptySet())
+        assertEquals(listOf(2L, 1L), presentation.anchored.map { it.bufferId })
+        assertEquals(listOf(regular), presentation.folders.single().children)
+        assertTrue(presentation.remaining.anchored.isEmpty())
+        assertEquals(listOf(archived), presentChatFolders(archive, listOf(folder), emptySet(), emptySet()).anchored)
+        val folderScope = active.filter { it.folderId == 7L }
+        assertEquals(listOf(2L, 1L), presentChatFolders(folderScope, emptyList(), emptySet(), emptySet()).anchored.map { it.bufferId })
+        assertTrue(presentChatFolders(folderAllRows(active, false), listOf(folder), emptySet(), emptySet()).anchored.isEmpty())
+    }
+
+    @Test
+    fun `anchor moves clamp boundaries and preserve scoped membership`() {
+        assertEquals(listOf(30L, 10L, 20L), moveAnchoredChat(listOf(10, 20, 30), 30, -2))
+        assertEquals(listOf(20L, 30L, 10L), moveAnchoredChat(listOf(10, 20, 30), 10, 99))
+        assertEquals(listOf(10L, 20L), moveAnchoredChat(listOf(10, 20), 99, 1))
+        assertEquals(emptyList<Long>(), moveAnchoredChat(emptyList(), 10, -1))
+    }
+
+    @Test
     fun `Discord mark-all selects active unmuted portal rows only`() {
         val active = row(id = 1, name = "#discord.guild.general", type = BufferType.CHANNEL, unreadCount = 3)
         val muted = row(id = 2, name = "#discord.guild.quiet", type = BufferType.CHANNEL, unreadCount = 2).copy(muted = true)

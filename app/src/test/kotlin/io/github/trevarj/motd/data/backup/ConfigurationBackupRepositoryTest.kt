@@ -96,6 +96,139 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class ConfigurationBackupRepositoryTest {
     @Test
+    fun chatPlacementsRoundTripRemappedNetworksAndDeferredChannelAndAccountQuery() =
+        runTest {
+            val source = inMemoryDb()
+            val target = inMemoryDb()
+            val relay = inMemoryDb()
+            try {
+                val network = source.networkDao().insert(secretNetwork(null))
+                val secondNetwork = source.networkDao().insert(secretNetwork(null).copy(name = "other", host = "other.example"))
+                val store = BufferStore(source)
+                val channel = store.getOrCreate(network, "#kotlin", "#Kotlin", BufferType.CHANNEL)
+                val query = store.getOrCreate(secondNetwork, "alice", "Alice", BufferType.QUERY)
+                store.bindQueryIdentity(query.id, secondNetwork, "alice", "Alice", "alice-account")
+                val pinned = store.getOrCreate(network, "bob", "Bob", BufferType.QUERY)
+                source.bufferDao().writeAnchorOrder(query.id, 0)
+                source.bufferDao().writeAnchorOrder(channel.id, 1)
+                source.bufferDao().setPinned(channel.id, true)
+                source.bufferDao().setPinned(pinned.id, true)
+                val raw = repository(source).exportToString(BackupExportMode.ENCRYPTED_WITH_CREDENTIALS, password = "anchor-backup-password")
+
+                target.networkDao().insert(secretNetwork(null).copy(name = "local", host = "local.example"))
+                repository(target).import(raw, password = "anchor-backup-password", importMode = BackupImportMode.MERGE)
+                val restoredNetwork = target.networkDao().allNow().single { it.name == "libera" }
+                val restoredSecond = target.networkDao().allNow().single { it.name == "other" }
+                assertTrue(restoredNetwork.id != network)
+                assertNull(target.bufferDao().byName(restoredNetwork.id, "#kotlin"))
+                assertNull(target.bufferDao().byName(restoredSecond.id, "alice"))
+                assertTrue(target.bufferDao().chatListNow().isEmpty())
+                assertEquals(3, BufferStore(target).chatPlacementSnapshot().size)
+
+                // Re-export before reconnect must retain deferred state, not only existing buffers.
+                val deferred = repository(target).exportToString(BackupExportMode.CREDENTIALS_EXCLUDED)
+                repository(relay).import(deferred, importMode = BackupImportMode.REPLACE)
+                val relayNetwork = relay.networkDao().allNow().single { it.name == "libera" }
+                val relaySecond = relay.networkDao().allNow().single { it.name == "other" }
+                val relayStore = BufferStore(relay)
+                val restoredChannel = relayStore.getOrCreate(relayNetwork.id, "#kotlin", "#Kotlin", BufferType.CHANNEL)
+                val restoredQuery = relayStore.getOrCreate(relaySecond.id, "newnick", "NewNick", BufferType.QUERY)
+                assertNull(restoredQuery.anchorOrder)
+                relayStore.bindQueryIdentity(restoredQuery.id, relaySecond.id, "newnick", "NewNick", "alice-account")
+                val restoredPinned = relayStore.getOrCreate(relayNetwork.id, "bob", "Bob", BufferType.QUERY)
+                assertEquals(1, relay.bufferDao().observeById(restoredChannel.id)?.anchorOrder)
+                assertTrue(relay.bufferDao().observeById(restoredChannel.id)?.pinned == true)
+                assertEquals(0, relay.bufferDao().observeById(restoredQuery.id)?.anchorOrder)
+                assertFalse(relay.bufferDao().observeById(restoredQuery.id)?.pinned ?: true)
+                assertTrue(restoredPinned.pinned)
+                assertNull(restoredPinned.anchorOrder)
+                assertTrue(relay.appStateDao().keysLike("pending-chat-placement:%").isEmpty())
+            } finally {
+                source.close()
+                target.close()
+                relay.close()
+            }
+        }
+
+    @Test
+    fun chatPlacementMergeRetainsLocalStateAndLegacyReplacePreservesPinsWhileExplicitEmptyClears() =
+        runTest {
+            val source = inMemoryDb()
+            val target = inMemoryDb()
+            try {
+                val network = source.networkDao().insert(secretNetwork(null))
+                val imported = BufferStore(source).getOrCreate(network, "#imported", "#Imported", BufferType.CHANNEL)
+                source.bufferDao().writeAnchorOrder(imported.id, 0)
+                val raw = repository(source).exportToString(BackupExportMode.CREDENTIALS_EXCLUDED)
+                val targetNetwork = target.networkDao().insert(secretNetwork(null))
+                val local = BufferStore(target).getOrCreate(targetNetwork, "local", "Local", BufferType.QUERY)
+                target.bufferDao().writeAnchorOrder(local.id, 0)
+                target.bufferDao().setPinned(local.id, true)
+                repository(target).import(raw, importMode = BackupImportMode.MERGE)
+                assertEquals(1, target.bufferDao().observeById(local.id)?.anchorOrder)
+                assertTrue(target.bufferDao().observeById(local.id)?.pinned == true)
+                val envelope = Json.parseToJsonElement(raw).jsonObject
+                val legacy = JsonObject(envelope + ("payload" to JsonObject(envelope.getValue("payload").jsonObject - "chatPlacements"))).toString()
+                repository(target).import(legacy, importMode = BackupImportMode.MERGE)
+                assertEquals(1, target.bufferDao().observeById(local.id)?.anchorOrder)
+                assertTrue(target.bufferDao().observeById(local.id)?.pinned == true)
+                repository(target).import(legacy, importMode = BackupImportMode.REPLACE)
+                assertEquals(1, target.bufferDao().observeById(local.id)?.anchorOrder)
+                assertTrue(target.bufferDao().observeById(local.id)?.pinned == true)
+                val emptyPlacements =
+                    JsonObject(
+                        envelope + ("payload" to JsonObject(envelope.getValue("payload").jsonObject + ("chatPlacements" to JsonArray(emptyList())))),
+                    ).toString()
+                repository(target).import(emptyPlacements, importMode = BackupImportMode.REPLACE)
+                assertNull(target.bufferDao().observeById(local.id)?.anchorOrder)
+                assertFalse(target.bufferDao().observeById(local.id)?.pinned ?: true)
+                assertTrue(BufferStore(target).chatPlacementSnapshot().isEmpty())
+            } finally {
+                source.close()
+                target.close()
+            }
+        }
+
+    @Test
+    fun invalidChatPlacementsAreRejectedBeforePreviewOrImportChangesState() =
+        runTest {
+            val db = inMemoryDb()
+            try {
+                val network = db.networkDao().insert(secretNetwork(null))
+                val room = BufferStore(db).getOrCreate(network, "#test", "#Test", BufferType.CHANNEL)
+                db.bufferDao().writeAnchorOrder(room.id, 0)
+                val backup = repository(db)
+                val envelope = Json.parseToJsonElement(backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED)).jsonObject
+                val payload = envelope.getValue("payload").jsonObject
+                val placement =
+                    payload
+                        .getValue("chatPlacements")
+                        .jsonArray
+                        .single()
+                        .jsonObject
+                val malformed =
+                    listOf(
+                        JsonArray(listOf(JsonObject(placement + ("anchorOrder" to JsonPrimitive(-1))))),
+                        JsonArray(listOf(JsonObject(placement + ("anchorOrder" to JsonPrimitive(100_000))))),
+                        JsonArray(listOf(placement, placement)),
+                        JsonArray(listOf(JsonObject(placement + ("networkExportId" to JsonPrimitive("missing"))))),
+                        JsonArray(listOf(JsonObject(placement + ("identityValue" to JsonPrimitive("x".repeat(513)))))),
+                        JsonArray(listOf(JsonObject(placement + ("identityValue" to JsonPrimitive("bad\nidentity"))))),
+                        JsonArray(listOf(JsonObject(placement + ("chatType" to JsonPrimitive("SERVER"))))),
+                        JsonArray(listOf(JsonObject(placement + ("identityKind" to JsonPrimitive("ACCOUNT"))))),
+                    )
+                for (placements in malformed) {
+                    val document = JsonObject(envelope + ("payload" to JsonObject(payload + ("chatPlacements" to placements)))).toString()
+                    assertTrue(runCatching { backup.preview(document, importMode = BackupImportMode.MERGE) }.exceptionOrNull() is BackupFormatException)
+                    assertTrue(runCatching { backup.import(document, importMode = BackupImportMode.REPLACE) }.exceptionOrNull() is BackupFormatException)
+                    assertEquals(0, db.bufferDao().observeById(room.id)?.anchorOrder)
+                }
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
     fun channelPrefixesRoundTripAndOldSettingsDefaultToFalse() =
         runTest {
             val settings = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())

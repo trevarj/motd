@@ -118,6 +118,13 @@ flowchart TD
   blur are involved. Title, icons, system status glyphs, tab text and badges stay sharp.
   Selected pills, coverage glyphs and activity dots use the secondary-container pair;
   unread and mention badges retain their independent semantic colors.
+- Anchored channels and queries occupy a manually ordered tier above ordinary pins,
+  within the current network/folder/archive scope. Drag handles and accessible moves
+  exchange the visible rooms' global slots without shifting hidden rooms; unanchoring
+  restores the room's prior pinned state. Room 51 adds nullable anchor order.
+  Configuration snapshots include portable chat identities, pins and anchor ranks.
+  Deferred identities use existing app-state storage; newer user placement edits win
+  over late identity claims. Legacy snapshots without placement data leave it unchanged.
 - Archive pull hints, the revealed folder and the archive-only route share the chat-card
   8dp horizontal/2dp vertical gutters, 16dp shape, 12dp inner inset and density-scaled
   avatar host/vertical padding. `titleMedium` labels may wrap at accessible font scales;

@@ -71,6 +71,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AddCircleOutline
 import androidx.compose.material.icons.outlined.AlternateEmail
+import androidx.compose.material.icons.outlined.Anchor
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.ArrowDownward
@@ -192,6 +193,7 @@ class UiIconsTest {
 
     private val ordinaryIcons =
         listOf(
+            Icons.Outlined.Anchor,
             Icons.AutoMirrored.Filled.ArrowBack,
             Icons.AutoMirrored.Filled.ArrowForwardIos,
             Icons.AutoMirrored.Filled.Login,

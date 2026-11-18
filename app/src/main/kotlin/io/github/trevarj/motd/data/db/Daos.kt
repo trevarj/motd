@@ -516,6 +516,45 @@ interface BufferDao {
         pinned: Boolean,
     )
 
+    @Query("SELECT * FROM buffers WHERE anchorOrder IS NOT NULL AND type IN ('CHANNEL', 'QUERY') AND redirectToRoomId IS NULL ORDER BY anchorOrder, id")
+    suspend fun anchoredRooms(): List<RoomEntity>
+
+    @Query("SELECT * FROM buffers WHERE type IN ('CHANNEL', 'QUERY') AND redirectToRoomId IS NULL AND (pinned = 1 OR anchorOrder IS NOT NULL) ORDER BY id")
+    suspend fun chatPlacementRooms(): List<RoomEntity>
+
+    @Query("UPDATE buffers SET anchorOrder = :anchorOrder WHERE id = :id AND type IN ('CHANNEL', 'QUERY') AND redirectToRoomId IS NULL")
+    suspend fun writeAnchorOrder(
+        id: Long,
+        anchorOrder: Int?,
+    )
+
+    /** Appends once, including anchors hidden by folders, archives, or network filters. */
+    @Transaction
+    suspend fun setAnchored(
+        id: Long,
+        anchored: Boolean,
+    ) {
+        val canonicalId = canonicalId(id) ?: return
+        val room = rawById(canonicalId) ?: return
+        if (!anchored) {
+            writeAnchorOrder(canonicalId, null)
+        } else if (room.anchorOrder == null) {
+            val last = anchoredRooms().lastOrNull()?.anchorOrder
+            writeAnchorOrder(canonicalId, (last ?: -1) + 1)
+        }
+    }
+
+    /** Replaces only selected global slots; stale ids and duplicates cannot move hidden rooms. */
+    @Transaction
+    suspend fun reorderAnchored(orderedIds: List<Long>) {
+        val rooms = anchoredRooms()
+        val ranks = rooms.associate { it.id to checkNotNull(it.anchorOrder) }
+        val selected = orderedIds.distinct().filter { it in ranks }
+        val selectedIds = selected.toSet()
+        val slots = rooms.filter { it.id in selectedIds }.map { checkNotNull(it.anchorOrder) }
+        selected.forEachIndexed { index, id -> writeAnchorOrder(id, slots[index]) }
+    }
+
     @Query("UPDATE buffers SET muted = :muted WHERE id = :id")
     suspend fun writeMuted(
         id: Long,
@@ -1035,6 +1074,7 @@ interface BufferDao {
         update(
             room.copy(
                 pinned = false,
+                anchorOrder = null,
                 muted = false,
                 folderId = null,
                 localReadAnchorTime = floorTime,
@@ -1119,6 +1159,7 @@ data class ChatListRow(
      * proves that.
      */
     val advertisedUnread: Boolean = false,
+    val anchorOrder: Int? = null,
 )
 
 /** Batched fool-aware replacement for chat-list preview and badge fields. */
@@ -2132,7 +2173,7 @@ interface RoomAliasDao {
         winnerId: RoomId,
     )
 
-    @Query("UPDATE buffers SET redirectToRoomId = :winnerId WHERE id = :loserId")
+    @Query("UPDATE buffers SET redirectToRoomId = :winnerId, anchorOrder = NULL WHERE id = :loserId")
     suspend fun markRedirect(
         loserId: RoomId,
         winnerId: RoomId,
@@ -2938,6 +2979,7 @@ internal const val CHAT_LIST_SQL =
         b.displayName AS displayName,
         b.type AS type,
         b.pinned AS pinned,
+        b.anchorOrder AS anchorOrder,
         b.muted AS muted,
         b.archived AS archived,
         b.avatarOverrideModel AS avatarOverrideModel,
@@ -3025,7 +3067,7 @@ internal const val CHAT_LIST_SQL =
         ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC
         LIMIT 1
     )
-    ORDER BY b.pinned DESC,
+    ORDER BY (b.anchorOrder IS NULL), b.anchorOrder, b.pinned DESC,
              (COALESCE(lm.serverTime, 0) = 0) ASC,
              COALESCE(lm.serverTime, 0) DESC,
              b.id DESC

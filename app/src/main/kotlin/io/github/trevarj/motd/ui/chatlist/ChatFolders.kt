@@ -35,6 +35,7 @@ data class FolderChatListPresentation(
     val pinned: List<ChatListRow>,
     val folders: List<PresentedChatFolder>,
     val remaining: ChatListSections,
+    val anchored: List<ChatListRow> = emptyList(),
 )
 
 fun presentChatFolders(
@@ -44,8 +45,9 @@ fun presentChatFolders(
     fools: Set<String>,
     activeBufferId: Long? = null,
 ): FolderChatListPresentation {
-    val pinned = rows.filter(ChatListRow::pinned)
-    val unpinned = rows.filterNot(ChatListRow::pinned)
+    val anchored = rows.filter { it.anchorOrder != null }.sortedWith(compareBy<ChatListRow> { it.anchorOrder }.thenBy { it.bufferId })
+    val pinned = rows.filter { it.pinned && it.anchorOrder == null }
+    val unpinned = rows.filter { !it.pinned && it.anchorOrder == null }
     val folderRows = unpinned.filter { it.folderId != null }.groupBy(ChatListRow::folderId)
     val presented =
         folders.mapNotNull { folder ->
@@ -60,7 +62,7 @@ fun presentChatFolders(
         }
     val knownFolderIds = folders.mapTo(mutableSetOf(), ChatFolderEntity::id)
     val remaining = unpinned.filter { it.folderId == null || it.folderId !in knownFolderIds }
-    return FolderChatListPresentation(pinned, presented, sectionChatList(remaining, friends, fools))
+    return FolderChatListPresentation(pinned, presented, sectionChatList(remaining, friends, fools), anchored)
 }
 
 internal fun folderAllRows(

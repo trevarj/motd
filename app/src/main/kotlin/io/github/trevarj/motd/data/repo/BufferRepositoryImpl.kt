@@ -46,6 +46,7 @@ class BufferRepositoryImpl
         private val visibilityReader: MessageVisibilityReader,
         private val localAvatarStore: LocalAvatarStore,
         private val networkIdentityDao: NetworkIdentityDao? = null,
+        private val bufferStore: io.github.trevarj.motd.data.sync.BufferStore,
     ) : BufferRepository {
         override fun observeChatList(): Flow<List<ChatListRow>> =
             combine(
@@ -114,7 +115,18 @@ class BufferRepositoryImpl
             id: Long,
             pinned: Boolean,
         ) {
-            bufferDao.setPinned(bufferDao.canonicalId(id) ?: id, pinned)
+            bufferStore.setPinned(bufferDao.canonicalId(id) ?: id, pinned)
+        }
+
+        override suspend fun setAnchored(
+            id: Long,
+            anchored: Boolean,
+        ) {
+            bufferStore.setAnchored(id, anchored)
+        }
+
+        override suspend fun reorderAnchored(orderedIds: List<Long>) {
+            bufferStore.reorderAnchored(orderedIds)
         }
 
         override suspend fun setMuted(

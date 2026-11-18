@@ -8,10 +8,8 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 /**
  * Chat-list priority sectioning. Pure and unit-tested.
  *
- * Pinned rows always lead the list, regardless of friend/fool membership. The remaining rows are
- * ordered as friends, regular chats, then fools. Only [BufferType.QUERY] rows classify by nick;
- * channels are never friends/fools. Input is already activity-ordered by the query, so each tier
- * preserves its input order.
+ * Anchored rows lead in manual order. Pinned rows follow, then friends, regular chats and fools.
+ * Only queries classify by nick. Unanchored tiers preserve the activity-ordered input.
  *
  * Note: QUERY `displayName` is the nick today (`ensureQueryBuffer`); if display renaming ever
  * lands, classification should switch to the underlying buffer name.
@@ -21,10 +19,11 @@ data class ChatListSections(
     val friends: List<ChatListRow>,
     val regular: List<ChatListRow>,
     val fools: List<ChatListRow>,
+    val anchored: List<ChatListRow> = emptyList(),
 ) {
     /** A label is useful only when regular rows follow an earlier visible priority tier. */
     val showRecentHeader: Boolean
-        get() = regular.isNotEmpty() && (pinned.isNotEmpty() || friends.isNotEmpty())
+        get() = regular.isNotEmpty() && (anchored.isNotEmpty() || pinned.isNotEmpty() || friends.isNotEmpty())
 }
 
 /** Splits the already-scoped projection before badges, drawer rollups, or sectioning run. */
@@ -368,6 +367,7 @@ fun sectionChatList(
     friends: Set<String>,
     fools: Set<String>,
 ): ChatListSections {
+    val anchored = ArrayList<ChatListRow>()
     val pinnedRows = ArrayList<ChatListRow>()
     val friendRows = ArrayList<ChatListRow>()
     val regular = ArrayList<ChatListRow>()
@@ -375,6 +375,8 @@ fun sectionChatList(
 
     for (row in rows) {
         when {
+            row.anchorOrder != null -> anchored.add(row)
+
             row.pinned -> pinnedRows.add(row)
 
             isFriendQuery(row, friends) -> friendRows.add(row)
@@ -387,6 +389,7 @@ fun sectionChatList(
     }
 
     return ChatListSections(
+        anchored = anchored.sortedWith(compareBy<ChatListRow> { it.anchorOrder }.thenBy { it.bufferId }),
         pinned = pinnedRows,
         friends = friendRows,
         regular = regular,
@@ -420,6 +423,10 @@ internal fun unreadActivityBeforeDisplayIndex(
         }
     }
 
+    if (sections.anchored.isNotEmpty()) {
+        consumeHeader()
+        consumeRows(sections.anchored)
+    }
     consumeRows(sections.pinned)
     if (sections.friends.isNotEmpty()) {
         consumeHeader()
@@ -437,8 +444,8 @@ internal fun unreadActivityBeforeDisplayIndex(
 
 /**
  * Key of the first item the chat-list LazyColumn presents, mirroring the emit order in
- * `ChatList`: invitation rows (or the empty state) in invitation mode, otherwise the invitations
- * folder, pinned rows, friends header, friends, recent header, regular rows, then fools. The
+ * `ChatList`: invitation rows (or the empty state) in invitation mode; otherwise anchored chats,
+ * invitations folder, pinned rows, folders, friends, recent chats, then fools. The
  * recent header can never be first because it requires an earlier visible tier. Must stay in
  * lockstep with the LazyColumn content.
  */
@@ -449,10 +456,15 @@ internal fun chatListTopItemKey(
     sections: ChatListSections,
     folders: List<PresentedChatFolder> = emptyList(),
     pinned: List<ChatListRow> = sections.pinned,
+    anchored: List<ChatListRow> = sections.anchored,
 ): Any? =
     when {
         invitationMode -> {
             invitations.firstOrNull()?.let { "invitation-${it.messageId}" } ?: "invitations-empty"
+        }
+
+        anchored.isNotEmpty() -> {
+            "anchored-header"
         }
 
         actionableInvitationCount > 0 -> {

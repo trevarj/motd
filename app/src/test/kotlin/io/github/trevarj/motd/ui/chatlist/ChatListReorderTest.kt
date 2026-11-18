@@ -110,6 +110,9 @@ class ChatListReorderTest {
     }
 
     private class FakeBufferRepository : BufferRepository {
+        val anchors = mutableListOf<Pair<Long, Boolean>>()
+        val anchorOrders = mutableListOf<List<Long>>()
+
         override fun observeChatList(): Flow<List<ChatListRow>> = flowOf(emptyList())
 
         override fun observeBuffer(id: Long): Flow<BufferEntity?> = flowOf(null)
@@ -120,6 +123,17 @@ class ChatListReorderTest {
             id: Long,
             pinned: Boolean,
         ) = Unit
+
+        override suspend fun setAnchored(
+            id: Long,
+            anchored: Boolean,
+        ) {
+            anchors += id to anchored
+        }
+
+        override suspend fun reorderAnchored(orderedIds: List<Long>) {
+            anchorOrders += orderedIds
+        }
 
         override suspend fun setMuted(
             id: Long,
@@ -323,8 +337,9 @@ class ChatListReorderTest {
     private fun vm(
         repository: NetworkRepository,
         bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
+        buffers: BufferRepository = FakeBufferRepository(),
     ) = ChatListViewModel(
-        bufferRepository = FakeBufferRepository(),
+        bufferRepository = buffers,
         networkRepository = repository,
         connectionManager = FakeConnectionManager(),
         gapFiller = NoopHistoryGapFiller,
@@ -387,6 +402,19 @@ class ChatListReorderTest {
     private fun order(viewModel: ChatListViewModel) =
         viewModel.state.value.drawerRows
             .map(DrawerRow::networkId)
+
+    @Test
+    fun `anchor mutations preserve requested state and scoped reorder ids`() =
+        runTest {
+            val buffers = FakeBufferRepository()
+            val viewModel = vm(FakeNetworkRepository(networks), buffers = buffers)
+            viewModel.setAnchored(listOf(2, 2, 8), true)
+            viewModel.setAnchored(listOf(2), false)
+            viewModel.reorderAnchored(listOf(8, 5))
+            runCurrent()
+            assertEquals(listOf(2L to true, 8L to true, 2L to false), buffers.anchors)
+            assertEquals(listOf(listOf(8L, 5L)), buffers.anchorOrders)
+        }
 
     @Test
     fun znc_preference_updates_drawer_badge_classification() =

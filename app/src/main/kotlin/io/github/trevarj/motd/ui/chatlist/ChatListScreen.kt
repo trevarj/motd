@@ -71,6 +71,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.AlternateEmail
+import androidx.compose.material.icons.outlined.Anchor
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DoneAll
@@ -361,6 +362,8 @@ fun ChatListScreen(
         onCreateFolderAndAssign = viewModel::createFolderAndAssign,
         onSetFolderExpanded = viewModel::setFolderExpanded,
         onSetPinned = viewModel::setPinned,
+        onSetAnchored = viewModel::setAnchored,
+        onReorderAnchored = viewModel::reorderAnchored,
         onSetMuted = viewModel::setMuted,
         onSetArchived = viewModel::setArchived,
         onDeleteBuffers = viewModel::deleteBuffers,
@@ -449,6 +452,8 @@ fun ChatListContent(
     onCreateFolderAndAssign: (String, FolderIconRef, Collection<Long>, (Boolean) -> Unit) -> Unit = { _, _, _, done -> done(false) },
     onSetFolderExpanded: (Long, Boolean) -> Unit = { _, _ -> },
     onSetPinned: (Collection<Long>, Boolean) -> Unit,
+    onSetAnchored: (Collection<Long>, Boolean) -> Unit = { _, _ -> },
+    onReorderAnchored: (List<Long>) -> Unit = {},
     onSetMuted: (Collection<Long>, Boolean) -> Unit,
     onSetArchived: (Collection<Long>, Boolean) -> Unit = { _, _ -> },
     onJoinChannel: (Long, String, String?) -> Unit,
@@ -903,6 +908,17 @@ fun ChatListContent(
                                                             overflowOpen = false
                                                         },
                                                     )
+                                                    val anchorTarget = aggregateToggleTarget(lastSelectedRows) { it.anchorOrder != null }
+                                                    DropdownMenuItem(
+                                                        text = { Text(stringResource(if (anchorTarget) R.string.anchor_chat else R.string.unanchor_chat)) },
+                                                        leadingIcon = { Icon(Icons.Outlined.Anchor, contentDescription = null) },
+                                                        modifier = Modifier.testTag("chatlist_selection_anchor"),
+                                                        onClick = {
+                                                            onSetAnchored(selectedRows.map(ChatListRow::bufferId), anchorTarget)
+                                                            selectedIds = emptyList()
+                                                            overflowOpen = false
+                                                        },
+                                                    )
                                                     DropdownMenuItem(
                                                         text = { Text(stringResource(if (pinTarget) R.string.chatlist_pin else R.string.chatlist_unpin)) },
                                                         leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
@@ -1097,6 +1113,7 @@ fun ChatListContent(
                                 fools = state.fools,
                                 multiNetwork = showNetworkChip,
                                 onOpenBuffer = onOpenBuffer,
+                                onReorderAnchored = onReorderAnchored,
                                 onSwipe = { row ->
                                     val ids = listOf(row.bufferId)
                                     when (swipeAction) {
@@ -1731,6 +1748,7 @@ private fun ChatList(
     multiNetwork: Boolean,
     onOpenBuffer: (Long) -> Unit,
     onSwipe: (ChatListRow) -> Unit,
+    onReorderAnchored: (List<Long>) -> Unit,
     onSetFolderExpanded: (Long, Boolean) -> Unit,
     onOpenFolderEditor: (Long) -> Unit,
     activeBufferId: Long?,
@@ -1743,12 +1761,22 @@ private fun ChatList(
     topContentPaddingPx: Int,
     folderBackdrop: SurfaceBackdropSource?,
 ) {
-    // Pinned rows escape folders; non-empty folders follow in manual order, then legacy tiers.
+    // Extract anchors only from authoritative scoped rows; all lower tiers exclude them.
     val presentation =
         remember(rows, folders, friends, fools, activeBufferId) {
             presentChatFolders(rows, folders, friends, fools, activeBufferId)
         }
-    val sections = presentation.remaining
+    var anchoredRows by remember(presentation.anchored) { mutableStateOf(presentation.anchored) }
+    val sections = presentation.remaining.copy(anchored = anchoredRows)
+
+    fun moveAnchor(
+        id: Long,
+        delta: Int,
+    ) {
+        val ids = moveAnchoredChat(anchoredRows.map(ChatListRow::bufferId), id, delta)
+        val byId = anchoredRows.associateBy(ChatListRow::bufferId)
+        anchoredRows = ids.map(byId::getValue)
+    }
 
     // Fools section is collapsed by default; state is local to the screen (accepted).
     var foolsExpanded by remember { mutableStateOf(false) }
@@ -1778,6 +1806,7 @@ private fun ChatList(
             sections,
             presentation.folders,
             presentation.pinned,
+            presentation.anchored,
         )
     val topItemTracker = remember { ChatListTopItemTracker(topItemKey) }
     if (topItemTracker.key != topItemKey) {
@@ -2126,6 +2155,47 @@ private fun ChatList(
                         }
                     }
                 } else {
+                    if (anchoredRows.isNotEmpty()) {
+                        item(key = "anchored-header") {
+                            Box(Modifier.testTag("chatlist_anchored_header")) {
+                                SectionHeader(stringResource(R.string.anchored_chats))
+                            }
+                        }
+                        items(anchoredRows, key = { it.bufferId }) { row ->
+                            AnchoredChatRow(
+                                bufferId = row.bufferId,
+                                canMoveUp = anchoredRows.first().bufferId != row.bufferId,
+                                canMoveDown = anchoredRows.last().bufferId != row.bufferId,
+                                enabled = !selectionActive,
+                                onMove = { delta -> moveAnchor(row.bufferId, delta) },
+                                onCommit = { onReorderAnchored(anchoredRows.map(ChatListRow::bufferId)) },
+                                modifier =
+                                    Modifier.animateItem(
+                                        fadeInSpec = ChatListItemMotion.fadeInSpec,
+                                        fadeOutSpec = ChatListItemMotion.fadeOutSpec,
+                                        placementSpec = placementSpec,
+                                    ),
+                            ) {
+                                SelectableChatListRow(
+                                    row = row,
+                                    presence = presence[row.bufferId],
+                                    isFriend = isFriendQuery(row, friends),
+                                    multiNetwork = multiNetwork,
+                                    onOpenBuffer = onOpenBuffer,
+                                    archiveMode = archiveMode,
+                                    swipeAction = swipeAction,
+                                    selected = row.bufferId in selectedIds,
+                                    active = row.bufferId == activeBufferId,
+                                    selectionActive = selectionActive,
+                                    onToggleSelection = onToggleSelection,
+                                    onStartSelection = onStartSelection,
+                                    onSwipe = { onSwipe(row) },
+                                    syncIndicator = syncIndicators[row.bufferId] ?: ChatListSyncIndicator.NONE,
+                                    activityRecoveryInProgress = row.bufferId in recoveringActivityIds,
+                                )
+                            }
+                        }
+                    }
                     if (actionableInvitationCount > 0) {
                         item(key = "invitations-folder") {
                             // Box wrapper (as for fools rows below) so the header items animate with

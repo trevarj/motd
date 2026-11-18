@@ -36,6 +36,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.text.TextLayoutResult
@@ -91,6 +92,103 @@ class ChatListSelectionUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    private fun showAnchoredChats(
+        calls: MutableList<Pair<String, List<Long>>>,
+        anchorCalls: MutableList<Pair<List<Long>, Boolean>> = mutableListOf(),
+    ) {
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatListContent(
+                    state =
+                        ChatListState(
+                            rows =
+                                listOf(
+                                    row().copy(bufferId = 2, displayName = "#channel", type = BufferType.CHANNEL, anchorOrder = 1),
+                                    row().copy(anchorOrder = 0, pinned = true),
+                                    row().copy(bufferId = 3, displayName = "recent"),
+                                ),
+                            chatListSwipeAction = ChatListSwipeAction.MARK_READ,
+                            loading = false,
+                        ),
+                    onOpenBuffer = { calls += "open" to listOf(it) },
+                    onOpenSettings = {},
+                    onOpenSearch = {},
+                    onSetPinned = { ids, _ -> calls += "pin" to ids.toList() },
+                    onSetAnchored = { ids, anchored -> anchorCalls += ids.toList() to anchored },
+                    onReorderAnchored = { calls += "reorder" to it },
+                    onSetMuted = { _, _ -> },
+                    onMarkSelectedRead = { calls += "read" to it.toList() },
+                    onJoinChannel = { _, _, _ -> },
+                    onMessageUser = { _, _ -> },
+                )
+            }
+        }
+    }
+
+    @Test fun anchored_tier_accessible_move_reorders_only_visible_anchors() {
+        val calls = mutableListOf<Pair<String, List<Long>>>()
+        showAnchoredChats(calls)
+        compose.onNodeWithTag("chatlist_anchored_header").assertIsDisplayed()
+        val first = compose.onNodeWithTag("chatlist_anchored_1").getUnclippedBoundsInRoot()
+        val second = compose.onNodeWithTag("chatlist_anchored_2").getUnclippedBoundsInRoot()
+        assertTrue(first.top < second.top)
+        val label = RuntimeEnvironment.getApplication().getString(R.string.move_anchor_down)
+        val action =
+            compose
+                .onNodeWithTag("chatlist_anchor_handle_1")
+                .fetchSemanticsNode()
+                .config[SemanticsActions.CustomActions]
+                .single { it.label == label }
+        compose.runOnIdle { assertTrue(action.action()) }
+        compose.runOnIdle { assertEquals(listOf("reorder" to listOf(2L, 1L)), calls) }
+        assertTrue(
+            compose.onNodeWithTag("chatlist_anchored_2").getUnclippedBoundsInRoot().top <
+                compose.onNodeWithTag("chatlist_anchored_1").getUnclippedBoundsInRoot().top,
+        )
+    }
+
+    @Test fun anchor_handle_drag_commits_once_without_opening_selecting_or_swiping_chat() {
+        val calls = mutableListOf<Pair<String, List<Long>>>()
+        showAnchoredChats(calls)
+        val rowHeight =
+            compose
+                .onNodeWithTag("chatlist_anchored_1")
+                .fetchSemanticsNode()
+                .boundsInRoot.height
+        compose.onNodeWithTag("chatlist_anchor_handle_1").performTouchInput {
+            swipe(center, center + Offset(0f, rowHeight * 1.4f), durationMillis = 600)
+        }
+        compose.runOnIdle { assertEquals(listOf("reorder" to listOf(2L, 1L)), calls) }
+        compose.onNodeWithTag("chatlist_selection_top_app_bar").assertDoesNotExist()
+    }
+
+    @Test fun anchor_selection_action_adds_unanchored_chat_without_pinning_it() {
+        val calls = mutableListOf<Pair<String, List<Long>>>()
+        val anchorCalls = mutableListOf<Pair<List<Long>, Boolean>>()
+        showAnchoredChats(calls, anchorCalls)
+        compose.onNodeWithTag("chatlist_row_3").performTouchInput { longClick() }
+        compose.onNodeWithTag("chatlist_selection_more").performClick()
+        compose.onNodeWithTag("chatlist_selection_anchor").performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(listOf(3L) to true), anchorCalls)
+            assertTrue(calls.isEmpty())
+        }
+    }
+
+    @Test fun unanchor_selection_action_does_not_change_existing_pin() {
+        val calls = mutableListOf<Pair<String, List<Long>>>()
+        val anchorCalls = mutableListOf<Pair<List<Long>, Boolean>>()
+        showAnchoredChats(calls, anchorCalls)
+        compose.onNodeWithTag("chatlist_row_1").performTouchInput { longClick() }
+        compose.onNodeWithTag("chatlist_selection_more").performClick()
+        compose.onNodeWithTag("chatlist_selection_anchor").performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(listOf(1L) to false), anchorCalls)
+            assertTrue(calls.isEmpty())
+        }
+        compose.onNodeWithTag("chatlist_row_pin", useUnmergedTree = true).assertIsDisplayed()
+    }
 
     @Test fun selected_row_exposes_selected_semantics_on_the_full_row() {
         compose.setContent {

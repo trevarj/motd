@@ -830,6 +830,59 @@ class RequiredHeadlessE2eTest {
             } finally {
                 runBlocking { settings.setFool(hidden.sender, false) }
             }
+            peer.sendMessage(bootstrap.args.nick, "$token anchored query")
+            peer.flushThroughServer("${token}anchor")
+            val queryId =
+                awaitWhileComposing("Fixture direct message creates a real query conversation", 20_000) {
+                    withTimeout(20_000) {
+                        bootstrap.seams
+                            .buffers()
+                            .observeChatList()
+                            .first { rows ->
+                                rows.any { it.networkId == network.childId && it.lastMessageText == "$token anchored query" }
+                            }.single { it.networkId == network.childId && it.lastMessageText == "$token anchored query" }
+                            .bufferId
+                    }
+                }
+            val chatList = ChatListRobot(compose)
+            chatList.apply {
+                awaitTag("chatlist_row_$queryId")
+                selectionAction(roomId, "chatlist_selection_pin")
+                assertNormalPlacement(roomId, queryId)
+                selectionAction(roomId, "chatlist_selection_anchor")
+                selectionAction(queryId, "chatlist_selection_anchor")
+                assertAnchoredOrder(roomId, queryId)
+                moveAnchor(queryId, up = true)
+                assertAnchoredOrder(queryId, roomId)
+                moveAnchor(queryId, up = false)
+                assertAnchoredOrder(roomId, queryId)
+                moveAnchor(queryId, up = true)
+                assertAnchoredOrder(queryId, roomId)
+            }
+            awaitWhileComposing("Reordered anchors reach persistent chat-list storage", 10_000) {
+                withTimeout(10_000) {
+                    bootstrap.seams.buffers().observeChatList().first { rows ->
+                        rows
+                            .filter { it.bufferId == roomId || it.bufferId == queryId }
+                            .filter { it.anchorOrder != null }
+                            .sortedBy { it.anchorOrder }
+                            .map { it.bufferId } == listOf(queryId, roomId)
+                    }
+                }
+            }
+            // Finish rather than recreate: a new Activity/ViewModel must reload the stored order.
+            scenario.close()
+            scenario.launch()
+            chatList.apply {
+                awaitTag("chatlist_anchored_$queryId")
+                assertAnchoredOrder(queryId, roomId)
+                selectionAction(roomId, "chatlist_selection_anchor")
+                assertAnchoredOrder(queryId)
+                selectionAction(queryId, "chatlist_selection_anchor")
+                assertNormalPlacement(roomId, queryId)
+                selectionAction(roomId, "chatlist_selection_pin")
+            }
+            milestones.record("anchored_chats_reordered_and_restored", "channel=$roomId query=$queryId")
         }
         assertEquals(originalSettings, runBlocking { settings.settings.first() })
         assertEquals(null, runBlocking { bootstrap.seams.buffers().joinedBufferId(network.childId, "#motd") })

@@ -38,7 +38,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 50,
+    version = 51,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -1137,6 +1137,14 @@ val MIGRATION_49_50 =
         }
     }
 
+/** v50 -> v51 adds independent, nullable global anchored-chat order. */
+val MIGRATION_50_51 =
+    object : Migration(50, 51) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE buffers ADD COLUMN anchorOrder INTEGER")
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1199,6 +1207,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_47_48,
         MIGRATION_48_49,
         MIGRATION_49_50,
+        MIGRATION_50_51,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"
