@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -53,6 +54,8 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
+import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IRC_COLOR
@@ -346,10 +349,10 @@ class ComposerEditorStateTest {
             }
         }
 
-        fun assertActionBand(trailing: String) {
+        fun assertActionBand(vararg trailing: String) {
             val area = compose.onNodeWithTag("chat_composer_input_area").fetchSemanticsNode().boundsInRoot
             val targets =
-                listOf("chat_composer_tools", "chat_composer_ai", trailing, "chat_composer_send").map {
+                (listOf("chat_composer_tools", "chat_composer_ai") + trailing + "chat_composer_send").map {
                     compose
                         .onNodeWithTag(it)
                         .assertIsDisplayed()
@@ -373,13 +376,13 @@ class ComposerEditorStateTest {
             assertEquals(1, aiOpens)
             draft.value = TextFieldValue("hello", TextRange(5))
         }
-        assertActionBand("chat_composer_format_expand")
+        assertActionBand("chat_composer_attachment", "chat_composer_format_expand")
         compose.runOnIdle {
             draft.value = TextFieldValue("first\nsecond\nthird", TextRange(18))
         }
-        assertActionBand("chat_composer_format_expand")
+        assertActionBand("chat_composer_attachment", "chat_composer_format_expand")
         compose.onNodeWithTag("chat_composer_format_expand").performClick()
-        assertActionBand("chat_composer_format_expand")
+        assertActionBand("chat_composer_attachment", "chat_composer_format_expand")
     }
 
     @Test
@@ -493,7 +496,7 @@ class ComposerEditorStateTest {
             }
             val inputTags =
                 listOf("chat_composer_tools", "chat_composer_send") +
-                    if (selectedStyle == ComposerStyle.COMFORTABLE) listOf("chat_composer_ai", "chat_composer_format_expand") else emptyList()
+                    if (selectedStyle == ComposerStyle.COMFORTABLE) listOf("chat_composer_ai", "chat_composer_attachment", "chat_composer_format_expand") else emptyList()
             val inputBounds =
                 inputTags.map { tag ->
                     val target =
@@ -549,12 +552,7 @@ class ComposerEditorStateTest {
             field.assertIsFocused()
             assertEquals(TextRange(0, 5), field.fetchSemanticsNode().config[SemanticsProperties.TextSelectionRange])
             assertEquals(sessionsBeforeOpening, inputSessions)
-            // Default retains attachment-to-expand substitution; Nickname keeps attachment with a draft.
-            if (selectedStyle == ComposerStyle.COMFORTABLE) {
-                compose.runOnIdle { draft.value = TextFieldValue() }
-            } else {
-                tools.performClick()
-            }
+            if (selectedStyle == ComposerStyle.COMPACT) tools.performClick()
             if (selectedStyle == ComposerStyle.COMPACT) compose.onNodeWithTag("chat_composer_attachment").performScrollTo()
             compose.onNodeWithTag("chat_composer_attachment").assertIsDisplayed().performClick()
             field.assertIsNotFocused()
@@ -578,6 +576,127 @@ class ComposerEditorStateTest {
         val card = compose.onNodeWithTag("chat_composer_pill").fetchSemanticsNode().boundsInRoot
         assertTrue("Large keeps the toolbar outside its card", toolbar.boundsInRoot.bottom <= card.top)
         assertTrue("Large retains horizontal scrolling", toolbar.config.contains(SemanticsActions.ScrollBy))
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h640dp")
+    fun wrapResizeAndShrinkKeepCurrentBackgroundAndNicknamePlacementOnEveryFrame() {
+        val draft = mutableStateOf(TextFieldValue(".", TextRange.Zero))
+        val style = mutableStateOf(ComposerStyle.COMFORTABLE)
+        val fontScale = mutableStateOf(1f)
+        val width = mutableStateOf(320.dp)
+        val fill = Color(0xFF123ABC)
+        var textOrigin = Offset.Zero
+        var fieldWindow = Rect.Zero
+        var pixelsPerDp = 0f
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale.value)) {
+                pixelsPerDp = LocalDensity.current.density
+                MotdTheme(
+                    dynamicColor = false,
+                    receivedBubbleColor = ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, fill.toArgb()),
+                ) {
+                    ConversationTypography(140) {
+                        Box(Modifier.width(width.value)) {
+                            Composer(
+                                value = draft.value,
+                                onValueChange = { draft.value = it },
+                                onSend = {},
+                                enabled = true,
+                                composerStyle = style.value,
+                                currentNick = "a-long-self-nickname",
+                                onAi = {},
+                                onAttachment = {},
+                                onUploadDraft = {},
+                                ircFormattingEnabled = true,
+                                onFieldPositioned = { fieldWindow = it },
+                                onFieldTextPositioned = { textOrigin = it },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        val field = compose.onNodeWithTag("chat_composer_field")
+
+        fun assertCurrentFrame(label: String) {
+            val layout = field.textLayout()
+            assertEquals(label, draft.value.text, layout.layoutInput.text.text)
+            val fieldBounds = field.fetchSemanticsNode().boundsInRoot
+            val pill = compose.onNodeWithTag("chat_composer_pill")
+            val pillBounds = pill.fetchSemanticsNode().boundsInRoot
+            assertTrue("$label keeps editable width", fieldBounds.width > 0f)
+            assertTrue("$label contains the current editor", fieldBounds.top >= pillBounds.top && fieldBounds.bottom <= pillBounds.bottom)
+            val targetTags =
+                when (style.value) {
+                    ComposerStyle.COMFORTABLE -> {
+                        listOf("chat_composer_tools", "chat_composer_ai", "chat_composer_format_expand", "chat_composer_attachment", "chat_composer_send")
+                    }
+
+                    ComposerStyle.COMPACT -> {
+                        listOf("chat_composer_tools", "chat_composer_send")
+                    }
+
+                    ComposerStyle.LARGE -> {
+                        listOf("chat_composer_send")
+                    }
+                }
+            val targets =
+                targetTags.map {
+                    compose
+                        .onNodeWithTag(it)
+                        .assertIsDisplayed()
+                        .fetchSemanticsNode()
+                        .boundsInRoot
+                }
+            targets.forEachIndexed { index, target ->
+                assertTrue("$label keeps full targets", target.width >= 48 * pixelsPerDp - 0.5f && target.height >= 48 * pixelsPerDp - 0.5f)
+                assertTrue("$label leaves the editor unobscured", !target.overlaps(fieldBounds))
+                targets.drop(index + 1).forEach { assertTrue("$label keeps distinct actions", !target.overlaps(it)) }
+            }
+            if (style.value == ComposerStyle.LARGE) {
+                val area = compose.onNodeWithTag("chat_composer_input_area").fetchSemanticsNode().boundsInRoot
+                assertEquals("$label paints this frame's input bounds", area, pillBounds)
+                val image = pill.captureToImage().asAndroidBitmap()
+                assertEquals("$label paints through the current bottom edge", fill.toArgb(), image.getPixel(image.width / 2, image.height - 2))
+            }
+            if (style.value == ComposerStyle.COMPACT) {
+                val nick = compose.onNodeWithTag("chat_composer_self_nick", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                val origin = textOrigin + fieldBounds.topLeft - fieldWindow.topLeft
+                val firstLineCenter = origin.y + (layout.getLineTop(0) + layout.getLineBottom(0)) / 2
+                assertEquals("$label aligns the current first line", maxOf(fieldBounds.top + nick.height / 2, firstLineCenter), nick.center.y, 1f)
+                assertTrue("$label keeps nickname inside the viewport", nick.top >= fieldBounds.top && nick.bottom <= fieldBounds.bottom)
+            }
+            field.assertIsFocused()
+        }
+
+        for (selectedStyle in ComposerStyle.entries) {
+            for (scale in listOf(1f, 2f)) {
+                compose.mainClock.autoAdvance = true
+                compose.runOnIdle {
+                    style.value = selectedStyle
+                    fontScale.value = scale
+                    width.value = 320.dp
+                    draft.value = TextFieldValue(".", TextRange.Zero)
+                }
+                field.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+                compose.waitForIdle()
+                compose.mainClock.autoAdvance = false
+                val wrapped = "wrap ".repeat(6)
+                for ((nextWidth, text) in listOf(320.dp to wrapped, 280.dp to wrapped, 280.dp to ".", 320.dp to ".")) {
+                    compose.runOnUiThread {
+                        width.value = nextWidth
+                        draft.value = TextFieldValue(text, TextRange.Zero)
+                        Snapshot.sendApplyNotifications()
+                    }
+                    repeat(3) { frame ->
+                        compose.mainClock.advanceTimeByFrame()
+                        assertCurrentFrame("$selectedStyle scale=$scale width=$nextWidth frame=$frame")
+                        if (text == wrapped) assertTrue("The draft must soft-wrap", field.textLayout().lineCount > 1)
+                    }
+                }
+            }
+        }
     }
 
     @Test

@@ -10,7 +10,10 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -130,6 +133,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
@@ -196,7 +200,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.math.ceil
 import androidx.compose.foundation.lazy.items as lazyItems
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -329,23 +332,6 @@ internal fun imeContentHeightPx(
 ): Int = (imeBottomPx - navigationBarsBottomPx).coerceAtLeast(0)
 
 /**
- * One frame of the residual collapse. A keyboard that comes back shorter than the captured height
- * leaves a strip below the input row; stepping the captured height down to the live IME height
- * animates that strip away instead of snapping the timeline when the session is finally dropped.
- */
-internal fun collapseCapturedImeHeightPx(
-    capturedImeHeightPx: Int,
-    currentImeHeightPx: Int,
-    remainingFrames: Int,
-): Int {
-    val floorPx = currentImeHeightPx.coerceAtLeast(0)
-    val capturedPx = capturedImeHeightPx.coerceAtLeast(0)
-    if (capturedPx <= floorPx || remainingFrames <= 1) return floorPx
-    val stepPx = (capturedPx - floorPx + remainingFrames - 1) / remainingFrames
-    return (capturedPx - stepPx).coerceAtLeast(floorPx)
-}
-
-/**
  * Follows the animated IME inset outside composition. Heights are snapshot-backed so the restore
  * handoff can await them without depending on a recomposition that may legitimately be skipped.
  *
@@ -367,7 +353,7 @@ internal class ImeInsetTracker(
         private set
 
     private var candidateHeightPx = 0
-    private var stableFrames = settledFrameCount
+    private var stableFrames by mutableIntStateOf(settledFrameCount)
 
     /** True once the current height has held still long enough to count as a resting position. */
     val settled: Boolean get() = stableFrames >= settledFrameCount
@@ -393,8 +379,6 @@ internal class ImeInsetTracker(
 
 private const val EMOJI_IME_RESTORE_TIMEOUT_MILLIS = 1_500L
 private const val IME_SETTLED_FRAME_COUNT = 3
-private const val IME_RESTORE_REFOCUS_FRAMES = 6
-private const val IME_RESIDUAL_COLLAPSE_FRAMES = 8
 private const val IME_FOLLOW_FRAME_LIMIT = 240
 private val COMPACT_EMOJI_PICKER_HEIGHT = 250.dp
 
@@ -611,18 +595,10 @@ fun Composer(
     val primaryVerticalInset = if (floatingPill) primaryInset - 2.dp else primaryInset
     val primaryVisualInset = if (floatingPill) 2.dp else 0.dp
     val collapsedMinimumHeight = if (floatingPill) 48.dp + primaryVerticalInset * 2 else 48.dp
-    val lineHeightPx =
-        with(LocalDensity.current) {
-            ceil(
-                MaterialTheme.typography.bodyLarge.lineHeight
-                    .toPx(),
-            ).toInt()
-        }
-    var textContentHeightPx by remember(lineHeightPx) { mutableIntStateOf(lineHeightPx) }
-    var editorTextLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val editorScrollState = rememberScrollState()
+    // Published during measure, consumed only in nickname placement: never next-frame composition.
+    var editorTextLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
     var editorViewportHeightPx by remember { mutableIntStateOf(0) }
-    var nickHeightPx by remember { mutableIntStateOf(0) }
     val selfNick = currentNick?.takeIf { composerStyle == ComposerStyle.COMPACT && it.isNotBlank() }
     val expandedHeight =
         (
@@ -706,6 +682,8 @@ fun Composer(
     // Height the retained picker is measured at. Non-zero once the picker has been opened at least
     // once, which is also what keeps the inflated view alive between sessions.
     var pickerContentHeightPx by remember { mutableIntStateOf(0) }
+    val restoringHeight = remember { Animatable(0f) }
+    var collapsingResidual by remember { mutableStateOf(false) }
     val closeEmojiPickerDescription = stringResource(R.string.chat_composer_emoji_close)
 
     // Follow the IME only while it is actually moving, and only from a coroutine: no composition
@@ -725,6 +703,7 @@ fun Composer(
     fun dismissEmojiPicker() {
         val session = emojiPickerSession ?: return
         if (session.phase == EmojiPickerPhase.OPEN) {
+            collapsingResidual = false
             emojiPickerSession = closeEmojiPickerSession(session)
         }
     }
@@ -743,79 +722,40 @@ fun Composer(
         keyboard?.hide()
     }
 
-    // Re-establish the text input connection on a frame boundary, then keep the picker occupying
-    // the complementary space until the IME animation has actually settled. If an IME refuses the
-    // request, return to the open picker instead of collapsing both input surfaces.
+    // Keep a slow IME's existing connection alive. Retry focus only after a complete timeout,
+    // and never restart an input connection whose keyboard is already moving.
     val restoringIme = emojiPickerSession?.phase == EmojiPickerPhase.RESTORING_IME
     LaunchedEffect(restoringIme) {
         if (!restoringIme) return@LaunchedEffect
+        val session = emojiPickerSession ?: return@LaunchedEffect
+        restoringHeight.snapTo(session.capturedImeHeightPx.toFloat())
         if (!latestInputFocused) focusRequester.requestFocus()
         withFrameNanos { }
-        val startGeneration = imeInsetTracker.settleGeneration
         keyboard?.show()
-        // Most keyboards reopen the still-focused input connection immediately. If one ignores that
-        // request, create exactly one fresh focus transition instead of repeatedly clearing focus
-        // and flashing the entire composer.
-        val refocus =
-            launch {
-                repeat(IME_RESTORE_REFOCUS_FRAMES) { withFrameNanos { } }
-                if (imeInsetTracker.currentImeHeightPx == 0) {
-                    focusManager.clearFocus(force = true)
-                    withFrameNanos { }
-                    focusRequester.requestFocus()
-                    withFrameNanos { }
-                    keyboard?.show()
-                }
-            }
-        // A settle at zero only means the keyboard has not started coming back yet, so keep waiting
-        // for a resting height the panel can actually hand its space over to.
-        val restoredHeightPx =
+
+        suspend fun awaitRestoredHeight(): Int =
             withTimeoutOrNull(EMOJI_IME_RESTORE_TIMEOUT_MILLIS) {
-                var generation = startGeneration
-                var heightPx = 0
-                while (heightPx <= 0) {
-                    generation =
-                        snapshotFlow { imeInsetTracker.settleGeneration }
-                            .first { it != generation }
-                    heightPx = imeInsetTracker.currentImeHeightPx
-                }
-                heightPx
+                snapshotFlow { imeInsetTracker.settled to imeInsetTracker.currentImeHeightPx }
+                    .first { (settled, height) -> settled && height > 0 }
+                    .second
             } ?: 0
-        refocus.cancel()
-        val settledSession =
-            emojiPickerSession
-                ?.takeIf { it.phase == EmojiPickerPhase.RESTORING_IME }
-                ?: return@LaunchedEffect
+        var restoredHeightPx = awaitRestoredHeight()
+        if (restoredHeightPx <= 0 && imeInsetTracker.currentImeHeightPx == 0) {
+            focusManager.clearFocus(force = true)
+            withFrameNanos { }
+            focusRequester.requestFocus()
+            withFrameNanos { }
+            keyboard?.show()
+            restoredHeightPx = awaitRestoredHeight()
+        }
         if (restoredHeightPx <= 0) {
-            emojiPickerSession = reopenEmojiPickerSession(settledSession)
+            emojiPickerSession = reopenEmojiPickerSession(session)
             return@LaunchedEffect
         }
-        // Never drop the panel while it still reports height: a keyboard that returns shorter than
-        // the captured one would otherwise snap the timeline by the leftover strip.
-        var collapsing: EmojiPickerSession = settledSession
-        var remainingFrames = IME_RESIDUAL_COLLAPSE_FRAMES
-        while (
-            remainingFrames > 0 &&
-            emojiPickerReplacementHeight(
-                collapsing.capturedImeHeightPx,
-                imeInsetTracker.currentImeHeightPx,
-            ) > 0
-        ) {
-            withFrameNanos { }
-            if (emojiPickerSession !== collapsing) return@LaunchedEffect
-            collapsing =
-                collapsing.copy(
-                    capturedImeHeightPx =
-                        collapseCapturedImeHeightPx(
-                            capturedImeHeightPx = collapsing.capturedImeHeightPx,
-                            currentImeHeightPx = imeInsetTracker.currentImeHeightPx,
-                            remainingFrames = remainingFrames,
-                        ),
-                )
-            emojiPickerSession = collapsing
-            remainingFrames--
-        }
-        if (emojiPickerSession === collapsing) emojiPickerSession = null
+        // The animation is consumed in measure; no per-frame session copies or composer recomposes.
+        collapsingResidual = true
+        restoringHeight.animateTo(restoredHeightPx.toFloat(), tween(durationMillis = 160))
+        emojiPickerSession = null
     }
 
     // Dismiss transient surfaces before leaving chat.
@@ -952,32 +892,47 @@ fun Composer(
         }
     }
 
+    // Retain the actual rendered data through fade/slide exit, not just visibility.
+    var retainedAutocomplete by remember { mutableStateOf<(@Composable () -> Unit)?>(null) }
+    val autocompleteVisibility = remember { MutableTransitionState(false) }
+    autocompleteVisibility.targetState = visiblePanel == ComposerPanel.AUTOCOMPLETE
+    if (visiblePanel == ComposerPanel.AUTOCOMPLETE) {
+        val suggestions = emojiSuggestions
+        val query = emojiQuery
+        val queryValue = editorValue
+        retainedAutocomplete =
+            if (suggestions.isNotEmpty() && query != null) {
+                {
+                    EmojiAutocompletePanel(
+                        suggestions = suggestions,
+                        onPick = { suggestion ->
+                            applyEditorValue(replaceEmojiQuery(queryValue, query, suggestion.emoji))
+                        },
+                        color = composerFill,
+                        contentColor = composerInk,
+                        tonalElevation = if (receivedBubbleColor == null) 3.dp else 0.dp,
+                    )
+                }
+            } else {
+                autocomplete
+            }
+    }
+    if (autocompleteVisibility.isIdle && !autocompleteVisibility.currentState) retainedAutocomplete = null
     AutocompleteOverlayLayout(
         modifier = modifier.fillMaxWidth(),
         overlay = {
+            // Candidate-count changes must not change an in-flight slide's travel distance.
             AnimatedVisibility(
-                visible = visiblePanel == ComposerPanel.AUTOCOMPLETE,
+                visibleState = autocompleteVisibility,
                 enter =
                     fadeIn(MotdMotion.fadeIn) +
-                        slideInVertically(animationSpec = MotdMotion.rowPlacement) { height -> height / 8 },
+                        slideInVertically(animationSpec = MotdMotion.rowPlacement) { with(density) { 8.dp.roundToPx() } },
                 exit =
                     fadeOut(MotdMotion.microFadeOut) +
-                        slideOutVertically(animationSpec = MotdMotion.rowPlacement) { height -> height / 8 },
+                        slideOutVertically(animationSpec = MotdMotion.rowPlacement) { with(density) { 8.dp.roundToPx() } },
             ) {
                 Box(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                    if (emojiSuggestions.isNotEmpty() && emojiQuery != null) {
-                        EmojiAutocompletePanel(
-                            suggestions = emojiSuggestions,
-                            onPick = { suggestion ->
-                                applyEditorValue(replaceEmojiQuery(editorValue, emojiQuery, suggestion.emoji))
-                            },
-                            color = composerFill,
-                            contentColor = composerInk,
-                            tonalElevation = if (receivedBubbleColor == null) 3.dp else 0.dp,
-                        )
-                    } else {
-                        autocomplete?.invoke()
-                    }
+                    retainedAutocomplete?.invoke()
                 }
             }
         },
@@ -1088,22 +1043,11 @@ fun Composer(
                             BoxWithConstraints(Modifier.weight(1f)) {
                                 val nicknameMaxWidth = minOf(92.dp, maxWidth * 0.30f)
                                 if (!floatingPill) {
-                                    val viewportHeight = with(density) { editorViewportHeightPx.toDp() }
-                                    val naturalHeight = with(density) { textContentHeightPx.toDp() } + collapsedVerticalPadding * 2
                                     Surface(
                                         modifier =
                                             Modifier
-                                                .align(Alignment.Center)
-                                                .fillMaxWidth()
-                                                .height(
-                                                    if (expanded) {
-                                                        expandedHeight
-                                                    } else {
-                                                        naturalHeight.coerceAtMost(
-                                                            if (editorViewportHeightPx > 0) viewportHeight else maxOf(collapsedMinimumHeight, naturalHeight),
-                                                        )
-                                                    },
-                                                ).effectSurface(
+                                                .matchParentSize()
+                                                .effectSurface(
                                                     io.github.trevarj.motd.data.prefs.EffectSurface.INPUT_BAR,
                                                     composerFill,
                                                     RoundedCornerShape(LocalInputCornerStyle.current.cornerRadius(16.dp, roundedRadius = 28.dp)),
@@ -1124,29 +1068,26 @@ fun Composer(
                                         ) { ToolsButton() }
                                     }
                                     if (selfNick != null) {
-                                        val paddingPx = with(density) { collapsedVerticalPadding.toPx() }
-                                        val visibleTextHeight =
-                                            minOf(
-                                                textContentHeightPx.toFloat(),
-                                                (editorViewportHeightPx - paddingPx * 2).coerceAtLeast(0f),
-                                            )
-                                        val firstLineTop =
-                                            if (expanded) {
-                                                with(density) { 8.dp.toPx() }
-                                            } else {
-                                                (editorViewportHeightPx - visibleTextHeight) / 2
-                                            }
-                                        val visibleLineCenter =
-                                            editorTextLayout?.let { layout ->
-                                                val scroll = editorScrollState.value.toFloat()
-                                                val line = layout.getLineForVerticalPosition(scroll)
-                                                (layout.getLineTop(line) + layout.getLineBottom(line)) / 2 - scroll
-                                            } ?: lineHeightPx / 2f
-                                        val nickTop =
-                                            with(density) {
-                                                (firstLineTop + visibleLineCenter - nickHeightPx / 2f).coerceAtLeast(0f).toDp()
-                                            }
-                                        Box(Modifier.padding(start = 8.dp, top = nickTop)) {
+                                        Box(
+                                            Modifier.padding(start = 8.dp).layout { measurable, constraints ->
+                                                val nick = measurable.measure(constraints)
+                                                layout(nick.width, nick.height) {
+                                                    val textLayout = editorTextLayout
+                                                    val paddingPx = if (expanded) 8.dp.toPx() else collapsedVerticalPadding.toPx()
+                                                    val textHeight = textLayout?.size?.height?.toFloat() ?: nick.height.toFloat()
+                                                    val viewport = editorViewportHeightPx.toFloat()
+                                                    val visibleHeight = minOf(textHeight, (viewport - paddingPx * 2).coerceAtLeast(0f))
+                                                    val top = if (expanded) paddingPx else (viewport - visibleHeight) / 2
+                                                    val scroll = editorScrollState.value.toFloat()
+                                                    val lineCenter =
+                                                        textLayout?.let {
+                                                            val line = it.getLineForVerticalPosition(scroll)
+                                                            (it.getLineTop(line) + it.getLineBottom(line)) / 2 - scroll
+                                                        } ?: textHeight / 2
+                                                    nick.placeRelative(0, (top + lineCenter - nick.height / 2f).toInt().coerceAtLeast(0))
+                                                }
+                                            },
+                                        ) {
                                             SenderLabel(
                                                 sender = selfNick,
                                                 color =
@@ -1161,7 +1102,6 @@ fun Composer(
                                                 modifier =
                                                     Modifier
                                                         .widthIn(max = nicknameMaxWidth)
-                                                        .onSizeChanged { if (nickHeightPx != it.height) nickHeightPx = it.height }
                                                         .testTag("chat_composer_self_nick"),
                                             )
                                         }
@@ -1171,8 +1111,8 @@ fun Composer(
                                     Box(
                                         Modifier
                                             .weight(1f)
-                                            .onGloballyPositioned { onFieldPositioned(it.boundsInWindow()) }
-                                            .onSizeChanged { if (editorViewportHeightPx != it.height) editorViewportHeightPx = it.height },
+                                            .onSizeChanged { editorViewportHeightPx = it.height }
+                                            .onGloballyPositioned { onFieldPositioned(it.boundsInWindow()) },
                                     ) {
                                         ComposerTextField(
                                             state = textFieldState,
@@ -1202,8 +1142,7 @@ fun Composer(
                                                     ComposerStyle.COMPACT -> 8.dp
                                                 },
                                             collapsedVerticalPadding = collapsedVerticalPadding,
-                                            onTextContentHeight = { if (textContentHeightPx != it) textContentHeightPx = it },
-                                            onTextLayout = { if (editorTextLayout != it) editorTextLayout = it },
+                                            onTextLayout = { editorTextLayout = it },
                                             scrollState = editorScrollState,
                                             ircFormattingEnabled = ircFormattingEnabled,
                                             expanded = expanded,
@@ -1255,40 +1194,37 @@ fun Composer(
                                             }
                                         }
 
-                                        when {
-                                            !relocatedTools && toggleExpandedAction != null -> {
-                                                IconButton(
-                                                    onClick = toggleExpandedAction,
-                                                    modifier =
-                                                        Modifier
-                                                            .size(48.dp)
-                                                            .testTag("chat_composer_format_expand")
-                                                            .semantics { selected = expanded },
-                                                ) {
-                                                    Icon(
-                                                        if (expanded) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
-                                                        contentDescription = if (expanded) "Collapse rich editor" else "Expand rich editor",
-                                                        tint =
-                                                            if (expanded) {
-                                                                toolAccent
-                                                            } else {
-                                                                composerInk
-                                                            },
-                                                    )
-                                                }
+                                        if (!relocatedTools && toggleExpandedAction != null) {
+                                            IconButton(
+                                                onClick = toggleExpandedAction,
+                                                modifier =
+                                                    Modifier
+                                                        .size(48.dp)
+                                                        .testTag("chat_composer_format_expand")
+                                                        .semantics { selected = expanded },
+                                            ) {
+                                                Icon(
+                                                    if (expanded) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                                                    contentDescription = if (expanded) "Collapse rich editor" else "Expand rich editor",
+                                                    tint =
+                                                        if (expanded) {
+                                                            toolAccent
+                                                        } else {
+                                                            composerInk
+                                                        },
+                                                )
                                             }
-
-                                            !relocatedTools && attachmentAction != null -> {
-                                                IconButton(
-                                                    onClick = attachmentAction,
-                                                    modifier = Modifier.size(48.dp).testTag("chat_composer_attachment"),
-                                                ) {
-                                                    Icon(
-                                                        Icons.Outlined.AttachFile,
-                                                        contentDescription = stringResource(R.string.chat_composer_attachment),
-                                                        tint = composerInk,
-                                                    )
-                                                }
+                                        }
+                                        if (!relocatedTools && attachmentAction != null) {
+                                            IconButton(
+                                                onClick = attachmentAction,
+                                                modifier = Modifier.size(48.dp).testTag("chat_composer_attachment"),
+                                            ) {
+                                                Icon(
+                                                    Icons.Outlined.AttachFile,
+                                                    contentDescription = stringResource(R.string.chat_composer_attachment),
+                                                    tint = composerInk,
+                                                )
                                             }
                                         }
                                     }
@@ -1310,6 +1246,7 @@ fun Composer(
                 EmojiPickerReplacementSurface(
                     session = emojiPickerSession,
                     contentHeightPx = pickerContentHeightPx,
+                    readRestoringHeightPx = { if (collapsingResidual) restoringHeight.value.toInt() else null },
                     readImeContentHeightPx = readImeContentHeightPx,
                     onPick = { emoji -> applyEditorValue(insertAtCursor(editorValue, emoji)) },
                 )
@@ -1936,6 +1873,7 @@ private fun rememberImeContentHeightReader(overridePx: Int?): (Density) -> Int {
 private fun EmojiPickerReplacementSurface(
     session: EmojiPickerSession?,
     contentHeightPx: Int,
+    readRestoringHeightPx: () -> Int?,
     readImeContentHeightPx: (Density) -> Int,
     onPick: (String) -> Unit,
 ) {
@@ -1961,7 +1899,12 @@ private fun EmojiPickerReplacementSurface(
         val visibleHeightPx =
             session?.let {
                 emojiPickerReplacementHeight(
-                    capturedImeHeightPx = it.capturedImeHeightPx,
+                    capturedImeHeightPx =
+                        if (it.phase == EmojiPickerPhase.RESTORING_IME) {
+                            readRestoringHeightPx() ?: it.capturedImeHeightPx
+                        } else {
+                            it.capturedImeHeightPx
+                        },
                     currentImeHeightPx = readImeContentHeightPx(this),
                 ).coerceAtMost(fullHeightPx)
             } ?: 0
@@ -1994,13 +1937,12 @@ private fun ComposerTextField(
     placeholder: String,
     onFocusChanged: (Boolean) -> Unit,
     onFocused: () -> Unit,
+    onTextLayout: (TextLayoutResult) -> Unit,
     modifier: Modifier = Modifier,
     onTextPositioned: (Offset) -> Unit = {},
     contentStartPadding: Dp = 4.dp,
     contentEndPadding: Dp = 4.dp,
     collapsedVerticalPadding: Dp,
-    onTextContentHeight: (Int) -> Unit,
-    onTextLayout: (TextLayoutResult) -> Unit,
     scrollState: ScrollState,
     ircFormattingEnabled: Boolean = false,
     expanded: Boolean = false,
@@ -2156,12 +2098,7 @@ private fun ComposerTextField(
             scrollState = scrollState,
             onTextLayout = { getResult ->
                 textLayout = getResult()
-                textLayout?.let { layout ->
-                    if (layout.lineCount > 0) {
-                        onTextContentHeight(ceil(layout.getLineBottom(layout.lineCount - 1) - layout.getLineTop(0)).toInt())
-                        onTextLayout(layout)
-                    }
-                }
+                textLayout?.let(onTextLayout)
             },
             decorator = { inner ->
                 Box(

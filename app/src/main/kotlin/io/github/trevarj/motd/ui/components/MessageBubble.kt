@@ -2543,20 +2543,19 @@ internal fun ReplyMiniBubble(
                 ).padding(vertical = 2.dp)
                 .clip(RoundedCornerShape(6.dp))
                 .background(previewColor)
-                .let { modifier ->
+                .drawWithContent {
+                    val railWidth = 3.dp.toPx()
+                    val railX = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Ltr) 0f else size.width - railWidth
+                    drawRect(accent, topLeft = Offset(railX, 0f), size = Size(railWidth, size.height))
+                    drawContent()
+                }.let { modifier ->
                     if (onClick != null) {
                         modifier.clickable(onClickLabel = openLabel, onClick = onClick)
                     } else {
                         modifier
                     }
-                },
+                }.padding(start = 3.dp),
     ) {
-        Box(
-            Modifier
-                .width(3.dp)
-                .heightIn(min = 28.dp)
-                .background(accent),
-        )
         Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)) {
             Text(
                 text = reply.sender,

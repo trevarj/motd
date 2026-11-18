@@ -32,6 +32,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotFocused
@@ -593,6 +594,89 @@ class ComposerUiTest {
     }
 
     @Test
+    fun autocompleteRetainsExitContentAndRapidReversalKeepsInputBoundsAndFocus() {
+        val showAutocomplete = mutableStateOf(true)
+        val candidates = mutableStateOf(listOf("alice", "alicia"))
+        val draft = mutableStateOf(TextFieldValue("ali", TextRange(3)))
+        var picked: String? = null
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                val panelCandidates = candidates.value
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    autocomplete =
+                        if (showAutocomplete.value && panelCandidates.isNotEmpty()) {
+                            {
+                                AutocompletePanel(
+                                    candidates = panelCandidates,
+                                    onPick = { picked = it },
+                                )
+                            }
+                        } else {
+                            null
+                        },
+                )
+            }
+        }
+        val field = compose.onNodeWithTag("chat_composer_field")
+        field.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+        compose.waitForIdle()
+        val tags = listOf("chat_composer_field", "chat_composer_pill", "chat_composer_send")
+        val bounds = tags.associateWith { compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot }
+
+        fun assertInputUnchanged() {
+            for (tag in tags) assertEquals(tag, bounds.getValue(tag), compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot)
+            field.assertIsFocused().assertTextEquals("ali")
+            compose.runOnIdle { assertEquals(TextRange(3), draft.value.selection) }
+        }
+
+        // Match the consumer contract: no candidates means a null autocomplete slot.
+        for (removeSlot in listOf(true, false)) {
+            compose.mainClock.autoAdvance = true
+            compose.runOnIdle {
+                candidates.value = listOf("alice", "alicia")
+                showAutocomplete.value = true
+            }
+            compose.onNodeWithText("alice").assertIsDisplayed()
+            compose.waitForIdle()
+            compose.mainClock.autoAdvance = false
+            compose.runOnUiThread {
+                if (removeSlot) showAutocomplete.value = false else candidates.value = emptyList()
+            }
+            repeat(3) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.onNodeWithText("alice").assertIsDisplayed()
+                compose.onNodeWithText("alicia").assertIsDisplayed()
+                assertInputUnchanged()
+            }
+            compose.runOnUiThread {
+                candidates.value = listOf("charlie")
+                showAutocomplete.value = true
+            }
+            compose.mainClock.advanceTimeByFrame()
+            compose.onNodeWithText("charlie").assertIsDisplayed()
+            compose.onNodeWithText("alice").assertDoesNotExist()
+            assertInputUnchanged()
+            compose.mainClock.advanceTimeBy(1_000)
+            compose.onNodeWithTag("autocomplete_item_0").performClick()
+            compose.runOnIdle { assertEquals("charlie", picked) }
+            assertInputUnchanged()
+
+            compose.runOnUiThread {
+                if (removeSlot) showAutocomplete.value = false else candidates.value = emptyList()
+            }
+            compose.mainClock.advanceTimeByFrame()
+            compose.onNodeWithText("charlie").assertIsDisplayed()
+            compose.mainClock.advanceTimeBy(1_000)
+            compose.onNodeWithTag("autocomplete_panel").assertDoesNotExist()
+            assertInputUnchanged()
+        }
+    }
+
+    @Test
     fun commandAutocomplete_describesCommandsWithoutChangingNickRowsOrPicks() {
         val command = mutableStateOf(true)
         var picked: String? = null
@@ -712,9 +796,10 @@ class ComposerUiTest {
     }
 
     @Test
-    fun attachmentBecomesExpandActionAndDraftUploadStaysDirectAfterTyping() {
+    fun attachmentStaysAlongsideExpandAndDraftUploadAfterTyping() {
         val draft = mutableStateOf(TextFieldValue())
         var uploads = 0
+        var attachments = 0
         compose.setContent {
             MotdTheme {
                 Composer(
@@ -724,7 +809,7 @@ class ComposerUiTest {
                     enabled = true,
                     showEmojiTool = false,
                     ircFormattingEnabled = true,
-                    onAttachment = {},
+                    onAttachment = { attachments++ },
                     onUploadDraft = { uploads++ },
                 )
             }
@@ -734,7 +819,11 @@ class ComposerUiTest {
 
         compose.runOnIdle { draft.value = TextFieldValue("x", TextRange(1)) }
         compose.waitForIdle()
-        compose.onAllNodesWithTag("chat_composer_attachment").assertCountEquals(0)
+        compose.onNodeWithTag("chat_composer_attachment").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(1, attachments) }
+        val attachmentBounds = compose.onNodeWithTag("chat_composer_attachment").fetchSemanticsNode().boundsInRoot
+        val expandBounds = compose.onNodeWithTag("chat_composer_format_expand").fetchSemanticsNode().boundsInRoot
+        assertTrue("Attachment and expand keep distinct targets", !attachmentBounds.overlaps(expandBounds))
         compose.onNodeWithTag("chat_composer_format_expand").assertIsDisplayed().performClick()
         compose
             .onNodeWithTag("chat_composer_upload_draft")
@@ -748,7 +837,8 @@ class ComposerUiTest {
         compose.waitForIdle()
         compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
         compose.onNodeWithTag("chat_composer_format_expand").assertIsDisplayed()
-        compose.onAllNodesWithTag("chat_composer_attachment").assertCountEquals(0)
+        compose.onNodeWithTag("chat_composer_attachment").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(2, attachments) }
     }
 
     @Test

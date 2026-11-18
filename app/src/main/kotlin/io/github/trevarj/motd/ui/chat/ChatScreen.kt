@@ -4050,17 +4050,21 @@ internal fun ChatContent(
                                         onVoiceLock = onVoiceLock,
                                         autocomplete =
                                             if (showAutocomplete && completions.isNotEmpty()) {
-                                                {
+                                                val candidates = completions.map { it.display }
+                                                val isCommand = completions.firstOrNull()?.isCommand == true
+                                                val completionNetworkId = state.buffer?.networkId
+                                                val panel: @Composable () -> Unit = {
                                                     AutocompletePanel(
-                                                        candidates = completions.map { it.display },
-                                                        isCommand = completions.firstOrNull()?.isCommand == true,
-                                                        networkId = state.buffer?.networkId,
+                                                        candidates = candidates,
+                                                        isCommand = isCommand,
+                                                        networkId = completionNetworkId,
                                                         onPick = { picked ->
                                                             composerText = applyPick(composerText, picked)
                                                             onDraftChanged(composerText.text)
                                                         },
                                                     )
                                                 }
+                                                panel
                                             } else {
                                                 null
                                             },

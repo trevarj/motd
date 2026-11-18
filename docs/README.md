@@ -94,6 +94,11 @@ Replies and denser message styles retain their ordinary send-flight presentation
 Accepted sends clear the composer once saved to chat. Their bubbles settle while a spinner
 shows pending delivery, then show confirmation or failure with Retry and Delete.
 
+Floating keeps its paperclip available while typing, alongside a separate Expand
+action; uploading the draft itself remains a distinct toolbar action.
+Quoted-message accent rails follow the rendered sender and preview height,
+including multiline replies and larger fonts.
+
 A chat-list swipe acts only after release at least 60% across the row width. Short
 flicks spring back without flying offscreen; right swipes do not dismiss chats.
 

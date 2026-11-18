@@ -310,60 +310,6 @@ class ComposerPanelTest {
         }
     }
 
-    @Test
-    fun `residual strip collapses to zero before the panel is removed`() {
-        val restoredImeHeightPx = 280
-        var capturedImeHeightPx = 320
-        var remainingFrames = 8
-
-        while (
-            remainingFrames > 0 &&
-            emojiPickerReplacementHeight(capturedImeHeightPx, restoredImeHeightPx) > 0
-        ) {
-            capturedImeHeightPx =
-                collapseCapturedImeHeightPx(
-                    capturedImeHeightPx = capturedImeHeightPx,
-                    currentImeHeightPx = restoredImeHeightPx,
-                    remainingFrames = remainingFrames,
-                )
-            remainingFrames--
-        }
-
-        // The panel only disappears once it reports no height at all, so removal cannot snap.
-        assertEquals(0, emojiPickerReplacementHeight(capturedImeHeightPx, restoredImeHeightPx))
-        assertEquals(restoredImeHeightPx, capturedImeHeightPx)
-    }
-
-    @Test
-    fun `residual collapse steps down without overshooting the restored keyboard`() {
-        assertEquals(
-            290,
-            collapseCapturedImeHeightPx(
-                capturedImeHeightPx = 320,
-                currentImeHeightPx = 200,
-                remainingFrames = 4,
-            ),
-        )
-        // The final frame lands exactly on the floor rather than leaving a sliver behind.
-        assertEquals(
-            200,
-            collapseCapturedImeHeightPx(
-                capturedImeHeightPx = 320,
-                currentImeHeightPx = 200,
-                remainingFrames = 1,
-            ),
-        )
-        // A keyboard taller than the captured height already reports no residual height.
-        assertEquals(
-            400,
-            collapseCapturedImeHeightPx(
-                capturedImeHeightPx = 320,
-                currentImeHeightPx = 400,
-                remainingFrames = 8,
-            ),
-        )
-    }
-
     private fun ImeInsetTracker.settleAt(heightPx: Int) {
         repeat(4) { update(heightPx) }
     }
