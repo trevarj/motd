@@ -1,0 +1,5 @@
+- Remove private metadata from uploads, direct transfers and voice messages, with a switch to send originals.
+- Fix image upload compatibility, cancellation and retries.
+- Silence notification bursts after the first alert per chat.
+- Select both light and dark built-in palettes together by default.
+- Preserve sender attribution during ignored playback.
