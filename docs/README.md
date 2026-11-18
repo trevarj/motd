@@ -83,11 +83,12 @@ the content, or arbitrary data hidden inside compressed samples.
 
 ## Emoji sets
 
-Appearance → Emoji set offers System (the default), Noto Emoji, and OpenMoji,
-independently of the text font. Nothing downloads automatically. Download & use
-fetches a verified font from its fixed upstream source; installed sets work
-offline. No chat content is sent, but the download server receives your IP address.
-Source and license links are available beside each set.
+Appearance → Emoji set offers System (the default), Noto Emoji, OpenMoji, and
+Twemoji, independently of the text font. Nothing downloads automatically.
+Download & use fetches a verified font from its fixed upstream source; installed
+sets work offline. No chat content is sent, but GitHub's download servers receive
+your IP address. Credits and licenses are in Settings → About → Emoji credits
+and licenses, not in the picker.
 
 The selected set applies throughout the app, including messages, the editor,
 reactions, and the Unicode picker. Categories, shared recents, and long-press

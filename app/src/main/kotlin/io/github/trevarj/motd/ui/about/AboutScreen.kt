@@ -15,11 +15,21 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
@@ -31,6 +41,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -48,6 +59,9 @@ import io.github.trevarj.motd.ui.settings.SettingsScaffold
 import io.github.trevarj.motd.ui.settings.SwitchRow
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ceramicLogoColorMatrix
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.IOException
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.settings.SettingsTarget as SettingsTargetAnchor
 
@@ -85,6 +99,7 @@ internal fun AboutContent(
     val context = LocalContext.current
     val licenseUrl = stringResource(R.string.about_license_url)
     val githubUrl = stringResource(R.string.settings_github_url)
+    var showEmojiNotices by rememberSaveable { mutableStateOf(false) }
     SettingsScaffold(
         title = stringResource(R.string.about_title),
         onBack = onBack,
@@ -162,6 +177,13 @@ internal fun AboutContent(
                 )
             }
             SettingsDivider()
+            SettingsActionRow(
+                title = stringResource(R.string.about_emoji_notices),
+                summary = stringResource(R.string.about_emoji_notices_summary),
+                modifier = Modifier.testTag("about_emoji_notices"),
+                onClick = { showEmojiNotices = true },
+            )
+            SettingsDivider()
             SettingsTargetAnchor(target?.name, SettingsTarget.PROJECT.name) { targetModifier ->
                 SettingsActionRow(
                     title = stringResource(R.string.settings_github),
@@ -227,6 +249,48 @@ internal fun AboutContent(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         )
     }
+    if (showEmojiNotices) {
+        EmojiNoticesDialog(onDismiss = { showEmojiNotices = false })
+    }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun EmojiNoticesDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val errorText = stringResource(R.string.about_emoji_notices_error)
+    val notices by produceState<String?>(initialValue = null, context) {
+        value =
+            withContext(Dispatchers.IO) {
+                try {
+                    context.assets
+                        .open("emoji/attribution.txt")
+                        .bufferedReader()
+                        .use { it.readText() }
+                } catch (_: IOException) {
+                    errorText
+                }
+            }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("about_emoji_notices_dialog"),
+        title = { Text(stringResource(R.string.about_emoji_notices)) },
+        text = {
+            SelectionContainer {
+                Text(
+                    notices ?: stringResource(R.string.about_emoji_notices_loading),
+                    modifier = Modifier.verticalScroll(rememberScrollState()).testTag("about_emoji_notices_text"),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.testTag("about_emoji_notices_dismiss")) {
+                Text(stringResource(R.string.action_dismiss))
+            }
+        },
+    )
 }
 
 @Composable

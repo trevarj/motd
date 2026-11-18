@@ -267,10 +267,12 @@ flowchart TD
   through the fade before restoring the normal selected backing.
   Topic editing uses one native field state for raw IRC text, reactive formatting and click-time Save.
 - Appearance's emoji-set selection is independent of the general UI font and defaults
-  to System. Only pinned Noto/OpenMoji fonts download, on explicit request; bounded
+  to System. Only pinned Noto/OpenMoji/Twemoji fonts download, on explicit request; bounded
   streaming, digest/platform validation and atomic installation preserve the previous
   font on failure or cancellation. Backups contain the selected ID, not font bytes;
   missing or corrupt installations resolve honestly to System.
+  Twemoji's pinned release download permits only bounded redirects to its repository's
+  GitHub release-asset path. Bundled notices are accessible from About, outside the picker.
   Bundled Unicode metadata recognizes the longest complete sequence before checking
   set coverage. Shared text/editor renderers preserve raw Unicode, formatting and
   offsets; unsupported sequences retain native fallback. The Compose picker shares

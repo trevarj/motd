@@ -764,6 +764,10 @@
     <string name="about_title">About</string>
     <string name="about_license">License</string>
     <string name="about_license_gpl">GNU GPL v3 or later</string>
+    <string name="about_emoji_notices">Emoji credits and licenses</string>
+    <string name="about_emoji_notices_summary">Bundled attribution for emoji data and downloadable sets.</string>
+    <string name="about_emoji_notices_loading">Loading emoji notices…</string>
+    <string name="about_emoji_notices_error">Emoji notices could not be loaded.</string>
     <string name="about_blurb">A modern IRCv3 client for Android, built for direct networks and soju bouncers.</string>
     <string name="about_legal_notice">Free software with no warranty. You may share and modify it under the GNU GPL v3 or later.</string>
     <string name="about_diagnostic_logging">Diagnostic logging</string>
@@ -2612,7 +2616,7 @@
     <string name="settings_emoji_scope">Changes emoji throughout the app, independently of the text font. Installed sets work offline.</string>
     <string name="settings_emoji_system">System</string>
     <string name="settings_emoji_system_desc">Use your device’s emoji. No download required.</string>
-    <string name="settings_emoji_privacy">Nothing downloads automatically. Download &amp; use fetches a verified font from the fixed upstream source on raw.githubusercontent.com. That server receives your IP address; no chat content is sent. Source and license links open in your browser.</string>
+    <string name="settings_emoji_privacy">Nothing downloads automatically. Downloads fetch a verified font from GitHub and its download servers, which receive your IP address. No chat content is sent.</string>
     <string name="settings_emoji_loading">Checking installed emoji…</string>
     <string name="settings_emoji_fallback_summary">System (saved set unavailable)</string>
     <string name="settings_emoji_fallback">The saved emoji set is missing, invalid, or unknown. System emoji are in use. Reinstall a listed set or choose System.</string>
@@ -2623,8 +2627,6 @@
     <string name="settings_emoji_remove">Remove download</string>
     <string name="settings_emoji_cancel">Cancel download</string>
     <string name="settings_emoji_progress">Downloading %1$s of %2$s</string>
-    <string name="settings_emoji_source">Source</string>
-    <string name="settings_emoji_license">License: %1$s</string>
     <string name="settings_emoji_sample" translatable="false">A 😀 👍🏽 🤝 🫱🏻‍🫲🏿 👨‍👩‍👧‍👦 🚶🏽‍➡️ 🇺🇳 ❤️ Z</string>
     <string name="settings_emoji_sample_error">The comparison could not be loaded. System emoji remain available.</string>
 </resources>

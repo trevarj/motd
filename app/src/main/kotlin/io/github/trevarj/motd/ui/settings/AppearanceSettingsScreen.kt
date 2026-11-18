@@ -61,7 +61,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
@@ -1060,7 +1059,6 @@ internal fun EmojiSetPickerContent(
     onRemove: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
-    val uriHandler = LocalUriHandler.current
     var previewId by remember(selectedId) { mutableStateOf(selectedId) }
     val effectiveId =
         if (previewId in state.installed && EmojiSets.find(previewId) != null) previewId else EmojiSets.SYSTEM_ID
@@ -1173,16 +1171,6 @@ internal fun EmojiSetPickerContent(
                                 Text(stringResource(if (installed || selectedId == spec.id) R.string.settings_emoji_reinstall else R.string.settings_emoji_download))
                             }
                         }
-                    }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(
-                            onClick = { uriHandler.openUri(spec.sourceUrl) },
-                            modifier = Modifier.testTag("settings_emoji_source_${spec.id}"),
-                        ) { Text(stringResource(R.string.settings_emoji_source)) }
-                        TextButton(
-                            onClick = { uriHandler.openUri(spec.licenseUrl) },
-                            modifier = Modifier.testTag("settings_emoji_license_${spec.id}"),
-                        ) { Text(stringResource(R.string.settings_emoji_license, spec.licenseName)) }
                     }
                 }
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp))

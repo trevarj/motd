@@ -15,6 +15,8 @@ from urllib.request import urlopen
 UNICODE_VERSION = "16.0"
 NOTO_REV = "8998f5dd683424a73e2314a8c1f1e359c19e8742"
 OPENMOJI_REV = "66e17da0f2d4347f64ee9d78c367fc5234283863"
+TWEMOJI_REV = "388f518b756404152f128a3539f5e7f9a6f1ebd6"
+FONT_IDS = ("noto", "openmoji", "twemoji")
 # Every authoring input is content-pinned, including files already in the cache.
 SOURCES = {
     "emoji-test-16.0.txt": (
@@ -35,6 +37,12 @@ SOURCES = {
     "openmoji.ttf": (
         f"https://raw.githubusercontent.com/hfg-gmuend/openmoji/{OPENMOJI_REV}/font/OpenMoji-color-cbdt/OpenMoji-color-cbdt.ttf",
         "de2cf500a9fe40c696205648300a2c00dcd6017c6d211909cb4b434472a7745d"),
+    "twemoji.ttf": (
+        "https://github.com/Nerixyz/twemoji-colr-font/releases/download/v0.0.2/Twemoji_GlyfColr0.ttf",
+        "0a75e5744aba8ba9692bf814522d24f85b4846e9619d26bbacebc2af386d385a"),
+    "twemoji-license.txt": (
+        f"https://raw.githubusercontent.com/jdecked/twemoji/{TWEMOJI_REV}/LICENSE-GRAPHICS",
+        "8ae9438818c26e4873b91d8c6ad620526c011e27e125677f13031eda903f007c"),
     "unicode-license.txt": (
         "https://www.unicode.org/license.txt",
         "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"),
@@ -171,7 +179,7 @@ def main():
     hb = shutil.which("hb-shape")
     require(hb is not None, "Use nix develop .#emoji-authoring for pinned hb-shape")
     payload = "\n".join(row["sequence"] for row in rows) + "\n"
-    for set_id in ("noto", "openmoji"):
+    for set_id in FONT_IDS:
         result = subprocess.run(
             [hb, str(args.sources / f"{set_id}.ttf"), *SHAPE_OPTIONS],
             input=payload, text=True, encoding="utf-8", capture_output=True, check=True,
@@ -212,18 +220,29 @@ def main():
         "Downloadable Noto Color Emoji 2.051: Google and Noto Emoji contributors.\n"
         "SIL Open Font License 1.1.\n"
         f"https://github.com/googlefonts/noto-emoji/blob/{NOTO_REV}/fonts/LICENSE\n\n"
+        "Downloadable Twemoji 17.0.2 artwork: Copyright Twitter, Inc. and other\n"
+        "contributors; maintained by jdecked and Twemoji contributors. CC BY 4.0.\n"
+        f"Artwork source: https://github.com/jdecked/twemoji/tree/{TWEMOJI_REV}\n"
+        f"https://github.com/jdecked/twemoji/blob/{TWEMOJI_REV}/LICENSE-GRAPHICS\n"
+        "https://creativecommons.org/licenses/by/4.0/\n"
+        "Artwork converted to a TrueType glyf/COLRv0 font by Nerixyz;\n"
+        "twemoji-colr-font v0.0.2 (Twemoji_GlyfColr0.ttf).\n"
+        "https://github.com/Nerixyz/twemoji-colr-font/releases/tag/v0.0.2\n"
+        "This is a converted artwork font, not the original SVG distribution.\n\n"
         "No fonts or artwork are bundled. catalog.json records exact source, font and\n"
         "authoring-tool hashes. Support means one visible nonzero HarfBuzz glyph for\n"
         "the complete sequence, not proof of Android color rendering compatibility.\n"
         + "\n\n".join(
-            f"===== {name} =====\n{inputs[name].decode('utf-8')}"
-            for name in ("unicode-license.txt", "openmoji-license.txt", "noto-license.txt")
+            f"===== {name} =====\n" + "\n".join(
+                line.rstrip() for line in inputs[name].decode("utf-8").split("\n")
+            )
+            for name in ("unicode-license.txt", "openmoji-license.txt", "noto-license.txt", "twemoji-license.txt")
         ),
         encoding="utf-8",
     )
     print(f"Unicode {UNICODE_VERSION}: {len(groups)} groups, {len(entries)} entries, {len(aliases)} aliases")
     print(f"Family roots: {sum(entry['base'] == entry['sequence'] for entry in entries)}")
-    for set_id in ("noto", "openmoji"):
+    for set_id in FONT_IDS:
         print(f"{set_id}: {sum(set_id in row['support'] for row in entries)} entries, "
               f"{sum(set_id in row['support'] for row in aliases)} aliases")
 

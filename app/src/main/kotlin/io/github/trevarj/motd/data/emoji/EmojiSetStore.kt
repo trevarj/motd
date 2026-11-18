@@ -162,29 +162,52 @@ class EmojiSetStore internal constructor(
         spec: EmojiSetSpec,
         target: File,
     ) {
-        val url = URL(spec.downloadUrl)
-        if (url.protocol != "https" || url.host != "raw.githubusercontent.com" ||
-            url.port !in listOf(-1, 443) || url.userInfo != null || url.ref != null || url.query != null
+        var url = URL(spec.downloadUrl)
+        val release = spec.downloadUrl == EmojiSets.find("twemoji")?.downloadUrl
+        if (!safeEmojiUrl(url) || url.query != null ||
+            (url.host != "raw.githubusercontent.com" && !release)
         ) {
             throw IOException("Untrusted emoji source")
         }
-        val connection = openConnection(url)
+        val activeConnection = AtomicReference<HttpURLConnection?>()
         val input = AtomicReference<InputStream?>()
         suspendCancellableCoroutine<Unit> { continuation ->
             fun close() {
-                runCatching { connection.disconnect() }
+                runCatching { activeConnection.getAndSet(null)?.disconnect() }
                 runCatching { input.getAndSet(null)?.close() }
             }
             continuation.invokeOnCancellation { close() }
             try {
                 continuation.context.ensureActive()
-                connection.instanceFollowRedirects = false
-                connection.useCaches = false
-                connection.connectTimeout = 15_000
-                connection.readTimeout = 15_000
-                connection.setRequestProperty("Accept-Encoding", "identity")
-                if (connection.responseCode != HttpURLConnection.HTTP_OK || connection.url.toExternalForm() != url.toExternalForm()) {
-                    throw IOException("Emoji download response rejected")
+                var redirects = 0
+                var connection: HttpURLConnection
+                while (true) {
+                    continuation.context.ensureActive()
+                    connection = openConnection(url)
+                    activeConnection.set(connection)
+                    continuation.context.ensureActive()
+                    connection.instanceFollowRedirects = false
+                    connection.useCaches = false
+                    connection.connectTimeout = 15_000
+                    connection.readTimeout = 15_000
+                    connection.setRequestProperty("Accept-Encoding", "identity")
+                    val status = connection.responseCode
+                    if (connection.url.toExternalForm() != url.toExternalForm()) {
+                        throw IOException("Emoji download response rejected")
+                    }
+                    if (status == HttpURLConnection.HTTP_OK) break
+                    if (!release || status !in listOf(301, 302, 303, 307, 308) || redirects++ >= 3) {
+                        throw IOException("Emoji download response rejected")
+                    }
+                    val location = connection.getHeaderField("Location") ?: throw IOException("Missing emoji redirect")
+                    val next = URL(url, location)
+                    if (!safeEmojiUrl(next) || next.host != "release-assets.githubusercontent.com" ||
+                        !next.path.startsWith("/github-production-release-asset/921888585/")
+                    ) {
+                        throw IOException("Untrusted emoji redirect")
+                    }
+                    close()
+                    url = next
                 }
                 val encoding = connection.contentEncoding
                 if (encoding != null && !encoding.equals("identity", true)) throw IOException("Unexpected emoji encoding")
@@ -253,6 +276,8 @@ class EmojiSetStore internal constructor(
         }
     }
 }
+
+private fun safeEmojiUrl(url: URL): Boolean = url.protocol == "https" && url.port in listOf(-1, 443) && url.userInfo == null && url.ref == null
 
 private data class Fingerprint(
     val device: Any,

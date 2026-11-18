@@ -39,6 +39,17 @@ object EmojiSets {
                 licenseUrl = "https://github.com/hfg-gmuend/openmoji/blob/66e17da0f2d4347f64ee9d78c367fc5234283863/LICENSE.txt",
                 sourceUrl = "https://github.com/hfg-gmuend/openmoji",
             ),
+            EmojiSetSpec(
+                id = "twemoji",
+                displayName = "Twemoji",
+                version = "17.0.2 (COLRv0 v0.0.2)",
+                downloadUrl = "https://github.com/Nerixyz/twemoji-colr-font/releases/download/v0.0.2/Twemoji_GlyfColr0.ttf",
+                sizeBytes = 2_064_468,
+                sha256 = "0a75e5744aba8ba9692bf814522d24f85b4846e9619d26bbacebc2af386d385a",
+                licenseName = "Creative Commons Attribution 4.0",
+                licenseUrl = "https://github.com/jdecked/twemoji/blob/388f518b756404152f128a3539f5e7f9a6f1ebd6/LICENSE-GRAPHICS",
+                sourceUrl = "https://github.com/Nerixyz/twemoji-colr-font/releases/tag/v0.0.2",
+            ),
         )
 
     fun find(id: String): EmojiSetSpec? = all.find { it.id == id }

@@ -86,6 +86,11 @@ class EmojiSequenceCatalogTest {
             assertTrue(data.matches("😀\u200D🫩", "noto").isEmpty())
             assertEquals(1, data.matches("1️⃣", "noto").size)
             assertTrue(data.matches("1️⃣\uFE0E", "noto").isEmpty())
+            for (sequence in listOf("👩🏽‍💻", "🫱🏽‍🫲🏿", "👩🏽‍❤️‍👨🏿", "🏳️‍🌈", "❤")) {
+                assertEquals(1, data.matches(sequence, "twemoji").size)
+            }
+            assertTrue(data.matches("🫪", "twemoji").isEmpty())
+            assertTrue(data.matches("❤\uFE0E", "twemoji").isEmpty())
         }
 
     @Test(expected = UnsupportedOperationException::class)

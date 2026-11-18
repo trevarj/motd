@@ -56,15 +56,110 @@ class EmojiSetStoreTest {
 
     private fun assertNoTemps() = assertFalse(File(context.filesDir, "emoji-sets").listFiles().orEmpty().any { it.extension == "tmp" })
 
-    @Test fun catalogHasOnlyPinnedHttpsSetsAndSystemIsNotDownloadable() {
-        assertEquals(listOf("noto", "openmoji"), EmojiSets.all.map { it.id })
+    @Test fun catalogPinsEveryDownloadAndSystemIsNotDownloadable() {
+        assertEquals(
+            EmojiSets.all.size,
+            EmojiSets.all
+                .map { it.id }
+                .toSet()
+                .size,
+        )
         assertNull(EmojiSets.find(EmojiSets.SYSTEM_ID))
         EmojiSets.all.forEach {
-            assertEquals("https", URL(it.downloadUrl).protocol)
-            assertEquals("raw.githubusercontent.com", URL(it.downloadUrl).host)
-            assertEquals(64, it.sha256.length)
+            val url = URL(it.downloadUrl)
+            assertEquals("https", url.protocol)
+            assertTrue(url.host in setOf("raw.githubusercontent.com", "github.com"))
+            assertNull(url.userInfo)
+            assertNull(url.ref)
+            assertNull(url.query)
+            assertTrue(it.sizeBytes > 0)
+            assertTrue(it.sha256.matches(Regex("[0-9a-f]{64}")))
         }
     }
+
+    @Test fun initialRequestsCannotBypassPinnedReleaseOrRawGithubBoundary() =
+        runBlocking {
+            val release = EmojiSets.find("twemoji")!!
+            val raw = EmojiSets.all.first().downloadUrl
+            for (url in listOf(
+                release.downloadUrl.replace("v0.0.2", "v0.0.3"),
+                "${release.downloadUrl}?token=secret",
+                "https://release-assets.githubusercontent.com/github-production-release-asset/921888585/font",
+                raw.replace("https:", "http:"),
+                raw.replace("https://", "https://user@"),
+                raw.replace(".com/", ".com:444/"),
+                "$raw?token=secret",
+                "$raw#fragment",
+            )) {
+                var opened = false
+                val store =
+                    store(release.copy(downloadUrl = url)) {
+                        opened = true
+                        Connection(font)
+                    }
+                assertTrue(store.download(release.id).isFailure)
+                assertFalse(opened)
+                assertNoTemps()
+            }
+        }
+
+    @Test fun pinnedReleaseRedirectsAcceptOnlyBoundedTrustedAssetsAndRetainInstalledBytes() =
+        runBlocking {
+            val spec = EmojiSets.find("twemoji")!!.copy(sizeBytes = font.size.toLong(), sha256 = sha256(font))
+            val asset = "https://release-assets.githubusercontent.com/github-production-release-asset/921888585/fixture?token=secret"
+            var location = asset
+            var loop = false
+            val opened = mutableListOf<Connection>()
+            val store =
+                EmojiSetStore(
+                    context,
+                    listOf(spec),
+                    { url ->
+                        Connection(
+                            font,
+                            status = if (url.toExternalForm() == spec.downloadUrl || loop) 302 else 200,
+                            responseUrl = url,
+                            location = location,
+                        ).also { opened.add(it) }
+                    },
+                    renderSample = "A",
+                    requireColor = false,
+                )
+            val target = store.download("twemoji").getOrThrow()
+            assertArrayEquals(font, target.readBytes())
+            assertEquals(2, opened.size)
+            assertTrue(opened.all { it.disconnected && !it.instanceFollowRedirects })
+            val revision = store.revision.value
+            for (unsafe in listOf(
+                asset.replace("https:", "http:"),
+                asset.replace("release-assets.githubusercontent.com", "example.com"),
+                asset.replace("release-assets.githubusercontent.com", "release-assets.githubusercontent.com.evil.test"),
+                asset.replace("https://", "https://user@"),
+                asset.replace(".com/", ".com:444/"),
+                asset.replace("/921888585/", "/other/"),
+                "$asset#fragment",
+                spec.downloadUrl,
+            )) {
+                location = unsafe
+                opened.clear()
+                assertTrue(store.download("twemoji").isFailure)
+                assertEquals(1, opened.size)
+                assertTrue(opened.all { it.disconnected })
+                assertArrayEquals(font, target.readBytes())
+                assertEquals(revision, store.revision.value)
+                assertNoTemps()
+            }
+            location = asset
+            loop = true
+            opened.clear()
+            assertTrue(store.download("twemoji").isFailure)
+            assertEquals(4, opened.size)
+            assertTrue(opened.all { it.disconnected })
+            assertArrayEquals(font, target.readBytes())
+            assertEquals(revision, store.revision.value)
+            assertNull(store.progress.value)
+            assertNoTemps()
+        }
 
     @Test fun nativeFixtureInstallReinstallAndRemovalOnlyChangeRevisionWhenStateChanges() =
         runBlocking {
@@ -238,6 +333,7 @@ class EmojiSetStoreTest {
         private val status: Int = 200,
         private val source: InputStream = ByteArrayInputStream(bytes),
         responseUrl: URL = URL(EmojiSets.all.first().downloadUrl),
+        private val location: String? = null,
     ) : HttpURLConnection(responseUrl) {
         @Volatile var disconnected = false
 
@@ -252,6 +348,8 @@ class EmojiSetStoreTest {
         override fun getResponseCode() = status
 
         override fun getContentLengthLong() = advertised
+
+        override fun getHeaderField(name: String): String? = if (name.equals("Location", true)) location else null
 
         override fun getInputStream() = source
     }

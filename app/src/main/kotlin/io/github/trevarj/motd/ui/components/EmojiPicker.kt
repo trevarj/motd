@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
@@ -153,12 +154,16 @@ private fun EmojiPickerContent(
                     modifier =
                         Modifier
                             .testTag("${tagPrefix}_emoji_category_${emojiCategoryTag(group)}")
-                            .semantics { selected = isSelected }
-                            .background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface),
+                            .semantics { selected = isSelected },
+                    shape = MaterialTheme.shapes.large,
+                    colors =
+                        ButtonDefaults.textButtonColors(
+                            containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface,
+                            contentColor = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
+                        ),
                 ) {
                     Text(
                         emojiCategoryLabel(group),
-                        color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                     )
                 }
