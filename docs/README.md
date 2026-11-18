@@ -99,6 +99,13 @@ action; uploading the draft itself remains a distinct toolbar action.
 Quoted-message accent rails follow the rendered sender and preview height,
 including multiline replies and larger fonts.
 
+Chat settings can hide the IRC voice-message button without disabling voice
+playback. Nickname taps default to Mention, with User menu as an alternative;
+hold a nickname for its user menu, or other message content for message actions.
+Mentions insert at the cursor or replace the selection. The `: ` suffix is used
+only at whole-message start, never merely because text wraps or follows an
+earlier nonblank line.
+
 A chat-list swipe acts only after release at least 60% across the row width. Short
 flicks spring back without flying offscreen; right swipes do not dismiss chats.
 

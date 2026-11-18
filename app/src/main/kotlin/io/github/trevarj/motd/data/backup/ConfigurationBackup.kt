@@ -711,6 +711,7 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setNickColorsEnabled(it.nickColorsEnabled)
                 settingsRepository.setNickColorPalette(it.nickColorPalette)
                 settingsRepository.setNickMentionStyle(it.nickMentionStyle)
+                settingsRepository.setNicknameTapAction(it.nicknameTapAction)
                 current.nickColorOverrides.keys
                     .filter { nick -> nick !in it.nickColorOverrides }
                     .forEach { nick -> settingsRepository.setNickColorOverride(nick, null) }
@@ -744,6 +745,7 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setChatWallpaper(it.chatWallpaper)
                 settingsRepository.setShowComposerEmoji(it.showComposerEmoji)
                 settingsRepository.setShowComposerFormattingTools(it.showComposerFormattingTools)
+                settingsRepository.setShowVoiceMessageButton(it.showVoiceMessageButton)
                 settingsRepository.setChatSoundsEnabled(it.chatSoundsEnabled)
                 settingsRepository.setHistorySyncDepth(it.historySyncDepth)
                 settingsRepository.setHistorySyncMode(it.historySyncMode)

@@ -42,6 +42,7 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
+import io.github.trevarj.motd.data.prefs.NicknameTapAction
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.testing.ReadAloudHarness
@@ -72,11 +73,12 @@ class ChatSettingsComposerToolsTest {
     fun composerAndReplySwitchesRenderAndDispatchIndependently() {
         var emoji: Boolean? = null
         var formatting: Boolean? = null
+        val settings = mutableStateOf(Settings(showComposerEmoji = false, showComposerFormattingTools = true))
         val reply = mutableStateOf(ReplyConfig())
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 ChatSettingsContent(
-                    settings = Settings(showComposerEmoji = false, showComposerFormattingTools = true),
+                    settings = settings.value,
                     reply = reply.value,
                     contentPreviews = ContentPreviewConfig(),
                     voice = VoiceConfig(),
@@ -94,6 +96,8 @@ class ChatSettingsComposerToolsTest {
                     onFoolsMode = {},
                     onShowComposerEmoji = { emoji = it },
                     onShowComposerFormattingTools = { formatting = it },
+                    onShowVoiceMessageButton = { settings.value = settings.value.copy(showVoiceMessageButton = it) },
+                    onNicknameTapAction = { settings.value = settings.value.copy(nicknameTapAction = it) },
                     onChatSoundsEnabled = {},
                     onVisibleReplyPrefix = { reply.value = reply.value.copy(visibleChannelPrefix = it) },
                     onSwipeToReplyEnabled = { reply.value = reply.value.copy(swipeToReplyEnabled = it) },
@@ -131,6 +135,20 @@ class ChatSettingsComposerToolsTest {
             .performScrollTo()
             .assertIsOn()
             .performClick()
+        compose
+            .onNodeWithText("Show voice-message button")
+            .performScrollTo()
+            .assertIsOn()
+            .performClick()
+        compose.onNodeWithText("Show voice-message button").assertIsOff()
+        compose.onNodeWithTag("settings_nickname_tap_action").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_nickname_tap_mention").assertIsSelected()
+        compose.onNodeWithTag("settings_nickname_tap_user_menu").performClick()
+        compose.runOnIdle { assertEquals(NicknameTapAction.USER_MENU, settings.value.nicknameTapAction) }
+        compose.onNodeWithTag("settings_nickname_tap_action").performScrollTo().performClick()
+        compose.onNodeWithTag("settings_nickname_tap_user_menu").assertIsSelected()
+        compose.onNodeWithTag("settings_nickname_tap_mention").performClick()
+        compose.runOnIdle { assertEquals(NicknameTapAction.MENTION, settings.value.nicknameTapAction) }
         compose
             .onNodeWithText("Visible reply prefix")
             .performScrollTo()
@@ -176,6 +194,8 @@ class ChatSettingsComposerToolsTest {
                     onFoolsMode = {},
                     onShowComposerEmoji = {},
                     onShowComposerFormattingTools = {},
+                    onShowVoiceMessageButton = {},
+                    onNicknameTapAction = {},
                     onChatSoundsEnabled = {},
                     onVisibleReplyPrefix = {},
                     onSwipeToReplyEnabled = {},
@@ -230,6 +250,8 @@ class ChatSettingsComposerToolsTest {
                     onFoolsMode = {},
                     onShowComposerEmoji = {},
                     onShowComposerFormattingTools = {},
+                    onShowVoiceMessageButton = {},
+                    onNicknameTapAction = {},
                     onChatSoundsEnabled = {},
                     onVisibleReplyPrefix = {},
                     onSwipeToReplyEnabled = {},
@@ -296,6 +318,8 @@ class ChatSettingsComposerToolsTest {
                     onFoolsMode = {},
                     onShowComposerEmoji = {},
                     onShowComposerFormattingTools = {},
+                    onShowVoiceMessageButton = {},
+                    onNicknameTapAction = {},
                     onChatSoundsEnabled = {},
                     onVisibleReplyPrefix = {},
                     onSwipeToReplyEnabled = {},
@@ -391,6 +415,8 @@ class ChatSettingsComposerToolsTest {
                             onFoolsMode = {},
                             onShowComposerEmoji = {},
                             onShowComposerFormattingTools = {},
+                            onShowVoiceMessageButton = {},
+                            onNicknameTapAction = {},
                             onChatSoundsEnabled = {},
                             onVisibleReplyPrefix = {},
                             onSwipeToReplyEnabled = {},

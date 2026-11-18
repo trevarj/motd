@@ -17,6 +17,7 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
+import io.github.trevarj.motd.data.prefs.NicknameTapAction
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
@@ -112,6 +113,10 @@ class ChatSettingsViewModel
         fun setShowComposerEmoji(value: Boolean) = launch { settingsRepository.setShowComposerEmoji(value) }
 
         fun setShowComposerFormattingTools(value: Boolean) = launch { settingsRepository.setShowComposerFormattingTools(value) }
+
+        fun setShowVoiceMessageButton(value: Boolean) = launch { settingsRepository.setShowVoiceMessageButton(value) }
+
+        fun setNicknameTapAction(value: NicknameTapAction) = launch { settingsRepository.setNicknameTapAction(value) }
 
         fun setChatSoundsEnabled(value: Boolean) = launch { settingsRepository.setChatSoundsEnabled(value) }
 

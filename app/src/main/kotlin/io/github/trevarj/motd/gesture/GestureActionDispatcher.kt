@@ -18,6 +18,7 @@ import io.github.trevarj.motd.service.unreadBufferIds
 import io.github.trevarj.motd.service.unreadChatRows
 import io.github.trevarj.motd.ui.chat.AttachmentRequestStore
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
+import io.github.trevarj.motd.ui.chat.ComposerPrefill
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -129,11 +130,11 @@ class GestureActionDispatcher internal constructor(
             }
 
             is GestureAction.InsertMention -> {
-                prefillCurrentChat("${action.nick}: ")
+                prefillCurrentChat(ComposerPrefill(action.nick, isNickname = true))
             }
 
             is GestureAction.InsertSnippet -> {
-                prefillCurrentChat(action.text)
+                prefillCurrentChat(ComposerPrefill(action.text))
             }
 
             is GestureAction.StartQuery -> {
@@ -199,9 +200,9 @@ class GestureActionDispatcher internal constructor(
      * while [ComposerDraftStore.prefillPushes] is what actually delivers the text into an open
      * composer (a `launchSingleTop` re-entry runs no entry effect to drain it).
      */
-    private suspend fun prefillCurrentChat(text: String): GestureActionResult =
+    private suspend fun prefillCurrentChat(prefill: ComposerPrefill): GestureActionResult =
         withCurrentChat { bufferId ->
-            drafts.push(bufferId, text)
+            drafts.push(bufferId, prefill)
             navigate(GestureNavRequest.OpenChat(bufferId))
         }
 

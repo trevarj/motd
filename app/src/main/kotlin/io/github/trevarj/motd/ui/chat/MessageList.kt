@@ -410,8 +410,9 @@ fun MessageList(
     // flips a single fool row either way so expand/re-collapse is bidirectional (bug #9).
     foolExpanded: (Long) -> Boolean = { false },
     onToggleFool: (Long) -> Unit = {},
-    // Tapping a non-self sender or body mention opens the nick sheet.
+    // Nickname taps use the configured action; nickname holds open the user menu.
     onSenderClick: (String) -> Unit = {},
+    onSenderLongClick: (String) -> Unit = {},
     onAcceptInvite: (Long) -> Unit = {},
     onDismissInvite: (Long) -> Unit = {},
     // Stored history gaps as rendered seams. Carried like readMarkerTime: a raw value each row kind
@@ -838,7 +839,9 @@ fun MessageList(
                         onOpenLink = onOpenLink,
                         onOpenPalette = onOpenPalette,
                         onSenderClick = onSenderClick,
+                        onSenderLongClick = onSenderLongClick,
                         onMentionClick = onSenderClick.takeIf { selectionMessageId == null },
+                        onMentionLongClick = onSenderLongClick.takeIf { selectionMessageId == null },
                         replyPreview = replyPreview,
                         onReplyPreviewClick = onReplyPreviewClick,
                         translation = translation,
@@ -1837,7 +1840,9 @@ private fun MessageRow(
     onOpenLink: (String) -> Unit,
     onOpenPalette: (PaletteDocument, String) -> Unit,
     onSenderClick: (String) -> Unit,
+    onSenderLongClick: (String) -> Unit,
     onMentionClick: ((String) -> Unit)?,
+    onMentionLongClick: ((String) -> Unit)?,
     replyPreview: (ReplyTarget) -> StateFlow<ReplyPreviewData?>,
     onReplyPreviewClick: (ReplyTarget) -> Unit,
     // Non-null for an expanded fool row: renders a "hide" chip above the bubble that re-collapses it.
@@ -2199,9 +2204,11 @@ private fun MessageRow(
                                 }
                             }
                         },
-                        // Only non-self senders open the nick sheet.
+                        // Self names stay inert; nickname holds do not replace message actions.
                         onSenderClick = if (msg.isSelf) null else ({ onSenderClick(msg.sender) }),
+                        onSenderLongClick = if (msg.isSelf) null else ({ onSenderLongClick(msg.sender) }),
                         onMentionClick = onMentionClick,
+                        onMentionLongClick = onMentionLongClick,
                         sourceWrapper = translatedSourceWrapper,
                         trailingContent = translationContent.takeUnless { standaloneAudio },
                         containerModifier = if (standaloneAudio) Modifier else translationHostModifier,

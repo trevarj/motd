@@ -104,6 +104,8 @@ internal fun CompactMessageRow(
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
+    onSenderLongClick: (() -> Unit)? = null,
+    onMentionLongClick: ((String) -> Unit)? = null,
     onMentionClick: ((String) -> Unit)? = null,
     containerModifier: Modifier = Modifier,
     sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? = null,
@@ -167,6 +169,7 @@ internal fun CompactMessageRow(
             showSender,
             mentionColor,
             onMentionClick,
+            onSenderClick,
             nickMentionStyle,
             nickColors.enabled,
             codeBackground,
@@ -195,6 +198,7 @@ internal fun CompactMessageRow(
                 nickMentionStyle = nickMentionStyle,
                 mentionColorsEnabled = nickColors.enabled,
                 onMentionClick = onMentionClick.takeUnless { selecting },
+                onSenderClick = onSenderClick.takeUnless { selecting },
                 adjustPaletteReadability = adjustPaletteReadability,
                 fitSenderColor = !nickColors.preservesAuthoredIdentity(sender, fallbackIsAuthored = true),
                 fitMentionColor = { !nickColors.preservesAuthoredIdentity(it) },
@@ -229,14 +233,15 @@ internal fun CompactMessageRow(
                 text = line,
                 concealment = LocalFoolBodyConcealment.current,
                 onLinkLongPress = onLongPress,
+                onSenderLongClick = onSenderLongClick,
+                onMentionLongClick = onMentionLongClick,
                 inlineBody = true,
                 style = MaterialTheme.typography.bodyLarge,
                 color = bodyColor,
                 modifier =
                     Modifier
                         .weight(1f)
-                        // Tapping the row's nick opens the nick sheet; the whole line is the target since
-                        // the nick is inline (bubble-style per-name tap isn't meaningful on one line).
+                        // The inline sender link, not the paragraph, owns nickname gestures.
                         .let { if (onSenderClick != null) it.padding(end = 6.dp) else it },
             )
             // Trailing timestamp keeps the IRC "right gutter" feel without a bubble.
@@ -310,6 +315,7 @@ internal fun buildCompactLine(
     nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
     mentionColorsEnabled: Boolean = true,
     onMentionClick: ((String) -> Unit)? = null,
+    onSenderClick: (() -> Unit)? = null,
     adjustPaletteReadability: Boolean = false,
     fitSenderColor: Boolean = true,
     fitMentionColor: (String) -> Boolean = { true },
@@ -323,6 +329,7 @@ internal fun buildCompactLine(
             )
         // Continuation lines omit the sender prefix entirely.
         if (showSender) {
+            val senderStart = length
             when (kind) {
                 MessageKind.NOTICE -> {
                     // irssi-style notice marker: `-nick-`.
@@ -338,6 +345,14 @@ internal fun buildCompactLine(
                         append(" ")
                     }
                 }
+            }
+            onSenderClick?.let { callback ->
+                addLink(
+                    androidx.compose.ui.text.LinkAnnotation
+                        .Clickable("action-sender", linkInteractionListener = { callback() }),
+                    senderStart,
+                    length - if (kind != MessageKind.NOTICE && brackets == CompactNickBrackets.NONE) 2 else 1,
+                )
             }
         }
         pushStringAnnotation(FOOL_BODY_RANGE, "")

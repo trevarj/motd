@@ -1223,6 +1223,40 @@ class ConfigurationBackupRepositoryTest {
         }
 
     @Test
+    fun voiceButtonAndNicknameTapRestoreExplicitChoicesAndLegacyDefaults() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val settings = DataStoreSettingsRepository(context)
+            val original = settings.settings.first()
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                settings.setShowVoiceMessageButton(false)
+                settings.setNicknameTapAction(io.github.trevarj.motd.data.prefs.NicknameTapAction.USER_MENU)
+                val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                settings.setShowVoiceMessageButton(true)
+                settings.setNicknameTapAction(io.github.trevarj.motd.data.prefs.NicknameTapAction.MENTION)
+                backup.import(raw, importMode = BackupImportMode.MERGE)
+                assertFalse(settings.settings.first().showVoiceMessageButton)
+                assertEquals(io.github.trevarj.motd.data.prefs.NicknameTapAction.USER_MENU, settings.settings.first().nicknameTapAction)
+
+                val legacy =
+                    raw
+                        .replace(Regex(""""showVoiceMessageButton"\s*:\s*false\s*,"""), "")
+                        .replace(Regex(""""nicknameTapAction"\s*:\s*"USER_MENU"\s*,"""), "")
+                assertFalse(legacy.contains("\"showVoiceMessageButton\""))
+                assertFalse(legacy.contains("\"nicknameTapAction\""))
+                backup.import(legacy, importMode = BackupImportMode.MERGE)
+                assertTrue(settings.settings.first().showVoiceMessageButton)
+                assertEquals(io.github.trevarj.motd.data.prefs.NicknameTapAction.MENTION, settings.settings.first().nicknameTapAction)
+            } finally {
+                settings.setShowVoiceMessageButton(original.showVoiceMessageButton)
+                settings.setNicknameTapAction(original.nicknameTapAction)
+                db.close()
+            }
+        }
+
+    @Test
     fun mentionsSettingsRoundTripThroughSettingsBackup() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()

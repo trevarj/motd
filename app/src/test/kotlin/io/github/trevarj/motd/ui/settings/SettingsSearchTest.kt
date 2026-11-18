@@ -34,6 +34,8 @@ class SettingsSearchTest {
 
         listOf(
             "bold" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.COMPOSER_FORMATTING),
+            "microphone record" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.VOICE_MESSAGE_BUTTON),
+            "user menu tap" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.NICKNAME_TAP_ACTION),
             "encrypted" to SettingsSearchDestination.Page(SettingsSearchPage.BACKUP, SettingsTarget.EXPORT_BACKUP),
             "tabs" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.FOLDER_LAYOUT),
             "bubble background" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.BUBBLE_COLORS),
@@ -295,6 +297,10 @@ class SettingsSearchTest {
             R.string.settings_notifications_summary -> "Global, server, and channel alerts and watches"
             R.string.settings_composer_formatting_tools -> "Formatting tools"
             R.string.settings_composer_formatting_tools_desc -> "Show rich text controls"
+            R.string.settings_voice_message_button -> "Show voice-message button"
+            R.string.settings_voice_message_button_desc -> "Show the recording button in IRC chats"
+            R.string.settings_nickname_tap_action -> "Nickname tap action"
+            R.string.settings_nickname_tap_action_desc -> "Choose what happens when you tap a sender"
             R.string.settings_nick_mention_style -> "Nick mention style"
             R.string.settings_message_background_opacity -> "Message background opacity"
             R.string.settings_message_background_opacity_desc -> "Message tint in every layout. 0% removes tint, not blur; content, mention highlights, and semantic rails stay visible."

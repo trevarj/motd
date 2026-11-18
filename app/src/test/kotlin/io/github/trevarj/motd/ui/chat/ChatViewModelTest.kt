@@ -2239,7 +2239,7 @@ class ChatViewModelTest {
         }
 
     @Test
-    fun `a prefill pushed at the open chat arrives as composer prefill text`() =
+    fun `prefills pushed at the open chat arrive as ordered typed gestures`() =
         runTest {
             // The gesture orb inserts into the visible conversation without navigating: delivery rides
             // composerPrefills alone, so this chain must work with the screen already collecting.
@@ -2247,16 +2247,17 @@ class ChatViewModelTest {
             val vm = viewModel(channel, FakeConnectionManager(network.id), drafts = drafts)
             advanceUntilIdle()
 
-            val received = mutableListOf<String>()
+            val received = mutableListOf<List<ComposerPrefill>>()
             val collector =
                 launch(start = CoroutineStart.UNDISPATCHED) {
                     vm.composerPrefills.collect { received += it }
                 }
-            drafts.push(channel.id, "on my way ")
+            val requests = listOf(ComposerPrefill("alice", isNickname = true), ComposerPrefill("on my way "))
+            requests.forEach { drafts.push(channel.id, it) }
             runCurrent()
             collector.cancel()
 
-            assertEquals(listOf("on my way "), received)
+            assertEquals(listOf(requests), received)
             // Delivered means consumed: entry hydration later must not append it a second time.
             assertEquals(null, drafts.consume(channel.id))
         }
@@ -7657,6 +7658,10 @@ class ChatViewModelTest {
         override suspend fun setShowComposerEmoji(show: Boolean) = Unit
 
         override suspend fun setShowComposerFormattingTools(show: Boolean) = Unit
+
+        override suspend fun setShowVoiceMessageButton(show: Boolean) = Unit
+
+        override suspend fun setNicknameTapAction(action: io.github.trevarj.motd.data.prefs.NicknameTapAction) = Unit
 
         override suspend fun setChatSoundsEnabled(enabled: Boolean) = Unit
 

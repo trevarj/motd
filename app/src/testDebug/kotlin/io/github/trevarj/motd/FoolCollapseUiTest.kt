@@ -141,7 +141,12 @@ class FoolCollapseUiTest {
         val tag = "chat_message_fool-$nick"
         compose.onNodeWithTag("chat_timeline", useUnmergedTree = true).performScrollToNode(hasTestTag(tag))
         val row = compose.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
-        val sourceSurface = SemanticsMatcher("message long-press surface") { it.config.contains(SemanticsActions.OnLongClick) }
+        val messageActionsLabel = ApplicationProvider.getApplicationContext<Context>().getString(R.string.chat_bubble_actions)
+        val sourceSurface =
+            SemanticsMatcher("message long-press surface") {
+                it.config.contains(SemanticsActions.OnLongClick) &&
+                    it.config[SemanticsActions.OnLongClick].label == messageActionsLabel
+            }
         val bubble =
             compose.onNode(hasAnyAncestor(hasTestTag(tag)) and sourceSurface, useUnmergedTree = true).assertIsDisplayed()
         val rowBounds = row.fetchSemanticsNode().boundsInRoot
@@ -203,10 +208,9 @@ class FoolCollapseUiTest {
         val clipboard = ApplicationProvider.getApplicationContext<Context>().getSystemService(ClipboardManager::class.java)
         var touchSlop = 0f
 
-        fun holdSourceNick() {
+        fun holdSourceBubble() {
             val rowTag = "chat_message_fool-a"
             compose.onNodeWithTag("chat_timeline", useUnmergedTree = true).performScrollToNode(hasTestTag(rowTag))
-            val row = compose.onNodeWithTag(rowTag, useUnmergedTree = true).assertIsDisplayed()
             val text =
                 compose
                     .onNode(
@@ -217,10 +221,10 @@ class FoolCollapseUiTest {
             text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
             val layoutResult = layouts.single()
             assertTrue("Normal CHIP display reserves native inline cells", layoutResult.placeholderRects.any { it != null })
-            val nickPosition = layoutResult.placeholderRects.first { it != null }!!.center
-            val textBounds = text.fetchSemanticsNode().boundsInRoot
-            val rowBounds = row.fetchSemanticsNode().boundsInRoot
-            row.performTouchInput { longClick(textBounds.topLeft + nickPosition - rowBounds.topLeft) }
+            val ordinaryBodyOffset =
+                layoutResult.layoutInput.text.text
+                    .indexOf("Alpha") + 2
+            text.performTouchInput { longClick(layoutResult.getBoundingBox(ordinaryBodyOffset).center) }
         }
         try {
             compose.setContent {
@@ -228,7 +232,7 @@ class FoolCollapseUiTest {
                 SideEffect { touchSlop = configuration.touchSlop }
                 fixture.Content()
             }
-            holdSourceNick()
+            holdSourceBubble()
             compose.onNodeWithTag("message_action_select_text").performScrollTo().performClick()
             compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
             compose
@@ -301,11 +305,11 @@ class FoolCollapseUiTest {
                 )
             }
             copyNativeSelection("idd")
-            holdSourceNick()
+            holdSourceBubble()
             compose.onNodeWithTag("message_action_select_text").performScrollTo().performClick()
             assertEquals(2, compose.onAllNodes(nativeHandles, useUnmergedTree = true).fetchSemanticsNodes().size)
             copyNativeSelection(plain)
-            holdSourceNick()
+            holdSourceBubble()
             compose.onNodeWithTag("message_selection").assertDoesNotExist()
             compose.onNodeWithTag("message_action_copy").performScrollTo().performClick()
             compose.runOnIdle {

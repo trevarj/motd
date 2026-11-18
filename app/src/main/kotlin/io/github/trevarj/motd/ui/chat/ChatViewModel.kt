@@ -2935,8 +2935,8 @@ class ChatViewModel
 
         // --- composer prefill (mention → draft) ---
 
-        /** Consume-once composer prefill queued by ChannelInfo before popping back; null when none. */
-        fun consumePrefill(): String? = draftStore.consume(operationalBufferId.value)
+        /** Consume queued insertion gestures before entering the composer; null when none. */
+        fun consumePrefill(): List<ComposerPrefill>? = draftStore.consume(operationalBufferId.value)
 
         /**
          * Prefills queued for this conversation *while it is already open*.
@@ -2946,7 +2946,7 @@ class ChatViewModel
          * there is `launchSingleTop`: no entry effect re-runs, so nothing would ever drain the queue.
          * Cold on purpose — the text stays queued until a screen is actually collecting and can apply it.
          */
-        val composerPrefills: Flow<String> =
+        val composerPrefills: Flow<List<ComposerPrefill>> =
             draftStore.prefillPushes
                 .filter { it == operationalBufferId.value }
                 .mapNotNull { draftStore.consume(it) }

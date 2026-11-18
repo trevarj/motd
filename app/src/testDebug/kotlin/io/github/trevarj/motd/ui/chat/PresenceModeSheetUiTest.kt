@@ -73,6 +73,8 @@ class PresenceModeSheetUiTest {
                     onFoolsMode = {},
                     onShowComposerEmoji = {},
                     onShowComposerFormattingTools = {},
+                    onShowVoiceMessageButton = {},
+                    onNicknameTapAction = {},
                     onChatSoundsEnabled = {},
                     onVisibleReplyPrefix = {},
                     onSwipeToReplyEnabled = {},

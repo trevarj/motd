@@ -14,6 +14,12 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** One insertion gesture; nickname punctuation is chosen when applied to the composer. */
+data class ComposerPrefill(
+    val text: String,
+    val isNickname: Boolean = false,
+)
+
 /** Room-backed composer state; only transient navigation prefills remain process-local. */
 @Singleton
 class ComposerDraftStore
@@ -21,7 +27,7 @@ class ComposerDraftStore
     constructor(
         private val db: MotdDatabase,
     ) {
-        private val prefills = ConcurrentHashMap<Long, String>()
+        private val prefills = ConcurrentHashMap<Long, List<ComposerPrefill>>()
 
         private val _prefillPushes =
             MutableSharedFlow<Long>(
@@ -126,17 +132,17 @@ class ComposerDraftStore
                 ) == 1
             }
 
-        /** Append [text] to any queued prefill for [bufferId] and announce it on [prefillPushes]. */
+        /** Append [prefill] in gesture order and announce it on [prefillPushes]. */
         fun push(
             bufferId: Long,
-            text: String,
+            prefill: ComposerPrefill,
         ) {
-            prefills.merge(bufferId, text) { old, new -> old + new }
+            prefills.merge(bufferId, listOf(prefill)) { old, new -> old + new }
             _prefillPushes.tryEmit(bufferId)
         }
 
-        /** Return and remove the queued prefill for [bufferId]. */
-        fun consume(bufferId: Long): String? = prefills.remove(bufferId)
+        /** Return and remove all queued gestures for [bufferId], in insertion order. */
+        fun consume(bufferId: Long): List<ComposerPrefill>? = prefills.remove(bufferId)
 
         private companion object {
             /** A prefill is one user gesture; a handful in flight is already more than realistic. */

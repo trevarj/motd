@@ -98,4 +98,41 @@ class AutocompleteTest {
         val r = applyCompletion(text, token, "alice")
         assertEquals("hey alice ", r.text)
     }
+
+    @Test fun completion_keeps_suffix_and_replaces_the_whole_token_at_an_internal_cursor() {
+        val text = "hey alicia !"
+        val result = applyCompletion(text, nickTokenAt(text, 6)!!, "alice")
+        assertEquals("hey alice !", result.text)
+        assertEquals(9, result.cursor)
+    }
+
+    @Test fun explicit_newline_after_text_does_not_restart_addressing() {
+        val text = "hello\nal"
+        val token = nickTokenAt(text, text.length)!!
+        assertTrue(!token.atLineStart)
+        assertEquals("hello\nalice ", applyCompletion(text, token, "alice").text)
+    }
+
+    @Test fun whitespace_only_message_prefix_uses_colon() {
+        val text = " \n\t@al"
+        val token = nickTokenAt(text, text.length)!!
+        assertTrue(token.atLineStart)
+        assertEquals(" \n\talice: ", applyCompletion(text, token, "alice").text)
+    }
+
+    @Test fun long_visually_wrapped_prefix_still_uses_space() {
+        val prefix = "earlier text ".repeat(40)
+        val text = prefix + "al"
+        assertEquals(prefix + "alice ", applyCompletion(text, nickTokenAt(text, text.length)!!, "alice").text)
+    }
+
+    @Test fun punctuation_bounds_token_without_discarding_irc_nickname_specials() {
+        val text = "hey (@al!), tail"
+        val token = nickTokenAt(text, 8)!!
+        assertEquals("al", token.text)
+        val result = applyCompletion(text, token, "alice")
+        assertEquals("hey (alice!), tail", result.text)
+        assertEquals(10, result.cursor)
+        assertEquals("[a]\\`_^{}|-", nickTokenAt("[a]\\`_^{}|-", 3)!!.text)
+    }
 }

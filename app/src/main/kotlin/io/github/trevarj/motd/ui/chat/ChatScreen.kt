@@ -224,6 +224,7 @@ import io.github.trevarj.motd.data.prefs.EffectSurface
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.NicknameTapAction
 import io.github.trevarj.motd.data.prefs.PaletteDocument
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
@@ -441,15 +442,15 @@ fun ChatScreen(
             }
         }
     var mentionRequest by remember { mutableStateOf<Pair<Long, String>?>(null) }
+    var composerPrefillRequest by remember { mutableStateOf<Pair<Long, List<ComposerPrefill>>?>(null) }
     var avatarEditorOpen by rememberSaveable { mutableStateOf(false) }
     var avatarUploadOpen by rememberSaveable { mutableStateOf(false) }
     var inviteNick by rememberSaveable { mutableStateOf<String?>(null) }
     var inviteChannelOpen by rememberSaveable { mutableStateOf(false) }
     var editingFool by rememberSaveable { mutableStateOf<String?>(null) }
-    // A prefill aimed at this conversation while it is already open (gesture orb). It arrives as
-    // text rather than as an entry to drain, and rides the same append path as a nick-sheet mention.
+    // Prefills aimed at the already-open conversation are drained without another screen entry.
     LaunchedEffect(viewModel) {
-        viewModel.composerPrefills.collect { mentionRequest = System.nanoTime() to it }
+        viewModel.composerPrefills.collect { composerPrefillRequest = System.nanoTime() to it }
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val ebooksHelperRoomId by viewModel.ebooksHelperRoomId.collectAsStateWithLifecycle()
@@ -730,7 +731,12 @@ fun ChatScreen(
         voiceState = voiceState,
         onVoiceTranscribe = voiceViewModel::transcribe,
         onVoiceTranscriptionCancel = voiceViewModel::cancelTranscription,
-        voiceEnabled = !isServerBuffer && (!state.parted),
+        voiceEnabled =
+            !isServerBuffer && !state.parted &&
+                (
+                    settings.showVoiceMessageButton ||
+                        (dickordEnabled && state.buffer?.let { isDickordPortalConversation(it.type, it.displayName) } == true)
+                ),
         onVoiceHoldStart = { startVoiceRecording(locked = false) },
         onVoiceAccessibilityStart = { startVoiceRecording(locked = true) },
         onVoiceHoldStop = voiceViewModel::stopRecording,
@@ -777,6 +783,8 @@ fun ChatScreen(
         outgoingFlight = outgoingFlight,
         onFlightSettled = viewModel::onFlightSettled,
         mentionPrefill = mentionRequest,
+        composerPrefill = composerPrefillRequest,
+        nicknameTapAction = settings.nicknameTapAction,
         jumpTarget = jumpTarget,
         initialTarget = initialTarget,
         entryState = entryState,
@@ -946,7 +954,7 @@ fun ChatScreen(
                 viewModel.submit("/query ${sheet.nick}", onOpenBuffer)
             },
             onMention = {
-                mentionRequest = System.nanoTime() to "${sheet.nick}: "
+                mentionRequest = System.nanoTime() to sheet.nick
                 viewModel.dismissNickSheet()
             },
             onToggleFriend = { viewModel.toggleFriend(sheet.nick) },
@@ -1186,7 +1194,7 @@ internal fun ChatContent(
     onDismissInvite: (Long) -> Unit = {},
     // Re-join the current channel from the parted banner.
     onRejoin: () -> Unit = {},
-    consumePrefill: () -> String? = { null },
+    consumePrefill: () -> List<ComposerPrefill>? = { null },
     // Consume-once file routed here by the share picker; opens the upload confirmation sheet.
     consumeSharedFile: () -> PendingShare.File? = { null },
     // Consume-once attachment request queued (by the gesture orb) before this screen was entered.
@@ -1217,8 +1225,10 @@ internal fun ChatContent(
     // The send currently travelling from the composer into the timeline, if any.
     outgoingFlight: OutgoingFlight? = null,
     onFlightSettled: (Long) -> Unit = {},
-    // Immediate nick-sheet mention request. The nonce permits mentioning the same nick repeatedly.
+    // Immediate raw-nickname request. The nonce permits mentioning the same nick repeatedly.
     mentionPrefill: Pair<Long, String>? = null,
+    composerPrefill: Pair<Long, List<ComposerPrefill>>? = null,
+    nicknameTapAction: NicknameTapAction = NicknameTapAction.MENTION,
     jumpTarget: ChatPositionTarget? = null,
     initialTarget: ChatPositionTarget? = null,
     entryState: EntryPositionState = EntryPositionState.Pending,
@@ -2008,15 +2018,31 @@ internal fun ChatContent(
             }
             if (!prefillConsumed) {
                 prefillConsumed = true
-                consumePrefill()?.let { prefill ->
-                    composerText = appendPrefill(composerText, prefill)
+                consumePrefill()?.forEach { prefill ->
+                    composerText =
+                        if (prefill.isNickname) {
+                            insertNickname(composerText, prefill.text)
+                        } else {
+                            appendPrefill(composerText, prefill.text)
+                        }
                     onDraftChanged(composerText.text)
                 }
             }
         }
         LaunchedEffect(mentionPrefill) {
             mentionPrefill?.second?.let {
-                composerText = appendPrefill(composerText, it)
+                composerText = insertNickname(composerText, it)
+                onDraftChanged(composerText.text)
+            }
+        }
+        LaunchedEffect(composerPrefill) {
+            composerPrefill?.second?.forEach { prefill ->
+                composerText =
+                    if (prefill.isNickname) {
+                        insertNickname(composerText, prefill.text)
+                    } else {
+                        appendPrefill(composerText, prefill.text)
+                    }
                 onDraftChanged(composerText.text)
             }
         }
@@ -4270,7 +4296,15 @@ internal fun ChatContent(
                                                 historyUiState = historyUiState,
                                                 foolExpanded = foolExpanded,
                                                 onToggleFool = onToggleFool,
-                                                onSenderClick = onSenderClick,
+                                                onSenderClick = { nick ->
+                                                    if (nicknameTapAction == NicknameTapAction.MENTION) {
+                                                        composerText = insertNickname(composerText, nick)
+                                                        onDraftChanged(composerText.text)
+                                                    } else {
+                                                        onSenderClick(nick)
+                                                    }
+                                                },
+                                                onSenderLongClick = onSenderClick,
                                             )
                                         }
                                         // Hidden rows cannot receive input; readiness removes this immediately.
@@ -5086,23 +5120,15 @@ internal inline fun <T> pagingSnapshotItemOrNull(
     }
 }
 
-/**
- * Append [prefill] to [value], inserting a single space when the current text is non-empty and
- * doesn't already end in whitespace. Places the cursor at the end.
- */
+/** Generic shares, snippets and quotes append; nickname requests use [insertNickname]. */
 fun appendPrefill(
     value: TextFieldValue,
     prefill: String,
 ): TextFieldValue {
     val current = value.text
-    val sep = if (current.isNotEmpty() && !current.last().isWhitespace()) " " else ""
-    val text = current + sep + prefill
-    return TextFieldValue(
-        text = text,
-        selection =
-            androidx.compose.ui.text
-                .TextRange(text.length),
-    )
+    val separator = if (current.isNotEmpty() && !current.last().isWhitespace()) " " else ""
+    val text = current + separator + prefill
+    return TextFieldValue(text, TextRange(text.length))
 }
 
 /** Hand the raw message text to the system share sheet (mirrors the image viewer's share). */
@@ -5118,16 +5144,6 @@ private fun shareMessageText(
     context.startActivity(
         Intent.createChooser(intent, context.getString(R.string.chat_action_share_chooser)),
     )
-}
-
-/** Restore a buffer draft, then merge a one-shot mention prefill without losing the cursor. */
-internal fun restoreComposerDraft(
-    draft: String?,
-    prefill: String?,
-): TextFieldValue {
-    val saved = draft.orEmpty()
-    val value = TextFieldValue(saved, TextRange(saved.length))
-    return prefill?.let { appendPrefill(value, it) } ?: value
 }
 
 /** Add the visible channel-reply prefix while preserving the current selection. */

@@ -35,6 +35,7 @@ import io.github.trevarj.motd.service.NotificationSettingsImpl
 import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.testing.NoopConnectionManager
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
+import io.github.trevarj.motd.ui.chat.ComposerPrefill
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -86,6 +87,27 @@ class ChannelInfoTopicMutationTest {
         database.close()
         Dispatchers.resetMain()
     }
+
+    @Test
+    fun `mention queues raw nickname gestures before returning to chat`() =
+        runTest {
+            val drafts = ComposerDraftStore(database)
+            val viewModel = viewModel(FakeConnectionManager(), drafts = drafts)
+            viewModel.init(BUFFER_ID)
+            viewModel.state.first { it.buffer != null }
+
+            viewModel.mentionMember("alice") {
+                assertEquals(listOf(ComposerPrefill("alice", isNickname = true)), drafts.consume(BUFFER_ID))
+            }
+            viewModel.mentionMember("bob") {}
+            viewModel.mentionMember("bob") {}
+
+            assertEquals(
+                listOf(ComposerPrefill("bob", isNickname = true), ComposerPrefill("bob", isNickname = true)),
+                drafts.consume(BUFFER_ID),
+            )
+            assertNull(drafts.consume(BUFFER_ID))
+        }
 
     @Test
     fun `missing client and rejected write preserve a retryable failure`() =
@@ -475,10 +497,11 @@ class ChannelInfoTopicMutationTest {
         notificationSettings: NotificationSettings = NotificationSettings.Noop,
         clock: AppClock = AppClock(System::currentTimeMillis),
         settings: SettingsRepository = FakeSettingsRepository(),
+        drafts: ComposerDraftStore = ComposerDraftStore(database),
     ) = ChannelInfoViewModel(
         bufferRepository = buffers,
         connectionManager = manager,
-        draftStore = ComposerDraftStore(database),
+        draftStore = drafts,
         settingsRepository = settings,
         userDao = database.userDao(),
         networkIdentityDao = database.networkIdentityDao(),
@@ -674,6 +697,10 @@ class ChannelInfoTopicMutationTest {
         override suspend fun setShowComposerEmoji(show: Boolean) = Unit
 
         override suspend fun setShowComposerFormattingTools(show: Boolean) = Unit
+
+        override suspend fun setShowVoiceMessageButton(show: Boolean) = Unit
+
+        override suspend fun setNicknameTapAction(action: io.github.trevarj.motd.data.prefs.NicknameTapAction) = Unit
 
         override suspend fun setChatSoundsEnabled(enabled: Boolean) = Unit
 

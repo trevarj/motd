@@ -36,6 +36,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
+import io.github.trevarj.motd.ui.chat.ComposerPrefill
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -95,7 +96,7 @@ class SharePickerViewModel
             val current = share ?: return false
             if (!store.consumeIfUnchanged(current)) return false
             when (current) {
-                is PendingShare.Text -> draftStore.push(bufferId, current.text)
+                is PendingShare.Text -> draftStore.push(bufferId, ComposerPrefill(current.text))
                 is PendingShare.File -> store.assignFile(bufferId, current)
             }
             handled = true

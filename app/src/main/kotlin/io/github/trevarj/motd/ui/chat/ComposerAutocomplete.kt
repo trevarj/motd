@@ -1,7 +1,9 @@
 package io.github.trevarj.motd.ui.chat
 
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.TextFieldValue
+import io.github.trevarj.motd.irc.format.containsIrcFormatting
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 
 /** A composer completion candidate: display text plus whether it is a `/` command hint. */
@@ -61,9 +63,56 @@ fun applyPick(
     val formatted = parseIrcFormatting(value.text)
     val visibleCursor = formatted.visibleOffset(value.selection.end)
     val token = nickTokenAt(formatted.visibleText, visibleCursor) ?: return value
-    val rawStart = formatted.rawToVisible.indexOfLast { it == token.start }.coerceAtLeast(0)
-    val rawEnd = formatted.rawToVisible.indexOfFirst { it == token.end }.takeIf { it >= 0 } ?: value.selection.end
-    val rawToken = token.copy(start = rawStart, end = rawEnd)
-    val result = applyCompletion(value.text, rawToken, picked)
-    return TextFieldValue(result.text, TextRange(result.cursor))
+    // Keep the opening controls before the nickname and closing controls with the suffix.
+    val rawStart = formatted.rawOffset(token.start)
+    val rawEnd = formatted.rawToVisible.indexOfFirst { it == token.end }
+    val insertion = picked + nicknameSuffix(formatted.visibleText, token.start, token.end)
+    val next =
+        buildAnnotatedString {
+            append(value.annotatedString.subSequence(0, rawStart))
+            append(insertion)
+            // Controls inside the replaced token must still affect the untouched suffix.
+            for (index in rawStart until rawEnd) {
+                if (formatted.rawToVisible[index] == formatted.rawToVisible[index + 1]) {
+                    append(value.annotatedString.subSequence(index, index + 1))
+                }
+            }
+            append(value.annotatedString.subSequence(rawEnd, value.text.length))
+        }
+    return TextFieldValue(next, TextRange(rawStart + insertion.length))
+}
+
+/** Insert a nickname at the native cursor, replacing either direction of selection. */
+fun insertNickname(
+    value: TextFieldValue,
+    nick: String,
+): TextFieldValue {
+    val start = value.selection.min
+    val end = value.selection.max
+    val formatted = if (containsIrcFormatting(value.text)) parseIrcFormatting(value.text) else null
+    val visibleText = formatted?.visibleText ?: value.text
+    val visibleStart = formatted?.visibleOffset(start) ?: start
+    val visibleEnd = formatted?.visibleOffset(end) ?: end
+    val previous = visibleText.getOrNull(visibleStart - 1)
+    val needsLeadingSpace = previous != null && (previous.isLetterOrDigit() || previous in "-[]\\`_^{}|@")
+    val insertion =
+        buildString(nick.length + 3) {
+            if (needsLeadingSpace) append(' ')
+            append(nick)
+            append(nicknameSuffix(visibleText, visibleStart, visibleEnd))
+        }
+    val next =
+        buildAnnotatedString {
+            append(value.annotatedString.subSequence(0, start))
+            append(insertion)
+            if (formatted != null) {
+                for (index in start until end) {
+                    if (formatted.rawToVisible[index] == formatted.rawToVisible[index + 1]) {
+                        append(value.annotatedString.subSequence(index, index + 1))
+                    }
+                }
+            }
+            append(value.annotatedString.subSequence(end, value.text.length))
+        }
+    return TextFieldValue(next, TextRange(start + insertion.length))
 }

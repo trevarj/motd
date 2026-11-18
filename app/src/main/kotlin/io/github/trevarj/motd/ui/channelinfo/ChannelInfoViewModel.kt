@@ -33,6 +33,7 @@ import io.github.trevarj.motd.service.NotificationMode
 import io.github.trevarj.motd.service.NotificationSettings
 import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
+import io.github.trevarj.motd.ui.chat.ComposerPrefill
 import io.github.trevarj.motd.ui.chat.NickSheetState
 import io.github.trevarj.motd.ui.chat.WhoisInfo
 import io.github.trevarj.motd.ui.chat.parseWhois
@@ -492,14 +493,14 @@ class ChannelInfoViewModel
         }
 
         /**
-         * Queue a "$nick: " prefill on the current buffer's composer draft, then [onDone] (pops back
+         * Queue a raw nickname for the current composer, then [onDone] (pops back
          * to the chat). ChatScreen reads it via [ComposerDraftStore.consume] on re-entry.
          */
         fun mentionMember(
             nick: String,
             onDone: () -> Unit,
         ) {
-            state.value.buffer?.let { draftStore.push(it.id, "$nick: ") }
+            state.value.buffer?.let { draftStore.push(it.id, ComposerPrefill(nick, isNickname = true)) }
             onDone()
         }
 

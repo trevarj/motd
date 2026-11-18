@@ -98,6 +98,7 @@ import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
@@ -140,6 +141,7 @@ import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
+import io.github.trevarj.motd.data.prefs.NicknameTapAction
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
 import io.github.trevarj.motd.dcc.EbooksResultCache
@@ -170,6 +172,7 @@ import io.github.trevarj.motd.ui.chat.ExternalTranslationRequest
 import io.github.trevarj.motd.ui.chat.MessageForwardError
 import io.github.trevarj.motd.ui.chat.MessageList
 import io.github.trevarj.motd.ui.chat.MessageUrlCache
+import io.github.trevarj.motd.ui.chat.NickActionSheet
 import io.github.trevarj.motd.ui.chat.OutgoingFlight
 import io.github.trevarj.motd.ui.chat.SendFlightAnchors
 import io.github.trevarj.motd.ui.chat.SendFlightMotion
@@ -332,7 +335,12 @@ class ComposerSendClearUiTest {
         compose.onNodeWithTag("chat_timeline", useUnmergedTree = true).performScrollToNode(hasTestTag(tag))
         compose.waitForIdle()
         val row = compose.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed()
-        val longPressSurface = SemanticsMatcher("message long-press surface") { it.config.contains(SemanticsActions.OnLongClick) }
+        val messageActionsLabel = RuntimeEnvironment.getApplication().getString(R.string.chat_bubble_actions)
+        val longPressSurface =
+            SemanticsMatcher("message long-press surface") {
+                it.config.contains(SemanticsActions.OnLongClick) &&
+                    it.config[SemanticsActions.OnLongClick].label == messageActionsLabel
+            }
         val bubble = compose.onNode(hasAnyAncestor(hasTestTag(tag)) and longPressSurface, useUnmergedTree = true).assertIsDisplayed()
         val rowBounds = row.fetchSemanticsNode().boundsInRoot
         val bubbleBounds = bubble.fetchSemanticsNode().boundsInRoot
@@ -480,6 +488,9 @@ class ComposerSendClearUiTest {
         historySyncStatus: HistorySyncStatus = HistorySyncStatus.Idle,
         onOpenChannelInfo: (Long) -> Unit = {},
         onSenderClick: (String) -> Unit = {},
+        nicknameTapAction: NicknameTapAction = NicknameTapAction.MENTION,
+        mentionPrefill: () -> Pair<Long, String>? = { null },
+        nickSheet: @Composable () -> Unit = {},
         onOpenSearch: (Long) -> Unit = {},
         parted: Boolean = false,
         onInviteUser: () -> Unit = {},
@@ -526,6 +537,7 @@ class ComposerSendClearUiTest {
         nickColorsEnabled: Boolean = true,
         contentHeight: () -> Dp? = { null },
         voiceState: () -> VoiceMessageUiState = { VoiceMessageUiState() },
+        voiceEnabled: () -> Boolean = { true },
         onViewportRefreshAnchor: (ViewportRefreshAnchor?) -> Unit = {},
         chatViewModel: ChatViewModel? = null,
         forwardEnabled: Boolean = false,
@@ -570,6 +582,8 @@ class ComposerSendClearUiTest {
                             historySyncStatus = historySyncStatus,
                             onOpenChannelInfo = onOpenChannelInfo,
                             onSenderClick = onSenderClick,
+                            nicknameTapAction = nicknameTapAction,
+                            mentionPrefill = mentionPrefill(),
                             ebooksHelperRoomId = ebooksHelperRoomId(),
                             ebooksDccOffers = ebooksDccOffers(),
                             onAcceptDccTransfer = onAcceptDccTransfer,
@@ -631,13 +645,164 @@ class ComposerSendClearUiTest {
                             channelSenderPrefixes = ownerSenderPrefixes ?: channelSenderPrefixes(),
                             identityRules = identityRules,
                             voiceState = voiceState(),
+                            voiceEnabled = voiceEnabled(),
                             onViewportRefreshAnchor = onViewportRefreshAnchor,
                         )
                         aiSheet()
+                        nickSheet()
                     }
                 }
             }
         }
+    }
+
+    @Test
+    fun nicknameTapInEmptyComposerAddsAddressPrefix() = assertNicknameTapInsertion("", 0, 0, "alice: ", 7)
+
+    @Test
+    fun nicknameTapAtStartPreservesExistingText() = assertNicknameTapInsertion("hello", 0, 0, "alice: hello", 7)
+
+    @Test
+    fun nicknameTapAtMiddleCursorPreservesSuffix() = assertNicknameTapInsertion("hello world", 6, 6, "hello alice world", 12)
+
+    @Test
+    fun nicknameTapReplacesSelectionAndPreservesPunctuation() = assertNicknameTapInsertion("hey bob!", 4, 7, "hey alice!", 9)
+
+    @Test
+    fun nicknameTapReplacesReversedSelection() = assertNicknameTapInsertion("hey bob!", 7, 4, "hey alice!", 9)
+
+    @Test
+    fun nicknameTapBeforePunctuationAddsWordBoundary() = assertNicknameTapInsertion("hi!", 2, 2, "hi alice!", 8)
+
+    @Test
+    fun nicknameTapAfterNewlineInNonemptyMessageDoesNotAddColon() = assertNicknameTapInsertion("hi\n", 3, 3, "hi\nalice ", 9)
+
+    @Test
+    fun nicknameTapAfterOnlyNewlineAddsAddressPrefix() = assertNicknameTapInsertion("\n", 1, 1, "\nalice: ", 8)
+
+    private fun assertNicknameTapInsertion(
+        initial: String,
+        selectionStart: Int,
+        selectionEnd: Int,
+        expected: String,
+        expectedCursor: Int,
+    ) {
+        val row = translationMessage().copy(text = "An ordinary message")
+        val saved = mutableListOf<String>()
+        val menus = mutableListOf<String>()
+        setContent(
+            draft = { ComposerDraftState(initial, hydrated = true, revision = 1) },
+            pages = flowOf(PagingData.from(listOf(row))),
+            onDraftChanged = { saved += it },
+            onSenderClick = { menus += it },
+            onSubmit = {},
+        )
+        val field = compose.onNodeWithTag("chat_composer_field")
+        field.performSemanticsAction(SemanticsActions.SetSelection) { it(selectionStart, selectionEnd, false) }
+        val sender =
+            compose.onNode(
+                hasText("alice") and hasAnyAncestor(hasTestTag(timelineMessageTag(row.msgid, row.id))),
+                useUnmergedTree = true,
+            )
+        val layouts = mutableListOf<TextLayoutResult>()
+        sender.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        sender.performTouchInput { click(layouts.single().getBoundingBox(2).center) }
+        field.assertTextEquals(expected)
+        field.assert(SemanticsMatcher.expectValue(SemanticsProperties.TextSelectionRange, TextRange(expectedCursor)))
+        compose.runOnIdle {
+            assertEquals(expected, saved.last())
+            assertTrue("Default nickname taps must insert, not open a menu", menus.isEmpty())
+        }
+        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+    }
+
+    @Test
+    fun nicknameHoldOpensUserMenuAndMentionInsertsAtSelection() {
+        val row = translationMessage().copy(text = "An ordinary message")
+        var menuNick by mutableStateOf<String?>(null)
+        var mention by mutableStateOf<Pair<Long, String>?>(null)
+        val saved = mutableListOf<String>()
+        setContent(
+            draft = { ComposerDraftState("hey bob!", hydrated = true, revision = 1) },
+            pages = flowOf(PagingData.from(listOf(row))),
+            onSenderClick = { menuNick = it },
+            mentionPrefill = { mention },
+            onDraftChanged = { saved += it },
+            nickSheet = {
+                menuNick?.let { nick ->
+                    NickActionSheet(
+                        nick = nick,
+                        isSelf = false,
+                        isFriend = false,
+                        isFool = false,
+                        canModerate = false,
+                        whois = null,
+                        onDismiss = { menuNick = null },
+                        onMessage = {},
+                        onMention = {
+                            mention = System.nanoTime() to nick
+                            menuNick = null
+                        },
+                        onToggleFriend = {},
+                        onToggleFool = {},
+                        onOpenFoolSettings = {},
+                        onOp = {},
+                        onVoice = {},
+                        onKick = {},
+                        onBan = { _, _ -> },
+                    )
+                }
+            },
+            onSubmit = {},
+        )
+        val field = compose.onNodeWithTag("chat_composer_field")
+        field.performSemanticsAction(SemanticsActions.SetSelection) { it(4, 7, false) }
+        val sender =
+            compose.onNode(
+                hasText("alice") and hasAnyAncestor(hasTestTag(timelineMessageTag(row.msgid, row.id))),
+                useUnmergedTree = true,
+            )
+        val layouts = mutableListOf<TextLayoutResult>()
+        sender.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        sender.performTouchInput { longClick(layouts.single().getBoundingBox(2).center) }
+        compose.onNodeWithTag("nick_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+        field.assertTextEquals("hey bob!")
+        compose.onNodeWithText(RuntimeEnvironment.getApplication().getString(R.string.nick_sheet_mention)).performScrollTo().performClick()
+        compose.onNodeWithTag("nick_sheet").assertDoesNotExist()
+        field.assertTextEquals("hey alice!")
+        field.assert(SemanticsMatcher.expectValue(SemanticsProperties.TextSelectionRange, TextRange(9)))
+        compose.runOnIdle { assertEquals("hey alice!", saved.last()) }
+        holdMessageBubble(row)
+        compose.onNodeWithTag("message_action_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("nick_sheet").assertDoesNotExist()
+    }
+
+    @Test
+    fun voiceDisabledEmptyComposerExposesDisabledSendAndNoRecordingAction() {
+        var enabled by mutableStateOf(false)
+        val sent = mutableListOf<String>()
+        setContent(
+            draft = { ComposerDraftState("", hydrated = true, revision = 1) },
+            voiceEnabled = { enabled },
+            onSubmit = { sent += it },
+        )
+        val send = compose.onNodeWithTag("chat_composer_send")
+        send.assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithContentDescription(RuntimeEnvironment.getApplication().getString(R.string.chat_composer_send)).assertIsNotEnabled()
+        compose.onNodeWithTag("chat_composer_voice").assertDoesNotExist()
+        compose.onNodeWithContentDescription(RuntimeEnvironment.getApplication().getString(R.string.voice_record)).assertDoesNotExist()
+        send.performTouchInput { click() }
+        compose.runOnIdle {
+            assertTrue(sent.isEmpty())
+            enabled = true
+        }
+        compose.onNodeWithTag("chat_composer_voice").assertIsDisplayed().assertIsEnabled()
+        compose.runOnIdle { enabled = false }
+        compose.onNodeWithTag("chat_composer_send").assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithTag("chat_composer_field").performTextInput("hello")
+        compose.onNodeWithTag("chat_composer_send").assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(listOf("hello"), sent) }
     }
 
     @Test
@@ -667,6 +832,7 @@ class ComposerSendClearUiTest {
             layoutDensity = { density },
             channelSenderPrefixes = { prefixes },
             identityRules = rules,
+            nicknameTapAction = NicknameTapAction.USER_MENU,
             onSenderClick = { senderClicks += it },
             onSubmit = {},
         )
@@ -3151,6 +3317,7 @@ class ComposerSendClearUiTest {
                 entry = EntryPositionState.Settled
             },
             onSenderClick = { senderClicks += it },
+            nicknameTapAction = NicknameTapAction.USER_MENU,
             onSubmit = {},
         )
         compose.mainClock.autoAdvance = false
@@ -3242,6 +3409,7 @@ class ComposerSendClearUiTest {
             nickMentionStyle = style,
             nickColorsEnabled = false,
             onSenderClick = { profileClicks += it },
+            nicknameTapAction = NicknameTapAction.USER_MENU,
             onSubmit = {},
         )
         val body = compose.onNodeWithText(row.text, useUnmergedTree = true)
@@ -3286,8 +3454,10 @@ class ComposerSendClearUiTest {
             .performSemanticsAction(SemanticsActions.Dismiss) { it() }
         compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
         olderBody.performTouchInput { longClick(olderMentionCenter) }
+        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(listOf("body-peer", "other-peer"), profileClicks) }
+        olderBody.performTouchInput { longClick(urlCenter) }
         compose.onNodeWithTag("message_action_sheet").assertIsDisplayed()
-        compose.runOnIdle { assertEquals(listOf("body-peer"), profileClicks) }
         compose.onNodeWithTag("message_action_select_text").performScrollTo().performClick()
         compose.onNodeWithTag("message_selection_text").assertTextEquals(older.text)
         val selectedLayouts = mutableListOf<TextLayoutResult>()
@@ -3301,12 +3471,12 @@ class ComposerSendClearUiTest {
             compose.onAllNodes(nativeHandles, useUnmergedTree = true).fetchSemanticsNodes().size == 2
         }
         body.performTouchInput { click(mentionCenter) }
-        compose.runOnIdle { assertEquals(listOf("body-peer"), profileClicks) }
+        compose.runOnIdle { assertEquals(listOf("body-peer", "other-peer"), profileClicks) }
         compose.onNodeWithTag("message_selection").assertDoesNotExist()
         compose.onNodeWithTag("message_selection_text").assertDoesNotExist()
         compose.onAllNodes(nativeHandles, useUnmergedTree = true).assertCountEquals(0)
         body.performTouchInput { click(mentionCenter) }
-        compose.runOnIdle { assertEquals(listOf("body-peer", "body-peer"), profileClicks) }
+        compose.runOnIdle { assertEquals(listOf("body-peer", "other-peer", "body-peer"), profileClicks) }
     }
 
     @Test

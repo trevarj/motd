@@ -13,6 +13,7 @@ import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.ui.chat.AttachmentRequestStore
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
+import io.github.trevarj.motd.ui.chat.ComposerPrefill
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -122,7 +123,7 @@ class GestureActionDispatcherTest {
             )
             runCurrent()
 
-            assertEquals("alice: ", world.drafts.consume(9L))
+            assertEquals(listOf(ComposerPrefill("alice", isNickname = true)), world.drafts.consume(9L))
             assertEquals(listOf(GestureNavRequest.OpenChat(9L)), nav)
         }
 
@@ -132,7 +133,25 @@ class GestureActionDispatcherTest {
 
             world.dispatcher.execute(GestureAction.InsertSnippet("on my way"))
 
-            assertEquals("on my way", world.drafts.consume(5L))
+            assertEquals(listOf(ComposerPrefill("on my way")), world.drafts.consume(5L))
+        }
+
+    @Test fun `multiple mention and snippet gestures retain raw identity and order`() =
+        runTest {
+            val world = world(currentBuffer = 5L)
+
+            world.dispatcher.execute(GestureAction.InsertMention("alice"))
+            world.dispatcher.execute(GestureAction.InsertSnippet("literal: \n"))
+            world.dispatcher.execute(GestureAction.InsertMention("alice"))
+
+            assertEquals(
+                listOf(
+                    ComposerPrefill("alice", isNickname = true),
+                    ComposerPrefill("literal: \n"),
+                    ComposerPrefill("alice", isNickname = true),
+                ),
+                world.drafts.consume(5L),
+            )
         }
 
     @Test fun `attach queues an attachment request without navigating anywhere`() =

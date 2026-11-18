@@ -52,6 +52,7 @@ internal object PrefKeys {
     val NICK_COLORS_ENABLED = stringPreferencesKey("nick_colors_enabled")
     val NICK_COLOR_PALETTE = stringPreferencesKey("nick_color_palette")
     val NICK_MENTION_STYLE = stringPreferencesKey("nick_mention_style")
+    val NICKNAME_TAP_ACTION = stringPreferencesKey("nickname_tap_action")
     val NICK_COLOR_OVERRIDES = stringPreferencesKey("nick_color_overrides")
     val FRIEND_NICKS = stringPreferencesKey("friend_nicks")
     val FOOL_NICKS = stringPreferencesKey("fool_nicks")
@@ -69,6 +70,7 @@ internal object PrefKeys {
     val CHAT_WALLPAPER = stringPreferencesKey("chat_wallpaper")
     val SHOW_COMPOSER_EMOJI = stringPreferencesKey("show_composer_emoji")
     val SHOW_COMPOSER_FORMATTING_TOOLS = stringPreferencesKey("show_composer_formatting_tools")
+    val SHOW_VOICE_MESSAGE_BUTTON = stringPreferencesKey("show_voice_message_button")
     val CHAT_SOUNDS_ENABLED = stringPreferencesKey("chat_sounds_enabled")
     val HISTORY_SYNC_DEPTH = stringPreferencesKey("history_sync_depth")
     val HISTORY_SYNC_MODE = stringPreferencesKey("history_sync_mode")
@@ -195,6 +197,7 @@ class DataStoreSettingsRepository
                     nickColorsEnabled = prefs[PrefKeys.NICK_COLORS_ENABLED]?.toBooleanStrictOrNull() ?: true,
                     nickColorPalette = nickColorPaletteFromPreference(prefs[PrefKeys.NICK_COLOR_PALETTE]),
                     nickMentionStyle = nickMentionStyleFromPreference(prefs[PrefKeys.NICK_MENTION_STYLE]),
+                    nicknameTapAction = nicknameTapActionFromPreference(prefs[PrefKeys.NICKNAME_TAP_ACTION]),
                     nickColorOverrides = decodeHueOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]),
                     friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]),
                     fools = fools,
@@ -216,6 +219,7 @@ class DataStoreSettingsRepository
                     showComposerEmoji = prefs[PrefKeys.SHOW_COMPOSER_EMOJI]?.toBooleanStrictOrNull() ?: true,
                     showComposerFormattingTools =
                         prefs[PrefKeys.SHOW_COMPOSER_FORMATTING_TOOLS]?.toBooleanStrictOrNull() ?: true,
+                    showVoiceMessageButton = prefs[PrefKeys.SHOW_VOICE_MESSAGE_BUTTON]?.toBooleanStrictOrNull() ?: true,
                     chatSoundsEnabled = prefs[PrefKeys.CHAT_SOUNDS_ENABLED]?.toBooleanStrictOrNull() ?: true,
                     historySyncDepth =
                         prefs[PrefKeys.HISTORY_SYNC_DEPTH]
@@ -299,6 +303,10 @@ class DataStoreSettingsRepository
 
         override suspend fun setNickMentionStyle(value: NickMentionStyle) {
             store.edit { it[PrefKeys.NICK_MENTION_STYLE] = value.name }
+        }
+
+        override suspend fun setNicknameTapAction(action: NicknameTapAction) {
+            store.edit { it[PrefKeys.NICKNAME_TAP_ACTION] = action.name }
         }
 
         override suspend fun setNickColorOverride(
@@ -493,6 +501,10 @@ class DataStoreSettingsRepository
 
         override suspend fun setShowComposerFormattingTools(show: Boolean) {
             store.edit { it[PrefKeys.SHOW_COMPOSER_FORMATTING_TOOLS] = show.toString() }
+        }
+
+        override suspend fun setShowVoiceMessageButton(show: Boolean) {
+            store.edit { it[PrefKeys.SHOW_VOICE_MESSAGE_BUTTON] = show.toString() }
         }
 
         override suspend fun setChatSoundsEnabled(enabled: Boolean) {

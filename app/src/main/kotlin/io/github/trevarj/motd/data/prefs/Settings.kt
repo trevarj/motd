@@ -49,6 +49,10 @@ enum class NickMentionStyle { NONE, BOLD, CHIP }
 
 internal fun nickMentionStyleFromPreference(saved: String?): NickMentionStyle = saved?.let { runCatching { NickMentionStyle.valueOf(it) }.getOrNull() } ?: NickMentionStyle.BOLD
 
+enum class NicknameTapAction { MENTION, USER_MENU }
+
+internal fun nicknameTapActionFromPreference(saved: String?): NicknameTapAction = saved?.let { runCatching { NicknameTapAction.valueOf(it) }.getOrNull() } ?: NicknameTapAction.MENTION
+
 enum class FoolsMode { DIMMED, BLUR, COLLAPSE, HIDE }
 
 @Serializable
@@ -302,6 +306,7 @@ data class Settings(
     val nickColorsEnabled: Boolean = true,
     val nickColorPalette: NickColorPalette = NickColorPalette.THEME,
     val nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
+    val nicknameTapAction: NicknameTapAction = NicknameTapAction.MENTION,
     /** Normalized nick -> hue/position 0..359, rendered through the active palette. */
     val nickColorOverrides: Map<String, Int> = emptyMap(),
     /** Normalized nicks. friends and fools are kept disjoint by the repository. */
@@ -334,6 +339,8 @@ data class Settings(
     val showComposerEmoji: Boolean = true,
     /** Show IRC formatting actions in the compact composer tools strip. */
     val showComposerFormattingTools: Boolean = true,
+    /** Show the voice-message button where IRC voice recording is available. */
+    val showVoiceMessageButton: Boolean = true,
     /** Play subtle send/receive sounds for the currently open foreground chat. */
     val chatSoundsEnabled: Boolean = true,
     /** Window the first history sync of a network enumerates; chosen during soju onboarding. */
@@ -410,6 +417,8 @@ interface SettingsRepository {
 
     suspend fun setNickMentionStyle(value: NickMentionStyle)
 
+    suspend fun setNicknameTapAction(action: NicknameTapAction)
+
     /** hue 0..359 (coerced); null removes. [nick] is normalized internally. */
     suspend fun setNickColorOverride(
         nick: String,
@@ -472,6 +481,8 @@ interface SettingsRepository {
     suspend fun setShowComposerEmoji(show: Boolean)
 
     suspend fun setShowComposerFormattingTools(show: Boolean)
+
+    suspend fun setShowVoiceMessageButton(show: Boolean)
 
     suspend fun setChatSoundsEnabled(enabled: Boolean)
 

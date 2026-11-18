@@ -8,7 +8,7 @@ package io.github.trevarj.motd.ui.chat
  * caller-supplied [normalize] (Isupport-normalized in the app; lowercase fallback).
  */
 
-/** The word being completed: the token boundaries around the cursor and whether it opens the line. */
+/** The completion token's bounds and whether only whitespace precedes it in the whole message. */
 data class NickToken(
     val start: Int,
     val end: Int,
@@ -17,22 +17,19 @@ data class NickToken(
 )
 
 /**
- * Find the completion token in [text] at [cursor]. The token starts at the previous whitespace (or
- * an `@` sigil) and runs to the next whitespace. Returns null when the cursor is on whitespace or
- * the token is empty. [atLineStart] is true when only whitespace precedes the token, which selects
- * the `nick: ` insertion form.
+ * Find the completion token in [text] at [cursor], bounded by whitespace or surrounding punctuation.
+ * A leading `@` is included in the replacement. Returns null for an empty token.
+ * [NickToken.atLineStart] means only whitespace precedes it in the entire message, not just its line.
  */
 fun nickTokenAt(
     text: String,
     cursor: Int,
 ): NickToken? {
     if (cursor < 0 || cursor > text.length) return null
-    // Walk left to a word boundary (space) — stop just after it.
     var start = cursor
-    while (start > 0 && !text[start - 1].isWhitespace()) start--
-    // Walk right to the next boundary.
+    while (start > 0 && isNickTokenCharacter(text[start - 1])) start--
     var end = cursor
-    while (end < text.length && !text[end].isWhitespace()) end++
+    while (end < text.length && isNickTokenCharacter(text[end])) end++
     if (start == end) return null
 
     var token = text.substring(start, end)
@@ -41,9 +38,11 @@ fun nickTokenAt(
     if (token.startsWith("@")) token = token.substring(1)
     if (token.isEmpty()) return null
 
-    val atLineStart = text.substring(0, start).isBlank()
+    val atLineStart = nicknameSuffix(text, start) == ": "
     return NickToken(start = start, end = end, text = token, atLineStart = atLineStart)
 }
+
+private fun isNickTokenCharacter(char: Char): Boolean = !char.isWhitespace() && char !in ",.:;!?()"
 
 /**
  * Prefix-rank [members] against [prefix]. [recentSpeakers] lists nicks most-recent-first (typically
@@ -86,10 +85,7 @@ fun rankNickCompletions(
         .map { it.value }
 }
 
-/**
- * Replace the token [token] in [text] with [nick], choosing the insertion form: `nick: ` at line
- * start, otherwise `nick `. Returns the new text and the cursor offset after insertion.
- */
+/** A completed message and the cursor offset immediately after its nickname insertion. */
 data class CompletionResult(
     val text: String,
     val cursor: Int,
@@ -100,9 +96,32 @@ fun applyCompletion(
     token: NickToken,
     nick: String,
 ): CompletionResult {
-    val insert = if (token.atLineStart) "$nick: " else "$nick "
-    val before = text.substring(0, token.start)
-    val after = text.substring(token.end)
-    val newText = before + insert + after
-    return CompletionResult(text = newText, cursor = before.length + insert.length)
+    val suffix = nicknameSuffix(text, token.start, token.end)
+    val insertionLength = nick.length + suffix.length
+    val newText =
+        buildString(text.length - (token.end - token.start) + insertionLength) {
+            append(text, 0, token.start)
+            append(nick)
+            append(suffix)
+            append(text, token.end, text.length)
+        }
+    return CompletionResult(text = newText, cursor = token.start + insertionLength)
+}
+
+/** Newlines and visual wrapping never restart a message's addressing prefix. */
+internal fun nicknameSuffix(
+    text: CharSequence,
+    before: Int,
+    after: Int = text.length,
+): String {
+    var atMessageStart = true
+    for (index in 0 until before) {
+        if (!text[index].isWhitespace()) {
+            atMessageStart = false
+            break
+        }
+    }
+    if (atMessageStart) return ": "
+    val next = text.getOrNull(after)
+    return if (next != null && (next.isWhitespace() || next in "!,.;:?)")) "" else " "
 }

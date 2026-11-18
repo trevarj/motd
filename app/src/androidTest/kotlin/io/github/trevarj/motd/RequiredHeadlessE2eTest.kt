@@ -216,7 +216,12 @@ class RequiredHeadlessE2eTest {
             runCatching { compose.onNode(canonicalSent, useUnmergedTree = true).assertIsDisplayed() }.isSuccess
         }
         val canonicalRow = compose.onNodeWithTag(canonical.tag(), useUnmergedTree = true)
-        val longPressSurface = SemanticsMatcher("canonical message long-press surface") { it.config.contains(SemanticsActions.OnLongClick) }
+        val messageActionsLabel = InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.chat_bubble_actions)
+        val longPressSurface =
+            SemanticsMatcher("canonical message long-press surface") {
+                it.config.contains(SemanticsActions.OnLongClick) &&
+                    it.config[SemanticsActions.OnLongClick].label == messageActionsLabel
+            }
         val bubble =
             compose
                 .onNode(

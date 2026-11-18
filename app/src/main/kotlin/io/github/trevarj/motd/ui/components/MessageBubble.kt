@@ -304,6 +304,22 @@ internal fun Modifier.messageRowClicks(
     )
 }
 
+/** Keep nickname gestures on the name/avatar, never on the surrounding message row. */
+@Composable
+internal fun Modifier.nicknameClicks(
+    onClick: (() -> Unit)?,
+    onLongClick: (() -> Unit)?,
+): Modifier =
+    if (!LocalMessageActionsEnabled.current || LocalMessageSelection.current != null || (onClick == null && onLongClick == null)) {
+        this
+    } else {
+        combinedClickable(
+            onClick = onClick ?: {},
+            onLongClick = onLongClick,
+            onLongClickLabel = if (onLongClick != null) stringResource(R.string.settings_nickname_tap_user_menu) else null,
+        )
+    }
+
 /** Persistent, non-animated mention marker shared by every message density. */
 private fun Modifier.mentionHighlight(accent: Color): Modifier =
     drawWithContent {
@@ -405,8 +421,10 @@ fun MessageBubble(
     onReact: (String) -> Unit = {},
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
-    // Tapping the sender name/avatar opens the nick sheet; null (self / non-first bubbles) = inert.
+    // Nickname taps and holds are independent of ordinary message actions.
     onSenderClick: (() -> Unit)? = null,
+    onSenderLongClick: (() -> Unit)? = null,
+    onMentionLongClick: ((String) -> Unit)? = null,
     onMentionClick: ((String) -> Unit)? = null,
     // Send-flight-only presentation; ordinary rows keep their existing surface and modifiers.
     sendMorphProgress: (() -> Float)? = null,
@@ -471,6 +489,8 @@ fun MessageBubble(
                 onImageClick = onImageClick,
                 onLinkPreviewClick = onLinkPreviewClick,
                 onSenderClick = onSenderClick,
+                onSenderLongClick = onSenderLongClick,
+                onMentionLongClick = onMentionLongClick,
                 onMentionClick = onMentionClick,
                 containerModifier = containerModifier,
                 sourceWrapper = sourceWrapper,
@@ -513,6 +533,8 @@ fun MessageBubble(
                 onImageClick = onImageClick,
                 onLinkPreviewClick = onLinkPreviewClick,
                 onSenderClick = onSenderClick,
+                onSenderLongClick = onSenderLongClick,
+                onMentionLongClick = onMentionLongClick,
                 onMentionClick = onMentionClick,
                 containerModifier = containerModifier,
                 sourceWrapper = sourceWrapper,
@@ -559,6 +581,8 @@ fun MessageBubble(
             onImageClick = onImageClick,
             onLinkPreviewClick = onLinkPreviewClick,
             onSenderClick = onSenderClick,
+            onSenderLongClick = onSenderLongClick,
+            onMentionLongClick = onMentionLongClick,
             onMentionClick = onMentionClick,
             containerModifier = containerModifier,
             sourceWrapper = sourceWrapper,
@@ -607,6 +631,8 @@ fun MessageBubble(
             onImageClick = onImageClick,
             onLinkPreviewClick = onLinkPreviewClick,
             onSenderClick = onSenderClick,
+            onSenderLongClick = onSenderLongClick,
+            onMentionLongClick = onMentionLongClick,
             onMentionClick = onMentionClick,
             containerModifier = containerModifier,
             sourceWrapper = sourceWrapper,
@@ -704,7 +730,7 @@ fun MessageBubble(
                         .padding(end = 8.dp, top = 2.dp)
                         .shadow(comfortableElevation(COMFORTABLE_BUBBLE_ELEVATION), avatarShape)
                         .testTag("chat_sender_avatar")
-                        .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
+                        .nicknameClicks(onSenderClick, onSenderLongClick)
                 Avatar(
                     name = sender,
                     size = spacing.bubbleAvatar,
@@ -750,7 +776,7 @@ fun MessageBubble(
                 val nameColor = remember(nameInk, nameBackground, normalNameBackground, dimmed, nickColors, sender) { messageContentColor(nameInk, nameBackground, dimmed, normalNameBackground, !nickColors.preservesAuthoredIdentity(sender, fallbackIsAuthored = true)) }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = if (onSenderClick != null) Modifier.clickable(onClick = onSenderClick) else Modifier,
+                    modifier = Modifier.nicknameClicks(onSenderClick, onSenderLongClick),
                 ) {
                     Text(
                         text = botDisplayName(displaySender, isBot),
@@ -843,6 +869,8 @@ fun MessageBubble(
                         text = body,
                         concealment = LocalFoolBodyConcealment.current,
                         onLinkLongPress = onLongPress,
+                        onSenderLongClick = onSenderLongClick,
+                        onMentionLongClick = onMentionLongClick,
                         color = bodyColor,
                         style = MaterialTheme.typography.bodyLarge,
                         modifier = bodyModifier,
@@ -973,6 +1001,8 @@ private fun ComfortableActionBubble(
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
+    onSenderLongClick: (() -> Unit)? = null,
+    onMentionLongClick: ((String) -> Unit)? = null,
     onMentionClick: ((String) -> Unit)? = null,
     containerModifier: Modifier = Modifier,
     sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? = null,
@@ -1013,8 +1043,8 @@ private fun ComfortableActionBubble(
             Color.Unspecified
         }
     val senderLink =
-        remember(onSenderClick) {
-            onSenderClick?.let { callback ->
+        remember(onSenderClick, selecting) {
+            onSenderClick?.takeUnless { selecting }?.let { callback ->
                 LinkAnnotation.Clickable(
                     tag = "action-sender",
                     linkInteractionListener = { callback() },
@@ -1135,7 +1165,7 @@ private fun ComfortableActionBubble(
                             .size(20.dp)
                             .shadow(comfortableElevation(COMFORTABLE_CONTENT_ELEVATION), avatarShape)
                             .testTag("chat_sender_avatar")
-                            .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
+                            .nicknameClicks(onSenderClick, onSenderLongClick)
                     Avatar(
                         name = sender,
                         size = 20.dp,
@@ -1148,6 +1178,8 @@ private fun ComfortableActionBubble(
                     text = actionLine,
                     concealment = LocalFoolBodyConcealment.current,
                     onLinkLongPress = onLongPress,
+                    onSenderLongClick = onSenderLongClick,
+                    onMentionLongClick = onMentionLongClick,
                     inlineBody = true,
                     style =
                         MaterialTheme.typography.bodyLarge.copy(
@@ -1257,6 +1289,8 @@ private fun ActionMessageRow(
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
+    onSenderLongClick: (() -> Unit)? = null,
+    onMentionLongClick: ((String) -> Unit)? = null,
     onMentionClick: ((String) -> Unit)? = null,
     containerModifier: Modifier = Modifier,
     sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? = null,
@@ -1302,8 +1336,8 @@ private fun ActionMessageRow(
     val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules, nickMentionStyle, onMentionClick != null)
     val mentionsActive = knownNicks.isNotEmpty() && (nickColors.enabled || nickMentionStyle != NickMentionStyle.NONE || onMentionClick != null)
     val senderLink =
-        remember(onSenderClick) {
-            onSenderClick?.let { callback ->
+        remember(onSenderClick, selecting) {
+            onSenderClick?.takeUnless { selecting }?.let { callback ->
                 LinkAnnotation.Clickable(
                     tag = "action-sender",
                     linkInteractionListener = { callback() },
@@ -1396,6 +1430,8 @@ private fun ActionMessageRow(
                     text = actionLine,
                     concealment = LocalFoolBodyConcealment.current,
                     onLinkLongPress = onLongPress,
+                    onSenderLongClick = onSenderLongClick,
+                    onMentionLongClick = onMentionLongClick,
                     inlineBody = true,
                     style =
                         MaterialTheme.typography.bodyLarge.copy(
@@ -1665,6 +1701,8 @@ private fun TwoLineMessageRow(
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
+    onSenderLongClick: (() -> Unit)? = null,
+    onMentionLongClick: ((String) -> Unit)? = null,
     onMentionClick: ((String) -> Unit)? = null,
     containerModifier: Modifier = Modifier,
     sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? = null,
@@ -1742,7 +1780,7 @@ private fun TwoLineMessageRow(
                         Modifier
                             .padding(end = 6.dp)
                             .align(Alignment.CenterVertically)
-                            .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it }
+                            .nicknameClicks(onSenderClick, onSenderLongClick)
                     Avatar(
                         name = sender,
                         size = spacing.bubbleAvatar,
@@ -1761,7 +1799,7 @@ private fun TwoLineMessageRow(
                     modifier =
                         Modifier
                             .weight(1f, fill = false)
-                            .let { if (onSenderClick != null) it.clickable(onClick = onSenderClick) else it },
+                            .nicknameClicks(onSenderClick, onSenderLongClick),
                 )
                 if (senderIsFriend) {
                     Icon(
@@ -1864,6 +1902,8 @@ private fun TwoLineMessageRow(
                         text = richBody,
                         concealment = LocalFoolBodyConcealment.current,
                         onLinkLongPress = onLongPress,
+                        onSenderLongClick = onSenderLongClick,
+                        onMentionLongClick = onMentionLongClick,
                         color = bodyColor,
                         style = MaterialTheme.typography.bodyLarge,
                     )

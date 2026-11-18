@@ -1238,6 +1238,12 @@
     <string name="settings_composer_emoji_desc">Show Emoji in Composer Tools.</string>
     <string name="settings_composer_formatting_tools">Formatting tools</string>
     <string name="settings_composer_formatting_tools_desc">Show formatting actions in Composer Tools.</string>
+    <string name="settings_voice_message_button">Show voice-message button</string>
+    <string name="settings_voice_message_button_desc">Show the recording button in IRC chats where voice messages are available.</string>
+    <string name="settings_nickname_tap_action">Nickname tap action</string>
+    <string name="settings_nickname_tap_action_desc">Choose what happens when you tap a message sender’s nickname.</string>
+    <string name="settings_nickname_tap_mention">Mention</string>
+    <string name="settings_nickname_tap_user_menu">User menu</string>
     <string name="settings_chat_sounds">Chat sounds</string>
     <string name="settings_chat_sounds_desc">Play subtle sounds when sending or receiving in the open chat.</string>
     <string name="settings_chat_sounds_configure">Configure chat sounds</string>

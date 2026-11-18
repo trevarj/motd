@@ -46,6 +46,7 @@ import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
+import io.github.trevarj.motd.data.prefs.NicknameTapAction
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.Settings
@@ -114,6 +115,8 @@ fun ChatSettingsScreen(
         onFoolsMode = viewModel::setFoolsMode,
         onShowComposerEmoji = viewModel::setShowComposerEmoji,
         onShowComposerFormattingTools = viewModel::setShowComposerFormattingTools,
+        onShowVoiceMessageButton = viewModel::setShowVoiceMessageButton,
+        onNicknameTapAction = viewModel::setNicknameTapAction,
         onChatSoundsEnabled = viewModel::setChatSoundsEnabled,
         onVisibleReplyPrefix = viewModel::setVisibleReplyPrefix,
         onSwipeToReplyEnabled = viewModel::setSwipeToReplyEnabled,
@@ -162,6 +165,8 @@ fun ChatSettingsContent(
     onFoolsMode: (FoolsMode) -> Unit,
     onShowComposerEmoji: (Boolean) -> Unit,
     onShowComposerFormattingTools: (Boolean) -> Unit,
+    onShowVoiceMessageButton: (Boolean) -> Unit,
+    onNicknameTapAction: (NicknameTapAction) -> Unit,
     onChatSoundsEnabled: (Boolean) -> Unit,
     onVisibleReplyPrefix: (Boolean) -> Unit,
     onSwipeToReplyEnabled: (Boolean) -> Unit,
@@ -188,6 +193,7 @@ fun ChatSettingsContent(
     var presenceSheetOpen by remember { mutableStateOf(false) }
     var swipeSheetOpen by remember { mutableStateOf(false) }
     var mentionsPlacementSheetOpen by remember { mutableStateOf(false) }
+    var nicknameTapSheetOpen by remember { mutableStateOf(false) }
     var awayDelaySheetOpen by remember { mutableStateOf(false) }
     var foolsSheetOpen by remember { mutableStateOf(false) }
     var awayMessageDialogOpen by remember { mutableStateOf(false) }
@@ -344,6 +350,26 @@ fun ChatSettingsContent(
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
+                title = stringResource(R.string.settings_voice_message_button),
+                subtitle = stringResource(R.string.settings_voice_message_button_desc),
+                checked = settings.showVoiceMessageButton,
+                onCheckedChange = onShowVoiceMessageButton,
+                switchTag = "settings_switch_voice_message_button",
+                requestedTarget = target?.name,
+                targetName = SettingsTarget.VOICE_MESSAGE_BUTTON.name,
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsNavigationRow(
+                title = stringResource(R.string.settings_nickname_tap_action),
+                value = nicknameTapActionLabel(settings.nicknameTapAction),
+                summary = stringResource(R.string.settings_nickname_tap_action_desc),
+                modifier = Modifier.testTag("settings_nickname_tap_action"),
+                requestedTarget = target?.name,
+                targetName = SettingsTarget.NICKNAME_TAP_ACTION.name,
+                onClick = { nicknameTapSheetOpen = true },
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SwitchRow(
                 title = stringResource(R.string.settings_reply_prefix),
                 subtitle = stringResource(R.string.settings_reply_prefix_desc),
                 checked = reply.visibleChannelPrefix,
@@ -465,6 +491,23 @@ fun ChatSettingsContent(
             onDismiss = { awayMessageDialogOpen = false },
         )
     }
+    if (nicknameTapSheetOpen) {
+        SingleChoiceSheet(
+            title = stringResource(R.string.settings_nickname_tap_action),
+            selected = settings.nicknameTapAction,
+            options =
+                NicknameTapAction.entries.map { action ->
+                    ChoiceOption(
+                        action,
+                        nicknameTapActionLabel(action),
+                        tag = "settings_nickname_tap_${action.name.lowercase()}",
+                    )
+                },
+            onSelect = onNicknameTapAction,
+            onDismiss = { nicknameTapSheetOpen = false },
+            tag = "settings_nickname_tap_sheet",
+        )
+    }
     if (presenceSheetOpen) {
         SingleChoiceSheet(
             title = stringResource(R.string.settings_presence_title),
@@ -579,6 +622,15 @@ fun ChatSettingsContent(
 }
 
 @Composable
+private fun nicknameTapActionLabel(action: NicknameTapAction): String =
+    stringResource(
+        when (action) {
+            NicknameTapAction.MENTION -> R.string.settings_nickname_tap_mention
+            NicknameTapAction.USER_MENU -> R.string.settings_nickname_tap_user_menu
+        },
+    )
+
+@Composable
 private fun chatListSwipeActionLabel(action: ChatListSwipeAction): String =
     stringResource(
         when (action) {
@@ -683,6 +735,8 @@ private fun ChatSettingsPreview() {
             onFoolsMode = {},
             onShowComposerEmoji = {},
             onShowComposerFormattingTools = {},
+            onShowVoiceMessageButton = {},
+            onNicknameTapAction = {},
             onChatSoundsEnabled = {},
             onVisibleReplyPrefix = {},
             onSwipeToReplyEnabled = {},

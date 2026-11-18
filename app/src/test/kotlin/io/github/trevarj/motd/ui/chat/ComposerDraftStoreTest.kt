@@ -45,10 +45,18 @@ class ComposerDraftStoreTest {
     fun tearDown() = db.close()
 
     @Test
-    fun `prefills remain consume once`() {
-        store.push(roomId, "alice: ")
-        store.push(roomId, "bob: ")
-        assertEquals("alice: bob: ", store.consume(roomId))
+    fun `mixed prefills retain raw text identity and gesture order and remain consume once`() {
+        val requests =
+            listOf(
+                ComposerPrefill("alice", isNickname = true),
+                ComposerPrefill("shared: text\n"),
+                ComposerPrefill("alice", isNickname = true),
+                ComposerPrefill("bob", isNickname = true),
+            )
+        requests.forEach { store.push(roomId, it) }
+        store.push(roomId + 1, ComposerPrefill("other room"))
+        assertEquals(requests, store.consume(roomId))
+        assertEquals(listOf(ComposerPrefill("other room")), store.consume(roomId + 1))
         assertNull(store.consume(roomId))
     }
 
@@ -61,8 +69,8 @@ class ComposerDraftStoreTest {
             }
             runCurrent()
 
-            store.push(roomId, "alice: ")
-            store.push(roomId + 1, "bob: ")
+            store.push(roomId, ComposerPrefill("alice", isNickname = true))
+            store.push(roomId + 1, ComposerPrefill("bob", isNickname = true))
             runCurrent()
 
             assertEquals(listOf(roomId, roomId + 1), seen)
@@ -71,7 +79,7 @@ class ComposerDraftStoreTest {
     @Test
     fun `a push nobody was listening for still leaves the prefill queued`() =
         runTest {
-            store.push(roomId, "alice: ")
+            store.push(roomId, ComposerPrefill("alice", isNickname = true))
 
             val seen = mutableListOf<Long>()
             backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
@@ -81,7 +89,7 @@ class ComposerDraftStoreTest {
 
             // No replay: the announcement is gone, but the text it announced is not.
             assertTrue(seen.isEmpty())
-            assertEquals("alice: ", store.consume(roomId))
+            assertEquals(listOf(ComposerPrefill("alice", isNickname = true)), store.consume(roomId))
         }
 
     @Test

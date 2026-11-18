@@ -136,12 +136,14 @@ internal fun FoolBodyText(
     concealment: FoolBodyConcealment,
     inlineBody: Boolean = false,
     onLinkLongPress: (() -> Unit)? = null,
+    onSenderLongClick: (() -> Unit)? = null,
+    onMentionLongClick: ((String) -> Unit)? = null,
 ) {
     val selecting = LocalMessageSelection.current != null
     val nativeLayout = remember(text, selecting) { mutableStateOf<TextLayoutResult?>(null) }
     val chips = remember(text) { text.getStringAnnotations(NICK_CHIP_RANGE, 0, text.length) }
     if (chips.isEmpty()) {
-        FoolBodyTextHost(text, modifier, color, style, maxLines, overflow, concealment, inlineBody, onLinkLongPress, nativeLayout)
+        FoolBodyTextHost(text, modifier, color, style, maxLines, overflow, concealment, inlineBody, onLinkLongPress, nativeLayout, onSenderLongClick = onSenderLongClick, onMentionLongClick = onMentionLongClick)
         return
     }
     val density = LocalDensity.current
@@ -198,7 +200,7 @@ internal fun FoolBodyText(
                 }
                 builder.toAnnotatedString() to content
             }
-        FoolBodyTextHost(prepared.first, Modifier, color, style, maxLines, overflow, concealment, inlineBody, onLinkLongPress, nativeLayout, prepared.second)
+        FoolBodyTextHost(prepared.first, Modifier, color, style, maxLines, overflow, concealment, inlineBody, onLinkLongPress, nativeLayout, prepared.second, onSenderLongClick, onMentionLongClick)
     }
 }
 
@@ -215,6 +217,8 @@ private fun FoolBodyTextHost(
     onLinkLongPress: (() -> Unit)?,
     layoutState: MutableState<TextLayoutResult?>,
     inlineContent: Map<String, InlineTextContent> = emptyMap(),
+    onSenderLongClick: (() -> Unit)? = null,
+    onMentionLongClick: ((String) -> Unit)? = null,
 ) {
     val ranges = remember(text) { text.getStringAnnotations(FOOL_BODY_RANGE, 0, text.length) }
     val start = ranges.minOfOrNull { it.start } ?: if (inlineBody) text.length else 0
@@ -247,9 +251,36 @@ private fun FoolBodyTextHost(
             }
         }
     val latestLinkLongPress by rememberUpdatedState(onLinkLongPress)
+    val latestSenderLongClick by rememberUpdatedState(onSenderLongClick)
+    val latestMentionLongClick by rememberUpdatedState(onMentionLongClick)
+    val userMenuLabel = stringResource(R.string.settings_nickname_tap_user_menu)
+    val nicknameActionsEnabled = LocalMessageSelection.current == null && LocalMessageActionsEnabled.current
+    val nicknameActions =
+        remember(displayed, onSenderLongClick, onMentionLongClick, userMenuLabel, nicknameActionsEnabled) {
+            if (!nicknameActionsEnabled) {
+                emptyList()
+            } else {
+                displayed.getLinkAnnotations(0, displayed.length).mapNotNull { range ->
+                    val tag = (range.item as? LinkAnnotation.Clickable)?.tag
+                    val callback: (() -> Unit)? =
+                        when {
+                            tag == "action-sender" -> onSenderLongClick
+                            tag?.startsWith("mention:") == true -> onMentionLongClick?.let { action -> { action(tag.removePrefix("mention:")) } }
+                            else -> null
+                        }
+                    callback?.let {
+                        CustomAccessibilityAction("$userMenuLabel: ${displayed.text.substring(range.start, range.end)}") {
+                            it()
+                            true
+                        }
+                    }
+                }
+            }
+        }
     val haptic = LocalHapticFeedback.current
     val linkLongPressModifier =
-        if (!concealed && dismissSelection == null && LocalMessageActionsEnabled.current && onLinkLongPress != null &&
+        if (LocalMessageSelection.current == null && LocalMessageActionsEnabled.current &&
+            (onLinkLongPress != null || onSenderLongClick != null || onMentionLongClick != null) &&
             displayed.hasLinkAnnotations(0, displayed.length)
         ) {
             Modifier.pointerInput(displayed, haptic) {
@@ -259,10 +290,12 @@ private fun FoolBodyTextHost(
                     val result = layout ?: return@awaitEachGesture
                     if (result.layoutInput.text.text != displayed.text) return@awaitEachGesture
                     val offset = result.nativeOffsetAt(down.position) ?: return@awaitEachGesture
-                    if (offset >= displayed.length || displayed.getLinkAnnotations(offset, offset + 1).isEmpty()) {
-                        return@awaitEachGesture
-                    }
-                    val nativeDown = awaitPointerEvent(PointerEventPass.Final)
+                    if (offset >= displayed.length) return@awaitEachGesture
+                    val link = displayed.getLinkAnnotations(offset, offset + 1).firstOrNull()?.item
+                    // Native links expand their touch targets into nearby ordinary glyphs. If
+                    // they consume that down, retain the message hold rather than losing it.
+                    if (link == null && (concealed || latestLinkLongPress == null)) return@awaitEachGesture
+                    val nativeDown = awaitPointerEvent(PointerEventPass.Main)
                     if (nativeDown.changes.none { it.id == down.id && it.isConsumed }) return@awaitEachGesture
                     val releasedOrMoved =
                         withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
@@ -280,7 +313,12 @@ private fun FoolBodyTextHost(
                         }
                     if (releasedOrMoved == null) {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        latestLinkLongPress?.invoke()
+                        val tag = (link as? LinkAnnotation.Clickable)?.tag
+                        when {
+                            tag == "action-sender" && latestSenderLongClick != null -> latestSenderLongClick?.invoke()
+                            tag?.startsWith("mention:") == true && latestMentionLongClick != null -> latestMentionLongClick?.invoke(tag.removePrefix("mention:"))
+                            else -> latestLinkLongPress?.invoke()
+                        }
                         do {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
                             event.changes.forEach { it.consume() }
@@ -303,6 +341,7 @@ private fun FoolBodyTextHost(
             modifier =
                 textModifier
                     .then(linkLongPressModifier)
+                    .then(if (nicknameActions.isEmpty() || concealed) Modifier else Modifier.semantics { customActions = nicknameActions })
                     .then(
                         if (!concealed) {
                             Modifier
@@ -335,7 +374,7 @@ private fun FoolBodyTextHost(
                                                     link.linkInteractionListener?.onClick(link)
                                                     true
                                                 },
-                                            )
+                                            ) + nicknameActions
                                     }
                                 }.pointerInput(concealed, start, end, concealment.onReveal) {
                                     awaitEachGesture {

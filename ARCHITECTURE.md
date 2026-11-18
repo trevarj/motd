@@ -266,6 +266,10 @@ flowchart TD
   newest row clear, and fully covered rows do not advance read state. Floating and
   Nickname keep tools/send/record inside their floating inputs; Large keeps its
   separate action. Stored enum names are unchanged.
+  Chat settings independently control IRC microphone-button visibility (default on)
+  without changing voice playback, and nickname taps default to Mention with a
+  selectable User menu alternative. Mention actions share cursor/selection-aware
+  insertion and use the address suffix only at whole-message start.
   Independent named presets control input corners, in-app avatar shape, chat-list
   card corners, and media-preview corners; stored `DEFAULT` preserves each surface/layout's
   heterogeneous geometry, while visible values name the resolved geometry (including the input
@@ -277,10 +281,11 @@ flowchart TD
   labels use 85% text size with 4dp horizontal and 1dp vertical padding; long nicks
   split into bounded native fragments. Selecting text temporarily flattens chips to
   ordinary nick text for character-by-character copying, and may reflow the message.
-  Literal characters and body offsets stay unchanged. Known mentions open the existing
-  nickname/WHOIS sheet in every style; matching excludes URLs/code. Mention links stay
-  inactive through concealment or active transcript selection, while long-press still
-  opens message actions. Sender prefixes and composer styling remain separate.
+  Literal characters and body offsets stay unchanged. Known mentions and sender names
+  follow the configured nickname-tap action; matching excludes URLs/code. Holding a
+  nickname opens its user/WHOIS sheet, while holding other message content opens
+  message actions. Concealment and transcript selection suppress nickname gestures.
+  Sender prefixes and composer styling remain separate.
   Appearance → Transparency and blur owns continuous 0–100 controls for ordinary PRIVMSG, NOTICE, and ACTION
   backings in every layout, with or without nickname tint: opacity defaults to 100%, and independent
   wallpaper blur defaults to Off (0), mapping linearly to 32dp at 100. Zero opacity removes tint,

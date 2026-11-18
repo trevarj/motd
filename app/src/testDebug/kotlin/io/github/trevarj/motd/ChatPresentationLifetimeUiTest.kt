@@ -152,7 +152,12 @@ class ChatPresentationLifetimeUiTest {
             val root = compose.onNodeWithTag("retained_surface", useUnmergedTree = true)
             val row = compose.onNodeWithTag(rowTag, useUnmergedTree = true)
             row.assertIsDisplayed()
-            val longPressSurface = SemanticsMatcher("message long-press surface") { it.config.contains(SemanticsActions.OnLongClick) }
+            val messageActionsLabel = ApplicationProvider.getApplicationContext<Context>().getString(R.string.chat_bubble_actions)
+            val longPressSurface =
+                SemanticsMatcher("message long-press surface") {
+                    it.config.contains(SemanticsActions.OnLongClick) &&
+                        it.config[SemanticsActions.OnLongClick].label == messageActionsLabel
+                }
             val bubble = compose.onNode(hasAnyAncestor(hasTestTag(rowTag)) and longPressSurface, useUnmergedTree = true)
 
             fun paintedBubble(): Int {
