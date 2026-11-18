@@ -51,9 +51,6 @@ internal class SettingsRobot(
     fun appearance() = scrollToAndClick("settings_category_appearance")
 
     fun selectThemeTextColors() {
-        awaitTag("settings_switch_adjust_palette_readability_row")
-        compose.onNodeWithTag("settings_switch_adjust_palette_readability_row", useUnmergedTree = true).performScrollTo()
-        turnOnPrefix("settings_switch_adjust_palette_readability_row")
         awaitTag("settings_switch_theme_text_colors_row")
         compose.onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true).performScrollTo()
         turnOnPrefix("settings_switch_theme_text_colors_row")
@@ -61,7 +58,6 @@ internal class SettingsRobot(
 
     fun assertThemeTextColorsEnabled() {
         awaitTag("settings_switch_theme_text_colors_row")
-        compose.onNodeWithTag("settings_switch_adjust_palette_readability_row", useUnmergedTree = true).performScrollTo().assertIsOn()
         compose.onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true).performScrollTo().assertIsOn()
     }
 

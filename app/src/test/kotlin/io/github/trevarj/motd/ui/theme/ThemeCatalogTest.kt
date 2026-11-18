@@ -1,7 +1,10 @@
 package io.github.trevarj.motd.ui.theme
 
+import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
@@ -27,38 +30,152 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ThemeCatalogTest {
-    @Test fun fixedPaletteDefaultsPreserveAuthoredRolesAndCacheEachReadabilityPolicy() {
-        ColorThemePreset.entries.filter { it.isFixedPalette }.forEach { preset ->
-            val raw = requireNotNull(rawFixedThemeScheme(preset))
-            val authored = requireNotNull(fixedThemeScheme(preset))
-            assertEquals("$preset authored roles", authoredRoles(raw), authoredRoles(authored))
-            assertTrue(authored === fixedThemeScheme(preset, useThemeTextColors = true))
-            val adjusted = fixedThemeScheme(preset, adjustPaletteReadability = true)
-            val themed = fixedThemeScheme(preset, useThemeTextColors = true, adjustPaletteReadability = true)
-            assertTrue(adjusted === fixedThemeScheme(preset, adjustPaletteReadability = true))
-            assertTrue(themed === fixedThemeScheme(preset, useThemeTextColors = true, adjustPaletteReadability = true))
-            assertTrue(authored !== adjusted)
-            assertTrue(adjusted !== themed)
+    @Test fun allBuiltIns_keepReadingRolesSafeInAllFourModesWithoutChangingAuthoredSources() {
+        val sources =
+            ColorThemePreset.entries.filter { it.isFixedPalette }.map { it to requireNotNull(rawFixedThemeScheme(it)) } +
+                listOf(ColorThemePreset.LIGHT to MotdLightRaw, ColorThemePreset.DARK to MotdDarkRaw)
+        for ((preset, raw) in sources) {
+            val original = authoredRoles(raw)
+            for (adjust in listOf(false, true)) {
+                fun resolve(themed: Boolean): ColorScheme = fixedThemeScheme(preset, themed, adjust) ?: motdThemeScheme(preset.isDark, themed, adjust)
+                val neutral = resolve(false)
+                val themed = resolve(true)
+                assertEquals("$preset/$adjust surfaces", neutralSurfaces(neutral), neutralSurfaces(themed))
+                assertEquals("$preset/$adjust fills", filledRoles(neutral), filledRoles(themed))
+                for (scheme in listOf(neutral, themed)) {
+                    for (fill in neutralSurfaces(scheme)) {
+                        for (ink in listOf(scheme.onBackground, scheme.onSurface, scheme.onSurfaceVariant)) {
+                            assertContrast(preset, "body $adjust", ink, fill, 4.5)
+                        }
+                        assertContrast(preset, "boundary $adjust", scheme.outline, fill, 3.0)
+                        assertContrast(preset, "action $adjust", scheme.readableForeground(scheme.primary), fill, 4.5)
+                    }
+                    val selection = scheme.readableSelectionColors()
+                    for (fill in neutralSurfaces(scheme)) {
+                        assertContrast(preset, "selection handle", selection.handleColor, fill, 3.0)
+                        assertContrast(preset, "selection ink", scheme.onSurface, selection.backgroundColor.compositeOver(fill), 4.5)
+                    }
+                }
+                if (!adjust) {
+                    assertEquals(raw.primary, neutral.primary)
+                    assertEquals(raw.secondary, neutral.secondary)
+                    assertEquals(raw.tertiary, neutral.tertiary)
+                    assertEquals(raw.background, neutral.background)
+                    assertEquals(raw.surface, neutral.surface)
+                    assertEquals(raw.surfaceContainer, neutral.surfaceContainer)
+                    val existingInks = listOf(raw.onBackground, raw.onSurface, raw.onSurfaceVariant, Color(0xFF171717), Color(0xFFF5F5F5), Color.Black, Color.White)
+                    assertTrue("$preset selected existing body ink", themed.onSurface in existingInks)
+                    assertTrue("$preset selected existing metadata ink", themed.onSurfaceVariant in existingInks)
+                    val fills = neutralSurfaces(themed)
+                    if (fills.all { contrastRatio(raw.onSurface, it) >= 4.5 }) {
+                        assertEquals("$preset keeps legible authored body", raw.onSurface, themed.onSurface)
+                    }
+                    if (fills.all { contrastRatio(raw.onSurfaceVariant, it) >= 4.5 }) {
+                        assertEquals("$preset keeps legible authored metadata", raw.onSurfaceVariant, themed.onSurfaceVariant)
+                    }
+                    val staticInk = if (raw.background.luminance() < 0.5f) Color(0xFFF5F5F5) else Color(0xFF171717)
+                    if (fills.all { contrastRatio(staticInk, it) >= 4.5 }) {
+                        assertEquals("$preset neutral preference", staticInk, neutral.onSurface)
+                    }
+                }
+            }
+            assertEquals("$preset source unchanged", original, authoredRoles(raw))
         }
     }
 
-    @Test fun authoredTextSeedsDerivedContainerInkWithoutNeutralizingItsHue() {
+    @Test fun readableForeground_preservesLegibleAndTransparentOverridesAndPairsActualFills() {
+        val scheme = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_LIGHT))
+        assertEquals(Color.Transparent, scheme.readableForeground(Color.Transparent))
+        assertEquals(scheme.onPrimary, scheme.readableForeground(scheme.primary, scheme.primary))
+        assertEquals(scheme.onSurface, scheme.readableForeground(scheme.onSurface))
+        assertTrue(contrastRatio(scheme.readableForeground(scheme.secondary, scheme.secondaryContainer), scheme.secondaryContainer) >= 4.5)
+    }
+
+    @Test fun readableForeground_checksRenderedAlphaAndKeepsLegibleAlphaOverrides() {
+        val scheme = MotdDarkScheme
+        val faint = Color.White.copy(alpha = 0.1f)
+        val ink = scheme.readableForeground(faint, Color.Black)
+        assertNotEquals(faint, ink)
+        assertTrue(contrastRatio(ink.compositeOver(Color.Black), Color.Black) >= 4.5)
+        val legible = Color.White.copy(alpha = 0.9f)
+        assertEquals(legible, scheme.readableForeground(legible, Color.Black))
+        assertEquals(Color.Transparent, scheme.readableForeground(Color.Transparent, Color.Black))
+    }
+
+    @Test fun textButtons_checkTranslucentContainersAgainstActualAndNeutralBackgrounds() {
+        val scheme = MotdLightScheme
+        val colors =
+            ButtonColors(
+                containerColor = Color.Black.copy(alpha = 0.1f),
+                contentColor = Color.White,
+                disabledContainerColor = Color.Red.copy(alpha = 0.1f),
+                disabledContentColor = Color.White.copy(alpha = 0.1f),
+            )
+        for (background in listOf(Color.White, Color.Unspecified)) {
+            val corrected = scheme.readableButtonColors(background, colors)
+            val surfaces = if (background == Color.Unspecified) neutralSurfaces(scheme) else listOf(background)
+            for (surface in surfaces) {
+                val fill = colors.containerColor.compositeOver(surface)
+                assertTrue(contrastRatio(corrected.contentColor.compositeOver(fill), fill) >= 4.5)
+            }
+            assertEquals(colors.containerColor, corrected.containerColor)
+            assertEquals(colors.disabledContainerColor, corrected.disabledContainerColor)
+            assertEquals(colors.disabledContentColor, corrected.disabledContentColor)
+        }
+        val faintInk = colors.copy(containerColor = Color.Black, contentColor = Color.White.copy(alpha = 0.1f))
+        val corrected = scheme.readableButtonColors(Color.White, faintInk)
+        assertTrue(contrastRatio(corrected.contentColor.compositeOver(Color.Black), Color.Black) >= 4.5)
+    }
+
+    @Test fun fieldSelection_keepsFocusedAndErrorInkReadableWithoutRemovingTheCue() {
+        val scheme = MotdLightScheme
+        val preferred = TextSelectionColors(Color.Black, Color.White.copy(alpha = 0.8f))
+        val focusedInk = scheme.readableForeground(Color.Black, Color.White)
+        val errorInk = scheme.readableForeground(Color.White, Color.Black)
+        val selection = scheme.readableSelectionColors(Color.White, focusedInk, preferred, Color.Black, errorInk)
+        assertTrue(selection.backgroundColor.alpha > 0f)
+        assertTrue(selection.backgroundColor.alpha < preferred.backgroundColor.alpha)
+        for ((fill, ink) in listOf(Color.White to focusedInk, Color.Black to errorInk)) {
+            val selectedFill = selection.backgroundColor.compositeOver(fill)
+            assertNotEquals(fill, selectedFill)
+            assertTrue(contrastRatio(ink.compositeOver(selectedFill), selectedFill) >= 4.5)
+        }
+    }
+
+    @Test fun draculaMatchedAdjustedSelection_staysVisibleGloballyAndInFields() {
+        val scheme = requireNotNull(fixedThemeScheme(ColorThemePreset.DRACULA, useThemeTextColors = true, adjustPaletteReadability = true))
+        val global = scheme.readableSelectionColors()
+        assertTrue(global.backgroundColor.alpha > 0f)
+        for (fill in neutralSurfaces(scheme)) {
+            val selectedFill = global.backgroundColor.compositeOver(fill)
+            assertNotEquals("visible global selection on $fill", fill, selectedFill)
+            for (ink in listOf(scheme.onSurface, scheme.onBackground, scheme.onSurfaceVariant)) {
+                assertTrue(contrastRatio(ink.compositeOver(selectedFill), selectedFill) >= 4.5)
+            }
+            val focusedInk = scheme.readableForeground(scheme.onSurface, fill)
+            val errorInk = scheme.readableForeground(scheme.onSurface, scheme.surface)
+            val field = scheme.readableSelectionColors(fill, focusedInk, global, scheme.surface, errorInk)
+            for ((activeFill, ink) in listOf(fill to focusedInk, scheme.surface to errorInk)) {
+                val selectedFieldFill = field.backgroundColor.compositeOver(activeFill)
+                assertNotEquals("visible field selection on $activeFill", activeFill, selectedFieldFill)
+                assertTrue(contrastRatio(ink.compositeOver(selectedFieldFill), selectedFieldFill) >= 4.5)
+            }
+        }
+        val transparent = TextSelectionColors(global.handleColor, Color.Transparent)
+        assertEquals(transparent, scheme.readableSelectionColors(preferred = transparent))
+        val visible = scheme.readableSelectionColors(scheme.surface, scheme.onSurface)
+        assertEquals(visible, scheme.readableSelectionColors(scheme.surface, scheme.onSurface, visible))
+    }
+
+    @Test fun authoredTextStillSeedsFilledInkIndependentlyOfReadingMode() {
         val authoredInk = Color(0xFF001060)
         val raw = MotdLightRaw.copy(onSurface = authoredInk)
-        val applied = paletteColorScheme(raw, dark = false)
-        assertEquals(authoredRoles(raw), authoredRoles(applied))
-        listOf(
-            applied.onPrimaryContainer to applied.primaryContainer,
-            applied.onSecondaryContainer to applied.secondaryContainer,
-            applied.onTertiaryContainer to applied.tertiaryContainer,
-        ).forEach { (ink, fill) ->
-            assertTrue(contrastRatio(authoredInk, fill) >= 4.5)
-            assertEquals(authoredInk, ink)
-        }
-        val adjusted = paletteColorScheme(raw, dark = false, adjustPaletteReadability = true)
-        assertNotEquals(authoredInk, adjusted.onSecondaryContainer)
-        assertEquals(adjusted.onSecondaryContainer.red, adjusted.onSecondaryContainer.green, 0.00001f)
-        assertEquals(adjusted.onSecondaryContainer.green, adjusted.onSecondaryContainer.blue, 0.00001f)
+        val neutral = paletteColorScheme(raw, dark = false)
+        val themed = paletteColorScheme(raw, dark = false, useThemeTextColors = true)
+        assertEquals(authoredInk, themed.onSurface)
+        assertNotEquals(authoredInk, neutral.onSurface)
+        assertEquals(filledRoles(neutral), filledRoles(themed))
+        assertEquals(authoredInk, neutral.onSecondaryContainer)
     }
 
     @Test fun comfortableBubbleThemeRolesFollowTheResolvedColorSchemeWhileCustomIsFixed() {
@@ -353,8 +470,13 @@ class ThemeCatalogTest {
             assertEquals(authored.onBackground, colors.onBackground)
             for (themeText in listOf(false, true)) {
                 val unadjusted = paletteColorScheme(raw, dark, themeText)
-                assertEquals(authoredRoles(raw), authoredRoles(unadjusted))
-                assertTrue(contrastRatio(unadjusted.onBackground, unadjusted.background) < 4.5)
+                if (themeText) {
+                    assertEquals(authoredRoles(raw), authoredRoles(unadjusted))
+                    assertTrue(contrastRatio(unadjusted.onBackground, unadjusted.background) < 4.5)
+                } else {
+                    assertTrue(contrastRatio(unadjusted.onBackground, unadjusted.background) >= 4.5)
+                    assertEquals(unadjusted.onBackground, unadjusted.onSurfaceVariant)
+                }
                 listOf(
                     unadjusted.onPrimary to unadjusted.primary,
                     unadjusted.onSecondary to unadjusted.secondary,
@@ -486,6 +608,29 @@ class ThemeCatalogTest {
             scheme.outline,
         )
 
+    private fun filledRoles(scheme: ColorScheme): List<Color> =
+        listOf(
+            scheme.primary,
+            scheme.onPrimary,
+            scheme.primaryContainer,
+            scheme.onPrimaryContainer,
+            scheme.secondary,
+            scheme.onSecondary,
+            scheme.secondaryContainer,
+            scheme.onSecondaryContainer,
+            scheme.tertiary,
+            scheme.onTertiary,
+            scheme.tertiaryContainer,
+            scheme.onTertiaryContainer,
+            scheme.error,
+            scheme.onError,
+            scheme.errorContainer,
+            scheme.onErrorContainer,
+            scheme.inverseSurface,
+            scheme.inverseOnSurface,
+            scheme.inversePrimary,
+        )
+
     private fun neutralSurfaces(scheme: ColorScheme): List<Color> =
         listOf(
             scheme.background,
@@ -495,6 +640,8 @@ class ThemeCatalogTest {
             scheme.surfaceContainer,
             scheme.surfaceContainerHigh,
             scheme.surfaceContainerHighest,
+            scheme.surfaceBright,
+            scheme.surfaceDim,
             scheme.surfaceVariant,
         ).distinct()
 

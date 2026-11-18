@@ -78,6 +78,9 @@ import io.github.trevarj.motd.gesture.vector
 import io.github.trevarj.motd.ui.settings.RadioRow
 import io.github.trevarj.motd.ui.settings.SettingsScaffold
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
@@ -169,6 +172,7 @@ fun GestureMenuEditorContent(
         pagePadding = false,
         topActions = {
             TextButton(
+                colors = readableTextButtonColors(),
                 onClick = { resetting = true },
                 enabled = state.loaded,
                 modifier = Modifier.testTag(GESTURE_EDITOR_RESET_TAG),
@@ -191,7 +195,7 @@ fun GestureMenuEditorContent(
                 contentPadding = PaddingValues(bottom = 24.dp),
             ) {
                 item {
-                    TextButton(onClick = { previewing = true }, enabled = state.previewRoot != null, modifier = Modifier.testTag("gesture_editor_preview")) {
+                    TextButton(colors = readableTextButtonColors(), onClick = { previewing = true }, enabled = state.previewRoot != null, modifier = Modifier.testTag("gesture_editor_preview")) {
                         Text(stringResource(R.string.settings_preview))
                     }
                 }
@@ -250,7 +254,7 @@ fun GestureMenuEditorContent(
             title = { Text(stringResource(R.string.gesture_editor_delete_title)) },
             text = { Text(stringResource(R.string.gesture_editor_delete_message, node.label)) },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(colors = readableTextButtonColors(), onClick = {
                     callbacks.onDelete(node.id)
                     deleting = null
                 }) {
@@ -258,7 +262,7 @@ fun GestureMenuEditorContent(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { deleting = null }) { Text(stringResource(R.string.action_cancel)) }
+                TextButton(colors = readableTextButtonColors(), onClick = { deleting = null }) { Text(stringResource(R.string.action_cancel)) }
             },
             modifier = Modifier.testTag("gesture_editor_delete_dialog"),
         )
@@ -269,7 +273,7 @@ fun GestureMenuEditorContent(
             title = { Text(stringResource(R.string.gesture_editor_reset_title)) },
             text = { Text(stringResource(R.string.gesture_editor_reset_message)) },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(colors = readableTextButtonColors(), onClick = {
                     callbacks.onReset()
                     resetting = false
                 }) {
@@ -277,7 +281,7 @@ fun GestureMenuEditorContent(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { resetting = false }) { Text(stringResource(R.string.action_cancel)) }
+                TextButton(colors = readableTextButtonColors(), onClick = { resetting = false }) { Text(stringResource(R.string.action_cancel)) }
             },
             modifier = Modifier.testTag("gesture_editor_reset_dialog"),
         )
@@ -698,7 +702,7 @@ private fun SheetTitle(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, background = MaterialTheme.colorScheme.surfaceContainerLow),
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
     )
 }
@@ -742,6 +746,7 @@ private fun SheetField(
     onValueChange: (String) -> Unit,
 ) {
     OutlinedTextField(
+        colors = readableOutlinedTextFieldColors(),
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
@@ -761,8 +766,8 @@ private fun SheetActions(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.End,
     ) {
-        TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
-        TextButton(onClick = onSave, enabled = enabled, modifier = Modifier.testTag(saveTag)) {
+        TextButton(colors = readableTextButtonColors(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+        TextButton(colors = readableTextButtonColors(), onClick = onSave, enabled = enabled, modifier = Modifier.testTag(saveTag)) {
             Text(stringResource(R.string.action_save))
         }
     }
@@ -782,6 +787,7 @@ private fun TextFieldDialog(
         title = { Text(title) },
         text = {
             OutlinedTextField(
+                colors = readableOutlinedTextFieldColors(),
                 value = text,
                 onValueChange = { text = it },
                 label = { Text(label) },
@@ -791,6 +797,7 @@ private fun TextFieldDialog(
         },
         confirmButton = {
             TextButton(
+                colors = readableTextButtonColors(),
                 onClick = { onSave(text) },
                 enabled = text.isNotBlank(),
                 modifier = Modifier.testTag("gesture_editor_rename_save"),
@@ -798,7 +805,7 @@ private fun TextFieldDialog(
                 Text(stringResource(R.string.action_save))
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+        dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
         modifier = Modifier.testTag("gesture_editor_rename_dialog"),
     )
 }
@@ -850,7 +857,7 @@ internal fun IconPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
         modifier = Modifier.testTag("gesture_editor_icon_dialog"),
     )

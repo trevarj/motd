@@ -65,6 +65,8 @@ import io.github.trevarj.motd.ui.components.ReasonPresetChips
 import io.github.trevarj.motd.ui.components.popupEffectSurface
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiSnackbarHost as SnackbarHost
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -139,6 +141,7 @@ private fun IgnoreSection(
     SettingsGroup(title = stringResource(R.string.network_tools_privacy_section)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
+                colors = readableOutlinedTextFieldColors(),
                 value = pattern,
                 onValueChange = { pattern = it },
                 label = { Text(stringResource(R.string.network_tools_ignore_hint)) },
@@ -300,6 +303,7 @@ private fun OperatorSection(
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = operUser,
                     onValueChange = { operUser = it },
                     label = { Text(stringResource(R.string.network_tools_oper_user)) },
@@ -307,6 +311,7 @@ private fun OperatorSection(
                     modifier = Modifier.fillMaxWidth().testTag("network_tools_oper_user"),
                 )
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = operPassword,
                     onValueChange = { operPassword = it },
                     label = { Text(stringResource(R.string.network_tools_oper_password)) },
@@ -332,6 +337,7 @@ private fun OperatorSection(
                     onExpandedChange = { modeTargetExpanded = it },
                 ) {
                     OutlinedTextField(
+                        colors = readableOutlinedTextFieldColors(),
                         value = modeTarget,
                         onValueChange = { modeTarget = it },
                         label = { Text(stringResource(R.string.network_tools_target)) },
@@ -370,6 +376,7 @@ private fun OperatorSection(
                     }
                 }
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = modes,
                     onValueChange = { modes = it },
                     label = { Text(stringResource(R.string.network_tools_modes)) },
@@ -377,6 +384,7 @@ private fun OperatorSection(
                     modifier = Modifier.fillMaxWidth().testTag("network_tools_mode_letters"),
                 )
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = modeArgs,
                     onValueChange = { modeArgs = it },
                     label = { Text(stringResource(R.string.network_tools_mode_args)) },
@@ -392,6 +400,7 @@ private fun OperatorSection(
 
                 HorizontalDivider()
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = killNick,
                     onValueChange = { killNick = it },
                     label = { Text(stringResource(R.string.network_tools_kill_nick)) },
@@ -425,6 +434,7 @@ private fun OperatorSection(
 
                 HorizontalDivider()
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = rehashServer,
                     onValueChange = { rehashServer = it },
                     label = { Text(stringResource(R.string.network_tools_rehash_server)) },
@@ -447,6 +457,7 @@ private fun OperatorSection(
 
                 HorizontalDivider()
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = connectServer,
                     onValueChange = { connectServer = it },
                     label = { Text(stringResource(R.string.network_tools_connect_server)) },
@@ -454,6 +465,7 @@ private fun OperatorSection(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = connectPort,
                     onValueChange = { connectPort = it.filter(Char::isDigit) },
                     label = { Text(stringResource(R.string.network_tools_connect_port)) },
@@ -461,6 +473,7 @@ private fun OperatorSection(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = connectRemote,
                     onValueChange = { connectRemote = it },
                     label = { Text(stringResource(R.string.network_tools_connect_remote)) },
@@ -483,6 +496,7 @@ private fun OperatorSection(
 
                 HorizontalDivider()
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = squitServer,
                     onValueChange = { squitServer = it },
                     label = { Text(stringResource(R.string.network_tools_squit_server)) },
@@ -576,6 +590,7 @@ private fun OperatorSection(
             },
             confirmButton = {
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = {
                         pending = null
                         onSendCommand(command.message)
@@ -584,7 +599,7 @@ private fun OperatorSection(
                 ) { Text(command.kind.commandName, color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { pending = null }) { Text(stringResource(R.string.action_cancel)) }
+                TextButton(colors = readableTextButtonColors(), onClick = { pending = null }) { Text(stringResource(R.string.action_cancel)) }
             },
         )
     }
@@ -598,6 +613,7 @@ private fun ReasonField(
     tag: String,
 ) {
     OutlinedTextField(
+        colors = readableOutlinedTextFieldColors(),
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
@@ -616,6 +632,7 @@ private fun DestructiveButton(
     onConfirm: (PendingOperatorCommand) -> Unit,
 ) {
     TextButton(
+        colors = readableTextButtonColors(),
         onClick = { onConfirm(command()) },
         enabled = enabled,
         modifier = Modifier.testTag(tag),

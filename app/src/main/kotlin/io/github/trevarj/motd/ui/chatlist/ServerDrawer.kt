@@ -108,6 +108,8 @@ import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ceramicLogoColorMatrix
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.theme.shape
 import kotlin.math.roundToInt
 import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
@@ -374,6 +376,7 @@ internal fun DrawerActionTile(
     modifier: Modifier,
 ) {
     TextButton(
+        colors = readableTextButtonColors(),
         onClick = onClick,
         modifier =
             modifier.heightIn(min = 48.dp).clearAndSetSemantics {
@@ -386,7 +389,7 @@ internal fun DrawerActionTile(
             },
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLow, minimumContrast = 3.0))
             Text(
                 text = visibleLabel,
                 style = MaterialTheme.typography.labelSmall,
@@ -423,7 +426,7 @@ private fun NetworksHeader(
             Text(
                 text = stringResource(R.string.drawer_networks).uppercase(),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLow),
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
@@ -454,6 +457,7 @@ private fun NetworksHeader(
         if (scoped) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = onClearFilter,
                     modifier = Modifier.testTag("drawer_clear_filter"),
                 ) {

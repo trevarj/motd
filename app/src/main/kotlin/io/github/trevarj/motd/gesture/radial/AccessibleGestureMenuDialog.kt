@@ -29,6 +29,8 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.gesture.GestureAction
 import io.github.trevarj.motd.gesture.vector
 import io.github.trevarj.motd.ui.components.effectSurface
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
@@ -53,7 +55,7 @@ internal fun AccessibleGestureMenuDialog(
     val current = path.last()
     AlertDialog(
         containerColor = Color.Transparent,
-        titleContentColor = MaterialTheme.colorScheme.primary,
+        titleContentColor = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLow),
         onDismissRequest = onDismiss,
         modifier = Modifier.effectSurface(io.github.trevarj.motd.data.prefs.EffectSurface.MENU, MaterialTheme.colorScheme.surfaceContainerLow, MaterialTheme.shapes.extraLarge).testTag(GESTURE_MENU_A11Y_DIALOG_TAG),
         title = {
@@ -74,7 +76,7 @@ internal fun AccessibleGestureMenuDialog(
                 items(current.children, key = { it.id }) { entry ->
                     ListItem(
                         headlineContent = { Text(entry.label) },
-                        leadingContent = { Icon(entry.icon.vector, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        leadingContent = { Icon(entry.icon.vector, contentDescription = null, tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLow, minimumContrast = 3.0)) },
                         trailingContent = {
                             if (entry.children.isNotEmpty()) {
                                 Icon(Icons.Outlined.ChevronRight, contentDescription = null)
@@ -104,7 +106,7 @@ internal fun AccessibleGestureMenuDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.gesture_menu_a11y_close)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss) { Text(stringResource(R.string.gesture_menu_a11y_close)) }
         },
     )
 }

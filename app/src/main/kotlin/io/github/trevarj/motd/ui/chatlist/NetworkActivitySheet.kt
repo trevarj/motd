@@ -43,6 +43,8 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import java.text.DateFormat
 import java.util.Date
 import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
@@ -83,8 +85,8 @@ internal fun NetworkActivitySheetContent(
     var recentExpanded by rememberSaveable { mutableStateOf(false) }
     val recentToggleLabel = stringResource(if (recentExpanded) R.string.network_activity_hide_recent else R.string.network_activity_show_recent)
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.network_activity_title), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f).semantics { heading() })
-        TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp).testTag("network_activity_close")) { Text(stringResource(R.string.network_activity_close)) }
+        Text(stringResource(R.string.network_activity_title), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLow), modifier = Modifier.weight(1f).semantics { heading() })
+        TextButton(colors = readableTextButtonColors(), onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp).testTag("network_activity_close")) { Text(stringResource(R.string.network_activity_close)) }
     }
     LazyColumn(Modifier.fillMaxWidth().testTag("network_activity_list"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { ActivityHeading(stringResource(R.string.network_activity_active, activity.unacknowledgedCount)) }
@@ -126,8 +128,8 @@ internal fun NetworkActivitySheetContent(
         if (activity.recent.isNotEmpty()) {
             item {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("network_activity_recent_heading"), verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.network_activity_recent, activity.recent.size), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f).semantics { heading() })
-                    TextButton(onClick = { recentExpanded = !recentExpanded }, modifier = Modifier.heightIn(min = 48.dp).testTag("network_activity_recent_toggle").semantics { contentDescription = recentToggleLabel }) {
+                    Text(stringResource(R.string.network_activity_recent, activity.recent.size), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLow), modifier = Modifier.weight(1f).semantics { heading() })
+                    TextButton(colors = readableTextButtonColors(), onClick = { recentExpanded = !recentExpanded }, modifier = Modifier.heightIn(min = 48.dp).testTag("network_activity_recent_toggle").semantics { contentDescription = recentToggleLabel }) {
                         Text(stringResource(if (recentExpanded) R.string.network_activity_hide else R.string.network_activity_show))
                     }
                     ActivityAction(stringResource(R.string.network_activity_clear), stringResource(R.string.network_activity_clear_recent), "network_activity_recent_clear", onClick = onClearRecent)
@@ -154,7 +156,7 @@ private fun ActivityNetwork(
     val serverLabel = stringResource(R.string.network_activity_server_target, network.name)
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("network_activity_network_${network.id}"), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(network.name, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(network.name, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLow), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(connectionLabel(network.connection), style = MaterialTheme.typography.bodySmall)
             if (network.history.any { it.status == HistorySyncStatus.AwaitingConnection }) Text(stringResource(R.string.chatlist_sync_waiting), style = MaterialTheme.typography.bodySmall)
             if (network.history.any { it.status == HistorySyncStatus.Queued }) Text(stringResource(R.string.chatlist_sync_queued), style = MaterialTheme.typography.bodySmall)
@@ -186,7 +188,7 @@ private fun ActivityNetwork(
 
 @Composable
 private fun ActivityHeading(text: String) {
-    Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 16.dp).semantics { heading() })
+    Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLow), modifier = Modifier.padding(horizontal = 16.dp).semantics { heading() })
 }
 
 @Composable
@@ -250,7 +252,7 @@ private fun ActivityAction(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
-    TextButton(onClick = onClick, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp).testTag(tag).semantics { contentDescription = description }) { Text(text) }
+    TextButton(colors = readableTextButtonColors(), onClick = onClick, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp).testTag(tag).semantics { contentDescription = description }) { Text(text) }
 }
 
 @Composable

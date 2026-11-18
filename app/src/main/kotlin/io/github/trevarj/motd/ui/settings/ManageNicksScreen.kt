@@ -48,6 +48,8 @@ import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -149,6 +151,7 @@ fun ManageNicksContent(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedTextField(
+                        colors = readableOutlinedTextFieldColors(),
                         value = input,
                         onValueChange = { input = it },
                         singleLine = true,
@@ -156,6 +159,7 @@ fun ManageNicksContent(
                         modifier = Modifier.weight(1f).testTag("manage_nick_input"),
                     )
                     TextButton(
+                        colors = readableTextButtonColors(),
                         enabled = sanitized != null,
                         onClick = {
                             val nick = sanitized ?: return@TextButton

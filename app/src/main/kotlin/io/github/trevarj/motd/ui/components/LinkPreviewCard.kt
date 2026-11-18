@@ -60,6 +60,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.cornerRadius
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.paletteColorScheme
+import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readingInk
 import io.github.trevarj.motd.ui.theme.toRawColorScheme
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -179,7 +180,7 @@ private fun LinkPreviewContent(
         return
     }
     val scheme = MaterialTheme.colorScheme
-    val readingInk = ensureContrast(readingInk(scheme), listOf(scheme.surfaceContainerHighest.compositeOver(scheme.background)), MESSAGE_TEXT_CONTRAST)
+    val readingInk = if (LocalAdjustPaletteReadability.current) ensureContrast(readingInk(scheme), listOf(scheme.surfaceContainerHighest.compositeOver(scheme.background)), MESSAGE_TEXT_CONTRAST) else readingInk(scheme)
     Row(
         modifier =
             Modifier
@@ -196,7 +197,7 @@ private fun LinkPreviewContent(
                 Text(
                     text = it,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, background = scheme.surfaceContainerHighest.compositeOver(scheme.background)),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -240,7 +241,7 @@ private fun PaletteLinkPreview(
     onClick: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val ink = ensureContrast(readingInk(scheme), listOf(scheme.surfaceContainerHighest.compositeOver(scheme.background)), MESSAGE_TEXT_CONTRAST)
+    val ink = if (LocalAdjustPaletteReadability.current) ensureContrast(readingInk(scheme), listOf(scheme.surfaceContainerHighest.compositeOver(scheme.background)), MESSAGE_TEXT_CONTRAST) else readingInk(scheme)
     val action = stringResource(R.string.palette_preview_action)
     Column(
         Modifier

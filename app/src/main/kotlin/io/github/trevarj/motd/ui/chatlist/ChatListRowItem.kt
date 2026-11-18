@@ -88,6 +88,7 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.cornerRadius
 import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readingInk
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -438,7 +439,14 @@ fun ChatListRowItem(
                         Icon(
                             imageVector = Icons.Filled.PlayArrow,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint =
+                                MaterialTheme.colorScheme.readableForeground(
+                                    MaterialTheme.colorScheme.primary,
+                                    MaterialTheme.colorScheme.primary
+                                        .copy(alpha = 0.14f)
+                                        .compositeOver(paintedRow),
+                                    minimumContrast = 3.0,
+                                ),
                             modifier = Modifier.size(14.dp),
                         )
                     }

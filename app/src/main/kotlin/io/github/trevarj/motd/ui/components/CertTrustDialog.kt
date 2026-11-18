@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import java.text.DateFormat
 import java.util.Date
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -79,12 +80,12 @@ fun CertTrustDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onTrust, modifier = Modifier.testTag("cert_trust_accept")) {
+            TextButton(colors = readableTextButtonColors(), onClick = onTrust, modifier = Modifier.testTag("cert_trust_accept")) {
                 Text(stringResource(R.string.cert_trust_accept))
             }
         },
         dismissButton = {
-            TextButton(onClick = onCancel, modifier = Modifier.testTag("cert_trust_cancel")) {
+            TextButton(colors = readableTextButtonColors(), onClick = onCancel, modifier = Modifier.testTag("cert_trust_cancel")) {
                 Text(stringResource(R.string.cert_trust_cancel))
             }
         },

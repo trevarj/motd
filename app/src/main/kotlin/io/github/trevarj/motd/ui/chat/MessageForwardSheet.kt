@@ -47,6 +47,7 @@ import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
 import io.github.trevarj.motd.ui.share.filterShareTargets
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -170,6 +171,7 @@ internal fun MessageForwardSheet(
                     Text(stringResource(R.string.chat_forward_include_sender), modifier = Modifier.padding(start = 8.dp))
                 }
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = onChangeDestination,
                     enabled = editable,
                     modifier = Modifier.testTag("message_forward_change_destination"),
@@ -183,6 +185,7 @@ internal fun MessageForwardSheet(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = onDismiss,
                     enabled = !state.sending,
                     modifier = Modifier.testTag("message_forward_cancel"),

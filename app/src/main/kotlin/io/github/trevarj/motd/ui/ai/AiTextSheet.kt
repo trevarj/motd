@@ -61,6 +61,8 @@ import io.github.trevarj.motd.ai.text.TextOperation
 import io.github.trevarj.motd.ai.text.TextTermination
 import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.UUID
@@ -173,7 +175,7 @@ fun AiTextSheet(
                         state.source?.let {
                             AiTextChoices(it, styles, effectiveTarget, true, onGenerate, { picking = true }, null)
                         }
-                        TextButton(onClick = onOpenSetup, modifier = Modifier.heightIn(min = 48.dp).testTag("ai_text_setup")) {
+                        TextButton(colors = readableTextButtonColors(), onClick = onOpenSetup, modifier = Modifier.heightIn(min = 48.dp).testTag("ai_text_setup")) {
                             Text(stringResource(R.string.ai_text_open_setup))
                         }
                         state.source?.let {
@@ -196,6 +198,7 @@ fun AiTextSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = onDismiss,
                     modifier = Modifier.heightIn(min = 48.dp).testTag("ai_text_close"),
                 ) {
@@ -204,6 +207,7 @@ fun AiTextSheet(
                 if (state is AiTextUiState.Result) {
                     val complete = state.result.termination == TextTermination.EOG
                     TextButton(
+                        colors = readableTextButtonColors(),
                         onClick = { scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("", state.result.text))) } },
                         enabled = complete,
                         modifier = Modifier.heightIn(min = 48.dp).testTag("ai_text_copy"),
@@ -298,7 +302,7 @@ private fun AiTextChoices(
                 }
             }
             if (onManageStyles != null) {
-                TextButton(onClick = onManageStyles, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp).testTag("ai_text_manage_styles")) {
+                TextButton(colors = readableTextButtonColors(), onClick = onManageStyles, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp).testTag("ai_text_manage_styles")) {
                     Text(stringResource(R.string.ai_text_manage_styles))
                 }
             }
@@ -392,12 +396,12 @@ fun AiTranslationTargetPicker(
             title = { Text(stringResource(R.string.ai_text_other_language)) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.ai_text_language_name)) }, singleLine = true, modifier = Modifier.testTag("ai_language_other_name"))
+                    OutlinedTextField(name, { name = it }, colors = readableOutlinedTextFieldColors(), label = { Text(stringResource(R.string.ai_text_language_name)) }, singleLine = true, modifier = Modifier.testTag("ai_language_other_name"))
                     Text(stringResource(R.string.ai_text_other_bounds))
                 }
             },
-            confirmButton = { TextButton(onClick = { onSelected(AiTranslationTarget("other", name.trim())) }, enabled = AiTranslationTarget("other", name.trim()).isValid(), modifier = Modifier.testTag("ai_language_other_save")) { Text(stringResource(R.string.action_save)) } },
-            dismissButton = { TextButton(onClick = { other = false }) { Text(stringResource(R.string.action_cancel)) } },
+            confirmButton = { TextButton(colors = readableTextButtonColors(), onClick = { onSelected(AiTranslationTarget("other", name.trim())) }, enabled = AiTranslationTarget("other", name.trim()).isValid(), modifier = Modifier.testTag("ai_language_other_save")) { Text(stringResource(R.string.action_save)) } },
+            dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = { other = false }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
 }
@@ -416,11 +420,11 @@ fun AiCustomStylesSheet(
             Text(stringResource(R.string.ai_text_custom_styles), style = MaterialTheme.typography.titleLarge)
             styles.forEach { style ->
                 Row(Modifier.fillMaxWidth()) {
-                    TextButton(onClick = { editing = style }, modifier = Modifier.weight(1f).testTag("ai_style_edit_${style.id}")) { Text(style.name) }
-                    TextButton(onClick = { onDelete(style.id) }, modifier = Modifier.testTag("ai_style_delete_${style.id}")) { Text(stringResource(R.string.action_delete)) }
+                    TextButton(colors = readableTextButtonColors(), onClick = { editing = style }, modifier = Modifier.weight(1f).testTag("ai_style_edit_${style.id}")) { Text(style.name) }
+                    TextButton(colors = readableTextButtonColors(), onClick = { onDelete(style.id) }, modifier = Modifier.testTag("ai_style_delete_${style.id}")) { Text(stringResource(R.string.action_delete)) }
                 }
             }
-            TextButton(onClick = { editing = AiCustomStyle(UUID.randomUUID().toString(), "", "") }, enabled = styles.size < 20, modifier = Modifier.testTag("ai_style_add")) { Text(stringResource(R.string.ai_text_add_style)) }
+            TextButton(colors = readableTextButtonColors(), onClick = { editing = AiCustomStyle(UUID.randomUUID().toString(), "", "") }, enabled = styles.size < 20, modifier = Modifier.testTag("ai_style_add")) { Text(stringResource(R.string.ai_text_add_style)) }
         }
     }
     editing?.let { original ->
@@ -429,15 +433,15 @@ fun AiCustomStylesSheet(
         val candidate = original.copy(name = name.trim(), instruction = instruction)
         AlertDialog(onDismissRequest = { editing = null }, title = { Text(stringResource(R.string.ai_text_writing_style)) }, text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
-                OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.ai_text_style_name)) }, modifier = Modifier.testTag("ai_style_name"))
-                OutlinedTextField(instruction, { instruction = it }, label = { Text(stringResource(R.string.ai_text_style_instruction)) }, modifier = Modifier.testTag("ai_style_instruction"))
+                OutlinedTextField(name, { name = it }, colors = readableOutlinedTextFieldColors(), label = { Text(stringResource(R.string.ai_text_style_name)) }, modifier = Modifier.testTag("ai_style_name"))
+                OutlinedTextField(instruction, { instruction = it }, colors = readableOutlinedTextFieldColors(), label = { Text(stringResource(R.string.ai_text_style_instruction)) }, modifier = Modifier.testTag("ai_style_instruction"))
             }
         }, confirmButton = {
-            TextButton(onClick = {
+            TextButton(colors = readableTextButtonColors(), onClick = {
                 onSave(candidate)
                 editing = null
             }, enabled = candidate.isValid(), modifier = Modifier.testTag("ai_style_save")) { Text(stringResource(R.string.action_save)) }
-        }, dismissButton = { TextButton(onClick = { editing = null }) { Text(stringResource(R.string.action_cancel)) } })
+        }, dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = { editing = null }) { Text(stringResource(R.string.action_cancel)) } })
     }
 }
 

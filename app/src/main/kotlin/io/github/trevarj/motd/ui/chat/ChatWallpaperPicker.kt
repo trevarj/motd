@@ -63,6 +63,8 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlin.math.roundToInt
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -184,7 +186,7 @@ private fun WallpaperEditorSheet(
                         .testTag("settings_wallpaper_list"),
             ) {
                 item(key = "title", span = { GridItemSpan(maxLineSpan) }) {
-                    Text(stringResource(R.string.settings_wallpaper), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.settings_wallpaper), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
                 }
                 item(key = "preview", span = { GridItemSpan(maxLineSpan) }) {
                     WallpaperPreview(
@@ -258,7 +260,7 @@ private fun WallpaperEditorSheet(
                 }
                 item(key = "custom", span = { GridItemSpan(maxLineSpan) }) {
                     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = onImport, enabled = !importing, modifier = Modifier.weight(1f).testTag("settings_wallpaper_custom")) {
+                        TextButton(colors = readableTextButtonColors(), onClick = onImport, enabled = !importing, modifier = Modifier.weight(1f).testTag("settings_wallpaper_custom")) {
                             Text(
                                 stringResource(
                                     when {
@@ -270,6 +272,7 @@ private fun WallpaperEditorSheet(
                             )
                         }
                         TextButton(
+                            colors = readableTextButtonColors(),
                             onClick = { updateSelection(selection.copy(localImageName = null)) },
                             enabled = !importing && selection.localImageName != null,
                             modifier = Modifier.weight(1f).testTag("settings_wallpaper_remove"),

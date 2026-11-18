@@ -95,6 +95,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -285,6 +286,7 @@ import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
 import io.github.trevarj.motd.ui.settings.foolEditorPreferences
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.ConversationTypography
+import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.LocalCompactNickBrackets
 import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundBlur
 import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundOpacityPercent
@@ -294,6 +296,8 @@ import io.github.trevarj.motd.ui.theme.MotdSizes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.theme.spacingFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -889,6 +893,7 @@ fun ChatScreen(
             },
             confirmButton = {
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = {
                         if (failure.canSendOriginal) {
                             viewModel.sendDccOriginal(failure)
@@ -902,7 +907,7 @@ fun ChatScreen(
             },
             dismissButton = {
                 if (failure.canSendOriginal) {
-                    TextButton(onClick = { viewModel.dismissDccSendFailure(failure) }) {
+                    TextButton(onClick = { viewModel.dismissDccSendFailure(failure) }, colors = readableTextButtonColors()) {
                         Text(stringResource(R.string.action_cancel))
                     }
                 }
@@ -3766,6 +3771,7 @@ internal fun ChatContent(
                             if (!compactHeader) {
                                 onOpenConversationList?.let { openConversationList ->
                                     TextButton(
+                                        colors = readableTextButtonColors(),
                                         onClick = openConversationList,
                                         modifier = Modifier.heightIn(min = 48.dp).testTag("chat_open_conversation_list"),
                                     ) {
@@ -3796,7 +3802,14 @@ internal fun ChatContent(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
                                 Text(stringResource(R.string.account_reminder_message), modifier = Modifier.weight(1f))
-                                TextButton(onClick = onDismissAccountSetup) { Text(stringResource(R.string.account_reminder_not_now)) }
+                                TextButton(
+                                    onClick = onDismissAccountSetup,
+                                    colors =
+                                        readableTextButtonColors(
+                                            background = MaterialTheme.colorScheme.secondaryContainer,
+                                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSecondaryContainer),
+                                        ),
+                                ) { Text(stringResource(R.string.account_reminder_not_now)) }
                                 Button(onClick = onAccountSetup, modifier = Modifier.testTag("chat_account_setup")) {
                                     Text(stringResource(R.string.account_setup_title))
                                 }
@@ -3968,10 +3981,12 @@ internal fun ChatContent(
                                     if (eligibleEbooksRoomId != null) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             TextButton(
+                                                colors = readableTextButtonColors(),
                                                 onClick = { ebooksHelpOpen = true },
                                                 modifier = Modifier.weight(1f).testTag("chat_ebooks_help"),
                                             ) { Text("Book search · How it works") }
                                             TextButton(
+                                                colors = readableTextButtonColors(),
                                                 onClick = {
                                                     pickingEbooksRoomId = eligibleEbooksRoomId
                                                     ebooksResultsPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
@@ -3980,6 +3995,7 @@ internal fun ChatContent(
                                             ) { Text("Open results ZIP") }
                                         }
                                         TextButton(
+                                            colors = readableTextButtonColors(),
                                             onClick = { ebooksOffersOpen = true },
                                             modifier = Modifier.fillMaxWidth().testTag("chat_ebooks_dcc_offers"),
                                         ) {
@@ -4623,7 +4639,7 @@ internal fun ChatContent(
                     )
                 },
                 confirmButton = {
-                    TextButton(onClick = { ebooksHelpOpen = false }) { Text("Close") }
+                    TextButton(onClick = { ebooksHelpOpen = false }, colors = readableTextButtonColors()) { Text("Close") }
                 },
             )
         }
@@ -4653,6 +4669,7 @@ internal fun ChatContent(
                                         Text(result.size, style = MaterialTheme.typography.bodySmall)
                                     }
                                     TextButton(
+                                        colors = readableTextButtonColors(),
                                         onClick = {
                                             if (ebooksResults === selectedEbooksResults && canRequest()) {
                                                 ebooksResults = null
@@ -4673,7 +4690,7 @@ internal fun ChatContent(
                         }
                     }
                 },
-                confirmButton = { TextButton(onClick = { ebooksResults = null }) { Text("Close") } },
+                confirmButton = { TextButton(onClick = { ebooksResults = null }, colors = readableTextButtonColors()) { Text("Close") } },
             )
         }
         val selectedEbooksError = ebooksResultsError
@@ -4683,7 +4700,7 @@ internal fun ChatContent(
                 modifier = Modifier.testTag("chat_ebooks_results_error"),
                 title = { Text("Cannot open results ZIP") },
                 text = { Text(selectedEbooksError) },
-                confirmButton = { TextButton(onClick = { ebooksResultsError = null }) { Text("Close") } },
+                confirmButton = { TextButton(onClick = { ebooksResultsError = null }, colors = readableTextButtonColors()) { Text("Close") } },
             )
         }
 
@@ -4737,7 +4754,7 @@ internal fun ChatContent(
                 title = { Text("Long draft") },
                 text = { Text("Upload the draft as a paste, or send it as ordinary IRC messages?") },
                 confirmButton = {
-                    androidx.compose.material3.TextButton(onClick = {
+                    androidx.compose.material3.TextButton(colors = readableTextButtonColors(), onClick = {
                         AutoFollowTrace.record("long_draft_upload", traceBufferId, traceSessionId)
                         longDraftPrompt = false
                         uploadCurrentDraftDirectly = true
@@ -4746,7 +4763,7 @@ internal fun ChatContent(
                 },
                 dismissButton = {
                     Row {
-                        androidx.compose.material3.TextButton(onClick = {
+                        androidx.compose.material3.TextButton(colors = readableTextButtonColors(), onClick = {
                             AutoFollowTrace.record("long_draft_send_messages", traceBufferId, traceSessionId)
                             if (!isEbooksSearchOnly(composerText.text)) {
                                 flightAnchors.captureLaunch()
@@ -4755,7 +4772,7 @@ internal fun ChatContent(
                                 scope.launch { scrollToNewest(animate = true, reason = "long_draft_send") }
                             }
                         }) { Text("Send as messages") }
-                        androidx.compose.material3.TextButton(onClick = {
+                        androidx.compose.material3.TextButton(colors = readableTextButtonColors(), onClick = {
                             AutoFollowTrace.record("long_draft_cancel", traceBufferId, traceSessionId)
                             longDraftPrompt = false
                         }) { Text("Cancel") }
@@ -4879,6 +4896,7 @@ internal fun ChatContent(
                 text = { Text(stringResource(R.string.chat_redaction_confirm_body)) },
                 confirmButton = {
                     androidx.compose.material3.TextButton(
+                        colors = readableTextButtonColors(),
                         onClick = {
                             redactionTarget = null
                             onRedact(target)
@@ -4889,7 +4907,7 @@ internal fun ChatContent(
                     }
                 },
                 dismissButton = {
-                    androidx.compose.material3.TextButton(onClick = { redactionTarget = null }) {
+                    androidx.compose.material3.TextButton(onClick = { redactionTarget = null }, colors = readableTextButtonColors()) {
                         Text(stringResource(R.string.action_cancel))
                     }
                 },
@@ -5789,10 +5807,21 @@ internal fun VoiceComposerPanel(
 ) {
     var destinationSheet by remember { mutableStateOf(false) }
     val panelColor = MaterialTheme.colorScheme.secondaryContainer
+    val adjustPaletteReadability = LocalAdjustPaletteReadability.current
     val recordingInkSeed = MaterialTheme.colorScheme.error
-    val recordingInk = remember(recordingInkSeed, panelColor) { ensureContrast(recordingInkSeed, listOf(panelColor)) }
+    val recordingInk =
+        if (adjustPaletteReadability) {
+            remember(recordingInkSeed, panelColor) { ensureContrast(recordingInkSeed, listOf(panelColor)) }
+        } else {
+            MaterialTheme.colorScheme.readableForeground(recordingInkSeed, background = panelColor)
+        }
     val previewInkSeed = MaterialTheme.colorScheme.primary
-    val previewInk = remember(previewInkSeed, panelColor) { ensureContrast(previewInkSeed, listOf(panelColor)) }
+    val previewInk =
+        if (adjustPaletteReadability) {
+            remember(previewInkSeed, panelColor) { ensureContrast(previewInkSeed, listOf(panelColor)) }
+        } else {
+            MaterialTheme.colorScheme.readableForeground(previewInkSeed, background = panelColor)
+        }
     // Hold the last non-null panel models so the exit animation still has content to draw after
     // the state field clears; live fields (state.sending, state.progress, playbackState) keep reading current
     // state as before.
@@ -5978,7 +6007,12 @@ internal fun VoiceComposerPanel(
                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                             )
                         }
-                        TextButton(onClick = { destinationSheet = true }, enabled = !state.sending, modifier = Modifier.testTag("voice_destination")) {
+                        TextButton(
+                            onClick = { destinationSheet = true },
+                            enabled = !state.sending,
+                            modifier = Modifier.testTag("voice_destination"),
+                            colors = readableTextButtonColors(background = panelColor),
+                        ) {
                             Text("Change")
                         }
                     }
@@ -6031,7 +6065,7 @@ internal fun VoiceComposerPanel(
             onDismissRequest = onErrorDismissed,
             title = { Text("Voice message") },
             text = { Text(error) },
-            confirmButton = { TextButton(onClick = onErrorDismissed) { Text("OK") } },
+            confirmButton = { TextButton(onClick = onErrorDismissed, colors = readableTextButtonColors()) { Text("OK") } },
         )
     }
 }
@@ -6100,7 +6134,11 @@ private fun PartedChannelBanner(
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f).padding(end = 12.dp),
             )
-            TextButton(onClick = onRejoin, modifier = Modifier.testTag("chat_parted_rejoin")) {
+            TextButton(
+                onClick = onRejoin,
+                modifier = Modifier.testTag("chat_parted_rejoin"),
+                colors = readableTextButtonColors(background = MaterialTheme.colorScheme.errorContainer),
+            ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Login,
                     contentDescription = null,

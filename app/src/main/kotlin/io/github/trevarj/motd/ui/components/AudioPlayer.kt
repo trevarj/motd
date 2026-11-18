@@ -84,6 +84,8 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdSizes
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.cornerRadius
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -177,6 +179,7 @@ fun AudioAttachmentPlayers(
                 }
                 if (!expanded && attachments.size > MAX_COLLAPSED_AUDIO_PLAYERS) {
                     TextButton(
+                        colors = readableTextButtonColors(),
                         onClick = { expanded = true },
                         modifier = Modifier.testTag("audio_player_expand"),
                     ) {
@@ -432,7 +435,7 @@ private fun AudioAttachmentPlayer(
             title = { Text("Play cleartext audio?") },
             text = { Text("This link uses HTTP. Anyone on the network path may see or modify it.") },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(colors = readableTextButtonColors(), onClick = {
                     confirmHttp = false
                     onToggle(attachment, networkId)
                 }) {
@@ -440,7 +443,7 @@ private fun AudioAttachmentPlayer(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { confirmHttp = false }) { Text("Cancel") }
+                TextButton(colors = readableTextButtonColors(), onClick = { confirmHttp = false }) { Text("Cancel") }
             },
         )
     }
@@ -544,7 +547,7 @@ fun AudioDetailsSheet(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        Text("Audio", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+        Text("Audio", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
         Spacer(Modifier.height(8.dp))
         DetailRow("Link", attachment.displayUrl)
         origin?.let {
@@ -558,6 +561,7 @@ fun AudioDetailsSheet(
         DetailRow("Encryption", if (attachment.encrypted) "Host-blind key in URL fragment" else "Off")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(
+                colors = readableTextButtonColors(),
                 onClick =
                     onCopy ?: {
                         context
@@ -571,6 +575,7 @@ fun AudioDetailsSheet(
                 Text("Copy")
             }
             TextButton(
+                colors = readableTextButtonColors(),
                 onClick =
                     onOpen ?: {
                         context.startActivity(Intent(Intent.ACTION_VIEW, attachment.displayUrl.toUri()))
@@ -580,7 +585,7 @@ fun AudioDetailsSheet(
                 Spacer(Modifier.width(6.dp))
                 Text("Open")
             }
-            TextButton(onClick = onSave ?: { enqueueDownload(context, attachment) }) {
+            TextButton(colors = readableTextButtonColors(), onClick = onSave ?: { enqueueDownload(context, attachment) }) {
                 Icon(Icons.Outlined.Download, null)
                 Spacer(Modifier.width(6.dp))
                 Text("Save")
@@ -606,6 +611,7 @@ fun AudioDetailsSheet(
             text = { Text(stringResource(R.string.voice_transcription_http_message)) },
             confirmButton = {
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = {
                         val force = pendingCleartextTranscription ?: return@TextButton
                         pendingCleartextTranscription = null
@@ -616,7 +622,7 @@ fun AudioDetailsSheet(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { pendingCleartextTranscription = null }) {
+                TextButton(colors = readableTextButtonColors(), onClick = { pendingCleartextTranscription = null }) {
                     Text(stringResource(R.string.action_cancel))
                 }
             },
@@ -652,6 +658,7 @@ private fun VoiceTranscriptionDetails(
         when (transcript) {
             null -> {
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = { onTranscribe(false) },
                     modifier = Modifier.testTag("audio_transcription_start"),
                 ) {
@@ -719,6 +726,7 @@ private fun VoiceTranscriptionDetails(
                     )
                 }
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = { onTranscribe(true) },
                     modifier = Modifier.testTag("audio_transcription_again"),
                 ) {
@@ -733,6 +741,7 @@ private fun VoiceTranscriptionDetails(
                     color = MaterialTheme.colorScheme.error,
                 )
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = { onTranscribe(false) },
                     modifier = Modifier.testTag("audio_transcription_retry"),
                 ) {
@@ -760,6 +769,7 @@ private fun VoiceTranscriptionProgress(
 @Composable
 private fun TranscriptionCancel(onCancel: () -> Unit) {
     TextButton(
+        colors = readableTextButtonColors(),
         onClick = onCancel,
         modifier = Modifier.testTag("audio_transcription_cancel"),
     ) {

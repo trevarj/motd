@@ -125,6 +125,8 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.TimestampConfig
 import io.github.trevarj.motd.ui.theme.fontFamily
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.theme.rememberAppFontFamily
 import io.github.trevarj.motd.ui.theme.resolvedMode
 import java.io.File
@@ -460,14 +462,13 @@ fun AppearanceSettingsContent(
             SettingsTarget(target?.name, SettingsTarget.THEME_TEXT_COLORS.name) { targetModifier ->
                 SwitchRow(
                     title = stringResource(R.string.settings_theme_text_colors),
-                    subtitle = stringResource(if (appearance.adjustPaletteReadability) R.string.settings_theme_text_colors_desc else R.string.settings_theme_text_colors_inactive),
+                    subtitle = stringResource(R.string.settings_theme_text_colors_desc),
                     checked = appearance.useThemeTextColors,
                     onCheckedChange = {
                         previewAppearance = previewAppearance.copy(useThemeTextColors = it)
                         onUseThemeTextColors(it)
                     },
                     switchTag = "settings_switch_theme_text_colors",
-                    enabled = appearance.adjustPaletteReadability,
                     modifier = targetModifier,
                 )
             }
@@ -1135,19 +1136,21 @@ internal fun EmojiSetPickerContent(
                         } else {
                             LinearProgressIndicator(Modifier.fillMaxWidth().testTag("settings_emoji_progress"))
                         }
-                        TextButton(onClick = onCancel, modifier = Modifier.testTag("settings_emoji_cancel")) {
+                        TextButton(onClick = onCancel, colors = readableTextButtonColors(), modifier = Modifier.testTag("settings_emoji_cancel")) {
                             Text(stringResource(R.string.settings_emoji_cancel))
                         }
                     } else {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (installed) {
                                 TextButton(
+                                    colors = readableTextButtonColors(),
                                     onClick = { onRemove(spec.id) },
                                     enabled = !state.loading,
                                     modifier = Modifier.testTag("settings_emoji_remove_${spec.id}"),
                                 ) { Text(stringResource(R.string.settings_emoji_remove)) }
                             }
                             TextButton(
+                                colors = readableTextButtonColors(),
                                 onClick = { onDownload(spec.id) },
                                 enabled = !state.loading && state.downloadingId == null,
                                 modifier = Modifier.testTag("settings_emoji_${if (installed || selectedId == spec.id) "reinstall" else "download"}_${spec.id}"),
@@ -1950,6 +1953,7 @@ private fun FontScaleSlider(
             modifier = Modifier.align(androidx.compose.ui.Alignment.End),
         ) {
             TextButton(
+                colors = readableTextButtonColors(),
                 onClick = {
                     pending = DEFAULT_FONT_SCALE_PERCENT.toFloat()
                     onValue(DEFAULT_FONT_SCALE_PERCENT)
@@ -2000,7 +2004,7 @@ private fun FontPickerSheet(
                 .padding(bottom = 24.dp)
                 .testTag("settings_font_options"),
         ) {
-            item { Text(stringResource(R.string.settings_app_font), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(16.dp)) }
+            item { Text(stringResource(R.string.settings_app_font), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary), modifier = Modifier.padding(16.dp)) }
             items(FontChoice.entries.size) { index ->
                 val choice = FontChoice.entries[index]
                 if (choice == FontChoice.CUSTOM) {
@@ -2057,7 +2061,11 @@ private fun CustomFontRow(
                 if (imported) {
                     TextButton(
                         onClick = onChange,
-                        colors = ButtonDefaults.textButtonColors(contentColor = if (selected) LocalContentColor.current else MaterialTheme.colorScheme.primary),
+                        colors =
+                            readableTextButtonColors(
+                                background = if (selected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Unspecified,
+                                colors = ButtonDefaults.textButtonColors(contentColor = if (selected) LocalContentColor.current else MaterialTheme.colorScheme.primary),
+                            ),
                     ) {
                         Text(stringResource(R.string.settings_font_custom_change))
                     }

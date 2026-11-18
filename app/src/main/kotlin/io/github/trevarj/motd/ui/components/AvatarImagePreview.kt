@@ -31,6 +31,7 @@ import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalAvatarShape
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.theme.shape
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 
@@ -106,6 +107,7 @@ internal fun ExplicitAvatarUrlPreview(
     val shape = if (!isChannel && avatarShape == AvatarShape.DEFAULT) CircleShape else avatarShape.shape(isChannel)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         TextButton(
+            colors = readableTextButtonColors(),
             onClick = {
                 val captured = validated?.let { expandAvatarUrl(it, 96) }
                 if (captured != null && owner != null && http != null) proposal = AvatarPreviewSnapshot(identity, owner, captured, (proposal?.retry ?: 0) + 1)

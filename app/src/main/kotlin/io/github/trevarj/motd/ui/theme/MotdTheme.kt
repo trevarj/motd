@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -448,7 +449,8 @@ fun MotdTheme(
         typography = typography,
     ) {
         CompositionLocalProvider(
-            LocalUseThemeTextColors provides (!adjustPaletteReadability || useThemeTextColors),
+            LocalUseThemeTextColors provides useThemeTextColors,
+            LocalTextSelectionColors provides remember(colorScheme) { colorScheme.readableSelectionColors() },
             LocalAdjustPaletteReadability provides adjustPaletteReadability,
             LocalSpacing provides spacingFor(layoutDensity, messageSpacing, bubbleCornerStyle),
             LocalCompactNickBrackets provides compactNickBrackets,

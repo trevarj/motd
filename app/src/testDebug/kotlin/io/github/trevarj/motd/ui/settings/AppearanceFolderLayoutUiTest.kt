@@ -848,7 +848,13 @@ class AppearanceFolderLayoutUiTest {
         val adjustment = compose.onNodeWithTag("settings_switch_adjust_palette_readability_row", useUnmergedTree = true)
         val text = compose.onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true)
         adjustment.performScrollTo().assertIsOff()
-        text.performScrollTo().assertIsNotEnabled().assertIsOff()
+        text.performScrollTo().assertIsEnabled().assertIsOff()
+        text.performClick().assertIsOn()
+        assertFalse(appearance.value.adjustPaletteReadability)
+        assertTrue(appearance.value.useThemeTextColors)
+        val themeInk = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK, useThemeTextColors = true))
+        assertEquals(themeInk.onSurface, inkOf("Appearance"))
+        text.performClick().assertIsOff()
         val authored = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK))
         assertEquals(authored.onSurface, inkOf("Appearance"))
         val preview = compose.onNodeWithTag("settings_chat_preview_inline_comfortable_default_rounded")
@@ -865,11 +871,15 @@ class AppearanceFolderLayoutUiTest {
         }
         text.performScrollTo().performClick().assertIsOn()
         adjustment.performScrollTo().performClick().assertIsOff()
-        text.performScrollTo().assertIsNotEnabled().assertIsOn()
+        text.performScrollTo().assertIsEnabled().assertIsOn()
         assertEquals(true, appearance.value.useThemeTextColors)
+        assertEquals(themeInk.onSurface, inkOf("Appearance"))
+        text.performClick().assertIsOff()
+        assertFalse(appearance.value.adjustPaletteReadability)
+        assertFalse(appearance.value.useThemeTextColors)
         assertEquals(authored.onSurface, inkOf("Appearance"))
         adjustment.performScrollTo().performClick()
-        text.performScrollTo().assertIsEnabled().assertIsOn()
+        text.performScrollTo().assertIsEnabled().assertIsOff()
     }
 
     @Test

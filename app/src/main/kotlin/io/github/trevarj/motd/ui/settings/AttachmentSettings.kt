@@ -45,6 +45,7 @@ import io.github.trevarj.motd.attachment.forBackend
 import io.github.trevarj.motd.attachment.validateEndpoint
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -209,6 +210,7 @@ fun UploadsSettingsContent(
                         var passwordDraft by remember { mutableStateOf<String?>(null) }
                         val endpointError = customEndpoint.isNotBlank() && validateEndpoint(customEndpoint) == null
                         OutlinedTextField(
+                            colors = readableOutlinedTextFieldColors(),
                             value = customEndpoint,
                             onValueChange = { value ->
                                 customEndpoint = value
@@ -260,6 +262,7 @@ fun UploadsSettingsContent(
                                     .testTag("settings_upload_custom_endpoint"),
                         )
                         OutlinedTextField(
+                            colors = readableOutlinedTextFieldColors(),
                             value = usernameDraft ?: config.username,
                             onValueChange = { value ->
                                 usernameDraft = value
@@ -300,6 +303,7 @@ fun UploadsSettingsContent(
             }
             val validSize = sizeDraft.toLongOrNull()?.takeIf { it in 1..maximumMiB }
             OutlinedTextField(
+                colors = readableOutlinedTextFieldColors(),
                 value = sizeDraft,
                 onValueChange = { value ->
                     sizeDraft = value

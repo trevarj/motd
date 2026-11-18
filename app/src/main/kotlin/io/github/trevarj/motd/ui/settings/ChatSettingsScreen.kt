@@ -61,6 +61,8 @@ import io.github.trevarj.motd.ui.components.ReadAloudVoiceOptions
 import io.github.trevarj.motd.ui.components.ReplyPrefixExample
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 
@@ -688,6 +690,7 @@ private fun AutoAwayMessageDialog(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = text,
                     onValueChange = { text = it },
                     singleLine = true,
@@ -699,6 +702,7 @@ private fun AutoAwayMessageDialog(
         },
         confirmButton = {
             TextButton(
+                colors = readableTextButtonColors(),
                 onClick = { onSave(text) },
                 modifier = Modifier.testTag("settings_auto_away_message_save"),
             ) {
@@ -706,7 +710,7 @@ private fun AutoAwayMessageDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
         modifier = Modifier.testTag("settings_auto_away_message_dialog"),
     )

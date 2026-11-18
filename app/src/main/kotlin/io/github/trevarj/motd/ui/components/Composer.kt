@@ -191,6 +191,9 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.cornerRadius
 import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableSelectionColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.theme.readingInk
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -576,6 +579,7 @@ fun Composer(
             MaterialTheme.colorScheme.secondaryContainer,
         )
     val composerInkSeed = readingInk(MaterialTheme.colorScheme)
+    val composerScheme = MaterialTheme.colorScheme
     val adjustPaletteReadability = LocalAdjustPaletteReadability.current
     val composerInk =
         remember(composerInkSeed, composerFill, adjustPaletteReadability) {
@@ -583,13 +587,22 @@ fun Composer(
         }
     val composerCursorSeed = MaterialTheme.colorScheme.primary
     val composerCursor =
-        remember(composerCursorSeed, composerFill) {
-            ensureContrast(composerCursorSeed, listOf(composerFill), MESSAGE_TEXT_CONTRAST)
+        if (adjustPaletteReadability) {
+            remember(composerCursorSeed, composerFill) {
+                ensureContrast(composerCursorSeed, listOf(composerFill), MESSAGE_TEXT_CONTRAST)
+            }
+        } else {
+            composerScheme.readableForeground(composerCursorSeed, composerFill, minimumContrast = 3.0)
         }
     val nickColors = LocalNickColors.current
     val toolAccentSeed = MaterialTheme.colorScheme.primary
     val toolBackground = composerFill
-    val toolAccent = remember(toolAccentSeed, toolBackground) { ensureContrast(toolAccentSeed, listOf(toolBackground)) }
+    val toolAccent =
+        if (adjustPaletteReadability) {
+            remember(toolAccentSeed, toolBackground) { ensureContrast(toolAccentSeed, listOf(toolBackground)) }
+        } else {
+            composerScheme.readableForeground(toolAccentSeed, toolBackground, minimumContrast = 3.0)
+        }
     val primaryInset = if (composerStyle == ComposerStyle.COMPACT) 2.dp else 4.dp
     val primaryVerticalInset = if (floatingPill) primaryInset - 2.dp else primaryInset
     val primaryVisualInset = if (floatingPill) 2.dp else 0.dp
@@ -1546,7 +1559,7 @@ private fun ComposerColorSheet(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("IRC color", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                Text("IRC color", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary), modifier = Modifier.weight(1f))
                 Button(onClick = onApply, modifier = Modifier.testTag("chat_composer_color_apply")) {
                     Text("Apply")
                 }
@@ -1555,20 +1568,30 @@ private fun ComposerColorSheet(
                 TextButton(
                     onClick = { editingBackground = false },
                     colors =
-                        androidx.compose.material3.ButtonDefaults
-                            .textButtonColors(containerColor = if (!editingBackground) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent, contentColor = if (!editingBackground) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary),
+                        readableTextButtonColors(
+                            colors =
+                                androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                    containerColor = if (!editingBackground) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                                    contentColor = if (!editingBackground) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary,
+                                ),
+                        ),
                 ) {
                     Text(if (editingBackground) "Text" else "Text ✓")
                 }
                 TextButton(
                     onClick = { editingBackground = true },
                     colors =
-                        androidx.compose.material3.ButtonDefaults
-                            .textButtonColors(containerColor = if (editingBackground) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent, contentColor = if (editingBackground) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary),
+                        readableTextButtonColors(
+                            colors =
+                                androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                    containerColor = if (editingBackground) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                                    contentColor = if (editingBackground) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary,
+                                ),
+                        ),
                 ) {
                     Text(if (editingBackground) "Background ✓" else "Background")
                 }
-                if (editingBackground) TextButton(onClick = { onBackground(null) }) { Text("No background") }
+                if (editingBackground) TextButton(onClick = { onBackground(null) }, colors = readableTextButtonColors()) { Text("No background") }
             }
             val previewBackground = background?.let(::composerPaletteColor) ?: MaterialTheme.colorScheme.surfaceContainerHigh
             val previewForeground =
@@ -1587,14 +1610,14 @@ private fun ComposerColorSheet(
                     modifier = Modifier.fillMaxWidth().padding(12.dp).testTag("chat_composer_color_preview"),
                 )
             }
-            Text("Basic 16", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            Text("Basic 16", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
             ColorGrid(
                 colors = (0..15).toList(),
                 selected = if (editingBackground) background else foreground,
                 onSelect = if (editingBackground) onBackground else onForeground,
                 modifier = Modifier.height(96.dp),
             )
-            Text("Extended 16–98", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            Text("Extended 16–98", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
             ColorGrid(
                 colors = (16..98).toList(),
                 selected = if (editingBackground) background else foreground,
@@ -1605,8 +1628,8 @@ private fun ComposerColorSheet(
                 Modifier.fillMaxWidth().padding(bottom = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             ) {
-                TextButton(onClick = onRemove) { Text("Remove colors") }
-                TextButton(onClick = onCancel) { Text("Cancel") }
+                TextButton(onClick = onRemove, colors = readableTextButtonColors()) { Text("Remove colors") }
+                TextButton(onClick = onCancel, colors = readableTextButtonColors()) { Text("Cancel") }
             }
         }
     }
@@ -1969,11 +1992,21 @@ private fun ComposerTextField(
     val latestDocument = rememberUpdatedState(document)
     val fieldBackground = backgroundColor
     val fieldForeground = contentColor
+    val selectionScheme = MaterialTheme.colorScheme
+    val adjustSelectionReadability = LocalAdjustPaletteReadability.current
     val selectionColors =
-        remember(cursorColor, fieldBackground, fieldForeground) {
-            TextSelectionColors(
-                handleColor = cursorColor,
-                backgroundColor = composerSelectionBackground(fieldForeground, fieldBackground, cursorColor),
+        if (adjustSelectionReadability) {
+            remember(cursorColor, fieldBackground, fieldForeground) {
+                TextSelectionColors(
+                    handleColor = cursorColor,
+                    backgroundColor = composerSelectionBackground(fieldForeground, fieldBackground, cursorColor),
+                )
+            }
+        } else {
+            selectionScheme.readableSelectionColors(
+                background = fieldBackground,
+                ink = fieldForeground,
+                preferred = TextSelectionColors(cursorColor, cursorColor.copy(alpha = 0.4f)),
             )
         }
     val commandBackground = MaterialTheme.colorScheme.primary

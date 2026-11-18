@@ -82,8 +82,11 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.ui.components.MetadataPill
+import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
@@ -171,7 +174,7 @@ internal fun SettingsNavigationRow(
     enabled: Boolean = true,
     requestedTarget: String? = null,
     targetName: String? = null,
-    iconTint: Color = MaterialTheme.colorScheme.primary,
+    iconTint: Color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0),
     onClick: () -> Unit,
 ) {
     val row: @Composable (Modifier) -> Unit = { targetModifier ->
@@ -255,10 +258,17 @@ internal fun RadioRow(
 ) {
     val scheme = MaterialTheme.colorScheme
     val targetColor = LocalSettingsTargetColor.current
+    val adjustReadability = LocalAdjustPaletteReadability.current
     val contentColor =
         if (selected && targetColor.alpha > 0f) {
             val fill = targetColor.compositeOver(scheme.secondaryContainer)
-            remember(scheme.onSecondaryContainer, fill) { ensureContrast(scheme.onSecondaryContainer, listOf(fill)) }
+            remember(scheme, fill, adjustReadability) {
+                if (adjustReadability) {
+                    ensureContrast(scheme.onSecondaryContainer, listOf(fill))
+                } else {
+                    scheme.readableForeground(scheme.onSecondaryContainer, fill)
+                }
+            }
         } else if (selected) {
             scheme.onSecondaryContainer
         } else {
@@ -363,7 +373,7 @@ internal fun SectionHeader(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp).semantics { heading() },
     )
@@ -374,7 +384,7 @@ internal fun SubLabel(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
         modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 2.dp).semantics { heading() },
     )
 }
@@ -403,8 +413,8 @@ internal fun PersistentStatusNotice(
             Text(text)
             if ((actionLabel != null && onAction != null) || onDismiss != null) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    if (actionLabel != null && onAction != null) TextButton(onClick = onAction) { Text(actionLabel) }
-                    if (onDismiss != null) TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_dismiss)) }
+                    if (actionLabel != null && onAction != null) TextButton(onClick = onAction, colors = readableTextButtonColors(background = if (error) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer)) { Text(actionLabel) }
+                    if (onDismiss != null) TextButton(onClick = onDismiss, colors = readableTextButtonColors(background = if (error) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer)) { Text(stringResource(R.string.action_dismiss)) }
                 }
             }
         }

@@ -6,6 +6,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarData
 import androidx.compose.material3.SnackbarDefaults
@@ -20,6 +21,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.LocalEmojiRenderer
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 
 /** Keep Material's host animations, timeout and accessibility; replace only its internal text. */
 @Composable
@@ -65,7 +68,7 @@ fun EmojiSnackbar(
             @Composable {
                 TextButton(
                     onClick = { snackbarData.performAction() },
-                    colors = ButtonDefaults.textButtonColors(contentColor = actionColor),
+                    colors = readableTextButtonColors(background = containerColor, colors = ButtonDefaults.textButtonColors(contentColor = actionColor)),
                 ) { EmojiText(actionLabel) }
             }
         }

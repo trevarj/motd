@@ -92,6 +92,9 @@ import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.lottieStrokeColor
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -232,7 +235,7 @@ fun OnboardingContent(
                 }
             },
             dismissButton = {
-                TextButton(onClick = onDismissPlaintext) {
+                TextButton(colors = readableTextButtonColors(), onClick = onDismissPlaintext) {
                     Text(stringResource(R.string.dialog_cancel))
                 }
             },
@@ -262,11 +265,11 @@ private fun WizardBar(
         ) {
             if (state.step != OnboardingStep.WELCOME) {
                 // Stable handle: Back is icon-agnostic across steps.
-                TextButton(onClick = onBack, modifier = Modifier.testTag("onboarding_back_button")) {
+                TextButton(colors = readableTextButtonColors(), onClick = onBack, modifier = Modifier.testTag("onboarding_back_button")) {
                     Text(stringResource(R.string.onboarding_back))
                 }
             } else {
-                TextButton(onClick = onSkip, modifier = Modifier.testTag("onboarding_skip_button")) {
+                TextButton(colors = readableTextButtonColors(), onClick = onSkip, modifier = Modifier.testTag("onboarding_skip_button")) {
                     Text(stringResource(R.string.onboarding_skip))
                 }
             }
@@ -676,7 +679,7 @@ private fun StateIndicator(connState: IrcClientState?) {
         ) { kind ->
             when (kind) {
                 StateIndicatorKind.READY -> {
-                    Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLowest, minimumContrast = 3.0))
                 }
 
                 StateIndicatorKind.FAILED -> {
@@ -717,7 +720,7 @@ private fun BouncerNetworksSection(
     Text(
         stringResource(R.string.onboarding_connect_networks_title),
         style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLowest),
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.padding(top = 12.dp),
     )
@@ -766,6 +769,7 @@ private fun BouncerNetworksSection(
     if (state.bouncerNetworks.isNotEmpty()) {
         val allSelected = state.bouncerNetworks.all { it.selected }
         TextButton(
+            colors = readableTextButtonColors(),
             onClick = {
                 state.bouncerNetworks.filter { it.selected == allSelected }.forEach { onToggleBouncer(it.netId) }
             },
@@ -811,6 +815,7 @@ private fun BouncerNetworksSection(
                 adding || state.bouncerAdd is BouncerAddState.Failed,
     ) {
         OutlinedTextField(
+            colors = readableOutlinedTextFieldColors(),
             value = state.bouncerAddDraft.name,
             onValueChange = { onDraftChange(state.bouncerAddDraft.copy(name = it)) },
             label = { Text(stringResource(R.string.onboarding_connect_add_name)) },
@@ -818,6 +823,7 @@ private fun BouncerNetworksSection(
             modifier = Modifier.fillMaxWidth().testTag("onboarding_bouncer_add_name"),
         )
         OutlinedTextField(
+            colors = readableOutlinedTextFieldColors(),
             value = state.bouncerAddDraft.host,
             onValueChange = { onDraftChange(state.bouncerAddDraft.copy(host = it)) },
             label = { Text(stringResource(R.string.onboarding_connect_add_host)) },
@@ -922,7 +928,7 @@ private fun OnboardingDisclosure(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLowest))
                 summary?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -973,7 +979,7 @@ private fun FinishPage() {
             Icon(
                 Icons.Filled.Check,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLowest, minimumContrast = 3.0),
                 modifier = Modifier.size(64.dp),
             )
         }

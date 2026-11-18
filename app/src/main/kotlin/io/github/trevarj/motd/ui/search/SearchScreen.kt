@@ -101,6 +101,9 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.readableFilledTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.theme.readingInk
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.components.EmojiTextField as TextField
@@ -305,11 +308,14 @@ fun SearchContent(
                                 },
                             ),
                         colors =
-                            TextFieldDefaults.colors(
-                                focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
-                                unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
-                                focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                                unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                            readableFilledTextFieldColors(
+                                colors =
+                                    TextFieldDefaults.colors(
+                                        focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                        unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                        focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                                        unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                                    ),
                             ),
                     )
                 },
@@ -495,7 +501,7 @@ private fun SearchResults(
                 Text(
                     text = stringResource(R.string.search_section_buffers),
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
                 )
@@ -533,7 +539,7 @@ private fun SearchResults(
                     Text(
                         text = dickordChannelLabel(group.bufferDisplayName, dickordEnabled),
                         style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLow),
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -683,10 +689,15 @@ private fun SearchRow(
         if (io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability.current) {
             ensureContrast(readingSeed, listOf(rowFill), MESSAGE_TEXT_CONTRAST)
         } else {
-            readingSeed
+            scheme.readableForeground(readingSeed, rowFill)
         }
     val highlightColor = LocalMotdSemanticColors.current.warningContainer
-    val highlightInk = ensureContrast(readingInk(scheme), listOf(highlightColor.compositeOver(rowFill)), MESSAGE_TEXT_CONTRAST)
+    val highlightInk =
+        if (io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability.current) {
+            ensureContrast(readingInk(scheme), listOf(highlightColor.compositeOver(rowFill)), MESSAGE_TEXT_CONTRAST)
+        } else {
+            scheme.readableForeground(readingInk(scheme), highlightColor.compositeOver(rowFill))
+        }
     val revealed = remember(tag, blurred) { androidx.compose.runtime.mutableStateOf(false) }
     val concealed = blurred && !revealed.value
     val reveal = { revealed.value = true }
@@ -794,6 +805,7 @@ private fun ServerSearchSection(
                         ),
                 )
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = onRetry,
                     modifier =
                         Modifier

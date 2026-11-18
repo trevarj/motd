@@ -1,11 +1,19 @@
 package io.github.trevarj.motd.ui.theme
 
+import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.material3.ButtonColors
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.TextFieldColors
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ProvidableCompositionLocal
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
@@ -35,8 +43,10 @@ internal val MotdDarkRaw =
         tertiary = MotdCoral,
     )
 
-internal val MotdLightScheme: ColorScheme by lazy { paletteColorScheme(MotdLightRaw, dark = false) }
-internal val MotdDarkScheme: ColorScheme by lazy { paletteColorScheme(MotdDarkRaw, dark = true) }
+internal val MotdLightScheme: ColorScheme by lazy { paletteColorScheme(MotdLightRaw, dark = false, builtIn = true) }
+internal val MotdDarkScheme: ColorScheme by lazy { paletteColorScheme(MotdDarkRaw, dark = true, builtIn = true) }
+private val MotdLightAuthoredScheme: ColorScheme by lazy { paletteColorScheme(MotdLightRaw, dark = false, useThemeTextColors = true, builtIn = true) }
+private val MotdDarkAuthoredScheme: ColorScheme by lazy { paletteColorScheme(MotdDarkRaw, dark = true, useThemeTextColors = true, builtIn = true) }
 internal val MotdLightThemeTextScheme: ColorScheme by lazy { paletteColorScheme(MotdLightRaw, dark = false, useThemeTextColors = true, adjustPaletteReadability = true) }
 internal val MotdDarkThemeTextScheme: ColorScheme by lazy { paletteColorScheme(MotdDarkRaw, dark = true, useThemeTextColors = true, adjustPaletteReadability = true) }
 private val MotdLightNeutralScheme: ColorScheme by lazy { paletteColorScheme(MotdLightRaw, dark = false, adjustPaletteReadability = true) }
@@ -48,6 +58,7 @@ internal fun motdThemeScheme(
     adjustPaletteReadability: Boolean = false,
 ): ColorScheme =
     when {
+        !adjustPaletteReadability && useThemeTextColors -> if (dark) MotdDarkAuthoredScheme else MotdLightAuthoredScheme
         !adjustPaletteReadability -> if (dark) MotdDarkScheme else MotdLightScheme
         useThemeTextColors -> if (dark) MotdDarkThemeTextScheme else MotdLightThemeTextScheme
         else -> if (dark) MotdDarkNeutralScheme else MotdLightNeutralScheme
@@ -124,6 +135,274 @@ internal fun bestOnColor(background: Color): Color =
         Color.Black
     }
 
+private fun renderedMinimumContrast(
+    foreground: Color,
+    backgrounds: List<Color>,
+): Double = backgrounds.minOf { contrastRatio(foreground.compositeOver(it), it) }
+
+private fun selectReadableInk(
+    preferred: Color,
+    backgrounds: List<Color>,
+    minimum: Double,
+    fallback: Color,
+    neutral: Color,
+): Color {
+    if (renderedMinimumContrast(preferred, backgrounds) >= minimum) return preferred
+    if (renderedMinimumContrast(fallback, backgrounds) >= minimum) return fallback
+    if (renderedMinimumContrast(neutral, backgrounds) >= minimum) return neutral
+    if (renderedMinimumContrast(Color.Black, backgrounds) >= minimum) return Color.Black
+    if (renderedMinimumContrast(Color.White, backgrounds) >= minimum) return Color.White
+    return if (renderedMinimumContrast(Color.Black, backgrounds) >= renderedMinimumContrast(Color.White, backgrounds)) Color.Black else Color.White
+}
+
+private fun ColorScheme.neutralReadingSurfaces(): List<Color> =
+    listOf(
+        background,
+        surface,
+        surfaceContainerLowest,
+        surfaceContainerLow,
+        surfaceContainer,
+        surfaceContainerHigh,
+        surfaceContainerHighest,
+        surfaceBright,
+        surfaceDim,
+        surfaceVariant,
+    )
+
+private fun ColorScheme.readingSurfaces(fill: Color): List<Color> =
+    when {
+        fill == Color.Unspecified -> neutralReadingSurfaces()
+        fill.alpha < 1f -> neutralReadingSurfaces().map { fill.compositeOver(it) }
+        else -> listOf(fill)
+    }
+
+fun ColorScheme.readableForeground(
+    preferred: Color,
+    background: Color = Color.Unspecified,
+    minimumContrast: Double = TEXT_CONTRAST,
+    fallback: Color = onSurface,
+): Color {
+    if (preferred == Color.Transparent) return preferred
+    val backgrounds = readingSurfaces(background)
+    val paired =
+        when (background) {
+            primary -> onPrimary
+            secondary -> onSecondary
+            tertiary -> onTertiary
+            primaryContainer -> onPrimaryContainer
+            secondaryContainer -> onSecondaryContainer
+            tertiaryContainer -> onTertiaryContainer
+            error -> onError
+            errorContainer -> onErrorContainer
+            inverseSurface -> inverseOnSurface
+            else -> fallback
+        }
+    return selectReadableInk(preferred, backgrounds, minimumContrast, paired, fallback)
+}
+
+internal fun ColorScheme.readableSelectionColors(
+    background: Color = Color.Unspecified,
+    ink: Color = onSurface,
+    preferred: TextSelectionColors? = null,
+    errorBackground: Color = background,
+    errorInk: Color = ink,
+): TextSelectionColors {
+    val surfaces = readingSurfaces(background)
+    val errorSurfaces = readingSurfaces(errorBackground)
+    val handle = readableForeground(preferred?.handleColor ?: primary, background, NON_TEXT_CONTRAST)
+    val backing = preferred?.backgroundColor ?: primary.copy(alpha = 0.4f)
+    val inks = if (background == Color.Unspecified) listOf(ink, onBackground, onSurfaceVariant) else listOf(ink)
+
+    fun fit(candidate: Color): Color {
+        var alpha = candidate.alpha
+        for (surface in surfaces) {
+            alpha = min(alpha, contrastSafeOverlay(surface, candidate, alpha, inks).alpha)
+        }
+        for (surface in errorSurfaces) {
+            alpha = min(alpha, contrastSafeOverlay(surface, candidate, alpha, listOf(errorInk)).alpha)
+        }
+        return candidate.copy(alpha = alpha)
+    }
+
+    fun visibility(candidate: Color): Double =
+        min(
+            surfaces.minOf { contrastRatio(candidate.compositeOver(it), it) },
+            errorSurfaces.minOf { contrastRatio(candidate.compositeOver(it), it) },
+        )
+    var selection = fit(backing)
+    val explicitTransparent = preferred != null && backing.alpha == 0f
+    if (!explicitTransparent && (selection.alpha < 0.08f || visibility(selection) < 1.08)) {
+        var bestVisibility = visibility(selection)
+        for (role in listOf(primaryContainer, secondaryContainer, tertiaryContainer, errorContainer, surfaceContainerLowest, surfaceContainerHighest, inverseSurface)) {
+            val candidate = fit(role.copy(alpha = 0.4f))
+            val candidateVisibility = visibility(candidate)
+            if (candidateVisibility > bestVisibility) {
+                selection = candidate
+                bestVisibility = candidateVisibility
+            }
+        }
+    }
+    return if (preferred != null && handle == preferred.handleColor && selection == preferred.backgroundColor) {
+        preferred
+    } else {
+        TextSelectionColors(handle, selection)
+    }
+}
+
+@Composable
+fun readableTextButtonColors(
+    background: Color = Color.Unspecified,
+    colors: ButtonColors = ButtonDefaults.textButtonColors(),
+): ButtonColors {
+    val scheme = MaterialTheme.colorScheme
+    return remember(scheme, background, colors) { scheme.readableButtonColors(background, colors) }
+}
+
+internal fun ColorScheme.readableButtonColors(
+    background: Color,
+    colors: ButtonColors,
+): ButtonColors {
+    val fill = colors.containerColor
+    val surfaces = readingSurfaces(background)
+    val backgrounds =
+        if (fill == Color.Unspecified || fill.alpha == 0f) {
+            surfaces
+        } else if (fill.alpha < 1f) {
+            surfaces.map { fill.compositeOver(it) }
+        } else {
+            listOf(fill)
+        }
+    val ink =
+        if (colors.contentColor == Color.Transparent) {
+            colors.contentColor
+        } else {
+            selectReadableInk(colors.contentColor, backgrounds, TEXT_CONTRAST, onSurface, staticTextInk(this))
+        }
+    return if (ink == colors.contentColor) colors else colors.copy(contentColor = ink)
+}
+
+@Composable
+fun readableOutlinedTextFieldColors(
+    background: Color = Color.Unspecified,
+    colors: TextFieldColors = OutlinedTextFieldDefaults.colors(),
+): TextFieldColors = readableFieldColors(background, colors)
+
+@Composable
+fun readableFilledTextFieldColors(
+    background: Color = Color.Unspecified,
+    colors: TextFieldColors = TextFieldDefaults.colors(),
+): TextFieldColors = readableFieldColors(background, colors)
+
+@Composable
+private fun readableFieldColors(
+    background: Color,
+    colors: TextFieldColors,
+): TextFieldColors {
+    val scheme = MaterialTheme.colorScheme
+    return remember(scheme, background, colors) {
+        fun fill(container: Color): Color =
+            if (container == Color.Unspecified || container.alpha == 0f) {
+                background
+            } else if (container.alpha < 1f && background != Color.Unspecified) {
+                container.compositeOver(background)
+            } else {
+                container
+            }
+        val focused = fill(colors.focusedContainerColor)
+        val unfocused = fill(colors.unfocusedContainerColor)
+        val error = fill(colors.errorContainerColor)
+
+        fun text(
+            ink: Color,
+            fill: Color,
+        ) = scheme.readableForeground(ink, fill)
+
+        fun boundary(
+            ink: Color,
+            fill: Color,
+        ) = scheme.readableForeground(ink, fill, NON_TEXT_CONTRAST)
+
+        fun errorText(ink: Color) = scheme.readableForeground(ink, error, fallback = scheme.onErrorContainer)
+        val focusedInk = text(colors.focusedTextColor, focused)
+        var changed = false
+
+        fun corrected(
+            original: Color,
+            value: Color,
+        ): Color {
+            if (value != original) changed = true
+            return value
+        }
+        val focusedTextColor = corrected(colors.focusedTextColor, focusedInk)
+        val unfocusedTextColor = corrected(colors.unfocusedTextColor, text(colors.unfocusedTextColor, unfocused))
+        val errorTextColor = corrected(colors.errorTextColor, errorText(colors.errorTextColor))
+        val cursorColor = corrected(colors.cursorColor, boundary(colors.cursorColor, focused))
+        val errorCursorColor = corrected(colors.errorCursorColor, boundary(colors.errorCursorColor, error))
+        val textSelectionColors = scheme.readableSelectionColors(focused, focusedInk, colors.textSelectionColors, error, errorTextColor)
+        if (textSelectionColors != colors.textSelectionColors) changed = true
+        val focusedIndicatorColor = corrected(colors.focusedIndicatorColor, boundary(colors.focusedIndicatorColor, focused))
+        val unfocusedIndicatorColor = corrected(colors.unfocusedIndicatorColor, boundary(colors.unfocusedIndicatorColor, unfocused))
+        val errorIndicatorColor = corrected(colors.errorIndicatorColor, boundary(colors.errorIndicatorColor, error))
+        val focusedLeadingIconColor = corrected(colors.focusedLeadingIconColor, boundary(colors.focusedLeadingIconColor, focused))
+        val unfocusedLeadingIconColor = corrected(colors.unfocusedLeadingIconColor, boundary(colors.unfocusedLeadingIconColor, unfocused))
+        val errorLeadingIconColor = corrected(colors.errorLeadingIconColor, boundary(colors.errorLeadingIconColor, error))
+        val focusedTrailingIconColor = corrected(colors.focusedTrailingIconColor, boundary(colors.focusedTrailingIconColor, focused))
+        val unfocusedTrailingIconColor = corrected(colors.unfocusedTrailingIconColor, boundary(colors.unfocusedTrailingIconColor, unfocused))
+        val errorTrailingIconColor = corrected(colors.errorTrailingIconColor, boundary(colors.errorTrailingIconColor, error))
+        val focusedLabelColor = corrected(colors.focusedLabelColor, text(colors.focusedLabelColor, focused))
+        val unfocusedLabelColor = corrected(colors.unfocusedLabelColor, text(colors.unfocusedLabelColor, unfocused))
+        val errorLabelColor = corrected(colors.errorLabelColor, errorText(colors.errorLabelColor))
+        val focusedPlaceholderColor = corrected(colors.focusedPlaceholderColor, text(colors.focusedPlaceholderColor, focused))
+        val unfocusedPlaceholderColor = corrected(colors.unfocusedPlaceholderColor, text(colors.unfocusedPlaceholderColor, unfocused))
+        val errorPlaceholderColor = corrected(colors.errorPlaceholderColor, errorText(colors.errorPlaceholderColor))
+        val focusedSupportingTextColor = corrected(colors.focusedSupportingTextColor, text(colors.focusedSupportingTextColor, background))
+        val unfocusedSupportingTextColor = corrected(colors.unfocusedSupportingTextColor, text(colors.unfocusedSupportingTextColor, background))
+        val errorSupportingTextColor = corrected(colors.errorSupportingTextColor, scheme.readableForeground(colors.errorSupportingTextColor, background, fallback = scheme.onErrorContainer))
+        val focusedPrefixColor = corrected(colors.focusedPrefixColor, text(colors.focusedPrefixColor, focused))
+        val unfocusedPrefixColor = corrected(colors.unfocusedPrefixColor, text(colors.unfocusedPrefixColor, unfocused))
+        val errorPrefixColor = corrected(colors.errorPrefixColor, errorText(colors.errorPrefixColor))
+        val focusedSuffixColor = corrected(colors.focusedSuffixColor, text(colors.focusedSuffixColor, focused))
+        val unfocusedSuffixColor = corrected(colors.unfocusedSuffixColor, text(colors.unfocusedSuffixColor, unfocused))
+        val errorSuffixColor = corrected(colors.errorSuffixColor, errorText(colors.errorSuffixColor))
+        if (!changed) {
+            colors
+        } else {
+            colors.copy(
+                focusedTextColor = focusedTextColor,
+                unfocusedTextColor = unfocusedTextColor,
+                errorTextColor = errorTextColor,
+                cursorColor = cursorColor,
+                errorCursorColor = errorCursorColor,
+                textSelectionColors = textSelectionColors,
+                focusedIndicatorColor = focusedIndicatorColor,
+                unfocusedIndicatorColor = unfocusedIndicatorColor,
+                errorIndicatorColor = errorIndicatorColor,
+                focusedLeadingIconColor = focusedLeadingIconColor,
+                unfocusedLeadingIconColor = unfocusedLeadingIconColor,
+                errorLeadingIconColor = errorLeadingIconColor,
+                focusedTrailingIconColor = focusedTrailingIconColor,
+                unfocusedTrailingIconColor = unfocusedTrailingIconColor,
+                errorTrailingIconColor = errorTrailingIconColor,
+                focusedLabelColor = focusedLabelColor,
+                unfocusedLabelColor = unfocusedLabelColor,
+                errorLabelColor = errorLabelColor,
+                focusedPlaceholderColor = focusedPlaceholderColor,
+                unfocusedPlaceholderColor = unfocusedPlaceholderColor,
+                errorPlaceholderColor = errorPlaceholderColor,
+                focusedSupportingTextColor = focusedSupportingTextColor,
+                unfocusedSupportingTextColor = unfocusedSupportingTextColor,
+                errorSupportingTextColor = errorSupportingTextColor,
+                focusedPrefixColor = focusedPrefixColor,
+                unfocusedPrefixColor = unfocusedPrefixColor,
+                errorPrefixColor = errorPrefixColor,
+                focusedSuffixColor = focusedSuffixColor,
+                unfocusedSuffixColor = unfocusedSuffixColor,
+                errorSuffixColor = errorSuffixColor,
+            )
+        }
+    }
+}
+
 /** Preserve hue where possible while making a filled surface visibly distinct from the canvas. */
 private fun ensureContainerContrast(
     container: Color,
@@ -151,6 +430,7 @@ internal fun paletteColorScheme(
     dark: Boolean,
     useThemeTextColors: Boolean = false,
     adjustPaletteReadability: Boolean = false,
+    builtIn: Boolean = false,
 ): ColorScheme {
     val surfaceContainerLow =
         ensureContainerContrast(
@@ -197,7 +477,14 @@ internal fun paletteColorScheme(
             surfaceContainerHighest,
             surfaceVariant,
         )
-    val onSurface = if (adjustPaletteReadability) ensureContrast(staticTextInk(raw), neutralSurfaces) else raw.onSurface
+    val fillInk = if (adjustPaletteReadability) ensureContrast(staticTextInk(raw), neutralSurfaces) else raw.onSurface
+
+    fun readingRole(authored: Color): Color {
+        val preferred = if (useThemeTextColors) authored else staticTextInk(raw)
+        if (adjustPaletteReadability) return ensureContrast(preferred, neutralSurfaces)
+        if (useThemeTextColors && !builtIn) return preferred
+        return selectReadableInk(preferred, neutralSurfaces, TEXT_CONTRAST, raw.onSurface, staticTextInk(raw))
+    }
     val primary = if (adjustPaletteReadability) ensureContrast(raw.primary, neutralSurfaces) else raw.primary
     val secondary = if (adjustPaletteReadability) ensureContrast(raw.secondary, neutralSurfaces) else raw.secondary
     val tertiary = if (adjustPaletteReadability) ensureContrast(raw.tertiary, neutralSurfaces) else raw.tertiary
@@ -216,9 +503,16 @@ internal fun paletteColorScheme(
     val errorSeed = if (dark) Color(0xFFF2B8B5) else Color(0xFFB3261E)
     val error = ensureContrast(errorSeed, neutralSurfaces)
     val errorContainer = container(errorSeed)
-    val outline = if (adjustPaletteReadability) ensureContrast(raw.outline, neutralSurfaces, NON_TEXT_CONTRAST) else raw.outline
+    val outline =
+        if (adjustPaletteReadability) {
+            ensureContrast(raw.outline, neutralSurfaces, NON_TEXT_CONTRAST)
+        } else if (builtIn) {
+            selectReadableInk(raw.outline, neutralSurfaces, NON_TEXT_CONTRAST, raw.onSurface, staticTextInk(raw))
+        } else {
+            raw.outline
+        }
     val outlineVariant = if (adjustPaletteReadability) ensureContrast(raw.outlineVariant, neutralSurfaces, NON_TEXT_CONTRAST) else raw.outlineVariant
-    val inverseSurface = onSurface
+    val inverseSurface = fillInk
     val inverseOnSurface = ensureContrast(raw.surface, listOf(inverseSurface))
     val inversePrimary = ensureContrast(raw.primary, listOf(inverseSurface))
 
@@ -226,42 +520,21 @@ internal fun paletteColorScheme(
         primary = primary,
         onPrimary = bestOnColor(primary),
         primaryContainer = primaryContainer,
-        onPrimaryContainer = ensureContrast(onSurface, listOf(primaryContainer)),
+        onPrimaryContainer = ensureContrast(fillInk, listOf(primaryContainer)),
         secondary = secondary,
         onSecondary = bestOnColor(secondary),
         secondaryContainer = secondaryContainer,
-        onSecondaryContainer = ensureContrast(onSurface, listOf(secondaryContainer)),
+        onSecondaryContainer = ensureContrast(fillInk, listOf(secondaryContainer)),
         tertiary = tertiary,
         onTertiary = bestOnColor(tertiary),
         tertiaryContainer = tertiaryContainer,
-        onTertiaryContainer = ensureContrast(onSurface, listOf(tertiaryContainer)),
+        onTertiaryContainer = ensureContrast(fillInk, listOf(tertiaryContainer)),
         background = raw.background,
-        onBackground =
-            if (!adjustPaletteReadability) {
-                raw.onBackground
-            } else if (useThemeTextColors) {
-                ensureContrast(raw.onBackground, neutralSurfaces)
-            } else {
-                onSurface
-            },
+        onBackground = readingRole(raw.onBackground),
         surface = raw.surface,
-        onSurface =
-            if (!adjustPaletteReadability) {
-                raw.onSurface
-            } else if (useThemeTextColors) {
-                ensureContrast(raw.onSurface, neutralSurfaces)
-            } else {
-                onSurface
-            },
+        onSurface = readingRole(raw.onSurface),
         surfaceVariant = surfaceVariant,
-        onSurfaceVariant =
-            if (!adjustPaletteReadability) {
-                raw.onSurfaceVariant
-            } else if (useThemeTextColors) {
-                ensureContrast(raw.onSurfaceVariant, neutralSurfaces)
-            } else {
-                onSurface
-            },
+        onSurfaceVariant = readingRole(raw.onSurfaceVariant),
         surfaceContainerLow = surfaceContainerLow,
         surfaceContainer = surfaceContainer,
         surfaceContainerHigh = surfaceContainerHigh,
@@ -271,7 +544,7 @@ internal fun paletteColorScheme(
         error = error,
         onError = bestOnColor(error),
         errorContainer = errorContainer,
-        onErrorContainer = ensureContrast(onSurface, listOf(errorContainer)),
+        onErrorContainer = ensureContrast(fillInk, listOf(errorContainer)),
         inverseSurface = inverseSurface,
         inverseOnSurface = inverseOnSurface,
         inversePrimary = inversePrimary,
@@ -328,6 +601,7 @@ internal fun rawFixedThemeScheme(preset: ColorThemePreset): ColorScheme? = RawFi
 private val FixedSchemes = java.util.concurrent.ConcurrentHashMap<ColorThemePreset, ColorScheme>()
 private val ThemeTextFixedSchemes = java.util.concurrent.ConcurrentHashMap<ColorThemePreset, ColorScheme>()
 private val AuthoredFixedSchemes = java.util.concurrent.ConcurrentHashMap<ColorThemePreset, ColorScheme>()
+private val NeutralAuthoredFixedSchemes = java.util.concurrent.ConcurrentHashMap<ColorThemePreset, ColorScheme>()
 
 internal fun fixedThemeScheme(
     theme: ColorThemePreset,
@@ -340,14 +614,14 @@ internal fun fixedThemeScheme(
     }
     val cache =
         if (!adjustPaletteReadability) {
-            AuthoredFixedSchemes
+            if (useThemeTextColors) AuthoredFixedSchemes else NeutralAuthoredFixedSchemes
         } else if (useThemeTextColors) {
             ThemeTextFixedSchemes
         } else {
             FixedSchemes
         }
     return cache[theme] ?: cache.computeIfAbsent(theme) { preset ->
-        paletteColorScheme(RawFixedSchemes.getValue(preset), preset.isDark, useThemeTextColors, adjustPaletteReadability)
+        paletteColorScheme(RawFixedSchemes.getValue(preset), preset.isDark, useThemeTextColors, adjustPaletteReadability, builtIn = true)
     }
 }
 
@@ -479,15 +753,18 @@ internal fun contrastSafeOverlay(
 ): Color {
     val requested = requestedAlpha.coerceIn(0f, 1f)
 
-    fun composite(alpha: Float) = overlay.copy(alpha = alpha).compositeOver(base)
-    if (foregrounds.all { contrastRatio(it, composite(requested)) >= minimum }) {
+    fun readable(alpha: Float): Boolean {
+        val fill = overlay.copy(alpha = alpha).compositeOver(base)
+        return foregrounds.all { contrastRatio(it.compositeOver(fill), fill) >= minimum }
+    }
+    if (readable(requested)) {
         return overlay.copy(alpha = requested)
     }
     var low = 0f
     var high = requested
     repeat(24) {
         val mid = (low + high) / 2f
-        if (foregrounds.all { contrastRatio(it, composite(mid)) >= minimum }) low = mid else high = mid
+        if (readable(mid)) low = mid else high = mid
     }
     return overlay.copy(alpha = low)
 }

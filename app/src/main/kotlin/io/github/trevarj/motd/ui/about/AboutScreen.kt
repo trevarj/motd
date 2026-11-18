@@ -59,6 +59,7 @@ import io.github.trevarj.motd.ui.settings.SettingsScaffold
 import io.github.trevarj.motd.ui.settings.SwitchRow
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ceramicLogoColorMatrix
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -286,7 +287,7 @@ private fun EmojiNoticesDialog(onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss, modifier = Modifier.testTag("about_emoji_notices_dismiss")) {
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss, modifier = Modifier.testTag("about_emoji_notices_dismiss")) {
                 Text(stringResource(R.string.action_dismiss))
             }
         },

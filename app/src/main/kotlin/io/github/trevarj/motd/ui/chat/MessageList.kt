@@ -147,6 +147,7 @@ import io.github.trevarj.motd.ui.components.withoutPreviewUrls
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdSpacing
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -1109,6 +1110,7 @@ internal fun ActiveDccTransferCard(
                 transfer.displayFilename.endsWith(".zip", ignoreCase = true)
             ) {
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = { onViewResults(transfer) },
                     modifier = Modifier.testTag("chat_ebooks_view_results_${transfer.id}"),
                 ) { Text("View results") }
@@ -1165,6 +1167,7 @@ private fun DccTransferActions(
             }
             if (terminal) {
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = { onRemove(transfer.id) },
                     modifier = Modifier.testTag("chat_dcc_remove_${transfer.id}"),
                 ) {
@@ -2593,6 +2596,7 @@ fun ChatHistoryFooter(
                 contentAlignment = Alignment.Center,
             ) {
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = onRetry,
                     modifier = Modifier.heightIn(min = 48.dp).testTag(CHAT_HISTORY_LOAD_OLDER_TAG),
                 ) {
@@ -2653,6 +2657,7 @@ private fun HistoryRetryFooter(
             color = MaterialTheme.colorScheme.error,
         )
         TextButton(
+            colors = readableTextButtonColors(),
             onClick = onRetry,
             modifier = Modifier.heightIn(min = 48.dp).testTag(CHAT_HISTORY_RETRY_TAG),
         ) {

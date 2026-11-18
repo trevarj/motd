@@ -28,6 +28,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.gesture.GestureNode
 import io.github.trevarj.motd.gesture.GestureProviderKind
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 
@@ -88,10 +89,10 @@ internal fun GestureMenuPreview(
                     Box(Modifier.fillMaxWidth().height(height)) {
                         RadialMenu(menu, metrics, MaterialTheme.colorScheme.primary)
                     }
-                    if (menu.rings.size > 1) TextButton(onClick = { menu = menu.copy(rings = menu.rings.dropLast(1)) }) { Text(stringResource(R.string.onboarding_back)) }
+                    if (menu.rings.size > 1) TextButton(colors = readableTextButtonColors(), onClick = { menu = menu.copy(rings = menu.rings.dropLast(1)) }) { Text(stringResource(R.string.onboarding_back)) }
                     menu.focusedEntry?.let { Text(stringResource(R.string.settings_gesture_preview_inspecting, it.label)) }
                     menu.active.entries.forEachIndexed { index, child ->
-                        TextButton(onClick = {
+                        TextButton(colors = readableTextButtonColors(), onClick = {
                             val radius = if (child.children.isNotEmpty()) metrics.descendRadius + 1f else (metrics.bandInnerRadius + metrics.bandOuterRadius) / 2
                             menu = onRadialPointer(menu, sliceAnchor(menu.active.center, menu.active.arc, index, radius), size, metrics, more).state
                         }, modifier = Modifier.fillMaxWidth().testTag("gesture_preview_inspect_${child.id}")) { Text(child.label.ifBlank { stringResource(R.string.gesture_editor_unknown) }) }

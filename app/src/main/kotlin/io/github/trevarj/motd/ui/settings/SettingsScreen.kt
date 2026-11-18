@@ -40,6 +40,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.ui.about.appVersion
+import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -154,7 +155,7 @@ fun SettingsContent(
                 Text(
                     stringResource(R.string.settings_search_results),
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
                     modifier = Modifier.semantics { heading() },
                 )
                 if (results.isEmpty()) {

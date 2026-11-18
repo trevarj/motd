@@ -33,6 +33,7 @@ import io.github.trevarj.motd.data.backup.BackupExportMode
 import io.github.trevarj.motd.data.backup.BackupImportMode
 import io.github.trevarj.motd.data.backup.ConfigurationImportPreview
 import io.github.trevarj.motd.ui.nav.SettingsTarget
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import java.text.DateFormat
 import java.util.Date
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -319,11 +320,11 @@ internal fun BackupRestoreContent(
             title = { Text(stringResource(R.string.backup_replace_confirm_title)) },
             text = { Text(pluralStringResource(R.plurals.backup_replace_confirm_message, removed, removed)) },
             confirmButton = {
-                TextButton(onClick = onConfirmReplace, modifier = Modifier.testTag("backup_replace_confirm_action")) {
+                TextButton(colors = readableTextButtonColors(), onClick = onConfirmReplace, modifier = Modifier.testTag("backup_replace_confirm_action")) {
                     Text(stringResource(R.string.backup_replace_confirm_action))
                 }
             },
-            dismissButton = { TextButton(onClick = onCancelReplace) { Text(stringResource(R.string.action_cancel)) } },
+            dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = onCancelReplace) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
 }

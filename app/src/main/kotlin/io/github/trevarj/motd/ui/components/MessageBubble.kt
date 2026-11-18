@@ -118,6 +118,7 @@ import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.cornerRadius
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.lottieStrokeColor
+import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readingInk
 import io.github.trevarj.motd.ui.theme.shape
 import kotlin.math.roundToInt
@@ -832,9 +833,9 @@ fun MessageBubble(
                 // (text, mention inputs) so it doesn't re-run every recomposition/scroll frame.
                 val linkColor =
                     if (isSelf || mentionHighlighted || kind == MessageKind.NOTICE) {
-                        bubbleRoles.normalContent
+                        scheme.readableForeground(bubbleRoles.normalContent, bubbleColor)
                     } else {
-                        MaterialTheme.colorScheme.primary
+                        scheme.readableForeground(scheme.primary, bubbleColor)
                     }
                 val nickMentionStyle = LocalNickMentionStyle.current.let { if (selecting && it == NickMentionStyle.CHIP) NickMentionStyle.NONE else it }
                 val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules, nickMentionStyle, onMentionClick != null)
@@ -1356,7 +1357,7 @@ private fun ActionMessageRow(
     val adjustPaletteReadability = LocalAdjustPaletteReadability.current
     val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed, adjustPaletteReadability) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow, adjustPaletteReadability) }
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
-    val linkColor = MaterialTheme.colorScheme.primary
+    val linkColor = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, contrastRow)
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
     val codeColor = bodyInk
     val nickMentionStyle = LocalNickMentionStyle.current.let { if (selecting && it == NickMentionStyle.CHIP) NickMentionStyle.NONE else it }
@@ -1900,7 +1901,7 @@ private fun TwoLineMessageRow(
 
             if (text.isNotBlank()) {
                 val selecting = LocalMessageSelection.current != null
-                val linkColor = MaterialTheme.colorScheme.primary
+                val linkColor = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, contrastRow)
                 val nickMentionStyle = LocalNickMentionStyle.current.let { if (selecting && it == NickMentionStyle.CHIP) NickMentionStyle.NONE else it }
                 val mentionColor = rememberMentionColor(knownNicks, nickColors, identityRules, nickMentionStyle, onMentionClick != null)
                 val mentionsActive = knownNicks.isNotEmpty() && (nickColors.enabled || nickMentionStyle != NickMentionStyle.NONE || onMentionClick != null)

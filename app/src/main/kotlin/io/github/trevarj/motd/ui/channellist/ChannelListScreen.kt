@@ -56,6 +56,9 @@ import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.theme.readingInk
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -161,6 +164,7 @@ internal fun ChannelListContent(
                 else -> {
                     // Search field: substring-mask fetch on the IME search action.
                     OutlinedTextField(
+                        colors = readableOutlinedTextFieldColors(),
                         value = text,
                         onValueChange = {
                             text = it
@@ -333,7 +337,7 @@ private fun ChannelList(
                         Text(
                             io.github.trevarj.motd.ui.components.linkifiedBody(
                                 text = listing.topic,
-                                linkColor = MaterialTheme.colorScheme.primary,
+                                linkColor = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, topicFill),
                                 mentionsActive = false,
                                 containerColor = topicFill,
                                 contentColor = readingInk,
@@ -358,6 +362,7 @@ private fun ChannelList(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         TextButton(
+                            colors = readableTextButtonColors(),
                             onClick = { onJoin(listing.name) },
                             enabled = joinStatus == ChannelJoinStatus.JOIN,
                             modifier =

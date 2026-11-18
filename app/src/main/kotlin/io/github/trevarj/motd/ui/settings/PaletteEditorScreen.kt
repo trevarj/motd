@@ -28,6 +28,7 @@ import io.github.trevarj.motd.ui.chat.parseColorHex
 import io.github.trevarj.motd.ui.chat.wallpaperColorHex
 import io.github.trevarj.motd.ui.theme.UiIcon
 import io.github.trevarj.motd.ui.theme.paletteColorScheme
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.theme.toRawColorScheme
 import io.github.trevarj.motd.ui.theme.withTrueBlackSurfaces
 import android.graphics.Color as AndroidColor
@@ -83,7 +84,7 @@ fun PaletteEditorScreen(
                     .padding(8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TextButton(onClick = { back() }) { Text(stringResource(R.string.palette_editor_cancel)) }
+                TextButton(colors = readableTextButtonColors(), onClick = { back() }) { Text(stringResource(R.string.palette_editor_cancel)) }
                 Button(onClick = { viewModel.save(false) }, enabled = draft != null && !state.saving && !state.invalidFields, modifier = Modifier.testTag("palette_editor_save")) { Text(stringResource(R.string.palette_editor_save)) }
                 Button(onClick = { viewModel.save(true) }, enabled = draft != null && !state.saving && !state.invalidFields, modifier = Modifier.testTag("palette_editor_save_apply")) { Text(stringResource(R.string.palette_editor_save_apply)) }
             }
@@ -190,21 +191,21 @@ fun PaletteEditorScreen(
                         if (draft.light != null) FilterChip(selected = editMode == PaletteMode.LIGHT, onClick = { editingDark = false }, label = { Text(stringResource(R.string.palette_editor_light)) }, modifier = Modifier.testTag("palette_editor_edit_light"))
                         if (draft.dark != null) FilterChip(selected = editMode == PaletteMode.DARK, onClick = { editingDark = true }, label = { Text(stringResource(R.string.palette_editor_dark)) }, modifier = Modifier.testTag("palette_editor_edit_dark"))
                         if (draft.light == null) {
-                            TextButton(onClick = {
+                            TextButton(colors = readableTextButtonColors(), onClick = {
                                 viewModel.addMode(PaletteMode.LIGHT)
                                 editingDark = false
                             }, modifier = Modifier.testTag("palette_editor_add_light")) { Text(stringResource(R.string.palette_editor_add_light)) }
                         }
                         if (draft.dark == null) {
-                            TextButton(onClick = {
+                            TextButton(colors = readableTextButtonColors(), onClick = {
                                 viewModel.addMode(PaletteMode.DARK)
                                 editingDark = true
                             }, modifier = Modifier.testTag("palette_editor_add_dark")) { Text(stringResource(R.string.palette_editor_add_dark)) }
                         }
-                        if (draft.light != null && draft.dark != null) TextButton(onClick = { removeMode = editMode.name }, modifier = Modifier.testTag("palette_editor_remove_${editMode.name.lowercase()}")) { Text(stringResource(R.string.palette_editor_remove_mode)) }
+                        if (draft.light != null && draft.dark != null) TextButton(colors = readableTextButtonColors(), onClick = { removeMode = editMode.name }, modifier = Modifier.testTag("palette_editor_remove_${editMode.name.lowercase()}")) { Text(stringResource(R.string.palette_editor_remove_mode)) }
                     }
                     Text(stringResource(R.string.palette_editor_mode_seed), style = MaterialTheme.typography.bodySmall)
-                    if (state.appearance.adjustPaletteReadability && !state.appearance.useThemeTextColors) Text(stringResource(R.string.palette_editor_neutral_mask), style = MaterialTheme.typography.bodySmall)
+                    if (!state.appearance.useThemeTextColors) Text(stringResource(R.string.palette_editor_neutral_mask), style = MaterialTheme.typography.bodySmall)
                     if (state.appearance.trueBlack) Text(stringResource(R.string.palette_editor_black_mask), style = MaterialTheme.typography.bodySmall)
                     if (!state.settings.nickColorsEnabled || state.settings.nickColorPalette != NickColorPalette.THEME) Text(stringResource(R.string.palette_editor_nick_mask), style = MaterialTheme.typography.bodySmall)
                     val roles = listOf("primary" to R.string.palette_editor_primary, "secondary" to R.string.palette_editor_secondary, "tertiary" to R.string.palette_editor_tertiary, "background" to R.string.palette_editor_background, "surface" to R.string.palette_editor_surface)
@@ -215,7 +216,7 @@ fun PaletteEditorScreen(
                             colorRole = role
                         }
                     }
-                    TextButton(onClick = { advanced = !advanced }, modifier = Modifier.testTag("palette_editor_advanced")) { Text(stringResource(if (advanced) R.string.palette_editor_hide_advanced else R.string.palette_editor_advanced)) }
+                    TextButton(colors = readableTextButtonColors(), onClick = { advanced = !advanced }, modifier = Modifier.testTag("palette_editor_advanced")) { Text(stringResource(if (advanced) R.string.palette_editor_hide_advanced else R.string.palette_editor_advanced)) }
                     Text(stringResource(R.string.palette_editor_nicknames), style = MaterialTheme.typography.titleMedium)
                     if (colors.nicknameColors.isEmpty()) Text(stringResource(R.string.palette_editor_automatic))
                     colors.nicknameColors.forEachIndexed { index, color ->
@@ -231,13 +232,13 @@ fun PaletteEditorScreen(
                                 }
                             }
                             Row(Modifier.horizontalScroll(rememberScrollState())) {
-                                TextButton(onClick = { viewModel.moveNickname(editMode, index, -1) }, enabled = index > 0) { Text(stringResource(R.string.palette_editor_move_up)) }
-                                TextButton(onClick = { viewModel.moveNickname(editMode, index, 1) }, enabled = index < colors.nicknameColors.lastIndex) { Text(stringResource(R.string.palette_editor_move_down)) }
-                                TextButton(onClick = { viewModel.removeNickname(editMode, index) }) { Text(stringResource(R.string.palette_editor_remove)) }
+                                TextButton(colors = readableTextButtonColors(), onClick = { viewModel.moveNickname(editMode, index, -1) }, enabled = index > 0) { Text(stringResource(R.string.palette_editor_move_up)) }
+                                TextButton(colors = readableTextButtonColors(), onClick = { viewModel.moveNickname(editMode, index, 1) }, enabled = index < colors.nicknameColors.lastIndex) { Text(stringResource(R.string.palette_editor_move_down)) }
+                                TextButton(colors = readableTextButtonColors(), onClick = { viewModel.removeNickname(editMode, index) }) { Text(stringResource(R.string.palette_editor_remove)) }
                             }
                         }
                     }
-                    TextButton(onClick = { viewModel.addNickname(editMode) }, enabled = colors.nicknameColors.size < 24, modifier = Modifier.testTag("palette_editor_nick_add")) { Text(stringResource(R.string.palette_editor_nick_add)) }
+                    TextButton(colors = readableTextButtonColors(), onClick = { viewModel.addNickname(editMode) }, enabled = colors.nicknameColors.size < 24, modifier = Modifier.testTag("palette_editor_nick_add")) { Text(stringResource(R.string.palette_editor_nick_add)) }
                 }
             } else {
                 Text(state.error ?: stringResource(R.string.palette_editor_loading), Modifier.padding(16.dp))
@@ -246,16 +247,16 @@ fun PaletteEditorScreen(
     }
     if (discard) {
         AlertDialog(onDismissRequest = { discard = false }, title = { Text(stringResource(R.string.palette_editor_discard_title)) }, text = { Text(stringResource(R.string.palette_editor_discard_message)) }, confirmButton = {
-            TextButton(onClick = onBack, modifier = Modifier.testTag("palette_editor_discard")) { Text(stringResource(R.string.palette_editor_discard)) }
-        }, dismissButton = { TextButton(onClick = { discard = false }, modifier = Modifier.testTag("palette_editor_keep_editing")) { Text(stringResource(R.string.palette_editor_keep_editing)) } })
+            TextButton(colors = readableTextButtonColors(), onClick = onBack, modifier = Modifier.testTag("palette_editor_discard")) { Text(stringResource(R.string.palette_editor_discard)) }
+        }, dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = { discard = false }, modifier = Modifier.testTag("palette_editor_keep_editing")) { Text(stringResource(R.string.palette_editor_keep_editing)) } })
     }
     removeMode?.let { mode ->
         AlertDialog(onDismissRequest = { removeMode = null }, title = { Text(stringResource(R.string.palette_editor_remove_mode)) }, text = { Text(stringResource(R.string.palette_editor_remove_mode_message)) }, confirmButton = {
-            TextButton(onClick = {
+            TextButton(colors = readableTextButtonColors(), onClick = {
                 viewModel.removeMode(PaletteMode.valueOf(mode))
                 removeMode = null
             }, modifier = Modifier.testTag("palette_editor_confirm_remove")) { Text(stringResource(R.string.palette_editor_remove)) }
-        }, dismissButton = { TextButton(onClick = { removeMode = null }) { Text(stringResource(R.string.palette_editor_cancel)) } })
+        }, dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = { removeMode = null }) { Text(stringResource(R.string.palette_editor_cancel)) } })
     }
     colorRole?.let { role ->
         val mode = PaletteMode.valueOf(colorMode)
@@ -344,7 +345,7 @@ private fun EditorColorDialog(
                 ColorComponentSlider(stringResource(R.string.palette_editor_brightness), hsv[2], 0f..1f, "${(hsv[2] * 100).toInt()}%", "palette_editor_brightness") { update(brightness = it) }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss, enabled = !invalid, modifier = Modifier.testTag("palette_editor_color_done")) { Text(stringResource(R.string.palette_editor_done)) } },
+        confirmButton = { TextButton(colors = readableTextButtonColors(), onClick = onDismiss, enabled = !invalid, modifier = Modifier.testTag("palette_editor_color_done")) { Text(stringResource(R.string.palette_editor_done)) } },
     )
 }
 

@@ -36,6 +36,7 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chat.ComposerPrefill
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -152,6 +153,7 @@ fun SharePickerScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             OutlinedTextField(
+                colors = readableOutlinedTextFieldColors(),
                 value = query,
                 onValueChange = viewModel::onQueryChange,
                 modifier =

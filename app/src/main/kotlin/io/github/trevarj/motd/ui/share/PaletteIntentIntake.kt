@@ -28,6 +28,7 @@ import io.github.trevarj.motd.parseJoinInvitePayload
 import io.github.trevarj.motd.ui.nav.JoinInviteRoute
 import io.github.trevarj.motd.ui.nav.PalettePreviewRoute
 import io.github.trevarj.motd.ui.nav.SharePickerRoute
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -266,7 +267,7 @@ fun IncomingContentNavigation(
             onDismissRequest = { error = null },
             title = { Text("Palette import") },
             text = { Text(message) },
-            confirmButton = { TextButton(onClick = { error = null }) { Text("OK") } },
+            confirmButton = { TextButton(colors = readableTextButtonColors(), onClick = { error = null }) { Text("OK") } },
         )
     }
 }

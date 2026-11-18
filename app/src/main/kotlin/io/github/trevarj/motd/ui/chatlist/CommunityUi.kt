@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 @Composable
@@ -36,8 +37,8 @@ internal fun CommunityInvitation(
         Text(stringResource(R.string.community_title), style = MaterialTheme.typography.titleMedium)
         Text(stringResource(R.string.community_channel), style = MaterialTheme.typography.bodyMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = onJoin, modifier = Modifier.testTag("community_invitation_join")) { Text(stringResource(R.string.community_join)) }
-            TextButton(onClick = onDismiss, modifier = Modifier.testTag("community_invitation_dismiss")) { Text(stringResource(R.string.community_dismiss)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onJoin, modifier = Modifier.testTag("community_invitation_join")) { Text(stringResource(R.string.community_join)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss, modifier = Modifier.testTag("community_invitation_dismiss")) { Text(stringResource(R.string.community_dismiss)) }
         }
     }
 }
@@ -79,6 +80,7 @@ internal fun CommunityPicker(
                 }
                 state.routes.forEach { route ->
                     TextButton(
+                        colors = readableTextButtonColors(),
                         enabled = !state.joining,
                         modifier = Modifier.fillMaxWidth().testTag("community_network_${route.network.id}"),
                         onClick = { if (route.ready || route.joinedBufferId != null) onChoose(route.network.id) else onSettings(route.network.id) },
@@ -97,12 +99,12 @@ internal fun CommunityPicker(
                         }
                     }
                 }
-                TextButton(onClick = onSetup, enabled = !state.joining, modifier = Modifier.testTag("community_setup")) {
+                TextButton(colors = readableTextButtonColors(), onClick = onSetup, enabled = !state.joining, modifier = Modifier.testTag("community_setup")) {
                     Text(stringResource(R.string.community_setup))
                 }
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onCancel, modifier = Modifier.testTag("community_cancel")) { Text(stringResource(R.string.community_cancel)) } },
+        dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = onCancel, modifier = Modifier.testTag("community_cancel")) { Text(stringResource(R.string.community_cancel)) } },
     )
 }

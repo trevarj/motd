@@ -61,8 +61,13 @@ flowchart TD
 - Appearance stores independent light and dark palette identities plus System/Light/Dark
   mode. Legacy single selections migrate to their supported variants; an unsupported
   opposite slot uses Device colors. Only Device colors uses Material You; custom
-  palettes preserve authored source colors by default. Readability corrections are
-  opt-in; dark-only true black remains independent. Draft/custom derivation is
+  palette documents retain authored source colors. Match text to theme independently
+  selects authored or neutral reading inks, even with readability corrections off.
+  Built-in reading and boundary roles choose legible existing inks without editing
+  palette data; changing text mode does not recolor accents or container fills.
+  Transparent actions and fields resolve ink against composited fills, preserving
+  readable text and visible selection backings. Readability corrections remain
+  opt-in; dark-only true black stays independent. Draft/custom derivation is
   remembered by actual colors, text mode and correction policy, never in a global
   slider-value cache.
 - The strict UTF-8 palette codec caps each document at 16 KiB. Appearance DataStore

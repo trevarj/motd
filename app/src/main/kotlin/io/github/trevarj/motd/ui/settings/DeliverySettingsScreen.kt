@@ -15,6 +15,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -43,6 +44,7 @@ import io.github.trevarj.motd.service.setBootReceiverEnabled
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import android.provider.Settings as AndroidSettings
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 
@@ -252,6 +254,7 @@ private fun DeliveryGroup(
             exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
         ) {
             TextButton(
+                colors = readableTextButtonColors(),
                 onClick = onInstallDistributor,
                 modifier =
                     Modifier
@@ -334,6 +337,7 @@ private fun PushStatusCard(
             androidx.compose.foundation.layout.Row {
                 if (availability.distributors.isNotEmpty()) {
                     TextButton(
+                        colors = readableTextButtonColors(background = MaterialTheme.colorScheme.surfaceContainerLow),
                         onClick = onChooseDistributor,
                         modifier = Modifier.testTag("settings_push_choose_distributor"),
                     ) {
@@ -349,6 +353,7 @@ private fun PushStatusCard(
                     }
                 }
                 TextButton(
+                    colors = readableTextButtonColors(background = MaterialTheme.colorScheme.surfaceContainerLow),
                     onClick = onRetry,
                     modifier = Modifier.testTag("settings_push_retry"),
                 ) { Text(stringResource(R.string.settings_delivery_push_retry)) }
@@ -379,8 +384,12 @@ private fun NotificationPermissionWarning(onFixNotifications: () -> Unit) {
             TextButton(
                 onClick = onFixNotifications,
                 colors =
-                    androidx.compose.material3.ButtonDefaults
-                        .textButtonColors(contentColor = io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors.current.onWarningContainer),
+                    readableTextButtonColors(
+                        background = io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors.current.warningContainer,
+                        colors =
+                            androidx.compose.material3.ButtonDefaults
+                                .textButtonColors(contentColor = io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors.current.onWarningContainer),
+                    ),
                 modifier = Modifier.testTag("settings_fix_notifications"),
             ) { Text(stringResource(R.string.settings_delivery_push_fix_notifications)) }
         }

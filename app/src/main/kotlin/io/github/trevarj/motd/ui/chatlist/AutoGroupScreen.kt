@@ -48,6 +48,9 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.ChatFolderRepository
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.ui.components.FolderIcon
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -158,7 +161,7 @@ internal fun AutoGroupProposalCard(
             Row(modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }) {
                 FolderIcon(icon, null, Modifier.size(24.dp))
                 Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                    Text(name, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
+                    Text(name, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLow), style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
                     Text(stringResource(R.string.folders_matched_prefix, proposal.matchedPrefix))
                 }
                 Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null)
@@ -174,8 +177,8 @@ internal fun AutoGroupProposalCard(
             OutlinedTextField(name, {
                 name = it
                 error = false
-            }, enabled = destination == null, label = { Text(stringResource(R.string.folders_name)) }, modifier = Modifier.fillMaxWidth())
-            TextButton(onClick = { destinationMenu = true }) {
+            }, enabled = destination == null, colors = readableOutlinedTextFieldColors(), label = { Text(stringResource(R.string.folders_name)) }, modifier = Modifier.fillMaxWidth())
+            TextButton(colors = readableTextButtonColors(), onClick = { destinationMenu = true }) {
                 Text(destination?.let { id -> folders.firstOrNull { it.id == id }?.displayName } ?: stringResource(R.string.folders_new_destination))
             }
             DropdownMenu(destinationMenu, { destinationMenu = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
@@ -191,7 +194,7 @@ internal fun AutoGroupProposalCard(
                 }
             }
             if (destination == null) {
-                TextButton(onClick = { iconPicker = true }) { Text(stringResource(R.string.folders_choose_icon)) }
+                TextButton(colors = readableTextButtonColors(), onClick = { iconPicker = true }) { Text(stringResource(R.string.folders_choose_icon)) }
             }
             Row {
                 Button(

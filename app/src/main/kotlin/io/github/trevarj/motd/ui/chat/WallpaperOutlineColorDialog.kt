@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.atan2
@@ -173,6 +174,7 @@ internal fun WallpaperOutlineColorDialog(
                     modifier = Modifier.fillMaxWidth().testTag("settings_wallpaper_color_hex"),
                 )
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = {
                         val hsv = FloatArray(3)
                         AndroidColor.colorToHSV(themeColor, hsv)
@@ -187,7 +189,7 @@ internal fun WallpaperOutlineColorDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, modifier = Modifier.testTag("settings_wallpaper_color_cancel")) {
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss, modifier = Modifier.testTag("settings_wallpaper_color_cancel")) {
                 Text(stringResource(R.string.action_cancel))
             }
         },

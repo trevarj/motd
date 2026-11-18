@@ -53,6 +53,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.invite.brandedInviteQrBitmap
 import io.github.trevarj.motd.ui.components.popupEffectSurface
 import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -253,6 +254,7 @@ private fun ContactInviteNetworkSelector(
         modifier = Modifier.fillMaxWidth(),
     ) {
         OutlinedTextField(
+            colors = readableOutlinedTextFieldColors(),
             value = selected.name,
             onValueChange = {},
             readOnly = true,

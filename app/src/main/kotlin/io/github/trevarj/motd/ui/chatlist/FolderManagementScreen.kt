@@ -62,6 +62,8 @@ import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.ui.components.FolderIcon
 import io.github.trevarj.motd.ui.components.FolderIconChoice
 import io.github.trevarj.motd.ui.components.folderIconChoices
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -191,7 +193,7 @@ fun ManageFoldersScreen(
                 }
             }
             item {
-                TextButton(onClick = viewModel::resetIgnored, modifier = Modifier.padding(12.dp).testTag("folders_reset_ignored")) {
+                TextButton(colors = readableTextButtonColors(), onClick = viewModel::resetIgnored, modifier = Modifier.padding(12.dp).testTag("folders_reset_ignored")) {
                     Text(stringResource(R.string.folders_reset_ignored))
                 }
             }
@@ -271,13 +273,13 @@ fun FolderEditorScreen(
             OutlinedTextField(name, {
                 name = it
                 error = false
-            }, label = { Text(stringResource(R.string.folders_name)) }, isError = error, modifier = Modifier.fillMaxWidth().testTag("folder_name"))
+            }, colors = readableOutlinedTextFieldColors(), label = { Text(stringResource(R.string.folders_name)) }, isError = error, modifier = Modifier.fillMaxWidth().testTag("folder_name"))
             Button(onClick = { iconPicker = true }, modifier = Modifier.padding(vertical = 8.dp).testTag("folder_icon_picker")) {
                 FolderIcon(icon, null, Modifier.size(24.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.folders_choose_icon))
             }
-            OutlinedTextField(query, { query = it }, label = { Text(stringResource(R.string.folders_search_chats)) }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(query, { query = it }, colors = readableOutlinedTextFieldColors(), label = { Text(stringResource(R.string.folders_search_chats)) }, modifier = Modifier.fillMaxWidth())
             LazyColumn(modifier = Modifier.weight(1f)) {
                 items(visible, key = ChatListRow::bufferId) { chat ->
                     Row(
@@ -319,8 +321,8 @@ fun FolderEditorScreen(
             onDismissRequest = { confirmDelete = false },
             title = { Text(stringResource(R.string.folders_delete)) },
             text = { Text(stringResource(R.string.folders_delete_confirm)) },
-            confirmButton = { TextButton(onClick = { viewModel.delete(folderId, onBack) }) { Text(stringResource(R.string.folders_delete)) } },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(android.R.string.cancel)) } },
+            confirmButton = { TextButton(colors = readableTextButtonColors(), onClick = { viewModel.delete(folderId, onBack) }) { Text(stringResource(R.string.folders_delete)) } },
+            dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = { confirmDelete = false }) { Text(stringResource(android.R.string.cancel)) } },
         )
     }
 }
@@ -338,7 +340,7 @@ fun FolderIconPicker(
         text = {
             LazyColumn(modifier = Modifier.heightIn(max = 420.dp).selectableGroup()) {
                 item {
-                    OutlinedTextField(query, { query = it }, label = { Text(stringResource(R.string.action_search)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(query, { query = it }, colors = readableOutlinedTextFieldColors(), label = { Text(stringResource(R.string.action_search)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 }
                 items(folderIconChoices(query), key = { "${it.ref.kind}:${it.ref.key}" }) { choice: FolderIconChoice ->
                     io.github.trevarj.motd.ui.settings.RadioRow(

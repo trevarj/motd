@@ -38,6 +38,8 @@ import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Density
 import io.github.trevarj.motd.ui.theme.LocalEmojiRenderer
+import io.github.trevarj.motd.ui.theme.readableFilledTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
 
 private val DefaultEmojiCursorBrush: Brush = SolidColor(Color.Black)
 
@@ -99,7 +101,7 @@ fun EmojiOutlinedTextField(
     onTextLayout: (Density.(getResult: () -> TextLayoutResult?) -> Unit)? = null,
     scrollState: ScrollState = rememberScrollState(),
     shape: Shape = OutlinedTextFieldDefaults.shape,
-    colors: TextFieldColors = OutlinedTextFieldDefaults.colors(),
+    colors: TextFieldColors = readableOutlinedTextFieldColors(),
     contentPadding: PaddingValues = OutlinedTextFieldDefaults.contentPadding(),
     interactionSource: MutableInteractionSource? = null,
 ) {
@@ -156,7 +158,7 @@ fun EmojiOutlinedTextField(
     minLines: Int = 1,
     interactionSource: MutableInteractionSource? = null,
     shape: Shape = OutlinedTextFieldDefaults.shape,
-    colors: TextFieldColors = OutlinedTextFieldDefaults.colors(),
+    colors: TextFieldColors = readableOutlinedTextFieldColors(),
 ) {
     OutlinedTextField(
         value = value,
@@ -209,7 +211,7 @@ fun EmojiOutlinedTextField(
     minLines: Int = 1,
     interactionSource: MutableInteractionSource? = null,
     shape: Shape = OutlinedTextFieldDefaults.shape,
-    colors: TextFieldColors = OutlinedTextFieldDefaults.colors(),
+    colors: TextFieldColors = readableOutlinedTextFieldColors(),
 ) {
     OutlinedTextField(
         value = value,
@@ -262,7 +264,7 @@ fun EmojiTextField(
     minLines: Int = 1,
     interactionSource: MutableInteractionSource? = null,
     shape: Shape = TextFieldDefaults.shape,
-    colors: TextFieldColors = TextFieldDefaults.colors(),
+    colors: TextFieldColors = readableFilledTextFieldColors(),
 ) {
     TextField(
         value = value,

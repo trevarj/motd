@@ -49,6 +49,7 @@ import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
 import io.github.trevarj.motd.ui.theme.cornerRadius
+import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readingInk
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 
@@ -118,7 +119,6 @@ internal fun CompactMessageRow(
     val spacing = LocalSpacing.current
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurfaceVariant)
     // Self text stays on the default body color; others too (IRC is uniform). The nick carries color.
-    val linkColor = MaterialTheme.colorScheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
     val codeColor = readingInk(MaterialTheme.colorScheme)
     val nickFontSize = MaterialTheme.typography.bodyMedium.fontSize
@@ -144,6 +144,7 @@ internal fun CompactMessageRow(
                     .effectBackingAlpha(paintedRow.alpha * backgroundAlpha),
         )
     val contrastRow = drawFill.compositeOver(canvas)
+    val linkColor = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, contrastRow)
     val bodyInk = codeColor
     val adjustPaletteReadability = LocalAdjustPaletteReadability.current
     val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed, adjustPaletteReadability) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow, adjustPaletteReadability) }

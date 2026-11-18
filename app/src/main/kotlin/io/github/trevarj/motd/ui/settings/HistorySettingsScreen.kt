@@ -44,6 +44,8 @@ import io.github.trevarj.motd.ui.components.HistorySyncModeSheet
 import io.github.trevarj.motd.ui.components.historySyncModeLabel
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import java.text.NumberFormat
 import java.util.Locale
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
@@ -274,6 +276,7 @@ private fun RetentionPlanner(
     val rows = rowsText.toIntOrNull()?.coerceAtLeast(MIN_CUSTOM_RETENTION_ROWS)
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         OutlinedTextField(
+            colors = readableOutlinedTextFieldColors(),
             value = rowsText,
             onValueChange = { text ->
                 dirty = true
@@ -288,6 +291,7 @@ private fun RetentionPlanner(
             modifier = Modifier.fillMaxWidth().testTag("settings_retention_rows_field"),
         )
         OutlinedTextField(
+            colors = readableOutlinedTextFieldColors(),
             value = sizeText,
             onValueChange = { text ->
                 dirty = true
@@ -314,6 +318,7 @@ private fun RetentionPlanner(
             style = MaterialTheme.typography.bodySmall,
         )
         TextButton(
+            colors = readableTextButtonColors(),
             onClick = {
                 rows?.let(onApply)
                 dirty = false

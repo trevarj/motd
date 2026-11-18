@@ -40,6 +40,8 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.attachment.isLocalMediaUri
 import io.github.trevarj.motd.avatar.validateAvatarUrl
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -90,15 +92,15 @@ fun AvatarEditorSheet(
             Text(
                 stringResource(R.string.avatar_editor_title),
                 style = androidx.compose.material3.MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
             CurrentAvatarInspection(name, isChannel, currentModel, Modifier.padding(horizontal = 16.dp))
             if (localImportError) Text(stringResource(R.string.settings_local_media_required), color = androidx.compose.material3.MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp).testTag("avatar_editor_import_error"))
             localProposal?.let { uri ->
                 LocalAvatarProposal(uri, isChannel, Modifier.padding(horizontal = 16.dp))
-                TextButton(onClick = { if (uri.isLocalMediaUri()) onImport(uri) }, enabled = uri.isLocalMediaUri(), modifier = Modifier.padding(horizontal = 8.dp).testTag("avatar_editor_use_image")) { Text(stringResource(R.string.settings_avatar_use_image)) }
-                TextButton(onClick = { localProposal = null }, modifier = Modifier.padding(horizontal = 8.dp).testTag("avatar_editor_discard_image")) { Text(stringResource(R.string.action_cancel)) }
+                TextButton(colors = readableTextButtonColors(), onClick = { if (uri.isLocalMediaUri()) onImport(uri) }, enabled = uri.isLocalMediaUri(), modifier = Modifier.padding(horizontal = 8.dp).testTag("avatar_editor_use_image")) { Text(stringResource(R.string.settings_avatar_use_image)) }
+                TextButton(colors = readableTextButtonColors(), onClick = { localProposal = null }, modifier = Modifier.padding(horizontal = 8.dp).testTag("avatar_editor_discard_image")) { Text(stringResource(R.string.action_cancel)) }
             }
             AvatarEditorAction(
                 icon = Icons.Outlined.Image,
@@ -137,6 +139,7 @@ fun AvatarEditorSheet(
                 modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("avatar_editor_url"),
             )
             TextButton(
+                colors = readableTextButtonColors(),
                 onClick = {
                     val validated = validateAvatarUrl(url)
                     if (validated == null) invalid = true else onUrl(validated)
@@ -164,7 +167,7 @@ fun AvatarEditorSheet(
                     tag = "avatar_editor_clear_shared",
                 ) { confirmClear = true }
             }
-            TextButton(onClick = onDismiss, modifier = Modifier.padding(horizontal = 8.dp).testTag("avatar_editor_cancel")) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss, modifier = Modifier.padding(horizontal = 8.dp).testTag("avatar_editor_cancel")) { Text(stringResource(R.string.action_cancel)) }
         }
     }
 
@@ -176,6 +179,7 @@ fun AvatarEditorSheet(
             text = { Text(stringResource(R.string.avatar_clear_shared_body)) },
             confirmButton = {
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = {
                         confirmClear = false
                         onClearShared()
@@ -184,7 +188,7 @@ fun AvatarEditorSheet(
                 ) { Text(stringResource(R.string.avatar_clear_shared)) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmClear = false }) { Text(stringResource(R.string.action_cancel)) }
+                TextButton(colors = readableTextButtonColors(), onClick = { confirmClear = false }) { Text(stringResource(R.string.action_cancel)) }
             },
         )
     }
@@ -202,7 +206,7 @@ private fun AvatarEditorAction(
         colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
         headlineContent = { Text(title) },
         supportingContent = supporting?.let { value -> { Text(value) } },
-        leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+        leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0)) },
         modifier =
             Modifier
                 .fillMaxWidth()

@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.components.popupEffectSurface
 import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 
@@ -235,6 +236,7 @@ fun BanTargetDialog(
         },
         confirmButton = {
             TextButton(
+                colors = readableTextButtonColors(),
                 onClick = { onBan(target.nick, mask, alsoKick && hasMember) },
                 enabled = mask.isNotBlank(),
                 modifier = Modifier.testTag("channelinfo_ban_confirm"),
@@ -246,12 +248,13 @@ fun BanTargetDialog(
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 onUnban?.let { unban ->
                     TextButton(
+                        colors = readableTextButtonColors(),
                         onClick = { unban(mask) },
                         enabled = mask.isNotBlank(),
                         modifier = Modifier.testTag("channelinfo_ban_remove"),
                     ) { Text(stringResource(R.string.channelinfo_remove_ban)) }
                 }
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+                TextButton(onClick = onDismiss, colors = readableTextButtonColors()) { Text(stringResource(R.string.action_cancel)) }
             }
         },
     )

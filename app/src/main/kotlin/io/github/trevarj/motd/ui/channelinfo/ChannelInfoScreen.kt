@@ -102,6 +102,8 @@ import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.theme.readingInk
 import kotlinx.coroutines.launch
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
@@ -634,7 +636,7 @@ fun ChannelInfoContent(
                         Text(
                             text = section.prefix?.let { "$it" } ?: stringResource(R.string.channelinfo_section_regular),
                             style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
                             fontWeight = FontWeight.SemiBold,
                             // Headers move with their rows but never fade: their identity is the
                             // section, not the membership.
@@ -738,6 +740,7 @@ fun ChannelInfoContent(
             },
             confirmButton = {
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = onLeave,
                     enabled = leaveMutation !is LeaveMutationState.Submitting,
                     modifier = Modifier.testTag("channelinfo_leave_confirm"),
@@ -747,6 +750,7 @@ fun ChannelInfoContent(
             },
             dismissButton = {
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = { showLeaveConfirm = false },
                     enabled = leaveMutation !is LeaveMutationState.Submitting,
                 ) {
@@ -784,12 +788,12 @@ private fun TopicText(
 ) {
     val scheme = MaterialTheme.colorScheme
     val fill = containerColor
-    val ink = if (LocalAdjustPaletteReadability.current) ensureContrast(readingInk(scheme), listOf(fill), MESSAGE_TEXT_CONTRAST) else readingInk(scheme)
+    val ink = if (LocalAdjustPaletteReadability.current) ensureContrast(readingInk(scheme), listOf(fill), MESSAGE_TEXT_CONTRAST) else scheme.readableForeground(readingInk(scheme), fill)
     val formatted =
         io.github.trevarj.motd.ui.components
             .linkifiedBody(
                 topic,
-                scheme.primary,
+                if (LocalAdjustPaletteReadability.current) scheme.primary else scheme.readableForeground(scheme.primary, fill),
                 mentionsActive = false,
                 containerColor = fill,
                 contentColor = ink,
@@ -856,6 +860,7 @@ internal fun TopicEditDialog(
         },
         confirmButton = {
             TextButton(
+                colors = readableTextButtonColors(),
                 onClick = { onSave(text.text.toString()) },
                 enabled = !submitting,
                 modifier = Modifier.testTag("channelinfo_topic_edit_save"),
@@ -864,7 +869,7 @@ internal fun TopicEditDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !submitting) {
+            TextButton(onClick = onDismiss, enabled = !submitting, colors = readableTextButtonColors()) {
                 Text(stringResource(R.string.action_cancel))
             }
         },
@@ -895,7 +900,7 @@ private fun FoolsSectionHeader(
         Icon(
             imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+            tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0),
         )
     }
 }
@@ -990,6 +995,7 @@ private fun ChannelHeader(
         }
         if (rosterState == RosterLoadState.FAILED) {
             TextButton(
+                colors = readableTextButtonColors(),
                 onClick = onRetryMembers,
                 modifier = Modifier.testTag("channelinfo_roster_retry"),
             ) {
@@ -1080,7 +1086,7 @@ private fun ActionItem(
         modifier = Modifier.clickable(onClick = onClick).padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+        Icon(icon, contentDescription = label, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0))
         Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 4.dp))
     }
 }
@@ -1109,7 +1115,7 @@ private fun MemberRow(
                         imageVector = Icons.Filled.Star,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0),
                     )
                 }
             } else {
@@ -1173,7 +1179,7 @@ private fun LagReadout(
     val tone = lagTone(lagMs)
     val dotColor =
         when (tone) {
-            LagTone.GOOD -> MaterialTheme.colorScheme.primary
+            LagTone.GOOD -> MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0)
             LagTone.DEGRADED -> io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors.current.warning
             LagTone.BAD -> MaterialTheme.colorScheme.error
         }

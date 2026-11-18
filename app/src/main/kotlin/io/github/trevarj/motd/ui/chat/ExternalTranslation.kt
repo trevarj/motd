@@ -48,6 +48,8 @@ import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.theme.readingInk
 import kotlinx.coroutines.launch
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
@@ -177,7 +179,7 @@ internal fun MessageTranslationPicker(
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            Text(stringResource(R.string.chat_translation_picker_title), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.chat_translation_picker_title), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
             Text(
                 stringResource(R.string.chat_translation_disclosure),
                 style = MaterialTheme.typography.bodyMedium,
@@ -215,6 +217,7 @@ internal fun MessageTranslationPicker(
                 onClick = { hideThen(onOther) },
             )
             TextButton(
+                colors = readableTextButtonColors(),
                 onClick = { hideThen {} },
                 modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp).testTag("message_translation_cancel"),
             ) {
@@ -270,7 +273,14 @@ internal fun InlineMessageTranslation(
             if (adjustReadability) ensureContrast(ink, listOf(fill), MESSAGE_TEXT_CONTRAST) else ink
         }
     val accentInk = scheme.primary
-    val accent = remember(accentInk, fill) { ensureContrast(accentInk, listOf(fill), MESSAGE_TEXT_CONTRAST) }
+    val accent =
+        remember(scheme, accentInk, fill, adjustReadability) {
+            if (adjustReadability) {
+                ensureContrast(accentInk, listOf(fill), MESSAGE_TEXT_CONTRAST)
+            } else {
+                scheme.readableForeground(accentInk, fill)
+            }
+        }
     Column(
         Modifier
             .fillMaxWidth()

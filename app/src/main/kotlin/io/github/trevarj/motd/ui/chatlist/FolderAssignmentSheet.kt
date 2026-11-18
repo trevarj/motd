@@ -28,6 +28,8 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.ChatFolderEntity
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.ui.components.FolderIcon
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -51,8 +53,8 @@ fun FolderAssignmentSheet(
     val visible = folders.filter { query.isBlank() || it.displayName.contains(query, ignoreCase = true) }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag("folder_assignment_sheet")) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Text(stringResource(R.string.folders_add_to), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-            OutlinedTextField(query, { query = it }, label = { Text(stringResource(R.string.action_search)) }, modifier = Modifier.fillMaxWidth())
+            Text(stringResource(R.string.folders_add_to), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLow))
+            OutlinedTextField(query, { query = it }, colors = readableOutlinedTextFieldColors(), label = { Text(stringResource(R.string.action_search)) }, modifier = Modifier.fillMaxWidth())
             LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
                 item {
                     FolderDestinationRow(
@@ -92,7 +94,7 @@ fun FolderAssignmentSheet(
                 OutlinedTextField(name, {
                     name = it
                     error = false
-                }, label = { Text(stringResource(R.string.folders_name)) }, isError = error, modifier = Modifier.fillMaxWidth())
+                }, colors = readableOutlinedTextFieldColors(), label = { Text(stringResource(R.string.folders_name)) }, isError = error, modifier = Modifier.fillMaxWidth())
                 Button(onClick = { pickingIcon = true }, modifier = Modifier.padding(vertical = 8.dp)) {
                     FolderIcon(icon, null, Modifier.size(24.dp))
                     Text(stringResource(R.string.folders_choose_icon), modifier = Modifier.padding(start = 8.dp))

@@ -37,6 +37,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.bouncer.ChannelCommandFields
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -121,6 +124,7 @@ fun ChannelsPanel(
         item {
             PanelCard(stringResource(R.string.bouncer_channel_editor)) {
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = network,
                     onValueChange = { network = it },
                     label = { Text(stringResource(R.string.bouncer_tab_networks)) },
@@ -128,6 +132,7 @@ fun ChannelsPanel(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = channel,
                     onValueChange = { channel = it },
                     label = { Text(stringResource(R.string.new_sheet_channel_hint)) },
@@ -150,6 +155,7 @@ fun ChannelsPanel(
                     label = stringResource(R.string.bouncer_channel_reattach_on),
                 )
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = detachAfter,
                     onValueChange = { detachAfter = it },
                     label = { Text(stringResource(R.string.bouncer_channel_detach_after)) },
@@ -176,6 +182,7 @@ fun ChannelsPanel(
                                 state.capabilities.supports("channel update"),
                     ) { Text(stringResource(R.string.action_save)) }
                     TextButton(
+                        colors = readableTextButtonColors(),
                         onClick = { confirmDelete = true },
                         enabled =
                             canMutate && channel.isNotBlank() && network.isNotBlank() &&
@@ -191,13 +198,13 @@ fun ChannelsPanel(
             title = { Text(stringResource(R.string.bouncer_channel_delete_title)) },
             text = { Text(stringResource(R.string.bouncer_channel_delete_message, channel, network)) },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(colors = readableTextButtonColors(), onClick = {
                     confirmDelete = false
                     callbacks.onDeleteChannel(channel.trim(), network.trim())
                 }) { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.action_cancel)) }
+                TextButton(colors = readableTextButtonColors(), onClick = { confirmDelete = false }) { Text(stringResource(R.string.action_cancel)) }
             },
         )
     }
@@ -236,6 +243,7 @@ fun AccountPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = nick,
                     onValueChange = { nick = it },
                     label = { Text(stringResource(R.string.bouncer_field_nick)) },
@@ -243,6 +251,7 @@ fun AccountPanel(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = realName,
                     onValueChange = { realName = it },
                     label = { Text(stringResource(R.string.onboarding_field_realname)) },
@@ -265,6 +274,7 @@ fun AccountPanel(
         item {
             PanelCard(stringResource(R.string.bouncer_account_upstream_auth)) {
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = network,
                     onValueChange = { network = it },
                     label = { Text(stringResource(R.string.bouncer_tab_networks)) },
@@ -281,6 +291,7 @@ fun AccountPanel(
                         enabled = enabled && network.isNotBlank() && state.capabilities.supports("sasl set-plain"),
                     ) { Text(stringResource(R.string.bouncer_sasl_set)) }
                     TextButton(
+                        colors = readableTextButtonColors(),
                         onClick = { confirmReset = true },
                         enabled = enabled && network.isNotBlank() && state.capabilities.supports("sasl reset"),
                     ) { Text(stringResource(R.string.bouncer_reset)) }
@@ -377,6 +388,7 @@ fun AdminPanel(
                         enabled = enabled && state.capabilities.supports("user update"),
                     ) { Text(stringResource(R.string.action_edit)) }
                     TextButton(
+                        colors = readableTextButtonColors(),
                         onClick = { dialog = AdminDialog.DELETE_USER },
                         enabled = enabled && state.capabilities.supports("user delete"),
                     ) { Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error) }
@@ -547,6 +559,7 @@ fun ConsolePanel(
             }
         }
         OutlinedTextField(
+            colors = readableOutlinedTextFieldColors(),
             value = command,
             onValueChange = { if ('\r' !in it && '\n' !in it) command = it },
             label = { Text(stringResource(R.string.bouncer_console_command)) },
@@ -593,7 +606,7 @@ private fun PanelCard(
         Text(
             title,
             style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
             fontWeight = FontWeight.SemiBold,
         )
         Surface(
@@ -615,6 +628,7 @@ private fun FilterField(
     label: String,
 ) {
     OutlinedTextField(
+        colors = readableOutlinedTextFieldColors(),
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
@@ -645,7 +659,7 @@ private fun ConfirmDialog(
         title = { Text(title) },
         text = { Text(message) },
         confirmButton = {
-            TextButton(onClick = onConfirm) {
+            TextButton(colors = readableTextButtonColors(), onClick = onConfirm) {
                 Text(
                     stringResource(R.string.action_continue),
                     color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
@@ -653,7 +667,7 @@ private fun ConfirmDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
 }

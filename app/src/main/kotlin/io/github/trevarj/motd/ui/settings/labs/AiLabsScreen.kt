@@ -48,6 +48,8 @@ import io.github.trevarj.motd.ui.settings.SettingsGroup
 import io.github.trevarj.motd.ui.settings.SettingsNavigationRow
 import io.github.trevarj.motd.ui.settings.SettingsScaffold
 import io.github.trevarj.motd.ui.settings.SwitchRow
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -273,7 +275,7 @@ private fun ModelSelectionSheet(
             Text(
                 text = stringResource(R.string.ai_choose_active_model),
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, background = MaterialTheme.colorScheme.surfaceContainerLow),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
             featureState.selectableModels.forEach { model ->
@@ -363,6 +365,7 @@ private fun NumberSettingField(
     tag: String,
 ) {
     OutlinedTextField(
+        colors = readableOutlinedTextFieldColors(),
         value = value,
         onValueChange = onValueChange,
         label = { Text(stringResource(label)) },
@@ -382,6 +385,7 @@ private fun TextSettingField(
     singleLine: Boolean = true,
 ) {
     OutlinedTextField(
+        colors = readableOutlinedTextFieldColors(),
         value = value,
         onValueChange = onValueChange,
         label = { Text(stringResource(label)) },

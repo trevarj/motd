@@ -30,6 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.AccountEnrollmentProvider
 import io.github.trevarj.motd.ui.settings.PasswordField
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -102,6 +103,7 @@ fun AccountSetupContent(
             when (state.phase) {
                 AccountSetupPhase.FORM, AccountSetupPhase.FAILED -> {
                     OutlinedTextField(
+                        colors = readableOutlinedTextFieldColors(),
                         value = state.account,
                         onValueChange = onAccountChange,
                         label = { Text(stringResource(R.string.account_setup_account)) },
@@ -109,6 +111,7 @@ fun AccountSetupContent(
                         modifier = Modifier.fillMaxWidth().testTag("account_setup_account"),
                     )
                     OutlinedTextField(
+                        colors = readableOutlinedTextFieldColors(),
                         value = state.email,
                         onValueChange = onEmailChange,
                         label = {
@@ -169,6 +172,7 @@ fun AccountSetupContent(
                         state.serverMessage?.let { Text(it) }
                         Text(stringResource(R.string.account_setup_verify_help))
                         OutlinedTextField(
+                            colors = readableOutlinedTextFieldColors(),
                             value = state.verification,
                             onValueChange = onVerificationChange,
                             label = { Text(stringResource(R.string.account_setup_code)) },

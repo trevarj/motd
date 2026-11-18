@@ -36,6 +36,7 @@ import io.github.trevarj.motd.ui.settings.RadioRow
 import io.github.trevarj.motd.ui.settings.SectionHeader
 import io.github.trevarj.motd.ui.settings.SettingsActionRow
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 
@@ -224,7 +225,7 @@ fun ChannelNotificationSheet(
                     )
                 }
             }
-            TextButton(onClick = onDismiss, modifier = Modifier.padding(horizontal = 8.dp)) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss, modifier = Modifier.padding(horizontal = 8.dp)) { Text(stringResource(R.string.action_cancel)) }
         }
     }
 }

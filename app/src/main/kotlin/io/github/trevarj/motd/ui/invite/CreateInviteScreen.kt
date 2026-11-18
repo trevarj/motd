@@ -47,6 +47,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.invite.brandedInviteQrBitmap
 import io.github.trevarj.motd.ui.settings.PasswordField
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -151,6 +153,7 @@ fun CreateInviteContent(
                         )
                     } else {
                         TextButton(
+                            colors = readableTextButtonColors(),
                             onClick = { showChannelKey = true },
                             modifier = Modifier.align(Alignment.Start).testTag("invite_add_key"),
                         ) {
@@ -173,7 +176,7 @@ fun CreateInviteContent(
                         Text(
                             stringResource(R.string.invite_how_it_works),
                             style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
                             modifier = Modifier.fillMaxWidth(),
                         )
                         NumberedInstruction(1, stringResource(R.string.invite_step_scan))
@@ -218,7 +221,7 @@ fun CreateInviteContent(
                 }) { Text(stringResource(R.string.invite_include_key)) }
             },
             dismissButton = {
-                TextButton(onClick = {
+                TextButton(colors = readableTextButtonColors(), onClick = {
                     showKeyWarning = false
                     showChannelKey = false
                     onRemoveKey()
@@ -282,7 +285,7 @@ internal fun NumberedInstruction(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        Text("$number.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Text("$number.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
         Text(text, modifier = Modifier.weight(1f))
     }
 }

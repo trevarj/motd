@@ -77,6 +77,9 @@ import io.github.trevarj.motd.ui.settings.addnetwork.NetworkGuidanceKind
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPreset
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.launch
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -139,7 +142,7 @@ fun NetworkForm(
                 Text(
                     stringResource(R.string.onboarding_auth_title),
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(top = 8.dp),
                 )
@@ -182,6 +185,7 @@ fun BouncerLoginFields(
                     )
                 }
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = sojuLogin.username,
                     onValueChange = { onSojuLoginChange(sojuLogin.copy(username = it)) },
                     label = { Text(stringResource(R.string.bouncer_username)) },
@@ -214,6 +218,7 @@ fun BouncerLoginFields(
                     )
                 }
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = zncLogin.username,
                     onValueChange = { onZncLoginChange(zncLogin.copy(username = it)) },
                     label = { Text(stringResource(R.string.bouncer_username)) },
@@ -234,6 +239,7 @@ fun BouncerLoginFields(
                     modifier = Modifier.fillMaxWidth().testTag("bouncer_username_field"),
                 )
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = zncLogin.network,
                     onValueChange = { onZncLoginChange(zncLogin.copy(network = it)) },
                     label = { Text(stringResource(R.string.bouncer_znc_network)) },
@@ -290,6 +296,7 @@ internal fun NetworkIdentityFields(
         NickField(server, onServerChange, imeAction = ImeAction.Next)
         if (soju) {
             OutlinedTextField(
+                colors = readableOutlinedTextFieldColors(),
                 value = auth.saslUser,
                 onValueChange = { onAuthChange(auth.copy(saslUser = it)) },
                 label = { Text(stringResource(R.string.onboarding_field_username)) },
@@ -309,6 +316,7 @@ internal fun NetworkIdentityFields(
             )
         } else {
             OutlinedTextField(
+                colors = readableOutlinedTextFieldColors(),
                 value = server.username,
                 onValueChange = { onServerChange(server.copy(username = it)) },
                 label = { Text(stringResource(R.string.onboarding_field_username)) },
@@ -318,6 +326,7 @@ internal fun NetworkIdentityFields(
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
+                colors = readableOutlinedTextFieldColors(),
                 value = server.realname,
                 onValueChange = { onServerChange(server.copy(realname = it)) },
                 label = { Text(stringResource(R.string.onboarding_field_realname)) },
@@ -327,7 +336,7 @@ internal fun NetworkIdentityFields(
             Text(
                 stringResource(R.string.onboarding_auth_title),
                 style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(top = 4.dp),
             )
@@ -353,6 +362,7 @@ private fun SojuFields(
     NickField(server, onServerChange, imeAction = ImeAction.Next)
     // Bouncer login username — case-sensitive, no auto-capitalise/correct.
     OutlinedTextField(
+        colors = readableOutlinedTextFieldColors(),
         value = auth.saslUser,
         onValueChange = { onAuthChange(auth.copy(saslUser = it)) },
         label = { Text(stringResource(R.string.onboarding_field_username)) },
@@ -405,6 +415,7 @@ private fun ServerFields(
             initiallyExpanded = server.username.isNotEmpty() || server.realname.isNotEmpty(),
         ) {
             OutlinedTextField(
+                colors = readableOutlinedTextFieldColors(),
                 value = server.username,
                 onValueChange = { onServerChange(server.copy(username = it)) },
                 label = { Text(stringResource(R.string.onboarding_field_username)) },
@@ -419,6 +430,7 @@ private fun ServerFields(
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
+                colors = readableOutlinedTextFieldColors(),
                 value = server.realname,
                 onValueChange = { onServerChange(server.copy(realname = it)) },
                 label = { Text(stringResource(R.string.onboarding_field_realname)) },
@@ -439,6 +451,7 @@ private fun HostField(
     onServerChange: (ServerForm) -> Unit,
 ) {
     OutlinedTextField(
+        colors = readableOutlinedTextFieldColors(),
         value = server.host,
         onValueChange = { onServerChange(server.copy(host = it)) },
         label = { Text(stringResource(R.string.onboarding_field_host)) },
@@ -459,6 +472,7 @@ private fun PortField(
     onServerChange: (ServerForm) -> Unit,
 ) {
     OutlinedTextField(
+        colors = readableOutlinedTextFieldColors(),
         value = server.port,
         onValueChange = { onServerChange(server.copy(port = it.filter(Char::isDigit))) },
         label = { Text(stringResource(R.string.onboarding_field_port)) },
@@ -496,6 +510,7 @@ private fun NickField(
 ) {
     // IRC nicks are case-sensitive: no auto-capitalise/correct.
     OutlinedTextField(
+        colors = readableOutlinedTextFieldColors(),
         value = server.nick,
         onValueChange = { onServerChange(server.copy(nick = it)) },
         label = { Text(stringResource(R.string.onboarding_field_nick)) },
@@ -525,6 +540,7 @@ fun PasswordField(
 ) {
     var visible by remember { mutableStateOf(false) }
     OutlinedTextField(
+        colors = readableOutlinedTextFieldColors(),
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
@@ -643,6 +659,7 @@ private fun AuthSection(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         OutlinedTextField(
+                            colors = readableOutlinedTextFieldColors(),
                             value = auth.saslUser,
                             onValueChange = { onAuthChange(auth.copy(saslUser = it)) },
                             label = { Text(stringResource(R.string.onboarding_auth_sasl_user)) },
@@ -697,6 +714,7 @@ private fun AuthSection(
                             modifier = Modifier.testTag("auth_import_certificate"),
                         ) { Text(stringResource(R.string.onboarding_auth_import_cert)) }
                         TextButton(
+                            colors = readableTextButtonColors(),
                             onClick = ::chooseCertificate,
                             enabled = !certificateBusy,
                             modifier = Modifier.testTag("auth_use_installed_certificate"),
@@ -745,7 +763,7 @@ private fun AuthSection(
                             Text(
                                 stringResource(R.string.onboarding_auth_nickserv_syntax),
                                 style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
                             )
                             Column(Modifier.selectableGroup()) {
                                 NickServSyntaxOption(
@@ -785,6 +803,7 @@ private fun AuthSection(
                             }
                             if (auth.nickServRecoveryEnabled) {
                                 OutlinedTextField(
+                                    colors = readableOutlinedTextFieldColors(),
                                     value = auth.nickServRecoverySequence,
                                     onValueChange = {
                                         onAuthChange(auth.copy(nickServRecoverySequence = it))
@@ -847,6 +866,7 @@ private fun NetworkGuidanceCard(preset: NetworkPreset) {
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             TextButton(
+                colors = readableTextButtonColors(),
                 onClick = { uriHandler.openUri(preset.registrationUrl) },
                 modifier = Modifier.heightIn(min = 48.dp).testTag("network_registration_guide_link"),
             ) {
@@ -862,6 +882,7 @@ private fun NetworkGuidanceCard(preset: NetworkPreset) {
             }
             preset.loginUrl?.let { url ->
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = { uriHandler.openUri(url) },
                     modifier = Modifier.heightIn(min = 48.dp).testTag("network_login_guide_link"),
                 ) { Text(stringResource(R.string.network_guidance_login_link)) }
@@ -910,7 +931,7 @@ private fun FormDisclosure(
                     .padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
             Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null)
         }
         if (expanded) {

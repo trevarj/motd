@@ -260,10 +260,9 @@
     <string name="settings_dynamic_color_desc">Use colors from your phone wallpaper, not your chat wallpaper (Android 12+).</string>
     <string name="settings_dynamic_color_unavailable">Choose Device appearance for Theme to use phone wallpaper colors (Android 12+).</string>
     <string name="settings_theme_text_colors">Match text to theme</string>
-    <string name="settings_theme_text_colors_desc">Use the theme\'s text colors across the app and chats instead of near-black or near-white text.</string>
+    <string name="settings_theme_text_colors_desc">Use theme text colors instead of near-black or near-white text, independently of palette adjustment. Built-in themes fall back to legible ink when needed.</string>
     <string name="settings_adjust_palette_readability">Adjust palette for readability</string>
-    <string name="settings_adjust_palette_readability_desc">Optionally correct palette colors for text and control contrast. Off keeps authored colors.</string>
-    <string name="settings_theme_text_colors_inactive">Authored text colors are used while readability adjustment is off. Your text preference is saved.</string>
+    <string name="settings_adjust_palette_readability_desc">Optionally correct palette colors for text and control contrast. Off keeps authored palette colors; built-in themes still use legible text and controls.</string>
     <string name="settings_theme_section">Theme</string>
     <string name="settings_appearance_text_section">Text &amp; font</string>
     <string name="settings_appearance_chat_list_section">Chat list</string>

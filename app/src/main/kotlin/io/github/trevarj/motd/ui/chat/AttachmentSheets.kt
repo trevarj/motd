@@ -114,6 +114,8 @@ import io.github.trevarj.motd.ui.settings.SwitchRow
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -548,6 +550,7 @@ fun AttachmentSheets(
                         Spacer(Modifier.height(8.dp))
                         Text(stringResource(R.string.upload_soju_off_host_override))
                         TextButton(
+                            colors = readableTextButtonColors(),
                             onClick = {
                                 viewModel.clearError()
                                 onDismiss()
@@ -559,7 +562,7 @@ fun AttachmentSheets(
             },
             confirmButton = {
                 lastAttempt?.let { request ->
-                    TextButton(onClick = {
+                    TextButton(colors = readableTextButtonColors(), onClick = {
                         val retry = attempt ?: return@TextButton
                         if (viewModel.attempt.value !== retry || viewModel.error.value !== failure) return@TextButton
                         viewModel.clearError()
@@ -579,12 +582,12 @@ fun AttachmentSheets(
                             ),
                         )
                     }
-                } ?: TextButton(onClick = viewModel::clearError) { Text(stringResource(R.string.action_ok)) }
+                } ?: TextButton(colors = readableTextButtonColors(), onClick = viewModel::clearError) { Text(stringResource(R.string.action_ok)) }
             },
             dismissButton =
                 if (lastAttempt != null) {
                     {
-                        TextButton(onClick = {
+                        TextButton(colors = readableTextButtonColors(), onClick = {
                             viewModel.clearError()
                             flow = lastAttempt
                             viewModel.clearAttempt(attempt)
@@ -604,7 +607,7 @@ fun AttachmentSheets(
             title = { Text(stringResource(R.string.upload_failed)) },
             text = { Text(stringResource(R.string.upload_content_unavailable)) },
             confirmButton = {
-                TextButton(onClick = ::closeSourceSheet) { Text(stringResource(R.string.action_cancel)) }
+                TextButton(colors = readableTextButtonColors(), onClick = ::closeSourceSheet) { Text(stringResource(R.string.action_cancel)) }
             },
         )
     }
@@ -623,7 +626,7 @@ fun AttachmentSheets(
                     Text(stringResource(R.string.action_delete))
                 }
             },
-            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text(stringResource(R.string.action_cancel)) } },
+            dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = { deleteTarget = null }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
 }
@@ -652,7 +655,7 @@ internal fun PhotoPickerSheet(
             Text(
                 stringResource(R.string.upload_photos_title),
                 style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(12.dp))
@@ -725,7 +728,7 @@ private fun GalleryActionTile(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0))
             Spacer(Modifier.height(4.dp))
             Text(label, style = MaterialTheme.typography.labelMedium)
         }
@@ -759,14 +762,14 @@ private fun CameraPreviewTile(
                     .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f), RoundedCornerShape(12.dp))
                     .padding(6.dp),
             ) {
-                Icon(Icons.Outlined.PhotoCamera, contentDescription = label, tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Outlined.PhotoCamera, contentDescription = label, tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surface.copy(alpha = 0.8f), minimumContrast = 3.0))
             }
         } else {
             Icon(
                 Icons.Outlined.PhotoCamera,
                 contentDescription = label,
                 modifier = Modifier.size(40.dp),
-                tint = MaterialTheme.colorScheme.primary,
+                tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0),
             )
         }
     }
@@ -852,14 +855,14 @@ private fun SourceSheet(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { confirmClearHistory = false }) { Text(stringResource(R.string.action_cancel)) }
+                TextButton(colors = readableTextButtonColors(), onClick = { confirmClearHistory = false }) { Text(stringResource(R.string.action_cancel)) }
             },
         )
     }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag("attachment_source_sheet")) {
         SheetSystemBars()
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(stringResource(R.string.upload_add_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.upload_add_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
             Text(stringResource(R.string.upload_add_subtitle), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -902,6 +905,7 @@ private fun SourceSheet(
                     Text(stringResource(R.string.upload_recent), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 }
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = { confirmClearHistory = true },
                     modifier = Modifier.testTag("attachment_clear_history"),
                 ) {
@@ -932,7 +936,7 @@ private fun SourceCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Icon(icon, null, tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(icon, null, tint = if (enabled) MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0) else MaterialTheme.colorScheme.onSurfaceVariant)
             Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -993,7 +997,7 @@ private fun TextPasteSheet(
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface) {
         SheetSystemBars()
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(stringResource(R.string.upload_text_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.upload_text_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 value = text,
@@ -1050,7 +1054,7 @@ internal fun ConfirmationSheet(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
-                Text(stringResource(R.string.upload_confirm_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                Text(stringResource(R.string.upload_confirm_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
                 Spacer(Modifier.height(12.dp))
                 if (unsupportedUri) Text(stringResource(R.string.settings_local_media_required), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("attachment_thumbnail_error"))
                 val preview =
@@ -1117,7 +1121,7 @@ internal fun ConfirmationSheet(
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.upload_action))
                 }
-                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.action_cancel)) }
+                TextButton(colors = readableTextButtonColors(), onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.action_cancel)) }
                 Spacer(Modifier.height(12.dp))
             }
         }
@@ -1141,7 +1145,7 @@ private fun BackendPickerSheet(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            Text(stringResource(R.string.upload_destination), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.upload_destination), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
             Spacer(Modifier.height(8.dp))
             uploadDestinations(source, config, sojuFileHostAvailable).forEach { destination ->
                 io.github.trevarj.motd.ui.settings.RadioRow(
@@ -1166,7 +1170,7 @@ private fun AttachmentMetadata(source: AttachmentSource) {
                 source is AttachmentSource.Photo ||
                     source is AttachmentSource.Document && source.mimeType?.startsWith("image/") == true ||
                     source is AttachmentSource.LocalFile && source.mimeType.startsWith("image/")
-            Icon(if (image) Icons.Outlined.Image else Icons.Outlined.Description, null, modifier = Modifier.size(28.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(if (image) Icons.Outlined.Image else Icons.Outlined.Description, null, modifier = Modifier.size(28.dp), tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(source.displayName(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
@@ -1238,7 +1242,7 @@ private fun UploadProgressSheet(
     ModalBottomSheet(onDismissRequest = onCancel, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, dragHandle = null) {
         SheetSystemBars()
         Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Outlined.CloudUpload, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Outlined.CloudUpload, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0))
             Spacer(Modifier.height(12.dp))
             Text(stringResource(R.string.upload_uploading), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(16.dp))
@@ -1250,7 +1254,7 @@ private fun UploadProgressSheet(
                 if (progress is UploadProgress.Transferring) Text(formatBytes(progress.bytesSent), Modifier.padding(top = 8.dp))
             }
             Spacer(Modifier.height(16.dp))
-            TextButton(onClick = onCancel) {
+            TextButton(colors = readableTextButtonColors(), onClick = onCancel) {
                 Icon(Icons.Filled.Close, null)
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.action_cancel))

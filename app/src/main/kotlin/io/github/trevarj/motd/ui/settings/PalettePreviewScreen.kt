@@ -47,6 +47,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.ui.theme.UiIcon
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -88,6 +89,7 @@ fun PalettePreviewScreen(
                             modifier = Modifier.fillMaxWidth().testTag("palette_preview_apply"),
                         ) { Text("Apply") }
                         TextButton(
+                            colors = readableTextButtonColors(),
                             onClick = viewModel::saveWithoutApplying,
                             enabled = !state.saving && !state.completed,
                             modifier = Modifier.fillMaxWidth().testTag("palette_preview_save"),
@@ -138,7 +140,7 @@ fun PalettePreviewScreen(
                         )
                         state.sourceHostname?.let { Text("Source host: $it") }
                         if (state.targetInstalledId != null) Text("Update this installed palette without changing your selected palette or color mode.")
-                        Text(if (state.appearance.adjustPaletteReadability) "Readability adjustments and your saved text preference apply. True black and nickname preferences remain independent." else "Authored palette colors are shown. True black and nickname preferences remain independent.")
+                        Text(if (state.appearance.adjustPaletteReadability) "Readability adjustments and your saved text preference apply. True black and nickname preferences remain independent." else "Authored palette colors are kept; your saved text preference and legible control ink still apply. True black and nickname preferences remain independent.")
                     }
                 }
                 if (state.targetInstalledId == null) {
@@ -266,13 +268,14 @@ fun PalettePreviewScreen(
             },
             confirmButton = {
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = viewModel::confirmConflict,
                     enabled = !state.saving,
                     modifier = Modifier.testTag("palette_preview_confirm_conflict"),
                 ) { Text("Confirm") }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::cancelConflict, enabled = !state.saving) { Text("Cancel") }
+                TextButton(colors = readableTextButtonColors(), onClick = viewModel::cancelConflict, enabled = !state.saving) { Text("Cancel") }
             },
         )
     }

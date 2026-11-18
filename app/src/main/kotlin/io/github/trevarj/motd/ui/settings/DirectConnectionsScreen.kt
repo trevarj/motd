@@ -26,6 +26,8 @@ import io.github.trevarj.motd.data.db.DccTransferProtocol
 import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.dcc.DccTransferController
 import io.github.trevarj.motd.ui.components.DccDownloadMenu
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -78,7 +80,7 @@ fun DirectConnectionsContent(
             Text(
                 text = stringResource(R.string.settings_direct_connections_recent),
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
             if (transfers.isEmpty()) {
@@ -140,7 +142,7 @@ private fun DirectConnectionTransferRow(
         trailingContent = {
             Row {
                 if (transfer.state in TERMINAL_TRANSFER_STATES) {
-                    TextButton(onClick = { onRemove(transfer.id) }) {
+                    TextButton(colors = readableTextButtonColors(), onClick = { onRemove(transfer.id) }) {
                         Text(stringResource(R.string.dcc_remove_record))
                     }
                 }

@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 /** The 12 fixed hues shown in the swatch grid (30° apart around the wheel). */
@@ -84,6 +85,7 @@ fun NickHuePickerDialog(
                     }
                 }
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = { onPick(null) },
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 ) {
@@ -92,7 +94,7 @@ fun NickHuePickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss) {
                 Text(stringResource(R.string.dialog_cancel))
             }
         },

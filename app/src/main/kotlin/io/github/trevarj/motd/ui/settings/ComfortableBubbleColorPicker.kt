@@ -65,6 +65,8 @@ import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.theme.resolveComfortableBubbleColor
 import io.github.trevarj.motd.ui.theme.resolvedMode
 import java.io.File
@@ -113,7 +115,7 @@ internal fun ComfortableBubbleColorPickerSheet(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(stringResource(R.string.settings_bubble_colors), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.settings_bubble_colors), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
             Text(stringResource(R.string.settings_bubble_colors_desc), style = MaterialTheme.typography.bodyMedium)
             AppearanceBubbleColorOptions(settings, appearance) {
                 Row(
@@ -161,7 +163,7 @@ internal fun ComfortableBubbleColorPickerSheet(
                     selected.customColor,
                 ) { showCustom = true }
             }
-            TextButton(onClick = onDismiss, modifier = Modifier.testTag("settings_bubble_color_done")) {
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss, modifier = Modifier.testTag("settings_bubble_color_done")) {
                 Text(stringResource(R.string.settings_wallpaper_done))
             }
         }
@@ -471,7 +473,7 @@ private fun ComfortableBubbleCustomColorDialog(
                 )
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("settings_bubble_color_cancel")) { Text(stringResource(R.string.action_cancel)) } },
+        dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = onDismiss, modifier = Modifier.testTag("settings_bubble_color_cancel")) { Text(stringResource(R.string.action_cancel)) } },
         confirmButton = {
             Button(onClick = { onApply(requireNotNull(parsed)) }, enabled = parsed != null, modifier = Modifier.testTag("settings_bubble_color_apply")) {
                 Text(stringResource(R.string.settings_wallpaper_color_apply))

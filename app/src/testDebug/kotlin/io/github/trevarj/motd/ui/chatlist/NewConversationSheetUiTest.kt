@@ -66,7 +66,7 @@ class NewConversationSheetUiTest {
         var fill = Color.Unspecified
         var ink = Color.Unspecified
         compose.setContent {
-            MotdTheme(dynamicColor = false, themePreset = ColorThemePreset.ONE_DARK, useThemeTextColors = true) {
+            MotdTheme(dynamicColor = false, themePreset = ColorThemePreset.ONE_DARK, useThemeTextColors = true, adjustPaletteReadability = true) {
                 fill = MaterialTheme.colorScheme.secondaryContainer
                 ink = MaterialTheme.colorScheme.onSecondaryContainer
                 // Sample the selected fill, not the transient native ripple left by a real click.

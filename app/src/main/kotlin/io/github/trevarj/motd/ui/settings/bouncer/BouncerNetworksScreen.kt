@@ -63,6 +63,7 @@ import io.github.trevarj.motd.ui.settings.SettingsNavigationRow
 import io.github.trevarj.motd.ui.settings.SettingsScaffold
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -195,7 +196,7 @@ fun BouncerNetworksContent(
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     state.notice?.let { Text(it, modifier = Modifier.testTag("bouncer_command_notice")) }
                     state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("bouncer_command_error")) }
-                    TextButton(onClick = callbacks.onClearFeedback) { Text(stringResource(R.string.action_dismiss)) }
+                    TextButton(colors = readableTextButtonColors(), onClick = callbacks.onClearFeedback) { Text(stringResource(R.string.action_dismiss)) }
                 }
             }
             if (state.selectedTab == BouncerControlTab.OVERVIEW) {
@@ -220,12 +221,12 @@ fun BouncerNetworksContent(
             title = { Text(stringResource(R.string.bouncer_user_delete_final_title)) },
             text = { Text(stringResource(R.string.bouncer_user_delete_final_message, pending.username)) },
             confirmButton = {
-                TextButton(onClick = callbacks.onConfirmUserDeletion) {
+                TextButton(colors = readableTextButtonColors(), onClick = callbacks.onConfirmUserDeletion) {
                     Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = callbacks.onCancelUserDeletion) {
+                TextButton(colors = readableTextButtonColors(), onClick = callbacks.onCancelUserDeletion) {
                     Text(stringResource(R.string.action_cancel))
                 }
             },
@@ -266,11 +267,11 @@ private fun ConnectionAndCapabilityHeader(
             }
         }
         if (state.rootState == IrcClientState.Disconnected || state.rootState is IrcClientState.Failed) {
-            TextButton(onClick = callbacks.onConnect) {
+            TextButton(colors = readableTextButtonColors(), onClick = callbacks.onConnect) {
                 Text(stringResource(if (state.rootState is IrcClientState.Failed) R.string.onboarding_connect_retry else R.string.bouncer_connect))
             }
         } else if (ready && !state.capabilities.verified) {
-            TextButton(onClick = callbacks.onProbe, enabled = !state.probing) {
+            TextButton(colors = readableTextButtonColors(), onClick = callbacks.onProbe, enabled = !state.probing) {
                 Text(stringResource(R.string.bouncer_probe_again))
             }
         }
@@ -362,7 +363,7 @@ private fun BouncerOverview(
                 onClick = { callbacks.onSelectTab(BouncerControlTab.NETWORKS) },
             )
             if (state.listingFailed) {
-                TextButton(onClick = callbacks.onRefresh, enabled = ready && !state.loading, modifier = Modifier.padding(horizontal = 16.dp)) {
+                TextButton(colors = readableTextButtonColors(), onClick = callbacks.onRefresh, enabled = ready && !state.loading, modifier = Modifier.padding(horizontal = 16.dp)) {
                     Text(stringResource(R.string.action_refresh))
                 }
             }
@@ -431,7 +432,7 @@ private fun NetworksPanel(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (state.listingFailed) {
-                    TextButton(onClick = callbacks.onRefresh, enabled = enabled && !state.loading) {
+                    TextButton(colors = readableTextButtonColors(), onClick = callbacks.onRefresh, enabled = enabled && !state.loading) {
                         Text(stringResource(R.string.action_refresh))
                     }
                 }
@@ -454,7 +455,7 @@ private fun NetworksPanel(
                     ),
                 )
                 if (state.listingFailed) {
-                    TextButton(onClick = callbacks.onRefresh, enabled = enabled && !state.loading) {
+                    TextButton(colors = readableTextButtonColors(), onClick = callbacks.onRefresh, enabled = enabled && !state.loading) {
                         Text(stringResource(R.string.action_refresh))
                     }
                 }
@@ -464,6 +465,7 @@ private fun NetworksPanel(
             item {
                 val allImported = state.rows.all { it.childNetworkId != null }
                 TextButton(
+                    colors = readableTextButtonColors(),
                     onClick = { callbacks.onSetAllImported(!allImported) },
                     enabled = enabled && !state.commandBusy,
                     modifier = Modifier.testTag("bouncer_toggle_all"),
@@ -596,7 +598,7 @@ private fun BouncerRow(
             title = { Text(stringResource(R.string.bouncer_delete_confirm_title)) },
             text = { Text(stringResource(R.string.bouncer_delete_confirm_message, row.name)) },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(colors = readableTextButtonColors(), onClick = {
                     showDeleteConfirm = false
                     onDeleteFromBouncer(row)
                 }) {
@@ -604,7 +606,7 @@ private fun BouncerRow(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) {
+                TextButton(colors = readableTextButtonColors(), onClick = { showDeleteConfirm = false }) {
                     Text(stringResource(R.string.action_cancel))
                 }
             },

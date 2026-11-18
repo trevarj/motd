@@ -63,6 +63,8 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.components.EmojiPickerPanel
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import androidx.compose.foundation.lazy.items as lazyItems
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -178,7 +180,7 @@ fun MessageActionSheet(
                             Text(
                                 text = "＋",
                                 fontSize = 24.sp,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
                             )
                         }
                     }
@@ -365,6 +367,7 @@ private fun ActionItem(
     tint: Color? = null,
 ) {
     TextButton(
+        colors = readableTextButtonColors(),
         onClick = onClick,
         modifier =
             modifier.heightIn(min = 48.dp).clearAndSetSemantics {
@@ -384,14 +387,14 @@ private fun ActionItem(
                 Icon(
                     icon,
                     contentDescription = null,
-                    tint = tint ?: MaterialTheme.colorScheme.primary,
+                    tint = MaterialTheme.colorScheme.readableForeground(tint ?: MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerHigh, minimumContrast = 3.0),
                     modifier = Modifier.padding(4.dp),
                 )
             }
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
-                color = tint ?: MaterialTheme.colorScheme.onSurface,
+                color = MaterialTheme.colorScheme.readableForeground(tint ?: MaterialTheme.colorScheme.onSurface, MaterialTheme.colorScheme.surfaceContainerLow),
                 textAlign = TextAlign.Center,
             )
         }

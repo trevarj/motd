@@ -36,6 +36,8 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.ui.nav.SettingsTarget
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
@@ -271,7 +273,9 @@ internal fun UploadPrivacyControls(
             Text(
                 text = stringResource(R.string.settings_upload_privacy),
                 style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
-                color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
+                color =
+                    androidx.compose.material3.MaterialTheme.colorScheme
+                        .readableForeground(androidx.compose.material3.MaterialTheme.colorScheme.primary),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
             when (config.backend) {
@@ -285,6 +289,7 @@ internal fun UploadPrivacyControls(
                     )
                     val expiryDays = uploadExpiryWholeDays(config.expiry)
                     OutlinedTextField(
+                        colors = readableOutlinedTextFieldColors(),
                         value = expiryDays?.let { pluralStringResource(R.plurals.settings_upload_expiry_days, it, it) } ?: config.expiry.orEmpty(),
                         onValueChange = { value -> onUpdate { it.copy(expiry = uploadExpiryHours(value)) } },
                         label = { Text(stringResource(R.string.settings_upload_expiry)) },

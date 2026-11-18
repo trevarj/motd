@@ -73,6 +73,8 @@ import io.github.trevarj.motd.ui.settings.PasswordField
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -207,7 +209,7 @@ internal fun NewConversationSheetContent(
             Text(
                 text = stringResource(R.string.new_sheet_title),
                 style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLow),
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.semantics { heading() }.testTag("new_conversation_header"),
             )
@@ -277,6 +279,7 @@ internal fun NewConversationSheetContent(
 
         if (tab == 0) {
             OutlinedTextField(
+                colors = readableOutlinedTextFieldColors(),
                 value = joinDraft,
                 onValueChange = { joinDraft = it },
                 enabled = selectedNetwork != null,
@@ -349,6 +352,7 @@ internal fun NewConversationSheetContent(
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = nickDraft,
                     onValueChange = {
                         nickDraft = it
@@ -448,6 +452,7 @@ private fun NetworkSelector(
         modifier = Modifier.fillMaxWidth(),
     ) {
         OutlinedTextField(
+            colors = readableOutlinedTextFieldColors(),
             value = current.name,
             onValueChange = {},
             readOnly = true,

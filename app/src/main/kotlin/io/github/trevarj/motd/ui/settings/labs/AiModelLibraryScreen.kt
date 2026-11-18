@@ -49,6 +49,7 @@ import io.github.trevarj.motd.ui.settings.SettingsDivider
 import io.github.trevarj.motd.ui.settings.SettingsGroup
 import io.github.trevarj.motd.ui.settings.SettingsNavigationRow
 import io.github.trevarj.motd.ui.settings.SettingsScaffold
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import java.text.DateFormat
 import java.util.Date
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -163,7 +164,7 @@ internal fun AiModelLibraryContent(
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 8.dp),
                     )
-                    TextButton(onClick = onCancelSetup, modifier = Modifier.testTag("ai_setup_cancel")) {
+                    TextButton(colors = readableTextButtonColors(), onClick = onCancelSetup, modifier = Modifier.testTag("ai_setup_cancel")) {
                         Text(stringResource(R.string.action_cancel))
                     }
                 }
@@ -218,20 +219,20 @@ internal fun AiModelLibraryContent(
             text = {
                 Column {
                     Text(stringResource(R.string.ai_text_download_disclosure))
-                    TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, modelLicenseUrl.toUri())) }, modifier = Modifier.testTag("ai_text_model_license")) {
+                    TextButton(colors = readableTextButtonColors(), onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, modelLicenseUrl.toUri())) }, modifier = Modifier.testTag("ai_text_model_license")) {
                         Text(stringResource(R.string.ai_text_model_license))
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(colors = readableTextButtonColors(), onClick = {
                     confirmDownload = false
                     onDownloadTextModel()
                 }, modifier = Modifier.testTag("ai_download_text_confirm")) {
                     Text(stringResource(R.string.ai_download_text_model))
                 }
             },
-            dismissButton = { TextButton(onClick = { confirmDownload = false }) { Text(stringResource(R.string.action_cancel)) } },
+            dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = { confirmDownload = false }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
 
@@ -245,6 +246,7 @@ internal fun AiModelLibraryContent(
                 text = { Text(stringResource(R.string.ai_delete_model_message, model.displayName)) },
                 confirmButton = {
                     TextButton(
+                        colors = readableTextButtonColors(),
                         onClick = {
                             pendingDelete = null
                             onDelete(modelId)
@@ -253,7 +255,7 @@ internal fun AiModelLibraryContent(
                     ) { Text(stringResource(R.string.action_delete)) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { pendingDelete = null }, modifier = Modifier.testTag("ai_delete_cancel")) {
+                    TextButton(colors = readableTextButtonColors(), onClick = { pendingDelete = null }, modifier = Modifier.testTag("ai_delete_cancel")) {
                         Text(stringResource(R.string.action_cancel))
                     }
                 },

@@ -37,6 +37,7 @@ import io.github.trevarj.motd.ui.theme.MotdDarkRaw
 import io.github.trevarj.motd.ui.theme.MotdLightRaw
 import io.github.trevarj.motd.ui.theme.UiIcon
 import io.github.trevarj.motd.ui.theme.rawFixedThemeScheme
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.theme.themeIdentityPalette
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -228,7 +229,7 @@ fun PaletteHubScreen(
                                 Modifier.testTag("palette_builtin_${preset.name.lowercase(Locale.ROOT)}"),
                                 onSelect = { viewModel.select(selection.withChoice(PaletteChoice(builtin = preset), target)) },
                             )
-                            TextButton(onClick = { edit(null) { localPaletteFork(document) } }) { Text(stringResource(R.string.palette_edit)) }
+                            TextButton(colors = readableTextButtonColors(), onClick = { edit(null) { localPaletteFork(document) } }) { Text(stringResource(R.string.palette_edit)) }
                         }
                     }
 
@@ -240,12 +241,12 @@ fun PaletteHubScreen(
                             Card {
                                 PaletteHubRow(document.name, document, isSelected(PaletteChoice(installedId = document.id), document), onSelect = { viewModel.select(selection.withChoice(PaletteChoice(installedId = document.id), target, state.appearance.customPalettes)) })
                                 FlowRow(Modifier.padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    TextButton(onClick = { edit(if (installed.catalogId != null) null else document.id) { if (installed.catalogId != null) localPaletteFork(document) else document } }) { Text(stringResource(R.string.palette_edit)) }
-                                    TextButton(onClick = { edit(null) { duplicatePalette(document) } }) { Text(stringResource(R.string.palette_duplicate)) }
-                                    TextButton(onClick = { launchAction { sharePaletteFile(context, document) } }, modifier = Modifier.testTag("palette_share")) { Text(stringResource(R.string.palette_share)) }
+                                    TextButton(colors = readableTextButtonColors(), onClick = { edit(if (installed.catalogId != null) null else document.id) { if (installed.catalogId != null) localPaletteFork(document) else document } }) { Text(stringResource(R.string.palette_edit)) }
+                                    TextButton(colors = readableTextButtonColors(), onClick = { edit(null) { duplicatePalette(document) } }) { Text(stringResource(R.string.palette_duplicate)) }
+                                    TextButton(colors = readableTextButtonColors(), onClick = { launchAction { sharePaletteFile(context, document) } }, modifier = Modifier.testTag("palette_share")) { Text(stringResource(R.string.palette_share)) }
                                     val hostedLink = installed.catalogId?.let { id -> installed.catalogRevision?.let { catalogPaletteLink(id, it) } } ?: installed.sourceLink
-                                    if (hostedLink != null) TextButton(onClick = { copyLink(hostedLink) }) { Text("Copy link") }
-                                    TextButton(onClick = {
+                                    if (hostedLink != null) TextButton(colors = readableTextButtonColors(), onClick = { copyLink(hostedLink) }) { Text("Copy link") }
+                                    TextButton(colors = readableTextButtonColors(), onClick = {
                                         try {
                                             exporting = encodePalette(document).toString(Charsets.UTF_8)
                                             exporter.launch("${document.id}.motd-palette.json")
@@ -256,7 +257,7 @@ fun PaletteHubScreen(
                                             viewModel.reportError(failure)
                                         }
                                     }) { Text(stringResource(R.string.palette_export)) }
-                                    TextButton(onClick = { if (selection.usesInstalled(document.id)) deleting = installed else viewModel.remove(document.id) }) { Text(stringResource(R.string.palette_delete)) }
+                                    TextButton(colors = readableTextButtonColors(), onClick = { if (selection.usesInstalled(document.id)) deleting = installed else viewModel.remove(document.id) }) { Text(stringResource(R.string.palette_delete)) }
                                 }
                             }
                         }
@@ -267,6 +268,7 @@ fun PaletteHubScreen(
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Community refresh connects directly from this device over HTTPS to GitHub, not through an IRC network proxy.")
                                 TextButton(
+                                    colors = readableTextButtonColors(),
                                     onClick = { viewModel.refreshCatalog() },
                                     enabled = !state.catalog.loading,
                                     modifier = Modifier.testTag("palette_catalog_refresh"),
@@ -290,7 +292,7 @@ fun PaletteHubScreen(
                                     Text("Installed", Modifier.padding(horizontal = 12.dp))
                                 }
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-                                    TextButton(onClick = { browseCatalog(document) }, modifier = Modifier.weight(1f)) { Text("Preview palette") }
+                                    TextButton(colors = readableTextButtonColors(), onClick = { browseCatalog(document) }, modifier = Modifier.weight(1f)) { Text("Preview palette") }
                                     IconButton(onClick = { copyLink(catalogPaletteLink(document.id, document.revision)) }, modifier = Modifier.size(48.dp)) {
                                         UiIcon(Icons.Filled.ContentCopy, stringResource(R.string.upload_copy_link))
                                     }
@@ -314,7 +316,7 @@ fun PaletteHubScreen(
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     state.appearance.customPalettes.filter { it.catalogId == document.id }.forEach { installed ->
-                        TextButton(onClick = {
+                        TextButton(colors = readableTextButtonColors(), onClick = {
                             choosingTarget = null
                             openCatalog(document, installed)
                         }, modifier = Modifier.testTag("palette_catalog_target_${installed.document.id}")) {
@@ -324,7 +326,7 @@ fun PaletteHubScreen(
                 }
             },
             confirmButton = {},
-            dismissButton = { TextButton(onClick = { choosingTarget = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = { choosingTarget = null }) { Text("Cancel") } },
         )
     }
     deleting?.let { installed ->
@@ -333,12 +335,12 @@ fun PaletteHubScreen(
             title = { Text(stringResource(R.string.palette_delete_title)) },
             text = { Text(stringResource(R.string.palette_delete_active)) },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(colors = readableTextButtonColors(), onClick = {
                     viewModel.remove(installed.document.id)
                     deleting = null
                 }) { Text(stringResource(R.string.palette_delete)) }
             },
-            dismissButton = { TextButton(onClick = { deleting = null }) { Text(stringResource(R.string.palette_cancel)) } },
+            dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = { deleting = null }) { Text(stringResource(R.string.palette_cancel)) } },
         )
     }
     if (contribution) {
@@ -349,7 +351,7 @@ fun PaletteHubScreen(
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text(stringResource(R.string.palette_contribution))
                     state.appearance.customPalettes.filter { it.document.light != null && it.document.dark != null }.forEach { installed ->
-                        TextButton(onClick = {
+                        TextButton(colors = readableTextButtonColors(), onClick = {
                             try {
                                 validatePalette(installed.document, requireBothModes = true)
                                 exporting = encodePalette(installed.document).toString(Charsets.UTF_8)
@@ -365,12 +367,12 @@ fun PaletteHubScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(colors = readableTextButtonColors(), onClick = {
                     contribution = false
                     uriHandler.openUri("https://github.com/trevarj/motd/tree/main/palettes")
                 }) { Text("Open repository") }
             },
-            dismissButton = { TextButton(onClick = { contribution = false }) { Text(stringResource(R.string.palette_cancel)) } },
+            dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = { contribution = false }) { Text(stringResource(R.string.palette_cancel)) } },
         )
     }
 }

@@ -40,6 +40,8 @@ import io.github.trevarj.motd.ui.components.popupEffectSurface
 import io.github.trevarj.motd.ui.settings.addnetwork.SOJU_NETWORK_PRESET_CHOICES
 import io.github.trevarj.motd.ui.settings.addnetwork.applySojuNetworkPreset
 import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -95,6 +97,7 @@ fun NetworkEditorDialog(
                         modifier = Modifier.testTag("bouncer_network_preset"),
                     ) {
                         OutlinedTextField(
+                            colors = readableOutlinedTextFieldColors(),
                             value = preset.displayName,
                             onValueChange = {},
                             readOnly = true,
@@ -141,6 +144,7 @@ fun NetworkEditorDialog(
                 FormField(username, { username = it }, R.string.onboarding_field_username)
                 FormField(realName, { realName = it }, R.string.onboarding_field_realname)
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = password,
                     onValueChange = { password = it },
                     label = { Text(stringResource(R.string.onboarding_auth_soju_password)) },
@@ -159,6 +163,7 @@ fun NetworkEditorDialog(
                     onValueChange = { enabled = it },
                 )
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = connectCommands,
                     onValueChange = { connectCommands = it },
                     label = { Text(stringResource(R.string.bouncer_field_connect_commands)) },
@@ -170,6 +175,7 @@ fun NetworkEditorDialog(
         },
         confirmButton = {
             TextButton(
+                colors = readableTextButtonColors(),
                 enabled = !creating || address.isNotBlank(),
                 onClick = {
                     onSubmit(
@@ -195,7 +201,7 @@ fun NetworkEditorDialog(
             ) { Text(stringResource(if (creating) R.string.bouncer_add else R.string.action_save)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
 }
@@ -215,6 +221,7 @@ fun SaslPlainDialog(
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 FormField(username, { username = it }, R.string.onboarding_auth_sasl_user)
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = password,
                     onValueChange = { password = it },
                     label = { Text(stringResource(R.string.onboarding_auth_sasl_password)) },
@@ -226,12 +233,13 @@ fun SaslPlainDialog(
         },
         confirmButton = {
             TextButton(
+                colors = readableTextButtonColors(),
                 enabled = username.isNotBlank() && password.isNotEmpty(),
                 onClick = { onSubmit(username.trim(), password) },
             ) { Text(stringResource(R.string.action_save)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
 }
@@ -252,6 +260,7 @@ fun UserCreateDialog(
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 FormField(username, { username = it }, R.string.onboarding_field_username)
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = password,
                     onValueChange = { password = it },
                     label = { Text(stringResource(R.string.onboarding_auth_soju_password)) },
@@ -265,12 +274,13 @@ fun UserCreateDialog(
         },
         confirmButton = {
             TextButton(
+                colors = readableTextButtonColors(),
                 enabled = username.isNotBlank() && password.isNotEmpty(),
                 onClick = { onSubmit(username.trim(), password, administrator, enabled) },
             ) { Text(stringResource(R.string.bouncer_add)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
 }
@@ -301,6 +311,7 @@ fun UserUpdateDialog(
             ) {
                 if (administrator) {
                     OutlinedTextField(
+                        colors = readableOutlinedTextFieldColors(),
                         value = target,
                         onValueChange = { target = it },
                         label = { Text(stringResource(R.string.bouncer_user_target)) },
@@ -310,6 +321,7 @@ fun UserUpdateDialog(
                     )
                 }
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = password,
                     onValueChange = {
                         password = it
@@ -338,6 +350,7 @@ fun UserUpdateDialog(
                 }
                 if (administrator) {
                     OutlinedTextField(
+                        colors = readableOutlinedTextFieldColors(),
                         value = maxNetworks,
                         onValueChange = { maxNetworks = it.filter { char -> char.isDigit() || char == '-' } },
                         label = { Text(stringResource(R.string.bouncer_user_max_networks)) },
@@ -348,7 +361,7 @@ fun UserUpdateDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
+            TextButton(colors = readableTextButtonColors(), onClick = {
                 onSubmit(
                     target.trim().takeIf(String::isNotBlank),
                     UserCommandFields(
@@ -364,7 +377,7 @@ fun UserUpdateDialog(
             }) { Text(stringResource(R.string.action_save)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
 }
@@ -384,6 +397,7 @@ fun TypedUserDeleteDialog(
                 Text(stringResource(R.string.bouncer_user_delete_help))
                 FormField(username, { username = it }, R.string.onboarding_field_username)
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = confirmation,
                     onValueChange = { confirmation = it },
                     label = { Text(stringResource(R.string.bouncer_user_delete_type_name)) },
@@ -394,12 +408,13 @@ fun TypedUserDeleteDialog(
         },
         confirmButton = {
             TextButton(
+                colors = readableTextButtonColors(),
                 enabled = username.isNotBlank() && confirmation == username,
                 onClick = { onSubmit(username.trim()) },
             ) { Text(stringResource(R.string.action_continue), color = MaterialTheme.colorScheme.error) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
 }
@@ -423,6 +438,7 @@ fun TextCommandDialog(
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 warning?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = first,
                     onValueChange = { first = it },
                     label = { Text(firstLabel) },
@@ -431,6 +447,7 @@ fun TextCommandDialog(
                 )
                 secondLabel?.let {
                     OutlinedTextField(
+                        colors = readableOutlinedTextFieldColors(),
                         value = second,
                         onValueChange = { second = it },
                         label = { Text(it) },
@@ -443,12 +460,13 @@ fun TextCommandDialog(
         },
         confirmButton = {
             TextButton(
+                colors = readableTextButtonColors(),
                 enabled = first.isNotBlank() && (secondLabel == null || second.isNotBlank()),
                 onClick = { onSubmit(first.trim(), second.trim()) },
             ) { Text(stringResource(R.string.action_continue)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
 }
@@ -469,6 +487,7 @@ fun TriStateField(
         }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
         OutlinedTextField(
+            colors = readableOutlinedTextFieldColors(),
             value = valueLabel,
             onValueChange = {},
             readOnly = true,
@@ -519,6 +538,7 @@ private fun FormField(
     label: Int,
 ) {
     OutlinedTextField(
+        colors = readableOutlinedTextFieldColors(),
         value = value,
         onValueChange = onValueChange,
         label = { Text(stringResource(label)) },

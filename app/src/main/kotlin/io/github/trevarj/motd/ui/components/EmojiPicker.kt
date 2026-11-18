@@ -60,6 +60,7 @@ import io.github.trevarj.motd.data.emoji.EmojiDataset
 import io.github.trevarj.motd.data.emoji.EmojiEntry
 import io.github.trevarj.motd.data.emoji.EmojiSequenceCatalog
 import io.github.trevarj.motd.ui.theme.LocalEmojiSequenceCatalog
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 @Composable
@@ -213,7 +214,7 @@ private fun EmojiPickerContent(
                                 modifier = Modifier.weight(1f).padding(8.dp).semantics { heading() },
                                 style = MaterialTheme.typography.titleMedium,
                             )
-                            TextButton(onClick = { variantBase = null }) {
+                            TextButton(colors = readableTextButtonColors(), onClick = { variantBase = null }) {
                                 Text(stringResource(R.string.emoji_picker_close_variants))
                             }
                         }

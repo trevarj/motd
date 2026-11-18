@@ -49,6 +49,8 @@ import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.ReasonPresetChips
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -264,12 +266,13 @@ internal fun NickKickDialog(
         },
         confirmButton = {
             TextButton(
+                colors = readableTextButtonColors(),
                 onClick = { onKick(reason.ifBlank { null }) },
                 modifier = Modifier.testTag("nick_sheet_kick_confirm"),
             ) { Text(stringResource(R.string.nick_sheet_kick)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
 }
@@ -342,7 +345,7 @@ private fun NickAction(
                 androidx.compose.material3.ListItemDefaults
                     .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
             headlineContent = { Text(label) },
-            leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0)) },
             modifier = Modifier.then(tag?.let(Modifier::testTag) ?: Modifier).clickable(onClick = onClick),
         )
     }

@@ -216,6 +216,8 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.cornerRadius
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -1023,6 +1025,7 @@ fun ChatListContent(
 
                                         ChatListTopBarMode.INVITATIONS -> {
                                             TextButton(
+                                                colors = readableTextButtonColors(),
                                                 onClick = ::inspectNetworkActivity,
                                                 modifier = Modifier.heightIn(min = 48.dp).testTag("chatlist_network_activity"),
                                             ) { Text(stringResource(R.string.network_activity_title)) }
@@ -1315,6 +1318,7 @@ fun ChatListContent(
                 },
                 confirmButton = {
                     TextButton(
+                        colors = readableTextButtonColors(),
                         onClick = {
                             showMarkAllReadDialog = false
                             onMarkAllRead()
@@ -1325,7 +1329,7 @@ fun ChatListContent(
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showMarkAllReadDialog = false }) {
+                    TextButton(colors = readableTextButtonColors(), onClick = { showMarkAllReadDialog = false }) {
                         Text(stringResource(android.R.string.cancel))
                     }
                 },
@@ -2573,7 +2577,7 @@ private fun InvitationsFolder(
                 .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Outlined.Mail, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Icon(Icons.Outlined.Mail, contentDescription = null, tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0))
         Column(modifier = Modifier.padding(start = 16.dp).weight(1f)) {
             Text(
                 text = pluralStringResource(R.plurals.chatlist_invitations_count, count, count),
@@ -2616,7 +2620,7 @@ private fun InvitationListItem(
             Text(
                 text = stringResource(R.string.chatlist_invitation_title, invitation.channel),
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surfaceContainerLow),
             )
             Text(
                 text = stringResource(R.string.chatlist_invitation_from, invitation.inviter, invitation.networkName),
@@ -2923,7 +2927,7 @@ private fun FoolsSectionHeader(
         Icon(
             imageVector = Icons.Filled.ExpandMore,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+            tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surface, minimumContrast = 3.0),
             modifier = Modifier.graphicsLayer { rotationZ = rotation },
         )
     }
@@ -3149,7 +3153,7 @@ internal fun ChatListTitleActivityStatus(
             Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.Top) {
                 // Keep the cue beside the first text line, even when the reserved subtitle wraps.
                 val cueModifier = Modifier.padding(top = cueTopInset).size(12.dp)
-                val cueColor = if (displayedAttention) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                val cueColor = if (displayedAttention) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0)
                 if (displayedWarningOnly) {
                     Icon(
                         Icons.Outlined.Warning,
@@ -3290,7 +3294,7 @@ internal fun DeleteConfirmDialog(
         title = { Text(stringResource(copy.confirmTitle)) },
         text = { Text(message) },
         confirmButton = {
-            TextButton(onClick = onConfirm, modifier = Modifier.testTag("chatlist_delete_confirm")) {
+            TextButton(colors = readableTextButtonColors(), onClick = onConfirm, modifier = Modifier.testTag("chatlist_delete_confirm")) {
                 Text(
                     stringResource(copy.confirmAction),
                     color = MaterialTheme.colorScheme.error,
@@ -3298,7 +3302,7 @@ internal fun DeleteConfirmDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, modifier = Modifier.testTag("chatlist_delete_cancel")) {
+            TextButton(colors = readableTextButtonColors(), onClick = onDismiss, modifier = Modifier.testTag("chatlist_delete_cancel")) {
                 Text(stringResource(R.string.action_cancel))
             }
         },
@@ -3337,9 +3341,9 @@ private fun MultiDeleteConfirmDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text(stringResource(R.string.chatlist_remove), color = MaterialTheme.colorScheme.error) }
+            TextButton(colors = readableTextButtonColors(), onClick = onConfirm) { Text(stringResource(R.string.chatlist_remove), color = MaterialTheme.colorScheme.error) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+        dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
 }
 
@@ -3420,7 +3424,7 @@ private fun SectionHeader(text: String) {
     Text(
         text = text.uppercase(),
         style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.surface),
         fontWeight = FontWeight.SemiBold,
         // Same container as the row wrappers so the list reads as one continuous surface.
         modifier =

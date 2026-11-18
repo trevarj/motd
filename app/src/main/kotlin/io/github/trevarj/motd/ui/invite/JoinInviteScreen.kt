@@ -42,6 +42,9 @@ import io.github.trevarj.motd.invite.JoinInviteV1
 import io.github.trevarj.motd.invite.JoinInviteV2
 import io.github.trevarj.motd.service.ChannelJoinRejectionKind
 import io.github.trevarj.motd.ui.settings.PasswordField
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -137,7 +140,7 @@ fun JoinInviteContent(
                         Text(
                             stringResource(if (contactInvite != null) R.string.contact_invite_review_title else R.string.invite_review_title),
                             style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
                         )
                         Text(
                             contactInvite?.contactNick ?: channelInvite?.channel.orEmpty(),
@@ -153,6 +156,7 @@ fun JoinInviteContent(
                             Text(stringResource(R.string.invite_create_plaintext_warning), color = MaterialTheme.colorScheme.error)
                         }
                         TextButton(
+                            colors = readableTextButtonColors(),
                             onClick = { detailsExpanded = !detailsExpanded },
                             modifier = Modifier.testTag("invite_details_toggle"),
                         ) {
@@ -190,6 +194,7 @@ fun JoinInviteContent(
                     Text(stringResource(R.string.invite_identity_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text(stringResource(R.string.invite_identity_help), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(
+                        colors = readableOutlinedTextFieldColors(),
                         value = state.nick,
                         onValueChange = onNickChange,
                         label = { Text(stringResource(R.string.onboarding_field_nick)) },
@@ -228,7 +233,7 @@ fun JoinInviteContent(
                 }
 
                 JoinInvitePhase.READY -> {
-                    Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0))
                     Text(stringResource(R.string.invite_ready), style = MaterialTheme.typography.headlineSmall)
                 }
 
@@ -273,7 +278,7 @@ fun JoinInviteContent(
             confirmButton = {
                 Button(onClick = onConfirmPlaintext) { Text(stringResource(R.string.add_network_plaintext_continue)) }
             },
-            dismissButton = { TextButton(onClick = onDismissPlaintext) { Text(stringResource(R.string.dialog_cancel)) } },
+            dismissButton = { TextButton(colors = readableTextButtonColors(), onClick = onDismissPlaintext) { Text(stringResource(R.string.dialog_cancel)) } },
         )
     }
 }

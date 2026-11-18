@@ -97,6 +97,8 @@ import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.theme.readingInk
 import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
 import io.github.trevarj.motd.ui.components.EmojiSnackbarHost as SnackbarHost
@@ -524,7 +526,7 @@ private fun PendingDetailsNotice(onRefresh: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            TextButton(onClick = onRefresh, modifier = Modifier.defaultMinSize(minHeight = 48.dp)) {
+            TextButton(colors = readableTextButtonColors(), onClick = onRefresh, modifier = Modifier.defaultMinSize(minHeight = 48.dp)) {
                 Text(stringResource(R.string.dickord_portal_refresh))
             }
         }
@@ -733,7 +735,7 @@ private fun DickordChannelRow(
                 } else if (row.muted) {
                     scheme.onSurfaceVariant
                 } else {
-                    scheme.primary
+                    scheme.readableForeground(scheme.primary, scheme.surfaceContainerLowest, minimumContrast = 3.0)
                 },
             modifier = Modifier.size(20.dp),
         )

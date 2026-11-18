@@ -51,7 +51,7 @@ import io.github.trevarj.motd.ui.components.RoutedInlineMediaFixture
 import io.github.trevarj.motd.ui.components.assertMediaCornerPixels
 import io.github.trevarj.motd.ui.components.solidMediaResponse
 import io.github.trevarj.motd.ui.theme.MotdTheme
-import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.contrastRatio
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -133,7 +133,7 @@ class LinkPreviewCardUiTest {
         val document = fixture.copy(light = colors, dark = null)
         val adjust = mutableStateOf(false)
         compose.setContent {
-            MotdTheme(dynamicColor = false, adjustPaletteReadability = adjust.value) {
+            MotdTheme(dynamicColor = false, useThemeTextColors = true, adjustPaletteReadability = adjust.value) {
                 Box(Modifier.width(320.dp)) {
                     LinkPreviewCard(
                         LinkPreview("https://example.test/p.motd-palette.json", null, null, null, null, LinkPreviewKind.PALETTE, palette = document),
@@ -398,10 +398,17 @@ class LinkPreviewCardUiTest {
                         val title = layoutOf(if (previewKind == LinkPreviewKind.FILE) url else "Reading title")
                         val description = layoutOf("Reading description\nsecond line")
                         val label = "$theme themed=$themed $previewKind contrastingFill=$contrasting"
-                        val readingInk = ensureContrast(seed, listOf(fill), MESSAGE_TEXT_CONTRAST)
-                        assertEquals("$label title", readingInk, title.layoutInput.style.color)
-                        assertEquals("$label description", readingInk, description.layoutInput.style.color)
-                        assertEquals("$label site metadata", siteInk, layoutOf("example.test").layoutInput.style.color)
+                        val titleInk = title.layoutInput.style.color
+                        assertTrue("$label readable title", contrastRatio(titleInk, fill) >= MESSAGE_TEXT_CONTRAST)
+                        assertEquals("$label shared reading ink", titleInk, description.layoutInput.style.color)
+                        if (contrastRatio(seed, fill) >= MESSAGE_TEXT_CONTRAST) {
+                            assertEquals("$label preserves legible selected text mode", seed, titleInk)
+                        }
+                        val metadataInk = layoutOf("example.test").layoutInput.style.color
+                        assertTrue("$label readable site metadata", contrastRatio(metadataInk, fill) >= 4.5)
+                        if (contrastRatio(siteInk, fill) >= 4.5) {
+                            assertEquals("$label preserves legible site accent", siteInk, metadataInk)
+                        }
                         assertEquals("$label text excerpt font", if (previewKind == LinkPreviewKind.TEXT) FontFamily.Monospace else FontFamily.Default, description.layoutInput.style.fontFamily)
                         if (previewKind == LinkPreviewKind.TEXT) compose.onNodeWithTag("link_preview_text_body", useUnmergedTree = true).assertIsDisplayed()
                     }

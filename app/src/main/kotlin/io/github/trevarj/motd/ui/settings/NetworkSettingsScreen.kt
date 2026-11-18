@@ -83,6 +83,9 @@ import io.github.trevarj.motd.ui.onboarding.ServerForm
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import java.text.NumberFormat
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -199,6 +202,7 @@ fun NetworkSettingsContent(
         snackbarHostState = snackbarHostState,
         topActions = {
             TextButton(
+                colors = readableTextButtonColors(),
                 onClick = onSave,
                 enabled = state.canSave,
                 modifier = Modifier.testTag("network_settings_save"),
@@ -216,6 +220,7 @@ fun NetworkSettingsContent(
         }
         SettingsGroup(title = stringResource(R.string.network_settings_general_section)) {
             OutlinedTextField(
+                colors = readableOutlinedTextFieldColors(),
                 value = state.displayName,
                 onValueChange = onDisplayNameChange,
                 label = { Text(stringResource(R.string.network_settings_display_name)) },
@@ -317,6 +322,7 @@ fun NetworkSettingsContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     OutlinedTextField(
+                        colors = readableOutlinedTextFieldColors(),
                         value = state.avatarInput,
                         onValueChange = onAvatarUrlChange,
                         label = { Text(stringResource(R.string.network_settings_avatar_url)) },
@@ -359,11 +365,11 @@ fun NetworkSettingsContent(
                                     io.github.trevarj.motd.avatar
                                         .validateAvatarUrl(state.avatarInput) != null,
                         ) { Text(stringResource(R.string.network_settings_avatar_publish)) }
-                        TextButton(onClick = onClearAvatar) {
+                        TextButton(colors = readableTextButtonColors(), onClick = onClearAvatar) {
                             Text(stringResource(R.string.network_settings_avatar_clear))
                         }
                         if (state.selfAvatar !is io.github.trevarj.motd.avatar.SelfAvatarSetting.Unmanaged) {
-                            TextButton(onClick = onStopManagingAvatar) {
+                            TextButton(colors = readableTextButtonColors(), onClick = onStopManagingAvatar) {
                                 Text(stringResource(R.string.network_settings_avatar_unmanage))
                             }
                         }
@@ -448,7 +454,7 @@ fun NetworkSettingsContent(
             title = { Text(stringResource(R.string.network_settings_unsaved_title)) },
             text = { Text(stringResource(R.string.network_settings_unsaved_message)) },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(colors = readableTextButtonColors(), onClick = {
                     showDiscardConfirm = false
                     onSave()
                 }, enabled = state.isValid) {
@@ -457,8 +463,8 @@ fun NetworkSettingsContent(
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { showDiscardConfirm = false }) { Text(stringResource(R.string.network_settings_keep_editing)) }
-                    TextButton(onClick = {
+                    TextButton(colors = readableTextButtonColors(), onClick = { showDiscardConfirm = false }) { Text(stringResource(R.string.network_settings_keep_editing)) }
+                    TextButton(colors = readableTextButtonColors(), onClick = {
                         showDiscardConfirm = false
                         onBack()
                     }) {
@@ -503,7 +509,7 @@ fun NetworkSettingsContent(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                TextButton(colors = readableTextButtonColors(), onClick = {
                     showDeleteConfirm = false
                     onDelete()
                 }) {
@@ -511,7 +517,7 @@ fun NetworkSettingsContent(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) {
+                TextButton(colors = readableTextButtonColors(), onClick = { showDeleteConfirm = false }) {
                     Text(stringResource(R.string.action_cancel))
                 }
             },
@@ -532,16 +538,16 @@ fun NetworkSettingsContent(
                 )
             },
             confirmButton = {
-                TextButton(onClick = onRemoveLocalMirrors) {
+                TextButton(colors = readableTextButtonColors(), onClick = onRemoveLocalMirrors) {
                     Text(stringResource(R.string.network_settings_remove_local_mirrors))
                 }
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = onCancelBouncerIdentityChange) {
+                    TextButton(colors = readableTextButtonColors(), onClick = onCancelBouncerIdentityChange) {
                         Text(stringResource(R.string.action_cancel))
                     }
-                    TextButton(onClick = onKeepLocalMirrors) {
+                    TextButton(colors = readableTextButtonColors(), onClick = onKeepLocalMirrors) {
                         Text(stringResource(R.string.network_settings_keep_local_mirrors))
                     }
                 }
@@ -640,6 +646,7 @@ private fun InitialAwayField(
 ) {
     val error = initialAwayValidationError(state.initialAwayMessage)
     OutlinedTextField(
+        colors = readableOutlinedTextFieldColors(),
         value = state.initialAwayMessage,
         onValueChange = onInitialAwayMessageChange,
         label = { Text(stringResource(R.string.network_settings_initial_away)) },
@@ -669,6 +676,7 @@ private fun TrustedFileHostField(
     onValueChange: (String) -> Unit,
 ) {
     OutlinedTextField(
+        colors = readableOutlinedTextFieldColors(),
         value = state.trustedFileHost,
         onValueChange = onValueChange,
         label = { Text(stringResource(R.string.network_settings_trusted_filehost)) },
@@ -696,6 +704,7 @@ private fun OnConnectCommandsField(
     onValueChange: (String) -> Unit,
 ) {
     OutlinedTextField(
+        colors = readableOutlinedTextFieldColors(),
         value = state.onConnectCommands,
         onValueChange = onValueChange,
         label = { Text(stringResource(R.string.network_settings_on_connect_commands)) },
@@ -745,7 +754,7 @@ private fun ObfuscationSection(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.network_settings_routing), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(R.string.network_settings_routing), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
                     Text(
                         stringResource(R.string.network_settings_current_value, obfsModeLabel(mode)),
                         style = MaterialTheme.typography.bodySmall,
@@ -802,6 +811,7 @@ private fun ObfuscationSection(
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     OutlinedTextField(
+                                        colors = readableOutlinedTextFieldColors(),
                                         value = proxyHost,
                                         onValueChange = onProxyHostChange,
                                         label = { Text(stringResource(R.string.network_settings_obfs_proxy_host)) },
@@ -816,6 +826,7 @@ private fun ObfuscationSection(
                                         modifier = Modifier.fillMaxWidth().testTag("network_obfs_host"),
                                     )
                                     OutlinedTextField(
+                                        colors = readableOutlinedTextFieldColors(),
                                         value = proxyPort,
                                         onValueChange = onProxyPortChange,
                                         label = { Text(stringResource(R.string.network_settings_obfs_proxy_port)) },
@@ -845,6 +856,7 @@ private fun ObfuscationSection(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     OutlinedTextField(
+                                        colors = readableOutlinedTextFieldColors(),
                                         value = obfsLink,
                                         onValueChange = onObfsLinkChange,
                                         label = { Text(stringResource(R.string.network_settings_obfs_reality_link)) },
@@ -892,7 +904,7 @@ private fun TransportSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.network_settings_transport), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                Text(stringResource(R.string.network_settings_transport), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
                 Text(
                     stringResource(
                         R.string.network_settings_current_value,
@@ -945,6 +957,7 @@ private fun TransportSection(
                     exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
                 ) {
                     OutlinedTextField(
+                        colors = readableOutlinedTextFieldColors(),
                         value = wsUrl,
                         onValueChange = onWsUrlChange,
                         label = { Text(stringResource(R.string.network_settings_ws_url)) },

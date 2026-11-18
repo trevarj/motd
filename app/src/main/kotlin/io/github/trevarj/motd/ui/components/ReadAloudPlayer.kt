@@ -58,6 +58,8 @@ import io.github.trevarj.motd.audio.ReadAloudStatus
 import io.github.trevarj.motd.audio.ReadAloudVoices
 import io.github.trevarj.motd.audio.readAloudBody
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
+import io.github.trevarj.motd.ui.theme.readableForeground
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlin.math.roundToInt
 import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
@@ -93,7 +95,7 @@ fun ReadAloudPlayer(
     ) {
         Column(Modifier.padding(horizontal = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.RecordVoiceOver, null, Modifier.padding(12.dp).size(24.dp), tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Outlined.RecordVoiceOver, null, Modifier.padding(12.dp).size(24.dp), tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0))
                 Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
                     Text(
                         state.current?.sender?.let(::readAloudBody) ?: stringResource(R.string.read_aloud_title),
@@ -171,7 +173,7 @@ fun ReadAloudVoiceOptions(
                 .padding(horizontal = 24.dp, vertical = 12.dp)
                 .testTag("read_aloud_voice_options"),
         ) {
-            Text(stringResource(R.string.read_aloud_options), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.read_aloud_options), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
             Text(stringResource(R.string.settings_voice_profile_scope), style = MaterialTheme.typography.bodyMedium, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
             Text(stringResource(R.string.read_aloud_voice_disclosure), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 12.dp))
             Text(stringResource(R.string.read_aloud_voice), style = MaterialTheme.typography.labelLarge)
@@ -251,7 +253,7 @@ fun ReadAloudVoiceOptions(
             if (voices.loading) Text(stringResource(R.string.read_aloud_preparing))
             (error ?: voices.error)?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { if (previewing) onStopPreview() else onPreview(config.copy(options = draft)) }, enabled = previewing || !voices.loading && voices.voices.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("read_aloud_preview")) {
+                TextButton(colors = readableTextButtonColors(), onClick = { if (previewing) onStopPreview() else onPreview(config.copy(options = draft)) }, enabled = previewing || !voices.loading && voices.voices.isNotEmpty(), modifier = Modifier.heightIn(min = 48.dp).testTag("read_aloud_preview")) {
                     Text(stringResource(if (previewing) R.string.read_aloud_stop_preview else R.string.read_aloud_preview))
                 }
                 Button(onClick = {

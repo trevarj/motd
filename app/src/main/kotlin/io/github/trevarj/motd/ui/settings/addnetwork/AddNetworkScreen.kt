@@ -54,6 +54,8 @@ import io.github.trevarj.motd.ui.settings.SettingsScaffold
 import io.github.trevarj.motd.ui.settings.SubLabel
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -162,6 +164,7 @@ fun AddNetworkContent(
             // otherwise fall back to the preset name or bare host until edited later.
             if (!state.isZnc) {
                 OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
                     value = state.displayName,
                     onValueChange = onDisplayNameChange,
                     label = { Text(stringResource(R.string.network_settings_display_name)) },
@@ -246,7 +249,7 @@ fun AddNetworkContent(
                 }
             },
             dismissButton = {
-                TextButton(onClick = onDismissPlaintext) { Text(stringResource(R.string.dialog_cancel)) }
+                TextButton(colors = readableTextButtonColors(), onClick = onDismissPlaintext) { Text(stringResource(R.string.dialog_cancel)) }
             },
         )
     }
@@ -396,8 +399,8 @@ private fun FailedSection(
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = onEditForm) { Text(stringResource(R.string.add_network_edit)) }
-            TextButton(onClick = onSaveAnyway) { Text(stringResource(R.string.add_network_save_anyway)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onEditForm) { Text(stringResource(R.string.add_network_edit)) }
+            TextButton(colors = readableTextButtonColors(), onClick = onSaveAnyway) { Text(stringResource(R.string.add_network_save_anyway)) }
             Button(onClick = onRetry) { Text(stringResource(R.string.add_network_retry)) }
         }
     }

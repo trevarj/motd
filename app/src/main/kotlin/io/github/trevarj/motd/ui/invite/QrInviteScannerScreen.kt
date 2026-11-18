@@ -59,6 +59,8 @@ import io.github.trevarj.motd.BuildConfig
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.invite.JoinInviteCodec
 import io.github.trevarj.motd.invite.decodeQrFrame
+import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
+import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.delay
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -188,6 +190,7 @@ fun QrInviteScannerScreen(
                 val pasteVisible = showPaste || !hasCamera
                 if (hasCamera) {
                     TextButton(
+                        colors = readableTextButtonColors(),
                         onClick = { showPaste = !showPaste },
                         modifier = Modifier.testTag("invite_paste_toggle"),
                     ) {
@@ -196,6 +199,7 @@ fun QrInviteScannerScreen(
                 }
                 if (pasteVisible) {
                     OutlinedTextField(
+                        colors = readableOutlinedTextFieldColors(),
                         value = paste,
                         onValueChange = { paste = it },
                         label = { Text(stringResource(R.string.invite_scan_paste_label)) },
