@@ -586,7 +586,7 @@ fun AttachmentSheets(
                     {
                         TextButton(onClick = {
                             viewModel.clearError()
-                            lastAttempt?.let { flow = it }
+                            flow = lastAttempt
                             viewModel.clearAttempt(attempt)
                         }) {
                             Text(stringResource(if (failure.metadataNotSupported) R.string.action_cancel else R.string.action_back))

@@ -30,6 +30,9 @@ the `.debug` application-id suffix, so it can coexist with a release install.
 Ordinary Gradle, IDE, and CI builds use normal Kotlin incremental compilation
 and the configured build caches.
 
+Use `:app:compileDebugKotlin` to verify app Kotlin warning fixes without packaging
+or installing an APK.
+
 ## Debug device install
 
 For an authorized arm64 physical-device install, run this single invocation from

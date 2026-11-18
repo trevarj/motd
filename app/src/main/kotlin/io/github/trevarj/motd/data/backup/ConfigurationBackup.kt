@@ -445,11 +445,7 @@ class ConfigurationBackupRepositoryImpl
                             target += palette
                         }
 
-                        existing == palette -> {
-                            Unit
-                        }
-
-                        else -> {
+                        existing != palette -> {
                             var id: String
                             do {
                                 id = UUID.randomUUID().toString()
