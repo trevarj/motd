@@ -78,15 +78,41 @@ data class IrcIdentityRules(
     fun containsMention(
         text: String,
         identity: String,
+    ): Boolean = scanMentions(text, identity) { _, _ -> true }
+
+    fun mentionRanges(
+        text: String,
+        identity: String,
+    ): List<IntRange> {
+        val ranges = mutableListOf<IntRange>()
+        scanMentions(text, identity) { start, end ->
+            ranges.add(start until end)
+            false
+        }
+        return ranges
+    }
+
+    private inline fun scanMentions(
+        text: String,
+        identity: String,
+        onMatch: (Int, Int) -> Boolean,
     ): Boolean {
         if (identity.isEmpty() || text.length < identity.length) return false
         val normalizedIdentity = normalize(identity)
+        val foldBrackets = caseMapping == IrcCaseMapping.Rfc1459 || caseMapping == IrcCaseMapping.Rfc1459Strict
+        val foldTilde = caseMapping == IrcCaseMapping.Rfc1459
         val lastStart = text.length - identity.length
         for (start in 0..lastStart) {
             val end = start + identity.length
             if (start > 0 && text[start - 1].isMentionWordCharacter()) continue
             if (end < text.length && text[end].isMentionWordCharacter()) continue
-            if (normalize(text.substring(start, end)) == normalizedIdentity) return true
+            var offset = 0
+            while (offset < identity.length &&
+                foldCharacter(text[start + offset], foldBrackets, foldTilde) == normalizedIdentity[offset]
+            ) {
+                offset++
+            }
+            if (offset == identity.length && onMatch(start, end)) return true
         }
         return false
     }
@@ -114,15 +140,20 @@ private fun fold(
 ): String =
     buildString(value.length) {
         for (char in value) {
-            append(
-                when {
-                    char in 'A'..'Z' -> char + 32
-                    foldBrackets && char == '[' -> '{'
-                    foldBrackets && char == ']' -> '}'
-                    foldBrackets && char == '\\' -> '|'
-                    foldTilde && char == '~' -> '^'
-                    else -> char
-                },
-            )
+            append(foldCharacter(char, foldBrackets, foldTilde))
         }
+    }
+
+private fun foldCharacter(
+    char: Char,
+    foldBrackets: Boolean,
+    foldTilde: Boolean,
+): Char =
+    when {
+        char in 'A'..'Z' -> char + 32
+        foldBrackets && char == '[' -> '{'
+        foldBrackets && char == ']' -> '}'
+        foldBrackets && char == '\\' -> '|'
+        foldTilde && char == '~' -> '^'
+        else -> char
     }

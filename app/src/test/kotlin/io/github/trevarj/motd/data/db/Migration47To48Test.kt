@@ -215,6 +215,52 @@ class Migration47To48Test {
             }
         }
 
+    @Test
+    fun migration51To52PreservesMessagesAndLeavesHighlightProvenanceUnknown() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            context.deleteDatabase(DB_NAME)
+            helper =
+                FrameworkSQLiteOpenHelperFactory().create(
+                    SupportSQLiteOpenHelper.Configuration
+                        .builder(context)
+                        .name(DB_NAME)
+                        .callback(
+                            object : SupportSQLiteOpenHelper.Callback(51) {
+                                override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion(db, 51)
+
+                                override fun onUpgrade(
+                                    db: SupportSQLiteDatabase,
+                                    oldVersion: Int,
+                                    newVersion: Int,
+                                ) = Unit
+                            },
+                        ).build(),
+                )
+            helper!!.writableDatabase.apply {
+                execSQL("INSERT INTO networks(id, name, role, host, port, tls, nick, username, realname, saslMechanism, autoConnect, ordering, restoreAutoConnect) VALUES (1, 'n', 'DIRECT', 'irc.example', 6697, 1, 'me', 'me', 'Me', 'NONE', 1, 0, 1)")
+                execSQL("INSERT INTO buffers(id, networkId, name, displayName, type, joined, membershipCycle, pinned, muted, archived, ordering, historyComplete, dismissed, anchorOrder) VALUES (1, 1, '#c', '#c', 'CHANNEL', 1, 1, 1, 0, 0, 0, 0, 0, 4)")
+                execSQL("INSERT INTO messages(id, bufferId, serverTime, sender, normalizedActor, kind, text, isSelf, hasMention, failed, dedupKey, serverTimeAuthoritative, timelineOrder, timelineOrderConfirmed, timeProvenance, notificationHandled, notificationClaimed, soundHandled) VALUES (1, 1, 1000, 'alice', 'alice', 'PRIVMSG', 'hello me', 0, 1, 0, 'old', 1, 1, 0, 'SERVER_TAG', 0, 0, 0)")
+            }
+            helper!!.close()
+            helper = null
+            val migrated = Room.databaseBuilder(context, MotdDatabase::class.java, DB_NAME).addMigrations(*ALL_MIGRATIONS).build()
+            try {
+                val row = requireNotNull(migrated.messageDao().byId(1))
+                assertEquals("hello me", row.text)
+                assertEquals(true, row.hasMention)
+                assertNull(row.highlightNick)
+                assertNull(row.highlightCaseMapping)
+                assertEquals(4, migrated.bufferDao().observeById(1)?.anchorOrder)
+                migrated.messageDao().update(row.copy(highlightNick = "me", highlightCaseMapping = "rfc1459"))
+                val saved = requireNotNull(migrated.messageDao().byId(1))
+                assertEquals("me", saved.highlightNick)
+                assertEquals("rfc1459", saved.highlightCaseMapping)
+            } finally {
+                migrated.close()
+            }
+        }
+
     private companion object {
         const val DB_NAME = "migration-47-48-test.db"
     }

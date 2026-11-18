@@ -469,6 +469,8 @@ data class TimelineEventEntity(
     val isSelf: Boolean = false,
     @ColumnInfo(defaultValue = "0") val isBot: Boolean = false,
     val hasMention: Boolean = false, // computed at insert by EventProcessor
+    val highlightNick: String? = null,
+    val highlightCaseMapping: String? = null,
     val replyToMsgid: String? = null,
     val replyToEventId: TimelineEventId? = null,
     val channelContext: String? = null,

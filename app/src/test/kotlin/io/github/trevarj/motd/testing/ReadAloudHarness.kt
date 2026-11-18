@@ -61,6 +61,14 @@ internal class ReadAloudHarness(
                     social.value = social.value.copy(nickMentionStyle = value)
                 }
 
+                override suspend fun setHighlightTriggerStyleEnabled(enabled: Boolean) {
+                    social.value = social.value.copy(highlightTriggerStyleEnabled = enabled)
+                }
+
+                override suspend fun setTypingIndicatorPlacement(placement: io.github.trevarj.motd.data.prefs.TypingIndicatorPlacement) {
+                    social.value = social.value.copy(typingIndicatorPlacement = placement)
+                }
+
                 override suspend fun setFoolPreferences(
                     nick: String,
                     preferences: io.github.trevarj.motd.data.prefs.FoolPreferences,

@@ -63,6 +63,12 @@ class GlobalFeedViewModel
                 specs = settingsRepository.settings.map(MessageVisibilitySpec::from),
             ).cachedIn(viewModelScope)
 
+        val highlightTriggerStyleEnabled: StateFlow<Boolean> =
+            settingsRepository.settings
+                .map { it.highlightTriggerStyleEnabled }
+                .distinctUntilChanged()
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
         val showNetwork: StateFlow<Boolean> =
             showsNetworkName(networkRepository.observeNetworks())
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
@@ -92,6 +98,12 @@ class MentionsViewModel
                 specs = settingsRepository.settings.map(MessageVisibilitySpec::from),
                 mentionsOnly = true,
             ).cachedIn(viewModelScope)
+
+        val highlightTriggerStyleEnabled: StateFlow<Boolean> =
+            settingsRepository.settings
+                .map { it.highlightTriggerStyleEnabled }
+                .distinctUntilChanged()
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
         val showNetwork: StateFlow<Boolean> =
             showsNetworkName(networkRepository.observeNetworks())

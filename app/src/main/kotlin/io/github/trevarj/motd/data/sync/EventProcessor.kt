@@ -696,6 +696,9 @@ class EventProcessor
             val type = route.type
             val routedText = route.storedText
             val sourceIsSelf = route.sourceIsSelf
+            if (origin == EventOrigin.LIVE && !sourceIsSelf) {
+                typing.onMessage(bufferId, e.source.nick, st.identityRules)
+            }
             val isDm = type == BufferType.QUERY
             // soju warns through console NOTICEs ("network X disconnected"). The console is not in the
             // chat list, so a swallowed notice leaves the user no signal at all.
@@ -726,9 +729,10 @@ class EventProcessor
                 } else {
                     false
                 }
-            val hasMention =
-                !sourceIsSelf && type != BufferType.SERVER &&
-                    (replyMentionsSelf || st.containsSelfMention(storedText))
+            val bodyMentionsSelf =
+                !sourceIsSelf && type != BufferType.SERVER && st.containsSelfMention(storedText)
+            val hasMention = !sourceIsSelf && type != BufferType.SERVER && (replyMentionsSelf || bodyMentionsSelf)
+            val capturesHighlight = bodyMentionsSelf && !origin.isHistorical
             val resolvedNotifications = notificationSettings.resolve(networkId, bufferId)
             val decision =
                 incomingNotificationDecision(
@@ -763,6 +767,10 @@ class EventProcessor
                     isSelf = sourceIsSelf,
                     isBot = e.isBot,
                     hasMention = hasMention,
+                    highlightNick = st.selfNick.takeIf { capturesHighlight },
+                    highlightCaseMapping =
+                        st.identityRules.caseMapping.rawName
+                            .takeIf { capturesHighlight },
                     notificationEligible = !sourceIsSelf && decision.eligible,
                     notificationEligibilityResolved = decision.eligibilityResolved,
                     notificationWatched = decision.bypassesMute,
@@ -970,7 +978,7 @@ class EventProcessor
             if (origin == EventOrigin.LIVE && !route.sourceIsSelf) {
                 e.typing?.let { typingState ->
                     val bufferId = ensureBuffer(networkId, route.bufferName, route.type, st)
-                    typing.onTyping(bufferId, e.source.nick, typingState)
+                    typing.onTyping(bufferId, e.source.nick, typingState, identityRules = st.identityRules)
                 }
             }
             // React rows are emoji-specific; an account-tag echo also removes the optimistic nick key.
@@ -1051,6 +1059,8 @@ class EventProcessor
                         text = tombstone,
                         ircFormattedText = null,
                         hasMention = false,
+                        highlightNick = null,
+                        highlightCaseMapping = null,
                         pendingLabel = null,
                         failed = false,
                     ),

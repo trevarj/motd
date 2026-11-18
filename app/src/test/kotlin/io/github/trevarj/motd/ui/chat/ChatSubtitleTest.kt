@@ -96,6 +96,30 @@ class ChatSubtitleTest {
         )
     }
 
+    @Test
+    fun aboveComposerPlacementLeavesMemberCountInHeader() {
+        val state = channelState(memberCount = 42, typingNicks = listOf("alice", "bob"))
+
+        assertEquals(
+            ChatSubtitleModel.Text("42 members", isMemberCount = true),
+            chatSubtitleModel(state, context, includeTyping = false),
+        )
+        assertEquals("alice and bob are typing…", chatTypingSummary(state, context))
+    }
+
+    @Test
+    fun aboveComposerSummaryClearsWithPrivacyAndDisconnectedState() {
+        val state = channelState(memberCount = 42, typingNicks = listOf("alice"))
+
+        assertNull(chatTypingSummary(state.copy(typingNicks = emptyList()), context))
+        assertNull(chatTypingSummary(state.copy(connState = IrcClientState.Disconnected), context))
+        assertNull(chatTypingSummary(state.copy(connState = IrcClientState.Connecting), context))
+        assertEquals(
+            ChatSubtitleModel.Text(context.getString(R.string.drawer_state_disconnected)),
+            chatSubtitleModel(state.copy(connState = IrcClientState.Disconnected), context, includeTyping = false),
+        )
+    }
+
     private fun channelState(
         memberCount: Int,
         typingNicks: List<String> = emptyList(),

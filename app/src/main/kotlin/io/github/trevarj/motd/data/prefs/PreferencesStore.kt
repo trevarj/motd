@@ -52,6 +52,8 @@ internal object PrefKeys {
     val NICK_COLORS_ENABLED = stringPreferencesKey("nick_colors_enabled")
     val NICK_COLOR_PALETTE = stringPreferencesKey("nick_color_palette")
     val NICK_MENTION_STYLE = stringPreferencesKey("nick_mention_style")
+    val HIGHLIGHT_TRIGGER_STYLE_ENABLED = stringPreferencesKey("highlight_trigger_style_enabled")
+    val TYPING_INDICATOR_PLACEMENT = stringPreferencesKey("typing_indicator_placement")
     val NICKNAME_TAP_ACTION = stringPreferencesKey("nickname_tap_action")
     val NICK_COLOR_OVERRIDES = stringPreferencesKey("nick_color_overrides")
     val FRIEND_NICKS = stringPreferencesKey("friend_nicks")
@@ -197,6 +199,7 @@ class DataStoreSettingsRepository
                     nickColorsEnabled = prefs[PrefKeys.NICK_COLORS_ENABLED]?.toBooleanStrictOrNull() ?: true,
                     nickColorPalette = nickColorPaletteFromPreference(prefs[PrefKeys.NICK_COLOR_PALETTE]),
                     nickMentionStyle = nickMentionStyleFromPreference(prefs[PrefKeys.NICK_MENTION_STYLE]),
+                    highlightTriggerStyleEnabled = prefs[PrefKeys.HIGHLIGHT_TRIGGER_STYLE_ENABLED]?.toBooleanStrictOrNull() ?: true,
                     nicknameTapAction = nicknameTapActionFromPreference(prefs[PrefKeys.NICKNAME_TAP_ACTION]),
                     nickColorOverrides = decodeHueOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]),
                     friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]),
@@ -212,6 +215,7 @@ class DataStoreSettingsRepository
                     showRedactedMessages = prefs[PrefKeys.SHOW_REDACTED_MESSAGES]?.toBooleanStrictOrNull() ?: true,
                     sendTypingIndicators = prefs[PrefKeys.SEND_TYPING_INDICATORS]?.toBooleanStrictOrNull() ?: true,
                     showTypingIndicators = prefs[PrefKeys.SHOW_TYPING_INDICATORS]?.toBooleanStrictOrNull() ?: true,
+                    typingIndicatorPlacement = typingIndicatorPlacementFromPreference(prefs[PrefKeys.TYPING_INDICATOR_PLACEMENT]),
                     avatarStyle = avatarStyleFromPreference(prefs[PrefKeys.AVATAR_STYLE]),
                     chatWallpaper =
                         prefs[PrefKeys.CHAT_WALLPAPER]?.let { runCatching { ChatWallpaper.valueOf(it) }.getOrNull() }
@@ -303,6 +307,14 @@ class DataStoreSettingsRepository
 
         override suspend fun setNickMentionStyle(value: NickMentionStyle) {
             store.edit { it[PrefKeys.NICK_MENTION_STYLE] = value.name }
+        }
+
+        override suspend fun setHighlightTriggerStyleEnabled(enabled: Boolean) {
+            store.edit { it[PrefKeys.HIGHLIGHT_TRIGGER_STYLE_ENABLED] = enabled.toString() }
+        }
+
+        override suspend fun setTypingIndicatorPlacement(placement: TypingIndicatorPlacement) {
+            store.edit { it[PrefKeys.TYPING_INDICATOR_PLACEMENT] = placement.name }
         }
 
         override suspend fun setNicknameTapAction(action: NicknameTapAction) {

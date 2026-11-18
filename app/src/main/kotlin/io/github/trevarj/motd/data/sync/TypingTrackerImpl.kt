@@ -2,6 +2,7 @@ package io.github.trevarj.motd.data.sync
 
 import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.di.ApplicationScope
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.TypingTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,15 +60,32 @@ class TypingTrackerImpl
             nick: String,
             state: String,
             now: Long = clock.nowMillis(),
+            identityRules: IrcIdentityRules = IrcIdentityRules(),
         ) {
             synchronized(lock) {
                 val list = entries.getOrPut(bufferId) { mutableListOf() }
-                list.removeAll { it.nick == nick || it.expiresAt <= now }
+                val normalizedNick = identityRules.normalize(nick)
+                list.removeAll { identityRules.normalize(it.nick) == normalizedNick || it.expiresAt <= now }
                 if (state == "active" || state == "paused") {
                     list.add(Entry(nick, now + ACTIVE_TTL_MS))
                 }
                 flowFor(bufferId).value = list.map { it.nick }
                 scheduleSweep(bufferId, list, now)
+            }
+        }
+
+        fun onMessage(
+            bufferId: Long,
+            nick: String,
+            identityRules: IrcIdentityRules,
+        ) {
+            synchronized(lock) {
+                val list = entries[bufferId] ?: return
+                if (list.isEmpty()) return
+                val normalizedNick = identityRules.normalize(nick)
+                if (!list.removeAll { identityRules.normalize(it.nick) == normalizedNick }) return
+                flowFor(bufferId).value = list.map { it.nick }
+                scheduleSweep(bufferId, list, clock.nowMillis())
             }
         }
 

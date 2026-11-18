@@ -13,6 +13,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -636,6 +637,8 @@ fun ChatScreen(
         bubbleCornerStyle = appearance.bubbleCornerStyle,
         composerStyle = appearance.composerStyle,
         showComposerEmoji = settings.showComposerEmoji,
+        highlightTriggerStyleEnabled = settings.highlightTriggerStyleEnabled,
+        typingIndicatorPlacement = settings.typingIndicatorPlacement,
         showComposerFormattingTools = settings.showComposerFormattingTools,
         visibleReplyPrefix = replyConfig.visibleChannelPrefix,
         swipeToReplyEnabled = replyConfig.swipeToReplyEnabled,
@@ -1177,6 +1180,9 @@ internal fun ChatContent(
     bubbleCornerStyle: io.github.trevarj.motd.data.prefs.BubbleCornerStyle =
         io.github.trevarj.motd.data.prefs.BubbleCornerStyle.ROUNDED,
     showComposerEmoji: Boolean = true,
+    highlightTriggerStyleEnabled: Boolean = true,
+    typingIndicatorPlacement: io.github.trevarj.motd.data.prefs.TypingIndicatorPlacement =
+        io.github.trevarj.motd.data.prefs.TypingIndicatorPlacement.HEADER,
     showComposerFormattingTools: Boolean = true,
     visibleReplyPrefix: Boolean = false,
     swipeToReplyEnabled: Boolean = true,
@@ -1836,6 +1842,18 @@ internal fun ChatContent(
         }
 
         // Raw ignored tails do not make the user leave the meaningful bottom of the conversation.
+        val atTimelineLiveEnd =
+            remember(listState, items, visibilityPolicy) {
+                derivedStateOf {
+                    isAtEffectiveBottom(
+                        firstVisibleIndex = listState.firstVisibleItemIndex,
+                        firstVisibleOffset = listState.firstVisibleItemScrollOffset,
+                        itemCount = items.itemCount,
+                        peek = items::peek,
+                        policy = visibilityPolicy,
+                    )
+                }
+            }
         val atBottom by remember(listState, items, visibilityPolicy) {
             derivedStateOf {
                 val layout = listState.layoutInfo
@@ -1844,13 +1862,7 @@ internal fun ChatContent(
                 bottomHostHeightPx > 0 &&
                     layout.beforeContentPadding >= bottomHostHeightPx &&
                     layout.viewportEndOffset > layout.viewportStartOffset + bottomHostHeightPx &&
-                    isAtEffectiveBottom(
-                        firstVisibleIndex = listState.firstVisibleItemIndex,
-                        firstVisibleOffset = listState.firstVisibleItemScrollOffset,
-                        itemCount = items.itemCount,
-                        peek = items::peek,
-                        policy = visibilityPolicy,
-                    )
+                    atTimelineLiveEnd.value
             }
         }
 
@@ -3676,7 +3688,13 @@ internal fun ChatContent(
                                     }
                                 }
                                 // The 10dp gap only separates the title from the avatar beside it.
-                                val subtitleModel = chatSubtitleModel(state, ctx, dickordEnabled)
+                                val subtitleModel =
+                                    chatSubtitleModel(
+                                        state,
+                                        ctx,
+                                        dickordEnabled,
+                                        includeTyping = typingIndicatorPlacement == io.github.trevarj.motd.data.prefs.TypingIndicatorPlacement.HEADER,
+                                    )
                                 Column(modifier = Modifier.padding(start = if (hideAvatar) 0.dp else 10.dp).weight(1f)) {
                                     if (compactHeader && subtitleModel is ChatSubtitleModel.Text && subtitleModel.isMemberCount) {
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -3880,6 +3898,16 @@ internal fun ChatContent(
                                             .testTag("chat_bottom_host")
                                             .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)),
                                 ) {
+                                    AboveComposerTyping(
+                                        summary =
+                                            if (typingIndicatorPlacement == io.github.trevarj.motd.data.prefs.TypingIndicatorPlacement.ABOVE_COMPOSER &&
+                                                atTimelineLiveEnd.value
+                                            ) {
+                                                chatTypingSummary(state, ctx, dickordEnabled)
+                                            } else {
+                                                null
+                                            },
+                                    )
                                     val isChannelBuffer = state.buffer?.type == BufferType.CHANNEL
                                     val completions =
                                         remember(composerText, memberNicks, recentSpeakers, isChannelBuffer) {
@@ -4286,6 +4314,7 @@ internal fun ChatContent(
                                                 onOpenPalette = onOpenPalette,
                                                 highlightMsgid = highlightMsgid,
                                                 highlightEventId = highlightEventId,
+                                                highlightTriggerStyleEnabled = highlightTriggerStyleEnabled,
                                                 knownNicks = knownNicks,
                                                 channelSenderPrefixes = channelSenderPrefixes.takeIf { state.buffer?.type == BufferType.CHANNEL }.orEmpty(),
                                                 friends = friends,
@@ -5445,6 +5474,7 @@ internal fun chatSubtitleModel(
     state: ChatState,
     context: android.content.Context,
     dickordEnabled: Boolean = false,
+    includeTyping: Boolean = true,
 ): ChatSubtitleModel? {
     when (val connection = state.connState) {
         null -> return null
@@ -5468,14 +5498,8 @@ internal fun chatSubtitleModel(
         dickordEnabled &&
             buffer != null &&
             isDickordPortalConversation(buffer.type, buffer.displayName)
-    if (state.typingNicks.isNotEmpty()) {
-        val typingNicks =
-            if (activeDickordChannel) {
-                state.typingNicks.map { dickordNickLabel(it, activeDickordChannel) }
-            } else {
-                state.typingNicks
-            }
-        return ChatSubtitleModel.Text(typingText(context, typingNicks))
+    if (includeTyping) {
+        chatTypingSummary(state, context, dickordEnabled)?.let { return ChatSubtitleModel.Text(it) }
     }
     if (activeDickordChannel) {
         return ChatSubtitleModel.Text(context.getString(R.string.dickord_channel_subtitle))
@@ -5486,6 +5510,39 @@ internal fun chatSubtitleModel(
         ChatSubtitleModel.Text(context.resources.getQuantityString(R.plurals.chat_member_count, n, n), isMemberCount = true)
     } else {
         null
+    }
+}
+
+internal fun chatTypingSummary(
+    state: ChatState,
+    context: android.content.Context,
+    dickordEnabled: Boolean = false,
+): String? {
+    if (state.connState !is IrcClientState.Ready || state.typingNicks.isEmpty()) return null
+    val buffer = state.buffer
+    val portal = dickordEnabled && buffer != null && isDickordPortalConversation(buffer.type, buffer.displayName)
+    val nicks = if (portal) state.typingNicks.map { dickordNickLabel(it, true) } else state.typingNicks
+    return typingText(context, nicks)
+}
+
+@Composable
+internal fun AboveComposerTyping(summary: String?) {
+    AnimatedContent(
+        targetState = summary,
+        transitionSpec = {
+            (fadeIn(MotdMotion.microFadeIn) togetherWith fadeOut(MotdMotion.microFadeOut))
+                .using(SizeTransform(clip = false))
+        },
+        label = "above_composer_typing",
+    ) { text ->
+        if (text != null) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().testTag("chat_typing_above_composer").padding(horizontal = 16.dp, vertical = 6.dp),
+            )
+        }
     }
 }
 

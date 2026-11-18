@@ -91,6 +91,7 @@ import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
+import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.InlineTextSegment
 import io.github.trevarj.motd.ui.chat.extractUrls
@@ -113,6 +114,7 @@ import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
+import io.github.trevarj.motd.ui.theme.bestOnColor
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.cornerRadius
 import io.github.trevarj.motd.ui.theme.ensureContrast
@@ -394,6 +396,9 @@ fun MessageBubble(
     displaySender: String = sender,
     isBot: Boolean = false,
     hasMention: Boolean = false,
+    highlightNick: String? = null,
+    highlightCaseMapping: String? = null,
+    highlightTriggerStyleEnabled: Boolean = true,
     dimmed: Boolean = false,
     networkId: Long? = null,
     senderAccount: String? = null,
@@ -445,6 +450,7 @@ fun MessageBubble(
     // EventProcessor never marks self messages as mentions. Keep the UI defensive so a malformed
     // or legacy row cannot style an own message as an incoming highlight.
     val mentionHighlighted = hasMention && !isSelf
+    val triggerNick = highlightNick.takeIf { mentionHighlighted && highlightTriggerStyleEnabled }
     val renderedModifier =
         if (mentionHighlighted && (kind != MessageKind.ACTION || (!spacing.compact && !spacing.twoLine))) {
             modifier.mentionHighlight(accent = MaterialTheme.colorScheme.primary)
@@ -468,6 +474,8 @@ fun MessageBubble(
                 nickColors = nickColors,
                 modifier = renderedModifier,
                 hasMention = mentionHighlighted,
+                highlightNick = triggerNick,
+                highlightCaseMapping = highlightCaseMapping,
                 dimmed = dimmed,
                 failed = failed,
                 pending = pending,
@@ -511,6 +519,8 @@ fun MessageBubble(
                 modifier = renderedModifier,
                 showSender = showSender,
                 hasMention = mentionHighlighted,
+                highlightNick = triggerNick,
+                highlightCaseMapping = highlightCaseMapping,
                 dimmed = dimmed,
                 senderIsFriend = senderIsFriend,
                 failed = failed,
@@ -559,6 +569,8 @@ fun MessageBubble(
             nickColors = nickColors,
             modifier = renderedModifier,
             hasMention = mentionHighlighted,
+            highlightNick = triggerNick,
+            highlightCaseMapping = highlightCaseMapping,
             dimmed = dimmed,
             failed = failed,
             pending = pending,
@@ -608,6 +620,8 @@ fun MessageBubble(
             spacing = spacing,
             modifier = renderedModifier,
             hasMention = mentionHighlighted,
+            highlightNick = triggerNick,
+            highlightCaseMapping = highlightCaseMapping,
             dimmed = dimmed,
             senderIsFriend = senderIsFriend,
             failed = failed,
@@ -817,6 +831,7 @@ fun MessageBubble(
                 // ; LinkAnnotation.Url uses the platform URI open handler. Known-nick
                 // @mentions are colored with the nick's own color. Body build is memoized per
                 // (text, mention inputs) so it doesn't re-run every recomposition/scroll frame.
+                val highlightColor = scheme.primary
                 val linkColor =
                     if (isSelf || mentionHighlighted || kind == MessageKind.NOTICE) {
                         bubbleRoles.normalContent
@@ -838,6 +853,9 @@ fun MessageBubble(
                         mentionsActive,
                         mentionColor,
                         onMentionClick,
+                        triggerNick,
+                        highlightCaseMapping,
+                        highlightColor,
                         nickMentionStyle,
                         nickColors.enabled,
                         codeBackground,
@@ -862,6 +880,9 @@ fun MessageBubble(
                             onMentionClick = onMentionClick.takeUnless { selecting },
                             adjustPaletteReadability = adjustPaletteReadability,
                             fitMentionColor = { !nickColors.preservesAuthoredIdentity(it) },
+                            highlightNick = triggerNick,
+                            highlightCaseMapping = highlightCaseMapping,
+                            highlightColor = highlightColor,
                         ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
                     }
                 if (body.isNotBlank()) {
@@ -979,6 +1000,8 @@ private fun ComfortableActionBubble(
     modifier: Modifier = Modifier,
     showSender: Boolean = true,
     hasMention: Boolean = false,
+    highlightNick: String? = null,
+    highlightCaseMapping: String? = null,
     dimmed: Boolean = false,
     senderIsFriend: Boolean = false,
     failed: Boolean = false,
@@ -1031,6 +1054,7 @@ private fun ComfortableActionBubble(
     val bodyColor = remember(bodyInk, rowColor, roles, dimmed, adjustPaletteReadability) { messageContentColor(bodyInk, rowColor, dimmed, roles.normalContainer, adjustPaletteReadability) }
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
     val linkColor = roles.normalContent
+    val highlightColor = scheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
     val codeColor = bodyInk
     val nickMentionStyle = LocalNickMentionStyle.current.let { if (selecting && it == NickMentionStyle.CHIP) NickMentionStyle.NONE else it }
@@ -1085,6 +1109,9 @@ private fun ComfortableActionBubble(
             mentionsActive,
             mentionColor,
             onMentionClick,
+            highlightNick,
+            highlightCaseMapping,
+            highlightColor,
             nickMentionStyle,
             nickColors.enabled,
             codeBackground,
@@ -1117,6 +1144,9 @@ private fun ComfortableActionBubble(
                 adjustPaletteReadability = adjustPaletteReadability,
                 fitSenderColor = !nickColors.preservesAuthoredIdentity(sender, fallbackIsAuthored = true),
                 fitMentionColor = { !nickColors.preservesAuthoredIdentity(it) },
+                highlightNick = highlightNick,
+                highlightCaseMapping = highlightCaseMapping,
+                highlightColor = highlightColor,
                 fitLinkColor = true,
             ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
         }
@@ -1268,6 +1298,8 @@ private fun ActionMessageRow(
     nickColors: NickColorScheme,
     modifier: Modifier = Modifier,
     hasMention: Boolean = false,
+    highlightNick: String? = null,
+    highlightCaseMapping: String? = null,
     dimmed: Boolean = false,
     failed: Boolean = false,
     pending: Boolean = false,
@@ -1362,6 +1394,8 @@ private fun ActionMessageRow(
             mentionsActive,
             mentionColor,
             onMentionClick,
+            highlightNick,
+            highlightCaseMapping,
             nickMentionStyle,
             nickColors.enabled,
             codeBackground,
@@ -1391,6 +1425,8 @@ private fun ActionMessageRow(
                 adjustPaletteReadability = adjustPaletteReadability,
                 fitSenderColor = !nickColors.preservesAuthoredIdentity(sender, fallbackIsAuthored = true),
                 fitMentionColor = { !nickColors.preservesAuthoredIdentity(it) },
+                highlightNick = highlightNick,
+                highlightCaseMapping = highlightCaseMapping,
             ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
         }
 
@@ -1513,6 +1549,9 @@ internal fun buildActionBody(
     adjustPaletteReadability: Boolean = false,
     fitMentionColor: (String) -> Boolean = { true },
     fitLinkColor: Boolean = adjustPaletteReadability,
+    highlightNick: String? = null,
+    highlightCaseMapping: String? = null,
+    highlightColor: Color = linkColor,
 ): AnnotatedString =
     buildAnnotatedString {
         // fontSynthesis is explicit because some OEM system fonts (e.g. Nothing OS) ship no italic
@@ -1552,6 +1591,9 @@ internal fun buildActionBody(
             adjustPaletteReadability = adjustPaletteReadability,
             fitMentionColor = fitMentionColor,
             fitLinkColor = fitLinkColor,
+            highlightNick = highlightNick,
+            highlightCaseMapping = highlightCaseMapping,
+            highlightColor = highlightColor,
         )
     }
 
@@ -1584,6 +1626,9 @@ internal fun buildActionLine(
     fitSenderColor: Boolean = true,
     fitMentionColor: (String) -> Boolean = { true },
     fitLinkColor: Boolean = adjustPaletteReadability,
+    highlightNick: String? = null,
+    highlightCaseMapping: String? = null,
+    highlightColor: Color = linkColor,
 ): AnnotatedString =
     buildAnnotatedString {
         if (includeStar) {
@@ -1627,6 +1672,9 @@ internal fun buildActionLine(
                 adjustPaletteReadability = adjustPaletteReadability,
                 fitMentionColor = fitMentionColor,
                 fitLinkColor = fitLinkColor,
+                highlightNick = highlightNick,
+                highlightCaseMapping = highlightCaseMapping,
+                highlightColor = highlightColor,
             ),
         )
         pop()
@@ -1679,6 +1727,8 @@ private fun TwoLineMessageRow(
     showSender: Boolean,
     modifier: Modifier = Modifier,
     hasMention: Boolean = false,
+    highlightNick: String? = null,
+    highlightCaseMapping: String? = null,
     dimmed: Boolean = false,
     senderIsFriend: Boolean = false,
     failed: Boolean = false,
@@ -1871,6 +1921,8 @@ private fun TwoLineMessageRow(
                         mentionsActive,
                         mentionColor,
                         onMentionClick,
+                        highlightNick,
+                        highlightCaseMapping,
                         nickMentionStyle,
                         nickColors.enabled,
                         codeBackground,
@@ -1895,6 +1947,8 @@ private fun TwoLineMessageRow(
                             onMentionClick = onMentionClick.takeUnless { selecting },
                             adjustPaletteReadability = adjustPaletteReadability,
                             fitMentionColor = { !nickColors.preservesAuthoredIdentity(it) },
+                            highlightNick = highlightNick,
+                            highlightCaseMapping = highlightCaseMapping,
                         ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
                     }
                 if (richBody.isNotBlank()) {
@@ -2270,10 +2324,13 @@ internal fun linkifiedBody(
     adjustPaletteReadability: Boolean = false,
     fitMentionColor: (String) -> Boolean = { true },
     fitLinkColor: Boolean = adjustPaletteReadability,
+    highlightNick: String? = null,
+    highlightCaseMapping: String? = null,
+    highlightColor: Color = linkColor,
 ): AnnotatedString {
     // Most chat rows are plain text. Avoid the URL regex, nick token walk, and builder allocation
     // when neither link annotations, mention styling, nor mIRC formatting can affect the result.
-    if (!mentionsActive && onMentionClick == null && !text.contains("http://") && !text.contains("https://") && !text.contains('`') &&
+    if (highlightNick == null && !mentionsActive && onMentionClick == null && !text.contains("http://") && !text.contains("https://") && !text.contains('`') &&
         text.none { it.code in 0x01..0x1F }
     ) {
         return AnnotatedString(text)
@@ -2301,6 +2358,9 @@ internal fun linkifiedBody(
             adjustPaletteReadability = adjustPaletteReadability,
             fitMentionColor = fitMentionColor,
             fitLinkColor = fitLinkColor,
+            highlightNick = highlightNick,
+            highlightCaseMapping = highlightCaseMapping,
+            highlightColor = highlightColor,
         )
     }
 }
@@ -2325,6 +2385,9 @@ internal fun AnnotatedString.Builder.appendRichText(
     adjustPaletteReadability: Boolean = false,
     fitMentionColor: (String) -> Boolean = { true },
     fitLinkColor: Boolean = adjustPaletteReadability,
+    highlightNick: String? = null,
+    highlightCaseMapping: String? = null,
+    highlightColor: Color = linkStyle.color,
 ) {
     val formatted = parseIrcFormatting(text)
     val segments = parseInlineCode(formatted.visibleText)
@@ -2436,6 +2499,55 @@ internal fun AnnotatedString.Builder.appendRichText(
                     }
                 }
                 addStyle(readingStyle(run.state.toSpanStyle(normalBackground, ink, MESSAGE_TEXT_CONTRAST), background, normalBackground), from, to)
+            }
+        }
+    }
+    if (highlightNick != null && highlightCaseMapping != null) {
+        val rules = IrcIdentityRules(caseMapping = IrcCaseMapping.from(highlightCaseMapping))
+        val matches = rules.mentionRanges(formatted.visibleText, highlightNick)
+        if (matches.isEmpty()) return
+        val body = toAnnotatedString()
+        val backings =
+            body.spanStyles.filter { it.item.background != Color.Unspecified } +
+                body.getStringAnnotations(NICK_CHIP_RANGE, bodyStart, length).map {
+                    AnnotatedString.Range(SpanStyle(background = Color(it.item.toULong())), it.start, it.end)
+                }
+        matches.forEach { range ->
+            val start = bodyStart + renderedOffsets[range.first]
+            val end = bodyStart + renderedOffsets[range.last + 1]
+            if (start < end) {
+                val boundaries = sortedSetOf(start, end)
+                backings.forEach { span ->
+                    if (span.start < end && span.end > start) {
+                        boundaries.add(span.start.coerceAtLeast(start))
+                        boundaries.add(span.end.coerceAtMost(end))
+                    }
+                }
+                val sorted = boundaries.toList()
+                for (index in 0 until sorted.lastIndex) {
+                    val from = sorted[index]
+                    val to = sorted[index + 1]
+                    var background = containerColor
+                    backings.forEach { span ->
+                        if (span.start <= from && span.end >= to) {
+                            background = span.item.background.compositeOver(background)
+                        }
+                    }
+                    val tintedBackground =
+                        if (background == Color.Unspecified) highlightColor.copy(alpha = 0.18f) else highlightColor.copy(alpha = 0.18f).compositeOver(background)
+                    // A mid-tone chip may admit no ink at the target contrast; fit the overlay fill first.
+                    val triggerBackground =
+                        if (background == Color.Unspecified) tintedBackground else ensureContrast(tintedBackground, listOf(bestOnColor(tintedBackground)), minimumContrast)
+                    addStyle(
+                        SpanStyle(
+                            color = if (background == Color.Unspecified) highlightColor else messageContentColor(highlightColor, triggerBackground, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalContainerColor, adjustPaletteReadability = true),
+                            fontWeight = FontWeight.Bold,
+                            background = triggerBackground,
+                        ),
+                        from,
+                        to,
+                    )
+                }
             }
         }
     }

@@ -47,6 +47,10 @@ enum class NickColorPalette { THEME, CLASSIC, VIVID }
 
 enum class NickMentionStyle { NONE, BOLD, CHIP }
 
+enum class TypingIndicatorPlacement { HEADER, ABOVE_COMPOSER }
+
+internal fun typingIndicatorPlacementFromPreference(saved: String?): TypingIndicatorPlacement = saved?.let { runCatching { TypingIndicatorPlacement.valueOf(it) }.getOrNull() } ?: TypingIndicatorPlacement.HEADER
+
 internal fun nickMentionStyleFromPreference(saved: String?): NickMentionStyle = saved?.let { runCatching { NickMentionStyle.valueOf(it) }.getOrNull() } ?: NickMentionStyle.BOLD
 
 enum class NicknameTapAction { MENTION, USER_MENU }
@@ -306,6 +310,7 @@ data class Settings(
     val nickColorsEnabled: Boolean = true,
     val nickColorPalette: NickColorPalette = NickColorPalette.THEME,
     val nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
+    val highlightTriggerStyleEnabled: Boolean = true,
     val nicknameTapAction: NicknameTapAction = NicknameTapAction.MENTION,
     /** Normalized nick -> hue/position 0..359, rendered through the active palette. */
     val nickColorOverrides: Map<String, Int> = emptyMap(),
@@ -325,6 +330,7 @@ data class Settings(
     val sendTypingIndicators: Boolean = true,
     /** Show IRCv3 +typing state received from peers. */
     val showTypingIndicators: Boolean = true,
+    val typingIndicatorPlacement: TypingIndicatorPlacement = TypingIndicatorPlacement.HEADER,
     /**
      * Backup compatibility only, never populated at runtime. Archives written before presence modes
      * existed carry the former boolean here; restore maps it onto [presenceMode] (see
@@ -416,6 +422,10 @@ interface SettingsRepository {
     suspend fun setNickColorPalette(p: NickColorPalette)
 
     suspend fun setNickMentionStyle(value: NickMentionStyle)
+
+    suspend fun setHighlightTriggerStyleEnabled(enabled: Boolean)
+
+    suspend fun setTypingIndicatorPlacement(placement: TypingIndicatorPlacement)
 
     suspend fun setNicknameTapAction(action: NicknameTapAction)
 

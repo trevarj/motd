@@ -105,6 +105,7 @@ import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.PaletteSelection
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.TypingIndicatorPlacement
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
@@ -208,6 +209,8 @@ fun AppearanceSettingsScreen(
         onNickColorsEnabled = viewModel::setNickColorsEnabled,
         onNickColorPalette = viewModel::setNickColorPalette,
         onNickMentionStyle = viewModel::setNickMentionStyle,
+        onHighlightTriggerStyleEnabled = viewModel::setHighlightTriggerStyleEnabled,
+        onTypingIndicatorPlacement = viewModel::setTypingIndicatorPlacement,
         onWallpaper = viewModel::setWallpaper,
         onImportWallpaper = viewModel::importWallpaper,
         importedWallpaper = importedWallpaper,
@@ -259,6 +262,8 @@ fun AppearanceSettingsContent(
     onNickColorsEnabled: (Boolean) -> Unit,
     onNickColorPalette: (NickColorPalette) -> Unit,
     onNickMentionStyle: (NickMentionStyle) -> Unit,
+    onHighlightTriggerStyleEnabled: (Boolean) -> Unit = {},
+    onTypingIndicatorPlacement: (TypingIndicatorPlacement) -> Unit = {},
     onWallpaper: (io.github.trevarj.motd.data.prefs.WallpaperSelection) -> Unit,
     onUiFontScale: (Int) -> Unit,
     onConversationFontScale: (Int) -> Unit,
@@ -593,6 +598,16 @@ fun AppearanceSettingsContent(
                 )
             }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.TYPING_INDICATOR_PLACEMENT.name) { targetModifier ->
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_typing_indicator_placement),
+                    value = typingIndicatorPlacementLabel(previewSettings.typingIndicatorPlacement),
+                    summary = stringResource(R.string.settings_typing_indicator_placement_desc),
+                    modifier = targetModifier.testTag("settings_typing_indicator_placement_picker"),
+                    onClick = { choiceSheet = AppearanceChoice.TYPING_INDICATOR_PLACEMENT },
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsTarget(target?.name, SettingsTarget.INPUT_SHAPE.name) { targetModifier ->
                 SettingsNavigationRow(
                     title = stringResource(R.string.settings_input_shape),
@@ -705,6 +720,20 @@ fun AppearanceSettingsContent(
                     summary = stringResource(R.string.settings_nick_mention_style_desc),
                     modifier = targetModifier.testTag("settings_nick_mention_style_picker"),
                     onClick = { choiceSheet = AppearanceChoice.NICK_MENTION_STYLE },
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.HIGHLIGHT_TRIGGER_STYLE.name) { targetModifier ->
+                SwitchRow(
+                    title = stringResource(R.string.settings_highlight_trigger_style),
+                    subtitle = stringResource(R.string.settings_highlight_trigger_style_desc),
+                    checked = previewSettings.highlightTriggerStyleEnabled,
+                    onCheckedChange = {
+                        previewSettings = previewSettings.copy(highlightTriggerStyleEnabled = it)
+                        onHighlightTriggerStyleEnabled(it)
+                    },
+                    switchTag = "settings_switch_highlight_trigger_style",
+                    modifier = targetModifier,
                 )
             }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -870,6 +899,10 @@ fun AppearanceSettingsContent(
             onNickMentionStyle = {
                 previewSettings = previewSettings.copy(nickMentionStyle = it)
                 onNickMentionStyle(it)
+            },
+            onTypingIndicatorPlacement = {
+                previewSettings = previewSettings.copy(typingIndicatorPlacement = it)
+                onTypingIndicatorPlacement(it)
             },
             onDensity = {
                 previewDensity = it
@@ -1158,7 +1191,7 @@ internal fun EmojiSetPickerContent(
     }
 }
 
-private enum class AppearanceChoice { PALETTE, NICK_MENTION_STYLE, ICONS, FOLDER_LAYOUT, CHAT_CARD_SHAPE, DENSITY, COMPOSER_STYLE, INPUT_SHAPE, MEDIA_SHAPE, AVATAR, AVATAR_SHAPE, TIME, SPACING, BUBBLES, LAUNCHER }
+private enum class AppearanceChoice { PALETTE, NICK_MENTION_STYLE, TYPING_INDICATOR_PLACEMENT, ICONS, FOLDER_LAYOUT, CHAT_CARD_SHAPE, DENSITY, COMPOSER_STYLE, INPUT_SHAPE, MEDIA_SHAPE, AVATAR, AVATAR_SHAPE, TIME, SPACING, BUBBLES, LAUNCHER }
 
 @Composable
 internal fun appearancePaletteSummary(appearance: AppearanceConfig): String {
@@ -1333,6 +1366,7 @@ private fun AppearanceChoiceSheet(
     previewShadows: Boolean,
     onPalette: (NickColorPalette) -> Unit,
     onNickMentionStyle: (NickMentionStyle) -> Unit,
+    onTypingIndicatorPlacement: (TypingIndicatorPlacement) -> Unit,
     onDensity: (LayoutDensity) -> Unit,
     onCompactNickBrackets: (CompactNickBrackets) -> Unit,
     onComposerStyle: (ComposerStyle) -> Unit,
@@ -1351,6 +1385,20 @@ private fun AppearanceChoiceSheet(
     onDismiss: () -> Unit,
 ) {
     when (choice) {
+        AppearanceChoice.TYPING_INDICATOR_PLACEMENT -> {
+            SingleChoiceSheet(
+                title = stringResource(R.string.settings_typing_indicator_placement),
+                selected = settings.typingIndicatorPlacement,
+                options =
+                    TypingIndicatorPlacement.entries.map {
+                        ChoiceOption(it, typingIndicatorPlacementLabel(it), tag = "settings_typing_indicator_placement_${it.name.lowercase()}")
+                    },
+                onSelect = onTypingIndicatorPlacement,
+                onDismiss = onDismiss,
+                tag = "settings_typing_indicator_placement_sheet",
+            )
+        }
+
         AppearanceChoice.NICK_MENTION_STYLE -> {
             SingleChoiceSheet(
                 title = stringResource(R.string.settings_nick_mention_style),
@@ -1705,6 +1753,15 @@ private fun AppearanceChoiceSheet(
         }
     }
 }
+
+@Composable
+private fun typingIndicatorPlacementLabel(placement: TypingIndicatorPlacement): String =
+    stringResource(
+        when (placement) {
+            TypingIndicatorPlacement.HEADER -> R.string.settings_typing_indicator_placement_header
+            TypingIndicatorPlacement.ABOVE_COMPOSER -> R.string.settings_typing_indicator_placement_above_composer
+        },
+    )
 
 @Composable
 private fun nickMentionStyleLabel(style: NickMentionStyle): String =

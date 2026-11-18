@@ -1411,6 +1411,97 @@ class EventProcessorTest {
         }
 
     @Test
+    fun liveChatClearsOnlyItsCasemappedTypistAndHistoryPushAndSelfDoNot() =
+        runTest {
+            val typing =
+                TypingTrackerImpl(
+                    backgroundScope,
+                    io.github.trevarj.motd.di
+                        .AppClock { testScheduler.currentTime },
+                )
+            val recording = EventProcessor(db, typing, MessageNotifier.Noop)
+            recording.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
+            for (kind in listOf(IrcEvent.ChatKind.PRIVMSG, IrcEvent.ChatKind.ACTION, IrcEvent.ChatKind.NOTICE)) {
+                val target = "#${kind.name}"
+                for (nick in listOf("Alice[", "Bob")) {
+                    recording.process(networkId, IrcEvent.TagMessage(ctx(), Prefix(nick), target, "active", null, null))
+                }
+                val room = db.bufferDao().byName(networkId, target)!!
+                val message = IrcEvent.ChatMessage(ctx("live-${kind.name}"), kind, Prefix("ALICE{"), target, "sent", false, null)
+                recording.process(networkId, IrcEvent.HistoryBatch(target, listOf(message.copy(ctx = ctx("history-${kind.name}")))))
+                recording.processPush(networkId, message.copy(ctx = ctx("push-${kind.name}")))
+                recording.process(networkId, message.copy(ctx = ctx("self-${kind.name}"), source = Prefix("me"), isSelf = true))
+                assertEquals(listOf("Alice[", "Bob"), typing.typingNicks(room.id).value)
+                recording.process(networkId, message)
+                assertEquals(listOf("Bob"), typing.typingNicks(room.id).value)
+                recording.process(networkId, IrcEvent.TagMessage(ctx(), Prefix("ALICE{"), target, "paused", null, null))
+                recording.process(networkId, message.copy(ctx = ctx("second-${kind.name}")))
+                assertEquals(listOf("Bob"), typing.typingNicks(room.id).value)
+            }
+        }
+
+    @Test
+    fun typingMessageRemovalHonorsStrictCasemapAndKeepsOtherTypistsOriginalExpiry() =
+        runTest {
+            val typing =
+                TypingTrackerImpl(
+                    backgroundScope,
+                    io.github.trevarj.motd.di
+                        .AppClock { testScheduler.currentTime },
+                )
+            val strict =
+                io.github.trevarj.motd.irc.proto.IrcIdentityRules
+                    .from("rfc1459-strict", null)
+            typing.onTyping(1, "Alice~", "active", identityRules = strict)
+            typing.onTyping(1, "Bob", "active", identityRules = strict)
+            testScheduler.runCurrent()
+            testScheduler.advanceTimeBy(3_000)
+            typing.onMessage(1, "ALICE^", strict)
+            assertEquals(listOf("Alice~", "Bob"), typing.typingNicks(1).value)
+            typing.onMessage(1, "ALICE~", strict)
+            assertEquals(listOf("Bob"), typing.typingNicks(1).value)
+            typing.onTyping(1, "BOB", "paused", identityRules = strict)
+            assertEquals(listOf("BOB"), typing.typingNicks(1).value)
+            typing.onTyping(2, "Carol", "active", identityRules = strict)
+            testScheduler.runCurrent()
+            testScheduler.advanceTimeBy(3_000)
+            typing.onMessage(2, "CAROL", strict)
+            assertEquals(listOf("BOB"), typing.typingNicks(1).value)
+            testScheduler.advanceTimeBy(3_000)
+            testScheduler.runCurrent()
+            assertEquals(emptyList<String>(), typing.typingNicks(1).value)
+        }
+
+    @Test
+    fun highlightProvenanceSurvivesNickCasemapChangesAndReplayButHistoryIsUnknown() =
+        runTest {
+            processor.onRegistered(networkId, "Me[", mapOf("CASEMAPPING" to "rfc1459"))
+            val message = IrcEvent.ChatMessage(ctx("highlight"), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"), "#chan", "\u0002Me{\u0002!", false, null)
+            processor.process(networkId, message)
+            val room = db.bufferDao().byName(networkId, "#chan")!!
+            val initial = db.messageDao().byMsgid(room.id, "highlight")!!
+            assertEquals("Me[", initial.highlightNick)
+            assertEquals("rfc1459", initial.highlightCaseMapping)
+            assertEquals("Me{!", initial.text)
+            processor.onRegistered(networkId, "newnick", mapOf("CASEMAPPING" to "ascii"))
+            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(message)))
+            val replayed = db.messageDao().byMsgid(room.id, "highlight")!!
+            assertEquals(initial.highlightNick, replayed.highlightNick)
+            assertEquals(initial.highlightCaseMapping, replayed.highlightCaseMapping)
+            val old = message.copy(ctx = ctx("unknown-history"), text = "newnick!")
+            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(old)))
+            val historical = db.messageDao().byMsgid(room.id, "unknown-history")!!
+            assertTrue(historical.hasMention)
+            assertNull(historical.highlightNick)
+            assertNull(historical.highlightCaseMapping)
+            processor.process(networkId, IrcEvent.MessageRedacted(ctx(), Prefix("oper"), "#chan", "highlight", null))
+            processor.process(networkId, message)
+            val redacted = db.messageDao().byMsgid(room.id, "highlight")!!
+            assertNull(redacted.highlightNick)
+            assertNull(redacted.highlightCaseMapping)
+        }
+
+    @Test
     fun selfPmEchoAccountTagDoesNotIdentifyDifferentRecipientsAsOneRoom() =
         runTest {
             suspend fun echo(
@@ -1796,6 +1887,10 @@ class EventProcessorTest {
             val buffer = db.bufferDao().byName(networkId, "#chan")!!
             val rows = pagingList(buffer.id).sortedBy { it.serverTime }
             assertTrue(rows[0].hasMention)
+            assertEquals("me", rows[0].highlightNick)
+            assertEquals("rfc1459", rows[0].highlightCaseMapping)
+            assertNull(rows[1].highlightNick)
+            assertNull(rows[1].highlightCaseMapping)
             assertFalse(rows[1].hasMention)
         }
 
@@ -1884,6 +1979,8 @@ class EventProcessorTest {
 
             val buffer = db.bufferDao().byName(networkId, "#chan")!!
             assertTrue(pagingList(buffer.id).first { it.msgid == "child" }.hasMention)
+            assertNull(pagingList(buffer.id).first { it.msgid == "child" }.highlightNick)
+            assertNull(pagingList(buffer.id).first { it.msgid == "child" }.highlightCaseMapping)
         }
 
     @Test

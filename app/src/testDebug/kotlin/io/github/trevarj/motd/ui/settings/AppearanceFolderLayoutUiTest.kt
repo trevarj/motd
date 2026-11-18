@@ -77,6 +77,7 @@ import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.PaletteSelection
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.TypingIndicatorPlacement
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
@@ -117,6 +118,45 @@ class AppearanceFolderLayoutUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun highlightTriggerStyleTargetChangesWithoutChangingKnownNickStyle() {
+        val settings = mutableStateOf(Settings(nickMentionStyle = NickMentionStyle.NONE))
+        setContent(
+            settingsProvider = { settings.value },
+            targetProvider = { SettingsTarget.HIGHLIGHT_TRIGGER_STYLE },
+            onHighlightTriggerStyleEnabled = { settings.value = settings.value.copy(highlightTriggerStyleEnabled = it) },
+        )
+        compose
+            .onNodeWithTag("settings_target_highlight_HIGHLIGHT_TRIGGER_STYLE")
+            .assertIsDisplayed()
+            .assertIsOn()
+            .performClick()
+            .assertIsOff()
+        compose.runOnIdle {
+            assertFalse(settings.value.highlightTriggerStyleEnabled)
+            assertEquals(NickMentionStyle.NONE, settings.value.nickMentionStyle)
+        }
+    }
+
+    @Test
+    fun typingPlacementTargetSelectsAndReopensPersistedChoiceWithoutEnablingTyping() {
+        val settings = mutableStateOf(Settings(showTypingIndicators = false))
+        setContent(
+            settingsProvider = { settings.value },
+            targetProvider = { SettingsTarget.TYPING_INDICATOR_PLACEMENT },
+            onTypingIndicatorPlacement = { settings.value = settings.value.copy(typingIndicatorPlacement = it) },
+        )
+        compose.onNodeWithTag("settings_target_highlight_TYPING_INDICATOR_PLACEMENT").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("settings_typing_indicator_placement_header").assertIsSelected()
+        compose.onNodeWithTag("settings_typing_indicator_placement_above_composer").performClick()
+        compose.onNodeWithTag("settings_target_highlight_TYPING_INDICATOR_PLACEMENT").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("settings_typing_indicator_placement_above_composer").assertIsSelected()
+        compose.runOnIdle {
+            assertEquals(TypingIndicatorPlacement.ABOVE_COMPOSER, settings.value.typingIndicatorPlacement)
+            assertFalse(settings.value.showTypingIndicators)
+        }
+    }
 
     @Test
     fun emojiTargetShowsMissingSavedSetAsSystemWithoutDownloading() {
@@ -1601,6 +1641,8 @@ class AppearanceFolderLayoutUiTest {
         onChatShadowsEnabled: (Boolean) -> Unit = {},
         onNicknameBackgroundsEnabled: (Boolean) -> Unit = {},
         onNickMentionStyle: (NickMentionStyle) -> Unit = {},
+        onHighlightTriggerStyleEnabled: (Boolean) -> Unit = {},
+        onTypingIndicatorPlacement: (TypingIndicatorPlacement) -> Unit = {},
         onUseThemeTextColors: (Boolean) -> Unit = {},
         onAdjustPaletteReadability: (Boolean) -> Unit = {},
         onOpenSurfaceEffects: (SettingsTarget?) -> Unit = {},
@@ -1658,6 +1700,8 @@ class AppearanceFolderLayoutUiTest {
                         onNickColorsEnabled = {},
                         onNickColorPalette = {},
                         onNickMentionStyle = onNickMentionStyle,
+                        onHighlightTriggerStyleEnabled = onHighlightTriggerStyleEnabled,
+                        onTypingIndicatorPlacement = onTypingIndicatorPlacement,
                         onWallpaper = onWallpaper,
                         importedWallpaper = importedWallpaperProvider(),
                         onUiFontScale = {},

@@ -749,6 +749,7 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setNickColorsEnabled(it.nickColorsEnabled)
                 settingsRepository.setNickColorPalette(it.nickColorPalette)
                 settingsRepository.setNickMentionStyle(it.nickMentionStyle)
+                settingsRepository.setHighlightTriggerStyleEnabled(it.highlightTriggerStyleEnabled)
                 settingsRepository.setNicknameTapAction(it.nicknameTapAction)
                 current.nickColorOverrides.keys
                     .filter { nick -> nick !in it.nickColorOverrides }
@@ -779,6 +780,7 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setShowRedactedMessages(it.showRedactedMessages)
                 settingsRepository.setSendTypingIndicators(it.sendTypingIndicators)
                 settingsRepository.setShowTypingIndicators(it.showTypingIndicators)
+                settingsRepository.setTypingIndicatorPlacement(it.typingIndicatorPlacement)
                 settingsRepository.setAvatarStyle(it.avatarStyle)
                 settingsRepository.setChatWallpaper(it.chatWallpaper)
                 settingsRepository.setShowComposerEmoji(it.showComposerEmoji)

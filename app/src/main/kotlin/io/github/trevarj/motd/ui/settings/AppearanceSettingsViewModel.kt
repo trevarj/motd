@@ -27,6 +27,7 @@ import io.github.trevarj.motd.data.prefs.PaletteSelection
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.TimeFormat
+import io.github.trevarj.motd.data.prefs.TypingIndicatorPlacement
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
@@ -240,6 +241,10 @@ class AppearanceSettingsViewModel
         fun setNickColorsEnabled(value: Boolean) = launch { settingsRepository.setNickColorsEnabled(value) }
 
         fun setNickMentionStyle(value: NickMentionStyle) = launch { settingsRepository.setNickMentionStyle(value) }
+
+        fun setHighlightTriggerStyleEnabled(enabled: Boolean) = launch { settingsRepository.setHighlightTriggerStyleEnabled(enabled) }
+
+        fun setTypingIndicatorPlacement(placement: TypingIndicatorPlacement) = launch { settingsRepository.setTypingIndicatorPlacement(placement) }
 
         fun setNickColorPalette(value: NickColorPalette) = launch { settingsRepository.setNickColorPalette(value) }
 

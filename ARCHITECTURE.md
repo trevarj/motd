@@ -275,6 +275,14 @@ flowchart TD
   set coverage. Shared text/editor renderers preserve raw Unicode, formatting and
   offsets; unsupported sequences retain native fallback. The Compose picker shares
   recents and sticky variants across composer/reactions without bundling artwork.
+- Receipt-time highlight nick and IRC case mapping persist with each message in Room 52.
+  The shared UTF-16 matcher styles only proven body ranges; historical unknown or
+  reply-only highlights retain the row cue without fabricated trigger spans.
+  A default-on appearance switch controls trigger bold/background independently
+  of known-nickname styling and message-level attention.
+  Received typing indicators default to the header; Above composer uses a localized
+  animated surface rather than timeline rows. One author's arrival clears only
+  that author, expiry collapses the surface, and idle layout reserves no gap.
 - Appearance's input style is an IRC-only preference shared by channel, query,
   and server buffers. Floating, Large, and Nickname use one editor/draft path;
   Nickname's network-owned identity is decoration, never submitted text.

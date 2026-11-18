@@ -826,6 +826,10 @@ class CanonicalTimelineStore
                     },
                 isBot = existing.isBot || incoming.isBot,
                 hasMention = existing.hasMention || incoming.hasMention,
+                highlightNick =
+                    if (existing.kind == MessageKind.REDACTED) null else existing.highlightNick ?: incoming.highlightNick,
+                highlightCaseMapping =
+                    if (existing.kind == MessageKind.REDACTED) null else existing.highlightCaseMapping ?: incoming.highlightCaseMapping,
                 replyToMsgid = existing.replyToMsgid ?: incoming.replyToMsgid,
                 replyToEventId = existing.replyToEventId ?: incoming.replyToEventId,
                 channelContext = existing.channelContext ?: incoming.channelContext,

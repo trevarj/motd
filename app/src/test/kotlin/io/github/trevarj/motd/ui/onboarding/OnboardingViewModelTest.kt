@@ -185,6 +185,14 @@ class OnboardingViewModelTest {
             settings.value = settings.value.copy(nickMentionStyle = value)
         }
 
+        override suspend fun setHighlightTriggerStyleEnabled(enabled: Boolean) {
+            settings.value = settings.value.copy(highlightTriggerStyleEnabled = enabled)
+        }
+
+        override suspend fun setTypingIndicatorPlacement(placement: io.github.trevarj.motd.data.prefs.TypingIndicatorPlacement) {
+            settings.value = settings.value.copy(typingIndicatorPlacement = placement)
+        }
+
         override suspend fun setNickColorsEnabled(enabled: Boolean) = Unit
 
         override suspend fun setNickColorPalette(p: NickColorPalette) = Unit

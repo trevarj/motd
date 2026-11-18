@@ -80,6 +80,8 @@ internal fun CompactMessageRow(
     nickColors: NickColorScheme,
     modifier: Modifier = Modifier,
     hasMention: Boolean = false,
+    highlightNick: String? = null,
+    highlightCaseMapping: String? = null,
     dimmed: Boolean = false,
     // Group continuation flag: false = omit the sender prefix.
     showSender: Boolean = true,
@@ -169,6 +171,8 @@ internal fun CompactMessageRow(
             showSender,
             mentionColor,
             onMentionClick,
+            highlightNick,
+            highlightCaseMapping,
             onSenderClick,
             nickMentionStyle,
             nickColors.enabled,
@@ -202,6 +206,8 @@ internal fun CompactMessageRow(
                 adjustPaletteReadability = adjustPaletteReadability,
                 fitSenderColor = !nickColors.preservesAuthoredIdentity(sender, fallbackIsAuthored = true),
                 fitMentionColor = { !nickColors.preservesAuthoredIdentity(it) },
+                highlightNick = highlightNick,
+                highlightCaseMapping = highlightCaseMapping,
             ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
         }
 
@@ -319,6 +325,8 @@ internal fun buildCompactLine(
     adjustPaletteReadability: Boolean = false,
     fitSenderColor: Boolean = true,
     fitMentionColor: (String) -> Boolean = { true },
+    highlightNick: String? = null,
+    highlightCaseMapping: String? = null,
 ): AnnotatedString =
     buildAnnotatedString {
         val nickStyle =
@@ -377,6 +385,8 @@ internal fun buildCompactLine(
             onMentionClick = onMentionClick,
             adjustPaletteReadability = adjustPaletteReadability,
             fitMentionColor = fitMentionColor,
+            highlightNick = highlightNick,
+            highlightCaseMapping = highlightCaseMapping,
         )
         pop()
     }

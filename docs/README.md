@@ -120,6 +120,17 @@ Mentions insert at the cursor or replace the selection. The `: ` suffix is used
 only at whole-message start, never merely because text wraps or follows an
 earlier nonblank line.
 
+Appearance's Style highlight triggers emphasizes the actual matched text with
+bold and a background, independently of known-nickname styling. Turning it off
+leaves the message-level mention cue intact. Older or reply-only highlights
+without a recorded text trigger keep that cue without inventing an inline match.
+
+Typing indicator placement offers Header (the default) or Above composer.
+The latter appears at the live end, where the next message belongs, then gives
+way to that sender's message or collapses on expiry without leaving an idle gap.
+It stays out of the way while reading history; returning to latest shows any
+still-active typists without moving a reader there automatically.
+
 A chat-list swipe acts only after release at least 60% across the row width. Short
 flicks spring back without flying offscreen; right swipes do not dismiss chats.
 

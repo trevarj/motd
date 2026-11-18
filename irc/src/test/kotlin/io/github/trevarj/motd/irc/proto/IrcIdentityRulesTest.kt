@@ -96,6 +96,22 @@ class IrcIdentityRulesTest {
     }
 
     @Test
+    fun `mention ranges share boundaries and casemapping in UTF16 coordinates`() {
+        val text = "😀 Nick[] nick{} prefixnick{} nick{}_ nick{}!"
+        val rules = IrcIdentityRules(caseMapping = IrcCaseMapping.Rfc1459)
+        assertEquals(listOf(3..8, 10..15, 38..43), rules.mentionRanges(text, "nick{}"))
+        for (mapping in listOf(IrcCaseMapping.Ascii, IrcCaseMapping.Rfc1459Strict, IrcCaseMapping.Rfc1459, IrcCaseMapping.Unknown("vendor"))) {
+            val mapped = IrcIdentityRules(caseMapping = mapping)
+            for (body in listOf("", "nick~", "nick^", "_nick^", "énick^", "nick^9", "😀 nick^! nick~")) {
+                assertEquals(mapped.mentionRanges(body, "nick^").isNotEmpty(), mapped.containsMention(body, "nick^"))
+            }
+            assertEquals(emptyList<IntRange>(), mapped.mentionRanges(text, ""))
+        }
+        assertEquals(listOf(0..4), rules.mentionRanges("nick~ nick^", "nick~").take(1))
+        assertEquals(emptyList<IntRange>(), IrcIdentityRules(IrcCaseMapping.Ascii).mentionRanges("nick~", "nick^"))
+    }
+
+    @Test
     fun `reaction actor key prefers account and namespaces nick fallback`() {
         val rules = IrcIdentityRules(caseMapping = IrcCaseMapping.Rfc1459Strict)
 

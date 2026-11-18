@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -26,6 +27,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontWeight
 import androidx.paging.LoadState
 import androidx.paging.LoadStates
 import androidx.paging.Pager
@@ -75,6 +78,68 @@ class GlobalFeedScreenTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun feedRendersReceiptTriggerSpanAndHonorsIndependentOffWithoutInventingProvenance() {
+        assertReceiptTriggerRendering(mentions = false)
+    }
+
+    @Test
+    fun mentionsRendersReceiptTriggerSpanAndHonorsIndependentOffWithoutInventingProvenance() {
+        assertReceiptTriggerRendering(mentions = true)
+    }
+
+    private fun assertReceiptTriggerRendering(mentions: Boolean) {
+        val receipt =
+            row(1, text = "Receipt Nick{ then Nick[!").let {
+                it.copy(
+                    message = it.message.copy(hasMention = true, highlightNick = "Nick[", highlightCaseMapping = "ascii"),
+                    caseMapping = "rfc1459",
+                )
+            }
+        val historical =
+            row(2, text = "Historical Nick[!").let {
+                it.copy(message = it.message.copy(hasMention = true))
+            }
+        val replyOnly =
+            row(3, text = "Reply Nick[!").let {
+                it.copy(message = it.message.copy(hasMention = true, replyToMsgid = "self-message"))
+            }
+        val stream = flowOf(PagingData.from(listOf(receipt, historical, replyOnly)))
+        var enabled by mutableStateOf(true)
+        setContent(stream, mentions = mentions, highlightTriggerStyleEnabled = { enabled })
+        awaitText(receipt.message.text)
+
+        fun assertSpans(
+            hit: SearchHit,
+            expected: List<Pair<Int, Int>>,
+        ) {
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose
+                .onNodeWithText(hit.message.text, useUnmergedTree = true)
+                .assertIsDisplayed()
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val rendered = layouts.single().layoutInput.text
+            assertEquals(hit.message.text, rendered.text)
+            val triggers = rendered.spanStyles.filter { it.item.background != Color.Unspecified }
+            assertEquals(expected, triggers.map { it.start to it.end })
+            triggers.forEach {
+                assertEquals(FontWeight.Bold, it.item.fontWeight)
+                assertEquals("Nick[", rendered.text.substring(it.start, it.end))
+            }
+        }
+
+        val start = receipt.message.text.indexOf("Nick[")
+        assertSpans(receipt, listOf(start to start + "Nick[".length))
+        assertSpans(historical, emptyList())
+        assertSpans(replyOnly, emptyList())
+        compose.runOnIdle { enabled = false }
+        assertSpans(receipt, emptyList())
+        assertSpans(historical, emptyList())
+        assertSpans(replyOnly, emptyList())
+        compose.runOnIdle { enabled = true }
+        assertSpans(receipt, listOf(start to start + "Nick[".length))
+    }
 
     @Test
     fun optedInBlurredMentionRevealsOnlyBeforeOpeningOrigin() {
@@ -191,6 +256,7 @@ class GlobalFeedScreenTest {
         showMentionsNavigation: Boolean = false,
         onMentionsViewportAtNewest: ((Boolean) -> Unit)? = null,
         visibilitySpec: () -> MessageVisibilitySpec = { MessageVisibilitySpec() },
+        highlightTriggerStyleEnabled: () -> Boolean = { true },
     ) {
         compose.setContent {
             // Motion off: the caption waits on a Lottie clock a stub composition never advances.
@@ -212,6 +278,7 @@ class GlobalFeedScreenTest {
                             mentions = mentions,
                             listState = listState,
                             visibilitySpec = visibilitySpec(),
+                            highlightTriggerStyleEnabled = highlightTriggerStyleEnabled(),
                         )
                         onMentionsViewportAtNewest?.let { callback ->
                             ReportMentionsViewportAtNewest(

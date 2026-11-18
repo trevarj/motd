@@ -29,6 +29,112 @@ import org.junit.Test
 
 class MessageBubbleTextTest {
     @Test
+    fun receiptTriggerIsBoldAndReadableWithoutKnownNickStylingInEveryBodyRenderer() {
+        val text = "🙂 BoB, bobby and https://example.org"
+        val bodies =
+            listOf(
+                linkifiedBody(text, Color.Blue, mentionsActive = false, containerColor = Color.White, nickMentionStyle = NickMentionStyle.NONE, mentionColorsEnabled = false, highlightNick = "bob", highlightCaseMapping = "ascii"),
+                buildCompactLine("sender", text, MessageKind.PRIVMSG, Color.Red, Color.Black, Color.Blue, containerColor = Color.White, nickMentionStyle = NickMentionStyle.NONE, mentionColorsEnabled = false, highlightNick = "bob", highlightCaseMapping = "ascii"),
+                buildActionBody(text, Color.Black, Color.Blue, mentionsActive = false, containerColor = Color.White, nickMentionStyle = NickMentionStyle.NONE, mentionColorsEnabled = false, highlightNick = "bob", highlightCaseMapping = "ascii"),
+                buildActionLine("sender", text, Color.Blue, Color.Red, Color.Black, Color.Blue, mentionsActive = false, containerColor = Color.White, nickMentionStyle = NickMentionStyle.NONE, mentionColorsEnabled = false, highlightNick = "bob", highlightCaseMapping = "ascii"),
+            )
+        bodies.forEach { body ->
+            val start = body.text.indexOf("BoB")
+            val trigger = body.spanStyles.last { it.start == start && it.end == start + 3 }
+            assertEquals(FontWeight.Bold, trigger.item.fontWeight)
+            assertTrue(trigger.item.background != Color.Unspecified)
+            assertTrue(contrastRatio(trigger.item.color, trigger.item.background) >= MESSAGE_TEXT_CONTRAST)
+            val nonMatch = body.text.indexOf("bobby")
+            assertTrue(body.spanStyles.none { nonMatch in it.start until it.end && it.item.fontWeight == FontWeight.Bold })
+            assertEquals(1, body.getLinkAnnotations(0, body.length).size)
+        }
+    }
+
+    @Test
+    fun receiptTriggerPreservesRichTextOffsetsChipsAndAuthoredOtherNickInk() {
+        val body =
+            linkifiedBody(
+                "🙂 \u0002BoB\u0002 `bob` @alice https://example.org",
+                Color.Blue,
+                mentionColor = { if (it == "alice") Color.Magenta else null },
+                codeBackground = Color.Black,
+                codeColor = Color.White,
+                containerColor = Color.White,
+                contentColor = Color.Black,
+                nickMentionStyle = NickMentionStyle.CHIP,
+                highlightNick = "bob",
+                highlightCaseMapping = "ascii",
+                fitMentionColor = { false },
+            )
+        assertEquals("🙂 BoB bob @alice https://example.org", body.text)
+        for (token in listOf("BoB", "bob")) {
+            val start = body.text.indexOf(token)
+            val trigger = body.spanStyles.last { start in it.start until it.end }
+            assertEquals(start, trigger.start)
+            assertEquals(start + token.length, trigger.end)
+            assertEquals(FontWeight.Bold, trigger.item.fontWeight)
+            assertTrue(contrastRatio(trigger.item.color, trigger.item.background) >= MESSAGE_TEXT_CONTRAST)
+        }
+        val chip = body.getStringAnnotations(NICK_CHIP_RANGE, 0, body.length).single()
+        assertEquals("@alice", body.text.substring(chip.start, chip.end))
+        assertEquals(Color.Magenta.value.toString(), chip.item)
+        assertEquals(1, body.getLinkAnnotations(0, body.length).size)
+    }
+
+    @Test
+    fun receiptProvenanceIsRequiredAndItsCaseMappingWinsOverCurrentIdentity() {
+        for ((nick, mapping) in listOf(null to "ascii", "bob" to null, null to null)) {
+            val body = linkifiedBody("bob", Color.Blue, mentionsActive = false, highlightNick = nick, highlightCaseMapping = mapping)
+            assertEquals("bob", body.text)
+            assertTrue(body.spanStyles.none { it.item.fontWeight == FontWeight.Bold })
+        }
+        for ((mapping, expected) in listOf("ascii" to false, "rfc1459" to true)) {
+            val body = linkifiedBody("{bob}", Color.Blue, mentionsActive = false, highlightNick = "[bob]", highlightCaseMapping = mapping)
+            assertEquals(expected, body.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+        }
+    }
+
+    @Test
+    fun triggerOverlayKeepsChipAnnotationsLinksAndDimmedContrast() {
+        for (minimum in listOf(MESSAGE_TEXT_CONTRAST, DIMMED_MESSAGE_TEXT_CONTRAST)) {
+            val baseline =
+                linkifiedBody(
+                    "bob https://bob/",
+                    Color.Blue,
+                    mentionColor = { if (it == "bob") Color.Red else null },
+                    containerColor = Color.White,
+                    contentColor = Color.Black,
+                    minimumContrast = minimum,
+                    nickMentionStyle = NickMentionStyle.CHIP,
+                )
+            val body =
+                linkifiedBody(
+                    "bob https://bob/",
+                    Color.Blue,
+                    mentionColor = { if (it == "bob") Color.Red else null },
+                    containerColor = Color.White,
+                    contentColor = Color.Black,
+                    minimumContrast = minimum,
+                    nickMentionStyle = NickMentionStyle.CHIP,
+                    highlightNick = "bob",
+                    highlightCaseMapping = "ascii",
+                )
+            assertEquals("bob https://bob/", body.text)
+            assertEquals("bob", body.getStringAnnotations(NICK_CHIP_RANGE, 0, body.length).single().let { body.text.substring(it.start, it.end) })
+            assertEquals("https://bob/", body.getLinkAnnotations(0, body.length).single().let { body.text.substring(it.start, it.end) })
+            assertEquals(baseline.getStringAnnotations(NICK_CHIP_RANGE, 0, baseline.length), body.getStringAnnotations(NICK_CHIP_RANGE, 0, body.length))
+            assertEquals(baseline.getLinkAnnotations(0, baseline.length), body.getLinkAnnotations(0, body.length))
+            val trigger = body.spanStyles.last { it.start == 0 && it.end == 3 }
+            assertEquals(FontWeight.Bold, trigger.item.fontWeight)
+            assertTrue(contrastRatio(trigger.item.color, trigger.item.background) >= minimum)
+            val withoutPreview = body.withoutPreviewUrls(listOf("https://bob/"))
+            assertEquals("bob", withoutPreview.text.trim())
+            assertEquals(trigger, withoutPreview.spanStyles.last { it.start == 0 && it.end == 3 })
+            assertEquals(body.getStringAnnotations(NICK_CHIP_RANGE, 0, body.length), withoutPreview.getStringAnnotations(NICK_CHIP_RANGE, 0, withoutPreview.length))
+        }
+    }
+
+    @Test
     fun authoredThemeIdentityAndReadingRolesSurviveActionAndRichTextActualFills() {
         val authored = Color(0xFFDDDDDD)
         val fill = Color.White
