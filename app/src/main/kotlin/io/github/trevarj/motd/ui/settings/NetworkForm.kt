@@ -34,9 +34,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -80,6 +78,8 @@ import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPreset
 import io.github.trevarj.motd.ui.settings.addnetwork.NetworkPresetId
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import kotlinx.coroutines.launch
+import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /**

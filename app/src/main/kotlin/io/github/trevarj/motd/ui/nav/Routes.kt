@@ -79,6 +79,7 @@ enum class SettingsTarget {
     NICK_PALETTE,
     NICK_OVERRIDES,
     APP_FONT,
+    APPEARANCE_EMOJI,
     UI_FONT_SIZE,
     CONVERSATION_FONT_SIZE,
     FOLDER_LAYOUT,

@@ -15,7 +15,6 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -45,6 +44,7 @@ import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import android.provider.Settings as AndroidSettings
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 /** Notifications & delivery category: delivery mode (persistent/push) and battery optimization. */
 @Composable

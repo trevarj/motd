@@ -23,7 +23,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +40,7 @@ import io.github.trevarj.motd.audio.contextLabel
 import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 @OptIn(ExperimentalMaterial3Api::class)

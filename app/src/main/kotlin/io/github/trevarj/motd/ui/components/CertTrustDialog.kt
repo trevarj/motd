@@ -7,7 +7,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -22,6 +21,7 @@ import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import java.text.DateFormat
 import java.util.Date
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 /**
  * TOFU cert-trust dialog. Shows the presented leaf's host:port, colon-formatted SHA-256,

@@ -90,7 +90,7 @@ import io.github.trevarj.motd.ui.chat.ConversationLayoutState
 import io.github.trevarj.motd.ui.chat.ConversationPresenceState
 import io.github.trevarj.motd.ui.chat.EntryPositionState
 import io.github.trevarj.motd.ui.chat.FoolCollapseChip
-import io.github.trevarj.motd.ui.chat.nativeEmojiViews
+import io.github.trevarj.motd.ui.chat.descendantViews
 import io.github.trevarj.motd.ui.components.FoolVisibilityExample
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.CompletableDeferred
@@ -167,7 +167,7 @@ class FoolCollapseUiTest {
                 ApplicationProvider.getApplicationContext<Context>().getSystemService(Context.WINDOW_SERVICE),
             ).views
             .asSequence()
-            .flatMap { it.nativeEmojiViews() }
+            .flatMap { it.descendantViews() }
             .filterIsInstance<TextView>()
             .firstOrNull { it.isShown && it.text.toString().equals("Copy", ignoreCase = true) }
 

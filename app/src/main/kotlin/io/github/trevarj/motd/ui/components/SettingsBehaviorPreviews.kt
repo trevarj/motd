@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -27,6 +26,7 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.service.prepareReplyDelivery
 import io.github.trevarj.motd.ui.chat.FoolCollapseChip
 import io.github.trevarj.motd.ui.chat.FoolPlaceholder
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 /** Fixed illustrative outcomes, not a second Smart-presence predicate. Checked against the real SQL. */
 internal val presenceExample =

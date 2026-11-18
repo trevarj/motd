@@ -259,6 +259,15 @@ flowchart TD
   container ink; transient search fills remain visible above selection and fit that ink
   through the fade before restoring the normal selected backing.
   Topic editing uses one native field state for raw IRC text, reactive formatting and click-time Save.
+- Appearance's emoji-set selection is independent of the general UI font and defaults
+  to System. Only pinned Noto/OpenMoji fonts download, on explicit request; bounded
+  streaming, digest/platform validation and atomic installation preserve the previous
+  font on failure or cancellation. Backups contain the selected ID, not font bytes;
+  missing or corrupt installations resolve honestly to System.
+  Bundled Unicode metadata recognizes the longest complete sequence before checking
+  set coverage. Shared text/editor renderers preserve raw Unicode, formatting and
+  offsets; unsupported sequences retain native fallback. The Compose picker shares
+  recents and sticky variants across composer/reactions without bundling artwork.
 - Appearance's input style is an IRC-only preference shared by channel, query,
   and server buffers. Floating, Large, and Nickname use one editor/draft path;
   Nickname's network-owned identity is decoration, never submitted text.

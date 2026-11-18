@@ -37,6 +37,8 @@ class SettingsSearchTest {
             "microphone record" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.VOICE_MESSAGE_BUTTON),
             "user menu tap" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.NICKNAME_TAP_ACTION),
             "encrypted" to SettingsSearchDestination.Page(SettingsSearchPage.BACKUP, SettingsTarget.EXPORT_BACKUP),
+            "emoji" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.APPEARANCE_EMOJI),
+            "openmoji" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.APPEARANCE_EMOJI),
             "tabs" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.FOLDER_LAYOUT),
             "bubble background" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.BUBBLE_COLORS),
             "authored palette" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.ADJUST_PALETTE_READABILITY),

@@ -14,8 +14,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -51,6 +49,8 @@ import io.github.trevarj.motd.ui.settings.SettingsNavigationRow
 import io.github.trevarj.motd.ui.settings.SettingsScaffold
 import io.github.trevarj.motd.ui.settings.SwitchRow
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
+import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.settings.SettingsTarget as SettingsTargetAnchor
 
 @Composable

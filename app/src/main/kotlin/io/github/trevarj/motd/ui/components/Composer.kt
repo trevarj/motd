@@ -1,10 +1,6 @@
 package io.github.trevarj.motd.ui.components
 
-import android.content.Context
 import android.net.Uri
-import android.view.ContextThemeWrapper
-import android.view.MotionEvent
-import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -94,7 +90,6 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.rememberTooltipState
@@ -103,7 +98,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -167,12 +161,12 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
-import androidx.emoji2.emojipicker.EmojiPickerView
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.emoji.EmojiDataset
+import io.github.trevarj.motd.data.emoji.EmojiSequenceCatalog
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.IrcEditorDocument
@@ -182,11 +176,13 @@ import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.COMMAND_HINTS
 import io.github.trevarj.motd.ui.chat.EmojiSearchEntry
+import io.github.trevarj.motd.ui.chat.emojiSearchEntries
 import io.github.trevarj.motd.ui.chat.messageFormattingRange
-import io.github.trevarj.motd.ui.chat.searchSystemEmojis
-import io.github.trevarj.motd.ui.chat.systemEmojiSearchEntries
+import io.github.trevarj.motd.ui.chat.searchEmojis
 import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.LocalComfortableBubbleColors
+import io.github.trevarj.motd.ui.theme.LocalEmojiRenderer
+import io.github.trevarj.motd.ui.theme.LocalEmojiSequenceCatalog
 import io.github.trevarj.motd.ui.theme.LocalInputCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
@@ -203,6 +199,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.foundation.lazy.items as lazyItems
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 data class ComposerReply(
@@ -658,10 +655,14 @@ fun Composer(
         colorSheetVisible = true
     }
     val emojiQuery = activeEmojiQuery(editorValue)
-    val emojiSearchEntries = remember { systemEmojiSearchEntries() }
+    val applicationContext = LocalContext.current.applicationContext
+    val sequenceCatalog = LocalEmojiSequenceCatalog.current ?: remember(applicationContext) { EmojiSequenceCatalog(applicationContext) }
+    var emojiDataset by remember(sequenceCatalog) { mutableStateOf<EmojiDataset?>(null) }
+    LaunchedEffect(sequenceCatalog) { emojiDataset = sequenceCatalog.load() }
+    val emojiSearchEntries = remember(emojiDataset) { emojiDataset?.let(::emojiSearchEntries).orEmpty() }
     val emojiSuggestions =
         remember(emojiQuery, emojiSearchEntries) {
-            emojiQuery?.let { searchSystemEmojis(emojiSearchEntries, it.query) }.orEmpty()
+            emojiQuery?.let { searchEmojis(emojiSearchEntries, it.query) }.orEmpty()
         }
     val hasAutocomplete = emojiSuggestions.isNotEmpty() || autocomplete != null
     // Keep autocomplete hidden for the entire restoration handoff. Otherwise it would introduce
@@ -1875,9 +1876,8 @@ private fun EmojiPickerReplacementSurface(
     readImeContentHeightPx: (Density) -> Int,
     onPick: (String) -> Unit,
 ) {
-    // Stay composed once the picker has been opened once. Re-inflating [EmojiPickerView] restarts
-    // its async category load, which is exactly the blank-then-populate flash on the most expensive
-    // frame of the handoff.
+    // Stay composed after first open: category selection, scroll position and loaded metadata
+    // survive keyboard handoffs and downloaded-font changes.
     if (contentHeightPx <= 0) return
     Layout(
         modifier =
@@ -1996,12 +1996,14 @@ private fun ComposerTextField(
         }
     val commandEnd = if (ircFormattingEnabled) completedCommandEnd(text) else null
     var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val emojiRenderer = LocalEmojiRenderer.current
+    val latestEmojiRenderer = rememberUpdatedState(emojiRenderer)
     val outputTransformation =
         remember(ircFormattingEnabled, fieldBackground, fieldForeground, commandForeground, commandFontSize, mentionsActive, mentionColor) {
-            if (!ircFormattingEnabled && !mentionsActive) {
-                null
-            } else {
-                OutputTransformation {
+            // OutputTransformation identity is part of BasicTextField's input-session state.
+            // Keep it installed in System mode and read renderer changes without replacing it.
+            OutputTransformation {
+                if (ircFormattingEnabled || mentionsActive || latestEmojiRenderer.value != null) {
                     val visibleText = toString()
                     if (ircFormattingEnabled) {
                         val displayed = latestDocument.value.let { if (it.text == visibleText) it else it.replaceText(visibleText) }
@@ -2028,6 +2030,7 @@ private fun ComposerTextField(
                             addStyle(SpanStyle(color = color), start, i)
                         }
                     }
+                    latestEmojiRenderer.value?.addStyles(this)
                 }
             }
         }
@@ -2084,7 +2087,10 @@ private fun ComposerTextField(
                         onFocusChanged(it.isFocused)
                         if (it.isFocused) onFocused()
                     }.testTag("chat_composer_field"),
-            textStyle = MaterialTheme.typography.bodyLarge.copy(color = fieldForeground),
+            textStyle =
+                MaterialTheme.typography.bodyLarge
+                    .copy(color = fieldForeground)
+                    .let { emojiRenderer?.textStyle(it) ?: it },
             cursorBrush = SolidColor(cursorColor),
             keyboardOptions =
                 KeyboardOptions(
@@ -2233,69 +2239,6 @@ private fun EmojiAutocompletePanel(
                 }
             }
         }
-    }
-}
-
-@Composable
-internal fun EmojiPickerPanel(
-    onPick: (String) -> Unit,
-    modifier: Modifier = Modifier,
-    tagPrefix: String = "chat_composer",
-) {
-    val surface = MaterialTheme.colorScheme.surfaceContainerHigh
-    // Compose's applied palette can oppose the platform's resource night mode.
-    val nativeTheme =
-        if (surface.luminance() > 0.5f) {
-            android.R.style.Theme_Material_Light_NoActionBar
-        } else {
-            android.R.style.Theme_Material_NoActionBar
-        }
-    Surface(
-        modifier =
-            modifier
-                .testTag("${tagPrefix}_emoji_picker")
-                .padding(start = 8.dp, end = 8.dp, top = 8.dp)
-                .fillMaxSize(),
-        shape = MotdShapes.bubble,
-        color = surface,
-    ) {
-        // Refresh native theme attributes only when the applied light/dark identity changes;
-        // ordinary composer close/reopen keeps the populated picker and its scroll position.
-        key(nativeTheme) {
-            AndroidView(
-                factory = { context -> NativeEmojiPickerHost(ContextThemeWrapper(context, nativeTheme)) },
-                update = { host ->
-                    host.picker.setOnEmojiPickedListener { item -> onPick(item.emoji) }
-                },
-                modifier =
-                    Modifier
-                        .fillMaxSize()
-                        .testTag("${tagPrefix}_emoji_grid"),
-            )
-        }
-    }
-}
-
-private class NativeEmojiPickerHost(
-    context: Context,
-) : FrameLayout(context) {
-    val picker = EmojiPickerView(context).apply { setBackgroundColor(android.graphics.Color.TRANSPARENT) }
-
-    init {
-        // AndroidView's nested-scroll bridge checks its hosted root, not the inner RecyclerView.
-        isNestedScrollingEnabled = true
-        addView(picker, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-    }
-
-    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        // Claim before a clickable emoji child handles DOWN: waiting for RecyclerView touch slop
-        // lets the enclosing Compose sheet's draggable cancel the native gesture first.
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) parent?.requestDisallowInterceptTouchEvent(true)
-        val handled = super.dispatchTouchEvent(event)
-        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
-            parent?.requestDisallowInterceptTouchEvent(false)
-        }
-        return handled
     }
 }
 

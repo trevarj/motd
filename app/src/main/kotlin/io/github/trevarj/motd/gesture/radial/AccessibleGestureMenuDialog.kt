@@ -13,7 +13,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,6 +29,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.gesture.GestureAction
 import io.github.trevarj.motd.gesture.vector
 import io.github.trevarj.motd.ui.components.effectSurface
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Test tag for the list form of the gesture menu. */

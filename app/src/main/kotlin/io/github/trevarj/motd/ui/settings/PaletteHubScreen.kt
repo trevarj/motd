@@ -42,6 +42,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.UUID
+import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable

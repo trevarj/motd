@@ -118,6 +118,10 @@
           JAVA_TOOL_OPTIONS = "-XX:ActiveProcessorCount=2";
           CMAKE_BUILD_PARALLEL_LEVEL = "2";
         };
+        # Metadata authoring only: pinned shaping tools, no fonts or Android SDK.
+        devShells.emoji-authoring = pkgs.mkShell {
+          packages = [ pkgs.python3 pkgs.harfbuzz ];
+        };
         # Standalone raster studies and browser verification, without the Android SDK.
         devShells.sprite-studies = pkgs.mkShell {
           packages = [ pkgs.nodejs_22 pkgs.imagemagick pkgs.chromium ];

@@ -12,7 +12,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +38,7 @@ import io.github.trevarj.motd.ui.components.rememberSurfaceBackdropSource
 import io.github.trevarj.motd.ui.components.surfaceBackdrop
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.LocalSurfaceEffects
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 internal fun surfaceEffectTitle(surface: EffectSurface): Int =
     when (surface) {

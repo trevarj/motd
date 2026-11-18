@@ -16,7 +16,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -52,6 +51,7 @@ import io.github.trevarj.motd.ui.settings.SettingsNavigationRow
 import io.github.trevarj.motd.ui.settings.SettingsScaffold
 import java.text.DateFormat
 import java.util.Date
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 private val MODEL_MIME_TYPES = arrayOf("application/octet-stream", "*/*")
 

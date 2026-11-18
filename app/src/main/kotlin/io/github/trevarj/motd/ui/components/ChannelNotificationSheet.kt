@@ -15,7 +15,6 @@ import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -38,6 +37,7 @@ import io.github.trevarj.motd.ui.settings.SectionHeader
 import io.github.trevarj.motd.ui.settings.SettingsActionRow
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 /** Policy and the independent watch for one canonical channel; defaults are an uneditable loading state. */
 data class ChannelNotificationPresentation(

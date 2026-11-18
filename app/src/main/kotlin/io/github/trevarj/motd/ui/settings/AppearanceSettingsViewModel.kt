@@ -4,6 +4,8 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.data.emoji.EmojiSetStore
+import io.github.trevarj.motd.data.emoji.EmojiSets
 import io.github.trevarj.motd.data.fonts.CustomFontStore
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
@@ -30,15 +32,18 @@ import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -51,6 +56,13 @@ data class AppearanceSettingsUiState(
     val appearance: AppearanceConfig = AppearanceConfig(),
 )
 
+data class EmojiSettingsState(
+    val installed: Map<String, File> = emptyMap(),
+    val loading: Boolean = true,
+    val downloadingId: String? = null,
+    val error: Boolean = false,
+)
+
 enum class CustomFontImportEvent { IMPORTED, FAILED }
 
 @HiltViewModel
@@ -61,6 +73,7 @@ class AppearanceSettingsViewModel
         private val appearancePrefs: AppearancePrefs,
         private val customFontStore: CustomFontStore,
         private val customWallpaperStore: CustomWallpaperStore,
+        private val emojiSetStore: EmojiSetStore,
     ) : ViewModel() {
         private val _customFontImportEvents = MutableSharedFlow<CustomFontImportEvent>()
         val customFontImportEvents = _customFontImportEvents.asSharedFlow()
@@ -73,6 +86,100 @@ class AppearanceSettingsViewModel
         val importedWallpaper = _importedWallpaper.asSharedFlow()
         private val _wallpaperFailures = MutableSharedFlow<Unit>()
         val wallpaperFailures = _wallpaperFailures.asSharedFlow()
+        private val _emojiState = MutableStateFlow(EmojiSettingsState())
+        val emojiState: StateFlow<EmojiSettingsState> = _emojiState
+        val emojiProgress = emojiSetStore.progress
+        private var emojiIntent = 0L
+        private var emojiJob: Job? = null
+        private val emojiSelectionMutex = Mutex()
+
+        init {
+            viewModelScope.launch {
+                emojiSetStore.revision.collectLatest {
+                    val installed =
+                        buildMap {
+                            for (spec in EmojiSets.all) {
+                                emojiSetStore.installedFile(spec.id)?.let { put(spec.id, it) }
+                            }
+                        }
+                    _emojiState.update { it.copy(installed = installed, loading = false) }
+                }
+            }
+        }
+
+        fun cancelEmojiDownload() {
+            emojiIntent++
+            emojiJob?.cancel()
+            emojiJob = null
+            _emojiState.update { it.copy(downloadingId = null, error = false) }
+        }
+
+        fun selectEmojiSet(id: String) {
+            require(id == EmojiSets.SYSTEM_ID || EmojiSets.find(id) != null)
+            cancelEmojiDownload()
+            val intent = emojiIntent
+            emojiJob =
+                viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    try {
+                        val available = id == EmojiSets.SYSTEM_ID || emojiSetStore.installedFile(id) != null
+                        if (!available) {
+                            if (intent == emojiIntent) _emojiState.update { it.copy(error = true) }
+                            return@launch
+                        }
+                        emojiSelectionMutex.withLock {
+                            if (intent == emojiIntent) appearancePrefs.setEmojiSetId(id)
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        if (intent == emojiIntent) _emojiState.update { it.copy(error = true) }
+                    }
+                }
+        }
+
+        fun downloadEmojiSet(id: String) {
+            require(EmojiSets.find(id) != null)
+            cancelEmojiDownload()
+            val intent = emojiIntent
+            _emojiState.update { it.copy(downloadingId = id) }
+            emojiJob =
+                viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    try {
+                        val file = emojiSetStore.download(id).getOrThrow()
+                        emojiSelectionMutex.withLock {
+                            if (intent == emojiIntent) {
+                                appearancePrefs.setEmojiSetId(id)
+                                _emojiState.update { it.copy(installed = it.installed + (id to file)) }
+                            }
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        if (intent == emojiIntent) _emojiState.update { it.copy(error = true) }
+                    } finally {
+                        if (intent == emojiIntent) _emojiState.update { it.copy(downloadingId = null) }
+                    }
+                }
+        }
+
+        fun removeEmojiSet(id: String) {
+            require(EmojiSets.find(id) != null)
+            cancelEmojiDownload()
+            val intent = emojiIntent
+            emojiJob =
+                viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    try {
+                        emojiSetStore.remove(id)
+                        if (intent == emojiIntent) {
+                            _emojiState.update { it.copy(installed = it.installed - id) }
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        if (intent == emojiIntent) _emojiState.update { it.copy(error = true) }
+                    }
+                }
+        }
 
         val state =
             combine(settingsRepository.settings, appearancePrefs.config, ::AppearanceSettingsUiState)

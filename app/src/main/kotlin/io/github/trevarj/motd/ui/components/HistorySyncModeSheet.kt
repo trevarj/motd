@@ -3,7 +3,6 @@ package io.github.trevarj.motd.ui.components
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -12,6 +11,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.ui.settings.ChoiceOption
 import io.github.trevarj.motd.ui.settings.SingleChoiceSheet
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 @Composable
 fun HistorySyncModeSheet(

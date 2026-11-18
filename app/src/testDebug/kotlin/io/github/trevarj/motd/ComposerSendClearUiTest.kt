@@ -180,14 +180,13 @@ import io.github.trevarj.motd.ui.chat.SendFlightOverlay
 import io.github.trevarj.motd.ui.chat.UnreadEntrySnapshot
 import io.github.trevarj.motd.ui.chat.VoiceMessageUiState
 import io.github.trevarj.motd.ui.chat.VoiceRecordingUi
-import io.github.trevarj.motd.ui.chat.clickNativeEmoji
+import io.github.trevarj.motd.ui.chat.clickEmoji
 import io.github.trevarj.motd.ui.chat.externalTranslationText
-import io.github.trevarj.motd.ui.chat.findNativeEmoji
-import io.github.trevarj.motd.ui.chat.pickNativeEmojiVariant
-import io.github.trevarj.motd.ui.chat.swipeNativeEmojiBody
-import io.github.trevarj.motd.ui.chat.tapNativeEmojiCategory
+import io.github.trevarj.motd.ui.chat.findEmoji
+import io.github.trevarj.motd.ui.chat.pickEmojiVariant
+import io.github.trevarj.motd.ui.chat.swipeEmojiBody
+import io.github.trevarj.motd.ui.chat.tapEmojiCategory
 import io.github.trevarj.motd.ui.chat.timelineMessageTag
-import io.github.trevarj.motd.ui.chat.touchNativeEmojiView
 import io.github.trevarj.motd.ui.components.LocalMessageWallpaperBackdrop
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.ReactionChip
@@ -2289,7 +2288,7 @@ class ComposerSendClearUiTest {
 
     @Test
     @Config(sdk = [35], qualifiers = "en-w411dp-h891dp")
-    fun messageBubbleMoreUsesNativePickerForPendingMessageWithoutChangingComposer() {
+    fun messageBubbleMoreUsesComposePickerForPendingMessageWithoutChangingComposer() {
         val draft = ComposerDraftState("Unsent draft", hydrated = true, revision = 17)
         val parent = translationMessage().copy(sender = "me", text = "Pending message", pendingLabel = "pending", msgid = null)
         val picked = mutableListOf<Pair<MessageEntity, String>>()
@@ -2307,13 +2306,13 @@ class ComposerSendClearUiTest {
         compose.onNodeWithTag("message_more_reactions").performClick()
         compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
         compose.onNodeWithTag("message_reaction_picker").assertIsDisplayed()
-        compose.tapNativeEmojiCategory("FOOD AND DRINK")
-        compose.swipeNativeEmojiBody(upward = true)
-        compose.swipeNativeEmojiBody(upward = false)
+        compose.tapEmojiCategory("food_drink")
+        compose.swipeEmojiBody(upward = true)
+        compose.swipeEmojiBody(upward = false)
         compose.onNodeWithTag("message_reaction_picker").assertIsDisplayed()
         compose.runOnIdle { assertTrue("Bubble → More cell swipes never send/pick a reaction", picked.isEmpty()) }
         compose.onNodeWithTag("chat_composer_field").assertTextEquals(draft.text)
-        compose.touchNativeEmojiView(compose.findNativeEmoji("ANIMALS AND NATURE", "🦑"))
+        compose.findEmoji("animals_nature", "🦑").performTouchInput { click() }
         compose.onNodeWithTag("message_reaction_picker").assertDoesNotExist()
         compose.onNodeWithTag("chat_composer_field").assertTextEquals(draft.text)
         compose.onNodeWithText("Replying to me").assertIsDisplayed()
@@ -2405,11 +2404,11 @@ class ComposerSendClearUiTest {
         compose.onNode(hasText("👍") and hasAnyAncestor(hasTestTag("message_action_sheet"))).assertIsNotEnabled()
         compose.onNode(hasText("❤️") and hasAnyAncestor(hasTestTag("message_action_sheet"))).assertIsEnabled()
         compose.onNodeWithTag("message_more_reactions").performClick()
-        compose.clickNativeEmoji("ANIMALS AND NATURE", "🦑")
+        compose.clickEmoji("animals_nature", "🦑")
         compose.onNodeWithTag("message_reaction_picker").assertIsDisplayed()
         compose.onNodeWithTag("message_reaction_unavailable").assertIsDisplayed()
         compose.runOnIdle { assertTrue(picked.isEmpty()) }
-        compose.pickNativeEmojiVariant("SMILEYS AND EMOTIONS", "👍", "👍🏽")
+        compose.pickEmojiVariant("people_body", "👍", "👍🏽")
         compose.onNodeWithTag("message_reaction_picker").assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf(parent to "👍🏽"), picked) }
     }
@@ -2433,30 +2432,31 @@ class ComposerSendClearUiTest {
         )
         holdMessageBubble(parent)
         compose.onNodeWithTag("message_more_reactions").performClick()
-        compose.clickNativeEmoji("ANIMALS AND NATURE", "🦑")
+        compose.clickEmoji("animals_nature", "🦑")
         compose.onNodeWithTag("message_reaction_picker").assertIsDisplayed()
         compose.onNodeWithTag("message_reaction_unavailable").assertIsDisplayed()
         compose.runOnIdle {
             assertTrue(picked.isEmpty())
             connection = IrcClientState.Disconnected
         }
-        compose.clickNativeEmoji("ANIMALS AND NATURE", "🦑")
+        compose.clickEmoji("animals_nature", "🦑")
         compose.onNodeWithTag("message_reaction_picker").assertIsDisplayed()
         compose.runOnIdle {
             assertTrue(picked.isEmpty())
             connection = IrcClientState.Ready("me", setOf("message-tags"), mapOf("CLIENTTAGDENY" to "draft/react"))
         }
-        compose.clickNativeEmoji("ANIMALS AND NATURE", "🦑")
+        compose.clickEmoji("animals_nature", "🦑")
         compose.onNodeWithTag("message_reaction_picker").assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf(parent to "🦑"), picked) }
     }
 
     @Test
     @Config(sdk = [35], qualifiers = "en-w411dp-h891dp")
-    fun composerAndReactionPickersShareNativeRecentAndStickyChoices() {
+    fun composerAndReactionPickersShareRecentsVariantsAndSendUnicodeUnchanged() {
         val parent = translationMessage().copy(text = "React to this", msgid = "source-message")
         var draft by mutableStateOf(ComposerDraftState("", hydrated = true, revision = 1))
         val picked = mutableListOf<String>()
+        val submissions = mutableListOf<String>()
         setContent(
             draft = { draft },
             pages = flowOf(PagingData.from(listOf(parent))),
@@ -2466,31 +2466,43 @@ class ComposerSendClearUiTest {
                 picked += emoji
             },
             onDraftChanged = { draft = draft.copy(text = it, revision = draft.revision + 1) },
-            onSubmit = { error("picking emoji submitted the composer") },
+            onSubmit = { submissions += it },
         )
         holdMessageBubble(parent)
         compose.onNodeWithTag("message_more_reactions").performClick()
-        compose.pickNativeEmojiVariant("SMILEYS AND EMOTIONS", "👍", "👍🏽")
+        compose.pickEmojiVariant("people_body", "👍", "👍🏽")
         compose.runOnIdle {
             assertEquals(listOf("👍🏽"), picked)
             assertEquals("", draft.text)
         }
 
-        // This composer picker is newly opened, so AndroidX loads its own persisted selections.
+        // A newly opened composer reads the preferred variant and recents from the reaction picker.
         compose.onNodeWithTag("chat_composer_tools").performClick()
         compose.onNodeWithTag("chat_composer_emoji").performClick()
         compose.onNodeWithTag("chat_composer_emoji_picker").assertIsDisplayed()
-        compose.clickNativeEmoji("RECENTLY USED", "👍🏽")
-        compose.clickNativeEmoji("SMILEYS AND EMOTIONS", "👍🏽")
-        compose.onNodeWithTag("chat_composer_field").assertTextEquals("👍🏽👍🏽")
+        compose.tapEmojiCategory("food_drink", tagPrefix = "chat_composer")
+        compose.swipeEmojiBody(upward = true, tagPrefix = "chat_composer")
+        compose.swipeEmojiBody(upward = false, tagPrefix = "chat_composer")
+        compose.clickEmoji("recents", "👍🏽", tagPrefix = "chat_composer")
+        compose.clickEmoji("people_body", "👍🏽", tagPrefix = "chat_composer")
+        compose.clickEmoji("flags", "🇬🇧", tagPrefix = "chat_composer")
+        compose.clickEmoji("people_body", "👩‍💻", tagPrefix = "chat_composer")
+        compose.clickEmoji("smileys_emotion", "❤️", tagPrefix = "chat_composer")
+        compose.onNodeWithTag("chat_composer_field").assertTextEquals("👍🏽👍🏽🇬🇧👩‍💻❤️")
         compose.onNodeWithTag("chat_composer_field").performTouchInput { click(center) }
 
         holdMessageBubble(parent)
         compose.onNodeWithTag("message_more_reactions").performClick()
-        compose.clickNativeEmoji("RECENTLY USED", "👍🏽")
+        compose.clickEmoji("recents", "👍🏽")
         compose.runOnIdle {
             assertEquals(listOf("👍🏽", "👍🏽"), picked)
-            assertEquals("👍🏽👍🏽", draft.text)
+            assertEquals("👍🏽👍🏽🇬🇧👩‍💻❤️", draft.text)
+            assertTrue("Scrolling, picking, and reacting never submit the composer", submissions.isEmpty())
+        }
+        compose.onNodeWithTag("chat_composer_send").performClick()
+        compose.runOnIdle {
+            assertEquals(1, submissions.size)
+            assertEquals("👍🏽👍🏽🇬🇧👩‍💻❤️", submissions.single())
         }
     }
 

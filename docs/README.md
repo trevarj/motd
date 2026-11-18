@@ -81,6 +81,20 @@ error or cancellation. Native media samples are capped at 4 MiB; Ogg comments at
 supported file/container metadata, not identifying details visible or audible in
 the content, or arbitrary data hidden inside compressed samples.
 
+## Emoji sets
+
+Appearance → Emoji set offers System (the default), Noto Emoji, and OpenMoji,
+independently of the text font. Nothing downloads automatically. Download & use
+fetches a verified font from its fixed upstream source; installed sets work
+offline. No chat content is sent, but the download server receives your IP address.
+Source and license links are available beside each set.
+
+The selected set applies throughout the app, including messages, the editor,
+reactions, and the Unicode picker. Categories, shared recents, and long-press
+variants insert ordinary Unicode, never images. Unsupported sequences use the
+device fallback. Backups save the selection, not downloaded fonts; a missing or
+invalid restored set visibly falls back to System until reinstalled.
+
 ## Chat navigation
 
 The drawer's Networks header shows total mentions, not total unread messages.

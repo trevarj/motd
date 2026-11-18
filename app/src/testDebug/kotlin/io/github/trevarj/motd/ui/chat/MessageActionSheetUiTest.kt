@@ -1,17 +1,8 @@
 package io.github.trevarj.motd.ui.chat
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Rect
-import android.os.Looper
-import android.os.SystemClock
-import android.view.InputDevice
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.view.inspector.WindowInspector
-import android.widget.ImageView
-import android.widget.TextView
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -23,25 +14,25 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertContentDescriptionEquals
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
@@ -49,19 +40,20 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.ColorUtils
-import androidx.emoji2.emojipicker.EmojiPickerView
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.UiDispatcherResetRule
@@ -78,10 +70,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
-import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
-import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -331,6 +321,9 @@ class MessageActionSheetUiTest {
         compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
         compose.onNodeWithTag("message_reaction_picker").assertIsDisplayed()
         compose.onNodeWithTag("message_reaction_emoji_picker").assertIsDisplayed()
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodes(hasTestTag("message_reaction_emoji_grid")).fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithTag("message_reaction_emoji_grid").assertIsDisplayed()
         compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss), useUnmergedTree = true).performSemanticsAction(SemanticsActions.Dismiss) { it() }
         compose.onNodeWithTag("message_reaction_picker").assertDoesNotExist()
@@ -339,17 +332,17 @@ class MessageActionSheetUiTest {
 
     @Test
     @Config(sdk = [35], qualifiers = "en-w411dp-h891dp")
-    fun moreReactionsUsesNativePickerAndPreservesEmojiSequences() {
+    fun moreReactionsUsesComposePickerAndPreservesEmojiSequences() {
         val picked = mutableListOf<String>()
         render(onReact = { picked += it })
         compose.onNodeWithTag("message_more_reactions").performClick()
-        compose.clickNativeEmoji("ANIMALS AND NATURE", "🦑")
+        compose.clickEmoji("animals_nature", "🦑")
         compose.onNodeWithTag("message_reaction_picker").assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf("🦑"), picked) }
 
         compose.onNodeWithTag("reopen_message_actions").performClick()
         compose.onNodeWithTag("message_more_reactions").performClick()
-        compose.pickNativeEmojiVariant("SMILEYS AND EMOTIONS", "👍", "👍🏽")
+        compose.pickEmojiVariant("people_body", "👍", "👍🏽")
         compose.onNodeWithTag("message_reaction_picker").assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf("🦑", "👍🏽"), picked) }
     }
@@ -360,21 +353,20 @@ class MessageActionSheetUiTest {
         val picked = mutableListOf<String>()
         render(onReact = { picked += it })
         compose.onNodeWithTag("message_more_reactions").performClick()
-        compose.tapNativeEmojiCategory("FOOD AND DRINK")
-        compose.swipeNativeEmojiBody(upward = true)
-        compose.swipeNativeEmojiBody(upward = false)
+        compose.tapEmojiCategory("food_drink")
+        compose.swipeEmojiBody(upward = true)
+        compose.swipeEmojiBody(upward = false)
         compose.onNodeWithTag("message_reaction_picker").assertIsDisplayed()
         compose.runOnIdle { assertTrue("Swiping never selects a reaction", picked.isEmpty()) }
 
-        val squid = compose.findNativeEmoji("ANIMALS AND NATURE", "🦑")
-        compose.touchNativeEmojiView(squid)
+        compose.findEmoji("animals_nature", "🦑").performTouchInput { click() }
         compose.onNodeWithTag("message_reaction_picker").assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf("🦑"), picked) }
         compose.onNodeWithTag("reopen_message_actions").performClick()
         compose.onNodeWithTag("message_more_reactions").performClick()
-        compose.tapNativeEmojiCategory("FOOD AND DRINK")
-        compose.swipeNativeEmojiBody(upward = true)
-        compose.pickNativeEmojiVariant("SMILEYS AND EMOTIONS", "👍", "👍🏽", touch = true)
+        compose.tapEmojiCategory("food_drink")
+        compose.swipeEmojiBody(upward = true)
+        compose.pickEmojiVariant("people_body", "👍", "👍🏽")
         compose.runOnIdle { assertEquals(listOf("🦑", "👍🏽"), picked) }
     }
 
@@ -383,30 +375,30 @@ class MessageActionSheetUiTest {
     fun appliedLightPickerCategoriesRenderAgainstPlatformNight() {
         render(themePreset = ColorThemePreset.LIGHT)
         compose.onNodeWithTag("message_more_reactions").performClick()
-        compose.assertNativeEmojiCategoryVisible("RECENTLY USED", pickerSurface)
-        compose.assertNativeEmojiCategoryVisible("FOOD AND DRINK", pickerSurface)
+        compose.assertEmojiCategoryVisible("recents", pickerSurface)
+        compose.assertEmojiCategoryVisible("food_drink", pickerSurface)
     }
 
     @Test
     @Config(sdk = [35], qualifiers = "en-w320dp-h640dp-notnight")
-    fun appliedDarkPickerCategoriesRenderAgainstPlatformDayAtLargeNativeFont() {
+    fun appliedDarkPickerCategoriesRenderAgainstPlatformDayAtLargeFont() {
         RuntimeEnvironment.setFontScale(2f)
         render(themePreset = ColorThemePreset.DARK)
         compose.onNodeWithTag("message_more_reactions").performClick()
-        compose.assertNativeEmojiCategoryVisible("RECENTLY USED", pickerSurface)
-        compose.assertNativeEmojiCategoryVisible("FOOD AND DRINK", pickerSurface)
-        compose.swipeNativeEmojiBody(upward = true)
-        compose.swipeNativeEmojiBody(upward = false)
+        compose.assertEmojiCategoryVisible("recents", pickerSurface)
+        compose.assertEmojiCategoryVisible("food_drink", pickerSurface)
+        compose.swipeEmojiBody(upward = true)
+        compose.swipeEmojiBody(upward = false)
     }
 
     @Test
     @Config(sdk = [35], qualifiers = "en-w411dp-h891dp")
-    fun nativePickerRechecksSelectionPolicyBeforeDismissing() {
+    fun pickerRechecksSelectionPolicyBeforeDismissing() {
         var enabled by mutableStateOf(false)
         val picked = mutableListOf<String>()
         render(onReact = { picked += it }, reactionEnabled = { enabled })
         compose.onNodeWithTag("message_more_reactions").performClick()
-        compose.clickNativeEmoji("ANIMALS AND NATURE", "🦑")
+        compose.clickEmoji("animals_nature", "🦑")
 
         compose.onNodeWithTag("message_reaction_picker").assertIsDisplayed()
         compose
@@ -417,7 +409,7 @@ class MessageActionSheetUiTest {
             assertTrue(picked.isEmpty())
             enabled = true
         }
-        compose.clickNativeEmoji("ANIMALS AND NATURE", "🦑")
+        compose.clickEmoji("animals_nature", "🦑")
         compose.onNodeWithTag("message_reaction_picker").assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf("🦑"), picked) }
     }
@@ -440,7 +432,7 @@ class MessageActionSheetUiTest {
         compose.setContent {
             MotdTheme(themePreset = themePreset) {
                 pixelsPerDp = LocalDensity.current.density
-                pickerSurface = MaterialTheme.colorScheme.surfaceContainerHigh
+                pickerSurface = MaterialTheme.colorScheme.surface
                 val scope = rememberCoroutineScope()
                 val actionState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
                 val pickerState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -492,463 +484,128 @@ class MessageActionSheetUiTest {
     }
 }
 
-// Exercise only attached Android Views and public accessibility/click/scroll APIs.
-internal fun View.nativeEmojiViews(): Sequence<View> =
+// General Android selection-toolbar traversal, unrelated to the Compose emoji picker.
+internal fun View.descendantViews(): Sequence<View> =
     sequence {
-        yield(this@nativeEmojiViews)
-        if (this@nativeEmojiViews is ViewGroup) {
-            for (index in 0 until childCount) yieldAll(getChildAt(index).nativeEmojiViews())
+        yield(this@descendantViews)
+        if (this@descendantViews is ViewGroup) {
+            for (index in 0 until childCount) yieldAll(getChildAt(index).descendantViews())
         }
     }
 
-private fun View.nativeEmojiVisible(): Boolean = isAttachedToWindow && isShown && width > 0 && height > 0 && getGlobalVisibleRect(Rect())
+private fun String.emojiCodePointTag(): String = codePoints().toArray().joinToString("_") { it.toString(16) }
 
-// getGlobalVisibleRect is root-relative, not screen-relative (dialog/popup windows can be offset).
-private fun View.nativeEmojiScreenRect(): Rect {
-    assertTrue("Use an attached, visible native view", nativeEmojiVisible())
-    val visible = Rect().also { assertTrue(getLocalVisibleRect(it)) }
-    val location = IntArray(2).also(::getLocationOnScreen)
-    visible.offset(location[0], location[1])
-    return visible
+internal fun ComposeContentTestRule.tapEmojiCategory(
+    category: String,
+    tagPrefix: String = "message_reaction",
+) {
+    // The picker shell precedes metadata loading; off-screen LazyRow items do not exist yet.
+    waitUntil(timeoutMillis = 10_000) {
+        onAllNodes(hasTestTag("${tagPrefix}_emoji_categories")).fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithTag("${tagPrefix}_emoji_categories")
+        .performScrollToNode(hasTestTag("${tagPrefix}_emoji_category_$category"))
+    onNodeWithTag("${tagPrefix}_emoji_category_$category")
+        .performClick()
+        .assertIsDisplayed()
+        .assertIsSelected()
+    onNodeWithTag("${tagPrefix}_emoji_grid").assertIsDisplayed()
 }
 
-private fun View.nativeEmojiInputRoot(): View =
-    generateSequence(this) { it.parent as? View }.filterIsInstance<ViewRootForTest>().firstOrNull()?.view
-        ?: rootView // Native variant popups have their own non-Compose window.
+internal fun ComposeContentTestRule.emojiScrollPosition(
+    tagPrefix: String = "message_reaction",
+): Float =
+    onNodeWithTag("${tagPrefix}_emoji_grid")
+        .fetchSemanticsNode()
+        .config[SemanticsProperties.VerticalScrollAxisRange]
+        .value()
 
-// Pseudolocalized resources can wrap labels in bidi controls; never normalize emoji code points.
-private fun CharSequence.nativeEmojiLabel(): String =
-    toString().trim {
-        it == '\u061c' || it == '\u200e' || it == '\u200f' || it in '\u202a'..'\u202e' || it in '\u2066'..'\u2069'
-    }
-
-private fun View.nativeEmojiDescription(): String? = contentDescription?.nativeEmojiLabel()
-
-internal fun ComposeContentTestRule.nativeEmojiPicker(): EmojiPickerView {
-    var picker: EmojiPickerView? = null
-    waitUntil(10_000) {
-        runOnIdle {
-            picker =
-                WindowInspector
-                    .getGlobalWindowViews()
-                    .asSequence()
-                    .flatMap { it.nativeEmojiViews() }
-                    .filterIsInstance<EmojiPickerView>()
-                    .singleOrNull { it.nativeEmojiVisible() }
-            picker?.nativeEmojiViews()?.any {
-                it.nativeEmojiVisible() && it.isClickable && it.nativeEmojiDescription()?.endsWith(" emoji") == true
-            } == true
-        }
-    }
-    return checkNotNull(picker)
-}
-
-private fun EmojiPickerView.nativeEmojiBody(): RecyclerView =
-    nativeEmojiViews().filterIsInstance<RecyclerView>().single {
-        (it.layoutManager as? LinearLayoutManager)?.orientation == RecyclerView.VERTICAL
-    }
-
-internal fun ComposeContentTestRule.tapNativeEmojiCategory(category: String) {
-    val picker = nativeEmojiPicker()
-    val body = runOnIdle { picker.nativeEmojiBody() }
-    val before =
-        runOnIdle {
-            body.computeVerticalScrollOffset() to
-                body
-                    .nativeEmojiViews()
-                    .filter { it.nativeEmojiVisible() }
-                    .mapNotNull { it.nativeEmojiDescription() }
-                    .toList()
-        }
-    val categoryIcon =
-        runOnIdle {
-            picker.nativeEmojiViews().filterIsInstance<ImageView>().single {
-                it.nativeEmojiVisible() && it.nativeEmojiDescription() == category
-            }
-        }
-    val categoryItem =
-        runOnIdle {
-            generateSequence<View>(categoryIcon) { it.parent as? View }.first { it.isClickable }.also {
-                assertTrue("Tap the native header's clickable item", it.nativeEmojiVisible())
-            }
-        }
-    val initiallySelected = runOnIdle { categoryIcon.isSelected }
-    touchNativeEmojiView(categoryItem)
-    try {
-        waitUntil(10_000) {
-            runOnIdle {
-                // Header notifications can rebind/recycle the icon after the real click.
-                val selected =
-                    picker.nativeEmojiViews().filterIsInstance<ImageView>().any {
-                        it.nativeEmojiVisible() && it.nativeEmojiDescription() == category && it.isSelected
-                    }
-                val title =
-                    body.nativeEmojiViews().filterIsInstance<TextView>().any {
-                        it.nativeEmojiVisible() && it.text.nativeEmojiLabel().equals(category, ignoreCase = true)
-                    }
-                val cells =
-                    body
-                        .nativeEmojiViews()
-                        .filter { it.nativeEmojiVisible() }
-                        .mapNotNull { it.nativeEmojiDescription() }
-                        .toList()
-                selected && title && cells.any { it.endsWith(" emoji") } &&
-                    (initiallySelected || body.computeVerticalScrollOffset() != before.first || cells != before.second)
-            }
-        }
-    } catch (failure: AssertionError) {
-        val diagnostic =
-            runOnIdle {
-                val window = picker.rootView
-                val windowOrigin = IntArray(2).also(window::getLocationOnScreen).toList()
-                val windowLocal = IntArray(2).also(window::getLocationInWindow).toList()
-                val hostOrigin = IntArray(2).also(categoryItem.nativeEmojiInputRoot()::getLocationOnScreen).toList()
-                val itemOrigin = IntArray(2).also(categoryItem::getLocationOnScreen).toList()
-                val headers =
-                    picker
-                        .nativeEmojiViews()
-                        .filterIsInstance<ImageView>()
-                        .map {
-                            "${it.nativeEmojiDescription()}:selected=${it.isSelected},visible=${it.nativeEmojiVisible()}"
-                        }.toList()
-                val titles =
-                    body
-                        .nativeEmojiViews()
-                        .filterIsInstance<TextView>()
-                        .filter { it.nativeEmojiVisible() }
-                        .map { it.text }
-                        .toList()
-                "category=$category itemScreen=$itemOrigin size=${categoryItem.width}x${categoryItem.height} " +
-                    "windowScreen=$windowOrigin windowLocal=$windowLocal hostScreen=$hostOrigin " +
-                    "headerClickable=${categoryItem.hasOnClickListeners()} headers=$headers " +
-                    "titles=$titles offset=${before.first}->${body.computeVerticalScrollOffset()}"
-            }
-        throw AssertionError("Native category touch did not select/navigate: $diagnostic", failure)
-    }
-}
-
-internal fun ComposeContentTestRule.swipeNativeEmojiBody(
+internal fun ComposeContentTestRule.swipeEmojiBody(
     upward: Boolean,
     tagPrefix: String = "message_reaction",
 ) {
-    val picker = nativeEmojiPicker()
-    val body = runOnIdle { picker.nativeEmojiBody() }
-
-    fun visibleAnchor(): Pair<Int, Int> {
-        val layoutManager = body.layoutManager as LinearLayoutManager
-        val position = layoutManager.findFirstVisibleItemPosition()
-        assertTrue("Native body has a visible content anchor", position != RecyclerView.NO_POSITION)
-        val anchor = checkNotNull(layoutManager.findViewByPosition(position))
-        assertTrue("Native content anchor is attached", anchor.isAttachedToWindow && anchor.parent === body)
-        return position to anchor.top
-    }
-    val before =
-        runOnIdle {
-            assertTrue("Use a mid-list swipe, not a native scroll edge", body.canScrollVertically(if (upward) 1 else -1))
-            visibleAnchor()
-        }
-
-    fun visibleCells() = body.nativeEmojiViews().filter { it.nativeEmojiVisible() && it.isClickable && it.nativeEmojiDescription()?.endsWith(" emoji") == true }
-    val visibleBefore = runOnIdle { visibleCells().map { it.nativeEmojiDescription() }.toList() }
-    val pickerBounds = runOnIdle { picker.nativeEmojiScreenRect() }
     val grid = onNodeWithTag("${tagPrefix}_emoji_grid")
-    val node = grid.fetchSemanticsNode()
-    val (start, end) =
-        runOnIdle {
-            val viewport = body.nativeEmojiScreenRect()
-            assertTrue("Native swipe viewport is nonempty", !viewport.isEmpty)
-            val host = (checkNotNull(node.root) as ViewRootForTest).view
-            val hostLocation = IntArray(2).also(host::getLocationOnScreen)
-            assertTrue("Inject through the attached Compose Android root", host.isAttachedToWindow)
-            val targetY = viewport.top + viewport.height() * if (upward) 0.75f else 0.25f
-            val cellBounds =
-                visibleCells()
-                    .map { cell ->
-                        val location = IntArray(2).also(cell::getLocationOnScreen)
-                        Rect(location[0], location[1], location[0] + cell.width, location[1] + cell.height)
-                            .takeIf { cell.nativeEmojiScreenRect().contains(it) && viewport.contains(it) }
-                    }.filterNotNull()
-                    .minBy { kotlin.math.abs(it.exactCenterY() - targetY) }
-            // performTouchInput adds boundsInRoot; its root receives host-local, not screen coordinates.
-            val inputOrigin = Offset(hostLocation[0].toFloat(), hostLocation[1].toFloat()) + node.boundsInRoot.topLeft
-            val start = Offset(cellBounds.exactCenterX(), cellBounds.exactCenterY()) - inputOrigin
-            val endY = viewport.top + viewport.height() * if (upward) 0.2f else 0.8f
-            start to (Offset(cellBounds.exactCenterX(), endY) - inputOrigin)
-        }
-    // Touch input is injected at the Compose/window root, not directly into RecyclerView.
+    val picker = onNodeWithTag("${tagPrefix}_emoji_picker")
+    val bounds = picker.fetchSemanticsNode().boundsInRoot
+    val before = emojiScrollPosition(tagPrefix)
     grid.performTouchInput {
-        down(start)
-        for (step in 1..16) moveTo(start + (end - start) * (step / 16f), delayMillis = 32)
-        advanceEventTime(100)
-        up()
+        if (upward) swipeUp() else swipeDown()
     }
-    waitForIdle()
-    runOnIdle {
-        val after = visibleAnchor()
-        val movedUp = after.first > before.first || (after.first == before.first && after.second < before.second)
-        val movedDown = after.first < before.first || (after.first == before.first && after.second > before.second)
-        assertTrue("Real clickable-cell swipe moves native content in the requested direction: $before -> $after", if (upward) movedUp else movedDown)
-        assertTrue("Real native content changes after the swipe", visibleBefore != visibleCells().map { it.nativeEmojiDescription() }.toList())
-        assertEquals("A mid-list swipe does not drag the enclosing sheet/picker", pickerBounds, picker.nativeEmojiScreenRect())
-    }
-    onNodeWithTag("${tagPrefix}_emoji_picker").assertIsDisplayed()
+    val after = emojiScrollPosition(tagPrefix)
+    assertTrue("Cell swipes scroll content in the requested direction: $before -> $after", if (upward) after > before else after < before)
+    assertEquals("Scrolling content does not drag its enclosing picker", bounds, picker.fetchSemanticsNode().boundsInRoot)
+    picker.assertIsDisplayed()
 }
 
-internal fun ComposeContentTestRule.touchNativeEmojiView(
-    view: View,
-    longPress: Boolean = false,
-) {
-    val (root, position) =
-        runOnIdle {
-            assertTrue("Touch a visible native cell/category", view.nativeEmojiVisible())
-            val bounds = view.nativeEmojiScreenRect()
-            val root = view.nativeEmojiInputRoot()
-            val location = IntArray(2).also(root::getLocationOnScreen)
-            root to Offset(bounds.exactCenterX() - location[0], bounds.exactCenterY() - location[1])
-        }
-    val downTime = runOnIdle { SystemClock.uptimeMillis() }
-
-    fun dispatch(action: Int) =
-        runOnIdle {
-            val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, position.x, position.y, 0)
-            event.source = InputDevice.SOURCE_TOUCHSCREEN
-            try {
-                assertTrue("The owning host dispatches native action=$action at $position", root.dispatchTouchEvent(event))
-            } finally {
-                event.recycle()
-            }
-        }
-    dispatch(MotionEvent.ACTION_DOWN)
-    if (longPress) {
-        mainClock.advanceTimeBy(700)
-        runOnIdle { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(700)) }
-    }
-    dispatch(MotionEvent.ACTION_UP)
-    waitForIdle()
-}
-
-internal fun ComposeContentTestRule.assertNativeEmojiCategoryVisible(
+internal fun ComposeContentTestRule.assertEmojiCategoryVisible(
     category: String,
     surface: Color,
     tagPrefix: String = "message_reaction",
 ) {
-    val picker = nativeEmojiPicker()
-    val previousOffset = runOnIdle { picker.nativeEmojiBody().computeVerticalScrollOffset() }
-    tapNativeEmojiCategory(category)
-    if (category != "RECENTLY USED") {
-        runOnIdle {
-            assertTrue("A real category tap navigates the body", picker.nativeEmojiBody().computeVerticalScrollOffset() != previousOffset)
+    tapEmojiCategory(category, tagPrefix)
+    val categoryNode = onNodeWithTag("${tagPrefix}_emoji_category_$category")
+    categoryNode.assertHasClickAction().assertIsSelected()
+    val title = onNodeWithTag("${tagPrefix}_emoji_category_title").assertIsDisplayed()
+    val layouts = mutableListOf<TextLayoutResult>()
+    title.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+    val layout = layouts.single()
+    assertFalse(
+        "The category title remains readable at the configured font scale: " +
+            "text=${layout.layoutInput.text.text}, size=${layout.size}, " +
+            "paragraph=${layout.multiParagraph.width}x${layout.multiParagraph.height}, " +
+            "constraints=${layout.layoutInput.constraints}, " +
+            "ellipsized=${(0 until layout.lineCount).any { layout.isLineEllipsized(it) }}",
+        layout.hasVisualOverflow,
+    )
+    val pixels = title.captureToImage().toPixelMap()
+    var contrastingPixels = 0
+    for (y in 0 until pixels.height) {
+        for (x in 0 until pixels.width) {
+            if (ColorUtils.calculateContrast(pixels[x, y].toArgb(), surface.toArgb()) >= 4.5) contrastingPixels++
         }
     }
-    val grid = onNodeWithTag("${tagPrefix}_emoji_grid")
-    val node = grid.fetchSemanticsNode()
-    val bitmap = grid.captureToImage().asAndroidBitmap()
-    runOnIdle {
-        val host = (checkNotNull(node.root) as ViewRootForTest).view
-        val location = IntArray(2).also(host::getLocationOnScreen)
-        val captureOrigin = Offset(location[0].toFloat(), location[1].toFloat()) + node.boundsInRoot.topLeft
-
-        fun bounds(view: View): Rect =
-            view.nativeEmojiScreenRect().also {
-                it.offset(-captureOrigin.x.toInt(), -captureOrigin.y.toInt())
-                assertTrue(it.intersect(0, 0, bitmap.width, bitmap.height))
-            }
-
-        fun contrastingPixels(
-            view: View,
-            minimumContrast: Double,
-        ): Int {
-            val rect = bounds(view)
-            var count = 0
-            for (y in rect.top until rect.bottom) {
-                for (x in rect.left until rect.right) {
-                    if (ColorUtils.calculateContrast(bitmap.getPixel(x, y), surface.toArgb()) >= minimumContrast) count++
-                }
-            }
-            return count
-        }
-        val labels =
-            picker
-                .nativeEmojiBody()
-                .nativeEmojiViews()
-                .filterIsInstance<TextView>()
-                .filter { it.nativeEmojiVisible() && it.text.isNotBlank() }
-                .toList()
-        assertTrue("The native category/recents text is actually laid out", labels.isNotEmpty())
-        labels.forEach {
-            assertTrue("Native '${it.text}' foreground contrasts with the applied Compose surface", ColorUtils.calculateContrast(it.currentTextColor, surface.toArgb()) >= 4.5)
-            assertTrue("Native '${it.text}' has visible rendered text pixels", contrastingPixels(it, 4.5) >= 8)
-        }
-        val labelBounds = bounds(labels.first())
-        assertTrue("The captured native window includes the actual Compose surface fill", bitmap.containsColor(labelBounds, surface.toArgb()))
-        val icons =
-            picker
-                .nativeEmojiViews()
-                .filterIsInstance<ImageView>()
-                .filter { it.nativeEmojiVisible() }
-                .toList()
-        assertTrue("All native category accessibility labels remain present", icons.size > 1 && icons.all { !it.nativeEmojiDescription().isNullOrBlank() })
-        icons.forEach { assertTrue("Native ${it.contentDescription} drawable has visible pixels", contrastingPixels(it, 3.0) >= 8) }
-        val selected = icons.single { it.isSelected && it.nativeEmojiDescription() == category }
-        val underline = (selected.parent as ViewGroup).nativeEmojiViews().single { it !== selected && it !is ViewGroup && it.isSelected && it.nativeEmojiVisible() }
-        assertTrue("The selected native category has a rendered underline", contrastingPixels(underline, 1.5) >= 4)
-    }
+    assertTrue("The category title has visible contrasting text against the applied theme", contrastingPixels >= 8)
 }
 
-private fun Bitmap.containsColor(
-    bounds: Rect,
-    color: Int,
-): Boolean {
-    for (y in bounds.top until bounds.bottom) {
-        for (x in bounds.left until bounds.right) if (getPixel(x, y) == color) return true
-    }
-    return false
-}
-
-internal fun ComposeContentTestRule.findNativeEmoji(
+internal fun ComposeContentTestRule.findEmoji(
     category: String,
     emoji: String,
-): View {
-    val picker = nativeEmojiPicker()
-    val header =
-        runOnIdle {
-            picker
-                .nativeEmojiViews()
-                .filterIsInstance<RecyclerView>()
-                .single {
-                    (it.layoutManager as? LinearLayoutManager)?.orientation == RecyclerView.HORIZONTAL
-                }.also { it.scrollToPosition(0) }
+    tagPrefix: String = "message_reaction",
+): SemanticsNodeInteraction {
+    tapEmojiCategory(category, tagPrefix)
+    val base =
+        if (category == "recents") {
+            emoji
+        } else {
+            emoji
+                .codePoints()
+                .filter { it !in 0x1f3fb..0x1f3ff }
+                .toArray()
+                .let { String(it, 0, it.size) }
         }
-    waitForIdle()
-    while (true) {
-        val label =
-            runOnIdle {
-                header.nativeEmojiViews().firstOrNull {
-                    it.nativeEmojiVisible() && it.nativeEmojiDescription() == category
-                }
-            }
-        if (label != null) {
-            runOnIdle {
-                var item: View = label
-                while (!item.isClickable) item = item.parent as? View ?: error("Native category has no clickable ancestor")
-                assertTrue(item.nativeEmojiVisible())
-                assertTrue(item.performClick())
-            }
-            break
-        }
-        val direction = if (header.layoutDirection == View.LAYOUT_DIRECTION_RTL) -1 else 1
-        val previousOffset =
-            runOnIdle {
-                assertTrue(
-                    "Native category $category absent: ${header.nativeEmojiViews().mapNotNull { it.nativeEmojiDescription() }.toList()}",
-                    header.canScrollHorizontally(direction),
-                )
-                header.computeHorizontalScrollOffset().also {
-                    header.scrollBy(direction * (header.width * 3 / 4).coerceAtLeast(1), 0)
-                    header.requestLayout()
-                }
-            }
-        waitForIdle()
-        runOnIdle {
-            assertTrue("Native category header did not scroll", header.computeHorizontalScrollOffset() != previousOffset)
-        }
-    }
-    val body =
-        runOnIdle {
-            picker.nativeEmojiViews().filterIsInstance<RecyclerView>().single {
-                (it.layoutManager as? LinearLayoutManager)?.orientation == RecyclerView.VERTICAL
-            }
-        }
-
-    fun visibleAnchor(): Pair<Int, Int> {
-        val layoutManager = body.layoutManager as LinearLayoutManager
-        val position = layoutManager.findFirstVisibleItemPosition()
-        assertTrue("Native body has a visible content anchor", position != RecyclerView.NO_POSITION)
-        val anchor = checkNotNull(layoutManager.findViewByPosition(position))
-        assertTrue("Native content anchor is attached", anchor.isAttachedToWindow && anchor.parent === body)
-        return position to anchor.top
-    }
-    while (true) {
-        waitForIdle()
-        waitUntil(10_000) {
-            runOnIdle {
-                val cells = body.nativeEmojiViews().filter { it.nativeEmojiVisible() && it.isClickable }.toList()
-                cells.isNotEmpty() && cells.all { it.nativeEmojiDescription()?.endsWith(" emoji") == true }
-            }
-        }
-        val cell =
-            runOnIdle {
-                body.nativeEmojiViews().firstOrNull {
-                    it.nativeEmojiVisible() && it.isClickable && it.nativeEmojiDescription() == "$emoji emoji"
-                }
-            }
-        if (cell != null) return cell
-        val before =
-            runOnIdle {
-                assertTrue(
-                    "$emoji absent from native $category cells: ${body.nativeEmojiViews().mapNotNull { it.contentDescription }.toList()}",
-                    body.canScrollVertically(1),
-                )
-                visibleAnchor().also {
-                    body.scrollBy(0, (body.height * 3 / 4).coerceAtLeast(1))
-                    body.requestLayout()
-                }
-            }
-        waitForIdle()
-        runOnIdle {
-            val after = visibleAnchor()
-            assertTrue(
-                "Native emoji body did not scroll: $before -> $after",
-                after.first > before.first || (after.first == before.first && after.second < before.second),
-            )
-        }
-    }
+    val cellTag = "${tagPrefix}_emoji_cell_${base.emojiCodePointTag()}"
+    onNodeWithTag("${tagPrefix}_emoji_grid").performScrollToNode(hasTestTag(cellTag))
+    return onNodeWithTag(cellTag).assertIsDisplayed().assertHasClickAction()
 }
 
-internal fun ComposeContentTestRule.clickNativeEmoji(
+internal fun ComposeContentTestRule.clickEmoji(
     category: String,
     emoji: String,
+    tagPrefix: String = "message_reaction",
 ) {
-    val cell = findNativeEmoji(category, emoji)
-    runOnIdle {
-        assertTrue("The selected native $emoji cell is attached and visible", cell.nativeEmojiVisible())
-        assertTrue(cell.performClick())
-    }
-    waitForIdle()
+    findEmoji(category, emoji, tagPrefix).performTouchInput { click() }
 }
 
-internal fun ComposeContentTestRule.pickNativeEmojiVariant(
+internal fun ComposeContentTestRule.pickEmojiVariant(
     category: String,
     base: String,
     variant: String,
-    touch: Boolean = false,
+    tagPrefix: String = "message_reaction",
 ) {
-    val cell = findNativeEmoji(category, base)
-    if (touch) {
-        touchNativeEmojiView(cell, longPress = true)
-    } else {
-        runOnIdle {
-            assertTrue("The native $base cell has a real long-press variant listener", cell.isLongClickable)
-            assertTrue(cell.performLongClick())
-        }
-    }
-    var variantCell: View? = null
-    waitUntil(10_000) {
-        runOnIdle {
-            val popup = shadowOf(RuntimeEnvironment.getApplication()).latestPopupWindow
-            variantCell =
-                popup?.takeIf { it.isShowing }?.contentView?.nativeEmojiViews()?.firstOrNull {
-                    it.nativeEmojiVisible() && it.isClickable && it.nativeEmojiDescription() == "$variant emoji"
-                }
-            variantCell != null
-        }
-    }
-    val popup = runOnIdle { checkNotNull(shadowOf(RuntimeEnvironment.getApplication()).latestPopupWindow).also { assertTrue(it.isShowing) } }
-    if (touch) {
-        touchNativeEmojiView(checkNotNull(variantCell))
-    } else {
-        runOnIdle { assertTrue(checkNotNull(variantCell).performClick()) }
-    }
-    runOnIdle { assertFalse("Choosing a real variant dismisses its native popup", popup.isShowing) }
-    waitForIdle()
+    findEmoji(category, base, tagPrefix).performTouchInput { longClick() }
+    onNodeWithTag("${tagPrefix}_emoji_variants").assertIsDisplayed()
+    onNodeWithTag("${tagPrefix}_emoji_variant_${variant.emojiCodePointTag()}")
+        .assertIsDisplayed()
+        .performTouchInput { click() }
+    onNodeWithTag("${tagPrefix}_emoji_variants").assertDoesNotExist()
 }

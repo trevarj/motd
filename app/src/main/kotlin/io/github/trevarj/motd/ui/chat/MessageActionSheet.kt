@@ -33,7 +33,6 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
@@ -66,6 +65,7 @@ import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import androidx.compose.foundation.lazy.items as lazyItems
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Quick-reaction row shown at the top of the action sheet. */

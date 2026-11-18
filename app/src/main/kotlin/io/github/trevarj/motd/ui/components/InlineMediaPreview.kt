@@ -12,7 +12,6 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -55,6 +54,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.chat.isVideoUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.net.URI
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 internal enum class RemoteMediaLoadState {

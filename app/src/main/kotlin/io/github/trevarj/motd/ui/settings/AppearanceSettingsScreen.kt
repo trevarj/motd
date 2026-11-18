@@ -19,6 +19,8 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,14 +39,13 @@ import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -60,6 +61,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
@@ -78,6 +80,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.emoji.EmojiDownloadProgress
+import io.github.trevarj.motd.data.emoji.EmojiSets
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
@@ -127,6 +131,8 @@ import java.io.File
 import kotlin.math.roundToInt
 import android.provider.Settings as AndroidSettings
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
+import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Appearance category: theme, dynamic color, layout density, avatar style, nick colors, wallpaper. */
@@ -141,6 +147,8 @@ fun AppearanceSettingsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val emojiState by viewModel.emojiState.collectAsStateWithLifecycle()
+    val emojiProgress by viewModel.emojiProgress.collectAsStateWithLifecycle()
     val wallpaperFailedMessage = stringResource(R.string.settings_wallpaper_invalid)
     val wallpaperImporting by viewModel.wallpaperImporting.collectAsStateWithLifecycle()
     var importedWallpaper by remember { mutableStateOf<WallpaperSelection?>(null) }
@@ -169,6 +177,12 @@ fun AppearanceSettingsScreen(
         settings = state.settings,
         appearance = state.appearance,
         customFontFile = customFontFile,
+        emojiState = emojiState,
+        emojiProgress = emojiProgress,
+        onSelectEmojiSet = viewModel::selectEmojiSet,
+        onDownloadEmojiSet = viewModel::downloadEmojiSet,
+        onCancelEmojiDownload = viewModel::cancelEmojiDownload,
+        onRemoveEmojiSet = viewModel::removeEmojiSet,
         onBack = onBack,
         onOpenNickColors = onOpenNickColors,
         onOpenPalettes = onOpenPalettes,
@@ -267,6 +281,12 @@ fun AppearanceSettingsContent(
     wallpaperImporting: Boolean = false,
     target: SettingsTarget? = null,
     snackbarHostState: SnackbarHostState? = null,
+    emojiState: EmojiSettingsState = EmojiSettingsState(),
+    emojiProgress: EmojiDownloadProgress? = null,
+    onSelectEmojiSet: (String) -> Unit = {},
+    onDownloadEmojiSet: (String) -> Unit = {},
+    onCancelEmojiDownload: () -> Unit = {},
+    onRemoveEmojiSet: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
@@ -294,6 +314,7 @@ fun AppearanceSettingsContent(
         }
     }
     var showFontSheet by rememberSaveable { mutableStateOf(false) }
+    var showEmojiSheet by rememberSaveable { mutableStateOf(false) }
     var showBubbleColorSheet by rememberSaveable { mutableStateOf(false) }
     var choiceSheet by rememberSaveable { mutableStateOf<AppearanceChoice?>(null) }
     // Update the sample on tap, before the persisted settings flow emits its new value.
@@ -467,6 +488,16 @@ fun AppearanceSettingsContent(
                     value = fontChoiceLabel(appearance.fontChoice),
                     onClick = { showFontSheet = true },
                     modifier = targetModifier.testTag("settings_font_picker"),
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.APPEARANCE_EMOJI.name) { targetModifier ->
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_emoji_set),
+                    value = emojiSetSummary(appearance.emojiSetId, emojiState),
+                    summary = stringResource(R.string.settings_emoji_scope),
+                    onClick = { showEmojiSheet = true },
+                    modifier = targetModifier.testTag("settings_emoji_picker"),
                 )
             }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -905,6 +936,18 @@ fun AppearanceSettingsContent(
             onDismiss = { choiceSheet = null },
         )
     }
+    if (showEmojiSheet) {
+        EmojiSetPickerSheet(
+            selectedId = appearance.emojiSetId,
+            state = emojiState,
+            progress = emojiProgress,
+            onSelect = onSelectEmojiSet,
+            onDownload = onDownloadEmojiSet,
+            onCancel = onCancelEmojiDownload,
+            onRemove = onRemoveEmojiSet,
+            onDismiss = { showEmojiSheet = false },
+        )
+    }
     if (showFontSheet) {
         FontPickerSheet(
             current = previewAppearance.fontChoice,
@@ -933,6 +976,185 @@ fun AppearanceSettingsContent(
             },
             onDismiss = { showBubbleColorSheet = false },
         )
+    }
+}
+
+@Composable
+internal fun emojiSetSummary(
+    selectedId: String,
+    state: EmojiSettingsState,
+): String =
+    when {
+        selectedId == EmojiSets.SYSTEM_ID -> stringResource(R.string.settings_emoji_system)
+        state.loading -> stringResource(R.string.settings_emoji_loading)
+        selectedId in state.installed && EmojiSets.find(selectedId) != null -> EmojiSets.find(selectedId)!!.displayName
+        else -> stringResource(R.string.settings_emoji_fallback_summary)
+    }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EmojiSetPickerSheet(
+    selectedId: String,
+    state: EmojiSettingsState,
+    progress: EmojiDownloadProgress?,
+    onSelect: (String) -> Unit,
+    onDownload: (String) -> Unit,
+    onCancel: () -> Unit,
+    onRemove: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        modifier = Modifier.testTag("settings_emoji_sheet"),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    ) {
+        SheetSystemBars()
+        EmojiSetPickerContent(selectedId, state, progress, onSelect, onDownload, onCancel, onRemove)
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun EmojiSetPickerContent(
+    selectedId: String,
+    state: EmojiSettingsState,
+    progress: EmojiDownloadProgress? = null,
+    onSelect: (String) -> Unit = {},
+    onDownload: (String) -> Unit = {},
+    onCancel: () -> Unit = {},
+    onRemove: (String) -> Unit = {},
+) {
+    val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
+    var previewId by remember(selectedId) { mutableStateOf(selectedId) }
+    val effectiveId =
+        if (previewId in state.installed && EmojiSets.find(previewId) != null) previewId else EmojiSets.SYSTEM_ID
+    val unavailable =
+        selectedId != EmojiSets.SYSTEM_ID && !state.loading &&
+            (selectedId !in state.installed || EmojiSets.find(selectedId) == null)
+    LazyColumn(
+        Modifier
+            .fillMaxWidth()
+            .selectableGroup()
+            .padding(bottom = 24.dp)
+            .testTag("settings_emoji_options"),
+    ) {
+        item {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.settings_emoji_set), style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.settings_emoji_scope), style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.settings_emoji_privacy), style = MaterialTheme.typography.bodySmall)
+                if (state.loading) Text(stringResource(R.string.settings_emoji_loading), Modifier.testTag("settings_emoji_loading"))
+                if (unavailable) {
+                    Text(
+                        stringResource(R.string.settings_emoji_fallback),
+                        Modifier.testTag("settings_emoji_fallback"),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (state.error) {
+                    Text(
+                        stringResource(R.string.settings_emoji_error),
+                        Modifier.testTag("settings_emoji_error"),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (effectiveId == EmojiSets.SYSTEM_ID) EmojiSetComparisonSample(EmojiSets.SYSTEM_ID, null)
+            }
+        }
+        item {
+            RadioRow(
+                label = stringResource(R.string.settings_emoji_system),
+                selected = effectiveId == EmojiSets.SYSTEM_ID && (!state.loading || previewId == EmojiSets.SYSTEM_ID),
+                enabled = true,
+                onClick = {
+                    previewId = EmojiSets.SYSTEM_ID
+                    onSelect(EmojiSets.SYSTEM_ID)
+                },
+                modifier = Modifier.testTag("settings_emoji_system"),
+                subtitle = stringResource(R.string.settings_emoji_system_desc),
+            )
+        }
+        items(EmojiSets.all.size) { index ->
+            val spec = EmojiSets.all[index]
+            val installed = spec.id in state.installed
+            val downloading = state.downloadingId == spec.id
+            Column {
+                RadioRow(
+                    label = spec.displayName,
+                    subtitle =
+                        stringResource(
+                            R.string.settings_emoji_catalog_detail,
+                            spec.version,
+                            android.text.format.Formatter
+                                .formatShortFileSize(context, spec.sizeBytes),
+                        ),
+                    selected = effectiveId == spec.id,
+                    enabled = installed && !state.loading,
+                    onClick = {
+                        previewId = spec.id
+                        onSelect(spec.id)
+                    },
+                    modifier = Modifier.testTag("settings_emoji_${spec.id}"),
+                )
+                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (effectiveId == spec.id) EmojiSetComparisonSample(spec.id, state.installed[spec.id])
+                    if (downloading) {
+                        val current = progress?.takeIf { it.id == spec.id }
+                        if (current != null && current.totalBytes > 0) {
+                            LinearProgressIndicator(
+                                progress = { (current.bytes.toFloat() / current.totalBytes).coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth().testTag("settings_emoji_progress"),
+                            )
+                            Text(
+                                stringResource(
+                                    R.string.settings_emoji_progress,
+                                    android.text.format.Formatter
+                                        .formatShortFileSize(context, current.bytes),
+                                    android.text.format.Formatter
+                                        .formatShortFileSize(context, current.totalBytes),
+                                ),
+                            )
+                        } else {
+                            LinearProgressIndicator(Modifier.fillMaxWidth().testTag("settings_emoji_progress"))
+                        }
+                        TextButton(onClick = onCancel, modifier = Modifier.testTag("settings_emoji_cancel")) {
+                            Text(stringResource(R.string.settings_emoji_cancel))
+                        }
+                    } else {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (installed) {
+                                TextButton(
+                                    onClick = { onRemove(spec.id) },
+                                    enabled = !state.loading,
+                                    modifier = Modifier.testTag("settings_emoji_remove_${spec.id}"),
+                                ) { Text(stringResource(R.string.settings_emoji_remove)) }
+                            }
+                            TextButton(
+                                onClick = { onDownload(spec.id) },
+                                enabled = !state.loading && state.downloadingId == null,
+                                modifier = Modifier.testTag("settings_emoji_${if (installed || selectedId == spec.id) "reinstall" else "download"}_${spec.id}"),
+                            ) {
+                                Text(stringResource(if (installed || selectedId == spec.id) R.string.settings_emoji_reinstall else R.string.settings_emoji_download))
+                            }
+                        }
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(
+                            onClick = { uriHandler.openUri(spec.sourceUrl) },
+                            modifier = Modifier.testTag("settings_emoji_source_${spec.id}"),
+                        ) { Text(stringResource(R.string.settings_emoji_source)) }
+                        TextButton(
+                            onClick = { uriHandler.openUri(spec.licenseUrl) },
+                            modifier = Modifier.testTag("settings_emoji_license_${spec.id}"),
+                        ) { Text(stringResource(R.string.settings_emoji_license, spec.licenseName)) }
+                    }
+                }
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+            }
+        }
     }
 }
 

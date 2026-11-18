@@ -16,7 +16,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.selection.rememberSelectionState
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -79,10 +78,12 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.theme.LocalEmojiRenderer
 import io.github.trevarj.motd.ui.theme.LocalSurfaceEffects
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 internal const val FOOL_BODY_RANGE = "fool_body"
 
@@ -148,7 +149,8 @@ internal fun FoolBodyText(
     }
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
-    val resolvedStyle = LocalTextStyle.current.merge(style).let { if (color == Color.Unspecified) it else it.copy(color = color) }
+    val emojiRenderer = LocalEmojiRenderer.current
+    val resolvedStyle = rememberEmojiTextStyle(LocalTextStyle.current.merge(style).let { if (color == Color.Unspecified) it else it.copy(color = color) })
     val layoutDirection = LocalLayoutDirection.current
     val layoutSemantics =
         if (concealment.concealed) {
@@ -163,7 +165,7 @@ internal fun FoolBodyText(
     BoxWithConstraints(modifier.then(layoutSemantics)) {
         val width = constraints.maxWidth
         val prepared =
-            remember(text, chips, width, density, measurer, resolvedStyle, layoutDirection) {
+            remember(text, chips, width, density, measurer, resolvedStyle, layoutDirection, emojiRenderer) {
                 val horizontal = with(density) { 4.dp.toPx() }
                 val vertical = with(density) { 1.dp.toPx() }
                 val available = (width - horizontal * 2).toInt().coerceAtLeast(1)
@@ -171,7 +173,7 @@ internal fun FoolBodyText(
                 val content = mutableMapOf<String, InlineTextContent>()
                 val captionStyle = resolvedStyle.copy(lineHeight = TextUnit.Unspecified)
                 chips.forEach { chip ->
-                    val caption = text.subSequence(chip.start, chip.end)
+                    val caption = text.subSequence(chip.start, chip.end).let { emojiRenderer?.annotate(it) ?: it }
                     val wrapped = measurer.measure(caption, captionStyle, constraints = Constraints(maxWidth = available))
                     for (line in 0 until wrapped.lineCount) {
                         val from = wrapped.getLineStart(line)
@@ -292,8 +294,10 @@ private fun FoolBodyTextHost(
                     val offset = result.nativeOffsetAt(down.position) ?: return@awaitEachGesture
                     if (offset >= displayed.length) return@awaitEachGesture
                     val link = displayed.getLinkAnnotations(offset, offset + 1).firstOrNull()?.item
-                    // Native links expand their touch targets into nearby ordinary glyphs. If
-                    // they consume that down, retain the message hold rather than losing it.
+                    // A native link child consumes down in Main before this text host; the
+                    // message row ancestor runs afterward. Final would include the row's own
+                    // consumption and incorrectly give an ordinary hold two owners.
+                    // Keep ordinary glyphs in expanded native link targets routed to the row action.
                     if (link == null && (concealed || latestLinkLongPress == null)) return@awaitEachGesture
                     val nativeDown = awaitPointerEvent(PointerEventPass.Main)
                     if (nativeDown.changes.none { it.id == down.id && it.isConsumed }) return@awaitEachGesture

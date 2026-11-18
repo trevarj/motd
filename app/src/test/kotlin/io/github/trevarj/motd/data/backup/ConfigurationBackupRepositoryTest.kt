@@ -15,6 +15,8 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.db.inMemoryDb
+import io.github.trevarj.motd.data.emoji.EmojiSetStore
+import io.github.trevarj.motd.data.emoji.EmojiSets
 import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
 import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
@@ -601,6 +603,118 @@ class ConfigurationBackupRepositoryTest {
 
             assertEquals(edited, gesturePrefs.menu.first())
             gesturePrefs.setMenu(GestureMenuConfig())
+        }
+
+    @Test
+    fun emojiSetSelectionRoundTripsWithoutDownloadedFilesOrCatalogMetadata() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val prefs = AppearancePrefsImpl(context)
+            val original = prefs.config.first().emojiSetId
+            val store = EmojiSetStore(context)
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                val futureId = "future-" + "a".repeat(57)
+                assertNull(EmojiSets.find(futureId))
+                for (selected in listOf(EmojiSets.SYSTEM_ID, futureId) + EmojiSets.all.map { it.id }) {
+                    assertNull(store.installedFile(selected))
+                    prefs.setEmojiSetId(selected)
+                    val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED)
+                    val appearance =
+                        Json
+                            .parseToJsonElement(raw)
+                            .jsonObject
+                            .getValue("payload")
+                            .jsonObject
+                            .getValue("settings")
+                            .jsonObject
+                            .getValue("appearance")
+                            .jsonObject
+                    assertEquals(JsonPrimitive(selected), appearance["emojiSetId"])
+                    assertEquals(setOf("emojiSetId"), appearance.keys.filter { it.startsWith("emoji", ignoreCase = true) }.toSet())
+                    for (spec in EmojiSets.all) {
+                        assertFalse(raw.contains(spec.downloadUrl))
+                        assertFalse(raw.contains(spec.sha256))
+                    }
+                    for (mode in BackupImportMode.entries) {
+                        prefs.setEmojiSetId(if (selected == EmojiSets.SYSTEM_ID) "noto" else EmojiSets.SYSTEM_ID)
+                        backup.import(raw, importMode = mode)
+                        assertEquals(selected, AppearancePrefsImpl(context).config.first().emojiSetId)
+                        assertNull(store.installedFile(selected))
+                        val reexported = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED)
+                        assertTrue(reexported.contains(""""emojiSetId": "$selected""""))
+                    }
+                }
+                prefs.setEmojiSetId(futureId)
+                val encrypted = backup.exportToString(BackupExportMode.ENCRYPTED_WITH_CREDENTIALS, password = "emoji backup password")
+                prefs.setEmojiSetId(EmojiSets.SYSTEM_ID)
+                backup.import(encrypted, password = "emoji backup password", importMode = BackupImportMode.REPLACE)
+                assertEquals(futureId, AppearancePrefsImpl(context).config.first().emojiSetId)
+                assertNull(store.installedFile(futureId))
+            } finally {
+                prefs.setEmojiSetId(original)
+                db.close()
+            }
+        }
+
+    @Test
+    fun legacyAppearanceResetsEmojiSetButAbsentAppearancePreservesSelection() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val prefs = AppearancePrefsImpl(context)
+            val original = prefs.config.first().emojiSetId
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                prefs.setEmojiSetId("openmoji")
+                val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED)
+                val legacy = editBackupAppearance(raw) { JsonObject(it - "emojiSetId") }
+                val absent = editBackupAppearance(raw) { null }
+                for (mode in BackupImportMode.entries) {
+                    prefs.setEmojiSetId("openmoji")
+                    backup.import(legacy, importMode = mode)
+                    assertEquals(EmojiSets.SYSTEM_ID, AppearancePrefsImpl(context).config.first().emojiSetId)
+                    prefs.setEmojiSetId("openmoji")
+                    backup.import(absent, importMode = mode)
+                    assertEquals("openmoji", AppearancePrefsImpl(context).config.first().emojiSetId)
+                }
+            } finally {
+                prefs.setEmojiSetId(original)
+                db.close()
+            }
+        }
+
+    @Test
+    fun invalidEmojiSetIdsRejectPreviewAndRestoreBeforeMutation() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val prefs = AppearancePrefsImpl(context)
+            val original = prefs.config.first().emojiSetId
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                db.networkDao().insert(secretNetwork(null))
+                prefs.setEmojiSetId("noto")
+                val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED)
+                prefs.setEmojiSetId("openmoji")
+                val appearance = context.appearanceDataStore.data.first()
+                val settings = context.settingsDataStore.data.first()
+                val networks = db.networkDao().allNow()
+                for (invalid in listOf("", "Noto", "1noto", "../noto", "noto.ttf", "noto font", "noto\n", "a".repeat(65))) {
+                    val malformed = editBackupAppearance(raw) { JsonObject(it + ("emojiSetId" to JsonPrimitive(invalid))) }
+                    for (mode in BackupImportMode.entries) {
+                        assertTrue(runCatching { backup.preview(malformed, importMode = mode) }.exceptionOrNull() is BackupFormatException)
+                        assertTrue(runCatching { backup.import(malformed, importMode = mode) }.exceptionOrNull() is BackupFormatException)
+                        assertEquals(appearance, context.appearanceDataStore.data.first())
+                        assertEquals(settings, context.settingsDataStore.data.first())
+                        assertEquals(networks, db.networkDao().allNow())
+                    }
+                }
+            } finally {
+                prefs.setEmojiSetId(original)
+                db.close()
+            }
         }
 
     /** Appearance fields travel with a backup, including the independent IRC input style. */

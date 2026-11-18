@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,6 +22,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 /** Sentinel labels returned by [dayLabelKind] that map to localized "Today"/"Yesterday" strings. */
 enum class DayLabelKind { TODAY, YESTERDAY, DATE }

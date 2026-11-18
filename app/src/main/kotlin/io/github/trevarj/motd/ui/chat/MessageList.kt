@@ -41,7 +41,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -155,6 +154,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.semantics.testTag as semanticsTestTag
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /**
@@ -2711,7 +2711,7 @@ private fun RetryRowAction(
             tint = androidx.compose.material3.MaterialTheme.colorScheme.error,
             modifier = Modifier.size(16.dp),
         )
-        androidx.compose.material3.Text(
+        io.github.trevarj.motd.ui.components.EmojiText(
             text = label,
             style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
             color = androidx.compose.material3.MaterialTheme.colorScheme.error,

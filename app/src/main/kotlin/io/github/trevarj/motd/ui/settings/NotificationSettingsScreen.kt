@@ -14,7 +14,6 @@ import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -40,6 +39,7 @@ import io.github.trevarj.motd.ui.components.label
 import io.github.trevarj.motd.ui.components.notificationIcon
 import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.nav.SettingsTarget
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 @Composable
 fun NotificationSettingsScreen(

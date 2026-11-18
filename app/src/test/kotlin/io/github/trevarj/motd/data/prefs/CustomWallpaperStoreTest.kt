@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.data.emoji.EmojiSetStore
 import io.github.trevarj.motd.data.fonts.CustomFontStore
 import io.github.trevarj.motd.ui.settings.AppearanceSettingsViewModel
 import kotlinx.coroutines.CancellationException
@@ -137,6 +138,10 @@ class CustomWallpaperStoreTest {
                 object : AppearancePrefs by AppearancePrefsImpl(context) {
                     override val config = configFlow
 
+                    override suspend fun setEmojiSetId(id: String) {
+                        configFlow.value = configFlow.value.copy(emojiSetId = id)
+                    }
+
                     override suspend fun setWallpaper(selection: WallpaperSelection) {
                         configFlow.value.wallpaper.localImageName?.let { previousName ->
                             assertTrue("Old image must survive until preferences commit", File(directory, previousName).exists())
@@ -147,7 +152,7 @@ class CustomWallpaperStoreTest {
                         configFlow.value = configFlow.value.copy(wallpaper = selection)
                     }
                 }
-            val vm = AppearanceSettingsViewModel(DataStoreSettingsRepository(context), prefs, CustomFontStore(context), store)
+            val vm = AppearanceSettingsViewModel(DataStoreSettingsRepository(context), prefs, CustomFontStore(context), store, EmojiSetStore(context))
             try {
                 vm.importWallpaper(Uri.fromFile(source)).join()
                 assertEquals(initial, configFlow.value.wallpaper)

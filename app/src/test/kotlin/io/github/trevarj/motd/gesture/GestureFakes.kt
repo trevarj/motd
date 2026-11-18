@@ -355,6 +355,10 @@ internal class FakeAppearance(
 
     override suspend fun setFontChoice(choice: FontChoice) = Unit
 
+    override suspend fun setEmojiSetId(id: String) {
+        state.value = state.value.copy(emojiSetId = id)
+    }
+
     override suspend fun setShowTimestamps(enabled: Boolean) = Unit
 
     override suspend fun setTimeFormat(format: TimeFormat) = Unit

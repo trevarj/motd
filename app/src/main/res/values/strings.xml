@@ -785,6 +785,21 @@
     <string name="chat_composer_cancel_reply">Cancel reply</string>
     <string name="chat_composer_attachment">Add attachment</string>
     <string name="chat_composer_emoji_help">Open the emoji picker to add an emoji.</string>
+    <string name="emoji_picker_recents">Recently used</string>
+    <string name="emoji_picker_empty_recents">No recently used emoji</string>
+    <string name="emoji_picker_loading">Loading emoji</string>
+    <string name="emoji_picker_show_variants">Show variants</string>
+    <string name="emoji_picker_variants">Variants for %1$s</string>
+    <string name="emoji_picker_close_variants">Close variants</string>
+    <string name="emoji_category_smileys_emotion">Smileys &amp; emotion</string>
+    <string name="emoji_category_people_body">People &amp; body</string>
+    <string name="emoji_category_animals_nature">Animals &amp; nature</string>
+    <string name="emoji_category_food_drink">Food &amp; drink</string>
+    <string name="emoji_category_travel_places">Travel &amp; places</string>
+    <string name="emoji_category_activities">Activities</string>
+    <string name="emoji_category_objects">Objects</string>
+    <string name="emoji_category_symbols">Symbols</string>
+    <string name="emoji_category_flags">Flags</string>
     <string name="chat_format_bold_help">Toggle bold for selected text or new typing.</string>
     <string name="chat_format_italic_help">Toggle italic for selected text or new typing.</string>
     <string name="chat_format_underline_help">Toggle underline for selected text or new typing.</string>
@@ -2581,4 +2596,23 @@
     <string name="upload_strip_metadata_description">Remove supported metadata before file uploads, direct file transfers and voice messages.</string>
     <string name="upload_strip_metadata_off_warning">Off: sends original files, which may expose location, author or device details.</string>
     <string name="upload_send_original">Send original</string>
+    <string name="settings_emoji_set">Emoji set</string>
+    <string name="settings_emoji_scope">Changes emoji throughout the app, independently of the text font. Installed sets work offline.</string>
+    <string name="settings_emoji_system">System</string>
+    <string name="settings_emoji_system_desc">Use your device’s emoji. No download required.</string>
+    <string name="settings_emoji_privacy">Nothing downloads automatically. Download &amp; use fetches a verified font from the fixed upstream source on raw.githubusercontent.com. That server receives your IP address; no chat content is sent. Source and license links open in your browser.</string>
+    <string name="settings_emoji_loading">Checking installed emoji…</string>
+    <string name="settings_emoji_fallback_summary">System (saved set unavailable)</string>
+    <string name="settings_emoji_fallback">The saved emoji set is missing, invalid, or unknown. System emoji are in use. Reinstall a listed set or choose System.</string>
+    <string name="settings_emoji_error">The emoji operation failed. Your previous choice was kept. Check your connection and storage, then try again.</string>
+    <string name="settings_emoji_catalog_detail">Version %1$s · %2$s</string>
+    <string name="settings_emoji_download">Download &amp; use</string>
+    <string name="settings_emoji_reinstall">Reinstall &amp; use</string>
+    <string name="settings_emoji_remove">Remove download</string>
+    <string name="settings_emoji_cancel">Cancel download</string>
+    <string name="settings_emoji_progress">Downloading %1$s of %2$s</string>
+    <string name="settings_emoji_source">Source</string>
+    <string name="settings_emoji_license">License: %1$s</string>
+    <string name="settings_emoji_sample" translatable="false">A 😀 👍🏽 🤝 🫱🏻‍🫲🏿 👨‍👩‍👧‍👦 🚶🏽‍➡️ 🇺🇳 ❤️ Z</string>
+    <string name="settings_emoji_sample_error">The comparison could not be loaded. System emoji remain available.</string>
 </resources>

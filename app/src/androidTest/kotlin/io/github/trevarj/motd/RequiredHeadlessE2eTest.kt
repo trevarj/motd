@@ -5,12 +5,14 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.app.RemoteInput
 import android.content.Intent
+import android.graphics.Bitmap
 import android.os.Bundle
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
@@ -32,6 +34,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.platform.io.PlatformTestStorageRegistry
 import androidx.test.rule.GrantPermissionRule
 import io.github.trevarj.motd.ai.WhisperNativeAssertions
 import io.github.trevarj.motd.audio.VoiceSendProgress
@@ -39,6 +42,8 @@ import io.github.trevarj.motd.audio.VoiceSendRequest
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.emoji.EmojiSetStore
+import io.github.trevarj.motd.data.emoji.EmojiSets
 import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
@@ -51,6 +56,7 @@ import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.e2e.BootstrappedNetwork
 import io.github.trevarj.motd.e2e.BufferProbe
 import io.github.trevarj.motd.e2e.ConnectionProbe
+import io.github.trevarj.motd.e2e.E2eArtifactSink
 import io.github.trevarj.motd.e2e.E2eBootstrap
 import io.github.trevarj.motd.e2e.E2eFailureArtifactRule
 import io.github.trevarj.motd.e2e.E2eMilestoneRecorder
@@ -893,6 +899,7 @@ class RequiredHeadlessE2eTest {
         TimelineRobot(compose).assertMessageVisible(communityMessage.tag())
         scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         ChatListRobot(compose).awaitTag("chatlist_row_$communityId")
+        exerciseDownloadedEmojiPicker(bootstrap, communityId, token)
         exerciseHostedPaletteLink(bootstrap, network, communityId, token)
         SettingsRobot(compose).apply {
             open()
@@ -996,6 +1003,155 @@ class RequiredHeadlessE2eTest {
         NetworksRobot(compose).openRoot(network.rootId)
         BouncerRobot(compose).assertPanels()
         milestones.record("settings_bouncer_smoke", "root=${network.rootId}")
+    }
+
+    /** Starts and ends on the chat list, without changing the surrounding palette/settings stack. */
+    private fun exerciseDownloadedEmojiPicker(
+        bootstrap: E2eBootstrap,
+        bufferId: Long,
+        token: String,
+    ) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val appearance = AppearancePrefsImpl(context)
+        val original = runBlocking { appearance.config.first() }
+        val store = EmojiSetStore(context)
+        val noto = requireNotNull(EmojiSets.find("noto"))
+        val previouslyInstalled = runBlocking { store.installedFile(noto.id) } != null
+        // Also preserve an existing invalid/missing-selection install rather than delete user data.
+        val hadFile = File(context.filesDir, "emoji-sets/${noto.id}.ttf").exists()
+        val settings = SettingsRobot(compose)
+        val chat = ChatRobot(compose)
+
+        fun openEmojiSettings() {
+            settings.open()
+            settings.appearance()
+            settings.scrollToAndClick("settings_emoji_picker")
+            settings.awaitTag("settings_emoji_sheet")
+            settings.awaitTagGone("settings_emoji_loading")
+        }
+
+        fun leaveEmojiSettings() {
+            val sheet = hasTestTag("settings_emoji_sheet")
+            val dismiss = SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and (sheet or hasAnyAncestor(sheet))
+            compose.onAllNodes(dismiss, useUnmergedTree = true)[0].performSemanticsAction(SemanticsActions.Dismiss)
+            settings.awaitTagGone("settings_emoji_sheet")
+            settings.returnToRoot()
+            settings.click("settings_back")
+            ChatListRobot(compose).awaitTag("chatlist_row_$bufferId")
+        }
+
+        try {
+            openEmojiSettings()
+            settings.scrollContainerTo("settings_emoji_options", "settings_emoji_system")
+            settings.click("settings_emoji_system")
+            awaitWhileComposing("Download begins from persisted System selection", 10_000) {
+                withTimeout(10_000) { appearance.config.first { it.emojiSetId == EmojiSets.SYSTEM_ID } }
+            }
+            // Reinstall still exercises the real pinned network download when a prior run installed Noto.
+            val action = if (previouslyInstalled) "reinstall" else "download"
+            settings.scrollContainerTo("settings_emoji_options", "settings_emoji_${action}_noto")
+            settings.click("settings_emoji_${action}_noto")
+            awaitWhileComposing("Pinned 10 MB Noto download validates and persists selection", 180_000) {
+                withTimeout(180_000) {
+                    appearance.config.first { it.emojiSetId == noto.id }
+                }
+            }
+            settings.awaitTagGone("settings_emoji_progress")
+            settings.scrollContainerTo("settings_emoji_options", "settings_emoji_remove_noto")
+            settings.assertDisplayed("settings_emoji_remove_noto")
+            settings.scrollContainerTo("settings_emoji_options", "settings_emoji_noto")
+            compose.onNodeWithTag("settings_emoji_noto", useUnmergedTree = true).assertIsSelected()
+            compose.onAllNodesWithTag("settings_emoji_error", useUnmergedTree = true).assertCountEquals(0)
+            val installed = requireNotNull(runBlocking { store.installedFile(noto.id) })
+            assertEquals(noto.sizeBytes, installed.length())
+            assertEquals(original.paletteSelection, runBlocking { appearance.config.first() }.paletteSelection)
+            recordEmojiArtifact("emoji_noto_downloaded", "bytes=${installed.length()} sha256=${noto.sha256}")
+            leaveEmojiSettings()
+
+            ChatListRobot(compose).open(bufferId)
+            val prefix = "$token emoji "
+            val text = prefix + "🫱🏻‍🫲🏿👩🏽‍💻"
+            chat.replace("chat_composer_field", prefix)
+            chat.openEmojiPicker()
+            chat.openEmojiVariants("1f91d")
+            recordEmojiArtifact("emoji_mixed_tone_variants")
+            chat.selectEmojiVariant("1faf1_1f3fb_200d_1faf2_1f3ff")
+            chat.assertComposerText(prefix + "🫱🏻‍🫲🏿")
+            chat.openEmojiVariants("1f469_200d_1f4bb")
+            chat.selectEmojiVariant("1f469_1f3fd_200d_1f4bb")
+            chat.assertComposerText(text)
+            recordEmojiArtifact("emoji_unicode_composed")
+            // Do not use send(text): that would replace the picker-produced editor contents.
+            chat.click("chat_composer_send")
+            val probe = MessageLifecycleProbe(bootstrap.seams.search(), milestones)
+            val sent =
+                awaitWhileComposing("Picker Unicode reaches canonical IRC echo and Room", 20_000) {
+                    probe.awaitCanonical(text, bufferId)
+                }
+            assertEquals(text, sent.text)
+            TimelineRobot(compose).assertMessageVisible(sent.tag())
+            recordEmojiArtifact("emoji_unicode_sent_noto", "buffer=$bufferId event=${sent.id}")
+            // The first Back closes the retained picker; leave chat only after its viewport closes.
+            scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            compose.waitUntil("Emoji picker closes before leaving chat", 15_000) {
+                runCatching {
+                    compose.onNodeWithTag("chat_composer_emoji_grid", useUnmergedTree = true).assertIsDisplayed()
+                }.isFailure
+            }
+            scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            ChatListRobot(compose).awaitTag("chatlist_row_$bufferId")
+
+            openEmojiSettings()
+            settings.scrollContainerTo("settings_emoji_options", "settings_emoji_system")
+            settings.click("settings_emoji_system")
+            awaitWhileComposing("System emoji selection persists", 10_000) {
+                withTimeout(10_000) { appearance.config.first { it.emojiSetId == EmojiSets.SYSTEM_ID } }
+            }
+            compose.onNodeWithTag("settings_emoji_system", useUnmergedTree = true).assertIsSelected()
+            assertTrue(runBlocking { store.installedFile(noto.id) } != null)
+            leaveEmojiSettings()
+            ChatListRobot(compose).open(bufferId)
+            val unchanged =
+                awaitWhileComposing("System font leaves canonical Unicode unchanged", 20_000) {
+                    probe.awaitCanonical(text, bufferId)
+                }
+            assertEquals(sent.id, unchanged.id)
+            assertEquals(sent.msgid, unchanged.msgid)
+            assertEquals(text, unchanged.text)
+            TimelineRobot(compose).assertMessageVisible(unchanged.tag())
+            recordEmojiArtifact("emoji_unicode_unchanged_system", "buffer=$bufferId event=${unchanged.id}")
+            scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            ChatListRobot(compose).awaitTag("chatlist_row_$bufferId")
+            assertEquals(original.paletteSelection, runBlocking { appearance.config.first() }.paletteSelection)
+        } finally {
+            if (settings.isPresent("settings_emoji_cancel")) {
+                settings.click("settings_emoji_cancel")
+                settings.awaitTagGone("settings_emoji_progress")
+            }
+            runBlocking {
+                appearance.setEmojiSetId(original.emojiSetId)
+                if (!hadFile) store.remove(noto.id)
+            }
+        }
+    }
+
+    private fun recordEmojiArtifact(
+        event: String,
+        detail: String = "",
+    ) {
+        milestones.record(event, detail)
+        E2eArtifactSink.write("${artifacts.artifactPrefix()}/emoji/milestones.jsonl", milestones.render())
+        val screenshot = requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+        try {
+            PlatformTestStorageRegistry
+                .getInstance()
+                .openOutputFile("${artifacts.artifactPrefix()}/emoji/$event.png", false)
+                .use {
+                    assertTrue("Emoji screenshot is written", screenshot.compress(Bitmap.CompressFormat.PNG, 100, it))
+                }
+        } finally {
+            screenshot.recycle()
+        }
     }
 
     private fun exerciseHostedPaletteLink(

@@ -1,14 +1,19 @@
 package io.github.trevarj.motd.e2e.robots
 
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.ComposeTestRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -44,6 +49,40 @@ internal class ChatRobot(
     fun send(text: String) {
         replace("chat_composer_field", text)
         click("chat_composer_send")
+    }
+
+    fun openEmojiPicker() {
+        click("chat_composer_tools")
+        click("chat_composer_emoji")
+        compose.waitUntil("Downloaded-font emoji grid is visible", 30_000) {
+            runCatching {
+                compose.onNodeWithTag("chat_composer_emoji_grid", useUnmergedTree = true).assertIsDisplayed()
+            }.isSuccess
+        }
+        scrollContainerTo("chat_composer_emoji_categories", "chat_composer_emoji_category_people_body")
+        click("chat_composer_emoji_category_people_body")
+        compose.onNodeWithTag("chat_composer_emoji_category_people_body", useUnmergedTree = true).assertIsSelected()
+    }
+
+    fun openEmojiVariants(baseCodepoints: String) {
+        val tag = "chat_composer_emoji_cell_$baseCodepoints"
+        scrollContainerTo("chat_composer_emoji_grid", tag)
+        compose.onNodeWithTag(tag, useUnmergedTree = true).performTouchInput { longClick() }
+        assertDisplayed("chat_composer_emoji_variants")
+    }
+
+    fun selectEmojiVariant(codepoints: String) {
+        val tag = "chat_composer_emoji_variant_$codepoints"
+        val variantGrid =
+            hasAnyAncestor(hasTestTag("chat_composer_emoji_variants")) and
+                SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollToIndex)
+        compose.onNode(variantGrid, useUnmergedTree = true).performScrollToNode(hasTestTag(tag))
+        click(tag)
+        awaitTagGone("chat_composer_emoji_variants")
+    }
+
+    fun assertComposerText(text: String) {
+        compose.onNodeWithTag("chat_composer_field", useUnmergedTree = true).assertTextEquals(text)
     }
 }
 

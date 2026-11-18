@@ -57,6 +57,7 @@ import coil.request.ErrorResult
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import io.github.trevarj.motd.UiDispatcherResetRule
+import io.github.trevarj.motd.data.emoji.EmojiSetStore
 import io.github.trevarj.motd.data.fonts.CustomFontStore
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
@@ -526,7 +527,7 @@ class ChatWallpaperPickerUiTest {
         val directory = File(context.filesDir, CustomWallpaperStore.DIRECTORY)
         directory.deleteRecursively()
         runBlocking { prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.NONE, 100, outlineColor = 0xffff0000.toInt())) }
-        val vm = AppearanceSettingsViewModel(DataStoreSettingsRepository(context), prefs, CustomFontStore(context), store)
+        val vm = AppearanceSettingsViewModel(DataStoreSettingsRepository(context), prefs, CustomFontStore(context), store, EmojiSetStore(context))
         val originalLoader = Coil.imageLoader(context)
         val loaded = CopyOnWriteArrayList<File>()
         val loader =

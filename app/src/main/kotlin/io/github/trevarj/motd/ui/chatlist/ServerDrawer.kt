@@ -41,7 +41,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationDrawerItem
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -113,6 +112,7 @@ import io.github.trevarj.motd.ui.theme.shape
 import kotlin.math.roundToInt
 import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
 import io.github.trevarj.motd.ui.components.EffectModalDrawerSheet as ModalDrawerSheet
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /**

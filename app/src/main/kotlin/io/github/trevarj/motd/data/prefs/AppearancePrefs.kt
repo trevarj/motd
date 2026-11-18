@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.data.prefs
 
+import io.github.trevarj.motd.data.emoji.EmojiSets
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -399,6 +400,11 @@ data class SurfaceEffects(
     fun normalized() = copy(surfaces = surfaces.mapValues { it.value.normalized() })
 }
 
+private val emojiSetIdPattern = Regex("[a-z][a-z0-9_-]{0,63}")
+
+/** Preserve bounded future catalog IDs; unavailable sets resolve visibly to System at runtime. */
+fun normalizeEmojiSetId(id: String?): String = id?.takeIf(emojiSetIdPattern::matches) ?: EmojiSets.SYSTEM_ID
+
 @Serializable
 data class AppearanceConfig(
     val theme: ColorThemePreset = ColorThemePreset.SYSTEM,
@@ -408,6 +414,7 @@ data class AppearanceConfig(
     val trueBlack: Boolean = false,
     val followSystem: Boolean = false,
     val fontChoice: FontChoice = FontChoice.SYSTEM,
+    val emojiSetId: String = EmojiSets.SYSTEM_ID,
     val showTimestamps: Boolean = true,
     val timeFormat: TimeFormat = TimeFormat.AUTO,
     // SimpleDateFormat pattern, only consulted when timeFormat == CUSTOM.
@@ -478,6 +485,8 @@ interface AppearancePrefs {
     suspend fun setConversationFontScale(percent: Int)
 
     suspend fun setFontChoice(choice: FontChoice)
+
+    suspend fun setEmojiSetId(id: String)
 
     suspend fun setShowTimestamps(enabled: Boolean)
 

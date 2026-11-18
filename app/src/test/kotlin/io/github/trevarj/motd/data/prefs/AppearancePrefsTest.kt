@@ -241,6 +241,54 @@ class AppearancePrefsTest {
             }
         }
 
+    @Test fun emojiSetPersistsReloadsAndRejectsMalformedIdsWithoutChangingUiFont() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val key = stringPreferencesKey("emoji_set_id_v1")
+            val keys = listOf(key, stringPreferencesKey("font_choice_v1"), stringPreferencesKey("custom_font_name_v1"))
+            val original = context.appearanceDataStore.data.first()
+            try {
+                context.appearanceDataStore.edit { it.remove(key) }
+                prefs.setFontChoice(FontChoice.CUSTOM)
+                prefs.setCustomFontName("UI font.ttf")
+                val baseline = AppearancePrefsImpl(context).config.first()
+                assertEquals("system", AppearanceConfig().emojiSetId)
+                assertEquals("system", baseline.emojiSetId)
+                assertEquals("system", Json.decodeFromString<AppearanceConfig>("""{"fontChoice":"CUSTOM","customFontName":"UI font.ttf"}""").emojiSetId)
+                assertEquals(FontChoice.CUSTOM, baseline.fontChoice)
+                assertEquals("UI font.ttf", baseline.customFontName)
+
+                for (id in listOf("noto", "openmoji", "future-pack_2", "a" + "0".repeat(63), "z", "system")) {
+                    prefs.setEmojiSetId(id)
+                    val reloaded = AppearancePrefsImpl(context).config.first()
+                    assertEquals(id, context.appearanceDataStore.data.first()[key])
+                    assertEquals(baseline.copy(emojiSetId = id), reloaded)
+                    assertEquals(reloaded, Json.decodeFromString<AppearanceConfig>(jsonWithDefaults.encodeToString(reloaded)))
+                }
+
+                val malformed = listOf("", " ", "Noto", "1noto", "noto/color", "noto.color", "noto\n", "😀", "a".repeat(65))
+                for (id in malformed) {
+                    context.appearanceDataStore.edit { it[key] = id }
+                    assertEquals(baseline, AppearancePrefsImpl(context).config.first())
+                }
+
+                prefs.setEmojiSetId("noto")
+                for (id in malformed) {
+                    val failure = runCatching { prefs.setEmojiSetId(id) }.exceptionOrNull()
+                    assertTrue("Expected invalid emoji ID to be rejected: $id", failure is IllegalArgumentException)
+                    assertEquals("noto", context.appearanceDataStore.data.first()[key])
+                    assertEquals(baseline.copy(emojiSetId = "noto"), AppearancePrefsImpl(context).config.first())
+                }
+            } finally {
+                context.appearanceDataStore.edit { stored ->
+                    for (savedKey in keys) {
+                        val value = original[savedKey]
+                        if (value == null) stored.remove(savedKey) else stored[savedKey] = value
+                    }
+                }
+            }
+        }
+
     @Test fun surfaceShapesRoundTripEveryValueIndependentlyAndFallBackToDefault() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()

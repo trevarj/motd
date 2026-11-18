@@ -37,6 +37,7 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.decodePalette
 import io.github.trevarj.motd.data.prefs.decodePaletteTree
 import io.github.trevarj.motd.data.prefs.encodePalette
+import io.github.trevarj.motd.data.prefs.normalizeEmojiSetId
 import io.github.trevarj.motd.data.prefs.normalizePaletteSelection
 import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.data.prefs.supportsMode
@@ -561,6 +562,7 @@ class ConfigurationBackupRepositoryImpl
         private fun validatePayloadFields(payload: BackupPayload) {
             require(payload.version == FORMAT_VERSION) { "Unsupported payload version ${payload.version}." }
             payload.settings.appearance?.let { appearance ->
+                require(normalizeEmojiSetId(appearance.emojiSetId) == appearance.emojiSetId) { "Backup contains an invalid emoji set id." }
                 validateInstalledPalettes(appearance.customPalettes)
                 appearance.paletteMode?.let { mode ->
                     val fallback = PaletteChoice(appearance.theme, appearance.customPaletteId)
@@ -766,6 +768,8 @@ class ConfigurationBackupRepositoryImpl
                 appearancePrefs.setUiFontScale(it.uiFontScalePercent)
                 appearancePrefs.setConversationFontScale(it.conversationFontScalePercent)
                 appearancePrefs.setFontChoice(it.fontChoice)
+                // Keep the selection even without its downloaded binary so settings can offer reinstall.
+                appearancePrefs.setEmojiSetId(it.emojiSetId)
                 appearancePrefs.setShowTimestamps(it.showTimestamps)
                 appearancePrefs.setTimeFormat(it.timeFormat)
                 appearancePrefs.setCustomTimeFormatPattern(it.customTimeFormatPattern)

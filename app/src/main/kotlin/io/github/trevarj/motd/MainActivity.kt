@@ -38,6 +38,8 @@ import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.avatar.AvatarRecord
 import io.github.trevarj.motd.avatar.AvatarStore
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.emoji.EmojiSequenceCatalog
+import io.github.trevarj.motd.data.emoji.EmojiSetStore
 import io.github.trevarj.motd.data.fonts.CustomFontStore
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
@@ -80,6 +82,7 @@ import io.github.trevarj.motd.ui.splash.shouldShowStartupSplash
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SystemBarThemeHost
 import io.github.trevarj.motd.ui.theme.TimestampConfig
+import io.github.trevarj.motd.ui.theme.rememberEmojiRenderer
 import io.github.trevarj.motd.ui.theme.resolvedMode
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -107,6 +110,10 @@ class MainActivity :
     @Inject lateinit var networkMediaHttp: NetworkMediaHttp
 
     @Inject lateinit var customFontStore: CustomFontStore
+
+    @Inject lateinit var emojiSetStore: EmojiSetStore
+
+    @Inject lateinit var emojiSequenceCatalog: EmojiSequenceCatalog
 
     @Inject lateinit var db: MotdDatabase
 
@@ -202,6 +209,14 @@ class MainActivity :
                 remember(appearance.customFontName, fontRevision) {
                     customFontStore.installedFile()
                 }
+            val emojiRevision by emojiSetStore.revision.collectAsStateWithLifecycle()
+            val emojiRenderer =
+                rememberEmojiRenderer(
+                    appearance.emojiSetId,
+                    emojiRevision,
+                    emojiSetStore,
+                    emojiSequenceCatalog,
+                )
             StartupSplashGate(
                 request = startupSplashOverlay,
                 loading = startupSplashLoading,
@@ -227,6 +242,8 @@ class MainActivity :
                     uiFontScalePercent = appearance.uiFontScalePercent,
                     fontChoice = appearance.fontChoice,
                     customFontFile = customFontFile,
+                    emojiRenderer = emojiRenderer,
+                    emojiSequenceCatalog = emojiSequenceCatalog,
                     timestampConfig =
                         TimestampConfig(
                             appearance.showTimestamps,

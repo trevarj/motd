@@ -12,7 +12,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,6 +35,7 @@ import io.github.trevarj.motd.data.backup.ConfigurationImportPreview
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import java.text.DateFormat
 import java.util.Date
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 @Composable
 fun BackupRestoreScreen(

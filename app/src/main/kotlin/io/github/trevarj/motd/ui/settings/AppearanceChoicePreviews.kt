@@ -17,10 +17,14 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -28,6 +32,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import io.github.trevarj.motd.R
@@ -36,6 +43,9 @@ import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioCacheStatus
 import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.audio.AudioWaveform
+import io.github.trevarj.motd.data.emoji.EmojiDownloadProgress
+import io.github.trevarj.motd.data.emoji.EmojiSequenceCatalog
+import io.github.trevarj.motd.data.emoji.EmojiSets
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.LauncherIcon
@@ -52,6 +62,9 @@ import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
 import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
+import io.github.trevarj.motd.ui.theme.EmojiRenderer
+import io.github.trevarj.motd.ui.theme.LocalEmojiRenderer
+import io.github.trevarj.motd.ui.theme.LocalEmojiSequenceCatalog
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -59,8 +72,97 @@ import io.github.trevarj.motd.ui.theme.TimestampConfig
 import io.github.trevarj.motd.ui.theme.UiDropdownTrailingIcon
 import io.github.trevarj.motd.ui.theme.UiIcon
 import io.github.trevarj.motd.ui.theme.resolvedMode
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Calendar
+import io.github.trevarj.motd.ui.components.EmojiText as Text
+
+@Composable
+internal fun EmojiSetComparisonSample(
+    setId: String,
+    file: File?,
+) {
+    val context = LocalContext.current
+    val providedCatalog = LocalEmojiSequenceCatalog.current
+    val catalog = remember(context, providedCatalog) { providedCatalog ?: EmojiSequenceCatalog(context.applicationContext) }
+    key(setId, file) {
+        var failed by remember { mutableStateOf(false) }
+        val renderer by produceState<EmojiRenderer?>(null) {
+            if (file == null || setId == EmojiSets.SYSTEM_ID) return@produceState
+            try {
+                value =
+                    withContext(Dispatchers.IO) {
+                        EmojiRenderer(catalog.load(), setId, FontFamily(Font(file)))
+                    }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                failed = true
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            CompositionLocalProvider(LocalEmojiRenderer provides null) {
+                Text(stringResource(R.string.settings_emoji_system), style = MaterialTheme.typography.labelMedium)
+                Text(
+                    stringResource(R.string.settings_emoji_sample),
+                    Modifier.testTag("settings_emoji_system_sample"),
+                    style = MaterialTheme.typography.titleLarge,
+                )
+            }
+            if (setId != EmojiSets.SYSTEM_ID) {
+                Text(
+                    EmojiSets.find(setId)?.displayName.orEmpty(),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                if (renderer != null) {
+                    CompositionLocalProvider(LocalEmojiRenderer provides renderer) {
+                        Text(
+                            stringResource(R.string.settings_emoji_sample),
+                            Modifier.testTag("settings_emoji_sample"),
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                    }
+                } else {
+                    Text(
+                        stringResource(if (failed) R.string.settings_emoji_sample_error else R.string.settings_emoji_loading),
+                        Modifier.testTag("settings_emoji_sample_status"),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Preview(name = "Emoji sets – System")
+@Composable
+private fun EmojiSystemSettingsPreview() {
+    MotdTheme(syncSystemBars = false) {
+        EmojiSetPickerContent(EmojiSets.SYSTEM_ID, EmojiSettingsState(loading = false))
+    }
+}
+
+@Preview(name = "Emoji sets – missing restored set")
+@Composable
+private fun EmojiMissingSettingsPreview() {
+    MotdTheme(syncSystemBars = false) {
+        EmojiSetPickerContent("noto", EmojiSettingsState(loading = false, error = true))
+    }
+}
+
+@Preview(name = "Emoji sets – cancellable download")
+@Composable
+private fun EmojiDownloadingSettingsPreview() {
+    MotdTheme(syncSystemBars = false) {
+        EmojiSetPickerContent(
+            EmojiSets.SYSTEM_ID,
+            EmojiSettingsState(loading = false, downloadingId = "noto"),
+            EmojiDownloadProgress("noto", 1_000_000L, 10_673_480L),
+        )
+    }
+}
 
 @Composable
 internal fun AppearanceSampleTheme(

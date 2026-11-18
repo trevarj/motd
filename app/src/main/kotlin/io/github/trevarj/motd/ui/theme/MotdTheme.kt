@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
+import io.github.trevarj.motd.data.emoji.EmojiSequenceCatalog
 import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
@@ -107,9 +108,10 @@ fun ConversationTypography(
     content: @Composable () -> Unit,
 ) {
     val family = LocalAppFontFamily.current
+    val emojiRenderer = LocalEmojiRenderer.current
     val typography =
-        remember(scalePercent, family) {
-            scaledConversationTypography(scalePercent, BaseTypography.withFontFamily(family))
+        remember(scalePercent, family, emojiRenderer) {
+            scaledConversationTypography(scalePercent, BaseTypography.withFontFamily(family, emojiRenderer))
         }
     MaterialTheme(
         colorScheme = MaterialTheme.colorScheme,
@@ -285,6 +287,8 @@ fun MotdTheme(
     // Only meaningful when fontChoice is CUSTOM; see rememberAppFontFamily. Optional so every
     // existing call site (incl. previews) is unaffected.
     customFontFile: File? = null,
+    emojiRenderer: EmojiRenderer? = LocalEmojiRenderer.current,
+    emojiSequenceCatalog: EmojiSequenceCatalog? = LocalEmojiSequenceCatalog.current,
     timestampConfig: TimestampConfig = TimestampConfig(),
     messageSpacing: MessageSpacing = MessageSpacing.DEFAULT,
     bubbleCornerStyle: BubbleCornerStyle = BubbleCornerStyle.ROUNDED,
@@ -435,8 +439,8 @@ fun MotdTheme(
     // components never receive them as parameters.
     val appFontFamily = rememberAppFontFamily(fontChoice, customFontFile)
     val typography =
-        remember(uiFontScalePercent, fontChoice, appFontFamily) {
-            scaledTypography(uiFontScalePercent, BaseTypography.withFontFamily(appFontFamily))
+        remember(uiFontScalePercent, fontChoice, appFontFamily, emojiRenderer) {
+            scaledTypography(uiFontScalePercent, BaseTypography.withFontFamily(appFontFamily, emojiRenderer))
         }
     MaterialTheme(
         colorScheme = colorScheme,
@@ -464,6 +468,8 @@ fun MotdTheme(
             LocalNickColors provides nickColorScheme,
             LocalAvatarStyle provides avatarStyle,
             LocalAppFontFamily provides appFontFamily,
+            LocalEmojiRenderer provides emojiRenderer,
+            LocalEmojiSequenceCatalog provides emojiSequenceCatalog,
             LocalTimestampConfig provides timestampConfig,
             LocalMotdSemanticColors provides semanticColors(colorScheme, dark),
             // Resolved once here: the timeline mounts a delivery tick per own row.

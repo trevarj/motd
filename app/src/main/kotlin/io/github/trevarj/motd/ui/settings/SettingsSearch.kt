@@ -156,6 +156,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_nick_palette, R.string.settings_nick_palette_desc, "nickname colors classic vivid avatars", SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_PALETTE),
         spec(R.string.settings_nick_color_overrides, R.string.settings_nick_color_overrides_desc, "nickname hue overrides custom avatars", SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_OVERRIDES),
         spec(R.string.settings_app_font, R.string.settings_appearance_text_section, "app typeface text font system device default", SettingsSearchPage.APPEARANCE, SettingsTarget.APP_FONT),
+        spec(R.string.settings_emoji_set, R.string.settings_emoji_scope, "emoji emoticons noto openmoji system download install fonts", SettingsSearchPage.APPEARANCE, SettingsTarget.APPEARANCE_EMOJI),
         spec(R.string.settings_ui_font_size, R.string.settings_ui_font_size_desc, "interface text scale", SettingsSearchPage.APPEARANCE, SettingsTarget.UI_FONT_SIZE),
         spec(R.string.settings_conversation_font_size, R.string.settings_conversation_font_size_desc, "conversation message text scale", SettingsSearchPage.APPEARANCE, SettingsTarget.CONVERSATION_FONT_SIZE),
         spec(R.string.settings_folder_layout, R.string.settings_folder_layout_desc, "folders tabs inline chat list", SettingsSearchPage.APPEARANCE, SettingsTarget.FOLDER_LAYOUT),

@@ -31,6 +31,8 @@ import io.github.trevarj.motd.ui.theme.paletteColorScheme
 import io.github.trevarj.motd.ui.theme.toRawColorScheme
 import io.github.trevarj.motd.ui.theme.withTrueBlackSurfaces
 import android.graphics.Color as AndroidColor
+import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

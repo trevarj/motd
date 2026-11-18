@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,6 +20,7 @@ import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.ui.components.PresenceExample
 import io.github.trevarj.motd.ui.settings.ChoiceOption
 import io.github.trevarj.motd.ui.settings.SingleChoiceSheet
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 @Composable
 fun PresenceModeSheet(

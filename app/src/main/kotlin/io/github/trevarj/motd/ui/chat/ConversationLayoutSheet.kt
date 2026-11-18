@@ -2,7 +2,6 @@ package io.github.trevarj.motd.ui.chat
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
@@ -25,6 +24,7 @@ import io.github.trevarj.motd.ui.settings.SingleChoiceSheet
 import io.github.trevarj.motd.ui.settings.SwitchRow
 import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundBlur
 import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundOpacityPercent
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 @Composable
 fun ConversationLayoutSheet(

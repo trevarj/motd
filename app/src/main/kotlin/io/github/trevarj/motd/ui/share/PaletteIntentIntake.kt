@@ -6,7 +6,6 @@ import android.content.Intent
 import android.provider.OpenableColumns
 import android.util.Base64
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,6 +39,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.security.MessageDigest
+import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 sealed interface IncomingContent {
     data class Palette(

@@ -42,6 +42,7 @@ private val WALLPAPER_SCENIC_ANIMATION = booleanPreferencesKey("wallpaper_scenic
 private val UI_FONT_SCALE = intPreferencesKey("ui_font_scale_percent_v1")
 private val CONVERSATION_FONT_SCALE = intPreferencesKey("conversation_font_scale_percent_v1")
 private val FONT_CHOICE = stringPreferencesKey("font_choice_v1")
+private val EMOJI_SET_ID = stringPreferencesKey("emoji_set_id_v1")
 private val SHOW_TIMESTAMPS = booleanPreferencesKey("show_timestamps_v1")
 private val TIME_FORMAT = stringPreferencesKey("time_format_v1")
 private val CUSTOM_TIME_FORMAT_PATTERN = stringPreferencesKey("custom_time_format_pattern_v1")
@@ -249,6 +250,7 @@ class AppearancePrefsImpl
                     fontChoice =
                         prefs[FONT_CHOICE]?.let { runCatching { FontChoice.valueOf(it) }.getOrNull() }
                             ?: FontChoice.SYSTEM,
+                    emojiSetId = normalizeEmojiSetId(prefs[EMOJI_SET_ID]),
                     showTimestamps = prefs[SHOW_TIMESTAMPS] ?: true,
                     timeFormat =
                         prefs[TIME_FORMAT]?.let { runCatching { TimeFormat.valueOf(it) }.getOrNull() }
@@ -425,6 +427,11 @@ class AppearancePrefsImpl
 
         override suspend fun setFontChoice(choice: FontChoice) {
             store.edit { it[FONT_CHOICE] = choice.name }
+        }
+
+        override suspend fun setEmojiSetId(id: String) {
+            require(normalizeEmojiSetId(id) == id) { "Invalid emoji set ID" }
+            store.edit { it[EMOJI_SET_ID] = id }
         }
 
         override suspend fun setShowTimestamps(enabled: Boolean) {

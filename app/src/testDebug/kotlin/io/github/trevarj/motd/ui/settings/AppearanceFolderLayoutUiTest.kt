@@ -57,6 +57,8 @@ import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.FolderIconKind
+import io.github.trevarj.motd.data.emoji.EmojiDownloadProgress
+import io.github.trevarj.motd.data.emoji.EmojiSets
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
@@ -115,6 +117,133 @@ class AppearanceFolderLayoutUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun emojiTargetShowsMissingSavedSetAsSystemWithoutDownloading() {
+        val downloads = mutableListOf<String>()
+        setContent(
+            appearance = AppearanceConfig(emojiSetId = "noto"),
+            emojiStateProvider = { EmojiSettingsState(loading = false) },
+            onDownloadEmojiSet = { downloads.add(it) },
+            targetProvider = { SettingsTarget.APPEARANCE_EMOJI },
+        )
+        compose.onNodeWithTag("settings_target_highlight_APPEARANCE_EMOJI").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("settings_emoji_fallback").assertIsDisplayed()
+        compose.onNodeWithTag("settings_emoji_options").performScrollToNode(hasTestTag("settings_emoji_system"))
+        compose.onNodeWithTag("settings_emoji_system").assertIsSelected()
+        compose.onNodeWithTag("settings_emoji_options").performScrollToNode(hasTestTag("settings_emoji_noto"))
+        compose.onNodeWithTag("settings_emoji_noto").assertIsNotSelected().assertIsNotEnabled()
+        compose.onNodeWithTag("settings_emoji_options").performScrollToNode(hasTestTag("settings_emoji_reinstall_noto"))
+        compose.runOnIdle { assertTrue(downloads.isEmpty()) }
+        compose.onNodeWithTag("settings_emoji_reinstall_noto").performClick()
+        compose.runOnIdle { assertEquals(listOf("noto"), downloads) }
+    }
+
+    @Test
+    fun unknownSavedEmojiSetNeverClaimsActiveAndSystemRemainsSelectable() {
+        val selected = mutableListOf<String>()
+        compose.setContent {
+            MotdTheme {
+                EmojiSetPickerContent(
+                    selectedId = "unknown-restored-id",
+                    state = EmojiSettingsState(loading = false),
+                    onSelect = { selected.add(it) },
+                )
+            }
+        }
+        compose.onNodeWithTag("settings_emoji_fallback").assertIsDisplayed()
+        compose.onNodeWithTag("settings_emoji_options").performScrollToNode(hasTestTag("settings_emoji_system"))
+        compose.onNodeWithTag("settings_emoji_system").assertIsSelected().performClick()
+        compose.runOnIdle { assertEquals(listOf(EmojiSets.SYSTEM_ID), selected) }
+    }
+
+    @Test
+    fun emojiDownloadProgressCanCancelAndFailureOffersExplicitRetry() {
+        val state = mutableStateOf(EmojiSettingsState(loading = false, downloadingId = "noto"))
+        var cancelled = false
+        val downloads = mutableListOf<String>()
+        compose.setContent {
+            MotdTheme {
+                EmojiSetPickerContent(
+                    selectedId = EmojiSets.SYSTEM_ID,
+                    state = state.value,
+                    progress = EmojiDownloadProgress("noto", 50, 100),
+                    onDownload = { downloads.add(it) },
+                    onCancel = {
+                        cancelled = true
+                        state.value = EmojiSettingsState(loading = false, error = true)
+                    },
+                )
+            }
+        }
+        compose.onNodeWithTag("settings_emoji_options").performScrollToNode(hasTestTag("settings_emoji_progress"))
+        compose.onNodeWithTag("settings_emoji_progress").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(0.5f, 0f..1f)),
+        )
+        compose.onNodeWithTag("settings_emoji_options").performScrollToNode(hasTestTag("settings_emoji_cancel"))
+        compose.onNodeWithTag("settings_emoji_cancel").performClick()
+        compose.runOnIdle {
+            assertTrue(cancelled)
+            assertTrue(downloads.isEmpty())
+        }
+        compose.onNodeWithTag("settings_emoji_options").performScrollToIndex(0)
+        compose.onNodeWithTag("settings_emoji_error").assertIsDisplayed()
+        compose.onNodeWithTag("settings_emoji_options").performScrollToNode(hasTestTag("settings_emoji_system"))
+        compose.onNodeWithTag("settings_emoji_system").assertIsSelected()
+        compose.onNodeWithTag("settings_emoji_options").performScrollToNode(hasTestTag("settings_emoji_download_noto"))
+        compose.onNodeWithTag("settings_emoji_download_noto").performClick()
+        compose.runOnIdle { assertEquals(listOf("noto"), downloads) }
+    }
+
+    @Test
+    fun installedEmojiSelectionIsImmediateOfflineAndRemovalShowsFallback() {
+        // This font is a UI fixture only; font integrity and emoji coverage belong to store tests.
+        val context = RuntimeEnvironment.getApplication()
+        val font = java.io.File.createTempFile("emoji-settings-", ".ttf", context.cacheDir)
+        context.resources.openRawResource(io.github.trevarj.motd.R.font.jetbrains_mono_wght).use { input ->
+            font.outputStream().use { input.copyTo(it) }
+        }
+        try {
+            val state = mutableStateOf(EmojiSettingsState(installed = mapOf("noto" to font), loading = false))
+            val selected = mutableListOf<String>()
+            val removed = mutableListOf<String>()
+            val appearance = AppearanceConfig(fontChoice = FontChoice.JETBRAINS_MONO)
+            compose.setContent {
+                MotdTheme(fontChoice = appearance.fontChoice) {
+                    EmojiSetPickerContent(
+                        selectedId = "noto",
+                        state = state.value,
+                        onSelect = { selected.add(it) },
+                        onRemove = {
+                            removed.add(it)
+                            state.value = EmojiSettingsState(loading = false)
+                        },
+                    )
+                }
+            }
+            compose.onNodeWithTag("settings_emoji_options").performScrollToNode(hasTestTag("settings_emoji_system"))
+            compose.onNodeWithTag("settings_emoji_system").performClick().assertIsSelected()
+            compose.onNodeWithTag("settings_emoji_options").performScrollToNode(hasTestTag("settings_emoji_noto"))
+            compose
+                .onNodeWithTag("settings_emoji_noto")
+                .assertIsEnabled()
+                .performClick()
+                .assertIsSelected()
+            compose.runOnIdle {
+                assertEquals(listOf("system", "noto"), selected)
+                assertEquals(FontChoice.JETBRAINS_MONO, appearance.fontChoice)
+            }
+            compose.onNodeWithTag("settings_emoji_options").performScrollToNode(hasTestTag("settings_emoji_remove_noto"))
+            compose.onNodeWithTag("settings_emoji_remove_noto").performClick()
+            compose.runOnIdle { assertEquals(listOf("noto"), removed) }
+            compose.onNodeWithTag("settings_emoji_options").performScrollToIndex(0)
+            compose.onNodeWithTag("settings_emoji_fallback").assertIsDisplayed()
+            compose.onNodeWithTag("settings_emoji_options").performScrollToNode(hasTestTag("settings_emoji_system"))
+            compose.onNodeWithTag("settings_emoji_system").assertIsSelected()
+        } finally {
+            font.delete()
+        }
+    }
 
     @Test
     fun appearanceKeepsAppIconChoiceWithoutSplashConfiguration() {
@@ -1478,6 +1607,8 @@ class AppearanceFolderLayoutUiTest {
         onWallpaper: (WallpaperSelection) -> Unit = {},
         importedWallpaperProvider: () -> WallpaperSelection? = { null },
         targetProvider: () -> SettingsTarget? = { null },
+        emojiStateProvider: () -> EmojiSettingsState = { EmojiSettingsState() },
+        onDownloadEmojiSet: (String) -> Unit = {},
     ) {
         compose.setContent {
             val currentAppearance = appearanceProvider()
@@ -1542,6 +1673,8 @@ class AppearanceFolderLayoutUiTest {
                         onOpenSurfaceEffects = onOpenSurfaceEffects,
                         onLauncherIcon = {},
                         target = targetProvider(),
+                        emojiState = emojiStateProvider(),
+                        onDownloadEmojiSet = onDownloadEmojiSet,
                     )
                 }
             }
