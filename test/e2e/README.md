@@ -245,6 +245,20 @@ The four journeys cover:
   settings, themes, and Soju control-center panels. The journey observes a real server
   self-JOIN and its persisted buffer before requiring the conversation to open.
 
+The send/reconnect journey uploads `app/src/androidTest/assets/required-voice.ogg`
+with metadata stripping enabled. This is a one-second mono Opus tone with a removable
+comment, not an empty placeholder. Regenerate it from the repository root with:
+
+```sh
+nix shell --inputs-from . nixpkgs#ffmpeg -c ffmpeg \
+  -hide_banner -loglevel error -f lavfi \
+  -i sine=frequency=440:sample_rate=48000:duration=1 \
+  -ac 1 -c:a libopus -b:a 16k -map_metadata -1 \
+  -metadata comment=required-headless-metadata-fixture \
+  -fflags +bitexact -flags:a +bitexact \
+  -y app/src/androidTest/assets/required-voice.ogg
+```
+
 The Soju Control Center opens on an overview; its Networks, Channels, Account,
 and Console cards open full-page panels, and Back returns to the overview.
 The networks drawer marks Soju roots and configured ZNC connections with a

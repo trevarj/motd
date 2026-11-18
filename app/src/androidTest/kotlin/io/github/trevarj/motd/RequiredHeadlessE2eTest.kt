@@ -345,9 +345,10 @@ class RequiredHeadlessE2eTest {
                 InstrumentationRegistry.getInstrumentation().targetContext.cacheDir,
                 "required-${bootstrap.args.runId}.ogg",
             )
-        fixture.delete()
-        assertTrue(fixture.createNewFile())
         try {
+            InstrumentationRegistry.getInstrumentation().context.assets.open("required-voice.ogg").use { source ->
+                fixture.outputStream().use { target -> source.copyTo(target) }
+            }
             val client = checkNotNull(bootstrap.seams.connections().clientFor(network.childId))
             val (upload, echo) =
                 runBlocking {
@@ -371,7 +372,7 @@ class RequiredHeadlessE2eTest {
                                         durationMs = 1_000,
                                         mimeType = "audio/ogg",
                                         extension = ".ogg",
-                                        sizeBytes = 0,
+                                        sizeBytes = fixture.length(),
                                         encrypt = false,
                                     ),
                                 ).filterIsInstance<VoiceSendProgress.Complete>()
