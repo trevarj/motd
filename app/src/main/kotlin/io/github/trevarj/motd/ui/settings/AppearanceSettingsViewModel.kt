@@ -84,6 +84,8 @@ class AppearanceSettingsViewModel
 
         fun setUseThemeTextColors(value: Boolean) = launch { appearancePrefs.setUseThemeTextColors(value) }
 
+        fun setAdjustPaletteReadability(value: Boolean) = launch { appearancePrefs.setAdjustPaletteReadability(value) }
+
         fun setSurfaceEffectsEnabled(value: Boolean) = launch { appearancePrefs.setSurfaceEffectsEnabled(value) }
 
         fun setLinkGlobalOpacity(value: Boolean) = launch { appearancePrefs.setLinkGlobalOpacity(value) }

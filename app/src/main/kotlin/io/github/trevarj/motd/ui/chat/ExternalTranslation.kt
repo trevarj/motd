@@ -46,6 +46,7 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.irc.format.containsIrcFormatting
 import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
+import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.readingInk
@@ -263,7 +264,11 @@ internal fun InlineMessageTranslation(
     val scheme = MaterialTheme.colorScheme
     val fill = scheme.surfaceContainerHighest.copy(alpha = 0.6f).compositeOver(parentColor)
     val ink = readingInk(scheme)
-    val bodyColor = remember(ink, fill) { ensureContrast(ink, listOf(fill), MESSAGE_TEXT_CONTRAST) }
+    val adjustReadability = LocalAdjustPaletteReadability.current
+    val bodyColor =
+        remember(ink, fill, adjustReadability) {
+            if (adjustReadability) ensureContrast(ink, listOf(fill), MESSAGE_TEXT_CONTRAST) else ink
+        }
     val accentInk = scheme.primary
     val accent = remember(accentInk, fill) { ensureContrast(accentInk, listOf(fill), MESSAGE_TEXT_CONTRAST) }
     Column(

@@ -53,12 +53,16 @@ import io.github.trevarj.motd.data.prefs.PaletteColors
 import io.github.trevarj.motd.data.prefs.PaletteDocument
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewKind
+import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.LocalMediaCornerStyle
+import io.github.trevarj.motd.ui.theme.LocalUseThemeTextColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.cornerRadius
 import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.paletteColorScheme
 import io.github.trevarj.motd.ui.theme.readingInk
+import io.github.trevarj.motd.ui.theme.toRawColorScheme
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 internal val LocalLinkPreviewAwaiting = staticCompositionLocalOf { false }
@@ -266,10 +270,15 @@ private fun PaletteLinkSample(
     mode: String,
     modifier: Modifier,
 ) {
-    val background = remember(colors.background) { Color(colors.background.toColorInt()) }
-    val surface = remember(colors.surface) { Color(colors.surface.toColorInt()) }
-    val authoredInk = remember(colors.onSurface) { Color(colors.onSurface.toColorInt()) }
-    val ink = remember(authoredInk, surface, background) { ensureContrast(authoredInk, listOf(surface, background), 4.5) }
+    val adjustReadability = LocalAdjustPaletteReadability.current
+    val useThemeTextColors = LocalUseThemeTextColors.current
+    val scheme =
+        remember(colors, mode, adjustReadability, useThemeTextColors) {
+            paletteColorScheme(colors.toRawColorScheme(mode == "dark"), mode == "dark", useThemeTextColors, adjustReadability)
+        }
+    val background = scheme.background
+    val surface = scheme.surface
+    val ink = scheme.onSurface
     val swatches =
         remember(colors) {
             listOf("primary" to colors.primary, "secondary" to colors.secondary, "tertiary" to colors.tertiary, "onSurface" to colors.onSurface)

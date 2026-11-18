@@ -104,6 +104,32 @@ class ChatListSelectionUiTest {
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
     }
 
+    @Test fun authored_title_ink_is_preserved_until_readability_adjustment_is_enabled() {
+        val adjust = mutableStateOf(false)
+        val authoredInk = Color(0xFF252525)
+        val fill = Color(0xFF202020)
+        compose.setContent {
+            MotdTheme(dynamicColor = false, useThemeTextColors = true, adjustPaletteReadability = adjust.value) {
+                MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(onBackground = authoredInk, surface = fill)) {
+                    Surface(color = fill) {
+                        ChatListRowItem(row().copy(displayName = "Authored title", unreadCount = 0), false, {}, {})
+                    }
+                }
+            }
+        }
+        for (enabled in listOf(false, true, false)) {
+            compose.runOnIdle { adjust.value = enabled }
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithText("Authored title", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val ink =
+                layouts
+                    .single()
+                    .layoutInput.style.color
+            assertEquals(if (enabled) ensureContrast(authoredInk, listOf(fill), MESSAGE_TEXT_CONTRAST) else authoredInk, ink)
+            assertTrue(if (enabled) contrastRatio(ink, fill) >= MESSAGE_TEXT_CONTRAST else contrastRatio(ink, fill) < MESSAGE_TEXT_CONTRAST)
+        }
+    }
+
     @Test fun read_previews_are_subdued_and_readable_without_changing_title_timestamp_sender_or_unread_weight() {
         val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
         val paletteText = mutableStateOf(false)
@@ -119,6 +145,7 @@ class ChatListSelectionUiTest {
                 dynamicColor = false,
                 themePreset = preset.value,
                 useThemeTextColors = paletteText.value,
+                adjustPaletteReadability = true,
                 timestampConfig = TimestampConfig(format = TimeFormat.CUSTOM, customPattern = "'Preview time'"),
             ) {
                 val scheme = MaterialTheme.colorScheme

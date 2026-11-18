@@ -80,6 +80,7 @@ internal fun AppearanceSampleTheme(
         trueBlack = appearance.trueBlack,
         dynamicColor = settings.dynamicColor,
         useThemeTextColors = appearance.useThemeTextColors,
+        adjustPaletteReadability = appearance.adjustPaletteReadability,
         layoutDensity = settings.layoutDensity,
         compactNickBrackets = settings.compactNickBrackets,
         nickColorsEnabled = settings.nickColorsEnabled,

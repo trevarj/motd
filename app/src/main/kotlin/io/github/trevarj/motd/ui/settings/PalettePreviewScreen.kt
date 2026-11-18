@@ -138,7 +138,7 @@ fun PalettePreviewScreen(
                         )
                         state.sourceHostname?.let { Text("Source host: $it") }
                         if (state.targetInstalledId != null) Text("Update this installed palette without changing your selected palette or color mode.")
-                        Text("Readability adjustments, neutral text, true black and nickname preferences still apply.")
+                        Text(if (state.appearance.adjustPaletteReadability) "Readability adjustments and your saved text preference apply. True black and nickname preferences remain independent." else "Authored palette colors are shown. True black and nickname preferences remain independent.")
                     }
                 }
                 if (state.targetInstalledId == null) {

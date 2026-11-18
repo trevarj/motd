@@ -96,6 +96,7 @@ import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MutedActivityBadge
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.components.UnreadBadge
+import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.readingInk
@@ -704,7 +705,12 @@ private fun DickordChannelRow(
     val badges = chatListBadgeState(row)
     val scheme = MaterialTheme.colorScheme
     val rowColor = if (selected) scheme.secondaryContainer else Color.Transparent
-    val readingInk = if (selected) scheme.onSecondaryContainer else ensureContrast(readingInk(scheme), listOf(scheme.surfaceContainerLowest), MESSAGE_TEXT_CONTRAST)
+    val readingInk =
+        when {
+            selected -> scheme.onSecondaryContainer
+            LocalAdjustPaletteReadability.current -> ensureContrast(readingInk(scheme), listOf(scheme.surfaceContainerLowest), MESSAGE_TEXT_CONTRAST)
+            else -> readingInk(scheme)
+        }
     Row(
         modifier =
             Modifier

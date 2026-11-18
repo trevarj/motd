@@ -112,6 +112,11 @@ An unreadable local palette collection blocks export and merge; a valid modern
 replace can recover it. An absent appearance section leaves even corrupt local
 palette state untouched.
 
+Appearance also stores `adjustPaletteReadability`, defaulting to `false` in older
+appearance objects. An absent appearance object preserves its local value. The
+saved `useThemeTextColors` choice still round-trips, but is inactive while readability
+adjustment is off; authored text is used without overwriting that choice.
+
 Legacy `splashScreenAnimation` values (`EDGE_TRACE`, `SOFT_WASH`, `TRAVELING_PULSE`,
 `STATIC`) still round-trip and restore for compatibility, although startup now
 uses a single non-configurable spark cut. Missing fields default to `EDGE_TRACE`;

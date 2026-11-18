@@ -185,6 +185,7 @@ import io.github.trevarj.motd.ui.chat.EmojiSearchEntry
 import io.github.trevarj.motd.ui.chat.messageFormattingRange
 import io.github.trevarj.motd.ui.chat.searchSystemEmojis
 import io.github.trevarj.motd.ui.chat.systemEmojiSearchEntries
+import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.LocalComfortableBubbleColors
 import io.github.trevarj.motd.ui.theme.LocalInputCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
@@ -578,9 +579,10 @@ fun Composer(
             MaterialTheme.colorScheme.secondaryContainer,
         )
     val composerInkSeed = readingInk(MaterialTheme.colorScheme)
+    val adjustPaletteReadability = LocalAdjustPaletteReadability.current
     val composerInk =
-        remember(composerInkSeed, composerFill) {
-            ensureContrast(composerInkSeed, listOf(composerFill), MESSAGE_TEXT_CONTRAST)
+        remember(composerInkSeed, composerFill, adjustPaletteReadability) {
+            if (adjustPaletteReadability) ensureContrast(composerInkSeed, listOf(composerFill), MESSAGE_TEXT_CONTRAST) else composerInkSeed
         }
     val composerCursorSeed = MaterialTheme.colorScheme.primary
     val composerCursor =
@@ -1092,11 +1094,7 @@ fun Composer(
                                                 sender = selfNick,
                                                 color =
                                                     remember(selfNick, composerFill, composerInk, nickColors) {
-                                                        ensureContrast(
-                                                            nickColors.nick(selfNick, composerInk),
-                                                            listOf(composerFill),
-                                                            MESSAGE_TEXT_CONTRAST,
-                                                        )
+                                                        nickColors.nick(selfNick, composerInk, listOf(composerFill), fallbackIsAuthored = true)
                                                     },
                                                 unread = false,
                                                 modifier =
@@ -2307,10 +2305,14 @@ private fun ReplyBar(
     onCancel: () -> Unit,
 ) {
     val fill = MaterialTheme.colorScheme.primaryContainer
-    val nameInk = LocalNickColors.current.nick(reply.sender, MaterialTheme.colorScheme.primary)
-    val accent = remember(nameInk, fill) { ensureContrast(nameInk, listOf(fill), MESSAGE_TEXT_CONTRAST) }
+    val nickColors = LocalNickColors.current
+    val accent = nickColors.nick(reply.sender, MaterialTheme.colorScheme.primary, listOf(fill), fallbackIsAuthored = true)
     val bodyInk = readingInk(MaterialTheme.colorScheme)
-    val bodyColor = remember(bodyInk, fill) { ensureContrast(bodyInk, listOf(fill), MESSAGE_TEXT_CONTRAST) }
+    val adjustPaletteReadability = LocalAdjustPaletteReadability.current
+    val bodyColor =
+        remember(bodyInk, fill, adjustPaletteReadability) {
+            if (adjustPaletteReadability) ensureContrast(bodyInk, listOf(fill), MESSAGE_TEXT_CONTRAST) else bodyInk
+        }
     Surface(
         modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 68.dp, top = 8.dp),
         shape = MotdShapes.card,

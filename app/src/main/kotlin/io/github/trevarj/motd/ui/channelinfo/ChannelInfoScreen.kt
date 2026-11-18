@@ -101,6 +101,7 @@ import io.github.trevarj.motd.ui.components.notificationIcon
 import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
 import io.github.trevarj.motd.ui.settings.foolEditorPreferences
+import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
@@ -783,10 +784,17 @@ private fun TopicText(
 ) {
     val scheme = MaterialTheme.colorScheme
     val fill = containerColor
-    val ink = ensureContrast(readingInk(scheme), listOf(fill), MESSAGE_TEXT_CONTRAST)
+    val ink = if (LocalAdjustPaletteReadability.current) ensureContrast(readingInk(scheme), listOf(fill), MESSAGE_TEXT_CONTRAST) else readingInk(scheme)
     val formatted =
         io.github.trevarj.motd.ui.components
-            .linkifiedBody(topic, scheme.primary, mentionsActive = false, containerColor = fill, contentColor = ink)
+            .linkifiedBody(
+                topic,
+                scheme.primary,
+                mentionsActive = false,
+                containerColor = fill,
+                contentColor = ink,
+                adjustPaletteReadability = LocalAdjustPaletteReadability.current,
+            )
     val displayed =
         if (linksEnabled) {
             formatted

@@ -81,6 +81,7 @@ import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
+import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
@@ -88,6 +89,7 @@ import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.NickColorScheme
 import io.github.trevarj.motd.ui.theme.TimestampConfig
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
@@ -626,6 +628,7 @@ class MessageBubbleFooterUiTest {
             Sample(
                 failed = true,
                 sentBubbleColor = ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, fill.toArgb()),
+                adjustPaletteReadability = true,
             )
         }
 
@@ -640,6 +643,73 @@ class MessageBubbleFooterUiTest {
         assertTrue(contrastRatio(body, fill) >= 4.5)
         assertTrue(contrastRatio(time, fill) >= 4.5)
         compose.onNodeWithContentDescription(RuntimeEnvironment.getApplication().getString(R.string.chat_failed), useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun authoredReadingAndThemeIdentityRemainExactUntilAdjustmentAcrossNativeRenderers() {
+        val authored = Color(0xFFDDDDDD)
+        val adjust = mutableStateOf(false)
+        val density = mutableStateOf(LayoutDensity.COMFORTABLE)
+        val kind = mutableStateOf(MessageKind.PRIVMSG)
+        val nickColorsEnabled = mutableStateOf(true)
+        var fill = Color.Unspecified
+        compose.setContent {
+            MotdTheme(
+                dynamicColor = false,
+                adjustPaletteReadability = adjust.value,
+                layoutDensity = density.value,
+                nicknameBackgroundsEnabled = false,
+                avatarStyle = AvatarStyle.NONE,
+            ) {
+                val scheme = MaterialTheme.colorScheme.copy(background = Color.White, onBackground = authored, onSurface = authored, onSurfaceVariant = authored)
+                val nicks = NickColorScheme(nickColorsEnabled.value, NickColorPalette.THEME, emptyMap(), false, identityPalette = listOf(authored), adjustPaletteReadability = adjust.value)
+                fill =
+                    when {
+                        density.value == LayoutDensity.COMFORTABLE -> messageBubbleRoleColors(scheme, false, false, kind.value, LocalMotdSemanticColors.current).container
+                        kind.value == MessageKind.ACTION -> scheme.tertiaryContainer.copy(alpha = 0.22f).compositeOver(scheme.background)
+                        else -> scheme.background
+                    }
+                MaterialTheme(colorScheme = scheme) {
+                    CompositionLocalProvider(LocalNickColors provides nicks) {
+                        Surface(Modifier.width(380.dp), color = scheme.background) {
+                            MessageBubble(
+                                sender = "alice",
+                                text = "Reading @bob",
+                                timeMs = 0,
+                                isSelf = false,
+                                showSender = true,
+                                kind = kind.value,
+                                knownNicks = setOf("bob"),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        for (layout in LayoutDensity.entries) {
+            for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.ACTION)) {
+                for (colored in listOf(true, false)) {
+                    for (adjusted in listOf(false, true)) {
+                        compose.runOnIdle {
+                            density.value = layout
+                            kind.value = messageKind
+                            adjust.value = adjusted
+                            nickColorsEnabled.value = colored
+                        }
+                        val label = "$layout $messageKind adjusted=$adjusted nickColors=$colored"
+                        val body = compose.onNodeWithText("Reading", substring = true, useUnmergedTree = true).textLayout()
+                        val sender = compose.onNodeWithText("alice", substring = true, useUnmergedTree = true).textLayout()
+                        for (ink in listOf(body.inkAt("Reading"), body.inkAt("@bob"), sender.inkAt("alice"))) {
+                            if (adjusted) {
+                                assertTrue("$label ink=$ink fill=$fill", contrastRatio(ink, fill) >= 4.5)
+                            } else {
+                                assertEquals(label, authored, ink)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     @Test
@@ -1309,6 +1379,7 @@ class MessageBubbleFooterUiTest {
                 layoutDensity = density.value,
                 avatarStyle = AvatarStyle.NONE,
                 useThemeTextColors = useThemeTextColors.value,
+                adjustPaletteReadability = true,
                 timestampConfig = TimestampConfig(show = true),
             ) {
                 val scheme = MaterialTheme.colorScheme
@@ -1598,7 +1669,7 @@ class MessageBubbleFooterUiTest {
                 avatarStyle = AvatarStyle.IRC_SPRITE,
             )
         }
-        val scheme = requireNotNull(fixedThemeScheme(ColorThemePreset.AYU_LIGHT))
+        val scheme = requireNotNull(fixedThemeScheme(ColorThemePreset.AYU_LIGHT, adjustPaletteReadability = true))
         for (layout in LayoutDensity.entries) {
             for (nickColors in listOf(true, false)) {
                 for (
@@ -1938,7 +2009,7 @@ class MessageBubbleFooterUiTest {
                     val canvasBounds = canvas.fetchSemanticsNode().boundsInRoot
                     val row = compose.onNodeWithTag("contrast_message", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
                     val fill = pixels[8, (row.top - canvasBounds.top).toInt() + 2]
-                    val expectedFill = requireNotNull(fixedThemeScheme(preset)).background.toArgb()
+                    val expectedFill = requireNotNull(fixedThemeScheme(preset, adjustPaletteReadability = true)).background.toArgb()
                     val actualFill = fill.toArgb()
                     for (channel in 0..3) {
                         val shift = channel * 8
@@ -2313,6 +2384,7 @@ class MessageBubbleFooterUiTest {
     ) {
         MotdTheme(
             dynamicColor = false,
+            adjustPaletteReadability = true,
             themePreset = theme,
             layoutDensity = density,
             avatarStyle = avatarStyle,
@@ -2426,9 +2498,11 @@ class MessageBubbleFooterUiTest {
         failed: Boolean = false,
         sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
         receivedBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
+        adjustPaletteReadability: Boolean = false,
     ) {
         MotdTheme(
             dynamicColor = false,
+            adjustPaletteReadability = adjustPaletteReadability,
             themePreset = ColorThemePreset.LIGHT,
             layoutDensity = density,
             avatarStyle = avatarStyle,

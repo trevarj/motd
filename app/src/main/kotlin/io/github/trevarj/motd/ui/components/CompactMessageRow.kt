@@ -38,6 +38,7 @@ import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.LocalCompactNickBrackets
 import io.github.trevarj.motd.ui.theme.LocalMediaCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalMessageBackgroundOpacityPercent
@@ -140,7 +141,8 @@ internal fun CompactMessageRow(
         )
     val contrastRow = drawFill.compositeOver(canvas)
     val bodyInk = codeColor
-    val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
+    val adjustPaletteReadability = LocalAdjustPaletteReadability.current
+    val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed, adjustPaletteReadability) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow, adjustPaletteReadability) }
 
     // The sender and body wrap as one paragraph; continuation lines omit the sender prefix.
     // Known-nick @mentions in the body are colored via the memoized resolver.
@@ -149,6 +151,9 @@ internal fun CompactMessageRow(
     val line =
         remember(
             selecting,
+            adjustPaletteReadability,
+            nickColors,
+            sender,
             displaySender,
             mediaUrls,
             audioPreviewUrls,
@@ -190,6 +195,9 @@ internal fun CompactMessageRow(
                 nickMentionStyle = nickMentionStyle,
                 mentionColorsEnabled = nickColors.enabled,
                 onMentionClick = onMentionClick.takeUnless { selecting },
+                adjustPaletteReadability = adjustPaletteReadability,
+                fitSenderColor = !nickColors.preservesAuthoredIdentity(sender, fallbackIsAuthored = true),
+                fitMentionColor = { !nickColors.preservesAuthoredIdentity(it) },
             ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
         }
 
@@ -234,7 +242,7 @@ internal fun CompactMessageRow(
             // Trailing timestamp keeps the IRC "right gutter" feel without a bubble.
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                 val metadataInk = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                val metadataColor = remember(metadataInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(metadataInk, contrastRow, dimmed, normalPaintedRow) }
+                val metadataColor = remember(metadataInk, contrastRow, normalPaintedRow, dimmed, failed, adjustPaletteReadability) { messageContentColor(metadataInk, contrastRow, dimmed, normalPaintedRow, failed || adjustPaletteReadability) }
                 MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed, contentColor = metadataColor)
                 if (LocalTimestampConfig.current.show) {
                     Text(
@@ -302,11 +310,14 @@ internal fun buildCompactLine(
     nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
     mentionColorsEnabled: Boolean = true,
     onMentionClick: ((String) -> Unit)? = null,
+    adjustPaletteReadability: Boolean = false,
+    fitSenderColor: Boolean = true,
+    fitMentionColor: (String) -> Boolean = { true },
 ): AnnotatedString =
     buildAnnotatedString {
         val nickStyle =
             SpanStyle(
-                color = if (containerColor == Color.Unspecified) nameColor else messageContentColor(nameColor, containerColor, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalContainerColor),
+                color = if (containerColor == Color.Unspecified) nameColor else messageContentColor(nameColor, containerColor, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalContainerColor, adjustPaletteReadability = fitSenderColor),
                 fontSize = nickFontSize,
                 fontWeight = FontWeight.Bold,
             )
@@ -349,6 +360,8 @@ internal fun buildCompactLine(
             nickMentionStyle = nickMentionStyle,
             mentionColorsEnabled = mentionColorsEnabled,
             onMentionClick = onMentionClick,
+            adjustPaletteReadability = adjustPaletteReadability,
+            fitMentionColor = fitMentionColor,
         )
         pop()
     }

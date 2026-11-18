@@ -66,14 +66,14 @@ fun DaySeparator(
             text = label,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
             modifier =
                 Modifier
                     .padding(horizontal = 8.dp)
                     .background(
-                        MaterialTheme.colorScheme.secondaryContainer,
+                        MaterialTheme.colorScheme.primaryContainer,
                         RoundedCornerShape(50),
-                    ).padding(horizontal = 12.dp, vertical = 4.dp),
+                    ).padding(horizontal = 14.dp, vertical = 6.dp),
         )
         HorizontalDivider(
             modifier = Modifier.weight(1f).clearAndSetSemantics {},
@@ -102,8 +102,14 @@ fun NewMessagesDivider(
             text = label,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 12.dp),
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier =
+                Modifier
+                    .padding(horizontal = 8.dp)
+                    .background(
+                        MaterialTheme.colorScheme.primaryContainer,
+                        RoundedCornerShape(50),
+                    ).padding(horizontal = 14.dp, vertical = 6.dp),
         )
         HorizontalDivider(
             modifier = Modifier.weight(1f).clearAndSetSemantics {},

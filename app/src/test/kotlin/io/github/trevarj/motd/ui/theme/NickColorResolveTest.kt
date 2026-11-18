@@ -233,7 +233,7 @@ class NickColorResolveTest {
         val isDark: Boolean,
     )
 
-    private fun fixture(preset: ColorThemePreset): ThemeFixture = fixture(fixedThemeScheme(preset)!!, preset.isDark, themeIdentityPalette(preset))
+    private fun fixture(preset: ColorThemePreset): ThemeFixture = fixture(fixedThemeScheme(preset, adjustPaletteReadability = true)!!, preset.isDark, themeIdentityPalette(preset))
 
     private fun fixture(
         scheme: ColorScheme,
@@ -262,7 +262,7 @@ class NickColorResolveTest {
             val colors = customContrastPalette(dark).copy(nicknameColors = identities)
             val palette = colors.nicknameColors.map { Color(0xFF000000L or it.substring(1).toLong(16)) }
             listOf(false, true).flatMap { useThemeTextColors ->
-                val scheme = accessibleColorScheme(colors.toRawColorScheme(dark), dark, useThemeTextColors)
+                val scheme = paletteColorScheme(colors.toRawColorScheme(dark), dark, useThemeTextColors, adjustPaletteReadability = true)
                 listOf(fixture(scheme, dark, palette)) +
                     if (dark) listOf(fixture(scheme.withTrueBlackSurfaces(), true, palette)) else emptyList()
             }
@@ -282,7 +282,107 @@ class NickColorResolveTest {
             textBackgrounds = f.backgrounds,
             themeColors = f.accents,
             identityPalette = f.identityPalette,
+            adjustPaletteReadability = true,
         )
+
+    @Test
+    fun authoredIdentityRetainsExactColorOnActualFillUntilAdjustmentEnabled() {
+        for (dark in listOf(false, true)) {
+            val authored = if (dark) Color(0xFF252525) else Color(0xFFE0E0E0)
+            val fill = if (dark) Color(0xFF202020) else Color(0xFFE8E8E8)
+
+            fun scheme(adjust: Boolean = false) =
+                NickColorScheme(
+                    enabled = true,
+                    palette = NickColorPalette.THEME,
+                    overrides = emptyMap(),
+                    isDark = dark,
+                    textBackgrounds = listOf(fill),
+                    identityPalette = listOf(authored),
+                    adjustPaletteReadability = adjust,
+                )
+            val original = scheme()
+            assertEquals(authored, original.nick("alice", fallback))
+            assertEquals(authored, original.mention("alice"))
+            assertEquals(authored, original.nick("alice", fallback, listOf(fill)))
+            val adjusted = scheme(true).nick("alice", fallback, listOf(fill))
+            assertNotEquals(authored, adjusted)
+            assertTrue(contrastRatio(adjusted, fill) >= 6.99)
+            assertEquals(authored, scheme(true).avatar("alice"))
+            assertEquals(
+                authored,
+                resolveNickColor(
+                    "alice",
+                    dark,
+                    true,
+                    NickColorPalette.THEME,
+                    emptyMap(),
+                    fallback,
+                    backgrounds = listOf(fill),
+                    identityPalette = listOf(authored),
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun disabledNickColorsPreserveOnlyAuthoredFallbackWithoutAdjustment() {
+        for (dark in listOf(false, true)) {
+            val authored = if (dark) Color(0xFF252525) else Color(0xFFE0E0E0)
+            val fill = if (dark) Color(0xFF202020) else Color(0xFFE8E8E8)
+            for (palette in NickColorPalette.entries) {
+                fun scheme(adjust: Boolean) =
+                    NickColorScheme(
+                        enabled = false,
+                        palette = palette,
+                        overrides = mapOf("alice" to 210),
+                        isDark = dark,
+                        identityPalette = listOf(Color.Red),
+                        adjustPaletteReadability = adjust,
+                    )
+                val original = scheme(false)
+                assertEquals(authored, original.nick("alice", authored, listOf(fill), fallbackIsAuthored = true))
+                assertTrue(original.preservesAuthoredIdentity("alice", fallbackIsAuthored = true))
+                assertEquals(
+                    ensureContrast(authored, listOf(fill), 7.0),
+                    original.nick("alice", authored, listOf(fill)),
+                )
+                val adjusted = scheme(true).nick("alice", authored, listOf(fill), fallbackIsAuthored = true)
+                assertNotEquals(authored, adjusted)
+                assertTrue(contrastRatio(adjusted, fill) >= 6.99)
+            }
+        }
+    }
+
+    @Test
+    fun readabilityPolicyDoesNotChangeGeneratedOrOverriddenIdentities() {
+        for (dark in listOf(false, true)) {
+            val fill = if (dark) Color(0xFF202020) else Color(0xFFE8E8E8)
+            for (palette in NickColorPalette.entries) {
+                for (overrides in listOf(emptyMap(), mapOf("alice" to 210))) {
+                    for (identities in listOf(emptyList(), listOf(Color(0xFF999999)))) {
+                        if (palette == NickColorPalette.THEME && overrides.isEmpty() && identities.isNotEmpty()) continue
+
+                        fun scheme(adjust: Boolean) =
+                            NickColorScheme(
+                                true,
+                                palette,
+                                overrides,
+                                dark,
+                                textBackgrounds = listOf(fill),
+                                identityPalette = identities,
+                                adjustPaletteReadability = adjust,
+                            )
+                        val original = scheme(false)
+                        val adjusted = scheme(true)
+                        assertEquals(original.nick("alice", fallback), adjusted.nick("alice", fallback))
+                        assertEquals(original.nick("alice", fallback, listOf(fill)), adjusted.nick("alice", fallback, listOf(fill)))
+                        assertTrue(contrastRatio(original.nick("alice", fallback), fill) >= 4.49)
+                    }
+                }
+            }
+        }
+    }
 
     @Test
     fun customIdentities_preserveAuthoredFillsAndReadableNickHuesAcrossModes() {
@@ -367,6 +467,7 @@ class NickColorResolveTest {
             f.accents,
             f.backgrounds,
             f.identityPalette,
+            adjustPaletteReadability = true,
         )
 
     /** Circular hue distance in degrees, so 359.8 and 0.0 read as the same hue. */

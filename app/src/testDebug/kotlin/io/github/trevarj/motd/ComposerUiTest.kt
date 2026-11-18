@@ -67,6 +67,9 @@ import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.EffectSurface
 import io.github.trevarj.motd.data.prefs.LayoutDensity
+import io.github.trevarj.motd.data.prefs.PaletteColors
+import io.github.trevarj.motd.data.prefs.PaletteDocument
+import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.SurfaceEffect
 import io.github.trevarj.motd.data.prefs.SurfaceEffects
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
@@ -319,6 +322,65 @@ class ComposerUiTest {
     }
 
     @Test
+    fun authoredComposerInkAndNicknameStayExactUntilReadabilityIsEnabled() {
+        val adjust = mutableStateOf(false)
+        var fill = Color.Unspecified
+        val colors =
+            PaletteColors(
+                primary = "#DDDDDD",
+                secondary = "#DDDDDD",
+                tertiary = "#DDDDDD",
+                background = "#FFFFFF",
+                surface = "#FFFFFF",
+                surfaceContainer = "#FFFFFF",
+                onBackground = "#EEEEEE",
+                onSurface = "#EEEEEE",
+                onSurfaceVariant = "#EEEEEE",
+                outlineVariant = "#DDDDDD",
+                nicknameColors = listOf("#EFEFEF"),
+            )
+        compose.setContent {
+            MotdTheme(
+                dynamicColor = false,
+                customPalette = PaletteDocument("composer-authored", "Composer authored", 1, light = colors),
+                paletteMode = PaletteMode.LIGHT,
+                adjustPaletteReadability = adjust.value,
+            ) {
+                fill = MaterialTheme.colorScheme.secondaryContainer
+                Composer(
+                    value = TextFieldValue("Draft"),
+                    onValueChange = {},
+                    onSend = {},
+                    enabled = true,
+                    composerStyle = ComposerStyle.COMPACT,
+                    currentNick = "alice",
+                )
+            }
+        }
+
+        fun nickInk(): Color {
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose
+                .onNodeWithText("alice", useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            return layouts
+                .single()
+                .layoutInput.style.color
+        }
+        assertEquals(Color(0xFFEEEEEE), composerTextLayout().layoutInput.style.color)
+        assertEquals(Color(0xFFEFEFEF), nickInk())
+        compose.runOnIdle { adjust.value = true }
+        assertNotEquals(Color(0xFFEEEEEE), composerTextLayout().layoutInput.style.color)
+        assertNotEquals(Color(0xFFEFEFEF), nickInk())
+        val target = minOf(MESSAGE_TEXT_CONTRAST, maxOf(contrastRatio(Color.Black, fill), contrastRatio(Color.White, fill)))
+        assertTrue(contrastRatio(composerTextLayout().layoutInput.style.color, fill) >= target - 0.00001)
+        assertTrue(contrastRatio(nickInk(), fill) >= target - 0.00001)
+        compose.runOnIdle { adjust.value = false }
+        assertEquals(Color(0xFFEEEEEE), composerTextLayout().layoutInput.style.color)
+        assertEquals(Color(0xFFEFEFEF), nickInk())
+    }
+
+    @Test
     fun receivedChatColorsKeepComposerTextReadableAndFollowPalette() {
         val received = mutableStateOf(ComfortableBubbleColor())
         val theme = mutableStateOf(ColorThemePreset.LIGHT)
@@ -328,6 +390,7 @@ class ComposerUiTest {
                 dynamicColor = false,
                 themePreset = theme.value,
                 receivedBubbleColor = received.value,
+                adjustPaletteReadability = true,
             ) {
                 paletteColor = MaterialTheme.colorScheme.primary
                 Composer(
@@ -714,7 +777,7 @@ class ComposerUiTest {
         val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
         var fill = Color.Unspecified
         compose.setContent {
-            MotdTheme(dynamicColor = false, themePreset = preset.value) {
+            MotdTheme(dynamicColor = false, themePreset = preset.value, adjustPaletteReadability = true) {
                 fill = MaterialTheme.colorScheme.primaryContainer
                 Composer(
                     value = TextFieldValue("reply"),

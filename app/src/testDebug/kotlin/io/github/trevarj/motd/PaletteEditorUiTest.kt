@@ -336,6 +336,55 @@ class PaletteEditorUiTest {
         assertTrue(current().customPalettes.isEmpty())
     }
 
+    @Test fun readabilityPolicyChangesContainedPreviewWithoutChangingAuthoredDraft() {
+        val base = rawDraft()
+        val document = base.copy(light = requireNotNull(base.light).copy(primary = "#FFFFFF", onSurface = "#EEEEEE", onBackground = "#EEEEEE"))
+        runBlocking { prefs.setUseThemeTextColors(false) }
+        editor = editorModel(editorHandle(document))
+        mount()
+        compose.onNodeWithTag("palette_editor_preview_light").performClick()
+        val authored = sample()
+        capture("editor-readability-off.png")
+        compose.onNodeWithText("Adjusted for readability", useUnmergedTree = true).assertDoesNotExist()
+        runBlocking { prefs.setAdjustPaletteReadability(true) }
+        awaitUi {
+            editor!!
+                .state.value.appearance.adjustPaletteReadability
+        }
+        compose.waitForIdle()
+        assertFalse(authored.sameAs(sample()))
+        capture("editor-readability-on.png")
+        assertEquals(document, editor!!.state.value.draft)
+        assertFalse(current().useThemeTextColors)
+        assertTrue(current().customPalettes.isEmpty())
+        runBlocking { prefs.setAdjustPaletteReadability(false) }
+        awaitUi {
+            !editor!!
+                .state.value.appearance.adjustPaletteReadability
+        }
+        compose.waitForIdle()
+        assertTrue(authored.sameAs(sample()))
+        compose.runOnIdle {
+            editor = null
+            preview = previewModel(document)
+        }
+        awaitLoaded()
+        compose.onNodeWithTag("palette_preview_mode_light").performClick()
+        val fullSample = compose.onNodeWithTag("palette_preview_sample_light")
+        fullSample.performScrollTo()
+        val fullAuthored = fullSample.captureToImage().asAndroidBitmap()
+        capture("full-preview-readability-off.png")
+        runBlocking { prefs.setAdjustPaletteReadability(true) }
+        awaitUi {
+            preview!!
+                .uiState.value.appearance.adjustPaletteReadability
+        }
+        compose.waitForIdle()
+        assertFalse(fullAuthored.sameAs(fullSample.captureToImage().asAndroidBitmap()))
+        capture("full-preview-readability-on.png")
+        assertTrue(current().customPalettes.isEmpty())
+    }
+
     @Test
     @Config(qualifiers = "w320dp-h640dp", fontScale = 1.5f)
     fun largeFontNarrowPane_keepsActionsAndLayoutControlsReachable() {
@@ -470,6 +519,7 @@ class PaletteEditorUiTest {
                 trueBlack = appearance.trueBlack,
                 dynamicColor = false,
                 useThemeTextColors = appearance.useThemeTextColors,
+                adjustPaletteReadability = appearance.adjustPaletteReadability,
                 syncSystemBars = false,
             ) {
                 val primary = MaterialTheme.colorScheme.primary.toArgb()

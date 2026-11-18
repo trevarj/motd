@@ -48,6 +48,7 @@ import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
@@ -96,6 +97,35 @@ class DickordPortalUiTest {
     }
 
     @Test
+    fun authoredConversationInkIsPreservedUntilReadabilityAdjustmentIsEnabled() {
+        val adjust = mutableStateOf(false)
+        val authoredInk = Color(0xFF252525)
+        val fill = Color(0xFF202020)
+        val conversation = channel(11, 7, "Bridge A", "general", "101")
+        val group = serverGroup(7, "Bridge A", "100", "Example Server", listOf(conversation))
+        compose.setContent {
+            MotdTheme(dynamicColor = false, useThemeTextColors = true, adjustPaletteReadability = adjust.value) {
+                MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(onBackground = authoredInk, surfaceContainerLowest = fill)) {
+                    DickordPortalContent(
+                        state = DickordPortalState(loading = false, enabled = true, groups = listOf(group), selectedGroupKey = group.key),
+                    )
+                }
+            }
+        }
+        for (enabled in listOf(false, true, false)) {
+            compose.runOnIdle { adjust.value = enabled }
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithText("general", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val ink =
+                layouts
+                    .single()
+                    .layoutInput.style.color
+            assertEquals(if (enabled) ensureContrast(authoredInk, listOf(fill), MESSAGE_TEXT_CONTRAST) else authoredInk, ink)
+            assertTrue(if (enabled) contrastRatio(ink, fill) >= MESSAGE_TEXT_CONTRAST else contrastRatio(ink, fill) < MESSAGE_TEXT_CONTRAST)
+        }
+    }
+
+    @Test
     fun guildAndPendingTitlesUseNeutralInkOnSelectedFillWithoutChangingIconsOrBadges() {
         val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
         val pending = mutableStateOf(false)
@@ -107,7 +137,7 @@ class DickordPortalUiTest {
         var badgeInk = Color.Unspecified
         var mentionInk = Color.Unspecified
         compose.setContent {
-            MotdTheme(dynamicColor = false, themePreset = preset.value) {
+            MotdTheme(dynamicColor = false, themePreset = preset.value, adjustPaletteReadability = true) {
                 val scheme = MaterialTheme.colorScheme
                 val (muted, unread) = rowState.value
                 fill = (if (selected.value) scheme.secondaryContainer else Color.Transparent).compositeOver(scheme.surfaceContainerLowest)

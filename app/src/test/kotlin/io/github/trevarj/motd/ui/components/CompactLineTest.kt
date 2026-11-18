@@ -7,8 +7,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
+import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.irc.format.IRC_BOLD
+import io.github.trevarj.motd.ui.theme.NickColorScheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -22,6 +24,41 @@ class CompactLineTest {
     private val nick = Color(0xFF112233)
     private val body = Color(0xFF445566)
     private val link = Color(0xFF778899)
+
+    @Test
+    fun compactPreservesAuthoredSenderAndMentionsButStillFitsOverridesOnActualFill() {
+        val authored = Color(0xFFDDDDDD)
+        val fill = Color.White
+        for (adjust in listOf(false, true)) {
+            val nicks = NickColorScheme(true, NickColorPalette.THEME, mapOf("override" to 30), false, identityPalette = listOf(authored), adjustPaletteReadability = adjust)
+            val line =
+                buildCompactLine(
+                    "alice",
+                    "Reading @bob @override",
+                    MessageKind.PRIVMSG,
+                    nicks.nick("alice", authored),
+                    authored,
+                    authored,
+                    mentionColor = { nicks.nick(it, authored) },
+                    containerColor = fill,
+                    adjustPaletteReadability = adjust,
+                    fitSenderColor = !nicks.preservesAuthoredIdentity("alice"),
+                    fitMentionColor = { !nicks.preservesAuthoredIdentity(it) },
+                )
+            for (word in listOf("<alice>", "Reading", "@bob", "@override")) {
+                val offset = line.text.indexOf(word)
+                val ink =
+                    line.spanStyles
+                        .last { offset in it.start until it.end && it.item.color != Color.Unspecified }
+                        .item.color
+                if (adjust || word == "@override") {
+                    assertReadingContrast(word, ink, fill)
+                } else {
+                    assertEquals(word, authored, ink)
+                }
+            }
+        }
+    }
 
     @Test
     fun compact_chip_markers_and_clicks_cover_only_body_mentions() {

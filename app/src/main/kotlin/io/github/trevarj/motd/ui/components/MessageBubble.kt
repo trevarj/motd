@@ -96,6 +96,7 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.InlineTextSegment
 import io.github.trevarj.motd.ui.chat.extractUrls
 import io.github.trevarj.motd.ui.chat.parseInlineCode
+import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.LocalAvatarShape
 import io.github.trevarj.motd.ui.theme.LocalChatShadowsEnabled
 import io.github.trevarj.motd.ui.theme.LocalComfortableBubbleColors
@@ -148,12 +149,17 @@ internal fun messageContentColor(
     fill: Color,
     dimmed: Boolean,
     normalFill: Color = fill,
+    adjustPaletteReadability: Boolean = false,
 ): Color =
-    ensureContrast(
-        if (dimmed) lerp(ensureContrast(normal, listOf(normalFill), MESSAGE_TEXT_CONTRAST), fill, 0.35f) else normal,
-        listOf(fill),
-        if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
-    )
+    if (!dimmed && !adjustPaletteReadability) {
+        normal
+    } else {
+        ensureContrast(
+            if (dimmed) lerp(ensureContrast(normal, listOf(normalFill), MESSAGE_TEXT_CONTRAST), fill, 0.35f) else normal,
+            listOf(fill),
+            if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST,
+        )
+    }
 
 /** Resolve the existing Two-line baseline before applying explicit user opacity. */
 private fun twoLineContrastFill(fill: Color): Color {
@@ -614,6 +620,7 @@ fun MessageBubble(
     val codeColor = readingInk(MaterialTheme.colorScheme)
 
     val scheme = MaterialTheme.colorScheme
+    val adjustPaletteReadability = LocalAdjustPaletteReadability.current
     val semantic = LocalMotdSemanticColors.current
     val comfortableBubbleColors = LocalComfortableBubbleColors.current
     // Keyed by color value, not scheme identity: Material3 mutates its retained ColorScheme in place.
@@ -654,9 +661,9 @@ fun MessageBubble(
                     .effectBackingAlpha(bubbleRoles.container.alpha * backgroundAlpha),
         )
     val bubbleColor = bubbleFill.compositeOver(scheme.background)
-    val textColor = messageContentColor(bubbleRoles.normalContent, bubbleColor, dimmed, bubbleRoles.normalContainer)
+    val textColor = messageContentColor(bubbleRoles.normalContent, bubbleColor, dimmed, bubbleRoles.normalContainer, adjustPaletteReadability = true)
     val bodyInk = readingInk(scheme)
-    val bodyColor = remember(bodyInk, bubbleColor, bubbleRoles, dimmed) { messageContentColor(bodyInk, bubbleColor, dimmed, bubbleRoles.normalContainer) }
+    val bodyColor = remember(bodyInk, bubbleColor, bubbleRoles, dimmed, adjustPaletteReadability) { messageContentColor(bodyInk, bubbleColor, dimmed, bubbleRoles.normalContainer, adjustPaletteReadability) }
     // Tighten the inner grouped edge while retaining the shared outer silhouette.
     val groupedCorner = spacing.bubbleGroupedCorner
     val topCorner = if (showSender) spacing.bubbleCorner else groupedCorner
@@ -740,7 +747,7 @@ fun MessageBubble(
                     }
                 val normalNameBackground =
                     if (senderIsFriend) scheme.primary.copy(alpha = 0.12f).compositeOver(bubbleRoles.normalContainer) else bubbleRoles.normalContainer
-                val nameColor = remember(nameInk, nameBackground, normalNameBackground, dimmed) { messageContentColor(nameInk, nameBackground, dimmed, normalNameBackground) }
+                val nameColor = remember(nameInk, nameBackground, normalNameBackground, dimmed, nickColors, sender) { messageContentColor(nameInk, nameBackground, dimmed, normalNameBackground, !nickColors.preservesAuthoredIdentity(sender, fallbackIsAuthored = true)) }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = if (onSenderClick != null) Modifier.clickable(onClick = onSenderClick) else Modifier,
@@ -796,6 +803,8 @@ fun MessageBubble(
                 val body =
                     remember(
                         selecting,
+                        adjustPaletteReadability,
+                        nickColors,
                         text,
                         mediaUrls,
                         audioPreviewUrls,
@@ -825,6 +834,8 @@ fun MessageBubble(
                             nickMentionStyle = nickMentionStyle,
                             mentionColorsEnabled = nickColors.enabled,
                             onMentionClick = onMentionClick.takeUnless { selecting },
+                            adjustPaletteReadability = adjustPaletteReadability,
+                            fitMentionColor = { !nickColors.preservesAuthoredIdentity(it) },
                         ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
                     }
                 if (body.isNotBlank()) {
@@ -883,7 +894,7 @@ fun MessageBubble(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 val metadataInk = if (failed) MaterialTheme.colorScheme.error else textColor
-                val metadataColor = if (failed) messageContentColor(metadataInk, bubbleColor, dimmed, bubbleRoles.normalContainer) else textColor
+                val metadataColor = if (failed) messageContentColor(metadataInk, bubbleColor, dimmed, bubbleRoles.normalContainer, adjustPaletteReadability = true) else textColor
                 if (isSelf && showSender) {
                     Text(
                         text = botDisplayName(displaySender, isBot),
@@ -972,6 +983,7 @@ private fun ComfortableActionBubble(
     val actionDescription = stringResource(R.string.chat_action_message)
     val actionLabel = if (LocalFoolBodyConcealment.current.concealed) actionAccessibilityLabel(displaySender, "") else actionAccessibilityLabel(displaySender, text)
     val scheme = MaterialTheme.colorScheme
+    val adjustPaletteReadability = LocalAdjustPaletteReadability.current
     val semanticColors = LocalMotdSemanticColors.current
     val roles =
         remember(scheme.tertiaryContainer, scheme.onTertiaryContainer, scheme.background, semanticColors.warningContainer, semanticColors.onWarningContainer, isSelf, hasMention, dimmed) {
@@ -986,7 +998,7 @@ private fun ComfortableActionBubble(
         )
     val rowColor = rowFill.compositeOver(scheme.background)
     val bodyInk = readingInk(scheme)
-    val bodyColor = remember(bodyInk, rowColor, roles, dimmed) { messageContentColor(bodyInk, rowColor, dimmed, roles.normalContainer) }
+    val bodyColor = remember(bodyInk, rowColor, roles, dimmed, adjustPaletteReadability) { messageContentColor(bodyInk, rowColor, dimmed, roles.normalContainer, adjustPaletteReadability) }
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
     val linkColor = roles.normalContent
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
@@ -1028,6 +1040,9 @@ private fun ComfortableActionBubble(
     val actionLine =
         remember(
             selecting,
+            adjustPaletteReadability,
+            nickColors,
+            sender,
             displaySender,
             isBot,
             text,
@@ -1069,6 +1084,10 @@ private fun ComfortableActionBubble(
                 nickMentionStyle = nickMentionStyle,
                 mentionColorsEnabled = nickColors.enabled,
                 onMentionClick = onMentionClick.takeUnless { selecting },
+                adjustPaletteReadability = adjustPaletteReadability,
+                fitSenderColor = !nickColors.preservesAuthoredIdentity(sender, fallbackIsAuthored = true),
+                fitMentionColor = { !nickColors.preservesAuthoredIdentity(it) },
+                fitLinkColor = true,
             ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
         }
 
@@ -1148,7 +1167,7 @@ private fun ComfortableActionBubble(
                             .padding(start = 8.dp, bottom = 1.dp),
                 ) {
                     val metadataInk = if (failed) MaterialTheme.colorScheme.error else roles.normalContent
-                    val metadataColor = messageContentColor(metadataInk, rowColor, dimmed, roles.normalContainer)
+                    val metadataColor = messageContentColor(metadataInk, rowColor, dimmed, roles.normalContainer, adjustPaletteReadability = true)
                     MessageStatusIcon(
                         isSelf = isSelf,
                         pending = pending,
@@ -1273,7 +1292,8 @@ private fun ActionMessageRow(
         )
     val contrastRow = drawFill.compositeOver(MaterialTheme.colorScheme.background)
     val bodyInk = readingInk(MaterialTheme.colorScheme)
-    val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
+    val adjustPaletteReadability = LocalAdjustPaletteReadability.current
+    val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed, adjustPaletteReadability) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow, adjustPaletteReadability) }
     val nameColor = nickColors.nick(sender, MaterialTheme.colorScheme.onSurface)
     val linkColor = MaterialTheme.colorScheme.primary
     val codeBackground = MaterialTheme.colorScheme.surfaceVariant
@@ -1293,6 +1313,9 @@ private fun ActionMessageRow(
     val actionLine =
         remember(
             selecting,
+            adjustPaletteReadability,
+            nickColors,
+            sender,
             displaySender,
             isBot,
             text,
@@ -1331,6 +1354,9 @@ private fun ActionMessageRow(
                 nickMentionStyle = nickMentionStyle,
                 mentionColorsEnabled = nickColors.enabled,
                 onMentionClick = onMentionClick.takeUnless { selecting },
+                adjustPaletteReadability = adjustPaletteReadability,
+                fitSenderColor = !nickColors.preservesAuthoredIdentity(sender, fallbackIsAuthored = true),
+                fitMentionColor = { !nickColors.preservesAuthoredIdentity(it) },
             ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
         }
 
@@ -1386,7 +1412,7 @@ private fun ActionMessageRow(
                     modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
                 ) {
                     val metadataInk = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                    val metadataColor = remember(metadataInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(metadataInk, contrastRow, dimmed, normalPaintedRow) }
+                    val metadataColor = remember(metadataInk, contrastRow, normalPaintedRow, dimmed, failed, adjustPaletteReadability) { messageContentColor(metadataInk, contrastRow, dimmed, normalPaintedRow, failed || adjustPaletteReadability) }
                     MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed, contentColor = metadataColor)
                     if (LocalTimestampConfig.current.show) {
                         Text(
@@ -1448,6 +1474,9 @@ internal fun buildActionBody(
     nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
     mentionColorsEnabled: Boolean = true,
     onMentionClick: ((String) -> Unit)? = null,
+    adjustPaletteReadability: Boolean = false,
+    fitMentionColor: (String) -> Boolean = { true },
+    fitLinkColor: Boolean = adjustPaletteReadability,
 ): AnnotatedString =
     buildAnnotatedString {
         // fontSynthesis is explicit because some OEM system fonts (e.g. Nothing OS) ship no italic
@@ -1484,6 +1513,9 @@ internal fun buildActionBody(
             nickMentionStyle = nickMentionStyle,
             mentionColorsEnabled = mentionColorsEnabled,
             onMentionClick = onMentionClick,
+            adjustPaletteReadability = adjustPaletteReadability,
+            fitMentionColor = fitMentionColor,
+            fitLinkColor = fitLinkColor,
         )
     }
 
@@ -1512,11 +1544,15 @@ internal fun buildActionLine(
     nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
     mentionColorsEnabled: Boolean = true,
     onMentionClick: ((String) -> Unit)? = null,
+    adjustPaletteReadability: Boolean = false,
+    fitSenderColor: Boolean = true,
+    fitMentionColor: (String) -> Boolean = { true },
+    fitLinkColor: Boolean = adjustPaletteReadability,
 ): AnnotatedString =
     buildAnnotatedString {
         if (includeStar) {
             val starColor =
-                if (containerColor == Color.Unspecified) accentColor else messageContentColor(accentColor, containerColor, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalContainerColor)
+                if (containerColor == Color.Unspecified) accentColor else messageContentColor(accentColor, containerColor, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalContainerColor, adjustPaletteReadability = true)
             withStyle(SpanStyle(color = starColor, fontStyle = FontStyle.Normal)) { append("* ") }
         }
         val nameBackground =
@@ -1525,7 +1561,7 @@ internal fun buildActionLine(
             if (friendTint == Color.Unspecified || normalContainerColor == Color.Unspecified) normalContainerColor else friendTint.compositeOver(normalContainerColor)
         val senderStyle =
             SpanStyle(
-                color = if (nameBackground == Color.Unspecified) nameColor else messageContentColor(nameColor, nameBackground, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalNameBackground),
+                color = if (nameBackground == Color.Unspecified) nameColor else messageContentColor(nameColor, nameBackground, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalNameBackground, adjustPaletteReadability = fitSenderColor),
                 fontWeight = FontWeight.Bold,
                 fontStyle = FontStyle.Normal,
                 background = friendTint,
@@ -1552,6 +1588,9 @@ internal fun buildActionLine(
                 nickMentionStyle = nickMentionStyle,
                 mentionColorsEnabled = mentionColorsEnabled,
                 onMentionClick = onMentionClick,
+                adjustPaletteReadability = adjustPaletteReadability,
+                fitMentionColor = fitMentionColor,
+                fitLinkColor = fitLinkColor,
             ),
         )
         pop()
@@ -1664,8 +1703,9 @@ private fun TwoLineMessageRow(
         )
     val contrastRow = drawFill.compositeOver(canvas)
     val bodyInk = codeColor
-    val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow) }
-    val nameColor = remember(nameInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(nameInk, contrastRow, dimmed, normalPaintedRow) }
+    val adjustPaletteReadability = LocalAdjustPaletteReadability.current
+    val bodyColor = remember(bodyInk, contrastRow, normalPaintedRow, dimmed, adjustPaletteReadability) { messageContentColor(bodyInk, contrastRow, dimmed, normalPaintedRow, adjustPaletteReadability) }
+    val nameColor = remember(nameInk, contrastRow, normalPaintedRow, dimmed, nickColors, sender) { messageContentColor(nameInk, contrastRow, dimmed, normalPaintedRow, !nickColors.preservesAuthoredIdentity(sender, fallbackIsAuthored = true)) }
 
     MessagePaintedContent(
         modifier =
@@ -1736,7 +1776,7 @@ private fun TwoLineMessageRow(
                     modifier = Modifier.padding(start = 6.dp),
                 ) {
                     val metadataInk = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                    val metadataColor = remember(metadataInk, contrastRow, normalPaintedRow, dimmed) { messageContentColor(metadataInk, contrastRow, dimmed, normalPaintedRow) }
+                    val metadataColor = remember(metadataInk, contrastRow, normalPaintedRow, dimmed, failed, adjustPaletteReadability) { messageContentColor(metadataInk, contrastRow, dimmed, normalPaintedRow, failed || adjustPaletteReadability) }
                     MessageStatusIcon(isSelf = isSelf, pending = pending, failed = failed, contentColor = metadataColor)
                     if (LocalTimestampConfig.current.show) {
                         Text(
@@ -1784,6 +1824,8 @@ private fun TwoLineMessageRow(
                 val richBody =
                     remember(
                         selecting,
+                        adjustPaletteReadability,
+                        nickColors,
                         text,
                         mediaUrls,
                         audioPreviewUrls,
@@ -1813,6 +1855,8 @@ private fun TwoLineMessageRow(
                             nickMentionStyle = nickMentionStyle,
                             mentionColorsEnabled = nickColors.enabled,
                             onMentionClick = onMentionClick.takeUnless { selecting },
+                            adjustPaletteReadability = adjustPaletteReadability,
+                            fitMentionColor = { !nickColors.preservesAuthoredIdentity(it) },
                         ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
                     }
                 if (richBody.isNotBlank()) {
@@ -2183,6 +2227,9 @@ internal fun linkifiedBody(
     nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
     mentionColorsEnabled: Boolean = true,
     onMentionClick: ((String) -> Unit)? = null,
+    adjustPaletteReadability: Boolean = false,
+    fitMentionColor: (String) -> Boolean = { true },
+    fitLinkColor: Boolean = adjustPaletteReadability,
 ): AnnotatedString {
     // Most chat rows are plain text. Avoid the URL regex, nick token walk, and builder allocation
     // when neither link annotations, mention styling, nor mIRC formatting can affect the result.
@@ -2211,6 +2258,9 @@ internal fun linkifiedBody(
             nickMentionStyle = nickMentionStyle,
             mentionColorsEnabled = mentionColorsEnabled,
             onMentionClick = onMentionClick,
+            adjustPaletteReadability = adjustPaletteReadability,
+            fitMentionColor = fitMentionColor,
+            fitLinkColor = fitLinkColor,
         )
     }
 }
@@ -2232,6 +2282,9 @@ internal fun AnnotatedString.Builder.appendRichText(
     nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
     mentionColorsEnabled: Boolean = true,
     onMentionClick: ((String) -> Unit)? = null,
+    adjustPaletteReadability: Boolean = false,
+    fitMentionColor: (String) -> Boolean = { true },
+    fitLinkColor: Boolean = adjustPaletteReadability,
 ) {
     val formatted = parseIrcFormatting(text)
     val segments = parseInlineCode(formatted.visibleText)
@@ -2242,22 +2295,24 @@ internal fun AnnotatedString.Builder.appendRichText(
         style: SpanStyle,
         backing: Color = containerColor,
         normalBacking: Color = normalContainerColor,
+        fit: Boolean = true,
     ): SpanStyle {
         if (containerColor == Color.Unspecified || style.color == Color.Unspecified) return style
+        if (!fit && minimumContrast != DIMMED_MESSAGE_TEXT_CONTRAST) return style
         val background = if (style.background == Color.Unspecified) backing else style.background.compositeOver(backing)
         val normalBackground = if (style.background == Color.Unspecified) normalBacking else style.background.compositeOver(normalBacking)
         val ink =
             if (style.color == contentColor) {
                 ensureContrast(style.color, listOf(background), minimumContrast)
             } else {
-                messageContentColor(style.color, background, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalBackground)
+                messageContentColor(style.color, background, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalBackground, adjustPaletteReadability = true)
             }
         return style.copy(color = ink)
     }
-    val readingPlain = readingStyle(plainStyle)
-    val readingLink = readingStyle(linkStyle)
-    val readingCode = readingStyle(codeStyle)
-    val mentionStyle: (Color) -> SpanStyle = { nickColor ->
+    val readingPlain = readingStyle(plainStyle, fit = adjustPaletteReadability)
+    val readingLink = readingStyle(linkStyle, fit = fitLinkColor)
+    val readingCode = readingStyle(codeStyle, fit = adjustPaletteReadability)
+    val mentionStyle: (String, Color) -> SpanStyle = { token, nickColor ->
         if (nickMentionStyle == NickMentionStyle.CHIP) {
             SpanStyle(
                 background = nickColor,
@@ -2272,7 +2327,7 @@ internal fun AnnotatedString.Builder.appendRichText(
                     } else if (containerColor == Color.Unspecified) {
                         nickColor
                     } else {
-                        messageContentColor(nickColor, containerColor, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalContainerColor)
+                        messageContentColor(nickColor, containerColor, minimumContrast == DIMMED_MESSAGE_TEXT_CONTRAST, normalContainerColor, adjustPaletteReadability = fitMentionColor(token))
                     },
                 fontWeight = if (nickMentionStyle == NickMentionStyle.BOLD) FontWeight.Bold else null,
             )
@@ -2371,24 +2426,24 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendPlainLinksAnd
     plainStyle: SpanStyle,
     linkStyle: SpanStyle,
     mentionColor: (String) -> androidx.compose.ui.graphics.Color?,
-    mentionStyle: (Color) -> SpanStyle,
+    mentionStyle: (String, Color) -> SpanStyle,
     onMentionClick: ((String) -> Unit)?,
 ) {
     val urls = extractUrls(text)
     if (urls.isEmpty()) {
-        withStyle(plainStyle) { appendMentionColored(text, mentionColor, mentionStyle, onMentionClick) }
+        withStyle(plainStyle) { appendMentionColored(text, mentionColor, onMentionClick = onMentionClick, mentionTokenStyle = mentionStyle) }
         return
     }
     var cursor = 0
     for (url in urls) {
         val at = text.indexOf(url, cursor)
         if (at < 0) continue
-        withStyle(plainStyle) { appendMentionColored(text.substring(cursor, at), mentionColor, mentionStyle, onMentionClick) }
+        withStyle(plainStyle) { appendMentionColored(text.substring(cursor, at), mentionColor, onMentionClick = onMentionClick, mentionTokenStyle = mentionStyle) }
         withLink(LinkAnnotation.Url(url)) { withStyle(linkStyle) { append(url) } }
         cursor = at + url.length
     }
     if (cursor < text.length) {
-        withStyle(plainStyle) { appendMentionColored(text.substring(cursor), mentionColor, mentionStyle, onMentionClick) }
+        withStyle(plainStyle) { appendMentionColored(text.substring(cursor), mentionColor, onMentionClick = onMentionClick, mentionTokenStyle = mentionStyle) }
     }
 }
 
@@ -2443,6 +2498,7 @@ internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendMentionColor
     mentionColor: (String) -> androidx.compose.ui.graphics.Color?,
     mentionStyle: (Color) -> SpanStyle = { SpanStyle(color = it) },
     onMentionClick: ((String) -> Unit)? = null,
+    mentionTokenStyle: ((String, Color) -> SpanStyle)? = null,
 ) {
     var i = 0
     val n = text.length
@@ -2460,7 +2516,7 @@ internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendMentionColor
             if (color != null) {
                 // Color the whole token including a leading '@' so the mention reads as one unit.
                 val mentionStart = length
-                val style = mentionStyle(color)
+                val style = mentionTokenStyle?.invoke(nick, color) ?: mentionStyle(color)
                 val textStyle = if (style.background == Color.Unspecified) style else style.copy(background = Color.Unspecified)
                 withStyle(textStyle) { append(text.substring(start, i)) }
                 if (style.background != Color.Unspecified) {
@@ -2525,9 +2581,10 @@ internal fun ReplyMiniBubble(
             dimmed,
         )
     val bodyInk = readingInk(MaterialTheme.colorScheme)
-    val bodyColor = remember(bodyInk, previewColor, dimmed) { messageContentColor(bodyInk, previewColor, dimmed) }
+    val adjustPaletteReadability = LocalAdjustPaletteReadability.current
+    val bodyColor = remember(bodyInk, previewColor, dimmed, adjustPaletteReadability) { messageContentColor(bodyInk, previewColor, dimmed, adjustPaletteReadability = adjustPaletteReadability) }
     val nameInk = nickColors.nick(reply.sender, MaterialTheme.colorScheme.onPrimaryContainer)
-    val accent = remember(nameInk, previewColor, dimmed) { messageContentColor(nameInk, previewColor, dimmed) }
+    val accent = remember(nameInk, previewColor, dimmed, nickColors, reply.sender) { messageContentColor(nameInk, previewColor, dimmed, adjustPaletteReadability = !nickColors.preservesAuthoredIdentity(reply.sender)) }
     val formattedText = reply.ircFormattedText ?: reply.text
     val previewText =
         remember(formattedText, previewColor, bodyColor, dimmed) {

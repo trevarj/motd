@@ -69,6 +69,7 @@ internal fun PaletteSamples(
         dynamicColor = false,
         trueBlack = appearance.trueBlack,
         useThemeTextColors = appearance.useThemeTextColors,
+        adjustPaletteReadability = appearance.adjustPaletteReadability,
         layoutDensity = layout,
         compactNickBrackets = settings.compactNickBrackets,
         nickColorsEnabled = settings.nickColorsEnabled,

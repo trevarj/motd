@@ -56,14 +56,15 @@ flowchart TD
   fallback and restores protocol defaults; the ViewModel resolves the same immutable Ready snapshot.
 - UI observes repositories and ViewModel state. Connection and protocol actions
   go through `ConnectionManager` instead of constructing IRC clients in screens.
-- Fixed theme contrast normalization is cached on demand per preset and text-color
-  mode. `SYSTEM`, `LIGHT`, `DARK`, and `AMOLED` never warm the fixed palette catalog.
+- Fixed theme roles are cached on demand per preset, text-color mode and readability
+  policy. `SYSTEM`, `LIGHT`, `DARK`, and `AMOLED` never warm the fixed palette catalog.
 - Appearance stores independent light and dark palette identities plus System/Light/Dark
   mode. Legacy single selections migrate to their supported variants; an unsupported
   opposite slot uses Device colors. Only Device colors uses Material You; custom
-  palettes reuse the existing readability and dark-only true-black pipeline.
-  Draft/custom fitting is remembered by actual colors and text mode, never in a
-  global slider-value cache.
+  palettes preserve authored source colors by default. Readability corrections are
+  opt-in; dark-only true black remains independent. Draft/custom derivation is
+  remembered by actual colors, text mode and correction policy, never in a global
+  slider-value cache.
 - The strict UTF-8 palette codec caps each document at 16 KiB. Appearance DataStore
   commits definitions and both selections together, with 64-entry/512 KiB collection
   limits and non-destructive per-slot corrupt-storage recovery.

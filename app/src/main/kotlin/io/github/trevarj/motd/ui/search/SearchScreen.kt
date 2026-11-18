@@ -678,7 +678,13 @@ private fun SearchRow(
     val displaySender = dickordNickLabel(sender, LocalDickordLabsEnabled.current)
     val scheme = MaterialTheme.colorScheme
     val rowFill = scheme.surfaceContainerLow.compositeOver(scheme.background)
-    val readingInk = ensureContrast(readingInk(scheme), listOf(rowFill), MESSAGE_TEXT_CONTRAST)
+    val readingSeed = readingInk(scheme)
+    val readingInk =
+        if (io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability.current) {
+            ensureContrast(readingSeed, listOf(rowFill), MESSAGE_TEXT_CONTRAST)
+        } else {
+            readingSeed
+        }
     val highlightColor = LocalMotdSemanticColors.current.warningContainer
     val highlightInk = ensureContrast(readingInk(scheme), listOf(highlightColor.compositeOver(rowFill)), MESSAGE_TEXT_CONTRAST)
     val revealed = remember(tag, blurred) { androidx.compose.runtime.mutableStateOf(false) }

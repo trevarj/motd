@@ -59,8 +59,8 @@ import io.github.trevarj.motd.ui.components.isAppliedThemeDark
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
-import io.github.trevarj.motd.ui.theme.accessibleColorScheme
 import io.github.trevarj.motd.ui.theme.fixedThemeScheme
+import io.github.trevarj.motd.ui.theme.paletteColorScheme
 import io.github.trevarj.motd.ui.theme.paletteNickFill
 import io.github.trevarj.motd.ui.theme.resolvedMode
 import org.junit.Assert.assertEquals
@@ -91,12 +91,15 @@ class ThemeStateRetentionUiTest {
         assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
         lateinit var selectTheme: (ColorThemePreset) -> Unit
         lateinit var selectTextColors: (Boolean) -> Unit
+        lateinit var adjustReadability: (Boolean) -> Unit
         compose.setContent {
             var theme by remember { mutableStateOf(ColorThemePreset.SYSTEM) }
             var useThemeTextColors by remember { mutableStateOf(false) }
+            var adjustPaletteReadability by remember { mutableStateOf(false) }
             selectTheme = { theme = it }
             selectTextColors = { useThemeTextColors = it }
-            MotdTheme(themePreset = theme, dynamicColor = true, useThemeTextColors = useThemeTextColors) {
+            adjustReadability = { adjustPaletteReadability = it }
+            MotdTheme(themePreset = theme, dynamicColor = true, useThemeTextColors = useThemeTextColors, adjustPaletteReadability = adjustPaletteReadability) {
                 var marker by remember { mutableStateOf("initial") }
                 Button(
                     onClick = { marker = "retained" },
@@ -114,6 +117,11 @@ class ThemeStateRetentionUiTest {
         compose.onNodeWithTag("theme_state_marker").assertTextEquals("retained")
         for (useThemeTextColors in listOf(true, false)) {
             compose.runOnUiThread { selectTextColors(useThemeTextColors) }
+            compose.waitForIdle()
+            compose.onNodeWithTag("theme_state_marker").assertTextEquals("retained")
+        }
+        for (enabled in listOf(true, false)) {
+            compose.runOnUiThread { adjustReadability(enabled) }
             compose.waitForIdle()
             compose.onNodeWithTag("theme_state_marker").assertTextEquals("retained")
         }
@@ -431,8 +439,8 @@ class ThemeStateRetentionUiTest {
                     uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
                         if (osDark) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
                 }
-            dynamicLight = accessibleColorScheme(dynamicLightColorScheme(context), false)
-            dynamicDark = accessibleColorScheme(dynamicDarkColorScheme(context), true)
+            dynamicLight = paletteColorScheme(dynamicLightColorScheme(context), false)
+            dynamicDark = paletteColorScheme(dynamicDarkColorScheme(context), true)
             CompositionLocalProvider(LocalConfiguration provides configuration) {
                 MotdTheme(themePreset = preset, paletteMode = mode, dynamicColor = true, syncSystemBars = false) {
                     val current = MaterialTheme.colorScheme

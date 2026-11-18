@@ -177,6 +177,7 @@ fun AppearanceSettingsScreen(
         onTrueBlack = viewModel::setTrueBlack,
         onDynamicColor = viewModel::setDynamicColor,
         onUseThemeTextColors = viewModel::setUseThemeTextColors,
+        onAdjustPaletteReadability = viewModel::setAdjustPaletteReadability,
         onLayoutDensity = viewModel::setLayoutDensity,
         onCompactNickBrackets = viewModel::setCompactNickBrackets,
         onShowChannelPrefixes = viewModel::setShowChannelPrefixes,
@@ -227,6 +228,7 @@ fun AppearanceSettingsContent(
     onTrueBlack: (Boolean) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
     onUseThemeTextColors: (Boolean) -> Unit,
+    onAdjustPaletteReadability: (Boolean) -> Unit = {},
     onLayoutDensity: (LayoutDensity) -> Unit,
     onComposerStyle: (ComposerStyle) -> Unit,
     onCompactNickBrackets: (CompactNickBrackets) -> Unit = {},
@@ -418,16 +420,31 @@ fun AppearanceSettingsContent(
                 )
             }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.ADJUST_PALETTE_READABILITY.name) { targetModifier ->
+                SwitchRow(
+                    title = stringResource(R.string.settings_adjust_palette_readability),
+                    subtitle = stringResource(R.string.settings_adjust_palette_readability_desc),
+                    checked = appearance.adjustPaletteReadability,
+                    onCheckedChange = {
+                        previewAppearance = previewAppearance.copy(adjustPaletteReadability = it)
+                        onAdjustPaletteReadability(it)
+                    },
+                    switchTag = "settings_switch_adjust_palette_readability",
+                    modifier = targetModifier,
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsTarget(target?.name, SettingsTarget.THEME_TEXT_COLORS.name) { targetModifier ->
                 SwitchRow(
                     title = stringResource(R.string.settings_theme_text_colors),
-                    subtitle = stringResource(R.string.settings_theme_text_colors_desc),
+                    subtitle = stringResource(if (appearance.adjustPaletteReadability) R.string.settings_theme_text_colors_desc else R.string.settings_theme_text_colors_inactive),
                     checked = appearance.useThemeTextColors,
                     onCheckedChange = {
                         previewAppearance = previewAppearance.copy(useThemeTextColors = it)
                         onUseThemeTextColors(it)
                     },
                     switchTag = "settings_switch_theme_text_colors",
+                    enabled = appearance.adjustPaletteReadability,
                     modifier = targetModifier,
                 )
             }
@@ -953,6 +970,7 @@ internal fun AppearanceChatLayoutPreview(
         trueBlack = appearance.trueBlack,
         dynamicColor = settings.dynamicColor,
         useThemeTextColors = appearance.useThemeTextColors,
+        adjustPaletteReadability = appearance.adjustPaletteReadability,
         layoutDensity = density,
         compactNickBrackets = settings.compactNickBrackets,
         nickColorsEnabled = settings.nickColorsEnabled,
@@ -1018,6 +1036,7 @@ private fun ComposerStylePreview(
         trueBlack = appearance.trueBlack,
         dynamicColor = settings.dynamicColor,
         useThemeTextColors = appearance.useThemeTextColors,
+        adjustPaletteReadability = appearance.adjustPaletteReadability,
         layoutDensity = settings.layoutDensity,
         nickColorsEnabled = settings.nickColorsEnabled,
         nickMentionStyle = settings.nickMentionStyle,

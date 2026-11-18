@@ -48,7 +48,6 @@
     <string name="palette_editor_remove_mode_message">Remove all authored colors for this mode? The other mode will be kept.</string>
     <string name="palette_editor_authored">Authored</string>
     <string name="palette_editor_applied">Applied</string>
-    <string name="palette_editor_adjusted">Adjusted for readability</string>
     <string name="palette_editor_hex_error">Enter a six-digit hex color, such as #006C70.</string>
     <string name="palette_editor_color">Edit color</string>
     <string name="palette_editor_hex">Hex color</string>

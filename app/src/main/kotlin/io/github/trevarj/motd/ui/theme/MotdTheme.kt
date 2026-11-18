@@ -261,6 +261,8 @@ fun PaletteSelection.resolvedMode(systemDark: Boolean): PaletteMode =
         else -> mode
     }
 
+val LocalAdjustPaletteReadability = staticCompositionLocalOf { false }
+
 @Composable
 fun MotdTheme(
     themePreset: ColorThemePreset = ColorThemePreset.SYSTEM,
@@ -269,6 +271,7 @@ fun MotdTheme(
     paletteMode: PaletteMode? = null,
     customPalette: PaletteDocument? = null,
     useThemeTextColors: Boolean = false,
+    adjustPaletteReadability: Boolean = false,
     // Round 4; all defaulted so existing call sites (incl. previews) stay unchanged.
     layoutDensity: LayoutDensity = LayoutDensity.COMFORTABLE,
     compactNickBrackets: CompactNickBrackets = CompactNickBrackets.ANGLE,
@@ -333,27 +336,24 @@ fun MotdTheme(
     val customColors = if (dark) customPalette?.dark else customPalette?.light
     val effectivePreset = if (resolvedPreset == ColorThemePreset.AMOLED) ColorThemePreset.DARK else resolvedPreset
     val resolvedScheme =
-        remember(customColors, effectivePreset, dark, context, dynamicColor, useThemeTextColors) {
+        remember(customColors, effectivePreset, dark, context, dynamicColor, useThemeTextColors, adjustPaletteReadability) {
             if (customColors != null) {
-                accessibleColorScheme(customColors.toRawColorScheme(dark), dark, useThemeTextColors)
+                paletteColorScheme(customColors.toRawColorScheme(dark), dark, useThemeTextColors, adjustPaletteReadability)
             } else {
-                fixedThemeScheme(effectivePreset, useThemeTextColors) ?: when {
+                fixedThemeScheme(effectivePreset, useThemeTextColors, adjustPaletteReadability) ?: when {
                     // Only Device colors is eligible for Material You, including forced modes.
                     effectivePreset == ColorThemePreset.SYSTEM &&
                         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-                        accessibleColorScheme(
+                        paletteColorScheme(
                             if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context),
                             dark,
                             useThemeTextColors,
+                            adjustPaletteReadability,
                         )
                     }
 
-                    dark -> {
-                        if (useThemeTextColors) MotdDarkThemeTextScheme else MotdDarkScheme
-                    }
-
                     else -> {
-                        if (useThemeTextColors) MotdLightThemeTextScheme else MotdLightScheme
+                        motdThemeScheme(dark, useThemeTextColors, adjustPaletteReadability)
                     }
                 }
             }
@@ -419,7 +419,7 @@ fun MotdTheme(
             }
         }
     val nickColorScheme =
-        remember(nickColorsEnabled, nickColorPalette, nickColorOverrides, dark, nickTextBackgrounds, nickThemeColors, nickIdentityPalette) {
+        remember(nickColorsEnabled, nickColorPalette, nickColorOverrides, dark, nickTextBackgrounds, nickThemeColors, nickIdentityPalette, adjustPaletteReadability) {
             NickColorScheme(
                 nickColorsEnabled,
                 nickColorPalette,
@@ -428,6 +428,7 @@ fun MotdTheme(
                 nickTextBackgrounds,
                 nickThemeColors,
                 nickIdentityPalette,
+                adjustPaletteReadability = adjustPaletteReadability,
             )
         }
     // Style-only concerns (spacing, nick colors, avatar style) flow through CompositionLocals so
@@ -443,7 +444,8 @@ fun MotdTheme(
         typography = typography,
     ) {
         CompositionLocalProvider(
-            LocalUseThemeTextColors provides useThemeTextColors,
+            LocalUseThemeTextColors provides (!adjustPaletteReadability || useThemeTextColors),
+            LocalAdjustPaletteReadability provides adjustPaletteReadability,
             LocalSpacing provides spacingFor(layoutDensity, messageSpacing, bubbleCornerStyle),
             LocalCompactNickBrackets provides compactNickBrackets,
             LocalNickMentionStyle provides nickMentionStyle,

@@ -29,6 +29,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -50,6 +51,41 @@ class ChannelInfoTopicEditUiTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
+    fun authoredTopicInkIsPreservedUntilReadabilityAdjustmentIsEnabled() {
+        val adjust = mutableStateOf(false)
+        val authoredInk = Color(0xFF252525)
+        val fill = Color(0xFF202020)
+        compose.setContent {
+            MotdTheme(dynamicColor = false, useThemeTextColors = true, adjustPaletteReadability = adjust.value) {
+                MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(onBackground = authoredInk, surfaceContainerLowest = fill)) {
+                    ChannelInfoContent(
+                        state =
+                            ChannelInfoUiState(
+                                buffer = BufferEntity(1, 1, "#room", "#room", BufferType.CHANNEL, topic = "Authored topic"),
+                                memberCount = 3,
+                            ),
+                        onBack = {},
+                        onSetPinned = {},
+                        onSetMuted = {},
+                        onLeave = {},
+                    )
+                }
+            }
+        }
+        for (enabled in listOf(false, true, false)) {
+            compose.runOnIdle { adjust.value = enabled }
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithTag("channelinfo_topic", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val ink =
+                layouts
+                    .single()
+                    .layoutInput.style.color
+            assertEquals(if (enabled) ensureContrast(authoredInk, listOf(fill), MESSAGE_TEXT_CONTRAST) else authoredInk, ink)
+            assertTrue(if (enabled) contrastRatio(ink, fill) >= MESSAGE_TEXT_CONTRAST else contrastRatio(ink, fill) < MESSAGE_TEXT_CONTRAST)
+        }
+    }
+
+    @Test
     fun topicProseUsesNeutralInkWhileLinksIrcFormattingAndRosterStayDistinct() {
         val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
         val topic = "Reading https://example.test \u000304red\u000f \u000399,00paper\u000f"
@@ -57,7 +93,7 @@ class ChannelInfoTopicEditUiTest {
         var linkInk = Color.Unspecified
         var rosterInk = Color.Unspecified
         compose.setContent {
-            MotdTheme(dynamicColor = false, themePreset = preset.value) {
+            MotdTheme(dynamicColor = false, themePreset = preset.value, adjustPaletteReadability = true) {
                 val scheme = MaterialTheme.colorScheme
                 fill = scheme.surfaceContainerLowest
                 linkInk = ensureContrast(scheme.primary, listOf(fill), MESSAGE_TEXT_CONTRAST)

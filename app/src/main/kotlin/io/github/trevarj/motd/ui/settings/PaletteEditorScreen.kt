@@ -27,7 +27,7 @@ import io.github.trevarj.motd.ui.chat.ColorWheel
 import io.github.trevarj.motd.ui.chat.parseColorHex
 import io.github.trevarj.motd.ui.chat.wallpaperColorHex
 import io.github.trevarj.motd.ui.theme.UiIcon
-import io.github.trevarj.motd.ui.theme.accessibleColorScheme
+import io.github.trevarj.motd.ui.theme.paletteColorScheme
 import io.github.trevarj.motd.ui.theme.toRawColorScheme
 import io.github.trevarj.motd.ui.theme.withTrueBlackSurfaces
 import android.graphics.Color as AndroidColor
@@ -135,8 +135,8 @@ fun PaletteEditorScreen(
                 val colors = if (editMode == PaletteMode.DARK) draft.dark!! else draft.light!!
                 val dark = editMode == PaletteMode.DARK
                 val fitted =
-                    remember(colors, dark, state.appearance.useThemeTextColors) {
-                        accessibleColorScheme(colors.toRawColorScheme(dark), dark, state.appearance.useThemeTextColors)
+                    remember(colors, dark, state.appearance.useThemeTextColors, state.appearance.adjustPaletteReadability) {
+                        paletteColorScheme(colors.toRawColorScheme(dark), dark, state.appearance.useThemeTextColors, state.appearance.adjustPaletteReadability)
                     }
                 val applied =
                     remember(fitted, dark, state.appearance.trueBlack) {
@@ -202,13 +202,13 @@ fun PaletteEditorScreen(
                         if (draft.light != null && draft.dark != null) TextButton(onClick = { removeMode = editMode.name }, modifier = Modifier.testTag("palette_editor_remove_${editMode.name.lowercase()}")) { Text(stringResource(R.string.palette_editor_remove_mode)) }
                     }
                     Text(stringResource(R.string.palette_editor_mode_seed), style = MaterialTheme.typography.bodySmall)
-                    if (!state.appearance.useThemeTextColors) Text(stringResource(R.string.palette_editor_neutral_mask), style = MaterialTheme.typography.bodySmall)
+                    if (state.appearance.adjustPaletteReadability && !state.appearance.useThemeTextColors) Text(stringResource(R.string.palette_editor_neutral_mask), style = MaterialTheme.typography.bodySmall)
                     if (state.appearance.trueBlack) Text(stringResource(R.string.palette_editor_black_mask), style = MaterialTheme.typography.bodySmall)
                     if (!state.settings.nickColorsEnabled || state.settings.nickColorPalette != NickColorPalette.THEME) Text(stringResource(R.string.palette_editor_nick_mask), style = MaterialTheme.typography.bodySmall)
                     val roles = listOf("primary" to R.string.palette_editor_primary, "secondary" to R.string.palette_editor_secondary, "tertiary" to R.string.palette_editor_tertiary, "background" to R.string.palette_editor_background, "surface" to R.string.palette_editor_surface)
                     val extra = listOf("surfaceContainer" to R.string.palette_editor_container, "onBackground" to R.string.palette_editor_on_background, "onSurface" to R.string.palette_editor_on_surface, "onSurfaceVariant" to R.string.palette_editor_supporting, "outlineVariant" to R.string.palette_editor_outline)
                     (roles + if (advanced) extra else emptyList()).forEach { (role, label) ->
-                        EditorRoleRow(colors, editMode, role, stringResource(label), state, fitted, applied) {
+                        EditorRoleRow(colors, editMode, role, stringResource(label), state, applied) {
                             colorMode = editMode.name
                             colorRole = role
                         }
@@ -273,7 +273,6 @@ private fun EditorRoleRow(
     role: String,
     label: String,
     state: PaletteEditorState,
-    fitted: ColorScheme,
     applied: ColorScheme,
     onClick: () -> Unit,
 ) {
@@ -292,7 +291,6 @@ private fun EditorRoleRow(
                 }
             }
             if ("${mode.name}:$role" in state.rejectedFields || parseColorHex(field) == null) Text(stringResource(R.string.palette_editor_hex_error), color = MaterialTheme.colorScheme.error)
-            if (fitted.paletteRole(role).toArgb() != authored.toArgb()) Text(stringResource(R.string.palette_editor_adjusted), style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -357,7 +355,7 @@ private fun EditorNicknameSwatches(
 ) {
     val authored = Color(parseColorHex(value)!!)
     val applied =
-        remember(authored, scheme, mode, state.settings.nickColorPalette, state.settings.nickColorsEnabled) {
+        remember(authored, scheme, mode, state.settings.nickColorPalette, state.settings.nickColorsEnabled, state.appearance.adjustPaletteReadability) {
             if (!state.settings.nickColorsEnabled) {
                 scheme.onSurface
             } else {
@@ -368,6 +366,7 @@ private fun EditorNicknameSwatches(
                     listOf(scheme.primary, scheme.tertiary, scheme.secondary),
                     listOf(scheme.background, scheme.surface, scheme.surfaceContainerLow, scheme.surfaceContainerHigh, scheme.surfaceContainerHighest, scheme.primaryContainer, scheme.secondaryContainer, scheme.tertiaryContainer).distinct(),
                     listOf(authored),
+                    adjustPaletteReadability = state.appearance.adjustPaletteReadability,
                 )
             }
         }
@@ -381,7 +380,6 @@ private fun EditorNicknameSwatches(
                 Box(Modifier.size(24.dp).background(applied, CircleShape))
                 Text(stringResource(R.string.palette_editor_applied))
             }
-            if (state.settings.nickColorsEnabled && state.settings.nickColorPalette == NickColorPalette.THEME) Text(stringResource(R.string.palette_editor_adjusted), style = MaterialTheme.typography.bodySmall)
         }
     }
 }

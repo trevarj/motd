@@ -343,6 +343,10 @@ internal class FakeAppearance(
         state.value = state.value.copy(useThemeTextColors = enabled)
     }
 
+    override suspend fun setAdjustPaletteReadability(enabled: Boolean) {
+        state.value = state.value.copy(adjustPaletteReadability = enabled)
+    }
+
     override suspend fun setWallpaper(selection: WallpaperSelection) = Unit
 
     override suspend fun setUiFontScale(percent: Int) = Unit

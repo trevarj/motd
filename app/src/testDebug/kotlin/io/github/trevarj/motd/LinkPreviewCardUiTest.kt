@@ -127,6 +127,44 @@ class LinkPreviewCardUiTest {
         }
     }
 
+    @Test fun nativePaletteMiniatureUsesAuthoredInkUntilReadabilityIsEnabled() {
+        val fixture = decodePalette(javaClass.getResourceAsStream("/palettes/duplicate-last-valid.motd-palette.json")!!.use { it.readBytes() })
+        val colors = requireNotNull(fixture.light).copy(background = "#FFFFFF", surface = "#FFFFFF", onSurface = "#EEEEEE")
+        val document = fixture.copy(light = colors, dark = null)
+        val adjust = mutableStateOf(false)
+        compose.setContent {
+            MotdTheme(dynamicColor = false, adjustPaletteReadability = adjust.value) {
+                Box(Modifier.width(320.dp)) {
+                    LinkPreviewCard(
+                        LinkPreview("https://example.test/p.motd-palette.json", null, null, null, null, LinkPreviewKind.PALETTE, palette = document),
+                        loading = false,
+                        onClick = {},
+                    )
+                }
+            }
+        }
+
+        fun sampleInk(): Color {
+            val results = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithText("Hello!", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(results) }
+            return results
+                .single()
+                .layoutInput.style.color
+        }
+        assertEquals(Color(0xFFEEEEEE), sampleInk())
+        for (enabled in listOf(false, true)) {
+            compose.runOnIdle { adjust.value = enabled }
+            val image = compose.onNodeWithTag("link_preview_palette").captureToImage().asAndroidBitmap()
+            val png = File("build/reports/palettes/link-card-readability-$enabled.png").apply { parentFile!!.mkdirs() }
+            png.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        assertTrue(
+            io.github.trevarj.motd.ui.theme
+                .contrastRatio(sampleInk(), Color.White) >= 4.5f,
+        )
+        compose.onNodeWithContentDescription("Light onSurface #EEEEEE", useUnmergedTree = true).assertIsDisplayed()
+    }
+
     @Test fun everySharedMessageLayoutAndActionKeepsTheNativePaletteCardWithoutInlineImages() {
         val palette = decodePalette(javaClass.getResourceAsStream("/palettes/duplicate-last-valid.motd-palette.json")!!.use { it.readBytes() })
         val layout = mutableStateOf(LayoutDensity.COMFORTABLE)
@@ -302,7 +340,7 @@ class LinkPreviewCardUiTest {
         var paletteReadingInk = Color.Unspecified
         var failedLabel = ""
         compose.setContent {
-            MotdTheme(dynamicColor = false, themePreset = preset.value, useThemeTextColors = useThemeTextColors.value) {
+            MotdTheme(dynamicColor = false, themePreset = preset.value, useThemeTextColors = useThemeTextColors.value, adjustPaletteReadability = true) {
                 val scheme = MaterialTheme.colorScheme
                 paletteReadingInk = scheme.onBackground
                 val cardColor =

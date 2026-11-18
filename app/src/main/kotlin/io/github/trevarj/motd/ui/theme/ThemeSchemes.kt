@@ -35,10 +35,23 @@ internal val MotdDarkRaw =
         tertiary = MotdCoral,
     )
 
-internal val MotdLightScheme: ColorScheme = accessibleColorScheme(MotdLightRaw, dark = false)
-internal val MotdDarkScheme: ColorScheme = accessibleColorScheme(MotdDarkRaw, dark = true)
-internal val MotdLightThemeTextScheme: ColorScheme = accessibleColorScheme(MotdLightRaw, dark = false, useThemeTextColors = true)
-internal val MotdDarkThemeTextScheme: ColorScheme = accessibleColorScheme(MotdDarkRaw, dark = true, useThemeTextColors = true)
+internal val MotdLightScheme: ColorScheme by lazy { paletteColorScheme(MotdLightRaw, dark = false) }
+internal val MotdDarkScheme: ColorScheme by lazy { paletteColorScheme(MotdDarkRaw, dark = true) }
+internal val MotdLightThemeTextScheme: ColorScheme by lazy { paletteColorScheme(MotdLightRaw, dark = false, useThemeTextColors = true, adjustPaletteReadability = true) }
+internal val MotdDarkThemeTextScheme: ColorScheme by lazy { paletteColorScheme(MotdDarkRaw, dark = true, useThemeTextColors = true, adjustPaletteReadability = true) }
+private val MotdLightNeutralScheme: ColorScheme by lazy { paletteColorScheme(MotdLightRaw, dark = false, adjustPaletteReadability = true) }
+private val MotdDarkNeutralScheme: ColorScheme by lazy { paletteColorScheme(MotdDarkRaw, dark = true, adjustPaletteReadability = true) }
+
+internal fun motdThemeScheme(
+    dark: Boolean,
+    useThemeTextColors: Boolean = false,
+    adjustPaletteReadability: Boolean = false,
+): ColorScheme =
+    when {
+        !adjustPaletteReadability -> if (dark) MotdDarkScheme else MotdLightScheme
+        useThemeTextColors -> if (dark) MotdDarkThemeTextScheme else MotdLightThemeTextScheme
+        else -> if (dark) MotdDarkNeutralScheme else MotdLightNeutralScheme
+    }
 
 internal val LocalUseThemeTextColors = staticCompositionLocalOf { false }
 
@@ -133,10 +146,11 @@ private fun ensureContainerContrast(
     return lerp(container, target, high)
 }
 
-internal fun accessibleColorScheme(
+internal fun paletteColorScheme(
     raw: ColorScheme,
     dark: Boolean,
     useThemeTextColors: Boolean = false,
+    adjustPaletteReadability: Boolean = false,
 ): ColorScheme {
     val surfaceContainerLow =
         ensureContainerContrast(
@@ -146,12 +160,11 @@ internal fun accessibleColorScheme(
             1.08,
         )
     val surfaceContainer =
-        ensureContainerContrast(
-            raw.surfaceContainer,
-            raw.background,
-            dark,
-            1.16,
-        )
+        if (adjustPaletteReadability) {
+            ensureContainerContrast(raw.surfaceContainer, raw.background, dark, 1.16)
+        } else {
+            raw.surfaceContainer
+        }
     val surfaceContainerHigh =
         ensureContainerContrast(
             raw.surfaceContainerHigh,
@@ -184,10 +197,10 @@ internal fun accessibleColorScheme(
             surfaceContainerHighest,
             surfaceVariant,
         )
-    val onSurface = ensureContrast(staticTextInk(raw), neutralSurfaces)
-    val primary = ensureContrast(raw.primary, neutralSurfaces)
-    val secondary = ensureContrast(raw.secondary, neutralSurfaces)
-    val tertiary = ensureContrast(raw.tertiary, neutralSurfaces)
+    val onSurface = if (adjustPaletteReadability) ensureContrast(staticTextInk(raw), neutralSurfaces) else raw.onSurface
+    val primary = if (adjustPaletteReadability) ensureContrast(raw.primary, neutralSurfaces) else raw.primary
+    val secondary = if (adjustPaletteReadability) ensureContrast(raw.secondary, neutralSurfaces) else raw.secondary
+    val tertiary = if (adjustPaletteReadability) ensureContrast(raw.tertiary, neutralSurfaces) else raw.tertiary
 
     fun container(accent: Color): Color =
         ensureContainerContrast(
@@ -203,8 +216,8 @@ internal fun accessibleColorScheme(
     val errorSeed = if (dark) Color(0xFFF2B8B5) else Color(0xFFB3261E)
     val error = ensureContrast(errorSeed, neutralSurfaces)
     val errorContainer = container(errorSeed)
-    val outline = ensureContrast(raw.outline, neutralSurfaces, NON_TEXT_CONTRAST)
-    val outlineVariant = ensureContrast(raw.outlineVariant, neutralSurfaces, NON_TEXT_CONTRAST)
+    val outline = if (adjustPaletteReadability) ensureContrast(raw.outline, neutralSurfaces, NON_TEXT_CONTRAST) else raw.outline
+    val outlineVariant = if (adjustPaletteReadability) ensureContrast(raw.outlineVariant, neutralSurfaces, NON_TEXT_CONTRAST) else raw.outlineVariant
     val inverseSurface = onSurface
     val inverseOnSurface = ensureContrast(raw.surface, listOf(inverseSurface))
     val inversePrimary = ensureContrast(raw.primary, listOf(inverseSurface))
@@ -223,11 +236,32 @@ internal fun accessibleColorScheme(
         tertiaryContainer = tertiaryContainer,
         onTertiaryContainer = ensureContrast(onSurface, listOf(tertiaryContainer)),
         background = raw.background,
-        onBackground = if (useThemeTextColors) ensureContrast(raw.onBackground, neutralSurfaces) else onSurface,
+        onBackground =
+            if (!adjustPaletteReadability) {
+                raw.onBackground
+            } else if (useThemeTextColors) {
+                ensureContrast(raw.onBackground, neutralSurfaces)
+            } else {
+                onSurface
+            },
         surface = raw.surface,
-        onSurface = if (useThemeTextColors) ensureContrast(raw.onSurface, neutralSurfaces) else onSurface,
+        onSurface =
+            if (!adjustPaletteReadability) {
+                raw.onSurface
+            } else if (useThemeTextColors) {
+                ensureContrast(raw.onSurface, neutralSurfaces)
+            } else {
+                onSurface
+            },
         surfaceVariant = surfaceVariant,
-        onSurfaceVariant = if (useThemeTextColors) ensureContrast(raw.onSurfaceVariant, neutralSurfaces) else onSurface,
+        onSurfaceVariant =
+            if (!adjustPaletteReadability) {
+                raw.onSurfaceVariant
+            } else if (useThemeTextColors) {
+                ensureContrast(raw.onSurfaceVariant, neutralSurfaces)
+            } else {
+                onSurface
+            },
         surfaceContainerLow = surfaceContainerLow,
         surfaceContainer = surfaceContainer,
         surfaceContainerHigh = surfaceContainerHigh,
@@ -293,18 +327,27 @@ internal fun rawFixedThemeScheme(preset: ColorThemePreset): ColorScheme? = RawFi
 // Normalize only the requested palette/text mode; eager catalog normalization delays first paint.
 private val FixedSchemes = java.util.concurrent.ConcurrentHashMap<ColorThemePreset, ColorScheme>()
 private val ThemeTextFixedSchemes = java.util.concurrent.ConcurrentHashMap<ColorThemePreset, ColorScheme>()
+private val AuthoredFixedSchemes = java.util.concurrent.ConcurrentHashMap<ColorThemePreset, ColorScheme>()
 
 internal fun fixedThemeScheme(
     theme: ColorThemePreset,
     useThemeTextColors: Boolean = false,
+    adjustPaletteReadability: Boolean = false,
 ): ColorScheme? {
     when (theme) {
         ColorThemePreset.SYSTEM, ColorThemePreset.LIGHT, ColorThemePreset.DARK, ColorThemePreset.AMOLED -> return null
         else -> Unit
     }
-    val cache = if (useThemeTextColors) ThemeTextFixedSchemes else FixedSchemes
+    val cache =
+        if (!adjustPaletteReadability) {
+            AuthoredFixedSchemes
+        } else if (useThemeTextColors) {
+            ThemeTextFixedSchemes
+        } else {
+            FixedSchemes
+        }
     return cache[theme] ?: cache.computeIfAbsent(theme) { preset ->
-        accessibleColorScheme(RawFixedSchemes.getValue(preset), preset.isDark, useThemeTextColors)
+        paletteColorScheme(RawFixedSchemes.getValue(preset), preset.isDark, useThemeTextColors, adjustPaletteReadability)
     }
 }
 

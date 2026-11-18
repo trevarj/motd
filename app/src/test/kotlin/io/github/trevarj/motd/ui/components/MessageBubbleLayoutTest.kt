@@ -17,14 +17,12 @@ import io.github.trevarj.motd.data.prefs.decodePalette
 import io.github.trevarj.motd.data.prefs.isDark
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewKind
-import io.github.trevarj.motd.ui.theme.MotdDarkScheme
-import io.github.trevarj.motd.ui.theme.MotdDarkThemeTextScheme
 import io.github.trevarj.motd.ui.theme.MotdLightScheme
-import io.github.trevarj.motd.ui.theme.MotdLightThemeTextScheme
-import io.github.trevarj.motd.ui.theme.accessibleColorScheme
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.fixedThemeScheme
+import io.github.trevarj.motd.ui.theme.motdThemeScheme
+import io.github.trevarj.motd.ui.theme.paletteColorScheme
 import io.github.trevarj.motd.ui.theme.readingInk
 import io.github.trevarj.motd.ui.theme.semanticColors
 import io.github.trevarj.motd.ui.theme.toRawColorScheme
@@ -35,6 +33,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MessageBubbleLayoutTest {
+    @Test fun authoredReadingInkRemainsExactAcrossActualFillsUnlessAdjustedOrDimmed() {
+        val ink = Color(0xFFDDDDDD)
+        val scheme = MotdLightScheme.copy(onBackground = ink, background = Color.White)
+        val fills =
+            listOf(
+                messageBubbleRoleColors(scheme, true, false, MessageKind.PRIVMSG, semanticColors(scheme, false)).container,
+                messageBubbleRoleColors(scheme, false, true, MessageKind.PRIVMSG, semanticColors(scheme, false)).container,
+                scheme.primary.copy(alpha = 0.1f).compositeOver(scheme.background),
+                scheme.primaryContainer,
+            )
+        fills.forEach { fill ->
+            assertEquals(ink, messageContentColor(readingInk(scheme, true), fill, false))
+            assertReadingContrast("adjusted actual fill", messageContentColor(ink, fill, false, adjustPaletteReadability = true), fill)
+            val dimmed = messageContentColor(ink, fill, true)
+            assertTrue(contrastRatio(dimmed, fill) >= DIMMED_MESSAGE_TEXT_CONTRAST - 0.00001)
+        }
+    }
+
     @Test fun typedPaletteCardUsesAvailableStateAndRetainsAwaitingLoadingAndFailureFootprints() {
         val palette = decodePalette(javaClass.getResourceAsStream("/palettes/duplicate-last-valid.motd-palette.json")!!.use { it.readBytes() })
         val preview = LinkPreview("https://example.org/test.motd-palette.json", null, null, null, null, LinkPreviewKind.PALETTE, palette = palette)
@@ -142,7 +158,7 @@ class MessageBubbleLayoutTest {
         val fill = Color(0xFFEEEEEE)
         for (dimmed in listOf(false, true)) {
             val minimum = if (dimmed) DIMMED_MESSAGE_TEXT_CONTRAST else MESSAGE_TEXT_CONTRAST
-            val ink = messageContentColor(Color.Black, fill, dimmed)
+            val ink = messageContentColor(Color.Black, fill, dimmed, adjustPaletteReadability = true)
             for (colored in listOf(false, true)) {
                 val bodies =
                     listOf(
@@ -198,17 +214,17 @@ class MessageBubbleLayoutTest {
 internal fun messageContrastSchemes(useThemeTextColors: Boolean = false): List<Triple<String, ColorScheme, Boolean>> {
     val fixed =
         listOf(
-            Triple("Light", if (useThemeTextColors) MotdLightThemeTextScheme else MotdLightScheme, false),
-            Triple("Dark", if (useThemeTextColors) MotdDarkThemeTextScheme else MotdDarkScheme, true),
+            Triple("Light", motdThemeScheme(false, useThemeTextColors, adjustPaletteReadability = true), false),
+            Triple("Dark", motdThemeScheme(true, useThemeTextColors, adjustPaletteReadability = true), true),
         ) +
             ColorThemePreset.entries.mapNotNull { preset ->
-                fixedThemeScheme(preset, useThemeTextColors)?.let { Triple(preset.name, it, preset.isDark) }
+                fixedThemeScheme(preset, useThemeTextColors, adjustPaletteReadability = true)?.let { Triple(preset.name, it, preset.isDark) }
             }
     val custom =
         listOf(false, true).map { dark ->
             Triple(
                 "Custom ${if (dark) "dark" else "light"}",
-                accessibleColorScheme(customContrastPalette(dark).toRawColorScheme(dark), dark, useThemeTextColors),
+                paletteColorScheme(customContrastPalette(dark).toRawColorScheme(dark), dark, useThemeTextColors, adjustPaletteReadability = true),
                 dark,
             )
         }
@@ -217,7 +233,7 @@ internal fun messageContrastSchemes(useThemeTextColors: Boolean = false): List<T
         listOf(
             Triple(
                 "Dynamic green light",
-                accessibleColorScheme(
+                paletteColorScheme(
                     lightColorScheme(
                         primary = Color(0xFF4D662B),
                         primaryContainer = Color(0xFFCDEDA3),
@@ -231,12 +247,13 @@ internal fun messageContrastSchemes(useThemeTextColors: Boolean = false): List<T
                     ),
                     dark = false,
                     useThemeTextColors = useThemeTextColors,
+                    adjustPaletteReadability = true,
                 ),
                 false,
             ),
             Triple(
                 "Dynamic purple dark",
-                accessibleColorScheme(
+                paletteColorScheme(
                     darkColorScheme(
                         primary = Color(0xFFCFBCFF),
                         primaryContainer = Color(0xFF4F378A),
@@ -250,6 +267,7 @@ internal fun messageContrastSchemes(useThemeTextColors: Boolean = false): List<T
                     ),
                     dark = true,
                     useThemeTextColors = useThemeTextColors,
+                    adjustPaletteReadability = true,
                 ),
                 true,
             ),

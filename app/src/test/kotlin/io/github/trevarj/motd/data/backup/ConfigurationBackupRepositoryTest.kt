@@ -639,6 +639,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setSentBubbleColor(ComfortableBubbleColor(ComfortableBubbleColorRole.PRIMARY))
             appearancePrefs.setReceivedBubbleColor(ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, 0xff12ab34.toInt()))
             appearancePrefs.setUseThemeTextColors(true)
+            appearancePrefs.setAdjustPaletteReadability(true)
             appearancePrefs.setLauncherIcon(LauncherIcon.GRUVBOX)
             appearancePrefs.setSplashScreenAnimation(SplashScreenAnimation.SOFT_WASH)
             appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, "12345678-1234-1234-1234-123456789abc.image", 0xff12ab34.toInt()))
@@ -674,6 +675,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setSentBubbleColor(ComfortableBubbleColor())
             appearancePrefs.setReceivedBubbleColor(ComfortableBubbleColor())
             appearancePrefs.setUseThemeTextColors(false)
+            appearancePrefs.setAdjustPaletteReadability(false)
             appearancePrefs.setLauncherIcon(LauncherIcon.DEFAULT)
             appearancePrefs.setSplashScreenAnimation(SplashScreenAnimation.STATIC)
             appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.MEMES, 20))
@@ -702,6 +704,7 @@ class ConfigurationBackupRepositoryTest {
             assertEquals(ComfortableBubbleColor(ComfortableBubbleColorRole.PRIMARY), config.sentBubbleColor)
             assertEquals(ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, 0xff12ab34.toInt()), config.receivedBubbleColor)
             assertEquals(true, config.useThemeTextColors)
+            assertEquals(true, config.adjustPaletteReadability)
             assertEquals(LauncherIcon.GRUVBOX, config.launcherIcon)
             assertEquals(SplashScreenAnimation.SOFT_WASH, config.splashScreenAnimation)
             assertEquals("Iosevka Term.ttf", config.customFontName)
@@ -711,6 +714,12 @@ class ConfigurationBackupRepositoryTest {
                     .exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 2_000L)
                     .contains("\"RETRO_CHAT\""),
             )
+            appearancePrefs.setAdjustPaletteReadability(false)
+            val authoredBackup = source.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 3_000L)
+            appearancePrefs.setAdjustPaletteReadability(true)
+            source.import(authoredBackup, importMode = BackupImportMode.REPLACE)
+            assertEquals(false, AppearancePrefsImpl(context).config.first().adjustPaletteReadability)
+            assertEquals(true, appearancePrefs.config.first().useThemeTextColors)
         }
 
     @Test
@@ -723,6 +732,7 @@ class ConfigurationBackupRepositoryTest {
                 val backup = repository(db)
                 appearancePrefs.setComposerStyle(ComposerStyle.COMPACT)
                 appearancePrefs.setUseThemeTextColors(true)
+                appearancePrefs.setAdjustPaletteReadability(true)
                 appearancePrefs.setNicknameBackgroundsEnabled(false)
                 appearancePrefs.setMessageBackgroundOpacity(37)
                 appearancePrefs.setMessageBackgroundBlur(63)
@@ -743,10 +753,11 @@ class ConfigurationBackupRepositoryTest {
                             val payload = envelope.getValue("payload").jsonObject
                             val settings = payload.getValue("settings").jsonObject
                             val appearance = settings.getValue("appearance").jsonObject
-                            JsonObject(envelope + ("payload" to JsonObject(payload + ("settings" to JsonObject(settings + ("appearance" to JsonObject(appearance - "surfaceEffects" - "linkGlobalOpacity" - "linkGlobalBlur"))))))).toString()
+                            JsonObject(envelope + ("payload" to JsonObject(payload + ("settings" to JsonObject(settings + ("appearance" to JsonObject(appearance - "surfaceEffects" - "linkGlobalOpacity" - "linkGlobalBlur" - "adjustPaletteReadability"))))))).toString()
                         }
                 assertFalse(oldRaw.contains("composerStyle"))
                 assertFalse(oldRaw.contains("useThemeTextColors"))
+                assertFalse(oldRaw.contains("adjustPaletteReadability"))
                 assertFalse(oldRaw.contains("nicknameBackgroundsEnabled"))
                 assertFalse(oldRaw.contains("messageBackgroundOpacityPercent"))
                 assertFalse(oldRaw.contains("messageBackgroundBlur"))
@@ -760,6 +771,7 @@ class ConfigurationBackupRepositoryTest {
                 backup.import(oldRaw, importMode = BackupImportMode.MERGE)
                 assertEquals(ComposerStyle.COMFORTABLE, appearancePrefs.config.first().composerStyle)
                 assertEquals(false, appearancePrefs.config.first().useThemeTextColors)
+                assertEquals(false, AppearancePrefsImpl(context).config.first().adjustPaletteReadability)
                 assertEquals(true, appearancePrefs.config.first().nicknameBackgroundsEnabled)
                 assertEquals(100, AppearancePrefsImpl(context).config.first().messageBackgroundOpacityPercent)
                 assertEquals(0, AppearancePrefsImpl(context).config.first().messageBackgroundBlur)

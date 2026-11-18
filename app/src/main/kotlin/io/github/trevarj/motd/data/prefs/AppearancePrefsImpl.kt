@@ -32,6 +32,7 @@ private val CUSTOM_PALETTES = stringPreferencesKey("custom_palettes_v1")
 private val LIGHT_PALETTE = stringPreferencesKey("light_palette_v1")
 private val DARK_PALETTE = stringPreferencesKey("dark_palette_v1")
 private val USE_THEME_TEXT_COLORS = booleanPreferencesKey("use_theme_text_colors_v1")
+private val ADJUST_PALETTE_READABILITY = booleanPreferencesKey("adjust_palette_readability_v1")
 private val WALLPAPER = stringPreferencesKey("wallpaper_preset_v1")
 private val WALLPAPER_INTENSITY = intPreferencesKey("wallpaper_intensity_v1")
 private val WALLPAPER_IMAGE = stringPreferencesKey("wallpaper_local_image_v1")
@@ -244,6 +245,7 @@ class AppearancePrefsImpl
                     trueBlack = storedTheme.trueBlack,
                     followSystem = prefs[FOLLOW_SYSTEM] ?: false,
                     useThemeTextColors = prefs[USE_THEME_TEXT_COLORS] ?: false,
+                    adjustPaletteReadability = prefs[ADJUST_PALETTE_READABILITY] ?: false,
                     fontChoice =
                         prefs[FONT_CHOICE]?.let { runCatching { FontChoice.valueOf(it) }.getOrNull() }
                             ?: FontChoice.SYSTEM,
@@ -393,6 +395,10 @@ class AppearancePrefsImpl
 
         override suspend fun setUseThemeTextColors(enabled: Boolean) {
             store.edit { it[USE_THEME_TEXT_COLORS] = enabled }
+        }
+
+        override suspend fun setAdjustPaletteReadability(enabled: Boolean) {
+            store.edit { it[ADJUST_PALETTE_READABILITY] = enabled }
         }
 
         override suspend fun setWallpaper(selection: WallpaperSelection) {

@@ -458,6 +458,35 @@ class AppearancePrefsTest {
             }
         }
 
+    @Test fun paletteReadabilityDefaultsOffAndPreservesSavedTextChoiceAcrossReload() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val policyKey = booleanPreferencesKey("adjust_palette_readability_v1")
+            val textKey = booleanPreferencesKey("use_theme_text_colors_v1")
+            val previous = context.appearanceDataStore.data.first()
+            context.appearanceDataStore.edit { it.remove(policyKey) }
+            try {
+                assertEquals(false, AppearancePrefsImpl(context).config.first().adjustPaletteReadability)
+                assertEquals(false, Json.decodeFromString<AppearanceConfig>("""{}""").adjustPaletteReadability)
+                for (savedText in listOf(false, true)) {
+                    prefs.setUseThemeTextColors(savedText)
+                    for (adjust in listOf(true, false)) {
+                        prefs.setAdjustPaletteReadability(adjust)
+                        val reloaded = AppearancePrefsImpl(context).config.first()
+                        assertEquals(adjust, reloaded.adjustPaletteReadability)
+                        assertEquals(adjust, context.appearanceDataStore.data.first()[policyKey])
+                        assertEquals(savedText, reloaded.useThemeTextColors)
+                        assertEquals(adjust, Json.decodeFromString<AppearanceConfig>(jsonWithDefaults.encodeToString(reloaded)).adjustPaletteReadability)
+                    }
+                }
+            } finally {
+                context.appearanceDataStore.edit {
+                    if (previous[policyKey] == null) it.remove(policyKey) else it[policyKey] = previous[policyKey]!!
+                    if (previous[textKey] == null) it.remove(textKey) else it[textKey] = previous[textKey]!!
+                }
+            }
+        }
+
     @Test fun garbageStoredEnumStrings_decodeToDefaults() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()

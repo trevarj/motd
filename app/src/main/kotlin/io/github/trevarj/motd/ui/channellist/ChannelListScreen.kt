@@ -54,6 +54,7 @@ import io.github.trevarj.motd.irc.client.ChannelListing
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.components.EmptyState
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
+import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.ensureContrast
@@ -313,7 +314,7 @@ private fun ChannelList(
 ) {
     val scheme = MaterialTheme.colorScheme
     val topicFill = scheme.surfaceContainerLow
-    val readingInk = ensureContrast(readingInk(scheme), listOf(topicFill), MESSAGE_TEXT_CONTRAST)
+    val readingInk = if (LocalAdjustPaletteReadability.current) ensureContrast(readingInk(scheme), listOf(topicFill), MESSAGE_TEXT_CONTRAST) else readingInk(scheme)
     LazyColumn(Modifier.fillMaxSize()) {
         // Keyed by channel name for stable recomposition over large lists (cap 2000).
         items(listings, key = { it.name }) { listing ->
@@ -336,6 +337,7 @@ private fun ChannelList(
                                 mentionsActive = false,
                                 containerColor = topicFill,
                                 contentColor = readingInk,
+                                adjustPaletteReadability = LocalAdjustPaletteReadability.current,
                             ),
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,

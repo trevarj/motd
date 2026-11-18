@@ -1,51 +1,50 @@
 # Color theme sources
 
-motd adapts these editor and terminal palettes into Material 3 semantic roles. Theme names belong
-to their respective projects; palette values are reproduced with attribution and adjusted only
-where Android UI contrast requires it.
+motd maps these editor and terminal palettes into Material 3 semantic roles. Theme names belong
+to their respective projects; authored palette values are reproduced with attribution and used
+unchanged by default. Unspecified Material roles are derived from those colors.
 
-## Accessibility adaptation
+## Authored colors and optional readability
 
-Palette identity is carried by the primary, secondary, and tertiary hues. motd adjusts their tone
-when necessary so readable text and meaningful icons meet a 4.5:1 contrast ratio across the
-surfaces where they appear. Component boundaries, outlines, and other non-text indicators target
-3:1. Success, warning, and error use stable semantic color families instead of borrowing an accent
-whose meaning changes between palettes.
+Appearance → **Adjust palette for readability** is off by default. Authored accents, backgrounds,
+surfaces, ordinary text, supporting text and outlines stay unchanged in the app, editors and
+previews. Authored THEME nickname identities and ordinary link accents also remain exact.
+Derived container/control ink and semantic status colors retain their contrast safeguards.
+True black remains a separate, explicit dark-surface override.
 
-Appearance → **Use theme text colors** selects palette-derived text instead of static neutral ink.
-It is off by default: ordinary app text—including headings, action labels, input text and placeholders,
-supporting text, timestamps, and other metadata—uses near-black `#171717` for light themes and
-near-white `#F5F5F5` for dark themes. Turning it on restores the applied palette's background, surface,
-and supporting-text hues, including Material You dynamic colors and true-black themes. Both modes
-fit ordinary text to normalized surfaces at 4.5:1 and reading text to each actual painted fill,
-including selected rows and search-hit highlights. The choice applies live to messages and Appearance
-previews, persists across restarts, and travels with configuration backups.
+Enable readability adjustment to fit text and meaningful icons to 4.5:1 contrast, and component
+boundaries and other non-text indicators to 3:1. Success, warning and error keep stable semantic
+color families instead of borrowing an accent whose meaning changes between palettes.
 
-Links, user-configured nickname colors, explicit IRC colors, and error/destructive/status text retain
-their meaningful hues. Native interactive accents (such as text buttons, selected tabs, and focused
-field labels) keep Material styling. Filled and inverse controls keep foregrounds matched to their
-actual backgrounds, and disabled controls keep their disabled styling; neither text-color mode
-overrides component content colors globally or changes fonts.
+**Match text to theme** applies only while adjustment is enabled. Its saved default is off,
+selecting near-black `#171717` ink for light themes and near-white `#F5F5F5` for dark themes.
+Turning it on uses palette text hues instead, including Device colors. Turning adjustment off
+uses authored ink without overwriting that saved choice. Both preferences apply live to native
+previews, persist across restarts and travel with configuration backups.
+
+Classic/Vivid, generated nickname fallbacks and explicit nickname hue overrides remain fitted.
+Explicit dimming, IRC formatting, nickname-chip foregrounds and search-highlight ink retain
+readability protections in either mode. Filled and inverse controls keep foregrounds matched
+to their actual backgrounds; disabled styling and fonts are unchanged.
 
 Composer fields and toolbars, ordinary Comfortable incoming bubbles, autocomplete,
-day/system-event pills, history overlays, and voice panels use the selected palette's
-`secondaryContainer`/`onSecondaryContainer` roles in light, dark, and true-black themes.
-Reply previews use `primaryContainer` with matched ink; selected formatting tools use
-`primary`/`onPrimary` to remain distinct from the toolbar. Editor text retains the
-theme-text preference and is fitted to its actual container, also used by IRC formatting.
-Outgoing ownership, mentions, actions/notices, and recording/error cues keep their existing
-accent or semantic roles. The chat canvas, app chrome, explicit IRC swatches, and shared
-native emoji picker are unchanged.
+system-event pills, history overlays and voice panels use the selected palette's
+`secondaryContainer`/`onSecondaryContainer` roles in light, dark and true-black themes.
+Date and new-message separators use accented `primaryContainer`/`onPrimaryContainer`
+capsules with the action pills' rounded shape and padding; their existing hairlines remain.
+Reply previews also use `primaryContainer` with matched ink; selected formatting tools use
+`primary`/`onPrimary` to remain distinct from the toolbar. Editor text stays authored unless
+readability adjustment is enabled. Outgoing ownership, mentions, actions/notices and
+recording/error cues keep their existing accent or semantic roles.
 
-Reading text uses a stronger **7:1 reading target** against the actual painted bubble, row, card,
-topic, search highlight, reply, or inline-code fill. Links, nick mentions, and explicit IRC foreground
-colors are tone-adjusted with the same hue-preserving rule; explicit IRC backgrounds and reverse
-formatting stay intact.
-Some mid-luminance fills cannot reach 7:1 with any ink, so these retain their palette color and use
-the most readable black or white ink, with at least 4.5:1 contrast.
+With readability adjustment enabled, reading text uses a stronger **7:1 reading target**
+against the actual painted bubble, row, card, topic, search highlight, reply or inline-code
+fill. Links and nick mentions are tone-adjusted with the same hue-preserving rule.
+Some mid-luminance fills cannot reach 7:1 with any ink; these retain their palette fill
+and use the most readable black or white ink, with at least 4.5:1 contrast.
 
 Read chat-list message previews are subdued while retaining at least 4.5:1 contrast.
-Unread previews keep the stronger reading ink in both text-color modes.
+Unread previews follow the authored-versus-adjusted reading policy.
 
 Flattened rows retain their nick/attention tint over the theme canvas. At 100% message opacity,
 normal tinted Two-line rows and ACTION rows admit wallpaper through their existing 90%-opaque

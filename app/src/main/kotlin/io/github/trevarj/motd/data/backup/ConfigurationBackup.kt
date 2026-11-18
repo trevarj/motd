@@ -759,6 +759,7 @@ class ConfigurationBackupRepositoryImpl
                 appearancePrefs.restorePalettes(target.palettes, target.selection)
                 appearancePrefs.setTrueBlack(it.trueBlack || (it.paletteMode == null && it.theme == ColorThemePreset.AMOLED))
                 appearancePrefs.setUseThemeTextColors(it.useThemeTextColors)
+                appearancePrefs.setAdjustPaletteReadability(it.adjustPaletteReadability)
                 appearancePrefs.setWallpaper(it.wallpaper)
                 appearancePrefs.setUiFontScale(it.uiFontScalePercent)
                 appearancePrefs.setConversationFontScale(it.conversationFontScalePercent)

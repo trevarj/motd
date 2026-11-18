@@ -78,6 +78,7 @@ import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.components.resolveIs24Hour
+import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.LocalChatCardCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
@@ -252,7 +253,11 @@ fun ChatListRowItem(
     )
     val paintedRow = rowContainer.compositeOver(MaterialTheme.colorScheme.surface)
     val readingInk = readingInk(MaterialTheme.colorScheme)
-    val readingColor = remember(readingInk, paintedRow) { ensureContrast(readingInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) }
+    val adjustReadability = LocalAdjustPaletteReadability.current || visualState != ChatListRowVisualState.DEFAULT
+    val readingColor =
+        remember(readingInk, paintedRow, adjustReadability) {
+            if (adjustReadability) ensureContrast(readingInk, listOf(paintedRow), MESSAGE_TEXT_CONTRAST) else readingInk
+        }
     // Read previews stay subdued without sacrificing readable contrast on the painted row.
     val previewColor =
         remember(isUnread, readingColor, paintedRow) {

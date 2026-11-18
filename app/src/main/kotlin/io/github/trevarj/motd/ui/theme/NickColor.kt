@@ -249,6 +249,7 @@ class NickColorScheme(
     private val themeColors: List<Color> = emptyList(),
     /** The active theme's published accent palette; empty for schemes that declare none. */
     private val identityPalette: List<Color> = emptyList(),
+    private val adjustPaletteReadability: Boolean = false,
 ) {
     // Memoize per nick: a new scheme instance is created whenever palette/overrides/theme change,
     // discarding these caches, so they never go stale. ConcurrentHashMap guards off-main
@@ -272,7 +273,7 @@ class NickColorScheme(
             if (override != null) {
                 hueColor(override, isDark, palette, themeColors, textBackgrounds)
             } else {
-                paletteNickColor(nick, isDark, palette, themeColors, textBackgrounds, identityPalette)
+                paletteNickColor(nick, isDark, palette, themeColors, textBackgrounds, identityPalette, adjustPaletteReadability)
             }
         }
 
@@ -281,6 +282,23 @@ class NickColorScheme(
         nick: String,
         fallback: Color,
     ): Color = if (!enabled) fallback else text(nick)
+
+    fun preservesAuthoredIdentity(
+        nick: String,
+        fallbackIsAuthored: Boolean = false,
+    ): Boolean =
+        !adjustPaletteReadability &&
+            if (!enabled) fallbackIsAuthored else palette == NickColorPalette.THEME && identityPalette.isNotEmpty() && overrides[normalizeNick(nick)] == null
+
+    fun nick(
+        nick: String,
+        fallback: Color,
+        backgrounds: List<Color>,
+        fallbackIsAuthored: Boolean = false,
+    ): Color {
+        val color = nick(nick, fallback)
+        return if (preservesAuthoredIdentity(nick, fallbackIsAuthored)) color else ensureContrast(color, backgrounds, 7.0)
+    }
 
     fun mention(nick: String): Color = text(nick)
 
@@ -318,13 +336,15 @@ fun resolveNickColor(
     fallback: Color,
     themeColors: List<Color> = emptyList(),
     backgrounds: List<Color> = emptyList(),
+    identityPalette: List<Color> = emptyList(),
+    adjustPaletteReadability: Boolean = false,
 ): Color {
     if (!enabled) return fallback
     val override = overrides[normalizeNick(nick)]
     return if (override != null) {
         hueColor(override, isDark, palette, themeColors, backgrounds)
     } else {
-        paletteNickColor(nick, isDark, palette, themeColors, backgrounds)
+        paletteNickColor(nick, isDark, palette, themeColors, backgrounds, identityPalette, adjustPaletteReadability)
     }
 }
 
@@ -335,8 +355,7 @@ fun resolveNickColor(
  * literally one of the theme's own colors rather than something synthesized nearby. Only when the
  * theme declares no palette (the Material schemes and dynamic color) does it fall back to a hue
  * wheel anchored on the primary, which is Material's own way of widening a three-accent scheme.
- * CLASSIC and VIVID keep their theme-independent hue table. All three go through the hue-preserving
- * contrast fix when [backgrounds] are supplied. Pure.
+ * CLASSIC and VIVID keep their theme-independent hue table.
  */
 fun paletteNickColor(
     nick: String,
@@ -345,11 +364,12 @@ fun paletteNickColor(
     themeColors: List<Color> = emptyList(),
     backgrounds: List<Color> = emptyList(),
     identityPalette: List<Color> = emptyList(),
+    adjustPaletteReadability: Boolean = false,
 ): Color {
     if (palette != NickColorPalette.THEME) {
         return contrastSafe(binIdentity(nick, isDark, palette), backgrounds, isDark)
     }
-    themeAccent(nick, identityPalette)?.let { return contrastSafe(it, backgrounds, isDark) }
+    themeAccent(nick, identityPalette)?.let { return if (adjustPaletteReadability) contrastSafe(it, backgrounds, isDark) else it }
     val character = ThemeCharacter.of(themeColors, isDark)
     val coord = nickCoord(nick)
     return contrastSafeIdentity(

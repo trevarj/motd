@@ -216,6 +216,7 @@ class MainActivity :
                     paletteMode = paletteMode,
                     customPalette = customPalette,
                     useThemeTextColors = appearance.useThemeTextColors,
+                    adjustPaletteReadability = appearance.adjustPaletteReadability,
                     layoutDensity = settings.layoutDensity,
                     compactNickBrackets = settings.compactNickBrackets,
                     nickColorsEnabled = settings.nickColorsEnabled,

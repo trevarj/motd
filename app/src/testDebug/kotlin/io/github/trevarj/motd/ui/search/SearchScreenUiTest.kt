@@ -296,6 +296,50 @@ class SearchScreenUiTest {
     }
 
     @Test
+    fun authoredSearchProseRemainsExactUntilAdjustmentEnabled() {
+        val adjust = mutableStateOf(false)
+        val authored = Color(0xFFEEEEEE)
+        var fill = Color.Unspecified
+        compose.setContent {
+            MotdTheme(dynamicColor = false, adjustPaletteReadability = adjust.value, useThemeTextColors = true) {
+                val scheme =
+                    MaterialTheme.colorScheme.copy(
+                        background = Color.White,
+                        surfaceContainerLow = Color.White,
+                        onBackground = authored,
+                        onSurface = authored,
+                    )
+                fill = scheme.surfaceContainerLow
+                MaterialTheme(colorScheme = scheme) {
+                    SearchContent(
+                        state = SearchUiState(rawQuery = "Reading", groups = listOf(group(hit(1, "authored", "Reading prose")))),
+                        onQueryChange = {},
+                        onScopeChange = {},
+                        onBack = {},
+                        onOpenHit = {},
+                    )
+                }
+            }
+        }
+
+        fun ink(): Color {
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose
+                .onNodeWithText("Reading prose", useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            return layouts
+                .single()
+                .layoutInput.style.color
+        }
+        assertEquals(authored, ink())
+        compose.runOnIdle { adjust.value = true }
+        assertEquals(ensureContrast(authored, listOf(fill), MESSAGE_TEXT_CONTRAST), ink())
+        assertTrue(contrastRatio(ink(), fill) >= MESSAGE_TEXT_CONTRAST - 0.00001)
+        compose.runOnIdle { adjust.value = false }
+        assertEquals(authored, ink())
+    }
+
+    @Test
     fun snippetsUseNeutralInkOnRowAndHighlightWithoutChangingSenderOrTimestamp() {
         val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
         val server = mutableStateOf(false)
@@ -309,6 +353,7 @@ class SearchScreenUiTest {
             MotdTheme(
                 dynamicColor = false,
                 themePreset = preset.value,
+                adjustPaletteReadability = true,
                 timestampConfig = TimestampConfig(format = TimeFormat.CUSTOM, customPattern = "'Search time'"),
             ) {
                 val scheme = MaterialTheme.colorScheme

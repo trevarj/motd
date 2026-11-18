@@ -430,6 +430,7 @@ data class AppearanceConfig(
     val customFontName: String = "",
     val composerStyle: ComposerStyle = ComposerStyle.COMFORTABLE,
     val useThemeTextColors: Boolean = false,
+    val adjustPaletteReadability: Boolean = false,
     val inputCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
     val avatarShape: AvatarShape = AvatarShape.DEFAULT,
     val chatCardCornerStyle: UiCornerStyle = UiCornerStyle.DEFAULT,
@@ -467,6 +468,8 @@ interface AppearancePrefs {
     suspend fun setTrueBlack(enabled: Boolean)
 
     suspend fun setUseThemeTextColors(enabled: Boolean)
+
+    suspend fun setAdjustPaletteReadability(enabled: Boolean)
 
     suspend fun setWallpaper(selection: WallpaperSelection)
 

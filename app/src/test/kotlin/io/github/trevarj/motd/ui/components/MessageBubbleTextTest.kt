@@ -11,12 +11,14 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontSynthesis
 import androidx.compose.ui.text.font.FontWeight
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IRC_HEX_COLOR
 import io.github.trevarj.motd.irc.format.IRC_REVERSE
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.ui.theme.NickColorScheme
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.readingInk
@@ -26,6 +28,73 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MessageBubbleTextTest {
+    @Test
+    fun authoredThemeIdentityAndReadingRolesSurviveActionAndRichTextActualFills() {
+        val authored = Color(0xFFDDDDDD)
+        val fill = Color.White
+        for (adjust in listOf(false, true)) {
+            val nicks = NickColorScheme(true, NickColorPalette.THEME, emptyMap(), false, identityPalette = listOf(authored), adjustPaletteReadability = adjust)
+            val bodyInk = messageContentColor(authored, fill, false, adjustPaletteReadability = adjust)
+            val bodies =
+                listOf(
+                    buildActionLine(
+                        "alice",
+                        "Reading @bob https://example.org `code`",
+                        Color.Blue,
+                        nicks.nick("alice", authored),
+                        bodyInk,
+                        authored,
+                        mentionColor = { nicks.nick(it, authored) },
+                        codeBackground = fill,
+                        codeColor = authored,
+                        containerColor = fill,
+                        adjustPaletteReadability = adjust,
+                        fitSenderColor = !nicks.preservesAuthoredIdentity("alice"),
+                        fitMentionColor = { !nicks.preservesAuthoredIdentity(it) },
+                    ),
+                    buildActionBody(
+                        "Reading @bob https://example.org `code`",
+                        bodyInk,
+                        authored,
+                        mentionColor = { nicks.nick(it, authored) },
+                        codeBackground = fill,
+                        codeColor = authored,
+                        containerColor = fill,
+                        adjustPaletteReadability = adjust,
+                        fitMentionColor = { !nicks.preservesAuthoredIdentity(it) },
+                    ),
+                    linkifiedBody(
+                        "Reading @bob https://example.org `code`",
+                        authored,
+                        mentionColor = { nicks.nick(it, authored) },
+                        codeBackground = fill,
+                        codeColor = authored,
+                        containerColor = fill,
+                        contentColor = bodyInk,
+                        adjustPaletteReadability = adjust,
+                        fitMentionColor = { !nicks.preservesAuthoredIdentity(it) },
+                    ),
+                )
+            for (body in bodies) {
+                for (word in listOf("@bob", "https://", "code")) {
+                    val offset = body.text.indexOf(word)
+                    val ink =
+                        body.spanStyles
+                            .last { offset in it.start until it.end && it.item.color != Color.Unspecified }
+                            .item.color
+                    if (adjust) assertReadingContrast(word, ink, fill) else assertEquals(word, authored, ink)
+                }
+                if (body.text.startsWith("* alice")) {
+                    val senderInk =
+                        body.spanStyles
+                            .first { it.start == 2 }
+                            .item.color
+                    if (adjust) assertReadingContrast("sender", senderInk, fill) else assertEquals(authored, senderInk)
+                }
+            }
+        }
+    }
+
     @Test
     fun action_mentions_remain_interactive_without_styling_or_colors() {
         val clicked = mutableListOf<String>()
@@ -418,6 +487,7 @@ class MessageBubbleTextTest {
                         codeColor = readingInk,
                         containerColor = role.container,
                         contentColor = bodyColor,
+                        adjustPaletteReadability = true,
                     )
                 assertRenderedInks("$name $roleName", body, bodyColor, role.container)
             }
@@ -441,6 +511,7 @@ class MessageBubbleTextTest {
                     codeBackground = scheme.surfaceVariant.copy(alpha = 0.72f),
                     codeColor = readingInk,
                     containerColor = rowFill,
+                    adjustPaletteReadability = true,
                 )
             assertRenderedInks("$name compact/two-line", compact, rowColor, rowFill)
             val actionFill = semantic.warningContainer.copy(alpha = MENTION_ROW_TINT_ALPHA).compositeOver(scheme.background)
@@ -458,6 +529,7 @@ class MessageBubbleTextTest {
                     codeBackground = scheme.surfaceVariant,
                     codeColor = readingInk,
                     containerColor = actionFill,
+                    adjustPaletteReadability = true,
                 )
             assertRenderedInks("$name action row", action, actionColor, actionFill)
         }

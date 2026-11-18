@@ -27,6 +27,40 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ThemeCatalogTest {
+    @Test fun fixedPaletteDefaultsPreserveAuthoredRolesAndCacheEachReadabilityPolicy() {
+        ColorThemePreset.entries.filter { it.isFixedPalette }.forEach { preset ->
+            val raw = requireNotNull(rawFixedThemeScheme(preset))
+            val authored = requireNotNull(fixedThemeScheme(preset))
+            assertEquals("$preset authored roles", authoredRoles(raw), authoredRoles(authored))
+            assertTrue(authored === fixedThemeScheme(preset, useThemeTextColors = true))
+            val adjusted = fixedThemeScheme(preset, adjustPaletteReadability = true)
+            val themed = fixedThemeScheme(preset, useThemeTextColors = true, adjustPaletteReadability = true)
+            assertTrue(adjusted === fixedThemeScheme(preset, adjustPaletteReadability = true))
+            assertTrue(themed === fixedThemeScheme(preset, useThemeTextColors = true, adjustPaletteReadability = true))
+            assertTrue(authored !== adjusted)
+            assertTrue(adjusted !== themed)
+        }
+    }
+
+    @Test fun authoredTextSeedsDerivedContainerInkWithoutNeutralizingItsHue() {
+        val authoredInk = Color(0xFF001060)
+        val raw = MotdLightRaw.copy(onSurface = authoredInk)
+        val applied = paletteColorScheme(raw, dark = false)
+        assertEquals(authoredRoles(raw), authoredRoles(applied))
+        listOf(
+            applied.onPrimaryContainer to applied.primaryContainer,
+            applied.onSecondaryContainer to applied.secondaryContainer,
+            applied.onTertiaryContainer to applied.tertiaryContainer,
+        ).forEach { (ink, fill) ->
+            assertTrue(contrastRatio(authoredInk, fill) >= 4.5)
+            assertEquals(authoredInk, ink)
+        }
+        val adjusted = paletteColorScheme(raw, dark = false, adjustPaletteReadability = true)
+        assertNotEquals(authoredInk, adjusted.onSecondaryContainer)
+        assertEquals(adjusted.onSecondaryContainer.red, adjusted.onSecondaryContainer.green, 0.00001f)
+        assertEquals(adjusted.onSecondaryContainer.green, adjusted.onSecondaryContainer.blue, 0.00001f)
+    }
+
     @Test fun comfortableBubbleThemeRolesFollowTheResolvedColorSchemeWhileCustomIsFixed() {
         val primary = ComfortableBubbleColor(ComfortableBubbleColorRole.PRIMARY)
         val custom = ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, 0xff12ab34.toInt())
@@ -224,8 +258,8 @@ class ThemeCatalogTest {
 
     @Test fun themeTextRoles_restoreRawPaletteHuesBeforeContrastAdaptation() {
         for ((preset, raw) in listOf(ColorThemePreset.GRUVBOX_LIGHT to GruvboxLightScheme, ColorThemePreset.GRUVBOX_DARK to GruvboxDarkScheme)) {
-            val themed = requireNotNull(fixedThemeScheme(preset, useThemeTextColors = true))
-            val static = requireNotNull(fixedThemeScheme(preset))
+            val themed = requireNotNull(fixedThemeScheme(preset, useThemeTextColors = true, adjustPaletteReadability = true))
+            val static = requireNotNull(fixedThemeScheme(preset, adjustPaletteReadability = true))
             val surfaces = neutralSurfaces(themed)
             assertEquals("$preset background", ensureContrast(raw.onBackground, surfaces), themed.onBackground)
             assertEquals("$preset surface", ensureContrast(raw.onSurface, surfaces), themed.onSurface)
@@ -318,7 +352,25 @@ class ThemeCatalogTest {
             assertNotEquals(raw.background, raw.surface)
             assertEquals(authored.onBackground, colors.onBackground)
             for (themeText in listOf(false, true)) {
-                val applied = accessibleColorScheme(raw, dark, themeText)
+                val unadjusted = paletteColorScheme(raw, dark, themeText)
+                assertEquals(authoredRoles(raw), authoredRoles(unadjusted))
+                assertTrue(contrastRatio(unadjusted.onBackground, unadjusted.background) < 4.5)
+                listOf(
+                    unadjusted.onPrimary to unadjusted.primary,
+                    unadjusted.onSecondary to unadjusted.secondary,
+                    unadjusted.onTertiary to unadjusted.tertiary,
+                    unadjusted.onPrimaryContainer to unadjusted.primaryContainer,
+                    unadjusted.onError to unadjusted.error,
+                ).forEach { (ink, fill) -> assertTrue(contrastRatio(ink, fill) >= 4.5) }
+                if (dark) {
+                    val black = unadjusted.withTrueBlackSurfaces()
+                    assertEquals(Color.Black, black.background)
+                    assertEquals(unadjusted.onBackground, black.onBackground)
+                    assertEquals(unadjusted.primary, black.primary)
+                }
+            }
+            for (themeText in listOf(false, true)) {
+                val applied = paletteColorScheme(raw, dark, themeText, adjustPaletteReadability = true)
                 assertEquals(raw.background, applied.background)
                 assertEquals(raw.surface, applied.surface)
                 assertNotEquals(raw.onBackground, applied.onBackground)
@@ -412,12 +464,27 @@ class ThemeCatalogTest {
 
     private fun staticSchemes(useThemeTextColors: Boolean = false): List<Pair<ColorThemePreset, ColorScheme>> =
         buildList {
-            add(ColorThemePreset.LIGHT to if (useThemeTextColors) MotdLightThemeTextScheme else MotdLightScheme)
-            add(ColorThemePreset.DARK to if (useThemeTextColors) MotdDarkThemeTextScheme else MotdDarkScheme)
+            add(ColorThemePreset.LIGHT to motdThemeScheme(false, useThemeTextColors, adjustPaletteReadability = true))
+            add(ColorThemePreset.DARK to motdThemeScheme(true, useThemeTextColors, adjustPaletteReadability = true))
             ColorThemePreset.entries.filter { it.isFixedPalette }.forEach { preset ->
-                add(preset to requireNotNull(fixedThemeScheme(preset, useThemeTextColors)))
+                add(preset to requireNotNull(fixedThemeScheme(preset, useThemeTextColors, adjustPaletteReadability = true)))
             }
         }
+
+    private fun authoredRoles(scheme: ColorScheme): List<Color> =
+        listOf(
+            scheme.primary,
+            scheme.secondary,
+            scheme.tertiary,
+            scheme.background,
+            scheme.surface,
+            scheme.surfaceContainer,
+            scheme.onBackground,
+            scheme.onSurface,
+            scheme.onSurfaceVariant,
+            scheme.outlineVariant,
+            scheme.outline,
+        )
 
     private fun neutralSurfaces(scheme: ColorScheme): List<Color> =
         listOf(

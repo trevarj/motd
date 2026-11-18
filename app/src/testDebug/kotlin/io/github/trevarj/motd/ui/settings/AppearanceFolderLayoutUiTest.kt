@@ -93,6 +93,7 @@ import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.fixedThemeScheme
 import io.github.trevarj.motd.ui.theme.resolvedMode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -649,7 +650,7 @@ class AppearanceFolderLayoutUiTest {
 
     @Test
     fun themeTextColorSwitchUpdatesOrdinaryTextAndMessagePreviewLive() {
-        val appearance = mutableStateOf(AppearanceConfig(theme = ColorThemePreset.GRUVBOX_DARK))
+        val appearance = mutableStateOf(AppearanceConfig(theme = ColorThemePreset.GRUVBOX_DARK, adjustPaletteReadability = true))
         var selected: Boolean? = null
         setContent(
             appearanceProvider = { appearance.value },
@@ -661,7 +662,7 @@ class AppearanceFolderLayoutUiTest {
         val preview = compose.onNodeWithTag("settings_chat_preview_inline_comfortable_default_rounded")
         val body = "See you in the channel!"
         preview.performScrollTo().assertIsDisplayed()
-        val static = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK))
+        val static = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK, adjustPaletteReadability = true))
         val staticBody = inkOf(body, "settings_chat_preview_inline_configuration")
         assertEquals(ensureContrast(Color(0xFFF5F5F5), listOf(static.secondaryContainer), MESSAGE_TEXT_CONTRAST), staticBody)
 
@@ -672,7 +673,7 @@ class AppearanceFolderLayoutUiTest {
             .performClick()
         compose.onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true).assertIsOn()
         assertEquals(true, selected)
-        val themed = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK, useThemeTextColors = true))
+        val themed = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK, useThemeTextColors = true, adjustPaletteReadability = true))
         assertEquals(themed.onSurface, inkOf("Appearance"))
         preview.performScrollTo().assertIsDisplayed()
         assertEquals(ensureContrast(themed.onBackground, listOf(themed.secondaryContainer), MESSAGE_TEXT_CONTRAST), inkOf(body, "settings_chat_preview_inline_configuration"))
@@ -685,6 +686,41 @@ class AppearanceFolderLayoutUiTest {
         assertEquals(false, selected)
         preview.performScrollTo().assertIsDisplayed()
         assertEquals(staticBody, inkOf(body, "settings_chat_preview_inline_configuration"))
+    }
+
+    @Test
+    fun readabilitySwitchChangesRootAndContainedPreviewWithoutOverwritingTextChoice() {
+        val appearance = mutableStateOf(AppearanceConfig(theme = ColorThemePreset.GRUVBOX_DARK))
+        setContent(
+            appearanceProvider = { appearance.value },
+            onAdjustPaletteReadability = { appearance.value = appearance.value.copy(adjustPaletteReadability = it) },
+            onUseThemeTextColors = { appearance.value = appearance.value.copy(useThemeTextColors = it) },
+        )
+        val adjustment = compose.onNodeWithTag("settings_switch_adjust_palette_readability_row", useUnmergedTree = true)
+        val text = compose.onNodeWithTag("settings_switch_theme_text_colors_row", useUnmergedTree = true)
+        adjustment.performScrollTo().assertIsOff()
+        text.performScrollTo().assertIsNotEnabled().assertIsOff()
+        val authored = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK))
+        assertEquals(authored.onSurface, inkOf("Appearance"))
+        val preview = compose.onNodeWithTag("settings_chat_preview_inline_comfortable_default_rounded")
+        val before = preview.performScrollTo().captureToImage().asAndroidBitmap()
+        adjustment.performScrollTo().performClick().assertIsOn()
+        text.performScrollTo().assertIsEnabled().assertIsOff()
+        val fitted = requireNotNull(fixedThemeScheme(ColorThemePreset.GRUVBOX_DARK, adjustPaletteReadability = true))
+        assertEquals(fitted.onSurface, inkOf("Appearance"))
+        val after = preview.performScrollTo().captureToImage().asAndroidBitmap()
+        assertFalse(before.sameAs(after))
+        for ((name, image) in listOf("authored" to before, "adjusted" to after)) {
+            val file = java.io.File("build/reports/palettes/appearance-$name.png").apply { parentFile!!.mkdirs() }
+            file.outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        text.performScrollTo().performClick().assertIsOn()
+        adjustment.performScrollTo().performClick().assertIsOff()
+        text.performScrollTo().assertIsNotEnabled().assertIsOn()
+        assertEquals(true, appearance.value.useThemeTextColors)
+        assertEquals(authored.onSurface, inkOf("Appearance"))
+        adjustment.performScrollTo().performClick()
+        text.performScrollTo().assertIsEnabled().assertIsOn()
     }
 
     @Test
@@ -1437,6 +1473,7 @@ class AppearanceFolderLayoutUiTest {
         onNicknameBackgroundsEnabled: (Boolean) -> Unit = {},
         onNickMentionStyle: (NickMentionStyle) -> Unit = {},
         onUseThemeTextColors: (Boolean) -> Unit = {},
+        onAdjustPaletteReadability: (Boolean) -> Unit = {},
         onOpenSurfaceEffects: (SettingsTarget?) -> Unit = {},
         onWallpaper: (WallpaperSelection) -> Unit = {},
         importedWallpaperProvider: () -> WallpaperSelection? = { null },
@@ -1455,6 +1492,7 @@ class AppearanceFolderLayoutUiTest {
                 customPalette = currentAppearance.customPalette(choice),
                 trueBlack = currentAppearance.trueBlack,
                 useThemeTextColors = currentAppearance.useThemeTextColors,
+                adjustPaletteReadability = currentAppearance.adjustPaletteReadability,
                 uiFontScalePercent = currentAppearance.uiFontScalePercent,
                 uiIconSet = currentAppearance.uiIconSet,
                 nickMentionStyle = currentSettings.nickMentionStyle,
@@ -1474,6 +1512,7 @@ class AppearanceFolderLayoutUiTest {
                         onTrueBlack = {},
                         onDynamicColor = {},
                         onUseThemeTextColors = onUseThemeTextColors,
+                        onAdjustPaletteReadability = onAdjustPaletteReadability,
                         onLayoutDensity = onLayoutDensity,
                         onCompactNickBrackets = onCompactNickBrackets,
                         onComposerStyle = onComposerStyle,

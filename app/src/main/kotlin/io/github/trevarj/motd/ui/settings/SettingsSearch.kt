@@ -147,6 +147,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.palette_color_mode, R.string.settings_follow_system_desc, "follow system device dark light mode", SettingsSearchPage.APPEARANCE, SettingsTarget.FOLLOW_SYSTEM),
         spec(R.string.settings_true_black, R.string.settings_true_black_desc, "oled amoled", SettingsSearchPage.APPEARANCE, SettingsTarget.TRUE_BLACK),
         spec(R.string.settings_dynamic_color, R.string.settings_dynamic_color_desc, "dynamic color phone wallpaper material you android 12", SettingsSearchPage.APPEARANCE, SettingsTarget.DYNAMIC_COLOR),
+        spec(R.string.settings_adjust_palette_readability, R.string.settings_adjust_palette_readability_desc, "authored palette colors contrast accessibility correction readability", SettingsSearchPage.APPEARANCE, SettingsTarget.ADJUST_PALETTE_READABILITY),
         spec(R.string.settings_theme_text_colors, R.string.settings_theme_text_colors_desc, "match theme static neutral font ink text palette", SettingsSearchPage.APPEARANCE, SettingsTarget.THEME_TEXT_COLORS),
         spec(R.string.settings_icon_set, R.string.settings_icon_set_desc, "ui icons icon set material lucide symbols glyphs interface toolbar menus", SettingsSearchPage.APPEARANCE, SettingsTarget.UI_ICON_SET),
         spec(R.string.settings_nick_colors, R.string.settings_nick_colors_desc, "nickname sender", SettingsSearchPage.APPEARANCE, SettingsTarget.NICK_COLORS),
