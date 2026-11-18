@@ -161,8 +161,9 @@ class WsLineTransportTest {
             transport.connect()
             assertTrue(opened.await(5, TimeUnit.SECONDS))
 
-            // Default sendAll fallback must retain one WebSocket frame per IRC line.
-            transport.sendAll(listOf("NICK motd", "USER motd 0 * :motd", "JOIN #a\r\n"))
+            transport.send("NICK motd")
+            transport.send("USER motd 0 * :motd")
+            transport.send("JOIN #a\r\n")
 
             // Wait until the server observed all three frames; a missing frame fails here with a message
             // instead of spinning until the JUnit/Gradle timeout.

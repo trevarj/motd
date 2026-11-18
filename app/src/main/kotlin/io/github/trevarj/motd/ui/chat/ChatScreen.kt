@@ -79,7 +79,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.GroupAdd
@@ -400,7 +399,6 @@ fun ChatScreen(
     showBack: Boolean = true,
     onOpenChannelInfo: (Long) -> Unit = {},
     onOpenSearch: (Long) -> Unit = {},
-    onOpenSharePicker: () -> Unit = {},
     onOpenImage: (String, Long?) -> Unit = { _, _ -> },
     // /msg and /query resolve-or-create a QUERY buffer via the VM, then navigate to it.
     onOpenBuffer: (Long) -> Unit = {},
@@ -598,23 +596,6 @@ fun ChatScreen(
     val uiEvents by viewModel.uiEvents.collectAsStateWithLifecycle()
     val historySyncStatus by viewModel.historySyncStatus.collectAsStateWithLifecycle()
     val timelineSeams by viewModel.timelineSeams.collectAsStateWithLifecycle()
-    val agentwireEnabled by viewModel.agentwireEnabled.collectAsStateWithLifecycle()
-    val contextScope = rememberCoroutineScope()
-    var contextPreparing by remember(viewModel) { mutableStateOf(false) }
-    var contextPreparation by remember(viewModel) { mutableStateOf<AgentContextPreparation?>(null) }
-
-    fun prepareContext(load: suspend () -> AgentContextPreparation) {
-        if (contextPreparing) return
-        contextPreparing = true
-        contextScope.launch {
-            try {
-                val result = load()
-                if (result == AgentContextPreparation.READY) onOpenSharePicker() else contextPreparation = result
-            } finally {
-                contextPreparing = false
-            }
-        }
-    }
     val isServerBuffer = state.buffer?.type == BufferType.SERVER
     val titleTarget = chatTitleTarget(state.buffer?.type)
 
@@ -673,10 +654,6 @@ fun ChatScreen(
         channelSenderPrefixes = channelSenderPrefixes,
         identityRules = identityRules,
         unreadEntrySnapshot = unreadEntrySnapshot,
-        agentwireEnabled = agentwireEnabled,
-        contextPreparing = contextPreparing,
-        onPrepareCatchUpContext = { prepareContext(viewModel::prepareCatchUpContext) },
-        onPrepareThreadContext = { eventId -> prepareContext { viewModel.prepareThreadContext(eventId) } },
         readMarkerLive = localReadAnchor,
         rawNewestAnchor = rawNewestAnchor,
         onMarkRead = viewModel::markRead,
@@ -918,39 +895,6 @@ fun ChatScreen(
                     TextButton(onClick = { viewModel.dismissDccSendFailure(failure) }) {
                         Text(stringResource(R.string.action_cancel))
                     }
-                }
-            },
-        )
-    }
-
-    contextPreparation?.let { result ->
-        AlertDialog(
-            onDismissRequest = { contextPreparation = null },
-            title = { Text(stringResource(R.string.agent_context_title)) },
-            text = {
-                Text(
-                    stringResource(
-                        when (result) {
-                            AgentContextPreparation.PENDING_SHARE -> R.string.agent_context_pending
-                            AgentContextPreparation.NO_CONTEXT -> R.string.agent_context_no_context
-                            AgentContextPreparation.TOO_LARGE -> R.string.agent_context_too_large
-                            else -> R.string.agent_context_failed
-                        },
-                    ),
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        contextPreparation = null
-                        if (result == AgentContextPreparation.PENDING_SHARE) onOpenSharePicker()
-                    },
-                ) {
-                    Text(
-                        stringResource(
-                            if (result == AgentContextPreparation.PENDING_SHARE) R.string.agent_context_resume else R.string.action_cancel,
-                        ),
-                    )
                 }
             },
         )
@@ -1337,10 +1281,6 @@ internal fun ChatContent(
     accountSetupReminder: Boolean = false,
     onAccountSetup: () -> Unit = {},
     onDismissAccountSetup: () -> Unit = {},
-    agentwireEnabled: Boolean = false,
-    contextPreparing: Boolean = false,
-    onPrepareCatchUpContext: () -> Unit = {},
-    onPrepareThreadContext: (Long) -> Unit = {},
     channelNotifications: ChannelNotificationPresentation = ChannelNotificationPresentation(),
     onChannelNotificationMode: (NotificationMode?) -> Unit = {},
     onStartWatch: (ChannelWatchDuration) -> Unit = {},
@@ -3480,18 +3420,6 @@ internal fun ChatContent(
                         },
                     )
                 }
-                if (canPrepareCatchUpContext(agentwireEnabled, isServerBuffer, unreadEntrySnapshot)) {
-                    DropdownMenuItem(
-                        modifier = Modifier.testTag("chat_catch_up"),
-                        text = { Text(stringResource(R.string.agent_context_catch_up)) },
-                        leadingIcon = { Icon(Icons.Outlined.AutoAwesome, contentDescription = null) },
-                        enabled = !contextPreparing,
-                        onClick = {
-                            overflowOpen = false
-                            onPrepareCatchUpContext()
-                        },
-                    )
-                }
                 if (buffer?.type == BufferType.CHANNEL) {
                     DropdownMenuItem(
                         modifier = Modifier.testTag("chat_watch").semantics { selected = !channelNotifications.loading && channelNotifications.available && channelNotifications.watch != null },
@@ -4824,15 +4752,6 @@ internal fun ChatContent(
                 onMoreReactions = { hideThen { reactionPickerTarget = target } },
                 reactions = target.msgid?.let(reactionChips).orEmpty(),
                 reactionEnabled = { emoji -> reactionEnabled(target, emoji) },
-                canPrepareThreadContext =
-                    !contextPreparing &&
-                        canPrepareThreadContext(
-                            agentwireEnabled = agentwireEnabled,
-                            isServerBuffer = isServerBuffer,
-                            message = target,
-                            visibilityPolicy = visibilityPolicy,
-                        ),
-                onPrepareThreadContext = { hideThen { onPrepareThreadContext(target.id) } },
                 onCopy = {
                     hideThen {
                         scope.launch {
@@ -5793,8 +5712,6 @@ internal fun VoiceComposerPanel(
     onDestinationSelected: (io.github.trevarj.motd.attachment.PasteBackendConfig?) -> Unit,
     onErrorDismissed: () -> Unit,
     modifier: Modifier = Modifier,
-    encryptionEnabled: Boolean = true,
-    sendEnabled: Boolean = true,
 ) {
     var destinationSheet by remember { mutableStateOf(false) }
     val panelColor = MaterialTheme.colorScheme.secondaryContainer
@@ -5951,34 +5868,26 @@ internal fun VoiceComposerPanel(
                         waveform = staged.waveform,
                         modifier = Modifier.fillMaxWidth().testTag("voice_preview_scrubber"),
                     )
-                    if (encryptionEnabled) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.Lock, null)
-                            Spacer(Modifier.width(8.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("Encrypt upload", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                                Text(
-                                    if (staged.encrypted) {
-                                        "The host cannot listen. IRC servers and bouncers can see the key in the link."
-                                    } else {
-                                        "Standard audio link. The host and anyone with the link can play it in any client."
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                )
-                            }
-                            Switch(
-                                checked = staged.encrypted,
-                                onCheckedChange = { onToggleEncryption() },
-                                enabled = !state.sending,
-                                modifier = Modifier.testTag("voice_encryption_toggle"),
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Lock, null)
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Encrypt upload", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            Text(
+                                if (staged.encrypted) {
+                                    "The host cannot listen. IRC servers and bouncers can see the key in the link."
+                                } else {
+                                    "Standard audio link. The host and anyone with the link can play it in any client."
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
                             )
                         }
-                    } else {
-                        Text(
-                            "Agent voice notes are sent unencrypted so Agentwire can transcribe them on the workstation.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        Switch(
+                            checked = staged.encrypted,
+                            onCheckedChange = { onToggleEncryption() },
+                            enabled = !state.sending,
+                            modifier = Modifier.testTag("voice_encryption_toggle"),
                         )
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -6017,7 +5926,7 @@ internal fun VoiceComposerPanel(
 
                         is VoiceSendProgress.Complete -> {}
                     }
-                    Button(onClick = onSend, enabled = sendEnabled && !state.sending, modifier = Modifier.fillMaxWidth().testTag("voice_send")) {
+                    Button(onClick = onSend, enabled = !state.sending, modifier = Modifier.fillMaxWidth().testTag("voice_send")) {
                         Icon(Icons.Outlined.CloudUpload, null)
                         Spacer(Modifier.width(6.dp))
                         Text("Send")

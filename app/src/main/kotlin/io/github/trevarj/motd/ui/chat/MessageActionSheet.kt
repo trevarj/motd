@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -93,8 +92,6 @@ fun MessageActionSheet(
     onRedact: () -> Unit = {},
     // SERVER buffers have no msgids/targets: reply + reactions are inert and hidden.
     isServerBuffer: Boolean = false,
-    canPrepareThreadContext: Boolean = false,
-    onPrepareThreadContext: () -> Unit = {},
     onTranslate: (() -> Unit)? = null,
     onForward: (() -> Unit)? = null,
     canSelectText: Boolean = false,
@@ -206,14 +203,6 @@ fun MessageActionSheet(
                                 onReply,
                                 modifier = actionModifier.testTag("message_action_reply"),
                             )
-                            if (canPrepareThreadContext) {
-                                ActionItem(
-                                    Icons.Outlined.AutoAwesome,
-                                    stringResource(R.string.agent_context_thread),
-                                    onPrepareThreadContext,
-                                    modifier = actionModifier.testTag("message_prepare_thread_context"),
-                                )
-                            }
                         }
                         onTranslate?.let {
                             ActionItem(
@@ -269,7 +258,6 @@ fun MessageActionSheet(
                         // Weighted blanks keep a partial last row in quarter-width cells.
                         val actionCount =
                             3 + (if (!isServerBuffer) 1 else 0) +
-                                (if (!isServerBuffer && canPrepareThreadContext) 1 else 0) +
                                 (if (onTranslate != null) 1 else 0) +
                                 (if (onForward != null) 1 else 0) +
                                 (if (canSelectText) 1 else 0) +

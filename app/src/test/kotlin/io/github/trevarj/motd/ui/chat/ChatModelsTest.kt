@@ -196,25 +196,6 @@ class ChatModelsTest {
         dedupKey = "1",
     )
 
-    @Test fun `catch up context requires enabled Agentwire and a non-server unread entry`() {
-        val snapshot = UnreadEntrySnapshot(TimelineAnchor(1, 1), loadedCount = 1, lowerBound = false)
-
-        assertTrue(canPrepareCatchUpContext(agentwireEnabled = true, isServerBuffer = false, unreadEntrySnapshot = snapshot))
-        assertFalse(canPrepareCatchUpContext(agentwireEnabled = false, isServerBuffer = false, unreadEntrySnapshot = snapshot))
-        assertFalse(canPrepareCatchUpContext(agentwireEnabled = true, isServerBuffer = true, unreadEntrySnapshot = snapshot))
-        assertFalse(canPrepareCatchUpContext(agentwireEnabled = true, isServerBuffer = false, unreadEntrySnapshot = null))
-    }
-
-    @Test fun `thread context requires enabled Agentwire and the existing visible conversation and fool policy`() {
-        val visible = MessageVisibilityPolicy(MessageVisibilitySpec(fools = setOf("ignored")))
-
-        assertTrue(canPrepareThreadContext(true, false, message(sender = "alice"), visible))
-        assertFalse(canPrepareThreadContext(false, false, message(sender = "alice"), visible))
-        assertFalse(canPrepareThreadContext(true, true, message(sender = "alice"), visible))
-        assertFalse(canPrepareThreadContext(true, false, message(kind = MessageKind.JOIN), visible))
-        assertFalse(canPrepareThreadContext(true, false, message(sender = "ignored"), visible))
-    }
-
     @Test fun `message highlight matches exact msgid or canonical event id`() {
         val row = message(id = 42).copy(msgid = null)
 

@@ -8,7 +8,6 @@ import io.github.trevarj.motd.irc.ext.SearchResultKind
 import io.github.trevarj.motd.irc.ext.SearchResultMessage
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.transport.TransportFactory
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -775,40 +774,6 @@ class IrcClientTest {
             assertFalse("+trevarj.github.io/audio" in messages[2].tags)
             assertEquals(List(3) { label }, messages.map { it.tags["label"] })
             assertEquals(List(3) { listOf("#chan", body) }, messages.map(IrcMessage::params))
-        }
-
-    @Test
-    fun `sequenced observer exposes a gap when a slow subscriber overflows`() =
-        runTest {
-            val ft = FakeTransport()
-            val client = registered(ft, observerBufferCapacity = 1)
-            val observed = mutableListOf<SequencedIrcEvent>()
-            val firstDelivered = CompletableDeferred<Unit>()
-            val releaseCollector = CompletableDeferred<Unit>()
-            val collector =
-                launch {
-                    client.sequencedEvents.collect { event ->
-                        observed += event
-                        if (observed.size == 1) {
-                            firstDelivered.complete(Unit)
-                            releaseCollector.await()
-                        }
-                    }
-                }
-            runCurrent()
-
-            ft.feed(":alice!u@h PRIVMSG #chan :first")
-            runCurrent()
-            firstDelivered.await()
-            ft.feed(":alice!u@h PRIVMSG #chan :dropped")
-            ft.feed(":alice!u@h PRIVMSG #chan :last")
-            runCurrent()
-            releaseCollector.complete(Unit)
-            runCurrent()
-            collector.cancelAndJoin()
-
-            assertEquals(listOf("first", "last"), observed.map { (it.event as IrcEvent.ChatMessage).text })
-            assertEquals(observed[0].sequence + 2, observed[1].sequence)
         }
 
     @Test

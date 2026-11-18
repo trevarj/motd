@@ -2,7 +2,6 @@ package io.github.trevarj.motd.ui.settings.labs
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import io.github.trevarj.motd.agentwire.AgentwirePrefs
 import io.github.trevarj.motd.data.prefs.EbooksLabsPrefs
 import io.github.trevarj.motd.data.prefs.GlobalFeedPrefs
 import io.github.trevarj.motd.dickord.DickordLabsPrefs
@@ -30,7 +29,6 @@ import org.robolectric.RobolectricTestRunner
 class LabsViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val gestures = FakeGesturePrefs()
-    private val agentwire = FakeAgentwirePrefs()
     private val globalFeed = FakeGlobalFeedPrefs()
     private val dickord = FakeDickordLabsPrefs()
     private val ebooks = FakeEbooksLabsPrefs()
@@ -43,14 +41,13 @@ class LabsViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun vm() = LabsViewModel(gestures, agentwire, globalFeed, dickord, ebooks)
+    private fun vm() = LabsViewModel(gestures, globalFeed, dickord, ebooks)
 
     @Test fun everyLabStartsOff() =
         runTest {
             assertEquals(
                 LabsUiState(
                     gesturesEnabled = false,
-                    agentwireEnabled = false,
                     globalFeedEnabled = false,
                     dickordEnabled = false,
                     ebooksEnabled = false,
@@ -67,11 +64,10 @@ class LabsViewModelTest {
 
             model.setGlobalFeedEnabled(true)
             assertEquals(
-                LabsUiState(gesturesEnabled = false, agentwireEnabled = false, globalFeedEnabled = true),
+                LabsUiState(gesturesEnabled = false, globalFeedEnabled = true),
                 model.state.first { it.globalFeedEnabled },
             )
             assertEquals(false, gestures.enabled.first())
-            assertEquals(false, agentwire.enabled.first())
         }
 
     @Test fun dickordToggle_reflectsExistingStorageAndWritesOnlyTheDickordStore() =
@@ -83,7 +79,6 @@ class LabsViewModelTest {
             model.setDickordEnabled(false)
             assertEquals(false, model.state.first { !it.dickordEnabled }.dickordEnabled)
             assertEquals(false, gestures.enabled.first())
-            assertEquals(false, agentwire.enabled.first())
             assertEquals(false, globalFeed.enabled.first())
         }
 
@@ -97,7 +92,6 @@ class LabsViewModelTest {
             model.setEbooksEnabled(true)
             assertEquals(true, model.state.first { it.ebooksEnabled && it.dickordEnabled }.ebooksEnabled)
             assertEquals(false, gestures.enabled.first())
-            assertEquals(false, agentwire.enabled.first())
             assertEquals(false, globalFeed.enabled.first())
             assertEquals(true, dickord.enabled.first())
 
@@ -112,28 +106,9 @@ class LabsViewModelTest {
             val model = vm()
             model.setGesturesEnabled(true)
             assertEquals(
-                LabsUiState(gesturesEnabled = true, agentwireEnabled = false),
+                LabsUiState(gesturesEnabled = true),
                 model.state.first { it.gesturesEnabled },
             )
-            assertEquals(false, agentwire.enabled.first())
-        }
-
-    /** Agentwire keeps its own storage, so an already-enabled user stays enabled here. */
-    @Test fun agentwireToggle_reflectsExistingStorageAndWritesBack() =
-        runTest {
-            agentwire.flag.value = true
-            val model = vm()
-            assertEquals(
-                LabsUiState(gesturesEnabled = false, agentwireEnabled = true),
-                model.state.first { it.agentwireEnabled },
-            )
-
-            model.setAgentwireEnabled(false)
-            assertEquals(
-                LabsUiState(gesturesEnabled = false, agentwireEnabled = false),
-                model.state.first { !it.agentwireEnabled },
-            )
-            assertEquals(false, gestures.enabled.first())
         }
 
     private class FakeGlobalFeedPrefs : GlobalFeedPrefs {
@@ -170,17 +145,6 @@ class LabsViewModelTest {
         override suspend fun setOrb(placement: OrbPlacement) {
             orbState.value = placement
         }
-    }
-
-    private class FakeAgentwirePrefs : AgentwirePrefs(ApplicationProvider.getApplicationContext<Context>()) {
-        val flag = MutableStateFlow(false)
-        override val enabled: Flow<Boolean> = flag
-
-        override suspend fun setEnabled(enabled: Boolean) {
-            flag.value = enabled
-        }
-
-        override suspend fun deviceId(): String = "device-under-test"
     }
 
     private class FakeDickordLabsPrefs : DickordLabsPrefs(ApplicationProvider.getApplicationContext<Context>()) {

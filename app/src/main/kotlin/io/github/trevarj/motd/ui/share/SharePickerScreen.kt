@@ -16,7 +16,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,25 +32,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.R
-import io.github.trevarj.motd.agentwire.AgentwirePrefs
-import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.repo.BufferRepository
-import io.github.trevarj.motd.irc.agentwire.AgentwireTopicParse
-import io.github.trevarj.motd.irc.agentwire.parseAgentwireTopicResult
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chatlist.ChatListRowItem
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -74,13 +64,6 @@ internal fun filterShareTargets(
     }
 }
 
-internal fun isAgentwireShareTarget(buffer: BufferEntity?): Boolean =
-    buffer != null &&
-        buffer.type == BufferType.CHANNEL &&
-        !buffer.archived &&
-        buffer.topic?.let(::parseAgentwireTopicResult) is AgentwireTopicParse.Valid
-
-@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class SharePickerViewModel
     @Inject
@@ -88,14 +71,10 @@ class SharePickerViewModel
         private val bufferRepository: BufferRepository,
         private val store: PendingShareStore,
         private val draftStore: ComposerDraftStore,
-        private val agentwirePrefs: AgentwirePrefs,
     ) : ViewModel() {
         private val queryState = MutableStateFlow("")
         val query: StateFlow<String> = queryState.asStateFlow()
         private val share = store.peek()
-        val contextShare = share as? PendingShare.AgentContext
-        private val _targetUnavailable = MutableStateFlow(false)
-        val targetUnavailable: StateFlow<Boolean> = _targetUnavailable.asStateFlow()
 
         // Set once the payload leaves this screen (picked or explicitly dismissed) so teardown never
         // discards someone else's parked share.
@@ -104,56 +83,20 @@ class SharePickerViewModel
         val targets: StateFlow<List<ChatListRow>> =
             bufferRepository
                 .observeChatList()
-                .flatMapLatest { rows ->
-                    if (contextShare == null) {
-                        flowOf(rows)
-                    } else {
-                        val channels = rows.filter { !it.archived && it.type == BufferType.CHANNEL }
-                        if (channels.isEmpty()) {
-                            flowOf(emptyList())
-                        } else {
-                            combine(
-                                channels.map { row ->
-                                    bufferRepository.observeBuffer(row.bufferId).map { buffer ->
-                                        row.takeIf { isAgentwireShareTarget(buffer) }
-                                    }
-                                },
-                            ) { it.filterNotNull() }
-                        }
-                    }
-                }.combine(agentwirePrefs.enabled) { rows, enabled ->
-                    if (contextShare != null && !enabled) emptyList() else rows
-                }.combine(queryState, ::filterShareTargets)
+                .combine(queryState, ::filterShareTargets)
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
         fun onQueryChange(value: String) {
             queryState.value = value
         }
 
-        /** Picking only hands off a draft; sensitive context can never use the ordinary text path. */
+        /** Picking only hands off a draft or file; it never sends a message. */
         suspend fun pick(bufferId: Long): Boolean {
             val current = share ?: return false
-            if (store.peek() !== current) return false
-            if (current is PendingShare.AgentContext) {
-                if (
-                    !agentwirePrefs.enabled.first() ||
-                    !isAgentwireShareTarget(bufferRepository.observeBuffer(bufferId).first()) ||
-                    !store.assignAgentContext(bufferId, current)
-                ) {
-                    _targetUnavailable.value = true
-                    return false
-                }
-                if (!store.consumeIfUnchanged(current)) {
-                    store.clearAgentContext(bufferId, current)
-                    return false
-                }
-            } else {
-                if (!store.consumeIfUnchanged(current)) return false
-                when (current) {
-                    is PendingShare.Text -> draftStore.push(bufferId, current.text)
-                    is PendingShare.File -> store.assignFile(bufferId, current)
-                    is PendingShare.AgentContext -> error("Context uses the protected handoff")
-                }
+            if (!store.consumeIfUnchanged(current)) return false
+            when (current) {
+                is PendingShare.Text -> draftStore.push(bufferId, current.text)
+                is PendingShare.File -> store.assignFile(bufferId, current)
             }
             handled = true
             return true
@@ -161,18 +104,13 @@ class SharePickerViewModel
 
         fun cancel() = discardUnhandled()
 
-        fun discardContext() {
-            contextShare?.let(store::consumeIfUnchanged)
-            handled = true
-        }
-
         /** System back / pop tears the screen down without a cancel callback; clean up here too. */
         override fun onCleared() = discardUnhandled()
 
         private fun discardUnhandled() {
             if (handled) return
             handled = true
-            if (contextShare == null) share?.let(store::consumeIfUnchanged)
+            share?.let(store::consumeIfUnchanged)
         }
     }
 
@@ -180,15 +118,13 @@ class SharePickerViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SharePickerScreen(
-    onPicked: (bufferId: Long, isAgentContext: Boolean) -> Unit,
+    onPicked: (bufferId: Long) -> Unit,
     onCancel: () -> Unit,
     viewModel: SharePickerViewModel = hiltViewModel(),
 ) {
     val rows by viewModel.targets.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
-    val targetUnavailable by viewModel.targetUnavailable.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    val contextShare = viewModel.contextShare
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {
@@ -197,7 +133,7 @@ fun SharePickerScreen(
                     androidx.compose.material3.TopAppBarDefaults
                         .topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                 title = {
-                    Text(stringResource(if (contextShare == null) R.string.share_picker_title else R.string.agent_context_picker_title))
+                    Text(stringResource(R.string.share_picker_title))
                 },
                 navigationIcon = {
                     IconButton(
@@ -214,29 +150,6 @@ fun SharePickerScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            if (contextShare != null) {
-                Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                    Text(contextShare.sourceLabel, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                    Text(stringResource(R.string.agent_context_warning), modifier = Modifier.testTag("agent_context_warning"))
-                    Text(contextShare.coverage, modifier = Modifier.testTag("agent_context_coverage"))
-                    TextButton(
-                        onClick = {
-                            viewModel.discardContext()
-                            onCancel()
-                        },
-                        modifier = Modifier.testTag("agent_context_discard"),
-                    ) {
-                        Text(stringResource(R.string.agentwire_context_discard))
-                    }
-                }
-            }
-            if (targetUnavailable) {
-                Text(
-                    stringResource(R.string.agent_context_target_unavailable),
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(16.dp).testTag("agent_context_target_unavailable"),
-                )
-            }
             OutlinedTextField(
                 value = query,
                 onValueChange = viewModel::onQueryChange,
@@ -252,7 +165,7 @@ fun SharePickerScreen(
             if (rows.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        text = stringResource(if (contextShare == null) R.string.share_picker_empty else R.string.agent_context_empty),
+                        text = stringResource(R.string.share_picker_empty),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -268,8 +181,8 @@ fun SharePickerScreen(
                             onClick = {
                                 scope.launch {
                                     if (viewModel.pick(row.bufferId)) {
-                                        onPicked(row.bufferId, contextShare != null)
-                                    } else if (contextShare == null) {
+                                        onPicked(row.bufferId)
+                                    } else {
                                         onCancel()
                                     }
                                 }

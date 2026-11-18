@@ -2,7 +2,6 @@ package io.github.trevarj.motd.gesture
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import io.github.trevarj.motd.agentwire.AgentwirePrefs
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
@@ -73,18 +72,5 @@ class GesturePrefsTest {
             assertEquals("Out", stored.findNode("default-away")?.label)
             assertEquals(null, stored.findNode("default-networks"))
             prefs.setMenu(GestureMenuConfig())
-        }
-
-    /** The two labs keep separate stores: switching one must never move the other. */
-    @Test fun gestureStore_isIndependentOfTheAgentwireLab() =
-        runTest {
-            val agentwire = AgentwirePrefs(context)
-            prefs.setEnabled(true)
-            assertEquals(false, agentwire.enabled.first())
-
-            agentwire.setEnabled(true)
-            prefs.setEnabled(false)
-            assertEquals(true, agentwire.enabled.first())
-            assertEquals(false, prefs.enabled.first())
         }
 }

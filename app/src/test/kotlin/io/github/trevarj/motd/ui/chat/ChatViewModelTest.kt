@@ -8,8 +8,6 @@ import androidx.paging.PagingData
 import androidx.paging.PagingSource
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
-import io.github.trevarj.motd.agentwire.AgentwireActionReceipt
-import io.github.trevarj.motd.agentwire.AgentwirePrefs
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioMetadataRepository
@@ -116,7 +114,6 @@ import io.github.trevarj.motd.testing.ReadAloudHarness
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.PendingShareStore
-import io.github.trevarj.motd.ui.share.SharePickerViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -155,9 +152,6 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -242,7 +236,6 @@ class ChatViewModelTest {
                 settingsRepository = settings,
                 replyPrefs = FakeReplyPrefs(),
                 ebooksLabsPrefs = FakeEbooksLabsPrefs(),
-                agentwirePrefs = FakeAgentwirePrefs(),
                 visibilityReader = MessageVisibilityReader(db),
                 historyResyncCoordinator = HistoryResyncCoordinator(db = db, processor = processor, scope = scope, settingsRepository = settings),
                 userDao = db.userDao(),
@@ -478,7 +471,7 @@ class ChatViewModelTest {
             drafts.saveDraft(channel.id, "Unsent source\nwith reply", source.id)
             drafts.saveDraft(query.id, "Unsent destination\nwith reply", targetReply.id)
             val shares = PendingShareStore()
-            val pending = PendingShare.AgentContext(query.id, "Unrelated", "Untouched payload", "partial")
+            val pending = PendingShare.Text("Untouched payload")
             shares.set(pending)
             val manager = FakeConnectionManager(network.id)
             val vm = viewModel(channel, manager, messages = seamRepository(), buffers = roomBuffers(), drafts = drafts, shares = shares)
@@ -521,7 +514,6 @@ class ChatViewModelTest {
                     assertEquals(sourceDraft, drafts.loadDraft(channel.id))
                     assertEquals(destinationDraft, drafts.loadDraft(query.id))
                     assertEquals(pending, shares.peek())
-                    assertNull(shares.agentContext(query.id).value)
                     assertEquals(source, db.messageDao().byCanonicalId(source.id))
                     assertEquals(targetReply, db.messageDao().byCanonicalId(targetReply.id))
                 }
@@ -619,7 +611,6 @@ class ChatViewModelTest {
                         name = "#agent",
                         displayName = "#agent",
                         joined = true,
-                        topic = "agentwire:v1;account=controller;agent=host;backend=claude",
                     ).let { it.copy(id = db.bufferDao().insert(it)) }
             for (excluded in listOf(
                 channel.copy(id = 0, name = "*", displayName = "server", type = BufferType.SERVER),
@@ -633,7 +624,7 @@ class ChatViewModelTest {
             val source = seedTranslationSource()
             val buffers = roomBuffers()
             val shares = PendingShareStore()
-            val pending = PendingShare.AgentContext(channel.id, "#room", "Unrelated context", "partial")
+            val pending = PendingShare.Text("Unrelated text")
             shares.set(pending)
             val manager = FakeConnectionManager(network.id)
             val ready = IrcClientState.Ready("destinationNick", emptySet(), emptyMap())
@@ -672,7 +663,6 @@ class ChatViewModelTest {
                 assertEquals(listOf(otherQuery.id, query.id, agent.id), manager.messages.map { it.bufferId })
                 assertTrue(manager.messages.all { it.text == forwardMessageText(source, true) && it.replyTo == null && it.channelContext == null })
                 assertEquals(pending, shares.peek())
-                assertNull(shares.agentContext(agent.id).value)
                 assertTrue(manager.joins.isEmpty())
                 assertTrue(manager.commandOrigins.isEmpty())
             } finally {
@@ -6787,192 +6777,6 @@ class ChatViewModelTest {
             assertEquals(listOf(channel.id to fixture.gapId), filler.requests)
         }
 
-    @Test
-    fun `summary preparation follows Agentwire enable and disable transitions`() =
-        runTest {
-            val (entered, unread) = seedContextUnread()
-            val prefs = FakeAgentwirePrefs()
-            val shares = PendingShareStore()
-            val vm =
-                viewModel(
-                    entered,
-                    FakeConnectionManager(network.id),
-                    messages = FakeMessageRepository(events = unread),
-                    shares = shares,
-                    agentwirePrefs = prefs,
-                )
-            vm.state.first { it.buffer != null }
-            vm.unreadEntrySnapshot.first { it != null }
-
-            assertFalse(vm.agentwireEnabled.value)
-            assertEquals(AgentContextPreparation.NO_CONTEXT, vm.prepareCatchUpContext())
-            assertEquals(AgentContextPreparation.NO_CONTEXT, vm.prepareThreadContext(unread.first().id))
-            assertNull(shares.peek())
-
-            prefs.setEnabled(true)
-            vm.agentwireEnabled.first { it }
-            assertEquals(AgentContextPreparation.READY, vm.prepareCatchUpContext())
-            assertTrue(shares.consume() is PendingShare.AgentContext)
-            assertEquals(AgentContextPreparation.READY, vm.prepareThreadContext(unread.first().id))
-            assertTrue(shares.consume() is PendingShare.AgentContext)
-
-            prefs.setEnabled(false)
-            vm.agentwireEnabled.first { !it }
-            assertEquals(AgentContextPreparation.NO_CONTEXT, vm.prepareCatchUpContext())
-            assertEquals(AgentContextPreparation.NO_CONTEXT, vm.prepareThreadContext(unread.first().id))
-            assertNull(shares.peek())
-        }
-
-    @Test
-    fun `catch-up preparation keeps the visit marker and never sends or persists source output`() =
-        runTest {
-            val (entered, unread) = seedContextUnread()
-            val manager = FakeConnectionManager(network.id)
-            val savedState = SavedStateHandle()
-            val buffers = FakeBufferRepository(entered)
-            val shares = PendingShareStore()
-            val vm =
-                viewModel(
-                    entered,
-                    manager,
-                    messages = FakeMessageRepository(events = unread),
-                    savedStateHandle = savedState,
-                    buffers = buffers,
-                    shares = shares,
-                    agentwirePrefs = FakeAgentwirePrefs(true),
-                )
-            vm.state.first { it.buffer != null }
-            val frozen = checkNotNull(vm.unreadEntrySnapshot.first { it != null })
-            savedState.getStateFlow("unread_entry_snapshot_computed", false).first { it }
-            vm.onResume()
-            val advancedMarker = TimelineAnchor(unread.last().serverTime, unread.last().id)
-            vm.markRead(advancedMarker)
-            buffers.update(
-                entered.copy(
-                    localReadAnchorTime = advancedMarker.serverTime,
-                    localReadAnchorEventId = advancedMarker.eventId,
-                ),
-            )
-            vm.localReadAnchor.first { it?.eventId == advancedMarker.eventId }
-            runCurrent()
-            val markerWrites = manager.readMarkers.size
-            val savedSnapshot = savedState.keys().associateWith { savedState.get<Any>(it) }
-            val before = db.messageDao().historyRowsForMerge(channel.id)
-
-            assertEquals(AgentContextPreparation.READY, vm.prepareCatchUpContext())
-            val share = shares.peek() as PendingShare.AgentContext
-            val records =
-                share.prompt
-                    .lineSequence()
-                    .filter { it.startsWith("{") }
-                    .map(Json::parseToJsonElement)
-                    .toList()
-            assertEquals(
-                unread.map { it.text },
-                records.map {
-                    it.jsonObject
-                        .getValue("text")
-                        .jsonPrimitive.content
-                },
-            )
-            assertEquals(
-                unread.map { it.sender },
-                records.map {
-                    it.jsonObject
-                        .getValue("sender")
-                        .jsonPrimitive.content
-                },
-            )
-            assertEquals(frozen, vm.unreadEntrySnapshot.value)
-            assertEquals(markerWrites, manager.readMarkers.size)
-            assertEquals(savedSnapshot, savedState.keys().associateWith { savedState.get<Any>(it) })
-            assertEquals(before, db.messageDao().historyRowsForMerge(channel.id))
-            assertTrue(manager.messages.isEmpty())
-
-            assertEquals(AgentContextPreparation.PENDING_SHARE, vm.prepareCatchUpContext())
-            assertEquals(share, shares.peek())
-        }
-
-    @Test
-    fun `catch-up discloses a frozen incomplete lower bound without a current history gap`() =
-        runTest {
-            val (entered, unread) = seedContextUnread()
-            val marker = TimelineAnchor(unread.first().serverTime, unread.first().id - 1, unread.first().timelineOrder)
-            val savedState =
-                SavedStateHandle(
-                    mapOf(
-                        "unread_entry_snapshot_computed" to true,
-                        "unread_entry_snapshot_time" to marker.serverTime,
-                        "unread_entry_snapshot_event" to marker.eventId,
-                        "unread_entry_snapshot_order" to marker.timelineOrder,
-                        "unread_entry_snapshot_count" to unread.size,
-                        "unread_entry_snapshot_lower_bound" to true,
-                    ),
-                )
-            val shares = PendingShareStore()
-            val vm =
-                viewModel(
-                    entered,
-                    FakeConnectionManager(network.id),
-                    savedStateHandle = savedState,
-                    shares = shares,
-                    agentwirePrefs = FakeAgentwirePrefs(true),
-                )
-            vm.state.first { it.buffer != null }
-
-            assertEquals(AgentContextPreparation.READY, vm.prepareCatchUpContext())
-            val share = shares.peek() as PendingShare.AgentContext
-            assertTrue(share.coverage.contains("partial"))
-            assertTrue(share.coverage.contains("missing local history"))
-        }
-
-    @Test
-    fun `missing thread context does not replace a parked share or prepare an empty prompt`() =
-        runTest {
-            val shares = PendingShareStore()
-            val vm =
-                viewModel(
-                    channel,
-                    FakeConnectionManager(network.id),
-                    shares = shares,
-                    agentwirePrefs = FakeAgentwirePrefs(true),
-                )
-            vm.state.first { it.buffer != null }
-            assertEquals(AgentContextPreparation.NO_CONTEXT, vm.prepareThreadContext(Long.MAX_VALUE))
-            assertNull(shares.peek())
-
-            val prior = PendingShare.AgentContext(channel.id, channel.displayName, "frozen context", "partial")
-            shares.setIfEmpty(prior)
-            assertEquals(AgentContextPreparation.PENDING_SHARE, vm.prepareThreadContext(Long.MAX_VALUE))
-            assertEquals(prior, shares.peek())
-        }
-
-    @Test
-    fun `context picker rejects ordinary chats and preserves both canceled source and existing destination draft`() =
-        runTest {
-            val shares = PendingShareStore()
-            val original = PendingShare.AgentContext(query.id, query.displayName, "frozen messages", "partial")
-            shares.setIfEmpty(original)
-            val drafts = ComposerDraftStore(db)
-            val existing = drafts.saveDraft(channel.id, "unfinished destination message", null)
-            val buffers = FakeBufferRepository(channel)
-            val prefs = FakeAgentwirePrefs(true)
-            val picker = SharePickerViewModel(buffers, shares, drafts, prefs)
-
-            assertFalse(picker.pick(channel.id))
-            picker.cancel()
-            assertEquals(original, shares.peek())
-            assertNull(shares.agentContext(channel.id).value)
-            assertEquals(existing, drafts.loadDraft(channel.id))
-
-            buffers.update(channel.copy(topic = "agentwire:v1;account=controller;agent=host;backend=claude"))
-            val reopened = SharePickerViewModel(buffers, shares, drafts, prefs)
-            assertTrue(reopened.pick(channel.id))
-            assertNull(shares.peek())
-            assertEquals(original, shares.agentContext(channel.id).value)
-            assertEquals(existing, drafts.loadDraft(channel.id))
-        }
-
     private suspend fun seedContextUnread(): Pair<BufferEntity, List<MessageEntity>> {
         val markerId =
             db
@@ -7087,7 +6891,6 @@ class ChatViewModelTest {
         // Injectable so a test can push prefills at the exact store instance the VM listens to.
         drafts: ComposerDraftStore = ComposerDraftStore(db),
         replyPrefs: ReplyPrefs = FakeReplyPrefs(),
-        agentwirePrefs: AgentwirePrefs = FakeAgentwirePrefs(),
         ebooksPrefs: EbooksLabsPrefs = FakeEbooksLabsPrefs(),
         shares: PendingShareStore = PendingShareStore(),
         notificationSettings: NotificationSettings = NotificationSettings.Noop,
@@ -7125,7 +6928,6 @@ class ChatViewModelTest {
             historyPageLoader = HistoryPageLoader(processor),
             settingsRepository = settings,
             replyPrefs = replyPrefs,
-            agentwirePrefs = agentwirePrefs,
             ebooksLabsPrefs = ebooksPrefs,
             visibilityReader = MessageVisibilityReader(db),
             historyResyncCoordinator = history,
@@ -7869,28 +7671,6 @@ class ChatViewModelTest {
         override suspend fun setAutoAwayMinutes(minutes: Int) = Unit
 
         override suspend fun setAutoAwayMessage(message: String) = Unit
-    }
-
-    private class FakeAgentwirePrefs(
-        initial: Boolean = false,
-    ) : AgentwirePrefs(ApplicationProvider.getApplicationContext()) {
-        override val enabled = MutableStateFlow(initial)
-
-        override suspend fun setEnabled(enabled: Boolean) {
-            this.enabled.value = enabled
-        }
-
-        override fun actionReceipts(): Flow<List<AgentwireActionReceipt>> = flowOf(emptyList())
-
-        override suspend fun recordAction(receipt: AgentwireActionReceipt) = Unit
-
-        override suspend fun updateAction(
-            id: String,
-            scope: String,
-            outcome: String,
-        ) = Unit
-
-        override suspend fun markUnresolvedActionsUnknown(scope: String) = Unit
     }
 
     private class FakeEbooksLabsPrefs(

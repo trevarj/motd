@@ -39,22 +39,15 @@ class PendingShareStoreTest {
         assertEquals(file("b"), store.consumeFile(2L))
     }
 
-    @Test fun canceledContextAndDestinationEditsCannotBeOverwrittenByAnotherHandoff() {
-        val original = PendingShare.AgentContext(1, "#source", "frozen messages", "partial")
-        val replacement = original.copy(originBufferId = 3, sourceLabel = "#other")
-        assertTrue(store.setIfEmpty(original))
-        assertFalse(store.setIfEmpty(replacement))
-        assertEquals(original, store.peek())
+    @Test fun stalePickerCannotConsumeANewerShare() {
+        val original = PendingShare.Text("first")
+        store.set(original)
+        val replacement = PendingShare.Text("second")
+        store.set(replacement)
 
-        assertTrue(store.assignAgentContext(2, original))
-        assertTrue(store.consumeIfUnchanged(original))
-        assertFalse(store.assignAgentContext(2, replacement))
-        val edited = original.copy(prompt = "reviewed messages")
-        assertTrue(store.updateAgentContext(2, original, edited))
-        assertFalse(store.clearAgentContext(2, original))
-        assertEquals(edited, store.agentContext(2).value)
-        assertNull(store.agentContext(3).value)
-        assertTrue(store.clearAgentContext(2, edited))
-        assertNull(store.agentContext(2).value)
+        assertFalse(store.consumeIfUnchanged(original))
+        assertEquals(replacement, store.peek())
+        assertTrue(store.consumeIfUnchanged(replacement))
+        assertNull(store.peek())
     }
 }

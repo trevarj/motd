@@ -1085,7 +1085,7 @@ class ComposerSendClearUiTest {
         val destination = buffer.copy(id = 2, networkId = 2, name = "alice", displayName = "alice", type = BufferType.QUERY)
         val sameNamed = destination.copy(id = 3, networkId = buffer.networkId)
         val shares = PendingShareStore()
-        val pending = PendingShare.AgentContext(sameNamed.id, "Unrelated", "Untouched payload", "partial")
+        val pending = PendingShare.Text("Untouched payload")
         shares.set(pending)
         val sends = mutableListOf<List<Any?>>()
         withTranslationOwner(

@@ -32,7 +32,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
-import io.github.trevarj.motd.agentwire.AgentwireGateScreen
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.encodePalette
 import io.github.trevarj.motd.dickord.DickordPortalRowLookup
@@ -96,6 +95,7 @@ import io.github.trevarj.motd.ui.share.PaletteIntentIntake
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.SharePickerScreen
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import kotlin.reflect.typeOf
 
 /**
  * App navigation graph. Routes come from [Routes.kt] (frozen). Each destination is wired to its
@@ -291,60 +291,49 @@ fun MotdNavGraph(
                         }
                     },
                     detailPane = { showBack ->
-                        AgentwireGateScreen(
+                        val chatViewModel: ChatViewModel = hiltViewModel(entry)
+                        ChatTranslationSessionEffect(navController, entry, chatViewModel::clearExternalTranslationSession)
+                        ChatScreen(
+                            bufferId = route.bufferId,
+                            appearance = appearance,
+                            viewModel = chatViewModel,
+                            pageCache = chatListViewModel.chatPageCache,
+                            presentations = presentations,
                             onBack = { navController.popBackStack() },
                             showBack = showBack,
-                            showComposerEmoji = showComposerEmoji,
-                            showComposerFormattingTools = showComposerFormattingTools,
+                            onOpenConversationList =
+                                if (portalOwned && showBack) {
+                                    { navController.openDickordNavigator() }
+                                } else {
+                                    null
+                                },
+                            onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
+                            onOpenSearch = { navController.navigate(SearchRoute(it)) },
+                            onOpenImage = { url, networkId ->
+                                navController.navigate(ImageViewerRoute(url, networkId))
+                            },
+                            onOpenPalette = { palette, sourceLink ->
+                                navController.navigate(
+                                    PalettePreviewRoute(encodePalette(palette).decodeToString(), sourceLink = sourceLink),
+                                )
+                            },
+                            // /msg and /query replace the detail on wide layouts and push on phones.
+                            onOpenBuffer = {
+                                navController.openChat(ChatRoute(it), replaceCurrentChat = !showBack)
+                            },
+                            onOpenAudioOrigin = { origin ->
+                                navController.openChat(
+                                    ChatRoute(origin.bufferId, origin.msgid, origin.serverTime, origin.eventId),
+                                    replaceCurrentChat = !showBack,
+                                )
+                            },
+                            onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
+                            onOpenAccountSetup = { navController.navigate(AccountSetupRoute(it)) },
                             onOpenAiSetup = { navController.navigate(AiLabsRoute(SettingsTarget.AI_TEXT_TOOLS)) },
-                        ) {
-                            val chatViewModel: ChatViewModel = hiltViewModel(entry)
-                            ChatTranslationSessionEffect(navController, entry, chatViewModel::clearExternalTranslationSession)
-                            ChatScreen(
-                                bufferId = route.bufferId,
-                                appearance = appearance,
-                                viewModel = chatViewModel,
-                                pageCache = chatListViewModel.chatPageCache,
-                                presentations = presentations,
-                                onBack = { navController.popBackStack() },
-                                showBack = showBack,
-                                onOpenConversationList =
-                                    if (portalOwned && showBack) {
-                                        { navController.openDickordNavigator() }
-                                    } else {
-                                        null
-                                    },
-                                onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
-                                onOpenSearch = { navController.navigate(SearchRoute(it)) },
-                                onOpenSharePicker = {
-                                    navController.navigate(SharePickerRoute) { launchSingleTop = true }
-                                },
-                                onOpenImage = { url, networkId ->
-                                    navController.navigate(ImageViewerRoute(url, networkId))
-                                },
-                                onOpenPalette = { palette, sourceLink ->
-                                    navController.navigate(
-                                        PalettePreviewRoute(encodePalette(palette).decodeToString(), sourceLink = sourceLink),
-                                    )
-                                },
-                                // /msg and /query replace the detail on wide layouts and push on phones.
-                                onOpenBuffer = {
-                                    navController.openChat(ChatRoute(it), replaceCurrentChat = !showBack)
-                                },
-                                onOpenAudioOrigin = { origin ->
-                                    navController.openChat(
-                                        ChatRoute(origin.bufferId, origin.msgid, origin.serverTime, origin.eventId),
-                                        replaceCurrentChat = !showBack,
-                                    )
-                                },
-                                onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
-                                onOpenAccountSetup = { navController.navigate(AccountSetupRoute(it)) },
-                                onOpenAiSetup = { navController.navigate(AiLabsRoute(SettingsTarget.AI_TEXT_TOOLS)) },
-                                onOpenNetworkSettings = {
-                                    navController.navigate(NetworkSettingsRoute(it, NetworkSettingsTarget.CONNECTION))
-                                },
-                            )
-                        }
+                            onOpenNetworkSettings = {
+                                navController.navigate(NetworkSettingsRoute(it, NetworkSettingsTarget.CONNECTION))
+                            },
+                        )
                     },
                 )
             }
@@ -555,7 +544,7 @@ fun MotdNavGraph(
                 onBack = { navController.popBackStack() },
             )
         }
-        composable<LabsRoute> { entry ->
+        composable<LabsRoute>(typeMap = mapOf(typeOf<SettingsTarget?>() to SettingsTargetNavType)) { entry ->
             LabsScreen(
                 target = entry.toRoute<LabsRoute>().target,
                 onBack = { navController.popBackStack() },
@@ -682,8 +671,8 @@ fun MotdNavGraph(
             SharePickerScreen(
                 // Leave the picker before opening the chat so back returns to the previous screen
                 // rather than the (now empty) picker.
-                onPicked = { bufferId, isAgentContext ->
-                    navController.completeShareNavigation(bufferId, preserveSourceChat = isAgentContext)
+                onPicked = { bufferId ->
+                    navController.completeShareNavigation(bufferId)
                 },
                 onCancel = { navController.popBackStack() },
             )
@@ -902,17 +891,9 @@ internal fun NavHostController.returnToChatList() {
     }
 }
 
-internal fun NavHostController.completeShareNavigation(
-    bufferId: Long,
-    preserveSourceChat: Boolean,
-) {
+internal fun NavHostController.completeShareNavigation(bufferId: Long) {
     popBackStack()
-    val currentChat =
-        currentBackStackEntry
-            ?.takeIf { isChatRoutePattern(it.destination.route) }
-            ?.toRoute<ChatRoute>()
-    if (preserveSourceChat && currentChat?.bufferId == bufferId) return
-    openChat(ChatRoute(bufferId), replaceCurrentChat = !preserveSourceChat)
+    openChat(ChatRoute(bufferId), replaceCurrentChat = true)
 }
 
 private fun NavHostController.openSettingsResult(destination: SettingsSearchDestination) {

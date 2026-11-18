@@ -193,7 +193,7 @@ class NavGraphTest {
     }
 
     @Test
-    fun `context handoff preserves source draft for same and different destinations`() {
+    fun `share completion replaces the previous chat for same and different destinations`() {
         for (destination in listOf(5L, 7L)) {
             val controller =
                 NavHostController(ApplicationProvider.getApplicationContext<Context>()).apply {
@@ -210,11 +210,11 @@ class NavGraphTest {
             controller.navigate(ChatRoute(5))
             controller.currentBackStackEntry!!.savedStateHandle["draft"] = "unsent original"
             controller.navigate(SharePickerRoute)
-            controller.completeShareNavigation(destination, preserveSourceChat = true)
+            controller.completeShareNavigation(destination)
             assertEquals(destination, controller.currentBackStackEntry!!.toRoute<ChatRoute>().bufferId)
-            if (destination != 5L) assertTrue(controller.popBackStack())
-            assertEquals(5L, controller.currentBackStackEntry!!.toRoute<ChatRoute>().bufferId)
-            assertEquals("unsent original", controller.currentBackStackEntry!!.savedStateHandle.get<String>("draft"))
+            assertNull(controller.currentBackStackEntry!!.savedStateHandle.get<String>("draft"))
+            assertTrue(controller.popBackStack())
+            assertEquals(ChatListRoute, controller.currentBackStackEntry!!.toRoute<ChatListRoute>())
         }
     }
 
@@ -248,7 +248,7 @@ class NavGraphTest {
         controller.navigate(DickordPortalRoute)
         controller.navigate(SharePickerRoute)
 
-        controller.completeShareNavigation(bufferId = 7, preserveSourceChat = false)
+        controller.completeShareNavigation(bufferId = 7)
 
         assertEquals(7L, controller.currentBackStackEntry!!.toRoute<ChatRoute>().bufferId)
         assertTrue(controller.popBackStack())

@@ -15,7 +15,6 @@ import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.sync.GapFillProgress
-import io.github.trevarj.motd.data.visibility.CONVERSATION_KINDS
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.irc.client.HistoryAvailability
@@ -506,21 +505,6 @@ data class UnreadEntrySnapshot(
     val loadedCount: Int,
     val lowerBound: Boolean,
 )
-
-enum class AgentContextPreparation { READY, NO_CONTEXT, TOO_LARGE, FAILED, PENDING_SHARE }
-
-internal fun canPrepareCatchUpContext(
-    agentwireEnabled: Boolean,
-    isServerBuffer: Boolean,
-    unreadEntrySnapshot: UnreadEntrySnapshot?,
-): Boolean = agentwireEnabled && !isServerBuffer && unreadEntrySnapshot != null
-
-internal fun canPrepareThreadContext(
-    agentwireEnabled: Boolean,
-    isServerBuffer: Boolean,
-    message: MessageEntity,
-    visibilityPolicy: MessageVisibilityPolicy,
-): Boolean = agentwireEnabled && !isServerBuffer && message.kind in CONVERSATION_KINDS && visibilityPolicy.preview(message)
 
 /**
  * Rebuild the frozen entry boundary from its flat SavedState projection.

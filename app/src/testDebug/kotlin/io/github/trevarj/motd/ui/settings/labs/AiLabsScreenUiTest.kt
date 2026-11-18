@@ -272,7 +272,6 @@ class AiLabsScreenUiTest {
                         state = LabsUiState(),
                         onBack = {},
                         onGesturesChanged = {},
-                        onAgentwireChanged = {},
                         onDickordChanged = {},
                         onOpenAi = { opened = true },
                         target = SettingsTarget.AI,
@@ -316,7 +315,6 @@ class AiLabsScreenUiTest {
                     state = LabsUiState(dickordEnabled = true),
                     onBack = {},
                     onGesturesChanged = {},
-                    onAgentwireChanged = {},
                     onDickordChanged = { changed = it },
                     target = SettingsTarget.DICKORD,
                 )
@@ -343,7 +341,6 @@ class AiLabsScreenUiTest {
                     state = LabsUiState(dickordEnabled = enabled),
                     onBack = {},
                     onGesturesChanged = { toggleRequests++ },
-                    onAgentwireChanged = { toggleRequests++ },
                     onGlobalFeedChanged = { toggleRequests++ },
                     onDickordChanged = { toggleRequests++ },
                     onEbooksChanged = { toggleRequests++ },

@@ -1,6 +1,9 @@
 package io.github.trevarj.motd.ui.nav
 
+import android.os.BadParcelableException
+import android.os.Bundle
 import androidx.annotation.Keep
+import androidx.navigation.NavType
 import kotlinx.serialization.Serializable
 
 @Serializable data object ChatListRoute
@@ -142,12 +145,45 @@ enum class SettingsTarget {
     EXPORT_BACKUP,
     IMPORT_BACKUP,
     GESTURES,
-    AGENTWIRE,
     DICKORD,
     GLOBAL_FEED,
     DIAGNOSTICS,
     LICENSE,
     PROJECT,
+}
+
+/** Optional search anchors must not prevent restoring a screen after an anchor is removed. */
+internal object SettingsTargetNavType : NavType<SettingsTarget?>(isNullableAllowed = true) {
+    override fun put(
+        bundle: Bundle,
+        key: String,
+        value: SettingsTarget?,
+    ) {
+        bundle.putString(key, value?.name)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun get(
+        bundle: Bundle,
+        key: String,
+    ): SettingsTarget? =
+        try {
+            when (val value = bundle[key]) {
+                is SettingsTarget -> value
+
+                // Older navigation saved Serializable enums.
+                is String -> parseValue(value)
+
+                else -> null
+            }
+        } catch (_: BadParcelableException) {
+            // A removed enum constant cannot be deserialized from an older saved target.
+            null
+        }
+
+    override fun parseValue(value: String): SettingsTarget? = SettingsTarget.entries.firstOrNull { it.name.equals(value, ignoreCase = true) }
+
+    override fun serializeAsValue(value: SettingsTarget?): String = value?.name ?: "null"
 }
 
 @Keep
@@ -235,7 +271,7 @@ enum class ChatSoundCue { SEND, RECEIVE }
     val networkId: Long? = null,
 )
 
-// Experimental features (gestures, Agentwire harness) live under their own category.
+// Experimental features live under their own category.
 @Serializable data class LabsRoute(
     val target: SettingsTarget? = null,
 )

@@ -16,18 +16,14 @@ services generally use `RPL_ISUPPORT`, as `soju.im/FILEHOST` does.
 
 ## Recommended next specifications
 
-1. **Agentwire v1.** Highest priority because MOTD already implements the
-   `+trevarj.github.io/agentwire` tag, topic marker, envelopes, fragmentation,
-   limits, and conformance fixtures. A public spec should pin that existing
-   contract before another implementation depends on it.
-2. **Call signaling.** Issue
+1. **Call signaling.** Issue
    [#39](https://github.com/trevarj/motd/issues/39) already proposes
    `+trevarj.github.io/call`. Draft this only when implementation starts, after
    crypto and replay rules are settled.
-3. **Generic attachment metadata.** Consider a vendor client tag only after a
+2. **Generic attachment metadata.** Consider a vendor client tag only after a
    second media type needs metadata that cannot live in a readable URL
    fallback. Until then, audio's small profile is enough.
-4. **Inline actions.** Closed issue
+3. **Inline actions.** Closed issue
    [#27](https://github.com/trevarj/motd/issues/27) identified a vendor client
    tag as the least-bad carrier. Keep deferred until a real bot integration
    needs it.

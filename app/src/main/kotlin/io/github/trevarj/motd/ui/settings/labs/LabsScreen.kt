@@ -42,7 +42,6 @@ fun LabsScreen(
         state = state,
         onBack = onBack,
         onGesturesChanged = viewModel::setGesturesEnabled,
-        onAgentwireChanged = viewModel::setAgentwireEnabled,
         onGlobalFeedChanged = viewModel::setGlobalFeedEnabled,
         onDickordChanged = viewModel::setDickordEnabled,
         onEbooksChanged = viewModel::setEbooksEnabled,
@@ -57,7 +56,6 @@ fun LabsContent(
     state: LabsUiState,
     onBack: () -> Unit,
     onGesturesChanged: (Boolean) -> Unit,
-    onAgentwireChanged: (Boolean) -> Unit,
     onGlobalFeedChanged: (Boolean) -> Unit = {},
     onDickordChanged: (Boolean) -> Unit,
     onEbooksChanged: (Boolean) -> Unit = {},
@@ -66,7 +64,6 @@ fun LabsContent(
     target: SettingsTarget? = null,
 ) {
     val context = LocalContext.current
-    val agentwireUrl = stringResource(R.string.labs_agentwire_url)
     val dickordUrl = stringResource(R.string.labs_dickord_url)
     SettingsScaffold(
         title = stringResource(R.string.settings_labs),
@@ -139,24 +136,6 @@ fun LabsContent(
                 )
             }
         }
-        SettingsTargetAnchor(target?.name, SettingsTarget.AGENTWIRE.name) { targetModifier ->
-            SettingsGroup(title = stringResource(R.string.labs_agentwire_section), modifier = targetModifier) {
-                SwitchRow(
-                    title = stringResource(R.string.labs_agentwire),
-                    subtitle = stringResource(R.string.labs_agentwire_desc),
-                    checked = state.agentwireEnabled,
-                    onCheckedChange = onAgentwireChanged,
-                    switchTag = "labs_agentwire_switch",
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                io.github.trevarj.motd.ui.settings.SettingsNavigationRow(
-                    title = stringResource(R.string.labs_agentwire_repo),
-                    summary = agentwireUrl,
-                    modifier = Modifier.testTag("labs_agentwire_repo"),
-                    onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, agentwireUrl.toUri())) },
-                )
-            }
-        }
         SettingsTargetAnchor(target?.name, SettingsTarget.GLOBAL_FEED.name) { targetModifier ->
             SettingsGroup(title = stringResource(R.string.labs_feed_section), modifier = targetModifier) {
                 SwitchRow(
@@ -179,7 +158,6 @@ private fun LabsScreenPreview() {
             state = LabsUiState(gesturesEnabled = true),
             onBack = {},
             onGesturesChanged = {},
-            onAgentwireChanged = {},
             onGlobalFeedChanged = {},
             onDickordChanged = {},
             onEbooksChanged = {},

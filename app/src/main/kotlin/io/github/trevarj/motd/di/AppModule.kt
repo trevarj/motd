@@ -201,7 +201,7 @@ internal abstract class AppModule {
     @Binds @Singleton
     abstract fun attachmentUploader(impl: AttachmentUploaderImpl): AttachmentUploader
 
-    /** Gesture lab store; kept out of configuration backup like the Agentwire lab flag. */
+    /** Gesture lab store; kept out of configuration backup. */
     @Binds @Singleton
     abstract fun gesturePrefs(impl: GesturePrefsImpl): GesturePrefs
 

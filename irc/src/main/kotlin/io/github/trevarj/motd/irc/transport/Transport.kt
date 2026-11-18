@@ -32,11 +32,6 @@ interface IrcTransport {
     /** Send one line; CRLF appended by the transport. */
     suspend fun send(line: String)
 
-    /** Send lines atomically when the transport can batch writes; fallback preserves compatibility. */
-    suspend fun sendAll(lines: List<String>) {
-        lines.forEach { send(it) }
-    }
-
     suspend fun close()
 }
 
@@ -171,14 +166,6 @@ class OkioLineTransport(
         val s = sink ?: throw IllegalStateException("connect() not called")
         sendMutex.withLock {
             runInterruptible(Dispatchers.IO) { s.writeIrcLines(listOf(line)) }
-        }
-    }
-
-    override suspend fun sendAll(lines: List<String>) {
-        if (lines.isEmpty()) return
-        val s = sink ?: throw IllegalStateException("connect() not called")
-        sendMutex.withLock {
-            runInterruptible(Dispatchers.IO) { s.writeIrcLines(lines) }
         }
     }
 

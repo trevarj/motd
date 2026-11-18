@@ -2,11 +2,11 @@
 
 ## Context
 
-Add one **default-off Labs → AI → Composer text tools** feature for local grammar/spelling correction, **Formal**, **Business**, **Silly**, saved custom prompt styles, and translation. Translation is available in the IRC chat composer and by long-holding any actual textual message: chat timelines, special timeline rows, feed, mentions, local/server search, and Agentwire user/assistant bodies. Everything runs on-device after explicit model setup. Drafts, messages, custom instructions, and generated results never go to a server.
+Add one **default-off Labs → AI → Composer text tools** feature for local grammar/spelling correction, **Formal**, **Business**, **Silly**, saved custom prompt styles, and translation. Translation is available in the IRC chat composer and by long-holding any actual textual message: chat timelines, special timeline rows, feed, mentions, and local/server search. Everything runs on-device after explicit model setup. Drafts, messages, custom instructions, and generated results never go to a server.
 
 The selected target is balanced **6–8 GB phones and multilingual text**; installed RAM is not an available-memory guarantee. Preserve the selected runtime/model pins and full surface coverage. Implementation uses one **m1 worker, effort lo**, only after approval. No commit, push, publication, physical installation, or emulator launch is authorized.
 
-Source evidence was read directly: `AiModels.kt` is speech-only; `AiLabsRepository.kt` rejects GGUF and its `state_v1` decoder filters retired text state; `AiExecutionCoordinator.kt` owns one foreground-aware resident engine; `ChatViewModel.kt` owns canonical-room draft/reply revisions and exactly-once send reservations. `MessageActionSheet` is not universal: `MessageList` special branches bypass it, feed/mentions omit useful holds, search rows are click-only, and Agentwire renders separate message cards. There is no dedicated thread-message route to implement.
+Source evidence was read directly: `AiModels.kt` is speech-only; `AiLabsRepository.kt` rejects GGUF and its `state_v1` decoder filters retired text state; `AiExecutionCoordinator.kt` owns one foreground-aware resident engine; `ChatViewModel.kt` owns canonical-room draft/reply revisions and exactly-once send reservations. `MessageActionSheet` is not universal: `MessageList` special branches bypass it, feed/mentions omit useful holds, and search rows are click-only. There is no dedicated thread-message route to implement.
 
 ## Approach and model choice
 
@@ -397,7 +397,7 @@ ChatContent(..., aiTextState: AiTextUiState = AiTextUiState.Closed,
 
 Invalidate the draft lease in the existing `operationalBufferId.drop(1)` collector, `advanceDraftRevisionLocked`, and `prepareDraftSubmission` when reserving Send. Add `onCleared` invalidation; no parallel navigation collector. Keep `AiComposerDraftSnapshot.requestId`: it distinguishes two opens at the same draft revision and must not be replaced with an unleased `DraftSnapshot`.
 
-`updateTransientMessage(key, text)` ignores non-selected keys. Null or a changed frozen body for the selected key invalidates its token immediately, clears source/result and closes; unchanged text is a no-op. Hosting `SearchScreen`/`AgentwireScreen` effects observe query/scope/results generation and epoch/item/body/kind respectively. Departure/loss of resumed lifecycle closes all workflows, including feed/mentions. Generation resolves enabled/readiness/model/latest style/target solely from `textToolsConfiguration()`; null or changed version prevents starting/publishing a result.
+`updateTransientMessage(key, text)` ignores non-selected keys. Null or a changed frozen body for the selected key invalidates its token immediately, clears source/result and closes; unchanged text is a no-op. Hosting `SearchScreen` effects observe query/scope/results generation. Departure/loss of resumed lifecycle closes all workflows, including feed/mentions. Generation resolves enabled/readiness/model/latest style/target solely from `textToolsConfiguration()`; null or changed version prevents starting/publishing a result.
 
 Collect `textToolsVersion` to immediately invalidate Running/Result work, including failed previews retaining old generated context; do not discard an otherwise-current Choosing source/draft lease solely for a style/target preference mutation. Disable/model disappearance or source changes still close it. Publish completed Result only inside `applyIfTextToolsVersion(capturedVersion)` with current request/source token. In `ChatScreen` close/invalidate an open Composer source when authoritative draft revision differs. Text preferences never clear voice caches.
 
@@ -461,8 +461,6 @@ Stored selection uses `messageRepository.byId(eventId)` to resolve identity, but
 
 Server hits use transient key `server-search:<generation>:<index>`, full displayed text, room and optional msgid, never fake IDs or sender/time/text correlation. Add non-default `generation: Long` to `ServerSearchState.Results`; increment at start/cancel/replacement and buffer change, capture before launching, guard **Results and Failed publication** against current generation/query/scope/buffer. Hosting `SearchScreen` invalidates on query/scope/results replacement/disappearance. For every available `(room,msgid)` subscribe to `observeReplyTarget(room, null, msgid)` even if initially unmatched: initial null permits server snapshot; latch `seenLocalMatch` on a row, after which null, REDACTED, changed body or eligibility permanently clears/closes. Never restore old server text after known deletion. No Room insertion/history fetch.
 
-Agentwire accepts only actual nonblank `user.prompt`/`assistant.*` bodies, validating kind at entry. Snapshot key is `agentwire:<epoch>:<timelineKey()>`; freeze kind/body too. User input uses literal prompt text; assistant input is exactly `plainIrcText(markdownToIrcFormatting(body))`, matching display projection. Changed body **or kind**, stream/session/epoch, disappearance/navigation invalidates via `updateTransientMessage`; send null for kind invalidation even if text is unchanged. Do not translate a newer streamed body or add actions on tool/plan/usage/activity/conversation/reply previews.
-
 Add these optional callback contracts and migrate every caller:
 
 ```kotlin
@@ -475,7 +473,6 @@ SystemEventPill(..., onLongPress: (() -> Unit)? = null,
 GlobalFeedContent(..., onTranslateMessage: ((MessageEntity) -> Unit)? = null)
 SearchContent(..., onTranslateLocalHit: ((SearchHit) -> Unit)? = null,
     onTranslateServerHit: ((ServerHitUi, Long, Int) -> Unit)? = null)
-AgentwireTimelineCard(..., onTranslateBody: (() -> Unit)? = null)
 ```
 
 Carry callbacks through existing private row functions. Use `combinedClickable`/existing messageRowClicks with long-click accessibility labels, retaining current click navigation and nested controls. An optional message hold on ActiveDccTransferCard defaults null so its separate offers-management caller stays unchanged.
@@ -494,7 +491,6 @@ Null translation callbacks are the Lab-off switch. Feed/mentions use existing `M
 | Collapsed fool/quiet ebook row | Hold performs existing reveal/expansion first; translate the exact revealed message on its subsequent hold. Do not bypass hidden content or translate only the truncated preview |
 | Feed and mentions | Hold opens the shared read-only translator on the row's stored event; normal click still opens its exact origin; mentions navigation hold remains unchanged |
 | Local and server search | Full selected text, not visible three-line truncation; existing highlight/group/navigation unchanged; server uses transient generation/index key |
-| Agentwire real user/assistant body | Shared read-only translator with session-stable string identity; no IRC Reply/Reactions/Room ID |
 
 Keep tags already used by timeline tests; add `chat_system_event_<id>` to expanded real lines and `message_action_translate` to the new action. No long-click callback is installed on unloaded Paging placeholders, absent/HIDE-mode messages, sample bubbles, send-flight replicas, reply-reference snippets, management records, or tool logs.
 
@@ -531,7 +527,6 @@ Use existing JUnit/Robolectric conventions and current fixtures; no tests of pro
 - `MessageTimelineUiTest.groupedDuplicateLinesKeepExactIdentityAfterPaging`: expand summary, hold ID-tagged chronological duplicate-text lines, assert distinct event IDs/leases, repeat after older append/Paging replacement. Identical text may correctly yield identical greedy output.
 - `GlobalFeedScreenTest.feedAndMentionsHoldsTranslateWithoutChangingOriginClicks`: exercise both actual surfaces with source/result and existing origin clicks/navigation hold.
 - `SearchScreenUiTest.localAndTransientServerHoldsUseFullSelectedText`: stored and transient duplicate/time/msgid-less hit identities, full text, query replacement invalidation, no Room insertion, existing jump identity unchanged.
-- `AgentwireTimelineUiTest.bodyHoldTranslationInvalidatesOnStreamAndSessionChange`: real user/assistant body, no tool/plan/usage Translate action, body/session update clears result and preserves user literal/assistant rendered text.
 
 Retain and run current draft same-text-after-send, grouped chronology/chunk/paging-demand, media privacy, voice/coordinator cleanup, and redaction observer regressions in the affected classes. Update direct MessageList/SystemEventPill/action-sheet test callers for their new optional contracts; existing no-op callers need no new wiring-only assertion.
 
@@ -562,8 +557,7 @@ nix develop -c ./gradlew :app:testDebugUnitTest \
   --tests 'io.github.trevarj.motd.MessagePagingDemandUiTest' \
   --tests 'io.github.trevarj.motd.ui.chat.RemoteMediaTimelineTest' \
   --tests 'io.github.trevarj.motd.ui.feed.GlobalFeedScreenTest' \
-  --tests 'io.github.trevarj.motd.ui.search.SearchScreenUiTest' \
-  --tests 'io.github.trevarj.motd.agentwire.AgentwireTimelineUiTest' --stacktrace
+  --tests 'io.github.trevarj.motd.ui.search.SearchScreenUiTest' --stacktrace
 ```
 
 No routine unfiltered suite/emulator/device gate. Compile affected existing E2E source and verify the native distribution contract; this assembles debug/E2E APKs but installs neither:

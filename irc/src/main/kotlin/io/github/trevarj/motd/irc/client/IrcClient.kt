@@ -172,15 +172,6 @@ data class WhoxResult(
     val completed: Boolean,
 )
 
-/**
- * An event observed through a bounded fan-out stream. Consumers must treat a non-contiguous
- * [sequence] as lost state and recover from their own authoritative source.
- */
-data class SequencedIrcEvent(
-    val sequence: Long,
-    val event: IrcEvent,
-)
-
 /** One instance per physical socket. Restartable: start() after stop() reconnects fresh. */
 class IrcClient(
     val config: IrcClientConfig,
@@ -212,20 +203,6 @@ class IrcClient(
 
     /** Best-effort fan-out for transient request correlation and UI-adjacent observers. */
     val broadcastEvents: SharedFlow<IrcEvent> = _events.asSharedFlow()
-
-    private val _sequencedEvents =
-        MutableSharedFlow<SequencedIrcEvent>(
-            replay = 0,
-            extraBufferCapacity = observerBufferCapacity,
-            onBufferOverflow = BufferOverflow.DROP_OLDEST,
-        )
-
-    /**
-     * Bounded, ordered fan-out for stateful observers. It intentionally does not consume
-     * [criticalEvents]; a slow observer is never allowed to stall the IRC reader.
-     */
-    val sequencedEvents: SharedFlow<SequencedIrcEvent> = _sequencedEvents.asSharedFlow()
-    private var nextObserverSequence = 0L
 
     private var criticalEventChannel = Channel<IrcEvent>(CRITICAL_EVENT_CAPACITY)
 
@@ -309,7 +286,6 @@ class IrcClient(
         postRegistrationActivity = CompletableDeferred()
         val criticalEvents = Channel<IrcEvent>(CRITICAL_EVENT_CAPACITY)
         criticalEventChannel = criticalEvents
-        nextObserverSequence = 0L
         registered = false
         _targetClassificationReady.value = false
         _pendingFeatureCaps.value = emptySet()
@@ -1023,9 +999,7 @@ class IrcClient(
         event: IrcEvent,
     ) {
         criticalEvents.send(event)
-        val sequenced = SequencedIrcEvent(++nextObserverSequence, event)
         _events.emit(event)
-        _sequencedEvents.emit(sequenced)
     }
 
     private suspend fun sendSerialized(
@@ -1097,15 +1071,6 @@ class IrcClient(
 
     private fun decrementSensitiveEcho(key: String) {
         sensitiveEchoes.computeIfPresent(key) { _, count -> (count - 1).takeIf { it > 0 } }
-    }
-
-    /** Send a logical protocol message without allowing another coroutine to interleave lines. */
-    suspend fun sendAtomicallyIfConnected(messages: List<IrcMessage>): Boolean {
-        if (messages.isEmpty()) return false
-        val t = transport ?: return false
-        val lines = messages.map(IrcMessage::serialize)
-        outboundLock.withLock { t.sendAll(lines) }
-        return true
     }
 
     /** Attach a label tag, suspend until the labeled response/ack batch completes. */

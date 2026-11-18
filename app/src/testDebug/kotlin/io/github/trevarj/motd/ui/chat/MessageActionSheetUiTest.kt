@@ -98,7 +98,6 @@ class MessageActionSheetUiTest {
     private val allActionTags =
         listOf(
             "message_action_reply",
-            "message_prepare_thread_context",
             "message_action_translate",
             "message_action_copy",
             "message_action_forward",
@@ -110,7 +109,6 @@ class MessageActionSheetUiTest {
     private val allActionLabels =
         listOf(
             R.string.chat_action_reply,
-            R.string.agent_context_thread,
             R.string.chat_action_translate,
             R.string.chat_action_copy,
             R.string.chat_action_forward,
@@ -181,27 +179,6 @@ class MessageActionSheetUiTest {
     }
 
     @Test
-    fun threadContextActionInvokesPreparation() {
-        var requested = false
-        render(canPrepareThreadContext = true, onPrepareThreadContext = { requested = true })
-
-        compose.onNodeWithTag("message_prepare_thread_context").assertIsDisplayed().performClick()
-        compose.runOnIdle { assertTrue(requested) }
-    }
-
-    @Test
-    fun threadContextActionStaysHiddenWithoutEligibleContext() {
-        render()
-        compose.onNodeWithTag("message_prepare_thread_context").assertDoesNotExist()
-    }
-
-    @Test
-    fun threadContextActionStaysHiddenOnServer() {
-        render(canPrepareThreadContext = true, isServerBuffer = true)
-        compose.onNodeWithTag("message_prepare_thread_context").assertDoesNotExist()
-    }
-
-    @Test
     @Config(qualifiers = "w320dp-h360dp", fontScale = 2f)
     fun compactActionsRemainAccessibleAcrossFontScales() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
@@ -219,15 +196,14 @@ class MessageActionSheetUiTest {
             return layouts.single()
         }
         render(
-            canPrepareThreadContext = true,
             canRedact = true,
             onTranslate = {},
             onForward = {},
             canSelectText = { true },
         )
-        val threadLabel = context.getString(R.string.agent_context_thread)
-        val scaledThreadLayout = labelLayout("message_prepare_thread_context", threadLabel)
-        assertEquals("The native dialog must actually use 2x fonts", 2f, scaledThreadLayout.layoutInput.density.fontScale, 0f)
+        val translateLabel = context.getString(R.string.chat_action_translate)
+        val scaledTranslateLayout = labelLayout("message_action_translate", translateLabel)
+        assertEquals("The native dialog must actually use 2x fonts", 2f, scaledTranslateLayout.layoutInput.density.fontScale, 0f)
 
         val viewport = compose.onNodeWithTag("message_action_actions").fetchSemanticsNode().boundsInRoot
         assertEquals("The native sheet must use the actual narrow viewport", 320f, viewport.width / pixelsPerDp, 1f)
@@ -310,7 +286,7 @@ class MessageActionSheetUiTest {
     @Test
     fun optionalActionsStayHiddenUnlessOffered() {
         render()
-        listOf("message_prepare_thread_context", "message_action_translate", "message_action_forward", "message_redact").forEach {
+        listOf("message_action_translate", "message_action_forward", "message_redact").forEach {
             compose.onNodeWithTag(it).assertDoesNotExist()
         }
         val bounds =
@@ -322,8 +298,8 @@ class MessageActionSheetUiTest {
     @Test
     fun serverKeepsTranslateAndCopyShareQuoteWithoutReplyOrReactions() {
         var translated = false
-        render(isServerBuffer = true, canPrepareThreadContext = true, onTranslate = { translated = true })
-        listOf("message_action_reply", "message_prepare_thread_context", "message_more_reactions").forEach {
+        render(isServerBuffer = true, onTranslate = { translated = true })
+        listOf("message_action_reply", "message_more_reactions").forEach {
             compose.onNodeWithTag(it).assertDoesNotExist()
         }
         compose.onNodeWithTag("message_action_translate").assertIsDisplayed().performClick()
@@ -451,8 +427,6 @@ class MessageActionSheetUiTest {
         reactions: List<ReactionChip> = emptyList(),
         canRedact: Boolean = false,
         onRedact: () -> Unit = {},
-        canPrepareThreadContext: Boolean = false,
-        onPrepareThreadContext: () -> Unit = {},
         isServerBuffer: Boolean = false,
         onTranslate: (() -> Unit)? = null,
         onForward: (() -> Unit)? = null,
@@ -506,8 +480,6 @@ class MessageActionSheetUiTest {
                         onShare = { onAction("message_action_share") },
                         canRedact = canRedact,
                         onRedact = onRedact,
-                        canPrepareThreadContext = canPrepareThreadContext,
-                        onPrepareThreadContext = onPrepareThreadContext,
                         isServerBuffer = isServerBuffer,
                         onTranslate = onTranslate,
                         onForward = onForward,

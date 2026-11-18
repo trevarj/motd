@@ -54,6 +54,15 @@ class SettingsSearchTest {
     }
 
     @Test
+    fun removedLabsFeatureIsNotSearchable() {
+        val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
+        assertTrue(searchSettings("agentwire", entries).isEmpty())
+        assertTrue(searchSettings("harness", entries).isEmpty())
+        assertTrue(entries.any { it.destination == SettingsSearchDestination.Page(SettingsSearchPage.LABS, SettingsTarget.GESTURES) })
+        assertTrue(entries.any { it.destination == SettingsSearchDestination.Page(SettingsSearchPage.LABS, SettingsTarget.GLOBAL_FEED) })
+    }
+
+    @Test
     fun composerStyleKeywordsOpenAppearanceInputStyle() {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
         val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.COMPOSER_STYLE)

@@ -264,7 +264,7 @@ flowchart TD
   The input host overlays the full timeline; matching scroll padding keeps the
   newest row clear, and fully covered rows do not advance read state. Floating and
   Nickname keep tools/send/record inside their floating inputs; Large keeps its
-  separate action. Agentwire always uses Floating. Stored enum names are unchanged.
+  separate action. Stored enum names are unchanged.
   Independent named presets control input corners, in-app avatar shape, chat-list
   card corners, and media-preview corners; stored `DEFAULT` preserves each surface/layout's
   heterogeneous geometry, while visible values name the resolved geometry (including the input
@@ -607,17 +607,8 @@ flowchart TD
   navigation to any other MOTD entry clears it even when the chat remains in the
   back stack; canceled predictive back and effect disposal do not clear it.
   Nothing is persisted across a new process.
-- Chat routing waits on Agentwire classification with a blank full-size gate, not
-  a progress bar or ordinary chat. Agentwire sync, history and running-tool
-  progress indicators remain visible after classification.
-- When Agentwire Labs is enabled, Agentwire Summary prepares catch-up or thread
-  context for an existing session. Frozen visible messages and coverage disclosures stay in memory until the user
-  chooses an Agentwire channel, reviews its authenticated session, and presses
-  Send. Context never enters ordinary IRC drafts. Sending shares it with that
-  channel and its history, and the configured agent/model provider. Replies use
-  the normal harness, converting supported Markdown to IRC formatting for display
-  while retaining the original text. Agentwire uses its own backend credentials,
-  not a motd subscription gateway. Search remains keyword-based; there is no semantic index.
+- Chats route directly to the ordinary IRC screen regardless of channel topic.
+  Search remains keyword-based; there is no semantic index.
 - Book search Labs is a local default-off preference. The chat helper appears only in IRC Highway
   `#ebooks`; it starts a plain `@Search` draft. The DCC offers entry shows incoming, non-removed
   offers from the same network. Review sender, endpoint risk, and transfer status there.

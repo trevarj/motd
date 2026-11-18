@@ -179,14 +179,21 @@ them and committed navigation away from the chat clears the visit. Nothing is
 stored across a new process.
 
 On-device AI in the chat picker retains its separate read-only result sheet.
-Feed, mentions, local/server search and Agentwire user/assistant bodies retain
-their local translation action. Source and selectable Result offer Copy and Close,
+Feed, mentions and local/server search retain their local translation action.
+Source and selectable Result offer Copy and Close,
 never Apply, Quote, Send, draft insertion, or history replacement. Redaction, source
-changes, search replacement, Agentwire stream/session changes, leaving the screen,
-or disabling the feature clear this local preview. No translation result cache is
+changes, search replacement, leaving the screen, or disabling the feature clear
+this local preview. No translation result cache is
 stored. Language coverage and factual preservation are experimental, not guarantees.
 The active video view forwards its owning-message hold while retaining playback
 controls; physical-device video gesture behavior remains unmeasured.
+
+## Removed Labs feature
+
+Agentwire has been removed. Previously marked channels now open as ordinary IRC
+chats; their server topics and stored history are preserved. Prepared agent
+context is not converted into a draft or message. The old private Labs store is
+left inert and remains outside configuration exports.
 
 ## Note on agent docs
 

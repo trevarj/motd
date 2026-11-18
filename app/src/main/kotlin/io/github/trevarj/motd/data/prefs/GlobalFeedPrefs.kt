@@ -11,7 +11,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 // Own store, isolated from Settings exports so restoring configuration cannot enable this lab
-// (same rule as `GesturePrefs` / `AgentwirePrefs`).
+// (same rule as `GesturePrefs`).
 private val Context.globalFeedDataStore by preferencesDataStore("global_feed_labs")
 private val ENABLED = booleanPreferencesKey("enabled_v1")
 
