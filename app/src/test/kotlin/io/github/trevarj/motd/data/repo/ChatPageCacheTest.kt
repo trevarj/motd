@@ -86,6 +86,7 @@ import java.util.concurrent.atomic.AtomicInteger
 @RunWith(RobolectricTestRunner::class)
 class ChatPageCacheTest {
     private val hosted = LinkedHashMap<ChatPageCache.Entry, HostedPresentation>()
+    private val hostedEntries = MutableStateFlow<Set<ChatPageCache.Entry>>(emptySet())
     private var startHostCollections = true
 
     @Test
@@ -1584,7 +1585,11 @@ class ChatPageCacheTest {
         startHostCollections = true
         owner.launch {
             cache.slots.collect { slots ->
-                for (entry in hosted.keys.filter { it !in slots }) hosted.remove(entry)?.stop()
+                for (entry in hosted.keys.filter { it !in slots }) {
+                    val presentation = hosted.remove(entry)
+                    hostedEntries.value = hosted.keys.toSet()
+                    presentation?.stop()
+                }
                 for (entry in slots) {
                     if (entry !in hosted) {
                         val presentation = HostedPresentation(entry, newDiffer(), owner)
@@ -1592,6 +1597,7 @@ class ChatPageCacheTest {
                         if (startHostCollections) presentation.start()
                     }
                 }
+                hostedEntries.value = hosted.keys.toSet()
             }
         }
         try {
@@ -1618,6 +1624,7 @@ class ChatPageCacheTest {
             checkNotNull(owner.coroutineContext[Job]).cancelAndJoin()
             advanceUntilIdle()
             hosted.clear()
+            hostedEntries.value = emptySet()
             db.close()
             databaseFile?.let(SQLiteDatabase::deleteDatabase)
             Dispatchers.resetMain()
@@ -1740,6 +1747,7 @@ class ChatPageCacheTest {
 
     private suspend fun TestScope.present(entry: ChatPageCache.Lease): Presentation {
         advanceUntilIdle()
+        hostedEntries.first { entry.entry in it }
         val root = checkNotNull(hosted[entry.entry])
         entry.changes.first {
             val states = root.states
