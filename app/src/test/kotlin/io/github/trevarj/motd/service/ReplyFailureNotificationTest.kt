@@ -40,7 +40,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
-/** Phone-only failure notices and durable reply bookkeeping across receiver cancellation. */
+/** Phone-only failure notices and durable reply bookkeeping across action cancellation. */
 @RunWith(RobolectricTestRunner::class)
 class ReplyFailureNotificationTest {
     private lateinit var db: MotdDatabase
@@ -114,9 +114,10 @@ class ReplyFailureNotificationTest {
                     .contains("lost text"),
             )
             val retry = shadowOf(notification.actions.single().actionIntent).savedIntent
-            assertEquals(ReplyReceiver.ACTION_RETRY_REPLY, retry.action)
-            assertEquals(bufferId, retry.getLongExtra(ReplyReceiver.EXTRA_BUFFER_ID, -1))
-            assertEquals("lost text", retry.getStringExtra(ReplyReceiver.EXTRA_REPLY_TEXT))
+            assertEquals(NotificationActionService.ACTION_RETRY_REPLY, retry.action)
+            assertEquals(bufferId, retry.getLongExtra(NotificationActionService.EXTRA_BUFFER_ID, -1))
+            assertEquals("lost text", retry.getStringExtra(NotificationActionService.EXTRA_REPLY_TEXT))
+            assertEquals("motd://notification/send-failure/$bufferId/retry", retry.dataString)
             val open = shadowOf(notification.contentIntent).savedIntent
             assertEquals(MotdNotifications.ACTION_OPEN_BUFFER, open.action)
             assertEquals(bufferId, open.getLongExtra(MotdNotifications.EXTRA_BUFFER_ID, -1))
@@ -148,8 +149,9 @@ class ReplyFailureNotificationTest {
             assertTrue(retry.isAuthenticationRequired)
             val pending = shadowOf(retry.actionIntent)
             assertTrue(pending.flags and PendingIntent.FLAG_IMMUTABLE != 0)
-            assertEquals(ReplyReceiver::class.java.name, pending.savedIntent.component?.className)
-            assertEquals("lost private text", pending.savedIntent.getStringExtra(ReplyReceiver.EXTRA_REPLY_TEXT))
+            assertTrue(pending.isService)
+            assertEquals(NotificationActionService::class.java.name, pending.savedIntent.component?.className)
+            assertEquals("lost private text", pending.savedIntent.getStringExtra(NotificationActionService.EXTRA_REPLY_TEXT))
         }
 
     @Test
@@ -310,17 +312,10 @@ class ReplyFailureNotificationTest {
         val wireMutex = Mutex(locked = true)
         val committed = CompletableDeferred<List<Long>>()
         val accepted = CompletableDeferred<SendAcceptance.Accepted>()
-        val failures = mutableListOf<Throwable>()
         var finishes = 0
-        var timeouts = 0
-        val receiver =
+        val delivery =
             launch {
-                runBoundedReceiverWork(
-                    timeoutMs = 9_000,
-                    onTimeout = { timeouts++ },
-                    onFailure = failures::add,
-                    finish = { finishes++ },
-                ) {
+                try {
                     deliver(retry = retry) {
                         val ids = persistReply("lost text", "cancel-after-commit")
                         val result =
@@ -339,14 +334,16 @@ class ReplyFailureNotificationTest {
                         accepted.complete(result)
                         result
                     }
+                } finally {
+                    finishes++
                 }
             }
         val ids = committed.await()
-        receiver.cancel()
+        delivery.cancel()
         assertTrue(accepted.isCompleted)
         assertEquals(0, finishes)
         wireMutex.unlock()
-        receiver.join()
+        delivery.join()
 
         assertEquals(ids, accepted.await().eventIds)
         assertEquals(wireAcceptance, accepted.await().wireOutcome.await())
@@ -360,8 +357,6 @@ class ReplyFailureNotificationTest {
                 .text,
         )
         assertEquals(1, finishes)
-        assertEquals(0, timeouts)
-        assertTrue(failures.isEmpty())
         assertEquals("typing", store.loadDraft(bufferId)?.text)
         assertEquals(7L, store.loadDraft(bufferId)?.replyToEventId)
         if (retry) {

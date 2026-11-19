@@ -272,10 +272,10 @@ of physical input latency, GPU-specific rendering, Doze/background delivery,
 UnifiedPush, system picker/provider behavior, OEM notification behavior, or
 release signing/install upgrades; retain a physical-device check for those.
 
-Android Auto support is notification-only. Its posted PendingIntent reply/read coverage
-is part of the existing send/reconnect journey, not a fifth test. Head-unit bridging,
-read-aloud, voice recognition, and OEM behavior remain unverified locally without an
-explicitly authorized Android Auto host; the default AOSP emulator is not such a host.
+Android Auto support is notification-only. The existing send/reconnect journey
+dispatches the actual reply and mark-read PendingIntents to the private action
+service. Head-unit bridging, read-aloud, voice recognition, and OEM behavior
+still require an Android Auto host; the default AOSP emulator is not one.
 
 For a [Desktop Head Unit](https://developer.android.com/training/cars/testing/dhu)
 or parked vehicle check, connect the phone, leave motd outside the target
@@ -286,6 +286,12 @@ Repeat with restricted preview modes and confirm that hidden content is neither
 shown nor spoken. motd does not provide a car launcher tile or pre-session history.
 For sideloaded builds, check **Unknown sources** in Android Auto's developer
 settings ([installation guidance](https://developer.android.com/training/cars/testing#unknown-sources)).
+
+On a display-less Linux host, DHU 2.1 projected successfully over the
+serial-targeted ADB tunnel with `SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software`
+and `--headless --adb=127.0.0.1:<forwarded-port>`. Use the DHU's `screenshot`
+command to inspect the projection. Voice checks still need working host audio;
+successful screen projection does not establish that read-aloud or replies work.
 
 The emulator and stack remain alive after a passing run to make the next run
 fast. Manage their lifecycle explicitly:

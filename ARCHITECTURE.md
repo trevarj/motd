@@ -703,6 +703,9 @@ flowchart TD
   messages use disjoint local-only rows; body histories and canonical read/open anchors
   stay lane-specific. Local-only is a bridging hint, not a security boundary. Channel
   replies use the actual public `ircTarget`, never an internal alias or the mention sender.
+  Reply, retry, and mark-read use explicit PendingIntents to one non-exported
+  started service. It stays alive until overlapping actions complete, without a
+  broadcast deadline, and does not redeliver actions after process death.
   Notification replies request one reconnect when not Ready and allow five seconds for
   the current client to become Ready and, for channels, self-JOIN; expiry never queues
   a later send. Submission uses the existing durable sender once. Pre-persistence rejection

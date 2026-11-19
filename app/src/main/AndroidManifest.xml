@@ -202,6 +202,7 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+        <service android:name=".service.NotificationActionService" android:exported="false" />
         <receiver android:name=".service.BootReceiver" android:exported="false">
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
         </receiver>
@@ -215,7 +216,6 @@
                 android:resource="@xml/camera_capture_paths" />
         </provider>
 
-        <receiver android:name=".service.ReplyReceiver" android:exported="false" />
         <receiver android:name=".service.InviteReceiver" android:exported="false" />
 
         <!-- UnifiedPush entry point (WP9). Distributors deliver endpoint lifecycle + push bodies. -->

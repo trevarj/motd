@@ -235,7 +235,7 @@ class MotdNotificationsFoolTest {
             assertEquals(dickordBufferId, shadowOf(posted.contentIntent).savedIntent.getLongExtra(MotdNotifications.EXTRA_BUFFER_ID, -1))
             val reply = requireNotNull(NotificationCompat.getAction(posted, 0))
             assertEquals(NotificationCompat.Action.SEMANTIC_ACTION_REPLY, reply.semanticAction)
-            assertEquals(dickordBufferId, shadowOf(reply.actionIntent).savedIntent.getLongExtra(ReplyReceiver.EXTRA_BUFFER_ID, -1))
+            assertEquals(dickordBufferId, shadowOf(reply.actionIntent).savedIntent.getLongExtra(NotificationActionService.EXTRA_BUFFER_ID, -1))
 
             notifications.onIncoming(
                 networkId,

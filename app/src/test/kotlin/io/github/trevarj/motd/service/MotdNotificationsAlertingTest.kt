@@ -309,8 +309,8 @@ class MotdNotificationsAlertingTest {
         event: MessageEntity,
     ) {
         val read = shadowOf(notification.actions.single { it.title.toString() == "Mark read" }.actionIntent).savedIntent
-        assertEquals(event.serverTime, read.getLongExtra(ReplyReceiver.EXTRA_UP_TO_TIME, -1))
-        assertEquals(event.id, read.getLongExtra(ReplyReceiver.EXTRA_UP_TO_EVENT_ID, -1))
+        assertEquals(event.serverTime, read.getLongExtra(NotificationActionService.EXTRA_UP_TO_TIME, -1))
+        assertEquals(event.id, read.getLongExtra(NotificationActionService.EXTRA_UP_TO_EVENT_ID, -1))
         val open = shadowOf(notification.contentIntent).savedIntent
         assertEquals(event.serverTime, open.getLongExtra(MotdNotifications.EXTRA_JUMP_TIME, -1))
         assertEquals(event.id, open.getLongExtra(MotdNotifications.EXTRA_EVENT_ID, -1))
@@ -338,7 +338,7 @@ class MotdNotificationsAlertingTest {
         assertEquals(!automotiveMessaging, reply.showsUserInterface)
         assertEquals(!automotiveMessaging, read.showsUserInterface)
         val input = requireNotNull(reply.remoteInputs).single()
-        assertEquals(ReplyReceiver.KEY_REPLY, input.resultKey)
+        assertEquals(NotificationActionService.KEY_REPLY, input.resultKey)
         assertTrue(input.allowFreeFormInput)
         assertTrue(read.remoteInputs.isNullOrEmpty())
         val replyPending = shadowOf(reply.actionIntent)
@@ -348,13 +348,14 @@ class MotdNotificationsAlertingTest {
         assertTrue(readPending.flags and PendingIntent.FLAG_IMMUTABLE != 0)
         val lane = tag ?: "default"
         for ((pending, action, suffix) in listOf(
-            Triple(replyPending, ReplyReceiver.ACTION_REPLY, "reply"),
-            Triple(readPending, ReplyReceiver.ACTION_MARK_READ, "read"),
+            Triple(replyPending, NotificationActionService.ACTION_REPLY, "reply"),
+            Triple(readPending, NotificationActionService.ACTION_MARK_READ, "read"),
         )) {
+            assertTrue(pending.isService)
             val intent = pending.savedIntent
-            assertEquals(ReplyReceiver::class.java.name, intent.component?.className)
+            assertEquals(NotificationActionService::class.java.name, intent.component?.className)
             assertEquals(action, intent.action)
-            assertEquals(bufferId, intent.getLongExtra(ReplyReceiver.EXTRA_BUFFER_ID, -1))
+            assertEquals(bufferId, intent.getLongExtra(NotificationActionService.EXTRA_BUFFER_ID, -1))
             assertEquals("motd://notification/$bufferId/$lane/$suffix", intent.dataString)
         }
         val openPending = shadowOf(notification.contentIntent)
@@ -1148,8 +1149,8 @@ class MotdNotificationsAlertingTest {
                     assertLaneAnchor(lane(null), c)
                     assertLaneAnchor(lane("channel_mentions"), later)
                     val read = shadowOf(capturedRead).savedIntent
-                    assertEquals(c.serverTime, read.getLongExtra(ReplyReceiver.EXTRA_UP_TO_TIME, -1))
-                    assertEquals(c.id, read.getLongExtra(ReplyReceiver.EXTRA_UP_TO_EVENT_ID, -1))
+                    assertEquals(c.serverTime, read.getLongExtra(NotificationActionService.EXTRA_UP_TO_TIME, -1))
+                    assertEquals(c.id, read.getLongExtra(NotificationActionService.EXTRA_UP_TO_EVENT_ID, -1))
                     assertTrue(b.notificationHandled)
                     assertTrue(promoted.hasMention)
                 } finally {
@@ -1350,8 +1351,8 @@ class MotdNotificationsAlertingTest {
         assertLaneAnchor(lane(null), older)
         assertLaneAnchor(lane("channel_mentions"), later)
         val savedRead = shadowOf(capturedMentionRead).savedIntent
-        assertEquals(later.serverTime, savedRead.getLongExtra(ReplyReceiver.EXTRA_UP_TO_TIME, -1))
-        assertEquals(later.id, savedRead.getLongExtra(ReplyReceiver.EXTRA_UP_TO_EVENT_ID, -1))
+        assertEquals(later.serverTime, savedRead.getLongExtra(NotificationActionService.EXTRA_UP_TO_TIME, -1))
+        assertEquals(later.id, savedRead.getLongExtra(NotificationActionService.EXTRA_UP_TO_EVENT_ID, -1))
         assertMessageActions(lane("channel_mentions"), channelId, "channel_mentions", automotiveMessaging = true)
         assertEquals(listOf(older.id), lane(null).extras.getLongArray("motd.notificationEventIds")?.toList())
         val promoted = requireNotNull(db.messageDao().byMsgid(channelId, "promoted"))
@@ -1802,8 +1803,8 @@ class MotdNotificationsAlertingTest {
             val mention = requireNotNull(db.messageDao().byMsgid(channelId, "mention"))
             val after = requireNotNull(db.messageDao().byMsgid(channelId, "after"))
             val savedRead = shadowOf(capturedRead).savedIntent
-            assertEquals(mention.id, savedRead.getLongExtra(ReplyReceiver.EXTRA_UP_TO_EVENT_ID, -1))
-            assertEquals(mention.serverTime, savedRead.getLongExtra(ReplyReceiver.EXTRA_UP_TO_TIME, -1))
+            assertEquals(mention.id, savedRead.getLongExtra(NotificationActionService.EXTRA_UP_TO_EVENT_ID, -1))
+            assertEquals(mention.serverTime, savedRead.getLongExtra(NotificationActionService.EXTRA_UP_TO_TIME, -1))
             assertLaneAnchor(lane(null), after)
             notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
             val buffer = requireNotNull(db.bufferDao().observeById(channelId))

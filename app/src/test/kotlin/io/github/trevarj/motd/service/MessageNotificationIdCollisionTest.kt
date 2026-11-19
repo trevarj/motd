@@ -2,7 +2,9 @@ package io.github.trevarj.motd.service
 
 import android.app.Notification
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.room.Room
@@ -17,11 +19,13 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.di.ForegroundBufferTrackerImpl
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -324,12 +328,16 @@ class MessageNotificationIdCollisionTest {
                 val open = shadowOf(notification.contentIntent).savedIntent
                 val id = open.getLongExtra(MotdNotifications.EXTRA_BUFFER_ID, -1)
                 val anchor = anchors.getValue(id to tag)
-                val read = shadowOf(notification.actions.single { it.title.toString() == "Mark read" }.actionIntent).savedIntent
-                val reply = shadowOf(notification.actions.single { it.title.toString() == "Reply" }.actionIntent).savedIntent
-                assertEquals(id, read.getLongExtra(ReplyReceiver.EXTRA_BUFFER_ID, -1))
-                assertEquals(id, reply.getLongExtra(ReplyReceiver.EXTRA_BUFFER_ID, -1))
-                assertEquals(anchor.id, read.getLongExtra(ReplyReceiver.EXTRA_UP_TO_EVENT_ID, -1))
-                assertEquals(anchor.serverTime, read.getLongExtra(ReplyReceiver.EXTRA_UP_TO_TIME, -1))
+                val readPending = shadowOf(notification.actions.single { it.title.toString() == "Mark read" }.actionIntent)
+                val replyPending = shadowOf(notification.actions.single { it.title.toString() == "Reply" }.actionIntent)
+                assertTrue(readPending.isService)
+                assertTrue(replyPending.isService)
+                val read = readPending.savedIntent
+                val reply = replyPending.savedIntent
+                assertEquals(id, read.getLongExtra(NotificationActionService.EXTRA_BUFFER_ID, -1))
+                assertEquals(id, reply.getLongExtra(NotificationActionService.EXTRA_BUFFER_ID, -1))
+                assertEquals(anchor.id, read.getLongExtra(NotificationActionService.EXTRA_UP_TO_EVENT_ID, -1))
+                assertEquals(anchor.serverTime, read.getLongExtra(NotificationActionService.EXTRA_UP_TO_TIME, -1))
                 assertEquals(anchor.id, open.getLongExtra(MotdNotifications.EXTRA_EVENT_ID, -1))
                 assertEquals(anchor.serverTime, open.getLongExtra(MotdNotifications.EXTRA_JUMP_TIME, -1))
                 assertEquals(anchor.msgid, open.getStringExtra(MotdNotifications.EXTRA_JUMP_MSGID))
@@ -341,6 +349,55 @@ class MessageNotificationIdCollisionTest {
                         .toString(),
                 )
             }
+        }
+
+    @Test
+    fun startupRetiresObsoleteNotificationActionsWithoutResettingUnrelatedRows() =
+        runTest {
+            val settings =
+                object : SettingsRepository by repo {
+                    override val notificationPreview = flowOf(NotificationPreview.FULL)
+                }
+            val current = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), settings)
+            current.onIncoming(networkId, bufferId, BufferType.QUERY, false, chat("current message"))
+            current.onReplyFailed(bufferId, "current retry", SendRejectionReason.CONNECTION_UNAVAILABLE)
+            current.onReplyDeliveryUncertain(17, "review only")
+            postStatusNotification()
+            val keep = shadowManager.activeNotifications.map { it.tag to it.id }.toSet()
+            assertEquals(4, keep.size)
+
+            val obsoleteAction =
+                PendingIntent.getBroadcast(context, 0, Intent("obsolete_action").setPackage(context.packageName), PendingIntent.FLAG_IMMUTABLE)
+
+            fun postOld(
+                id: Int,
+                channel: String,
+                tag: String? = null,
+            ) {
+                val old =
+                    NotificationCompat
+                        .Builder(context, channel)
+                        .setSmallIcon(android.R.drawable.ic_dialog_info)
+                        .apply { extras.putString("motd.notificationPreview", NotificationPreview.FULL.name) }
+                        .addAction(android.R.drawable.ic_menu_send, "old action", obsoleteAction)
+                        .build()
+                NotificationManagerCompat.from(context).notify(tag, id, old)
+            }
+
+            val obsoleteId = MotdNotifications.messageNotificationId(3)
+            postOld(obsoleteId, MotdNotifications.CHANNEL_MESSAGES)
+            postOld(obsoleteId, MotdNotifications.CHANNEL_MENTIONS, "channel_mentions")
+            postOld(MotdNotifications.sendFailureNotificationId(3), MotdNotifications.CHANNEL_SEND_FAILURES)
+            val invite = MotdNotifications.invitationNotificationId(3)
+            val transfer = MotdNotifications.transferNotificationId(3)
+            val watchEnded = MotdNotifications.watchEndedNotificationId(3)
+            postOld(invite, MotdNotifications.CHANNEL_INVITATIONS)
+            postOld(transfer, MotdNotifications.CHANNEL_TRANSFERS)
+            postOld(watchEnded, MotdNotifications.CHANNEL_MESSAGES)
+
+            MotdNotifications(context, db, ForegroundBufferTrackerImpl(), settings, applicationScope = backgroundScope)
+            testScheduler.runCurrent()
+            assertEquals(keep + setOf(null to invite, null to transfer, null to watchEnded), shadowManager.activeNotifications.map { it.tag to it.id }.toSet())
         }
 
     @Test

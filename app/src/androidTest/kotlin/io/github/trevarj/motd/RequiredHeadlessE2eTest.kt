@@ -79,7 +79,7 @@ import io.github.trevarj.motd.e2e.robots.TimelineRobot
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.service.MotdNotifications
-import io.github.trevarj.motd.service.ReplyReceiver
+import io.github.trevarj.motd.service.NotificationActionService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -306,7 +306,15 @@ class RequiredHeadlessE2eTest {
             val replyAction = actions.single { it.semanticAction == Notification.Action.SEMANTIC_ACTION_REPLY }
             val readAction = actions.single { it.semanticAction == Notification.Action.SEMANTIC_ACTION_MARK_AS_READ }
             assertTrue(actions.indices.none { NotificationCompat.getAction(notification, it)?.showsUserInterface == true })
-            assertEquals(1, checkNotNull(replyAction.remoteInputs).size)
+            assertEquals(NotificationActionService.KEY_REPLY, checkNotNull(replyAction.remoteInputs).single().resultKey)
+            assertTrue(readAction.remoteInputs.isNullOrEmpty())
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                assertTrue(replyAction.actionIntent.isService)
+                assertTrue(!replyAction.actionIntent.isImmutable)
+                assertTrue(readAction.actionIntent.isService)
+                assertTrue(readAction.actionIntent.isImmutable)
+                assertTrue(checkNotNull(notification.contentIntent).isActivity)
+            }
             runBlocking {
                 bootstrap.seams.connections().disconnect(network.childId)
                 connectionProbe.awaitDisconnected(network.childId)
@@ -315,7 +323,7 @@ class RequiredHeadlessE2eTest {
             RemoteInput.addResultsToIntent(
                 replyAction.remoteInputs,
                 fillIn,
-                Bundle().apply { putCharSequence(ReplyReceiver.KEY_REPLY, replyToken) },
+                Bundle().apply { putCharSequence(NotificationActionService.KEY_REPLY, replyToken) },
             )
             replyAction.actionIntent.send(context, 0, fillIn)
             val replied = runBlocking { probe.awaitCanonical(replyToken, bufferId) }

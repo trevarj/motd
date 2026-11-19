@@ -206,8 +206,13 @@ class MotdNotifications
             dickordBatches.clear()
             manager.activeNotifications
                 .filter {
-                    it.notification.channelId in RESETTABLE_CHANNELS &&
-                        it.notification.extras.getString(EXTRA_PREVIEW) != preview.name
+                    val notification = it.notification
+                    val channel = notification.channelId
+                    if (channel !in RESETTABLE_CHANNELS) return@filter false
+                    if (notification.extras.getString(EXTRA_PREVIEW) != preview.name) return@filter true
+                    val canHaveLegacyActions = channel == CHANNEL_SEND_FAILURES || (channel in MESSAGE_CHANNELS && !isWatchEndedNotificationId(it.id))
+                    canHaveLegacyActions && !notification.extras.getBoolean(EXTRA_SERVICE_ACTIONS) &&
+                        !notification.actions.isNullOrEmpty()
                 }.forEach { manager.cancel(it.tag, it.id) }
             val shortcuts = conversationShortcuts().map { it.id }
             if (preview == NotificationPreview.GENERIC) {
@@ -787,17 +792,17 @@ class MotdNotifications
 
             fun destination(action: String): Uri = "motd://notification/$bufferId/${if (thread.channelMentions) CHANNEL_MENTION_TAG else "default"}/$action".toUri()
             val replyIntent =
-                PendingIntent.getBroadcast(
+                PendingIntent.getService(
                     context,
                     bufferId.toInt(),
-                    Intent(context, ReplyReceiver::class.java)
-                        .setAction(ReplyReceiver.ACTION_REPLY)
+                    Intent(context, NotificationActionService::class.java)
+                        .setAction(NotificationActionService.ACTION_REPLY)
                         .setData(destination("reply"))
-                        .putExtra(ReplyReceiver.EXTRA_BUFFER_ID, bufferId),
+                        .putExtra(NotificationActionService.EXTRA_BUFFER_ID, bufferId),
                     PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                 )
             val replyLabel = context.getString(R.string.notification_projection_reply)
-            val remoteInput = RemoteInput.Builder(ReplyReceiver.KEY_REPLY).setLabel(replyLabel).build()
+            val remoteInput = RemoteInput.Builder(NotificationActionService.KEY_REPLY).setLabel(replyLabel).build()
             val replyAction =
                 NotificationCompat.Action
                     .Builder(
@@ -811,15 +816,15 @@ class MotdNotifications
                     .build()
 
             val markReadIntent =
-                PendingIntent.getBroadcast(
+                PendingIntent.getService(
                     context,
                     -bufferId.toInt(),
-                    Intent(context, ReplyReceiver::class.java)
-                        .setAction(ReplyReceiver.ACTION_MARK_READ)
+                    Intent(context, NotificationActionService::class.java)
+                        .setAction(NotificationActionService.ACTION_MARK_READ)
                         .setData(destination("read"))
-                        .putExtra(ReplyReceiver.EXTRA_BUFFER_ID, bufferId)
-                        .putExtra(ReplyReceiver.EXTRA_UP_TO_TIME, canonicalEventTime)
-                        .putExtra(ReplyReceiver.EXTRA_UP_TO_EVENT_ID, canonicalEventId ?: 0L),
+                        .putExtra(NotificationActionService.EXTRA_BUFFER_ID, bufferId)
+                        .putExtra(NotificationActionService.EXTRA_UP_TO_TIME, canonicalEventTime)
+                        .putExtra(NotificationActionService.EXTRA_UP_TO_EVENT_ID, canonicalEventId ?: 0L),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                 )
             val markReadAction =
@@ -867,6 +872,7 @@ class MotdNotifications
                 .addExtras(
                     android.os.Bundle().apply {
                         putLongArray(EXTRA_NOTIFICATION_EVENT_IDS, notificationEventIds)
+                        putBoolean(EXTRA_SERVICE_ACTIONS, true)
                     },
                 ).addAction(replyAction)
                 .addAction(markReadAction)
@@ -1564,15 +1570,16 @@ class MotdNotifications
                             .setAutoCancel(true)
                             .setContentIntent(openBufferPendingIntent(bufferId, "$destination/open"))
                     if (allowRetry) {
+                        notification.extras.putBoolean(EXTRA_SERVICE_ACTIONS, true)
                         val retryIntent =
-                            PendingIntent.getBroadcast(
+                            PendingIntent.getService(
                                 context,
                                 0,
-                                Intent(context, ReplyReceiver::class.java)
-                                    .setAction(ReplyReceiver.ACTION_RETRY_REPLY)
+                                Intent(context, NotificationActionService::class.java)
+                                    .setAction(NotificationActionService.ACTION_RETRY_REPLY)
                                     .setData("$destination/retry".toUri())
-                                    .putExtra(ReplyReceiver.EXTRA_BUFFER_ID, bufferId)
-                                    .putExtra(ReplyReceiver.EXTRA_REPLY_TEXT, text),
+                                    .putExtra(NotificationActionService.EXTRA_BUFFER_ID, bufferId)
+                                    .putExtra(NotificationActionService.EXTRA_REPLY_TEXT, text),
                                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                             )
                         notification.addAction(
@@ -1776,3 +1783,4 @@ internal suspend fun resolveLatestNotificationAnchor(
 private const val EXTRA_NOTIFICATION_EVENT_IDS = "motd.notificationEventIds"
 
 private const val EXTRA_PREVIEW = "motd.notificationPreview"
+private const val EXTRA_SERVICE_ACTIONS = "motd.notificationServiceActions"

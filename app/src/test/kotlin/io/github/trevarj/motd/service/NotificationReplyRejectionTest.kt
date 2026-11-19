@@ -170,7 +170,7 @@ class NotificationReplyRejectionTest {
         runTest {
             val preparing = CompletableDeferred<Unit>()
             val recorder = Recorder()
-            val receiver =
+            val delivery =
                 launch {
                     deliverNotificationReply(
                         retry = false,
@@ -186,8 +186,8 @@ class NotificationReplyRejectionTest {
                     )
                 }
             preparing.await()
-            receiver.cancel()
-            receiver.join()
+            delivery.cancel()
+            delivery.join()
 
             assertEquals(0, recorder.preserved)
             assertEquals(0, recorder.released)

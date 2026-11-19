@@ -1,30 +1,27 @@
 package io.github.trevarj.motd.service
 
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
 import android.util.Log
 import androidx.core.app.RemoteInput
+import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
 import io.github.trevarj.motd.data.db.TimelineAnchor
-import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
- * Direct-reply / mark-read notification actions. The RemoteInput reply is forwarded to
+ * Started service for reply, retry, and mark-read notification actions. A RemoteInput reply is forwarded to
  * [ConnectionManager.sendNotificationReply]; the mark-read action to [ConnectionManager.markRead].
  */
 @AndroidEntryPoint
-class ReplyReceiver : BroadcastReceiver() {
+class NotificationActionService : LifecycleService() {
     @Inject lateinit var connectionManager: ConnectionManager
-
-    @Inject @ApplicationScope
-    lateinit var applicationScope: CoroutineScope
 
     @Inject lateinit var diagnostics: DiagnosticLogger
 
@@ -32,32 +29,53 @@ class ReplyReceiver : BroadcastReceiver() {
 
     @Inject lateinit var draftStore: ComposerDraftStore
 
-    override fun onReceive(
-        context: Context,
-        intent: Intent,
-    ) {
+    private var latestStartId = 0
+    private var inFlight = 0
+
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int,
+    ): Int {
+        super.onStartCommand(intent, flags, startId)
+        latestStartId = startId
+        inFlight++
+        lifecycleScope.launch {
+            try {
+                if (intent != null) dispatch(intent)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                Log.w(TAG, "notification action failed: ${failure.javaClass.simpleName}")
+            } finally {
+                // Both the starts and their completions are confined to the main thread.
+                if (--inFlight == 0) stopSelf(latestStartId)
+            }
+        }
+        return START_NOT_STICKY
+    }
+
+    private suspend fun dispatch(intent: Intent) {
         val bufferId = intent.getLongExtra(EXTRA_BUFFER_ID, -1L)
         if (bufferId < 0) return
         when (intent.action) {
             ACTION_REPLY -> {
                 val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_REPLY)?.toString()
                 if (text.isNullOrBlank()) return
-                launchAsync(applicationScope, TAG) { send(bufferId, text, retry = false) }
+                send(bufferId, text, retry = false)
             }
 
             ACTION_RETRY_REPLY -> {
                 val text = intent.getStringExtra(EXTRA_REPLY_TEXT)
                 if (text.isNullOrBlank()) return
-                launchAsync(applicationScope, TAG) { send(bufferId, text, retry = true) }
+                send(bufferId, text, retry = true)
             }
 
             ACTION_MARK_READ -> {
                 if (!intent.hasExtra(EXTRA_UP_TO_TIME)) return
                 val upTo = intent.getLongExtra(EXTRA_UP_TO_TIME, 0L)
                 val eventId = intent.getLongExtra(EXTRA_UP_TO_EVENT_ID, 0L)
-                launchAsync(applicationScope, TAG) {
-                    connectionManager.markRead(bufferId, TimelineAnchor(upTo, eventId))
-                }
+                connectionManager.markRead(bufferId, TimelineAnchor(upTo, eventId))
             }
 
             else -> {}
@@ -95,9 +113,13 @@ class ReplyReceiver : BroadcastReceiver() {
         bufferId: Long,
         text: String,
     ) {
-        runCatching {
+        try {
             draftStore.appendNotificationReply(bufferId, text)
-        }.onFailure { Log.w(TAG, "preserving notification reply failed", it) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            Log.w(TAG, "preserving notification reply failed: ${failure.javaClass.simpleName}")
+        }
     }
 
     /** Drop the preserved copy once the retry is durable, unless the user has since edited the draft. */
@@ -105,9 +127,13 @@ class ReplyReceiver : BroadcastReceiver() {
         bufferId: Long,
         text: String,
     ) {
-        runCatching {
+        try {
             draftStore.removeNotificationReply(bufferId, text)
-        }.onFailure { Log.w(TAG, "clearing retried reply draft failed", it) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            Log.w(TAG, "clearing retried reply draft failed: ${failure.javaClass.simpleName}")
+        }
     }
 
     companion object {
@@ -119,7 +145,7 @@ class ReplyReceiver : BroadcastReceiver() {
         const val EXTRA_UP_TO_TIME = "upToTime"
         const val EXTRA_UP_TO_EVENT_ID = "upToEventId"
         const val KEY_REPLY = "key_reply"
-        private const val TAG = "ReplyReceiver"
+        private const val TAG = "NotificationAction"
     }
 }
 
