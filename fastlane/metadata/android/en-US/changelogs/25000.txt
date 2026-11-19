@@ -1,0 +1,5 @@
+- Anchor and reorder chats above pinned conversations.
+- Download Noto, OpenMoji or Twemoji. Choose how nick taps, mentions and typing indicators work, and hide the mic button.
+- Attach files without losing your draft. Fix composer flicker, emoji send animation and clipped reply bars.
+- Improve theme contrast and make theme-matched text optional.
+- Add notification preview controls, clearer connection status and updated Android Auto message actions.
