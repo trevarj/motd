@@ -2,6 +2,8 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+mapfile -t git_env < <(git rev-parse --local-env-vars)
+unset "${git_env[@]}"
 bases=()
 all=false
 candidate="$(git -C "$REPO" rev-parse --verify 'HEAD^{commit}')"
