@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.components
 
 import android.content.SharedPreferences
+import androidx.core.content.edit
 import io.github.trevarj.motd.data.emoji.EmojiDataset
 import io.github.trevarj.motd.data.emoji.EmojiEntry
 
@@ -66,11 +67,10 @@ internal fun writeEmojiPickerHistory(
     preferences: SharedPreferences,
     history: EmojiPickerHistory,
 ) {
-    preferences
-        .edit()
-        .putString(EMOJI_PICKER_RECENTS_KEY, history.recents.joinToString(","))
-        .putString(EMOJI_PICKER_STICKY_KEY, history.sticky.entries.joinToString("|") { "${it.key}=${it.value}" })
-        .apply()
+    preferences.edit {
+        putString(EMOJI_PICKER_RECENTS_KEY, history.recents.joinToString(","))
+        putString(EMOJI_PICKER_STICKY_KEY, history.sticky.entries.joinToString("|") { "${it.key}=${it.value}" })
+    }
 }
 
 internal fun recordEmojiPickerSelection(

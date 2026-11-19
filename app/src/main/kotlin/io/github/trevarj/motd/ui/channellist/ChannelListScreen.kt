@@ -318,7 +318,10 @@ private fun ChannelList(
 ) {
     val scheme = MaterialTheme.colorScheme
     val topicFill = scheme.surfaceContainerLow
-    val readingInk = if (LocalAdjustPaletteReadability.current) ensureContrast(readingInk(scheme), listOf(topicFill), MESSAGE_TEXT_CONTRAST) else readingInk(scheme)
+    val adjustReadability = LocalAdjustPaletteReadability.current
+    val readingSeed = readingInk(scheme)
+    val readingInk = if (adjustReadability) ensureContrast(readingSeed, listOf(topicFill), MESSAGE_TEXT_CONTRAST) else readingSeed
+    val linkInk = if (adjustReadability) scheme.primary else scheme.readableForeground(scheme.primary, topicFill)
     LazyColumn(Modifier.fillMaxSize()) {
         // Keyed by channel name for stable recomposition over large lists (cap 2000).
         items(listings, key = { it.name }) { listing ->
@@ -337,11 +340,11 @@ private fun ChannelList(
                         Text(
                             io.github.trevarj.motd.ui.components.linkifiedBody(
                                 text = listing.topic,
-                                linkColor = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, topicFill),
+                                linkColor = linkInk,
                                 mentionsActive = false,
                                 containerColor = topicFill,
                                 contentColor = readingInk,
-                                adjustPaletteReadability = LocalAdjustPaletteReadability.current,
+                                adjustPaletteReadability = adjustReadability,
                             ),
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,

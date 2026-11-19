@@ -611,9 +611,9 @@ class ConfigurationBackupRepositoryImpl
                 }
             }
             require(payload.networks.size <= MAX_NETWORKS) { "Too many networks in backup." }
-            val ids = payload.networks.map { it.exportId }
-            require(ids.size == ids.toSet().size) { "Backup contains duplicate network ids." }
-            val idSet = ids.toSet()
+            val networksById = payload.networks.associateBy(PortableNetwork::exportId)
+            require(networksById.size == payload.networks.size) { "Backup contains duplicate network ids." }
+            val idSet = networksById.keys
             payload.networks.forEach { network ->
                 require(network.exportId.isNotBlank()) { "Backup contains a network without an id." }
                 require(network.name.isNotBlank()) { "Backup contains a network without a name." }
@@ -621,7 +621,7 @@ class ConfigurationBackupRepositoryImpl
                 require(network.port in 1..65535) { "Backup contains an invalid port." }
                 require(network.nick.isNotBlank()) { "Backup contains a network without a nick." }
                 if (network.role == NetworkRole.BOUNCER_CHILD) {
-                    require(!network.parentExportId.isNullOrBlank() && network.parentExportId in idSet) {
+                    require(networksById[network.parentExportId]?.role == NetworkRole.BOUNCER_ROOT) {
                         "Backup contains a bouncer child without a valid parent."
                     }
                     require(!network.bouncerNetId.isNullOrBlank()) {

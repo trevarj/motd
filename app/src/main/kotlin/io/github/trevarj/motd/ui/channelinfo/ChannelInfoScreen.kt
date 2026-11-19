@@ -788,7 +788,8 @@ private fun TopicText(
 ) {
     val scheme = MaterialTheme.colorScheme
     val fill = containerColor
-    val ink = if (LocalAdjustPaletteReadability.current) ensureContrast(readingInk(scheme), listOf(fill), MESSAGE_TEXT_CONTRAST) else scheme.readableForeground(readingInk(scheme), fill)
+    val readingSeed = readingInk(scheme)
+    val ink = if (LocalAdjustPaletteReadability.current) ensureContrast(readingSeed, listOf(fill), MESSAGE_TEXT_CONTRAST) else readingSeed
     val formatted =
         io.github.trevarj.motd.ui.components
             .linkifiedBody(

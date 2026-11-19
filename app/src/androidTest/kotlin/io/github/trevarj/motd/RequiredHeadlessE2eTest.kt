@@ -5,7 +5,6 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.app.RemoteInput
 import android.content.Intent
-import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
 import androidx.compose.ui.geometry.Offset
@@ -35,7 +34,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.platform.io.PlatformTestStorageRegistry
 import androidx.test.rule.GrantPermissionRule
 import io.github.trevarj.motd.ai.WhisperNativeAssertions
 import io.github.trevarj.motd.audio.VoiceSendProgress
@@ -57,7 +55,6 @@ import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.e2e.BootstrappedNetwork
 import io.github.trevarj.motd.e2e.BufferProbe
 import io.github.trevarj.motd.e2e.ConnectionProbe
-import io.github.trevarj.motd.e2e.E2eArtifactSink
 import io.github.trevarj.motd.e2e.E2eBootstrap
 import io.github.trevarj.motd.e2e.E2eFailureArtifactRule
 import io.github.trevarj.motd.e2e.E2eMilestoneRecorder
@@ -1134,7 +1131,7 @@ class RequiredHeadlessE2eTest {
             val installed = requireNotNull(runBlocking { store.installedFile(noto.id) })
             assertEquals(noto.sizeBytes, installed.length())
             assertEquals(original.paletteSelection, runBlocking { appearance.config.first() }.paletteSelection)
-            recordEmojiArtifact("emoji_noto_downloaded", "bytes=${installed.length()} sha256=${noto.sha256}")
+            milestones.record("emoji_noto_downloaded", "bytes=${installed.length()} sha256=${noto.sha256}")
             leaveEmojiSettings()
 
             ChatListRobot(compose).open(bufferId)
@@ -1143,13 +1140,13 @@ class RequiredHeadlessE2eTest {
             chat.replace("chat_composer_field", prefix)
             chat.openEmojiPicker()
             chat.openEmojiVariants("1f91d")
-            recordEmojiArtifact("emoji_mixed_tone_variants")
+            milestones.record("emoji_mixed_tone_variants")
             chat.selectEmojiVariant("1faf1_1f3fb_200d_1faf2_1f3ff")
             chat.assertComposerText(prefix + "🫱🏻‍🫲🏿")
             chat.openEmojiVariants("1f469_200d_1f4bb")
             chat.selectEmojiVariant("1f469_1f3fd_200d_1f4bb")
             chat.assertComposerText(text)
-            recordEmojiArtifact("emoji_unicode_composed")
+            milestones.record("emoji_unicode_composed")
             // Do not use send(text): that would replace the picker-produced editor contents.
             chat.click("chat_composer_send")
             val probe = MessageLifecycleProbe(bootstrap.seams.search(), milestones)
@@ -1159,10 +1156,8 @@ class RequiredHeadlessE2eTest {
                 }
             assertEquals(text, sent.text)
             TimelineRobot(compose).assertMessageVisible(sent.tag())
-            recordEmojiArtifact("emoji_unicode_sent_noto", "buffer=$bufferId event=${sent.id}")
-            // The first Back closes the retained picker; leave chat only after its viewport closes.
-            scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
-            compose.waitUntil("Emoji picker closes before leaving chat", 15_000) {
+            milestones.record("emoji_unicode_sent_noto", "buffer=$bufferId event=${sent.id}")
+            compose.waitUntil("Sending closes the emoji picker before leaving chat", 15_000) {
                 runCatching {
                     compose.onNodeWithTag("chat_composer_emoji_grid", useUnmergedTree = true).assertIsDisplayed()
                 }.isFailure
@@ -1188,12 +1183,12 @@ class RequiredHeadlessE2eTest {
             assertEquals(sent.msgid, unchanged.msgid)
             assertEquals(text, unchanged.text)
             TimelineRobot(compose).assertMessageVisible(unchanged.tag())
-            recordEmojiArtifact("emoji_unicode_unchanged_system", "buffer=$bufferId event=${unchanged.id}")
+            milestones.record("emoji_unicode_unchanged_system", "buffer=$bufferId event=${unchanged.id}")
             scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
             ChatListRobot(compose).awaitTag("chatlist_row_$bufferId")
             assertEquals(original.paletteSelection, runBlocking { appearance.config.first() }.paletteSelection)
         } finally {
-            if (settings.isPresent("settings_emoji_cancel")) {
+            if (runCatching { settings.isPresent("settings_emoji_cancel") }.getOrDefault(false)) {
                 settings.click("settings_emoji_cancel")
                 settings.awaitTagGone("settings_emoji_progress")
             }
@@ -1201,25 +1196,6 @@ class RequiredHeadlessE2eTest {
                 appearance.setEmojiSetId(original.emojiSetId)
                 if (!hadFile) store.remove(noto.id)
             }
-        }
-    }
-
-    private fun recordEmojiArtifact(
-        event: String,
-        detail: String = "",
-    ) {
-        milestones.record(event, detail)
-        E2eArtifactSink.write("${artifacts.artifactPrefix()}/emoji/milestones.jsonl", milestones.render())
-        val screenshot = requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
-        try {
-            PlatformTestStorageRegistry
-                .getInstance()
-                .openOutputFile("${artifacts.artifactPrefix()}/emoji/$event.png", false)
-                .use {
-                    assertTrue("Emoji screenshot is written", screenshot.compress(Bitmap.CompressFormat.PNG, 100, it))
-                }
-        } finally {
-            screenshot.recycle()
         }
     }
 

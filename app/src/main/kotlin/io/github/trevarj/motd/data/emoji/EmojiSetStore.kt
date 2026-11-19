@@ -1,11 +1,11 @@
 package io.github.trevarj.motd.data.emoji
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import androidx.core.graphics.createBitmap
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -253,7 +253,7 @@ class EmojiSetStore internal constructor(
                 color = Color.WHITE
             }
         if (!paint.hasGlyph(renderSample)) throw IOException("Emoji font cannot shape the rendering probe")
-        val bitmap = Bitmap.createBitmap(160, 128, Bitmap.Config.ARGB_8888)
+        val bitmap = createBitmap(160, 128)
         try {
             Canvas(bitmap).drawText(renderSample, 8f, 88f, paint)
             val pixels = IntArray(bitmap.width * bitmap.height)

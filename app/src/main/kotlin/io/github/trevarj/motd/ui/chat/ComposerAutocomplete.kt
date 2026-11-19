@@ -3,7 +3,9 @@ package io.github.trevarj.motd.ui.chat
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.TextFieldValue
+import io.github.trevarj.motd.irc.format.IrcFormattedText
 import io.github.trevarj.motd.irc.format.containsIrcFormatting
+import io.github.trevarj.motd.irc.format.ircColorArgumentSeparator
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 
 /** A composer completion candidate: display text plus whether it is a `/` command hint. */
@@ -67,19 +69,7 @@ fun applyPick(
     val rawStart = formatted.rawOffset(token.start)
     val rawEnd = formatted.rawToVisible.indexOfFirst { it == token.end }
     val insertion = picked + nicknameSuffix(formatted.visibleText, token.start, token.end)
-    val next =
-        buildAnnotatedString {
-            append(value.annotatedString.subSequence(0, rawStart))
-            append(insertion)
-            // Controls inside the replaced token must still affect the untouched suffix.
-            for (index in rawStart until rawEnd) {
-                if (formatted.rawToVisible[index] == formatted.rawToVisible[index + 1]) {
-                    append(value.annotatedString.subSequence(index, index + 1))
-                }
-            }
-            append(value.annotatedString.subSequence(rawEnd, value.text.length))
-        }
-    return TextFieldValue(next, TextRange(rawStart + insertion.length))
+    return replaceNickname(value, rawStart, rawEnd, insertion, formatted)
 }
 
 /** Insert a nickname at the native cursor, replacing either direction of selection. */
@@ -101,18 +91,42 @@ fun insertNickname(
             append(nick)
             append(nicknameSuffix(visibleText, visibleStart, visibleEnd))
         }
+    return replaceNickname(value, start, end, insertion, formatted)
+}
+
+private fun replaceNickname(
+    value: TextFieldValue,
+    start: Int,
+    end: Int,
+    insertion: String,
+    formatted: IrcFormattedText?,
+): TextFieldValue {
+    val source = value.annotatedString
     val next =
         buildAnnotatedString {
-            append(value.annotatedString.subSequence(0, start))
+            append(source, 0, start)
             append(insertion)
             if (formatted != null) {
-                for (index in start until end) {
-                    if (formatted.rawToVisible[index] == formatted.rawToVisible[index + 1]) {
-                        append(value.annotatedString.subSequence(index, index + 1))
+                val offsets = formatted.rawToVisible
+                var index = start
+                var controlsStart = end
+                var controlsEnd = end
+                // Move controls inside the replaced text so they still affect the untouched suffix.
+                while (index < end) {
+                    if (offsets[index] != offsets[index + 1]) {
+                        index++
+                        continue
                     }
+                    controlsStart = index
+                    do {
+                        index++
+                    } while (index < end && offsets[index] == offsets[index + 1])
+                    controlsEnd = index
+                    append(source, controlsStart, controlsEnd)
                 }
+                append(ircColorArgumentSeparator(source, controlsStart, controlsEnd, value.text.getOrNull(end)))
             }
-            append(value.annotatedString.subSequence(end, value.text.length))
+            append(source, end, source.length)
         }
     return TextFieldValue(next, TextRange(start + insertion.length))
 }

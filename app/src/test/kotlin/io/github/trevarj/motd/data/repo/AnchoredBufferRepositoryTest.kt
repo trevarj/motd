@@ -3,8 +3,10 @@ package io.github.trevarj.motd.data.repo
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.avatar.LocalAvatarStore
+import io.github.trevarj.motd.data.db.AppStateEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.FolderIdentityKind
+import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.RoomAliasEntity
 import io.github.trevarj.motd.data.db.RoomAliasNamespace
 import io.github.trevarj.motd.data.db.buffer
@@ -15,7 +17,10 @@ import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -182,6 +187,85 @@ class AnchoredBufferRepositoryTest {
         }
 
     @Test
+    fun legacyNickPlacementWaitsForVerifiedRoomAndAccountPlacementWins() =
+        runTest {
+            val db = inMemoryDb()
+            try {
+                val networkId = db.networkDao().insert(network())
+                val store = BufferStore(db)
+                val nick = "ni[*]?éx"
+                val account = "acct[*]?"
+                val neighbor = PortableChatPlacement(networkId, BufferType.QUERY, FolderIdentityKind.NICK, "${nick}tra")
+                store.restoreChatPlacements(
+                    listOf(neighbor, PortableChatPlacement(networkId, BufferType.QUERY, FolderIdentityKind.ACCOUNT, account, anchorOrder = 0)),
+                    replace = true,
+                )
+                val stale = store.getOrCreate(networkId, "stale", "Stale", BufferType.QUERY)
+                val verified = store.getOrCreate(networkId, "verified", "Verified", BufferType.QUERY)
+                val legacy = legacyPendingKey(PortableChatPlacement(networkId, BufferType.QUERY, FolderIdentityKind.NICK, nick, pinned = true))
+                db.appStateDao().insert(AppStateEntity(legacy))
+                assertTrue(store.chatPlacementSnapshot().any { it.identityValue == nick && it.pinned })
+                db.roomAliasDao().insertIgnore(
+                    RoomAliasEntity(networkId = networkId, namespace = RoomAliasNamespace.PROVISIONAL_NICK, value = nick, roomId = stale.id),
+                )
+                db.roomAliasDao().insertIgnore(
+                    RoomAliasEntity(
+                        networkId = networkId,
+                        namespace = RoomAliasNamespace.VERIFIED_NICK,
+                        value = nick,
+                        roomId = verified.id,
+                        verified = true,
+                    ),
+                )
+
+                val staleBind = store.bindQueryIdentity(stale.id, networkId, stale.name, stale.displayName, account = null)
+                assertFalse(staleBind.pinned)
+                assertEquals(0, db.appStateDao().contains(legacy))
+                assertTrue(store.chatPlacementSnapshot().any { it.identityValue == nick && it.pinned })
+
+                val verifiedBind = store.bindQueryIdentity(verified.id, networkId, nick, nick, account)
+                assertFalse(verifiedBind.pinned)
+                assertEquals(0, verifiedBind.anchorOrder)
+                assertEquals(1, db.appStateDao().keysGlob("pending-chat-placement:*").size)
+                assertTrue(store.chatPlacementSnapshot().any { it.identityValue == neighbor.identityValue })
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun deletingBouncerTreeClearsIndexedAndLegacyPlacementsOnlyForDeletedNetworks() =
+        runTest {
+            val db = inMemoryDb()
+            try {
+                val networks = db.networkDao()
+                val root = networks.insert(network("bouncer").copy(role = NetworkRole.BOUNCER_ROOT))
+                val child = networks.insert(network("child").copy(role = NetworkRole.BOUNCER_CHILD, parentId = root, bouncerNetId = "child"))
+                val unrelated = networks.insert(network("unrelated").copy(id = root * 10))
+                val store = BufferStore(db)
+                val networkIds = listOf(root, child, unrelated)
+                store.restoreChatPlacements(
+                    networkIds.map { PortableChatPlacement(it, BufferType.QUERY, FolderIdentityKind.ACCOUNT, "pending-account", pinned = true) },
+                    replace = true,
+                )
+                val state = db.appStateDao()
+                for (networkId in networkIds) {
+                    val placement = PortableChatPlacement(networkId, BufferType.CHANNEL, FolderIdentityKind.CHANNEL, "#legacy", pinned = true)
+                    state.insert(AppStateEntity(legacyPendingKey(placement)))
+                }
+                val survivingKeys =
+                    state.keysGlob("pending-chat-placement:$unrelated:*") +
+                        state.keysGlob("pending-chat-placement:{\"networkId\":$unrelated,*")
+                assertEquals(2, survivingKeys.size)
+                assertEquals(setOf(root, child), networks.deleteLocalTree(root).toSet())
+                assertEquals(survivingKeys.toSet(), state.keysGlob("pending-chat-placement:*").toSet())
+                assertTrue(store.getOrCreate(unrelated, "#legacy", "#legacy", BufferType.CHANNEL).pinned)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
     fun anchorsPersistAndScopedReorderDoesNotMoveHiddenChatsOrMutatePins() =
         runTest {
             val db = inMemoryDb()
@@ -220,4 +304,6 @@ class AnchoredBufferRepositoryTest {
                 db.close()
             }
         }
+
+    private fun legacyPendingKey(placement: PortableChatPlacement): String = "pending-chat-placement:${Json.encodeToString(placement)}"
 }

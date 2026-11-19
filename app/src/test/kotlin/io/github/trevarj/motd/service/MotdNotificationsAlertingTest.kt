@@ -1,8 +1,12 @@
 package io.github.trevarj.motd.service
 
 import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
 import android.database.Cursor
 import android.os.CancellationSignal
@@ -41,6 +45,7 @@ import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -48,7 +53,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
@@ -66,6 +73,9 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
+import org.robolectric.shadows.ShadowShortcutManager
 import org.robolectric.shadows.ShadowSystemClock
 import java.time.Duration
 import java.util.concurrent.CountDownLatch
@@ -414,6 +424,13 @@ class MotdNotificationsAlertingTest {
             assertTrue(identityStyle.messages.all { it.person?.name?.toString() == "alert-peer" })
             assertTrue(identityStyle.messages.all { it.person?.icon != null })
 
+            val systemNotifications = context.getSystemService(NotificationManager::class.java)
+            val conversationChannel =
+                NotificationChannel("quiet-conversation", "Quiet", NotificationManager.IMPORTANCE_LOW).apply {
+                    setConversationId(MotdNotifications.CHANNEL_MESSAGES, shortcutId)
+                }
+            systemNotifications.createNotificationChannel(conversationChannel)
+
             preview.value = NotificationPreview.GENERIC
             testScheduler.runCurrent()
             assertTrue(postedNotifications().isEmpty())
@@ -423,11 +440,88 @@ class MotdNotificationsAlertingTest {
             assertEquals(listOf(replacement, replacement, replacement), bodies(generic))
             assertNull(generic.extras.getCharSequence(Notification.EXTRA_SUB_TEXT))
             assertNull(generic.shortcutId)
+            assertEquals(conversationChannel.id, generic.channelId)
+            assertEquals(NotificationManager.IMPORTANCE_LOW, systemNotifications.getNotificationChannel(generic.channelId).importance)
             val genericStyle = requireNotNull(NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(generic))
             assertEquals(replacement, genericStyle.conversationTitle.toString())
             assertTrue(genericStyle.messages.all { it.person?.name?.toString() == context.getString(R.string.notification_projection_sender) })
             assertTrue(genericStyle.messages.all { it.person?.key == null && it.person?.icon == null })
             assertMessageActions(generic, dmBufferId, null, automotiveMessaging = true)
+        }
+
+    @Test
+    @Config(sdk = [30], shadows = [RateLimitedShortcutManager::class])
+    fun genericPreviewAnonymizesPinnedShortcutWhenUpdatesAreThrottled() =
+        runTest {
+            val shortcuts = context.getSystemService(ShortcutManager::class.java)
+            val old =
+                ShortcutInfo
+                    .Builder(context, "motd:chat:$dmBufferId")
+                    .setShortLabel("private peer")
+                    .setLongLabel("private peer on private network")
+                    .setIntent(Intent(context, MainActivity::class.java).setAction(MotdNotifications.ACTION_OPEN_BUFFER))
+                    .build()
+            assertTrue(shortcuts.requestPinShortcut(old, null))
+            notifications =
+                MotdNotifications(
+                    context,
+                    db,
+                    ForegroundBufferTrackerImpl(),
+                    withPreview(MutableStateFlow(NotificationPreview.GENERIC)),
+                    applicationScope = backgroundScope,
+                )
+            testScheduler.runCurrent()
+
+            val pinned = shortcuts.pinnedShortcuts.single()
+            val genericLabel = context.getString(R.string.notification_projection_message)
+            assertEquals(genericLabel, pinned.shortLabel.toString())
+            assertEquals(genericLabel, pinned.longLabel.toString())
+            assertEquals(Intent.ACTION_MAIN, pinned.intent?.action)
+        }
+
+    @Implements(ShortcutManager::class)
+    class RateLimitedShortcutManager : ShadowShortcutManager() {
+        @Implementation
+        override fun updateShortcuts(shortcutInfoList: MutableList<ShortcutInfo>): Boolean = false
+    }
+
+    @Test
+    fun previewObserverClearsPrivateCardsOnReadFailureAndResubscribes() =
+        runTest {
+            val values = MutableStateFlow(NotificationPreview.FULL)
+            val firstSubscription = AtomicBoolean(true)
+            val interruptObserver = CompletableDeferred<Unit>()
+            val settings =
+                object : SettingsRepository by repo {
+                    override val notificationPreview =
+                        flow {
+                            if (firstSubscription.getAndSet(false)) {
+                                emit(values.value)
+                                interruptObserver.await()
+                                error("interrupted settings observer")
+                            }
+                            emitAll(values)
+                        }
+                }
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), settings, applicationScope = backgroundScope)
+            testScheduler.runCurrent()
+            val processor = EventProcessor(db, TypingTrackerImpl(), notifications)
+            processor.onRegistered(networkId, "me", emptyMap())
+            processor.process(networkId, chat("alert-peer", "private first", "observer-first"))
+            assertEquals(listOf("private first"), bodies(lane(null)))
+
+            interruptObserver.complete(Unit)
+            testScheduler.runCurrent()
+            assertTrue(postedNotifications().isEmpty())
+
+            testScheduler.advanceTimeBy(1_001)
+            testScheduler.runCurrent()
+            processor.process(networkId, chat("alert-peer", "private second", "observer-second", 2_000))
+            assertTrue("private second" in bodies(lane(null)))
+
+            values.value = NotificationPreview.GENERIC
+            testScheduler.runCurrent()
+            assertTrue(postedNotifications().isEmpty())
         }
 
     private fun withPreview(preview: MutableStateFlow<NotificationPreview>): SettingsRepository =
@@ -587,6 +681,7 @@ class MotdNotificationsAlertingTest {
                             networkId: Long,
                             bufferId: Long,
                             messageId: Long,
+                            silent: Boolean,
                         ) {
                             error("interrupted file offer")
                         }

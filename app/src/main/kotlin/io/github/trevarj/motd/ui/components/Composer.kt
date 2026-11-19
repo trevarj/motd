@@ -104,6 +104,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -141,6 +142,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
@@ -405,6 +407,25 @@ internal fun voiceGestureTarget(
         else -> VoiceGestureTarget.NONE
     }
 
+private val LocalAutocompleteCanPick = staticCompositionLocalOf<(() -> Boolean)?> { null }
+
+private class ComposerAutocompleteContent(
+    val panel: @Composable () -> Unit,
+    val canPick: () -> Boolean,
+)
+
+@Composable
+internal fun Modifier.composerAutocompleteClick(onClick: () -> Unit): Modifier {
+    val canPick = LocalAutocompleteCanPick.current
+    return if (canPick == null) {
+        clickable(onClick = onClick)
+    } else if (canPick()) {
+        clickable { if (canPick()) onClick() }
+    } else {
+        semantics { hideFromAccessibility() }
+    }
+}
+
 /** Modern chat composer with embedded tools and a stable, separate primary send action. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -581,9 +602,10 @@ fun Composer(
     val composerInkSeed = readingInk(MaterialTheme.colorScheme)
     val composerScheme = MaterialTheme.colorScheme
     val adjustPaletteReadability = LocalAdjustPaletteReadability.current
+    val fitComposerInk = adjustPaletteReadability || receivedBubbleColor != null
     val composerInk =
-        remember(composerInkSeed, composerFill, adjustPaletteReadability) {
-            if (adjustPaletteReadability) ensureContrast(composerInkSeed, listOf(composerFill), MESSAGE_TEXT_CONTRAST) else composerInkSeed
+        remember(composerInkSeed, composerFill, fitComposerInk) {
+            if (fitComposerInk) ensureContrast(composerInkSeed, listOf(composerFill), MESSAGE_TEXT_CONTRAST) else composerInkSeed
         }
     val composerCursorSeed = MaterialTheme.colorScheme.primary
     val composerCursor =
@@ -909,20 +931,22 @@ fun Composer(
     }
 
     // Retain the actual rendered data through fade/slide exit, not just visibility.
-    var retainedAutocomplete by remember { mutableStateOf<(@Composable () -> Unit)?>(null) }
+    var retainedAutocomplete by remember { mutableStateOf<ComposerAutocompleteContent?>(null) }
     val autocompleteVisibility = remember { MutableTransitionState(false) }
     autocompleteVisibility.targetState = visiblePanel == ComposerPanel.AUTOCOMPLETE
+    val autocompleteEnabled by rememberUpdatedState(enabled)
+    val latestAutocomplete by rememberUpdatedState(autocomplete)
+    val latestEmojiSuggestions by rememberUpdatedState(emojiSuggestions)
     if (visiblePanel == ComposerPanel.AUTOCOMPLETE) {
         val suggestions = emojiSuggestions
         val query = emojiQuery
-        val queryValue = editorValue
-        retainedAutocomplete =
+        val panel: (@Composable () -> Unit)? =
             if (suggestions.isNotEmpty() && query != null) {
                 {
                     EmojiAutocompletePanel(
                         suggestions = suggestions,
                         onPick = { suggestion ->
-                            applyEditorValue(replaceEmojiQuery(queryValue, query, suggestion.emoji))
+                            applyEditorValue(replaceEmojiQuery(editorValue, query, suggestion.emoji))
                         },
                         color = composerFill,
                         contentColor = composerInk,
@@ -932,6 +956,21 @@ fun Composer(
             } else {
                 autocomplete
             }
+        val sourceEditor =
+            if (suggestions.isEmpty()) {
+                remember(value) {
+                    val draft = parseIrcFormatting(value.text)
+                    TextFieldValue(draft.visibleText, TextRange(draft.visibleOffset(value.selection.start), draft.visibleOffset(value.selection.end)))
+                }
+            } else {
+                editorValue
+            }
+        val canPick = {
+            autocompleteVisibility.targetState && autocompleteEnabled && emojiPickerSession == null && latestValue == value && sourceEditor == editorValue &&
+                editorValue.selection == textFieldState.selection && editorValue.text.contentEquals(textFieldState.text) &&
+                latestEmojiSuggestions === suggestions && (suggestions.isNotEmpty() || latestAutocomplete === autocomplete)
+        }
+        retainedAutocomplete = panel?.let { ComposerAutocompleteContent(it, canPick) }
     }
     if (autocompleteVisibility.isIdle && !autocompleteVisibility.currentState) retainedAutocomplete = null
     AutocompleteOverlayLayout(
@@ -947,8 +986,14 @@ fun Composer(
                     fadeOut(MotdMotion.microFadeOut) +
                         slideOutVertically(animationSpec = MotdMotion.rowPlacement) { with(density) { 8.dp.roundToPx() } },
             ) {
-                Box(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                    retainedAutocomplete?.invoke()
+                val content = retainedAutocomplete
+                val active = autocompleteVisibility.targetState
+                val semantics = if (active) Modifier else Modifier.semantics { hideFromAccessibility() }
+                Box(Modifier.padding(horizontal = 8.dp, vertical = 4.dp).then(semantics)) {
+                    if (content != null) {
+                        val canPick = if (active) content.canPick else ({ false })
+                        CompositionLocalProvider(LocalAutocompleteCanPick provides canPick, content = content.panel)
+                    }
                 }
             }
         },
@@ -1107,8 +1152,12 @@ fun Composer(
                                             SenderLabel(
                                                 sender = selfNick,
                                                 color =
-                                                    remember(selfNick, composerFill, composerInk, nickColors) {
-                                                        nickColors.nick(selfNick, composerInk, listOf(composerFill), fallbackIsAuthored = true)
+                                                    remember(selfNick, composerFill, composerInk, nickColors, receivedBubbleColor) {
+                                                        if (receivedBubbleColor == null) {
+                                                            nickColors.nick(selfNick, composerInk, listOf(composerFill), fallbackIsAuthored = true)
+                                                        } else {
+                                                            ensureContrast(nickColors.nick(selfNick, composerInk), listOf(composerFill), MESSAGE_TEXT_CONTRAST)
+                                                        }
                                                     },
                                                 unread = false,
                                                 modifier =
@@ -2256,7 +2305,7 @@ private fun EmojiAutocompletePanel(
                     modifier =
                         Modifier
                             .fillMaxWidth()
-                            .clickable { onPick(suggestion) }
+                            .composerAutocompleteClick { onPick(suggestion) }
                             .heightIn(min = 48.dp)
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,

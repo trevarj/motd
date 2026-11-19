@@ -1060,6 +1060,10 @@ class EventProcessor
                 if (target.bufferId != canonicalExpectedRoomId || target.kind !in REDACTABLE_MESSAGE_KINDS) {
                     return@withTransaction null
                 }
+                reactionDao.deleteForTarget(target.bufferId, event.targetMsgid)
+                // Retry post-commit retirement without rewriting an existing tombstone.
+                if (target.kind == MessageKind.REDACTED) return@withTransaction target.bufferId to target.id
+
                 val tombstone =
                     "Message deleted by ${event.source.nick}" +
                         event.reason
@@ -1078,8 +1082,7 @@ class EventProcessor
                         failed = false,
                     ),
                 )
-                reactionDao.deleteForTarget(target.bufferId, event.targetMsgid)
-                if (target.kind == MessageKind.REDACTED) null else target.bufferId to target.id
+                target.bufferId to target.id
             }
         }
 
@@ -2676,7 +2679,7 @@ class EventProcessor
                 )
             recordPlaybackResult(networkId, result)
             traceMessageWrite("canonical_dcc_file_offer", result.event, historical)
-            dccTransferDao.insertIgnore(
+            val transfer =
                 DccTransferEntity(
                     networkId = networkId,
                     timelineEventId = result.event.id,
@@ -2701,11 +2704,11 @@ class EventProcessor
                     createdAt = e.ctx.serverTime,
                     expiresAt = if (historical) e.ctx.serverTime else e.ctx.serverTime + DCC_OFFER_EXPIRY_MS,
                     updatedAt = e.ctx.serverTime,
-                ),
-            )
+                )
+            val transferId = dccTransferDao.insertIgnore(transfer)
             if (origin.notifies && !historical) {
                 presentNotification(result.event.id) {
-                    notifier.onDccTransferOffer(networkId, result.event.bufferId, result.event.id)
+                    notifier.onDccTransferOffer(networkId, result.event.bufferId, result.event.id, silent = transferId == -1L)
                 }
             }
         }
@@ -4771,11 +4774,12 @@ interface MessageNotifier {
     /** Cancel notification state after Join/Dismiss resolves an invitation. */
     suspend fun onInvitationResolved(messageId: Long) = Unit
 
-    /** A newly persisted live DCC file offer. */
+    /** Present a live DCC file offer; a reclaimed presentation must be silent. */
     suspend fun onDccTransferOffer(
         networkId: Long,
         bufferId: Long,
         messageId: Long,
+        silent: Boolean,
     ) = Unit
 
     /** No-op notifier for tests / headless contexts. */

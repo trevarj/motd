@@ -285,6 +285,40 @@ private fun parseHexColor(
 
 private fun Char.isHexDigit(): Boolean = isDigit() || lowercaseChar() in 'a'..'f'
 
+private const val IRC_COLOR_ARGUMENT_SEPARATOR = "$IRC_BOLD$IRC_BOLD"
+
+fun ircColorArgumentSeparator(
+    controls: CharSequence,
+    start: Int,
+    end: Int,
+    next: Char?,
+): String {
+    if (start == end || next == null || (next != ',' && !next.isHexDigit())) return ""
+    var control = end - 1
+    while (control >= start && !controls[control].isISOControl()) control--
+    if (control < start) return ""
+    val arguments = end - control - 1
+    val couldExtend =
+        when (controls[control]) {
+            IRC_COLOR -> {
+                when {
+                    next == ',' -> arguments in 1..2
+                    next.isDigit() -> arguments <= 1 || controls[end - 2] == ','
+                    else -> false
+                }
+            }
+
+            IRC_HEX_COLOR -> {
+                if (next == ',') arguments == 6 else arguments == 0
+            }
+
+            else -> {
+                false
+            }
+        }
+    return if (couldExtend) IRC_COLOR_ARGUMENT_SEPARATOR else ""
+}
+
 private fun buildRuns(states: List<IrcFormatState>): List<IrcStyleRun> {
     if (states.isEmpty()) return emptyList()
     val runs = ArrayList<IrcStyleRun>()
@@ -397,8 +431,11 @@ internal fun serializeVisibleIrc(
         var previous = IrcFormatState()
         visible.indices.forEach { index ->
             val next = states[index]
-            append(stateTransition(previous, next))
-            append(visible[index])
+            val char = visible[index]
+            if (previous != next) {
+                append(stateTransition(previous, next, if (char == ',' && index == visible.lastIndex) null else char))
+            }
+            append(char)
             previous = next
         }
         if (!previous.isDefault) append(IRC_RESET)
@@ -409,7 +446,9 @@ fun restoreIrcState(state: IrcFormatState): String = stateTransition(IrcFormatSt
 private fun stateTransition(
     from: IrcFormatState,
     to: IrcFormatState,
+    next: Char? = null,
 ): String {
+    if (from == to) return ""
     if (!from.isDefault && to.isDefault) return IRC_RESET.toString()
     return buildString {
         if (from.bold != to.bold) append(IRC_BOLD)
@@ -422,6 +461,7 @@ private fun stateTransition(
             if (from.background != null && to.background == null && to.foreground != null) append(IRC_COLOR)
             append(colorTransition(to.foreground, to.background))
         }
+        append(ircColorArgumentSeparator(this, 0, length, next))
     }
 }
 
@@ -524,10 +564,17 @@ private fun splitVisibleUtf8(
             val next = end + Character.charCount(codePoint)
             val state = states[end]
             // State controls and color digits are all single-byte UTF-8.
-            val transitionBytes = if (previous == state) 0 else stateTransition(previous, state).length
+            val transitionBytes = if (previous == state) 0 else stateTransition(previous, state, visible[end]).length
             val codePointBytes = utf8Bytes(codePoint)
             val closingResetBytes = if (state.isDefault) 0 else 1
-            if (bytes + transitionBytes + codePointBytes + closingResetBytes > maxBytes) break
+            if (bytes + transitionBytes + codePointBytes + closingResetBytes > maxBytes) {
+                if (visible[end] == ',' &&
+                    bytes + stateTransition(previous, state).length + codePointBytes + closingResetBytes <= maxBytes
+                ) {
+                    end = next
+                }
+                break
+            }
             bytes += transitionBytes + codePointBytes
             previous = state
             end = next

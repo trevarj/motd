@@ -23,8 +23,10 @@ import io.github.trevarj.motd.data.db.TimelineEventEntity
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.repo.ChatRoomRevisions
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
+import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.dickord.DICKORD_CHANNEL_TAG
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
@@ -38,11 +40,14 @@ import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.Prefix
 import io.github.trevarj.motd.push.PushEventHandler
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -1413,12 +1418,10 @@ class EventProcessorTest {
     @Test
     fun liveChatClearsOnlyItsCasemappedTypistAndHistoryPushAndSelfDoNot() =
         runTest {
-            val typing =
-                TypingTrackerImpl(
-                    backgroundScope,
-                    io.github.trevarj.motd.di
-                        .AppClock { testScheduler.currentTime },
-                )
+            // Room uses real executors; waiting for it can advance runTest's background timers.
+            val typingScheduler = TestCoroutineScheduler()
+            val typingScope = CoroutineScope(backgroundScope.coroutineContext + typingScheduler + StandardTestDispatcher(typingScheduler))
+            val typing = TypingTrackerImpl(typingScope, AppClock { typingScheduler.currentTime })
             val recording = EventProcessor(db, typing, MessageNotifier.Noop)
             recording.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "rfc1459"))
             for (kind in listOf(IrcEvent.ChatKind.PRIVMSG, IrcEvent.ChatKind.ACTION, IrcEvent.ChatKind.NOTICE)) {
@@ -1426,12 +1429,16 @@ class EventProcessorTest {
                 for (nick in listOf("Alice[", "Bob")) {
                     recording.process(networkId, IrcEvent.TagMessage(ctx(), Prefix(nick), target, "active", null, null))
                 }
-                val room = db.bufferDao().byName(networkId, target)!!
+                val room = db.bufferDao().byName(networkId, target.lowercase())!!
+                val peers = listOf("Alice[", "Bob")
+                assertEquals("$kind TAGMSG", peers, typing.typingNicks(room.id).value)
                 val message = IrcEvent.ChatMessage(ctx("live-${kind.name}"), kind, Prefix("ALICE{"), target, "sent", false, null)
                 recording.process(networkId, IrcEvent.HistoryBatch(target, listOf(message.copy(ctx = ctx("history-${kind.name}")))))
+                assertEquals("$kind history", peers, typing.typingNicks(room.id).value)
                 recording.processPush(networkId, message.copy(ctx = ctx("push-${kind.name}")))
+                assertEquals("$kind push", peers, typing.typingNicks(room.id).value)
                 recording.process(networkId, message.copy(ctx = ctx("self-${kind.name}"), source = Prefix("me"), isSelf = true))
-                assertEquals(listOf("Alice[", "Bob"), typing.typingNicks(room.id).value)
+                assertEquals("$kind self", peers, typing.typingNicks(room.id).value)
                 recording.process(networkId, message)
                 assertEquals(listOf("Bob"), typing.typingNicks(room.id).value)
                 recording.process(networkId, IrcEvent.TagMessage(ctx(), Prefix("ALICE{"), target, "paused", null, null))
@@ -2830,6 +2837,7 @@ class EventProcessorTest {
     @Test
     fun redaction_tombstonesKnownMessageInTargetHistory_andRemovesItsReactions() =
         runTest {
+            ChatRoomRevisions.install(db.openHelper.writableDatabase)
             val notified = mutableListOf<Pair<Long, Long>>()
             val wrongRoom = IrcEvent.MessageRedacted(ctx(), Prefix("oper"), "#other", "m1", "wrong room")
             BufferStore(db).getOrCreate(networkId, "#other", "#other", BufferType.CHANNEL)
@@ -2846,6 +2854,7 @@ class EventProcessorTest {
                             assertEquals(MessageKind.REDACTED, db.messageDao().byId(messageId)?.kind)
                             processor.process(networkId, wrongRoom)
                             notified += bufferId to messageId
+                            if (notified.size == 1) error("interrupted retirement")
                         }
                     },
                 )
@@ -2905,8 +2914,11 @@ class EventProcessorTest {
             assertNull(redacted.ircFormattedText)
             assertFalse(redacted.hasMention)
             assertEquals(listOf(buffer.id to redacted.id), notified)
-            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(redaction)))
-            assertEquals(listOf(buffer.id to redacted.id), notified)
+            val roomRevision = checkNotNull(db.messageDao().roomRevision(buffer.id))
+            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(redaction.copy(reason = "duplicate"))))
+            assertEquals(listOf(buffer.id to redacted.id, buffer.id to redacted.id), notified)
+            assertEquals(redacted, db.messageDao().byId(redacted.id))
+            assertEquals(roomRevision, db.messageDao().roomRevision(buffer.id))
             assertTrue(
                 db
                     .reactionDao()
@@ -5399,26 +5411,20 @@ class EventProcessorTest {
     @Test
     fun dccFileOffer_createsQueryTimelineRow_transferState_andNotification() =
         runTest {
-            val notified = mutableListOf<Triple<Long, Long, Long>>()
+            val presentations = mutableListOf<Pair<Long, Boolean>>()
             val recording =
                 EventProcessor(
                     db,
                     TypingTrackerImpl(),
-                    object : MessageNotifier {
-                        override suspend fun onIncoming(
-                            networkId: Long,
-                            bufferId: Long,
-                            type: BufferType,
-                            hasMention: Boolean,
-                            message: IrcEvent.ChatMessage,
-                        ) = Unit
-
+                    object : MessageNotifier by MessageNotifier.Noop {
                         override suspend fun onDccTransferOffer(
                             networkId: Long,
                             bufferId: Long,
                             messageId: Long,
+                            silent: Boolean,
                         ) {
-                            notified += Triple(networkId, bufferId, messageId)
+                            presentations += messageId to silent
+                            if (presentations.size == 1) error("interrupted after posting")
                         }
                     },
                 )
@@ -5444,9 +5450,14 @@ class EventProcessorTest {
                 )
 
             recording.process(networkId, offer)
+            val buffer = db.bufferDao().byName(networkId, "alice")!!
+            val interrupted = pagingList(buffer.id).single()
+            assertFalse(interrupted.notificationClaimed)
+            assertFalse(interrupted.notificationHandled)
+
+            recording.process(networkId, offer)
             recording.process(networkId, offer)
 
-            val buffer = db.bufferDao().byName(networkId, "alice")!!
             assertEquals(BufferType.QUERY, buffer.type)
             val row = pagingList(buffer.id).single()
             assertEquals(MessageKind.DCC_TRANSFER, row.kind)
@@ -5460,8 +5471,9 @@ class EventProcessorTest {
             assertEquals(DccTransferState.OFFERED, transfer.state)
             assertEquals("photo set.jpg", transfer.displayFilename)
             assertEquals(310_000L, transfer.expiresAt)
-            assertEquals(1, notified.size)
-            assertEquals(row.id, notified.single().third)
+            assertEquals(listOf(row.id to false, row.id to true), presentations)
+            assertFalse(row.notificationClaimed)
+            assertTrue(row.notificationHandled)
         }
 
     @Test

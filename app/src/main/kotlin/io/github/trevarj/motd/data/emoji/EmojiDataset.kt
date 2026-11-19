@@ -78,7 +78,7 @@ class EmojiDataset internal constructor(
                 }
             }
             if (terminal == null) {
-                start = continuationEnd(text, start + Character.charCount(Character.codePointAt(text, start)))
+                start = continuationEnd(text, codePointOrRegionalPairEnd(text, start))
                 continue
             }
             val completeEnd = continuationEnd(text, end)
@@ -118,6 +118,21 @@ class EmojiDataset internal constructor(
         return node.terminal
     }
 
+    private fun codePointOrRegionalPairEnd(
+        text: CharSequence,
+        offset: Int,
+    ): Int {
+        val codePoint = Character.codePointAt(text, offset)
+        val end = offset + Character.charCount(codePoint)
+        return if (codePoint in 0x1F1E6..0x1F1FF && end < text.length &&
+            Character.codePointAt(text, end) in 0x1F1E6..0x1F1FF
+        ) {
+            end + 2
+        } else {
+            end
+        }
+    }
+
     private fun continuationEnd(
         text: CharSequence,
         offset: Int,
@@ -127,7 +142,7 @@ class EmojiDataset internal constructor(
             val cp = Character.codePointAt(text, end)
             if (cp == 0x200D) {
                 end++
-                if (end < text.length) end += Character.charCount(Character.codePointAt(text, end))
+                if (end < text.length) end = codePointOrRegionalPairEnd(text, end)
             } else if (cp == 0xFE0E || cp == 0xFE0F || cp == 0x20E3 ||
                 cp in 0x1F3FB..0x1F3FF || cp in 0xE0020..0xE007F
             ) {

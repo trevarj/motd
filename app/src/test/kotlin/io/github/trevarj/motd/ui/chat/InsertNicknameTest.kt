@@ -6,6 +6,9 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import io.github.trevarj.motd.irc.format.IRC_BOLD
+import io.github.trevarj.motd.irc.format.IRC_COLOR
+import io.github.trevarj.motd.irc.format.IrcColor
+import io.github.trevarj.motd.irc.format.IrcFormatState
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -65,6 +68,32 @@ class InsertNicknameTest {
         val parsed = parseIrcFormatting(result.text)
         assertTrue(parsed.stateAtVisible(parsed.visibleText.lastIndex).bold)
         assertEquals(TextRange(9), result.selection)
+    }
+
+    @Test fun moved_foreground_color_does_not_consume_the_unselected_suffix() {
+        val raw = "hey a${IRC_COLOR}04l,05 tail"
+        val suffixStart = raw.indexOf(',')
+        for (selection in listOf(TextRange(4, suffixStart), TextRange(suffixStart, 4))) {
+            val result = insertNickname(TextFieldValue(raw, selection), "alice")
+            val parsed = parseIrcFormatting(result.text)
+
+            assertEquals("hey alice,05 tail", parsed.visibleText)
+            assertEquals(TextRange(9), result.selection)
+            assertTrue(parsed.stateAtVisible(8).isDefault)
+            assertEquals(IrcFormatState(foreground = IrcColor.Numeric(4)), parsed.stateAtVisible(9))
+            assertEquals(parsed.stateAtVisible(9), parsed.stateAtVisible(parsed.visibleText.lastIndex))
+        }
+    }
+
+    @Test fun moved_color_reset_does_not_consume_unselected_digits() {
+        val raw = "hey ${IRC_COLOR}04a${IRC_COLOR}l05 tail"
+        val result = insertNickname(TextFieldValue(raw, TextRange(7, raw.indexOf("05"))), "alice")
+        val parsed = parseIrcFormatting(result.text)
+
+        assertEquals("hey alice 05 tail", parsed.visibleText)
+        assertEquals(TextRange(13), result.selection)
+        assertEquals(IrcFormatState(foreground = IrcColor.Numeric(4)), parsed.stateAtVisible(8))
+        assertTrue(parsed.stateAtVisible(10).isDefault)
     }
 
     @Test fun annotated_styles_on_surrounding_text_are_preserved() {

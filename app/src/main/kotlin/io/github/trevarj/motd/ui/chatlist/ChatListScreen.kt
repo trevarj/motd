@@ -1770,16 +1770,25 @@ private fun ChatList(
         remember(rows, folders, friends, fools, activeBufferId) {
             presentChatFolders(rows, folders, friends, fools, activeBufferId)
         }
-    var anchoredRows by remember(presentation.anchored) { mutableStateOf(presentation.anchored) }
+    val authoritativeAnchorIds = remember(presentation.anchored) { presentation.anchored.map(ChatListRow::bufferId) }
+    // Discard pending moves when the visible anchor order changes, not when a row's content changes.
+    var anchoredIds by remember(authoritativeAnchorIds) { mutableStateOf(authoritativeAnchorIds) }
+    val anchoredRows =
+        remember(presentation.anchored, anchoredIds) {
+            if (anchoredIds == authoritativeAnchorIds) {
+                presentation.anchored
+            } else {
+                val rowsById = presentation.anchored.associateBy(ChatListRow::bufferId)
+                anchoredIds.map(rowsById::getValue)
+            }
+        }
     val sections = presentation.remaining.copy(anchored = anchoredRows)
 
     fun moveAnchor(
         id: Long,
         delta: Int,
     ) {
-        val ids = moveAnchoredChat(anchoredRows.map(ChatListRow::bufferId), id, delta)
-        val byId = anchoredRows.associateBy(ChatListRow::bufferId)
-        anchoredRows = ids.map(byId::getValue)
+        anchoredIds = moveAnchoredChat(anchoredIds, id, delta)
     }
 
     // Fools section is collapsed by default; state is local to the screen (accepted).
@@ -2172,7 +2181,7 @@ private fun ChatList(
                                 canMoveDown = anchoredRows.last().bufferId != row.bufferId,
                                 enabled = !selectionActive,
                                 onMove = { delta -> moveAnchor(row.bufferId, delta) },
-                                onCommit = { onReorderAnchored(anchoredRows.map(ChatListRow::bufferId)) },
+                                onCommit = { onReorderAnchored(anchoredIds) },
                                 modifier =
                                     Modifier.animateItem(
                                         fadeInSpec = ChatListItemMotion.fadeInSpec,

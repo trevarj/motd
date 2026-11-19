@@ -18,6 +18,8 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import kotlinx.coroutines.flow.Flow
 
+internal const val PENDING_CHAT_PLACEMENT_PREFIX = "pending-chat-placement:"
+
 // Room is the authoritative boundary for fixed persistence queries. Prefer typed entity or
 // projection methods here; keep raw SQL at callers only when predicates are genuinely dynamic.
 
@@ -110,6 +112,12 @@ interface NetworkDao {
     @Query("DELETE FROM users WHERE networkId IN (:networkIds)")
     suspend fun deleteUsersForNetworks(networkIds: List<Long>)
 
+    @Query("DELETE FROM app_state WHERE `key` GLOB :indexedPattern OR `key` GLOB :legacyPattern")
+    suspend fun deletePendingChatPlacements(
+        indexedPattern: String,
+        legacyPattern: String,
+    )
+
     @Query("DELETE FROM networks WHERE id IN (:networkIds)")
     suspend fun deleteNetworkRows(networkIds: List<Long>)
 
@@ -122,6 +130,12 @@ interface NetworkDao {
         deleteMembersForNetworks(networkIds)
         deleteReactionsForNetworks(networkIds)
         deleteUsersForNetworks(networkIds)
+        networkIds.forEach { networkId ->
+            deletePendingChatPlacements(
+                "$PENDING_CHAT_PLACEMENT_PREFIX$networkId:*",
+                "$PENDING_CHAT_PLACEMENT_PREFIX{\"networkId\":$networkId,*",
+            )
+        }
         deleteNetworkRows(networkIds)
         return networkIds
     }
@@ -2951,6 +2965,9 @@ interface AppStateDao {
 
     @Query("SELECT `key` FROM app_state WHERE `key` LIKE :pattern ORDER BY `key`")
     suspend fun keysLike(pattern: String): List<String>
+
+    @Query("SELECT `key` FROM app_state WHERE `key` GLOB :pattern ORDER BY `key`")
+    suspend fun keysGlob(pattern: String): List<String>
 
     @Query("DELETE FROM app_state WHERE `key` = :key")
     suspend fun delete(key: String)

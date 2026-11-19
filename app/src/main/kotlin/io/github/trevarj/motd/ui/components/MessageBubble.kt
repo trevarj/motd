@@ -703,7 +703,11 @@ fun MessageBubble(
     val bubbleColor = bubbleFill.compositeOver(scheme.background)
     val textColor = messageContentColor(bubbleRoles.normalContent, bubbleColor, dimmed, bubbleRoles.normalContainer, adjustPaletteReadability = true)
     val bodyInk = readingInk(scheme)
-    val bodyColor = remember(bodyInk, bubbleColor, bubbleRoles, dimmed, adjustPaletteReadability) { messageContentColor(bodyInk, bubbleColor, dimmed, bubbleRoles.normalContainer, adjustPaletteReadability) }
+    val explicitFill =
+        kind == MessageKind.PRIVMSG && !mentionHighlighted &&
+            (if (isSelf) comfortableBubbleColors.sent else comfortableBubbleColors.received) != null
+    val fitBodyInk = adjustPaletteReadability || explicitFill
+    val bodyColor = remember(bodyInk, bubbleColor, bubbleRoles, dimmed, fitBodyInk) { messageContentColor(bodyInk, bubbleColor, dimmed, bubbleRoles.normalContainer, fitBodyInk) }
     // Tighten the inner grouped edge while retaining the shared outer silhouette.
     val groupedCorner = spacing.bubbleGroupedCorner
     val topCorner = if (showSender) spacing.bubbleCorner else groupedCorner
@@ -787,7 +791,10 @@ fun MessageBubble(
                     }
                 val normalNameBackground =
                     if (senderIsFriend) scheme.primary.copy(alpha = 0.12f).compositeOver(bubbleRoles.normalContainer) else bubbleRoles.normalContainer
-                val nameColor = remember(nameInk, nameBackground, normalNameBackground, dimmed, nickColors, sender) { messageContentColor(nameInk, nameBackground, dimmed, normalNameBackground, !nickColors.preservesAuthoredIdentity(sender, fallbackIsAuthored = true)) }
+                val nameColor =
+                    remember(nameInk, nameBackground, normalNameBackground, dimmed, nickColors, sender, explicitFill) {
+                        messageContentColor(nameInk, nameBackground, dimmed, normalNameBackground, explicitFill || !nickColors.preservesAuthoredIdentity(sender, fallbackIsAuthored = true))
+                    }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.nicknameClicks(onSenderClick, onSenderLongClick),
@@ -844,6 +851,7 @@ fun MessageBubble(
                     remember(
                         selecting,
                         adjustPaletteReadability,
+                        explicitFill,
                         nickColors,
                         text,
                         mediaUrls,
@@ -877,7 +885,8 @@ fun MessageBubble(
                             mentionColorsEnabled = nickColors.enabled,
                             onMentionClick = onMentionClick.takeUnless { selecting },
                             adjustPaletteReadability = adjustPaletteReadability,
-                            fitMentionColor = { !nickColors.preservesAuthoredIdentity(it) },
+                            fitMentionColor = { explicitFill || !nickColors.preservesAuthoredIdentity(it) },
+                            fitLinkColor = fitBodyInk,
                             highlightNick = triggerNick,
                             highlightCaseMapping = highlightCaseMapping,
                             receiptNickColor = nickColors::mention,
@@ -2392,18 +2401,13 @@ internal fun AnnotatedString.Builder.appendRichText(
     val renderedOffsets = inlineCodeRenderedOffsets(formatted.visibleText, segments)
     val bodyStart = length
     val receiptRules =
-        highlightCaseMapping?.takeIf { highlightNick != null }?.let {
-            IrcIdentityRules(caseMapping = IrcCaseMapping.from(it))
-        }
-    val receiptNick = highlightNick?.let { receiptRules?.normalize(it) }
-    val bodyMentionColor: (String) -> Color? = { token ->
-        mentionColor(token) ?: if (receiptNick != null && receiptRules?.normalize(token) == receiptNick &&
-            (mentionColorsEnabled || nickMentionStyle != NickMentionStyle.NONE || onMentionClick != null)
-        ) {
-            if (mentionColorsEnabled || nickMentionStyle == NickMentionStyle.CHIP) receiptNickColor(token) else Color.Unspecified
+        if (highlightNick != null && (mentionColorsEnabled || nickMentionStyle != NickMentionStyle.NONE || onMentionClick != null)) {
+            highlightCaseMapping?.let { IrcIdentityRules(caseMapping = IrcCaseMapping.from(it)) }
         } else {
             null
         }
+    val receiptColor: (String) -> Color = { token ->
+        if (mentionColorsEnabled || nickMentionStyle == NickMentionStyle.CHIP) receiptNickColor(token) else Color.Unspecified
     }
 
     fun readingStyle(
@@ -2459,9 +2463,11 @@ internal fun AnnotatedString.Builder.appendRichText(
                     segment.text,
                     readingPlain,
                     readingLink,
-                    bodyMentionColor,
+                    mentionColor,
                     mentionStyle,
                     onMentionClick,
+                    if (receiptRules != null && highlightNick != null) receiptRules.mentionRanges(segment.text, highlightNick) else emptyList(),
+                    receiptColor,
                 )
             }
         }
@@ -2543,22 +2549,27 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendPlainLinksAnd
     mentionColor: (String) -> androidx.compose.ui.graphics.Color?,
     mentionStyle: (String, Color) -> SpanStyle,
     onMentionClick: ((String) -> Unit)?,
+    receiptRanges: List<IntRange>,
+    receiptColor: (String) -> Color,
 ) {
-    val urls = extractUrls(text)
-    if (urls.isEmpty()) {
-        withStyle(plainStyle) { appendMentionColored(text, mentionColor, onMentionClick = onMentionClick, mentionTokenStyle = mentionStyle) }
-        return
+    fun appendPlain(
+        start: Int,
+        end: Int,
+    ) {
+        withStyle(plainStyle) {
+            appendMentionRuns(text, start, end, mentionColor, mentionStyle, onMentionClick, receiptRanges, receiptColor)
+        }
     }
     var cursor = 0
-    for (url in urls) {
+    for (url in extractUrls(text)) {
         val at = text.indexOf(url, cursor)
         if (at < 0) continue
-        withStyle(plainStyle) { appendMentionColored(text.substring(cursor, at), mentionColor, onMentionClick = onMentionClick, mentionTokenStyle = mentionStyle) }
+        appendPlain(cursor, at)
         withLink(LinkAnnotation.Url(url)) { withStyle(linkStyle) { append(url) } }
         cursor = at + url.length
     }
-    if (cursor < text.length) {
-        withStyle(plainStyle) { appendMentionColored(text.substring(cursor), mentionColor, onMentionClick = onMentionClick, mentionTokenStyle = mentionStyle) }
+    if (cursor == 0 || cursor < text.length) {
+        appendPlain(cursor, text.length)
     }
 }
 
@@ -2615,49 +2626,80 @@ internal fun androidx.compose.ui.text.AnnotatedString.Builder.appendMentionColor
     onMentionClick: ((String) -> Unit)? = null,
     mentionTokenStyle: ((String, Color) -> SpanStyle)? = null,
 ) {
-    var i = 0
-    val n = text.length
-    while (i < n) {
-        val c = text[i]
-        // A token starts at a nick char, or an `@` immediately followed by a nick char.
-        val atMention = c == '@' && i + 1 < n && isNickChar(text[i + 1])
-        if (isNickChar(c) || atMention) {
-            val start = i
-            if (atMention) i++ // skip the leading '@' when scanning the nick body
+    appendMentionRuns(text, 0, text.length, mentionColor, mentionTokenStyle ?: { _, color -> mentionStyle(color) }, onMentionClick)
+}
+
+private fun AnnotatedString.Builder.appendMentionRuns(
+    text: String,
+    from: Int,
+    to: Int,
+    mentionColor: (String) -> Color?,
+    mentionStyle: (String, Color) -> SpanStyle,
+    onMentionClick: ((String) -> Unit)?,
+    receiptRanges: List<IntRange> = emptyList(),
+    receiptColor: ((String) -> Color)? = null,
+) {
+    fun appendMention(
+        start: Int,
+        end: Int,
+        nick: String,
+        color: Color,
+    ) {
+        val mentionStart = length
+        val style = mentionStyle(nick, color)
+        val textStyle = if (style.background == Color.Unspecified) style else style.copy(background = Color.Unspecified)
+        withStyle(textStyle) { append(text, start, end) }
+        if (style.background != Color.Unspecified) {
+            addStringAnnotation(NICK_CHIP_RANGE, style.background.value.toString(), mentionStart, length)
+        }
+        if (onMentionClick != null) {
+            addLink(
+                LinkAnnotation.Clickable(
+                    tag = "mention:$nick",
+                    styles = TextLinkStyles(style = SpanStyle()),
+                    linkInteractionListener = { onMentionClick(nick) },
+                ),
+                mentionStart,
+                length,
+            )
+        }
+    }
+
+    var i = from
+    var receiptIndex = if (from == 0 || receiptRanges.isEmpty()) 0 else receiptRanges.binarySearchBy(from) { it.first }.let { if (it >= 0) it else -it - 1 }
+    while (i < to) {
+        while (receiptRanges.getOrNull(receiptIndex)?.first?.let { it < i } == true) receiptIndex++
+        val receipt = receiptRanges.getOrNull(receiptIndex)?.takeIf { it.last < to }
+        val receiptStart = receipt?.let { if (it.first > i && text[it.first - 1] == '@') it.first - 1 else it.first } ?: to
+        if (receipt != null && i == receiptStart) {
+            val end = receipt.last + 1
+            val nick = text.substring(receipt.first, end)
+            val color = mentionColor(nick) ?: receiptColor?.invoke(nick)
+            if (color == null) append(text, i, end) else appendMention(i, end, nick, color)
+            i = end
+            continue
+        }
+        val start = i
+        val atMention = text[i] == '@' && i + 1 < receiptStart && isNickChar(text[i + 1])
+        if (isNickChar(text[i]) || atMention) {
+            if (atMention) i++
             val nickStart = i
-            while (i < n && isNickChar(text[i])) i++
-            val nick = text.substring(nickStart, i)
-            val color = mentionColor(nick)
-            if (color != null) {
-                // Color the whole token including a leading '@' so the mention reads as one unit.
-                val mentionStart = length
-                val style = mentionTokenStyle?.invoke(nick, color) ?: mentionStyle(color)
-                val textStyle = if (style.background == Color.Unspecified) style else style.copy(background = Color.Unspecified)
-                withStyle(textStyle) { append(text.substring(start, i)) }
-                if (style.background != Color.Unspecified) {
-                    addStringAnnotation(NICK_CHIP_RANGE, style.background.value.toString(), mentionStart, length)
+            while (i < receiptStart && isNickChar(text[i])) i++
+            val splitStart = !atMention && start > from && isNickChar(text[start - 1])
+            val splitEnd = i == receiptStart && i < to && isNickChar(text[i])
+            if (!splitStart && !splitEnd) {
+                val nick = text.substring(nickStart, i)
+                val color = mentionColor(nick)
+                if (color != null) {
+                    appendMention(start, i, nick, color)
+                    continue
                 }
-                if (onMentionClick != null) {
-                    addLink(
-                        LinkAnnotation.Clickable(
-                            tag = "mention:$nick",
-                            styles = TextLinkStyles(style = SpanStyle()),
-                            linkInteractionListener = { onMentionClick(nick) },
-                        ),
-                        mentionStart,
-                        length,
-                    )
-                }
-            } else {
-                append(text.substring(start, i))
             }
         } else {
-            // Non-nick run (whitespace/punctuation): append up to the next potential token start.
-            val start = i
-            while (i < n && !isNickChar(text[i]) && text[i] != '@') i++
-            if (i == start) i++ // lone '@' not starting a mention
-            append(text.substring(start, i))
+            while (i < receiptStart && !isNickChar(text[i]) && text[i] != '@') i++
+            if (i == start) i++
         }
+        append(text, start, i)
     }
 }
 

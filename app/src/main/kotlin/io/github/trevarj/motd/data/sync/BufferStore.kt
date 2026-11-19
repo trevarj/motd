@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.PENDING_CHAT_PLACEMENT_PREFIX
 import io.github.trevarj.motd.data.db.RoomAliasEntity
 import io.github.trevarj.motd.data.db.RoomAliasNamespace
 import io.github.trevarj.motd.data.db.RoomEntity
@@ -21,6 +22,7 @@ import io.github.trevarj.motd.data.repo.PortableChatPlacement
 import io.github.trevarj.motd.service.NotificationRoomMergeListener
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -35,12 +37,27 @@ class BufferStore
         private val chatFolders: ChatFolderRepository = ChatFolderRepository(db),
         private val notificationRoomMergeListener: NotificationRoomMergeListener = NotificationRoomMergeListener.Noop,
     ) {
-        private val prefix = "pending-chat-placement:"
+        private val placementEncoder = Base64.getUrlEncoder().withoutPadding()
 
-        private suspend fun pending() =
-            db.appStateDao().keysLike("$prefix%").map { key ->
-                key to Json.decodeFromString<PortableChatPlacement>(key.removePrefix(prefix))
-            }
+        private fun pendingIdentityPrefix(
+            networkId: Long,
+            chatType: BufferType,
+            identityKind: FolderIdentityKind,
+            identityValue: String,
+        ): String {
+            val encodedValue = placementEncoder.encodeToString(identityValue.encodeToByteArray())
+            return "$PENDING_CHAT_PLACEMENT_PREFIX$networkId:${chatType.name}:${identityKind.name}:$encodedValue:"
+        }
+
+        private fun pendingKey(placement: PortableChatPlacement): String =
+            pendingIdentityPrefix(placement.networkId, placement.chatType, placement.identityKind, placement.identityValue) +
+                Json.encodeToString(placement)
+
+        private fun pendingPayload(key: String): String = key.substring(key.indexOf('{', PENDING_CHAT_PLACEMENT_PREFIX.length))
+
+        private fun decodePending(key: String): PortableChatPlacement = Json.decodeFromString(pendingPayload(key))
+
+        private suspend fun pending() = db.appStateDao().keysGlob("$PENDING_CHAT_PLACEMENT_PREFIX*").map { key -> key to decodePending(key) }
 
         private suspend fun nextRevision(): Long {
             val keys = db.appStateDao().keysLike("chat-placement-revision:%")
@@ -192,7 +209,7 @@ class BufferStore
                 val normalized = placement.copy(anchorOrder = orders[placement.identity()])
                 val room = resolve(normalized)
                 if (room == null) {
-                    db.appStateDao().insert(AppStateEntity(prefix + Json.encodeToString(normalized)))
+                    db.appStateDao().insert(AppStateEntity(pendingKey(normalized)))
                 } else {
                     apply(room.id, normalized)
                 }
@@ -223,25 +240,60 @@ class BufferStore
                 }
         }
 
-        private suspend fun claimPendingPlacement(roomId: Long) =
-            db.withTransaction {
-                val room = db.bufferDao().observeById(roomId) ?: return@withTransaction
-                val matches =
-                    pending().filter { (_, placement) ->
-                        placement.networkId == room.networkId && placement.chatType == room.type && resolve(placement)?.id == room.id
+        private suspend fun claimPendingPlacement(room: RoomEntity) {
+            if (room.type == BufferType.SERVER) return
+            val state = db.appStateDao()
+            state.keysGlob("$PENDING_CHAT_PLACEMENT_PREFIX{*").forEach { key ->
+                state.insert(AppStateEntity(pendingKey(decodePending(key))))
+                state.delete(key)
+            }
+
+            val aliases = db.roomAliasDao().forRoom(room.id)
+            val identities =
+                buildSet {
+                    val channel = room.type == BufferType.CHANNEL
+                    add((if (channel) FolderIdentityKind.CHANNEL else FolderIdentityKind.NICK) to room.name)
+                    for (alias in aliases) {
+                        if (alias.networkId != room.networkId) continue
+                        val kind =
+                            when (alias.namespace) {
+                                RoomAliasNamespace.CHANNEL -> if (channel) FolderIdentityKind.CHANNEL else null
+
+                                RoomAliasNamespace.ACCOUNT -> if (channel) null else FolderIdentityKind.ACCOUNT
+
+                                RoomAliasNamespace.VERIFIED_NICK,
+                                RoomAliasNamespace.PROVISIONAL_NICK,
+                                -> if (channel) null else FolderIdentityKind.NICK
+
+                                RoomAliasNamespace.LEGACY_NAME -> null
+                            }
+                        if (kind != null) add(kind to alias.value)
                     }
-                // Account identity is authoritative if a nick and account both become known together.
-                matches.sortedBy { if (it.second.identityKind == FolderIdentityKind.ACCOUNT) 1 else 0 }.forEach { (key, placement) ->
-                    val editedRevision = editRevision(room.id)
-                    if (editRevision(room.id, "chat-placement-pin-edit") <= placement.restoreRevision) {
-                        db.bufferDao().setPinned(room.id, placement.pinned)
-                    }
-                    if (editedRevision <= placement.restoreRevision) {
-                        db.bufferDao().writeAnchorOrder(room.id, placement.anchorOrder)
-                    }
-                    db.appStateDao().delete(key)
+                }
+            val matches = mutableListOf<Pair<String, PortableChatPlacement>>()
+            for ((kind, value) in identities) {
+                val identityPrefix = pendingIdentityPrefix(room.networkId, room.type, kind, value)
+                for (key in state.keysGlob("$identityPrefix*")) {
+                    val placement = decodePending(key)
+                    if (resolve(placement)?.id == room.id) matches.add(key to placement)
                 }
             }
+            if (matches.isEmpty()) return
+
+            // Account identity is authoritative if a nick and account both become known together.
+            matches.sortWith(compareBy({ it.second.identityKind == FolderIdentityKind.ACCOUNT }, { pendingPayload(it.first) }))
+            val editedRevision = editRevision(room.id)
+            val pinEditedRevision = editRevision(room.id, "chat-placement-pin-edit")
+            for ((key, placement) in matches) {
+                if (pinEditedRevision <= placement.restoreRevision) {
+                    db.bufferDao().setPinned(room.id, placement.pinned)
+                }
+                if (editedRevision <= placement.restoreRevision) {
+                    db.bufferDao().writeAnchorOrder(room.id, placement.anchorOrder)
+                }
+                state.delete(key)
+            }
+        }
 
         private suspend fun apply(
             roomId: Long,
@@ -326,7 +378,7 @@ class BufferStore
                             ),
                         )
                         chatFolders.claimPending(promoted.id, normalizedChannel = normalizedName)
-                        claimPendingPlacement(promoted.id)
+                        claimPendingPlacement(promoted)
                         return@withTransaction checkNotNull(dao.observeById(promoted.id))
                     }
                 }
@@ -365,7 +417,7 @@ class BufferStore
                 if (effectiveType == BufferType.CHANNEL) {
                     chatFolders.claimPending(room.id, normalizedChannel = normalizedName)
                 }
-                claimPendingPlacement(room.id)
+                claimPendingPlacement(room)
                 checkNotNull(dao.observeById(room.id))
             }
 
@@ -476,7 +528,7 @@ class BufferStore
                     }
                 }
                 chatFolders.claimPending(room.id, account = account, normalizedNick = normalizedNick)
-                claimPendingPlacement(room.id)
+                claimPendingPlacement(room)
                 checkNotNull(db.bufferDao().observeById(room.id))
             }
 

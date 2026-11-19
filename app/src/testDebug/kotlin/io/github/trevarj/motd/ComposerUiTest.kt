@@ -11,6 +11,7 @@ import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
@@ -30,6 +31,7 @@ import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
@@ -44,6 +46,7 @@ import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -342,6 +345,7 @@ class ComposerUiTest {
                 dynamicColor = false,
                 customPalette = PaletteDocument("composer-authored", "Composer authored", 1, light = colors),
                 paletteMode = PaletteMode.LIGHT,
+                useThemeTextColors = true,
                 adjustPaletteReadability = adjust.value,
             ) {
                 fill = MaterialTheme.colorScheme.secondaryContainer
@@ -388,7 +392,7 @@ class ComposerUiTest {
                 dynamicColor = false,
                 themePreset = theme.value,
                 receivedBubbleColor = received.value,
-                adjustPaletteReadability = true,
+                adjustPaletteReadability = false,
             ) {
                 paletteColor = MaterialTheme.colorScheme.primary
                 Composer(
@@ -401,7 +405,7 @@ class ComposerUiTest {
             }
         }
 
-        listOf(Color(0xFFFFF5D7), Color(0xFF7E5CAE)).forEach { color ->
+        listOf(Color.Black, Color(0xFFFFF5D7), Color(0xFF7E5CAE)).forEach { color ->
             compose.runOnIdle {
                 received.value = ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, color.toArgb())
             }
@@ -653,6 +657,7 @@ class ComposerUiTest {
     fun autocompleteRetainsExitContentAndRapidReversalKeepsInputBoundsAndFocus() {
         val showAutocomplete = mutableStateOf(true)
         val candidates = mutableStateOf(listOf("alice", "alicia"))
+        val draftText = mutableStateOf("ali")
         val draft = mutableStateOf(TextFieldValue("ali", TextRange(3)))
         var picked: String? = null
         compose.setContent {
@@ -663,11 +668,13 @@ class ComposerUiTest {
                     onValueChange = { draft.value = it },
                     onSend = {},
                     enabled = true,
+                    modifier = Modifier.offset(y = 320.dp),
                     autocomplete =
                         if (showAutocomplete.value && panelCandidates.isNotEmpty()) {
                             {
                                 AutocompletePanel(
                                     candidates = panelCandidates,
+                                    isCommand = panelCandidates.first().startsWith('/'),
                                     onPick = { picked = it },
                                 )
                             }
@@ -685,51 +692,140 @@ class ComposerUiTest {
 
         fun assertInputUnchanged() {
             for (tag in tags) assertEquals(tag, bounds.getValue(tag), compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot)
-            field.assertIsFocused().assertTextEquals("ali")
-            compose.runOnIdle { assertEquals(TextRange(3), draft.value.selection) }
+            field.assertIsFocused().assertTextEquals(draftText.value)
+            compose.runOnIdle { assertEquals(TextRange(draftText.value.length), draft.value.selection) }
         }
 
         // Match the consumer contract: no candidates means a null autocomplete slot.
         for (removeSlot in listOf(true, false)) {
+            val first = if (removeSlot) "alice" else "/join"
+            val second = if (removeSlot) "alicia" else "/away"
+            val replacement = if (removeSlot) "charlie" else "/me"
             compose.mainClock.autoAdvance = true
             compose.runOnIdle {
-                candidates.value = listOf("alice", "alicia")
+                draftText.value = if (removeSlot) "ali" else "/a"
+                draft.value = TextFieldValue(draftText.value, TextRange(draftText.value.length))
+                candidates.value = listOf(first, second)
+                picked = null
                 showAutocomplete.value = true
             }
-            compose.onNodeWithText("alice").assertIsDisplayed()
-            compose.waitForIdle()
+            compose.onNodeWithText(first).assertIsDisplayed()
+            val row = compose.onNodeWithTag("autocomplete_item_0")
+            val stalePick =
+                row
+                    .assertHasClickAction()
+                    .fetchSemanticsNode()
+                    .config[SemanticsActions.OnClick]
+                    .action!!
+            val setSelection = field.fetchSemanticsNode().config[SemanticsActions.SetSelection].action!!
+            compose.runOnUiThread {
+                assertTrue(setSelection(0, 0, false))
+                stalePick()
+            }
+            compose.runOnIdle {
+                assertEquals(null, picked)
+                assertEquals(TextFieldValue(draftText.value, TextRange.Zero), draft.value)
+            }
+            val end = draftText.value.length
+            field.performSemanticsAction(SemanticsActions.SetSelection) { assertTrue(it(end, end, false)) }
+            assertInputUnchanged()
             compose.mainClock.autoAdvance = false
             compose.runOnUiThread {
                 if (removeSlot) showAutocomplete.value = false else candidates.value = emptyList()
             }
-            repeat(3) {
+            compose.mainClock.advanceTimeUntil(96) {
+                compose.onAllNodesWithTag("autocomplete_item_0").fetchSemanticsNodes().singleOrNull()?.let {
+                    SemanticsActions.OnClick !in it.config
+                } == true
+            }
+            assertInputUnchanged()
+            row.assertIsDisplayed().assertHasNoClickAction()
+            val rowCoordinates = row.fetchSemanticsNode().layoutInfo.coordinates
+            val fieldCoordinates = field.fetchSemanticsNode().layoutInfo.coordinates
+            val rowTop = rowCoordinates.localToScreen(Offset.Zero).y
+            val fieldTop = fieldCoordinates.localToScreen(Offset.Zero).y
+            assertTrue("The popup tap must land on-screen above the composer", rowTop > 0f && rowTop < fieldTop)
+            row.performTouchInput { click() }
+            compose.runOnIdle { assertEquals(null, picked) }
+            assertInputUnchanged()
+            repeat(2) {
                 compose.mainClock.advanceTimeByFrame()
-                compose.onNodeWithText("alice").assertIsDisplayed()
-                compose.onNodeWithText("alicia").assertIsDisplayed()
+                compose.onNodeWithText(first).assertIsDisplayed()
+                compose.onNodeWithText(second).assertIsDisplayed()
                 assertInputUnchanged()
             }
             compose.runOnUiThread {
-                candidates.value = listOf("charlie")
+                candidates.value = listOf(replacement)
                 showAutocomplete.value = true
             }
             compose.mainClock.advanceTimeByFrame()
-            compose.onNodeWithText("charlie").assertIsDisplayed()
-            compose.onNodeWithText("alice").assertDoesNotExist()
+            compose.onNodeWithText(replacement).assertIsDisplayed()
+            compose.onNodeWithText(first).assertDoesNotExist()
             assertInputUnchanged()
             compose.mainClock.advanceTimeBy(1_000)
             compose.onNodeWithTag("autocomplete_item_0").performClick()
-            compose.runOnIdle { assertEquals("charlie", picked) }
+            compose.runOnIdle { assertEquals(replacement, picked) }
             assertInputUnchanged()
 
             compose.runOnUiThread {
                 if (removeSlot) showAutocomplete.value = false else candidates.value = emptyList()
             }
             compose.mainClock.advanceTimeByFrame()
-            compose.onNodeWithText("charlie").assertIsDisplayed()
+            compose.onNodeWithText(replacement).assertIsDisplayed()
             compose.mainClock.advanceTimeBy(1_000)
             compose.onNodeWithTag("autocomplete_panel").assertDoesNotExist()
             assertInputUnchanged()
         }
+    }
+
+    @Test
+    fun emojiAutocompleteRejectsAnOldClickAfterTheEditorChangesAndDuringExit() {
+        val query = ":grinning_face"
+        val draft = mutableStateOf(TextFieldValue(query, TextRange(query.length)))
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                )
+            }
+        }
+        val field = compose.onNodeWithTag("chat_composer_field")
+        val label = query.removePrefix(":")
+        val suggestion = compose.onNodeWithText(label)
+        compose.waitUntil(5_000) { compose.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty() }
+        field.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+        suggestion.assertHasClickAction().performClick()
+        compose.runOnIdle {
+            assertEquals(TextFieldValue("😀", TextRange("😀".length)), draft.value)
+            draft.value = TextFieldValue(query, TextRange(query.length))
+        }
+        compose.waitForIdle()
+        val stalePick =
+            suggestion
+                .assertHasClickAction()
+                .fetchSemanticsNode()
+                .config[SemanticsActions.OnClick]
+                .action!!
+        val setSelection = field.fetchSemanticsNode().config[SemanticsActions.SetSelection].action!!
+
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread {
+            assertTrue(setSelection(0, 0, false))
+            stalePick()
+        }
+        compose.mainClock.advanceTimeUntil(96) {
+            compose.onAllNodesWithText(label).fetchSemanticsNodes().singleOrNull()?.let {
+                SemanticsActions.OnClick !in it.config
+            } == true
+        }
+        suggestion.assertIsDisplayed().assertHasNoClickAction().performTouchInput { click() }
+        compose.runOnIdle { assertEquals(TextFieldValue(query, TextRange.Zero), draft.value) }
+        compose.mainClock.advanceTimeBy(1_000)
+        suggestion.assertDoesNotExist()
+        field.assertTextEquals(query)
     }
 
     @Test

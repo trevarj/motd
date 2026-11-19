@@ -622,26 +622,33 @@ class MessageBubbleFooterUiTest {
     }
 
     @Test
-    fun customComfortableFillKeepsBodyAndFailedFooterReadable() {
-        val fill = Color(0xFF777777)
+    fun customComfortableFillKeepsIncomingAndSentInkReadableWithReadabilityOff() {
+        val fill = Color.Black
+        val selected = ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, fill.toArgb())
+        val isSelf = mutableStateOf(false)
         compose.setContent {
             Sample(
-                failed = true,
-                sentBubbleColor = ComfortableBubbleColor(ComfortableBubbleColorRole.CUSTOM, fill.toArgb()),
-                adjustPaletteReadability = true,
+                isSelf = isSelf.value,
+                failed = isSelf.value,
+                sentBubbleColor = selected,
+                receivedBubbleColor = selected,
+                adjustPaletteReadability = false,
             )
         }
 
-        val body = compose.onNodeWithText(BODY, useUnmergedTree = true).textLayout().inkAt(BODY)
-        val time =
-            compose
-                .onNodeWithText(TIME, useUnmergedTree = true)
-                .textLayout()
-                .layoutInput
-                .style
-                .color
-        assertTrue(contrastRatio(body, fill) >= 4.5)
-        assertTrue(contrastRatio(time, fill) >= 4.5)
+        for (self in listOf(false, true)) {
+            compose.runOnIdle { isSelf.value = self }
+            val body = compose.onNodeWithText(BODY, useUnmergedTree = true).textLayout().inkAt(BODY)
+            val time =
+                compose
+                    .onNodeWithText(TIME, useUnmergedTree = true)
+                    .textLayout()
+                    .layoutInput
+                    .style
+                    .color
+            assertTrue("self=$self body=$body", contrastRatio(body, fill) >= MESSAGE_TEXT_CONTRAST)
+            assertTrue("self=$self time=$time", contrastRatio(time, fill) >= MESSAGE_TEXT_CONTRAST)
+        }
         compose.onNodeWithContentDescription(RuntimeEnvironment.getApplication().getString(R.string.chat_failed), useUnmergedTree = true).assertIsDisplayed()
     }
 
@@ -656,6 +663,7 @@ class MessageBubbleFooterUiTest {
         compose.setContent {
             MotdTheme(
                 dynamicColor = false,
+                useThemeTextColors = true,
                 adjustPaletteReadability = adjust.value,
                 layoutDensity = density.value,
                 nicknameBackgroundsEnabled = false,

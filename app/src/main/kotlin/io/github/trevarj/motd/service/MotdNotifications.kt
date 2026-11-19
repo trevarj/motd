@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.ShortcutManager
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
@@ -59,8 +60,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -166,8 +168,11 @@ class MotdNotifications
             ensureChannels()
             applicationScope?.launch {
                 settingsRepository.notificationPreview
-                    .catch { emit(NotificationPreview.GENERIC) }
-                    .collect { previewSnapshot() }
+                    .retryWhen { _, _ ->
+                        synchronized(history) { applyPreview(NotificationPreview.GENERIC) }
+                        delay(PREVIEW_RETRY_MS)
+                        true
+                    }.collect { previewSnapshot() }
             }
             applicationScope?.launch {
                 retireLegacyMessageNotifications()
@@ -177,7 +182,7 @@ class MotdNotifications
                     db.withTransaction {
                         if (db.appStateDao().contains(V10_NOTIFICATION_RESET) > 0) {
                             manager.activeNotifications
-                                .filter { it.notification.channelId in RESETTABLE_CHANNELS }
+                                .filter { it.notification.baseChannelId in RESETTABLE_CHANNELS }
                                 .forEach { manager.cancel(it.tag, it.id) }
                             db.appStateDao().delete(V10_NOTIFICATION_RESET)
                         }
@@ -207,7 +212,7 @@ class MotdNotifications
             manager.activeNotifications
                 .filter {
                     val notification = it.notification
-                    val channel = notification.channelId
+                    val channel = notification.baseChannelId
                     if (channel !in RESETTABLE_CHANNELS) return@filter false
                     if (notification.extras.getString(EXTRA_PREVIEW) != preview.name) return@filter true
                     val canHaveLegacyActions = channel == CHANNEL_SEND_FAILURES || (channel in MESSAGE_CHANNELS && !isWatchEndedNotificationId(it.id))
@@ -303,7 +308,7 @@ class MotdNotifications
             runCatching {
                 manager.activeNotifications
                     .filter {
-                        it.notification.channelId in MESSAGE_CHANNELS &&
+                        it.notification.baseChannelId in MESSAGE_CHANNELS &&
                             !isMessageNotificationId(it.id) &&
                             !isWatchEndedNotificationId(it.id)
                     }.forEach { legacy ->
@@ -389,7 +394,7 @@ class MotdNotifications
                         }
 
                         MessageKind.DCC_TRANSFER -> {
-                            postDccTransferOffer(buffer.networkId, buffer.id, event.id, silent = true)
+                            onDccTransferOffer(buffer.networkId, buffer.id, event.id, silent = true)
                         }
 
                         else -> {}
@@ -856,7 +861,7 @@ class MotdNotifications
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                 )
 
-            return previewBuilder(channel, preview, R.string.notification_projection_message)
+            return previewBuilder(messageChannelId(channel, bufferId), preview, R.string.notification_projection_message)
                 .apply {
                     if (shortcutId != null) {
                         setShortcutId(shortcutId)
@@ -871,6 +876,7 @@ class MotdNotifications
                 .setContentIntent(contentIntent)
                 .addExtras(
                     android.os.Bundle().apply {
+                        putString(EXTRA_MESSAGE_CHANNEL, channel)
                         putLongArray(EXTRA_NOTIFICATION_EVENT_IDS, notificationEventIds)
                         putBoolean(EXTRA_SERVICE_ACTIONS, true)
                     },
@@ -878,6 +884,22 @@ class MotdNotifications
                 .addAction(markReadAction)
                 .build()
         }
+
+        private val Notification.baseChannelId: String
+            get() = extras.getString(EXTRA_MESSAGE_CHANNEL) ?: channelId
+
+        private fun messageChannelId(
+            parentChannel: String,
+            bufferId: Long,
+        ): String =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                context
+                    .getSystemService(NotificationManager::class.java)
+                    .getNotificationChannel(parentChannel, "$CONVERSATION_SHORTCUT_PREFIX$bufferId")
+                    ?.id ?: parentChannel
+            } else {
+                parentChannel
+            }
 
         private fun postMessageNotification(
             thread: NotificationThreadKey,
@@ -1008,7 +1030,7 @@ class MotdNotifications
                 style,
                 keys,
                 dickordBatch,
-                active.notification.channelId,
+                active.notification.baseChannelId,
                 latest?.msgid,
                 anchor,
             )
@@ -1152,8 +1174,7 @@ class MotdNotifications
             val label = context.getString(R.string.notification_projection_message)
             val pinned = conversationShortcuts().filter { it.isPinned && it.id in ids }
             if (pinned.isNotEmpty()) {
-                ShortcutManagerCompat.updateShortcuts(
-                    context,
+                val sanitized =
                     pinned.map {
                         ShortcutInfoCompat
                             .Builder(context, it.id)
@@ -1168,8 +1189,17 @@ class MotdNotifications
                                     .build(),
                             ).setIntent(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
                             .build()
-                    },
-                )
+                    }
+                if (!ShortcutManagerCompat.updateShortcuts(context, sanitized)) {
+                    sanitized.forEach { shortcut -> optionalMetadata { ShortcutManagerCompat.pushDynamicShortcut(context, shortcut) } }
+                    val remaining =
+                        context
+                            .getSystemService(ShortcutManager::class.java)
+                            .pinnedShortcuts
+                            .filter { it.id in ids && (it.shortLabel.toString() != label || it.longLabel.toString() != label) }
+                            .map { it.id }
+                    if (remaining.isNotEmpty()) ShortcutManagerCompat.disableShortcuts(context, remaining, label)
+                }
             }
             ShortcutManagerCompat.removeDynamicShortcuts(context, ids)
             ShortcutManagerCompat.removeLongLivedShortcuts(context, ids)
@@ -1217,7 +1247,7 @@ class MotdNotifications
                     .forEach(::clearThread)
                 manager.activeNotifications
                     .filter { row ->
-                        row.notification.channelId in MESSAGE_CHANNELS &&
+                        row.notification.baseChannelId in MESSAGE_CHANNELS &&
                             row.notification.extras
                                 .getLongArray(EXTRA_NOTIFICATION_EVENT_IDS)
                                 ?.any { it in ids } == true
@@ -1230,7 +1260,7 @@ class MotdNotifications
             val ids =
                 manager.activeNotifications
                     .asSequence()
-                    .filter { it.notification.channelId in MESSAGE_CHANNELS }
+                    .filter { it.notification.baseChannelId in MESSAGE_CHANNELS }
                     .flatMap {
                         it.notification.extras
                             .getLongArray(EXTRA_NOTIFICATION_EVENT_IDS)
@@ -1412,12 +1442,6 @@ class MotdNotifications
         }
 
         override suspend fun onDccTransferOffer(
-            networkId: Long,
-            bufferId: Long,
-            messageId: Long,
-        ) = postDccTransferOffer(networkId, bufferId, messageId, silent = false)
-
-        private suspend fun postDccTransferOffer(
             networkId: Long,
             bufferId: Long,
             messageId: Long,
@@ -1630,6 +1654,7 @@ class MotdNotifications
             private const val CHANNEL_MENTION_TAG = "channel_mentions"
             private const val MAX_NOTIFICATION_MESSAGES = 25
             private const val ALERT_QUIET_WINDOW_MS = 30_000L
+            private const val PREVIEW_RETRY_MS = 1_000L
             private val MESSAGE_CHANNELS = setOf(CHANNEL_MESSAGES, CHANNEL_MENTIONS)
             private val RESETTABLE_CHANNELS =
                 setOf(
@@ -1641,6 +1666,7 @@ class MotdNotifications
                 )
             private const val V10_NOTIFICATION_RESET = "v10_notification_reset"
             private const val CONVERSATION_SHORTCUT_PREFIX = "motd:chat:"
+            private const val EXTRA_MESSAGE_CHANNEL = "motd.messageChannel"
             private const val MAX_RECOVERY_NOTIFICATIONS = 200
 
             /** Recovery only re-presents events this close to the newest stored one; older ones are stale. */

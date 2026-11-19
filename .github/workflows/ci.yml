@@ -248,8 +248,14 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-snapshot-save -noaudio -no-boot-anim -gpu swiftshader_indirect
           script: bash ./test/e2e/ci-emulator-suite.sh emulator-5554
-      - name: Upload privacy-safe required diagnostics
+      - name: Audit required diagnostics before upload
         if: always()
+        id: audit_required_diagnostics
+        run: |
+          source ./test/e2e/fast-suite-privacy.sh
+          e2e_audit_required_artifacts test/e2e/artifacts/fast-suite
+      - name: Upload privacy-safe required diagnostics
+        if: always() && steps.audit_required_diagnostics.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: headless-diagnostics

@@ -114,8 +114,8 @@ palette state untouched.
 
 Appearance also stores `adjustPaletteReadability`, defaulting to `false` in older
 appearance objects. An absent appearance object preserves its local value. The
-saved `useThemeTextColors` choice still round-trips, but is inactive while readability
-adjustment is off; authored text is used without overwriting that choice.
+saved `useThemeTextColors` choice also round-trips and independently selects
+theme-matched or neutral text, even when readability adjustment is off.
 
 Legacy `splashScreenAnimation` values (`EDGE_TRACE`, `SOFT_WASH`, `TRAVELING_PULSE`,
 `STATIC`) still round-trip and restore for compatibility, although startup now

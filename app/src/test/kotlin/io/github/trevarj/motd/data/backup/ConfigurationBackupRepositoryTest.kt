@@ -230,6 +230,51 @@ class ConfigurationBackupRepositoryTest {
         }
 
     @Test
+    fun chatPlacementsOnSelfParentedBouncerChildRejectBeforeReplacingLocalState() =
+        runTest {
+            val db = inMemoryDb()
+            try {
+                val network = db.networkDao().insert(secretNetwork(null))
+                val room = BufferStore(db).getOrCreate(network, "#test", "#Test", BufferType.CHANNEL)
+                db.bufferDao().writeAnchorOrder(room.id, 0)
+                val backup = repository(db)
+                val envelope = Json.parseToJsonElement(backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED)).jsonObject
+                val payload = envelope.getValue("payload").jsonObject
+                val portable =
+                    payload
+                        .getValue("networks")
+                        .jsonArray
+                        .single()
+                        .jsonObject
+                val child =
+                    JsonObject(
+                        portable +
+                            mapOf(
+                                "role" to JsonPrimitive("BOUNCER_CHILD"),
+                                "parentExportId" to portable.getValue("exportId"),
+                                "bouncerNetId" to JsonPrimitive("child"),
+                            ),
+                    )
+                val document =
+                    JsonObject(envelope + ("payload" to JsonObject(payload + ("networks" to JsonArray(listOf(child)))))).toString()
+
+                assertTrue(runCatching { backup.preview(document, importMode = BackupImportMode.REPLACE) }.exceptionOrNull() is BackupFormatException)
+                assertTrue(runCatching { backup.import(document, importMode = BackupImportMode.REPLACE) }.exceptionOrNull() is BackupFormatException)
+                assertEquals(
+                    network,
+                    db
+                        .networkDao()
+                        .allNow()
+                        .single()
+                        .id,
+                )
+                assertEquals(0, db.bufferDao().observeById(room.id)?.anchorOrder)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
     fun channelPrefixesRoundTripAndOldSettingsDefaultToFalse() =
         runTest {
             val settings = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())

@@ -689,14 +689,14 @@ private fun SearchRow(
         if (io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability.current) {
             ensureContrast(readingSeed, listOf(rowFill), MESSAGE_TEXT_CONTRAST)
         } else {
-            scheme.readableForeground(readingSeed, rowFill)
+            readingSeed
         }
     val highlightColor = LocalMotdSemanticColors.current.warningContainer
     val highlightInk =
         if (io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability.current) {
-            ensureContrast(readingInk(scheme), listOf(highlightColor.compositeOver(rowFill)), MESSAGE_TEXT_CONTRAST)
+            ensureContrast(readingSeed, listOf(highlightColor.compositeOver(rowFill)), MESSAGE_TEXT_CONTRAST)
         } else {
-            scheme.readableForeground(readingInk(scheme), highlightColor.compositeOver(rowFill))
+            scheme.readableForeground(readingSeed, highlightColor.compositeOver(rowFill))
         }
     val revealed = remember(tag, blurred) { androidx.compose.runtime.mutableStateOf(false) }
     val concealed = blurred && !revealed.value

@@ -1,6 +1,5 @@
 package io.github.trevarj.motd.ui.components
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -68,7 +67,7 @@ fun AutocompletePanel(
                             .fillMaxWidth()
                             // >=48dp touch target for autocomplete rows.
                             .heightIn(min = 48.dp)
-                            .clickable { onPick(candidate) }
+                            .composerAutocompleteClick { onPick(candidate) }
                             .testTag("${tagPrefix}_item_$index")
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,

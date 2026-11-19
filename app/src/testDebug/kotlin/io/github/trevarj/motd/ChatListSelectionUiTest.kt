@@ -96,6 +96,7 @@ class ChatListSelectionUiTest {
     private fun showAnchoredChats(
         calls: MutableList<Pair<String, List<Long>>>,
         anchorCalls: MutableList<Pair<List<Long>, Boolean>> = mutableListOf(),
+        firstAnchor: () -> ChatListRow = { row() },
     ) {
         compose.setContent {
             MotdTheme(dynamicColor = false) {
@@ -105,7 +106,7 @@ class ChatListSelectionUiTest {
                             rows =
                                 listOf(
                                     row().copy(bufferId = 2, displayName = "#channel", type = BufferType.CHANNEL, anchorOrder = 1),
-                                    row().copy(anchorOrder = 0, pinned = true),
+                                    firstAnchor().copy(anchorOrder = 0, pinned = true),
                                     row().copy(bufferId = 3, displayName = "recent"),
                                 ),
                             chatListSwipeAction = ChatListSwipeAction.MARK_READ,
@@ -161,6 +162,32 @@ class ChatListSelectionUiTest {
         }
         compose.runOnIdle { assertEquals(listOf("reorder" to listOf(2L, 1L)), calls) }
         compose.onNodeWithTag("chatlist_selection_top_app_bar").assertDoesNotExist()
+    }
+
+    @Test fun anchor_handle_drag_keeps_pending_order_when_chat_activity_updates() {
+        val calls = mutableListOf<Pair<String, List<Long>>>()
+        val firstAnchor = mutableStateOf(row())
+        showAnchoredChats(calls, firstAnchor = { firstAnchor.value })
+        val first = compose.onNodeWithTag("chatlist_anchored_1")
+        val second = compose.onNodeWithTag("chatlist_anchored_2")
+        val rowHeight = first.fetchSemanticsNode().boundsInRoot.height
+
+        compose.onNodeWithTag("chatlist_anchor_handle_1").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, rowHeight * 1.4f))
+        }
+        assertTrue(second.getUnclippedBoundsInRoot().top < first.getUnclippedBoundsInRoot().top)
+
+        compose.runOnIdle {
+            assertTrue(calls.isEmpty())
+            firstAnchor.value = firstAnchor.value.copy(lastMessageText = "New activity", unreadCount = 3)
+        }
+        compose.onNodeWithText("New activity", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_unread_badge", useUnmergedTree = true).assertIsDisplayed()
+        assertTrue(second.getUnclippedBoundsInRoot().top < first.getUnclippedBoundsInRoot().top)
+
+        compose.onNodeWithTag("chatlist_rows").performTouchInput { up() }
+        compose.runOnIdle { assertEquals(listOf("reorder" to listOf(2L, 1L)), calls) }
     }
 
     @Test fun anchor_selection_action_adds_unanchored_chat_without_pinning_it() {

@@ -132,11 +132,6 @@ class MotdNotificationsFoolTest {
         shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
             .activeNotifications.size
 
-    private fun assertSilent(notification: android.app.Notification) {
-        assertEquals("silent", notification.group)
-        assertEquals(NotificationCompat.GROUP_ALERT_SUMMARY, notification.groupAlertBehavior)
-    }
-
     /** A first presentation alerts through its channel (no NotificationCompat silent-group marker). */
     private fun assertAlerting(notification: android.app.Notification) {
         assertNull(notification.group)
@@ -966,7 +961,7 @@ class MotdNotificationsFoolTest {
                     .single()
                     .notification
             assertEquals(MotdNotifications.CHANNEL_INVITATIONS, posted.channelId)
-            assertSilent(posted)
+            assertAlerting(posted)
             assertNull(NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(posted))
             for (index in posted.actions.indices) {
                 assertEquals(NotificationCompat.Action.SEMANTIC_ACTION_NONE, requireNotNull(NotificationCompat.getAction(posted, index)).semanticAction)

@@ -51,7 +51,7 @@ class ChannelListScreenUiTest {
         var linkInk = Color.Unspecified
         var metadataInk = Color.Unspecified
         compose.setContent {
-            MotdTheme(dynamicColor = false, themePreset = preset.value) {
+            MotdTheme(dynamicColor = false, themePreset = preset.value, adjustPaletteReadability = true) {
                 val scheme = MaterialTheme.colorScheme
                 val rowColor =
                     if (contrastingFill.value) {

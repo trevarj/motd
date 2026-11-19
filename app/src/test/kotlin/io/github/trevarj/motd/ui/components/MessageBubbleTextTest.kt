@@ -159,6 +159,38 @@ class MessageBubbleTextTest {
     }
 
     @Test
+    fun receiptMentionRangesWinOverBroaderRosterTokensOutsideLinksAndCode() {
+        val roster: (String) -> Color? = { if (it == "[Nick]") Color.Green else null }
+        val cases =
+            listOf(
+                Triple("ascii", "Nick", "[Nick] @Nick -Nick- _Nick Nick_"),
+                Triple("rfc1459", "Nick^", "[Nick~] @Nick^ _Nick^ Nick^_"),
+                Triple("rfc1459-strict", "Nick^", "[Nick~] @Nick^ _Nick^ Nick^_"),
+            )
+        for ((mapping, nick, plain) in cases) {
+            val text = "$plain `[$nick]` https://example.org/[$nick]/"
+            val expected =
+                IrcIdentityRules.from(mapping, null).mentionRanges(plain, nick).map { range ->
+                    val start = if (plain.getOrNull(range.first - 1) == '@') range.first - 1 else range.first
+                    plain.substring(start, range.last + 1)
+                }
+            for (style in listOf(NickMentionStyle.BOLD, NickMentionStyle.CHIP)) {
+                nicknameBodies(text, style, roster, receiptNick = nick, mapping = mapping).forEach { body ->
+                    val start = body.text.indexOf(plain)
+                    val ranges =
+                        if (style == NickMentionStyle.CHIP) {
+                            body.getStringAnnotations(NICK_CHIP_RANGE, start, body.length)
+                        } else {
+                            body.spanStyles.filter { it.start >= start && it.item.fontWeight == FontWeight.Bold }
+                        }
+                    assertEquals("$mapping $style", expected, ranges.map { body.text.substring(it.start, it.end) })
+                    assertEquals(1, body.getLinkAnnotations(0, body.length).size)
+                }
+            }
+        }
+    }
+
+    @Test
     fun authoredThemeIdentityAndReadingRolesSurviveActionAndRichTextActualFills() {
         val authored = Color(0xFFDDDDDD)
         val fill = Color.White

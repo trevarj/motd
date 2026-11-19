@@ -4,6 +4,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IRC_COLOR
+import io.github.trevarj.motd.irc.format.IRC_HEX_COLOR
 import io.github.trevarj.motd.irc.format.IRC_RESET
 import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
@@ -101,5 +102,23 @@ class ComposerAutocompleteTest {
         val result = applyPick(value, candidates.first().display)
         assertEquals("hey alice! tail", result.text)
         assertEquals(TextRange(9), result.selection)
+    }
+
+    @Test fun moved_foreground_color_does_not_consume_the_literal_suffix() {
+        for ((control, suffix) in listOf("${IRC_COLOR}04" to ",05 tail", "${IRC_HEX_COLOR}ff0000" to ",abcdef tail")) {
+            val raw = "hey a${control}l$suffix"
+            val value = TextFieldValue(raw, TextRange(raw.indexOf(',')))
+            val candidates = autocompleteFor(value, members, emptyList(), { it.lowercase() })
+            val result = applyPick(value, candidates.first().display)
+            val original = parseIrcFormatting(raw)
+            val parsed = parseIrcFormatting(result.text)
+
+            assertEquals("hey alice$suffix", parsed.visibleText)
+            assertEquals(TextRange(9), result.selection)
+            assertTrue(parsed.stateAtVisible(8).isDefault)
+            for (offset in suffix.indices) {
+                assertEquals(original.stateAtVisible(6 + offset), parsed.stateAtVisible(9 + offset))
+            }
+        }
     }
 }

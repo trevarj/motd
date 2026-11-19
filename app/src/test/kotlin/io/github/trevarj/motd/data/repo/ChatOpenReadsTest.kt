@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -62,6 +63,7 @@ class ChatOpenReadsTest {
                     db.close()
                 }
             }
+            null
         }
 
     @Test
@@ -84,6 +86,7 @@ class ChatOpenReadsTest {
                             },
                         ).build(),
                 ).use { it.writableDatabase }
+            null
         }
 
     @Test
@@ -91,24 +94,29 @@ class ChatOpenReadsTest {
         productionDatabaseSurvivesReopen { context ->
             val db = DbModule.provideDatabase(context)
             try {
-                // A development branch with a newer schema takes the production downgrade path.
-                db.openHelper.writableDatabase.execSQL("PRAGMA user_version = 50")
+                val roomId = db.bufferDao().insert(buffer(db.networkDao().insert(network()), "#old"))
+                val previousSession = checkNotNull(db.messageDao().roomRevision(roomId)).session
+                // Simulate a development branch one version ahead of the running schema.
+                val sqlite = db.openHelper.writableDatabase
+                sqlite.version += 1
+                previousSession
             } finally {
                 db.close()
             }
         }
 
-    private fun productionDatabaseSurvivesReopen(prepare: (Context) -> Unit) =
+    private fun productionDatabaseSurvivesReopen(prepare: suspend (Context) -> String?) =
         runBlocking(Dispatchers.IO) {
             val context = ApplicationProvider.getApplicationContext<Context>()
             context.deleteDatabase("motd.db")
             var db: MotdDatabase? = null
             try {
-                prepare(context)
+                val previousSession = prepare(context)
                 val installed = DbModule.provideDatabase(context)
                 db = installed
                 val roomId = installed.bufferDao().insert(buffer(installed.networkDao().insert(network()), "#motd"))
                 val initial = checkNotNull(installed.messageDao().roomRevision(roomId))
+                if (previousSession != null) assertNotEquals(previousSession, initial.session)
                 assertEquals(0L, initial.revision)
                 assertEquals(ChatRoomRevisions.objectCount, initial.trackingObjects)
                 installed.messageDao().insertAll(listOf(message(roomId, "committed", serverTime = 1, dedupKey = "committed")))

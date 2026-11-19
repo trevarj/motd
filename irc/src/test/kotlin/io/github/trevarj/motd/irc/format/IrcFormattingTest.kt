@@ -175,4 +175,25 @@ class IrcFormattingTest {
         assertTrue(components.all { component -> parseIrcFormatting(component).runs.all { it.state.bold } })
         assertTrue(components.all { parseIrcFormatting(it).activeState.isDefault })
     }
+
+    @Test
+    fun editorAndSplitSerializersPreserveLiteralColorArguments() {
+        val text = "abc,05"
+        val document = IrcEditorDocument(text, List(text.length) { IrcFormatState() }).applyColors(3, text.length, 4, null)
+        val serialized = document.toRawValue(3, 3)
+        val parsed = parseIrcFormatting(serialized.text)
+
+        assertEquals(text, parsed.visibleText)
+        assertEquals(document.states, parsed.characterStates)
+        assertEquals(3, parsed.visibleOffset(serialized.selectionStart))
+
+        for (maxBytes in listOf(5, 8)) {
+            val components = splitIrcFormattedUtf8(serialized.text, maxBytes)
+            assertTrue(components.size > 1)
+            assertTrue(components.all { it.toByteArray().size <= maxBytes })
+            val reparsed = components.map(::parseIrcFormatting)
+            assertEquals(text, reparsed.joinToString("") { it.visibleText })
+            assertEquals(document.states, reparsed.flatMap { it.characterStates })
+        }
+    }
 }

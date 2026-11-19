@@ -279,6 +279,11 @@ class PushInstanceCoordinatorTest {
 
         override suspend fun deleteUsersForNetworks(networkIds: List<Long>) = Unit
 
+        override suspend fun deletePendingChatPlacements(
+            indexedPattern: String,
+            legacyPattern: String,
+        ) = Unit
+
         override suspend fun deleteNetworkRows(networkIds: List<Long>) = Unit
 
         override suspend fun allNow(): List<NetworkEntity> = flow.value

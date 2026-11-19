@@ -59,6 +59,18 @@ class EmojiSequenceCatalogTest {
     }
 
     @Test
+    fun regionalIndicatorsPairFromTheStartOfEachRun() {
+        val au = entry("🇦🇺")
+        val us = entry("🇺🇸")
+        val data = EmojiDataset(listOf(au, us), listOf("Test"), emptyList())
+        assertEquals(
+            listOf(EmojiMatch(4, 8, us), EmojiMatch(11, 15, au), EmojiMatch(15, 19, us)),
+            data.matches("🇦🇦🇺🇸🇦 🇦🇺🇺🇸", "noto"),
+        )
+        assertEquals(listOf(EmojiMatch(7, 11, us)), data.matches("😀\u200D🇦🇦🇺🇸", "noto"))
+    }
+
+    @Test
     fun aliasesHaveTheirOwnExactCoverageAndTextPresentationStaysNative() {
         val data = dataset()
         assertEquals(heart, data.entry("❤")!!.sequence)

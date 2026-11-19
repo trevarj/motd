@@ -128,8 +128,9 @@ flowchart TD
   exchange the visible rooms' global slots without shifting hidden rooms; unanchoring
   restores the room's prior pinned state. Room 51 adds nullable anchor order.
   Configuration snapshots include portable chat identities, pins and anchor ranks.
-  Deferred identities use existing app-state storage; newer user placement edits win
-  over late identity claims. Legacy snapshots without placement data leave it unchanged.
+  Deferred identities are indexed in app-state storage and deleted with their
+  networks. Newer user edits win over late identity claims. Legacy snapshots
+  without placement data leave local placement unchanged.
 - Archive pull hints, the revealed folder and the archive-only route share the chat-card
   8dp horizontal/2dp vertical gutters, 16dp shape, 12dp inner inset and density-scaled
   avatar host/vertical padding. `titleMedium` labels may wrap at accessible font scales;
@@ -677,10 +678,12 @@ flowchart TD
   The device-local preview choice projects the actual MessagingStyle payload used by
   Android Auto as well as the phone card. Each alert has a private lock-screen policy
   and a separate generic public version. A preview change retires older projections;
-  Generic also removes native chat shortcut metadata. Named query and channel
-  notifications share a canonical chat shortcut across lanes without changing
-  which lane bridges to Android Auto. Redaction retires affected active cards
-  after the Room commit; canonical merges retain the tombstone.
+  failed settings reads clear full projections and the observer resubscribes.
+  Generic removes native chat shortcut metadata without bypassing existing Android
+  conversation channel settings. Named query and channel notifications share a
+  canonical chat shortcut across lanes without changing which lane bridges to
+  Android Auto. Redaction retires affected active cards after the Room commit,
+  including on replay; canonical merges retain the tombstone.
   Interrupted recovery retains the frozen decision and always presents silently.
   Recovery and live message presentation stage canonical reads and lane promotion without holding
   a presentation lock across suspension, including historical refreshes inside Room transactions.
