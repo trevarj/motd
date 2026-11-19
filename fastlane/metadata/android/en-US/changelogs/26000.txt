@@ -1,0 +1,4 @@
+- Create seamless chat wallpapers in Wallpaper Workshop. Start from a design or mix built-in doodles and imported SVG icons. Adjust layout, density, sizes, colors, and textures.
+- Save and reuse designs across all chats or for individual conversations. Designs and chat assignments travel with configuration backups.
+- Preview scenic and imported photo wallpapers in the picker.
+- Restore sender nickname colors and reveal wallpaper with the first messages when opening a chat.
