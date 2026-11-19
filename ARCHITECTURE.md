@@ -404,9 +404,12 @@ flowchart TD
   Fresh anchor reads run sequentially on IO rather than returning through Main after
   each query; the caller retains entry-snapshot and target publication.
   The timeline becomes visible once fresh payload admission and measured entry placement
-  permit it; there is no post-placement entry fade. At the existing 1.5-second timeout, an ordinary
-  retained return can restore its freshly certified last confirmed viewport. That visit ignores
-  late automatic targets, but explicit jumps remain available and reading still waits for fresh metadata.
+  permit it. Chat art loads in parallel, but both the viewport and blur captures draw the
+  theme canvas until the first admitted timeline or a terminal empty/failure state. Ready
+  artwork and rows appear without an entry fade; later refreshes do not re-hide the art.
+  At the existing 1.5-second timeout, an ordinary retained return can restore its freshly
+  certified last confirmed viewport. That visit ignores late automatic targets, but explicit
+  jumps remain available and reading still waits for fresh metadata.
   Once placed, surviving keyed timeline rows ease history reflow with native placement-only
   motion, never a refresh fade. Entry alignment, reader scrolling and active live/send gap
   animations retain exclusive placement ownership.

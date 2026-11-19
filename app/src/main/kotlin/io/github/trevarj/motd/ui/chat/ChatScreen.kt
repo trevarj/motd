@@ -119,6 +119,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -616,6 +618,7 @@ fun ChatScreen(
         remember(appearance.wallpaper, appearance.wallpaperLibrary, appearance.wallpaperLibraryReadError, wallpaperChoice) {
             resolveWallpaper(appearance, wallpaperChoice)
         }
+    val wallpaperRevealed = remember(viewModel) { mutableStateOf(false) }
 
     if (items == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -653,6 +656,7 @@ fun ChatScreen(
         expandAllFools = expandAllFools,
         onExpandAllFoolsChange = viewModel::setExpandAllFools,
         chatWallpaper = wallpaper,
+        wallpaperRevealed = wallpaperRevealed,
         onOpenWallpaperWorkshop = onOpenWallpaperWorkshop,
         wallpaperName = wallpaperName,
         collapseTitleBar = appearance.collapseTitleBar,
@@ -1195,6 +1199,7 @@ internal fun ChatContent(
     expandAllFools: Boolean = false,
     onExpandAllFoolsChange: (Boolean) -> Unit = {},
     chatWallpaper: WallpaperRenderSpec = remember { resolveWallpaper(AppearanceConfig()) },
+    wallpaperRevealed: MutableState<Boolean> = remember { mutableStateOf(false) },
     onOpenWallpaperWorkshop: ((Long) -> Unit)? = null,
     wallpaperName: String? = null,
     collapseTitleBar: Boolean = true,
@@ -1796,6 +1801,17 @@ internal fun ChatContent(
         val drawingAllowed =
             payloadAllowed ||
                 (temporaryFoolMotion && initialPositionSettled && entryVeilLifted && entryState is EntryPositionState.Settled && jumpTarget == null)
+        val timelineVisible = entryVeilLifted && drawingAllowed
+        val showEmptyTimeline =
+            items.loadState.refresh is LoadState.NotLoading &&
+                initialPagingPage(items.itemCount, olderHistoryLoad) == InitialPagingPage.TerminalEmpty &&
+                !historySyncStatus.isActive
+        val showWallpaper =
+            wallpaperRevealed.value || showEmptyTimeline || timelineHistoryStatus is HistorySyncStatus.Failed ||
+                (timelineVisible && items.itemSnapshotList.items.isNotEmpty())
+        if (showWallpaper && !wallpaperRevealed.value) {
+            SideEffect { wallpaperRevealed.value = true }
+        }
         val preserveOutgoingHiddenBodies = restoringHiddenFools || (temporaryFoolMotion && !expandAllFools)
         val restoreStillValid =
             presentationContextCompatible && restorePolicy?.samePolicyExceptHiddenReveal(visibleSpec) == true &&
@@ -3870,6 +3886,7 @@ internal fun ChatContent(
                 val photoLoaded = rememberWallpaperPhotoLoaded(chatWallpaper)
                 val photoVisible = photoLoaded.value
                 val wallpaperBacking = wallpaperNeedsReadableBacking(chatWallpaper, photoVisible)
+                val wallpaperCanvas = MaterialTheme.colorScheme.background
                 val wallpaperTag =
                     remember(chatWallpaper.selection, photoVisible) {
                         val selection = chatWallpaper.selection
@@ -3897,9 +3914,11 @@ internal fun ChatContent(
                             .captureSurfaceBackdrop(wallpaperSource)
                             .recordMessageWallpaper(wallpaperBackdrop, MaterialTheme.colorScheme.surface)
                             .then(
+                                if (showWallpaper) Modifier else Modifier.drawWithContent { drawRect(wallpaperCanvas) },
+                            ).then(
                                 if (chatWallpaper.selection.preset != ChatWallpaperPreset.NONE || chatWallpaper.selection.localImageName != null) {
                                     Modifier.fadeChatEdges(
-                                        MaterialTheme.colorScheme.background,
+                                        wallpaperCanvas,
                                         readTopHostHeightPx,
                                         readBottomHostHeightPx,
                                         readBottomOffsetPx = {
@@ -4297,14 +4316,14 @@ internal fun ChatContent(
                                                     .fillMaxSize()
                                                     .captureSurfaceBackdrop(pageBackdrop)
                                                     .graphicsLayer {
-                                                        alpha = if (entryVeilLifted && drawingAllowed) 1f else 0f
+                                                        alpha = if (timelineVisible) 1f else 0f
                                                         compositingStrategy = CompositingStrategy.Offscreen
                                                     }.fadeChatEdges(
                                                         Color.Black,
                                                         readTopHostHeightPx,
                                                         readBottomHostHeightPx,
                                                         blendMode = BlendMode.DstOut,
-                                                    ).then(if (entryVeilLifted && drawingAllowed) Modifier else Modifier.clearAndSetSemantics {}),
+                                                    ).then(if (timelineVisible) Modifier else Modifier.clearAndSetSemantics {}),
                                         ) {
                                             MessageList(
                                                 items = items,
@@ -4413,7 +4432,7 @@ internal fun ChatContent(
                                             )
                                         }
                                         // Hidden rows cannot receive input; readiness removes this immediately.
-                                        if (!entryVeilLifted || !drawingAllowed) {
+                                        if (!timelineVisible) {
                                             Box(
                                                 modifier =
                                                     Modifier
@@ -4436,11 +4455,7 @@ internal fun ChatContent(
                                 // Paging begins with a transient empty refresh before Room delivers its first
                                 // page. Only show the empty state once APPEND proves the buffer is terminally
                                 // empty; otherwise the large placeholder flashes during every chat entry.
-                                if (items.loadState.refresh is LoadState.NotLoading &&
-                                    initialPagingPage(items.itemCount, items.loadState.append) ==
-                                    InitialPagingPage.TerminalEmpty &&
-                                    !historySyncStatus.isActive
-                                ) {
+                                if (showEmptyTimeline) {
                                     io.github.trevarj.motd.ui.components.EmptyState(
                                         icon = Icons.Outlined.Forum,
                                         title = stringResource(R.string.chat_empty_title),

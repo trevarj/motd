@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.net.Uri
 import android.text.SpannableString
 import androidx.activity.OnBackPressedDispatcher
@@ -140,9 +141,13 @@ import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
+import io.github.trevarj.motd.data.prefs.EffectSurface
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.NicknameTapAction
+import io.github.trevarj.motd.data.prefs.SurfaceEffect
+import io.github.trevarj.motd.data.prefs.SurfaceEffects
+import io.github.trevarj.motd.data.prefs.WallpaperPattern
 import io.github.trevarj.motd.data.prefs.WallpaperPatternRef
 import io.github.trevarj.motd.data.prefs.WallpaperPatternRefKind
 import io.github.trevarj.motd.data.prefs.WallpaperRenderSpec
@@ -545,6 +550,7 @@ class ComposerSendClearUiTest {
         onViewportRefreshAnchor: (ViewportRefreshAnchor?) -> Unit = {},
         chatViewModel: ChatViewModel? = null,
         forwardEnabled: Boolean = false,
+        surfaceEffects: SurfaceEffects = SurfaceEffects(),
         onSubmit: (String) -> Unit,
     ) {
         compose.setContent {
@@ -563,7 +569,12 @@ class ComposerSendClearUiTest {
                 LocalDensity provides (fontScale?.let { Density(LocalDensity.current.density, it) } ?: LocalDensity.current),
                 LocalDickordLabsEnabled provides dickordEnabled(),
             ) {
-                MotdTheme(layoutDensity = layoutDensity(), nickMentionStyle = nickMentionStyle, nickColorsEnabled = nickColorsEnabled) {
+                MotdTheme(
+                    layoutDensity = layoutDensity(),
+                    nickMentionStyle = nickMentionStyle,
+                    nickColorsEnabled = nickColorsEnabled,
+                    surfaceEffects = surfaceEffects,
+                ) {
                     Box(
                         Modifier
                             .then(contentHeight()?.let { Modifier.height(it).fillMaxWidth() } ?: Modifier.fillMaxSize())
@@ -3295,6 +3306,7 @@ class ComposerSendClearUiTest {
     }
 
     @Test
+    @Config(sdk = [35])
     fun entryReadinessPaintsFullyAndRoutesBodyMentionTouchOnTheNextFrame() {
         val row =
             MessageEntity(
@@ -3310,21 +3322,31 @@ class ComposerSendClearUiTest {
         var entry by mutableStateOf<EntryPositionState>(EntryPositionState.Pending)
         var positionsHandled = 0
         val senderClicks = mutableListOf<String>()
+        val wallpaperColor = Color.GREEN
+
+        fun page(
+            messages: List<MessageEntity>,
+            refresh: LoadState,
+        ) = PagingData.from(
+            messages,
+            sourceLoadStates =
+                LoadStates(
+                    refresh = refresh,
+                    prepend = LoadState.NotLoading(endOfPaginationReached = messages.isNotEmpty()),
+                    append = LoadState.NotLoading(endOfPaginationReached = messages.isNotEmpty()),
+                ),
+        )
+
+        val pages = MutableStateFlow(page(listOf(row), LoadState.NotLoading(endOfPaginationReached = false)))
         setContent(
             draft = { ComposerDraftState(hydrated = true) },
-            pages =
-                flowOf(
-                    PagingData.from(
-                        listOf(row),
-                        sourceLoadStates =
-                            LoadStates(
-                                refresh = LoadState.NotLoading(endOfPaginationReached = false),
-                                prepend = LoadState.NotLoading(endOfPaginationReached = true),
-                                append = LoadState.NotLoading(endOfPaginationReached = true),
-                            ),
-                    ),
+            pages = pages,
+            chatWallpaper =
+                WallpaperRenderSpec(
+                    WallpaperSelection(ChatWallpaperPreset.PATTERN),
+                    WallpaperPattern(seed = 0, background = wallpaperColor, icons = emptyList()),
                 ),
-            chatWallpaper = WallpaperRenderSpec(WallpaperSelection(ChatWallpaperPreset.NONE), null),
+            surfaceEffects = SurfaceEffects(surfaces = mapOf(EffectSurface.CHAT_HEADER to SurfaceEffect(opacityPercent = 10, blurPercent = 100))),
             knownNicks = setOf("body-peer"),
             initialTarget = { target },
             entryState = { entry },
@@ -3346,20 +3368,39 @@ class ComposerSendClearUiTest {
         val mentionCenter = layouts.single().getBoundingBox(row.text.indexOf("body-peer") + 2).center
         val bounds = message.fetchSemanticsNode().boundsInRoot
         val rootBounds = root.fetchSemanticsNode().boundsInRoot
+        val header = compose.onNodeWithTag("chat_top_app_bar", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val headerY = (header.top - rootBounds.top).toInt()
 
-        fun paintedRow(): Bitmap {
-            // Capture the root, not the row's layer: parent alpha must affect these real pixels.
-            val screen = root.captureToImage().asAndroidBitmap()
-            return Bitmap.createBitmap(
+        fun paintedRow(screen: Bitmap): Bitmap =
+            Bitmap.createBitmap(
                 screen,
                 (bounds.left - rootBounds.left).toInt(),
                 (bounds.top - rootBounds.top).toInt(),
                 bounds.width.toInt(),
                 bounds.height.toInt(),
             )
+
+        fun timelinePixel(screen: Bitmap): Int = screen.getPixel(screen.width * 3 / 4, screen.height / 2)
+
+        fun headerGreenSignal(screen: Bitmap): Int {
+            val pixel = screen.getPixel(screen.width * 2 / 3, headerY)
+            return Color.green(pixel) - maxOf(Color.red(pixel), Color.blue(pixel))
         }
+
+        fun Bitmap.onlyContains(color: Int): Boolean {
+            val pixels = IntArray(width * height)
+            getPixels(pixels, 0, width, 0, 0, width, height)
+            return pixels.all { it == color }
+        }
+
         compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertExists()
-        val hidden = paintedRow()
+        // Capture the root, not the row's layer: parent alpha must affect these real pixels.
+        val pending = root.captureToImage().asAndroidBitmap()
+        val neutral = timelinePixel(pending)
+        val pendingHeaderSignal = headerGreenSignal(pending)
+        assertFalse("Pending timeline must not paint wallpaper", neutral == wallpaperColor)
+        assertTrue("Pending rows must not paint over the neutral timeline", paintedRow(pending).onlyContains(neutral))
+        assertTrue("Pending wallpaper must not bleed through the blurred header", pendingHeaderSignal < 8)
         body.performTouchInput { click(mentionCenter) }
         body.performTouchInput { longClick(mentionCenter) }
         compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
@@ -3380,8 +3421,10 @@ class ComposerSendClearUiTest {
         assertEquals("The real exact-row placement must settle before reveal", 1, positionsHandled)
         compose.mainClock.advanceTimeByFrame()
         compose.waitForIdle()
-        val ready = paintedRow()
-        assertFalse("Readiness must paint messages, not just expose semantics", hidden.sameAs(ready))
+        val firstReady = root.captureToImage().asAndroidBitmap()
+        val ready = paintedRow(firstReady)
+        assertEquals("Wallpaper must paint on the first ready frame", wallpaperColor, timelinePixel(firstReady))
+        assertFalse("Readiness must paint messages, not just expose semantics", ready.onlyContains(wallpaperColor))
         compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertDoesNotExist()
         val readyFrame = compose.mainClock.currentTime
         // The click helper advances gesture time by one frame; inject the ready-frame touch directly.
@@ -3394,7 +3437,14 @@ class ComposerSendClearUiTest {
         compose.mainClock.advanceTimeBy(1_000)
         compose.waitForIdle()
         assertEquals(bounds, message.fetchSemanticsNode().boundsInRoot)
-        assertTrue("The first ready frame must already have full opacity", ready.sameAs(paintedRow()))
+        val settled = root.captureToImage().asAndroidBitmap()
+        assertTrue("The first ready frame must already have full opacity", ready.sameAs(paintedRow(settled)))
+        assertTrue("Wallpaper must reach the actual header blur, even at the top edge faded to canvas", headerGreenSignal(settled) > pendingHeaderSignal + 8)
+
+        compose.mainClock.autoAdvance = true
+        compose.runOnIdle { pages.value = page(emptyList(), LoadState.Loading) }
+        message.assertDoesNotExist()
+        assertEquals("A later refresh must not hide the already-revealed wallpaper", wallpaperColor, timelinePixel(root.captureToImage().asAndroidBitmap()))
     }
 
     @Test
