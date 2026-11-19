@@ -1293,7 +1293,7 @@ class SettingsHomeAndPrimitivesUiTest {
         var picked: String? = null
         var draft by mutableStateOf(
             androidx.compose.ui.text.input
-                .TextFieldValue("al"),
+                .TextFieldValue(""),
         )
         compose.setContent {
             MotdTheme(
@@ -1363,7 +1363,12 @@ class SettingsHomeAndPrimitivesUiTest {
         for (nextVariant in 0..2) {
             compose.runOnIdle {
                 variant = nextVariant
-                val text = if (nextVariant == 2) ":smile" else "al"
+                val text =
+                    when (nextVariant) {
+                        0 -> "al"
+                        1 -> "/jo"
+                        else -> ":smile"
+                    }
                 draft =
                     androidx.compose.ui.text.input
                         .TextFieldValue(
