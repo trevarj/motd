@@ -2,8 +2,10 @@ package io.github.trevarj.motd.appearance
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.LauncherIcon
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -42,7 +44,7 @@ class LauncherIconControllerTest {
         assertEquals(expectedDisabled, disable.toSet())
     }
 
-    @Test fun componentPlan_for_default_disables_all_six_variant_aliases() {
+    @Test fun componentPlan_for_teal_disables_all_six_other_aliases() {
         val (enable, disable) = launcherComponentPlan(LauncherIcon.DEFAULT, LauncherIcon.entries)
         assertEquals(launcherAliasFqcn(LauncherIcon.DEFAULT), enable)
         assertEquals(6, disable.size)
@@ -58,52 +60,65 @@ class LauncherIconControllerApplyTest {
 
     private fun componentFor(icon: LauncherIcon) = ComponentName(context.packageName, launcherAliasFqcn(icon))
 
-    private fun isEnabled(
-        icon: LauncherIcon,
-        manifestDefaultEnabled: Boolean,
-    ): Boolean =
-        when (packageManager.getComponentEnabledSetting(componentFor(icon))) {
-            PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> true
-            PackageManager.COMPONENT_ENABLED_STATE_DISABLED -> false
-            else -> manifestDefaultEnabled
-        }
+    private fun launcherActivities() =
+        packageManager.queryIntentActivities(
+            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(context.packageName),
+            0,
+        )
+
+    @Test fun fresh_install_uses_mono_for_the_launcher_and_application_icon() {
+        val activity = launcherActivities().single().activityInfo
+        assertEquals(launcherAliasFqcn(LauncherIcon.MONO), activity.name)
+        val monoIcons = setOf(R.mipmap.ic_launcher_mono, R.mipmap.ic_launcher_mono_round)
+        assertTrue(activity.icon in monoIcons)
+        assertTrue(context.applicationInfo.icon in monoIcons)
+    }
 
     @Test fun apply_enables_only_the_selected_alias() {
         controller.apply(LauncherIcon.GRUVBOX)
 
-        assertTrue(isEnabled(LauncherIcon.GRUVBOX, manifestDefaultEnabled = false))
-        LauncherIcon.entries.filter { it != LauncherIcon.GRUVBOX }.forEach { other ->
-            assertFalse(
-                "expected $other disabled",
-                isEnabled(other, manifestDefaultEnabled = other == LauncherIcon.DEFAULT),
-            )
-        }
+        assertEquals(launcherAliasFqcn(LauncherIcon.GRUVBOX), launcherActivities().single().activityInfo.name)
     }
 
     @Test fun apply_switching_variants_disables_the_previous_alias() {
         controller.apply(LauncherIcon.NORD)
-        assertTrue(isEnabled(LauncherIcon.NORD, manifestDefaultEnabled = false))
+        assertEquals(launcherAliasFqcn(LauncherIcon.NORD), launcherActivities().single().activityInfo.name)
 
         controller.apply(LauncherIcon.LIGHT)
-        assertTrue(isEnabled(LauncherIcon.LIGHT, manifestDefaultEnabled = false))
-        assertFalse(isEnabled(LauncherIcon.NORD, manifestDefaultEnabled = false))
+        assertEquals(launcherAliasFqcn(LauncherIcon.LIGHT), launcherActivities().single().activityInfo.name)
     }
 
-    @Test fun apply_back_to_default_re_enables_the_default_alias_and_disables_the_rest() {
+    @Test fun apply_mono_reconciles_legacy_component_overrides() {
+        packageManager.setComponentEnabledSetting(
+            componentFor(LauncherIcon.DEFAULT),
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+            PackageManager.DONT_KILL_APP,
+        )
+        packageManager.setComponentEnabledSetting(
+            componentFor(LauncherIcon.MONO),
+            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+            PackageManager.DONT_KILL_APP,
+        )
+
         controller.apply(LauncherIcon.MONO)
+
+        assertEquals(launcherAliasFqcn(LauncherIcon.MONO), launcherActivities().single().activityInfo.name)
+    }
+
+    @Test fun apply_teal_enables_the_legacy_default_alias_instead_of_mono() {
         controller.apply(LauncherIcon.DEFAULT)
 
-        assertTrue(isEnabled(LauncherIcon.DEFAULT, manifestDefaultEnabled = true))
-        assertFalse(isEnabled(LauncherIcon.MONO, manifestDefaultEnabled = false))
+        val activity = launcherActivities().single().activityInfo
+        assertEquals(launcherAliasFqcn(LauncherIcon.DEFAULT), activity.name)
+        assertTrue(activity.icon in setOf(R.mipmap.ic_launcher, R.mipmap.ic_launcher_round))
     }
 
-    @Test fun apply_is_a_no_op_when_the_target_is_already_current() {
-        controller.apply(LauncherIcon.CATPPUCCIN)
-        val settingBefore = packageManager.getComponentEnabledSetting(componentFor(LauncherIcon.CATPPUCCIN))
+    @Test fun apply_does_not_override_mono_manifest_default_when_already_selected() {
+        controller.apply(LauncherIcon.MONO)
 
-        controller.apply(LauncherIcon.CATPPUCCIN)
-
-        assertEquals(settingBefore, packageManager.getComponentEnabledSetting(componentFor(LauncherIcon.CATPPUCCIN)))
-        assertTrue(isEnabled(LauncherIcon.CATPPUCCIN, manifestDefaultEnabled = false))
+        assertEquals(
+            PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
+            packageManager.getComponentEnabledSetting(componentFor(LauncherIcon.MONO)),
+        )
     }
 }

@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.service
 
+import android.app.Notification
 import android.app.NotificationManager
 import android.content.Context
 import androidx.core.app.NotificationCompat
@@ -20,7 +21,7 @@ import io.github.trevarj.motd.di.ForegroundBufferTrackerImpl
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -107,10 +108,8 @@ class MessageNotificationIdCollisionTest {
         )
 
     private fun postStatusNotification() {
-        NotificationManagerCompat.from(context).notify(
-            IrcForegroundService.STATUS_ID,
-            notifications.statusNotification(connectedCount = 1, reconnecting = false),
-        )
+        val shape = StatusNotificationShape(listOf(StatusNotificationRow("libera", StatusConnection.CONNECTED)), starting = false)
+        NotificationManagerCompat.from(context).notify(IrcForegroundService.STATUS_ID, buildStatusNotification(context, shape))
     }
 
     private fun post(
@@ -188,7 +187,7 @@ class MessageNotificationIdCollisionTest {
                     )
                 }
             val messageId = MotdNotifications.messageNotificationId(channels.first())
-            post(messageId, MotdNotifications.CHANNEL_MESSAGES)
+            notifications.onIncoming(networkId, channels.first(), BufferType.CHANNEL, false, chat("ordinary").copy(target = "#first"))
             channels.forEach { notifications.watchEnded(it) }
             notifications.retireLegacyMessageNotifications()
 
@@ -202,6 +201,7 @@ class MessageNotificationIdCollisionTest {
                 assertEquals(id, shadowOf(notification.contentIntent).savedIntent.getLongExtra(MotdNotifications.EXTRA_BUFFER_ID, -1))
                 assertNull(NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(notification))
                 assertTrue(notification.actions.isNullOrEmpty())
+                assertEquals(Notification.GROUP_ALERT_SUMMARY, notification.groupAlertBehavior)
             }
         }
 
@@ -358,9 +358,8 @@ class MessageNotificationIdCollisionTest {
             post(5, MotdNotifications.CHANNEL_MENTIONS, "legacy-tag")
             db.appStateDao().insert(AppStateEntity("v10_notification_reset"))
 
-            coroutineScope {
-                MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, applicationScope = this)
-            }
+            MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, applicationScope = backgroundScope)
+            db.invalidationTracker.createFlow("app_state").first { db.appStateDao().contains("v10_notification_reset") == 0 }
 
             assertEquals(
                 setOf(null to IrcForegroundService.STATUS_ID, "status-tag" to id),

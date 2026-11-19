@@ -8,16 +8,22 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
+import android.os.Build
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
+import androidx.core.content.LocusIdCompat
 import androidx.core.content.edit
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import androidx.core.net.toUri
 import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.MainActivity
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.avatar.notificationAvatarIcon
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -51,6 +57,9 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.Prefix
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -76,8 +85,7 @@ fun shouldPostNotification(
 /**
  * MessagingStyle notifications. Owns the notification channels and applies the final
  * suppression rules that need Android state (muted buffer, foregrounded buffer) before posting.
- * Implements [MessageNotifier] (the EventProcessor hook) and hosts the status notification for
- * the foreground service.
+ * Implements [MessageNotifier], the EventProcessor hook.
  */
 @Singleton
 class MotdNotifications
@@ -151,9 +159,16 @@ class MotdNotifications
 
         // Guarded by history; no presentation lock may span a Room read inside playback's transaction.
         private var historyRevision = 0L
+        private var currentPreview: NotificationPreview? = null
+        private val shortcutRooms = HashMap<String, Job>()
 
         init {
             ensureChannels()
+            applicationScope?.launch {
+                settingsRepository.notificationPreview
+                    .catch { emit(NotificationPreview.GENERIC) }
+                    .collect { previewSnapshot() }
+            }
             applicationScope?.launch {
                 retireLegacyMessageNotifications()
                 // Only the v9→v10 migration writes this marker. Fresh/empty databases must not infer
@@ -169,9 +184,107 @@ class MotdNotifications
                     }
                 }
                 retireCommittedRoomMerges()
+                retireRedactedNotifications()
                 recoverCanonicalNotifications()
             }
         }
+
+        private suspend fun readPreview(): NotificationPreview =
+            try {
+                settingsRepository.notificationPreview.first()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                NotificationPreview.GENERIC
+            }
+
+        private fun applyPreview(preview: NotificationPreview) {
+            if (currentPreview == preview) return
+            historyRevision++
+            history.clear()
+            historyKeys.clear()
+            dickordBatches.clear()
+            manager.activeNotifications
+                .filter {
+                    it.notification.channelId in RESETTABLE_CHANNELS &&
+                        it.notification.extras.getString(EXTRA_PREVIEW) != preview.name
+                }.forEach { manager.cancel(it.tag, it.id) }
+            val shortcuts = conversationShortcuts().map { it.id }
+            if (preview == NotificationPreview.GENERIC) {
+                shortcutRooms.values.forEach { it.cancel() }
+                shortcutRooms.clear()
+                forgetConversationShortcuts(shortcuts)
+            } else {
+                shortcuts.forEach(::watchShortcutRoom)
+            }
+            currentPreview = preview
+        }
+
+        private suspend fun previewSnapshot(): Pair<NotificationPreview, Long> {
+            while (true) {
+                val revision = synchronized(history) { historyRevision }
+                val preview = readPreview()
+                synchronized(history) {
+                    if (historyRevision == revision) {
+                        applyPreview(preview)
+                        return preview to historyRevision
+                    }
+                }
+            }
+        }
+
+        private inline fun <T> commitPreview(
+            preview: NotificationPreview,
+            revision: Long,
+            block: () -> T,
+        ): T? =
+            synchronized(history) {
+                if (currentPreview == preview && historyRevision == revision) block() else null
+            }
+
+        private fun previewBuilder(
+            channel: String,
+            preview: NotificationPreview,
+            genericText: Int,
+        ): NotificationCompat.Builder =
+            NotificationCompat
+                .Builder(context, channel)
+                .setSmallIcon(R.drawable.ic_notification_motd)
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .setPublicVersion(
+                    NotificationCompat
+                        .Builder(context, channel)
+                        .setSmallIcon(R.drawable.ic_notification_motd)
+                        .setContentTitle(context.getString(R.string.app_name))
+                        .setContentText(context.getString(genericText))
+                        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                        .build(),
+                ).apply { extras.putString(EXTRA_PREVIEW, preview.name) }
+
+        private inline fun NotificationPreview.showIdentity(value: () -> String?): String? = if (this == NotificationPreview.GENERIC) null else value()
+
+        private suspend fun networkLabel(
+            networkId: Long,
+            preview: NotificationPreview,
+        ): String? =
+            preview.showIdentity {
+                optionalMetadata {
+                    db
+                        .networkDao()
+                        .byId(networkId)
+                        ?.name
+                        ?.takeIf { it.isNotBlank() }
+                }
+            }
+
+        private inline fun <T> optionalMetadata(block: () -> T?): T? =
+            try {
+                block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
 
         /**
          * Retire message notifications posted by a build that used the raw `bufferId` as the
@@ -267,11 +380,11 @@ class MotdNotifications
                         }
 
                         MessageKind.INVITE -> {
-                            onInvitation(buffer.networkId, buffer.id, event.id)
+                            onRecoveredInvitation(buffer.networkId, buffer.id, event.id)
                         }
 
                         MessageKind.DCC_TRANSFER -> {
-                            onDccTransferOffer(buffer.networkId, buffer.id, event.id)
+                            postDccTransferOffer(buffer.networkId, buffer.id, event.id, silent = true)
                         }
 
                         else -> {}
@@ -291,9 +404,15 @@ class MotdNotifications
 
         private fun ensureChannels() {
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
-            nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_STATUS, "Connection status", NotificationManager.IMPORTANCE_MIN),
-            )
+            if (nm.getNotificationChannel(CHANNEL_STATUS) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_STATUS,
+                        context.getString(R.string.connection_notification_channel),
+                        NotificationManager.IMPORTANCE_LOW,
+                    ).apply { setShowBadge(false) },
+                )
+            }
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_MESSAGES, "Messages", NotificationManager.IMPORTANCE_HIGH),
             )
@@ -309,45 +428,6 @@ class MotdNotifications
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_SEND_FAILURES, "Failed sends", NotificationManager.IMPORTANCE_HIGH),
             )
-        }
-
-        // -- status notification (foreground service) --
-
-        fun statusNotification(
-            connectedCount: Int,
-            reconnecting: Boolean,
-            starting: Boolean = false,
-        ): Notification {
-            // Explicit component: getLaunchIntentForPackage resolves to the enabled launcher
-            // activity-alias, and switching icons (feat(appearance): selectable launcher icon
-            // variants) disables that alias, dead-ending an already-posted PendingIntent.
-            val contentIntent =
-                PendingIntent.getActivity(
-                    context,
-                    0,
-                    Intent(context, MainActivity::class.java)
-                        .setAction(Intent.ACTION_MAIN)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                )
-            val stopIntent =
-                PendingIntent.getService(
-                    context,
-                    1,
-                    Intent(context, IrcForegroundService::class.java).setAction(IrcForegroundService.ACTION_STOP),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                )
-            val text = statusNotificationText(connectedCount, reconnecting, starting)
-            return NotificationCompat
-                .Builder(context, CHANNEL_STATUS)
-                .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
-                .setContentTitle("motd")
-                .setContentText(text)
-                .setOngoing(true)
-                .setSilent(true)
-                .setContentIntent(contentIntent)
-                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopIntent)
-                .build()
         }
 
         // -- MessageNotifier (message/mention notifications) --
@@ -393,7 +473,7 @@ class MotdNotifications
             refreshOnly: Boolean = false,
         ) {
             while (true) {
-                val revision = synchronized(history) { historyRevision }
+                val (preview, revision) = previewSnapshot()
                 // Plain suspend reads: Room and DataStore dispatch off the main thread on their own.
                 // Historical enrichment can call this inside Room's exclusive playback transaction.
                 val buffer =
@@ -401,12 +481,18 @@ class MotdNotifications
                         if (refreshOnly) throw error
                         null
                     }
+                if (buffer != null && (buffer.id != bufferId || buffer.dismissed || buffer.pendingCloseAt != null)) return
                 val canonicalEvent =
                     eventId?.let { id ->
                         db.messageDao().byCanonicalId(id)?.takeIf { event ->
                             buffer != null && db.bufferDao().canonicalId(event.bufferId) == buffer.id
                         }
                     }
+                if ((eventId != null && canonicalEvent == null) || canonicalEvent?.kind == MessageKind.REDACTED ||
+                    (eventId == null && message.ctx.msgid?.let { db.messageDao().byMsgid(bufferId, it)?.kind } == MessageKind.REDACTED)
+                ) {
+                    return
+                }
                 val canonicalEventId = canonicalEvent?.id
                 val canonicalEventTime = canonicalEvent?.serverTime ?: message.ctx.serverTime
                 val thread = NotificationThreadKey(bufferId, type == BufferType.CHANNEL && (canonicalEvent?.hasMention ?: hasMention))
@@ -494,6 +580,7 @@ class MotdNotifications
                             settings,
                             identityRules,
                             dickordEnabled,
+                            preview,
                         )
                     } else {
                         null
@@ -510,14 +597,7 @@ class MotdNotifications
                     synchronized(history) {
                         dickordBatches[thread] ?: (dickordEnabled && isDickordChannel(title))
                     }
-                val person =
-                    notificationPerson(
-                        networkId,
-                        message.source.nick,
-                        dickordNickLabel(message.source.nick, dickordBatch),
-                        settings.avatarStyle,
-                        identityRules,
-                    )
+                val network = networkLabel(networkId, preview)
                 val cached =
                     synchronized(history) {
                         history[thread]?.let { style ->
@@ -553,27 +633,13 @@ class MotdNotifications
                         emptyList()
                     }
                 val keys = mutableListOf<NotificationMessageKey>()
-                val style =
-                    NotificationCompat
-                        .MessagingStyle(Person.Builder().setName("me").build())
-                        .setConversationTitle(if (thread.channelMentions) title else dickordChannelLabel(title, dickordBatch))
-                        .setGroupConversation(type == BufferType.CHANNEL)
+                val style = chatStyle(preview, type, if (thread.channelMentions) title else dickordChannelLabel(title, dickordBatch))
                 if (rebuild) {
                     restored.forEach { row ->
                         val key = NotificationMessageKey.from(row)
                         if (keys.none { it.matches(key) }) {
                             keys += key
-                            style.addMessage(
-                                row.text,
-                                row.serverTime,
-                                notificationPerson(
-                                    networkId,
-                                    row.sender,
-                                    dickordNickLabel(row.sender, dickordBatch),
-                                    settings.avatarStyle,
-                                    identityRules,
-                                ),
-                            )
+                            style.addChatMessage(preview, key, networkId, dickordBatch, settings.avatarStyle, identityRules)
                         }
                     }
                 } else {
@@ -609,7 +675,7 @@ class MotdNotifications
                 } else {
                     keys += key
                     if (keys.size > MAX_NOTIFICATION_MESSAGES) keys.removeAt(0)
-                    style.addMessage(message.text, canonicalEventTime, person)
+                    style.addChatMessage(preview, key, networkId, dickordBatch, settings.avatarStyle, identityRules)
                 }
                 val notificationEventIds = keys.mapNotNull { it.eventId }.distinct().toLongArray()
                 val ordinaryEventIds =
@@ -621,16 +687,17 @@ class MotdNotifications
                         ?.toLongArray()
                 val latestAnchor = resolveLatestNotificationAnchor(db, bufferId, notificationEventIds.toList())
                 val latestEvent = latestAnchor?.let { db.messageDao().byCanonicalId(it.eventId) }
+                if (readPreview() != preview) continue
                 var requestedAlert = false
                 val canPost =
-                    synchronized(history) {
-                        if (historyRevision != revision) return@synchronized null
+                    commitPreview(preview, revision) {
                         val eligibleNewBody = firstPresentation && addedNewBody
                         val now = SystemClock.elapsedRealtime()
                         if (eligibleNewBody) pruneAlertWindows(now)
                         requestedAlert = eligibleNewBody && lastEligiblePost[bufferId] == null
                         // FLAG_UPDATE_CURRENT mutates already-posted action anchors, so build only
                         // after validation and commit both lanes without another presentation interleaving.
+                        val shortcutId = conversationShortcut(buffer, network, preview, settings.avatarStyle)
                         val notification =
                             buildMessageNotification(
                                 thread,
@@ -641,6 +708,9 @@ class MotdNotifications
                                 if (latestEvent != null) latestEvent.msgid else message.ctx.msgid,
                                 latestAnchor?.serverTime ?: canonicalEventTime,
                                 latestAnchor?.eventId ?: canonicalEventId,
+                                preview,
+                                network,
+                                shortcutId,
                                 silent = !requestedAlert,
                             )
                         val ordinaryNotification =
@@ -654,6 +724,9 @@ class MotdNotifications
                                     staged.msgid,
                                     staged.anchor.serverTime,
                                     staged.anchor.eventId.takeIf { it != 0L },
+                                    preview,
+                                    network,
+                                    shortcutId,
                                     silent = true,
                                 )
                             }
@@ -704,6 +777,9 @@ class MotdNotifications
             msgid: String?,
             canonicalEventTime: Long,
             canonicalEventId: Long?,
+            preview: NotificationPreview,
+            network: String?,
+            shortcutId: String?,
             silent: Boolean,
         ): Notification {
             val bufferId = thread.bufferId
@@ -720,12 +796,13 @@ class MotdNotifications
                         .putExtra(ReplyReceiver.EXTRA_BUFFER_ID, bufferId),
                     PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                 )
-            val remoteInput = RemoteInput.Builder(ReplyReceiver.KEY_REPLY).setLabel("Reply").build()
+            val replyLabel = context.getString(R.string.notification_projection_reply)
+            val remoteInput = RemoteInput.Builder(ReplyReceiver.KEY_REPLY).setLabel(replyLabel).build()
             val replyAction =
                 NotificationCompat.Action
                     .Builder(
                         android.R.drawable.ic_menu_send,
-                        "Reply",
+                        replyLabel,
                         replyIntent,
                     ).addRemoteInput(remoteInput)
                     .setSemanticAction(
@@ -749,7 +826,7 @@ class MotdNotifications
                 NotificationCompat.Action
                     .Builder(
                         android.R.drawable.ic_menu_view,
-                        "Mark read",
+                        context.getString(R.string.notification_projection_mark_read),
                         markReadIntent,
                     ).setSemanticAction(
                         if (automotiveMessaging) NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ else NotificationCompat.Action.SEMANTIC_ACTION_NONE,
@@ -774,9 +851,13 @@ class MotdNotifications
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                 )
 
-            return NotificationCompat
-                .Builder(context, channel)
-                .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
+            return previewBuilder(channel, preview, R.string.notification_projection_message)
+                .apply {
+                    if (shortcutId != null) {
+                        setShortcutId(shortcutId)
+                        setLocusId(LocusIdCompat(shortcutId))
+                    }
+                }.setSubText(network)
                 .setStyle(style)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setLocalOnly(!automotiveMessaging)
@@ -827,6 +908,7 @@ class MotdNotifications
             settings: Settings,
             identityRules: IrcIdentityRules,
             dickordEnabled: Boolean,
+            preview: NotificationPreview,
         ): OrdinaryPromotion? {
             val ordinary = NotificationThreadKey(buffer.id, false)
             // A cached body is not proof that the user still has its notification.
@@ -854,11 +936,7 @@ class MotdNotifications
             val dickordBatch =
                 synchronized(history) { dickordBatches[ordinary] }
                     ?: (dickordEnabled && isDickordChannel(buffer.displayName))
-            val style =
-                NotificationCompat
-                    .MessagingStyle(Person.Builder().setName("me").build())
-                    .setConversationTitle(dickordChannelLabel(buffer.displayName, dickordBatch))
-                    .setGroupConversation(true)
+            val style = chatStyle(preview, BufferType.CHANNEL, dickordChannelLabel(buffer.displayName, dickordBatch))
             val keys = mutableListOf<NotificationMessageKey>()
             val remainingEvents = mutableListOf<MessageEntity>()
             val cachedRows =
@@ -911,17 +989,7 @@ class MotdNotifications
                     if (keys.none { it.matches(key) }) {
                         keys += key
                         remainingEvents += row
-                        style.addMessage(
-                            row.text,
-                            row.serverTime,
-                            notificationPerson(
-                                buffer.networkId,
-                                row.sender,
-                                dickordNickLabel(row.sender, dickordBatch),
-                                settings.avatarStyle,
-                                identityRules,
-                            ),
-                        )
+                        style.addChatMessage(preview, key, buffer.networkId, dickordBatch, settings.avatarStyle, identityRules)
                     }
                 }
             }
@@ -944,11 +1012,40 @@ class MotdNotifications
             message: MessageEntity,
             type: BufferType,
         ): Boolean =
-            if (type == BufferType.SERVER) {
-                !isFool(message)
-            } else {
-                allowsNotification(message.senderAccount, message.normalizedActor, type == BufferType.QUERY, message.hasMention)
-            }
+            message.kind != MessageKind.REDACTED &&
+                if (type == BufferType.SERVER) {
+                    !isFool(message)
+                } else {
+                    allowsNotification(message.senderAccount, message.normalizedActor, type == BufferType.QUERY, message.hasMention)
+                }
+
+        private fun chatStyle(
+            preview: NotificationPreview,
+            type: BufferType,
+            title: String,
+        ): NotificationCompat.MessagingStyle =
+            NotificationCompat
+                .MessagingStyle(Person.Builder().setName(context.getString(R.string.notification_projection_you)).build())
+                .setConversationTitle(preview.showIdentity { title } ?: context.getString(R.string.notification_projection_message))
+                .setGroupConversation(type == BufferType.CHANNEL)
+
+        private fun NotificationCompat.MessagingStyle.addChatMessage(
+            preview: NotificationPreview,
+            key: NotificationMessageKey,
+            networkId: Long,
+            dickordBatch: Boolean,
+            avatarStyle: AvatarStyle,
+            identityRules: IrcIdentityRules,
+        ) {
+            val person =
+                if (preview == NotificationPreview.GENERIC) {
+                    Person.Builder().setName(context.getString(R.string.notification_projection_sender)).build()
+                } else {
+                    notificationPerson(networkId, key.sender, dickordNickLabel(key.sender, dickordBatch), avatarStyle, identityRules)
+                }
+            val text = if (preview == NotificationPreview.FULL) key.text else context.getString(R.string.notification_projection_message)
+            addMessage(text, key.serverTime, person)
+        }
 
         private fun notificationPerson(
             networkId: Long,
@@ -963,6 +1060,181 @@ class MotdNotifications
                 .setKey("irc:$networkId:${identityRules.normalize(name)}")
                 .setIcon(notificationAvatarIcon(context, name, style))
                 .build()
+
+        private fun conversationShortcut(
+            buffer: RoomEntity?,
+            network: String?,
+            preview: NotificationPreview,
+            avatarStyle: AvatarStyle,
+        ): String? {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || preview == NotificationPreview.GENERIC ||
+                buffer == null || buffer.type == BufferType.SERVER ||
+                (
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        androidx.core.content.ContextCompat
+                            .checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) !=
+                        android.content.pm.PackageManager.PERMISSION_GRANTED
+                )
+            ) {
+                return null
+            }
+            val id = "$CONVERSATION_SHORTCUT_PREFIX${buffer.id}"
+            val title = buffer.displayName.takeIf { it.isNotBlank() } ?: return null
+            val longLabel = shortcutLongLabel(title, network)
+            val shortcuts = conversationShortcuts()
+            val watched = shortcutRooms.iterator()
+            while (watched.hasNext()) {
+                val (watchedId, job) = watched.next()
+                if (shortcuts.none { it.id == watchedId }) {
+                    watched.remove()
+                    job.cancel()
+                }
+            }
+            val existing = shortcuts.find { it.id == id && (it.isDynamic || it.isCached) }
+            if (existing?.shortLabel?.toString() == title && existing.longLabel?.toString() == longLabel) {
+                watchShortcutRoom(id)
+                return id
+            }
+
+            val icon = notificationAvatarIcon(context, title, avatarStyle)
+            val shortcut =
+                ShortcutInfoCompat
+                    .Builder(context, id)
+                    .setIsConversation()
+                    .setShortLabel(title)
+                    .setLongLabel(longLabel)
+                    .setIcon(icon)
+                    .setPerson(
+                        Person
+                            .Builder()
+                            .setName(title)
+                            .setKey(id)
+                            .setIcon(icon)
+                            .build(),
+                    ).setIntent(openBufferIntent(buffer.id, "motd://notification/conversation/${buffer.id}".toUri()))
+                    .apply {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            setExcludedFromSurfaces(ShortcutInfoCompat.SURFACE_LAUNCHER)
+                        }
+                    }.build()
+            val published = runCatching { ShortcutManagerCompat.pushDynamicShortcut(context, shortcut) }.getOrDefault(false)
+            if (!published && existing == null) return null
+            watchShortcutRoom(id)
+            return id
+        }
+
+        private fun conversationShortcuts(): List<ShortcutInfoCompat> =
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                emptyList()
+            } else {
+                ShortcutManagerCompat
+                    .getShortcuts(
+                        context,
+                        ShortcutManagerCompat.FLAG_MATCH_DYNAMIC or
+                            ShortcutManagerCompat.FLAG_MATCH_CACHED or ShortcutManagerCompat.FLAG_MATCH_PINNED,
+                    ).filter { it.id.startsWith(CONVERSATION_SHORTCUT_PREFIX) }
+            }
+
+        private fun shortcutLongLabel(
+            title: String,
+            network: String?,
+        ): String = network?.let { context.getString(R.string.notification_projection_shortcut_on_network, title, it) } ?: title
+
+        private fun forgetConversationShortcuts(ids: List<String>) {
+            if (ids.isEmpty() || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+            ids.forEach { shortcutRooms.remove(it)?.cancel() }
+            val label = context.getString(R.string.notification_projection_message)
+            val pinned = conversationShortcuts().filter { it.isPinned && it.id in ids }
+            if (pinned.isNotEmpty()) {
+                ShortcutManagerCompat.updateShortcuts(
+                    context,
+                    pinned.map {
+                        ShortcutInfoCompat
+                            .Builder(context, it.id)
+                            .setShortLabel(label)
+                            .setLongLabel(label)
+                            .setIcon(IconCompat.createWithResource(context, R.drawable.ic_notification_motd))
+                            .setPerson(
+                                Person
+                                    .Builder()
+                                    .setName(label)
+                                    .setKey(it.id)
+                                    .build(),
+                            ).setIntent(Intent(context, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
+                            .build()
+                    },
+                )
+            }
+            ShortcutManagerCompat.removeDynamicShortcuts(context, ids)
+            ShortcutManagerCompat.removeLongLivedShortcuts(context, ids)
+        }
+
+        private fun watchShortcutRoom(id: String) {
+            val scope = applicationScope ?: return
+            if (id in shortcutRooms) return
+            val bufferId = id.removePrefix(CONVERSATION_SHORTCUT_PREFIX).toLongOrNull() ?: return
+            val job =
+                scope.launch(start = CoroutineStart.LAZY) {
+                    db.bufferDao().observe(bufferId).first { it?.id != bufferId || it.dismissed || it.pendingCloseAt != null }
+                    synchronized(history) {
+                        if (shortcutRooms[id] !== coroutineContext[Job]) return@synchronized
+                        historyRevision++
+                        clearThread(NotificationThreadKey(bufferId, false))
+                        clearThread(NotificationThreadKey(bufferId, true))
+                        forgetConversationShortcuts(listOf(id))
+                    }
+                }
+            shortcutRooms[id] = job
+            job.start()
+        }
+
+        private fun clearThread(thread: NotificationThreadKey) {
+            history.remove(thread)
+            historyKeys.remove(thread)
+            dickordBatches.remove(thread)
+            manager.cancel(if (thread.channelMentions) CHANNEL_MENTION_TAG else null, messageNotificationId(thread.bufferId))
+        }
+
+        override suspend fun onMessageRedacted(
+            bufferId: Long,
+            messageId: Long,
+        ) {
+            val event = db.messageDao().byCanonicalId(messageId)
+            val canonicalId = event?.id ?: messageId
+            val ids = (db.canonicalTimelineDao().losingEventIds(canonicalId) + canonicalId).toSet()
+            synchronized(history) {
+                historyRevision++
+                historyKeys
+                    .filter { (thread, keys) ->
+                        keys.any { it.eventId in ids || (thread.bufferId == bufferId && event?.msgid != null && it.msgid == event.msgid) }
+                    }.keys
+                    .forEach(::clearThread)
+                manager.activeNotifications
+                    .filter { row ->
+                        row.notification.channelId in MESSAGE_CHANNELS &&
+                            row.notification.extras
+                                .getLongArray(EXTRA_NOTIFICATION_EVENT_IDS)
+                                ?.any { it in ids } == true
+                    }.forEach { manager.cancel(it.tag, it.id) }
+            }
+        }
+
+        private suspend fun retireRedactedNotifications() {
+            val dao = db.messageDao()
+            val ids =
+                manager.activeNotifications
+                    .asSequence()
+                    .filter { it.notification.channelId in MESSAGE_CHANNELS }
+                    .flatMap {
+                        it.notification.extras
+                            .getLongArray(EXTRA_NOTIFICATION_EVENT_IDS)
+                            ?.asSequence() ?: emptySequence()
+                    }.distinct()
+            for (id in ids) {
+                val event = dao.byCanonicalId(id) ?: continue
+                if (event.kind == MessageKind.REDACTED) onMessageRedacted(event.bufferId, event.id)
+            }
+        }
 
         override suspend fun onRead(
             bufferId: Long,
@@ -997,10 +1269,7 @@ class MotdNotifications
                                 false
                             } else {
                                 historyRevision++
-                                history.remove(thread)
-                                historyKeys.remove(thread)
-                                dickordBatches.remove(thread)
-                                manager.cancel(tag, messageNotificationId(bufferId))
+                                clearThread(thread)
                                 true
                             }
                         }
@@ -1030,12 +1299,9 @@ class MotdNotifications
                     recordEligiblePost(winnerId, loserTime)
                 }
                 if (alertWindowBoot != null) alertWindowPrefs.edit { remove("buffer:$loserId") }
-                for (thread in listOf(NotificationThreadKey(loserId, false), NotificationThreadKey(loserId, true))) {
-                    history.remove(thread)
-                    historyKeys.remove(thread)
-                    dickordBatches.remove(thread)
-                    manager.cancel(if (thread.channelMentions) CHANNEL_MENTION_TAG else null, messageNotificationId(loserId))
-                }
+                clearThread(NotificationThreadKey(loserId, false))
+                clearThread(NotificationThreadKey(loserId, true))
+                forgetConversationShortcuts(listOf("$CONVERSATION_SHORTCUT_PREFIX$loserId"))
             }
             diagnostics.record("notifications", "room_notification_retired") {
                 mapOf("winner_id" to winnerId, "loser_id" to loserId)
@@ -1046,113 +1312,96 @@ class MotdNotifications
             networkId: Long,
             bufferId: Long,
             messageId: Long,
+        ) = postInvitation(networkId, bufferId, messageId, silent = false)
+
+        override suspend fun onRecoveredInvitation(
+            networkId: Long,
+            bufferId: Long,
+            messageId: Long,
+        ) = postInvitation(networkId, bufferId, messageId, silent = true)
+
+        private suspend fun postInvitation(
+            networkId: Long,
+            bufferId: Long,
+            messageId: Long,
+            silent: Boolean,
         ) {
             val message = db.messageDao().byCanonicalId(messageId) ?: return
-            val canonicalMessageId = message.id
             val buffer = db.bufferDao().observeById(bufferId) ?: return
-            val contentIntent =
-                PendingIntent.getActivity(
-                    context,
-                    invitationNotificationId(canonicalMessageId),
-                    Intent(context, MainActivity::class.java)
-                        .setAction(ACTION_OPEN_BUFFER)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                        .putExtra(EXTRA_BUFFER_ID, bufferId)
-                        .putExtra(EXTRA_JUMP_MSGID, message.msgid)
-                        .putExtra(EXTRA_JUMP_TIME, message.serverTime)
-                        .putExtra(EXTRA_EVENT_ID, message.id),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                )
-
-            fun actionIntent(
-                action: String,
-                requestOffset: Int,
-            ): PendingIntent =
-                PendingIntent.getBroadcast(
-                    context,
-                    invitationNotificationId(canonicalMessageId) + requestOffset,
-                    Intent(context, InviteReceiver::class.java)
-                        .setAction(action)
-                        .putExtra(InviteReceiver.EXTRA_MESSAGE_ID, canonicalMessageId),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                )
-            val dismissIntent = actionIntent(InviteReceiver.ACTION_DISMISS, 1)
-            val joinIntent =
-                PendingIntent.getActivity(
-                    context,
-                    invitationNotificationId(canonicalMessageId) + 2,
-                    Intent(context, MainActivity::class.java)
-                        .setAction(ACTION_ACCEPT_INVITE)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                        .putExtra(EXTRA_BUFFER_ID, bufferId)
-                        .putExtra(EXTRA_JUMP_MSGID, message.msgid)
-                        .putExtra(EXTRA_JUMP_TIME, message.serverTime)
-                        .putExtra(EXTRA_EVENT_ID, message.id)
-                        .putExtra(EXTRA_INVITE_MESSAGE_ID, canonicalMessageId),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                )
-            val notification =
-                NotificationCompat
-                    .Builder(context, CHANNEL_INVITATIONS)
-                    .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
-                    .setContentTitle("Invitation to ${buffer.displayName}")
-                    .setContentText(message.text)
-                    .setStyle(NotificationCompat.BigTextStyle().bigText(message.text))
+            postAuxiliary(invitationNotificationId(message.id), networkId) { preview, network ->
+                val destination = "motd://notification/invitation/${message.id}"
+                val contentIntent = openBufferPendingIntent(buffer.id, "$destination/open", message)
+                val dismissIntent =
+                    PendingIntent.getBroadcast(
+                        context,
+                        0,
+                        Intent(context, InviteReceiver::class.java)
+                            .setAction(InviteReceiver.ACTION_DISMISS)
+                            .setData("$destination/dismiss".toUri())
+                            .putExtra(InviteReceiver.EXTRA_MESSAGE_ID, message.id),
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                    )
+                val joinIntent =
+                    PendingIntent.getActivity(
+                        context,
+                        0,
+                        openBufferIntent(buffer.id, "$destination/join".toUri(), message)
+                            .setAction(ACTION_ACCEPT_INVITE)
+                            .putExtra(EXTRA_INVITE_MESSAGE_ID, message.id),
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                    )
+                val title =
+                    preview.showIdentity { context.getString(R.string.notification_projection_invitation_to, buffer.displayName) }
+                        ?: context.getString(R.string.notification_projection_invitation)
+                previewBuilder(CHANNEL_INVITATIONS, preview, R.string.notification_projection_invitation)
+                    .setContentTitle(title)
+                    .setContentText(
+                        if (preview == NotificationPreview.IDENTITY) {
+                            context.getString(R.string.notification_projection_invitation_from, message.sender)
+                        } else {
+                            null
+                        },
+                    ).setSubText(network)
+                    .previewBody(preview, message.text)
                     .setContentIntent(contentIntent)
                     .setDeleteIntent(dismissIntent)
-                    // Invitation presentation is recoverable; it must not introduce an untracked system
-                    // sound that could replay if the process dies after notify() but before completion.
-                    .setSilent(true)
+                    .setSilent(silent)
                     .setAutoCancel(true)
-                    .addAction(android.R.drawable.ic_menu_add, "Join", joinIntent)
-                    .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Dismiss", dismissIntent)
+                    .addAction(android.R.drawable.ic_menu_add, context.getString(R.string.notification_projection_join), joinIntent)
+                    .addAction(android.R.drawable.ic_menu_close_clear_cancel, context.getString(R.string.notification_projection_dismiss), dismissIntent)
                     .build()
-            val canPost =
-                android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
-                    androidx.core.content.ContextCompat.checkSelfPermission(
-                        context,
-                        android.Manifest.permission.POST_NOTIFICATIONS,
-                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (canPost) manager.notify(invitationNotificationId(canonicalMessageId), notification)
+            }
         }
 
         suspend fun watchEnded(bufferId: Long) {
-            val name = db.bufferDao().observeById(bufferId)?.displayName ?: return
-            val text = context.getString(io.github.trevarj.motd.R.string.notification_watch_ended, name)
-            val notificationId = watchEndedNotificationId(bufferId)
-            val contentIntent =
-                PendingIntent.getActivity(
-                    context,
-                    notificationId,
-                    Intent(context, MainActivity::class.java)
-                        .setAction(ACTION_OPEN_BUFFER)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                        .putExtra(EXTRA_BUFFER_ID, bufferId),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                )
-            val notification =
-                NotificationCompat
-                    .Builder(context, CHANNEL_MESSAGES)
-                    .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
-                    .setContentTitle(context.getString(io.github.trevarj.motd.R.string.notification_watch_ended_title))
+            val buffer = db.bufferDao().observeById(bufferId) ?: return
+            postAuxiliary(watchEndedNotificationId(buffer.id), buffer.networkId) { preview, network ->
+                val text =
+                    preview.showIdentity { context.getString(R.string.notification_watch_ended, buffer.displayName) }
+                        ?: context.getString(R.string.notification_projection_watch_ended)
+                previewBuilder(CHANNEL_MESSAGES, preview, R.string.notification_watch_ended_title)
+                    .setContentTitle(context.getString(R.string.notification_watch_ended_title))
                     .setContentText(text)
-                    .setContentIntent(contentIntent)
+                    .setSubText(network)
+                    .setContentIntent(openBufferPendingIntent(buffer.id, "motd://notification/watch/${buffer.id}"))
+                    .setLocalOnly(true)
+                    .setSilent(true)
                     .setAutoCancel(true)
                     .build()
-            val canPost =
-                android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
-                    androidx.core.content.ContextCompat.checkSelfPermission(
-                        context,
-                        android.Manifest.permission.POST_NOTIFICATIONS,
-                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (canPost) manager.notify(notificationId, notification)
+            }
         }
 
         override suspend fun onInvitationResolved(messageId: Long) {
-            val canonicalId = db.canonicalTimelineDao().canonicalEventId(messageId)
-            manager.cancel(invitationNotificationId(canonicalId))
-            db.canonicalTimelineDao().losingEventIds(canonicalId).forEach { losingId ->
-                manager.cancel(invitationNotificationId(losingId))
+            val dao = db.canonicalTimelineDao()
+            val canonicalId = dao.canonicalEventId(messageId)
+            val ids = dao.losingEventIds(canonicalId) + canonicalId
+            synchronized(history) {
+                manager.activeNotifications
+                    .filter { row ->
+                        if (row.notification.channelId != CHANNEL_INVITATIONS) return@filter false
+                        val legacy = row.notification.extras.getString(EXTRA_PREVIEW) == null
+                        ids.any { id -> row.id == if (legacy) legacyInvitationNotificationId(id) else invitationNotificationId(id) }
+                    }.forEach { manager.cancel(it.tag, it.id) }
             }
         }
 
@@ -1160,47 +1409,38 @@ class MotdNotifications
             networkId: Long,
             bufferId: Long,
             messageId: Long,
+        ) = postDccTransferOffer(networkId, bufferId, messageId, silent = false)
+
+        private suspend fun postDccTransferOffer(
+            networkId: Long,
+            bufferId: Long,
+            messageId: Long,
+            silent: Boolean,
         ) {
             val message = db.messageDao().byCanonicalId(messageId) ?: return
             val buffer = db.bufferDao().observeById(bufferId) ?: return
-            val foreground = foregroundBufferTracker.foregroundBufferId.value == bufferId
+            val foreground = foregroundBufferTracker.foregroundBufferId.value == buffer.id
             val incomingAnchor = TimelineAnchor(message.serverTime, message.id, message.timelineOrder)
             val alreadyRead = effectiveLocalReadAnchor(buffer)?.let { incomingAnchor <= it } == true
             if (foreground || buffer.muted || alreadyRead) return
 
-            val contentIntent =
-                PendingIntent.getActivity(
-                    context,
-                    transferNotificationId(message.id),
-                    Intent(context, MainActivity::class.java)
-                        .setAction(ACTION_OPEN_BUFFER)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                        .putExtra(EXTRA_BUFFER_ID, bufferId)
-                        .putExtra(EXTRA_JUMP_MSGID, message.msgid)
-                        .putExtra(EXTRA_JUMP_TIME, message.serverTime)
-                        .putExtra(EXTRA_EVENT_ID, message.id),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                )
-            val notification =
-                NotificationCompat
-                    .Builder(context, CHANNEL_TRANSFERS)
-                    .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
-                    .setContentTitle("File offer from ${message.sender}")
-                    .setContentText(message.text)
-                    .setStyle(NotificationCompat.BigTextStyle().bigText(message.text))
-                    .setCategory(NotificationCompat.CATEGORY_STATUS)
-                    .setSilent(true)
-                    .setAutoCancel(true)
-                    .setContentIntent(contentIntent)
-                    .addAction(android.R.drawable.ic_menu_save, "Open to save", contentIntent)
-                    .build()
             val canPost =
-                android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
-                    androidx.core.content.ContextCompat.checkSelfPermission(
-                        context,
-                        android.Manifest.permission.POST_NOTIFICATIONS,
-                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (canPost) manager.notify(transferNotificationId(message.id), notification)
+                postAuxiliary(transferNotificationId(message.id), networkId) { preview, network ->
+                    val contentIntent = openBufferPendingIntent(buffer.id, "motd://notification/transfer/${message.id}", message)
+                    val title =
+                        preview.showIdentity { context.getString(R.string.notification_projection_offer_from, message.sender) }
+                            ?: context.getString(R.string.notification_projection_offer)
+                    previewBuilder(CHANNEL_TRANSFERS, preview, R.string.notification_projection_offer)
+                        .setContentTitle(title)
+                        .setSubText(network)
+                        .previewBody(preview, message.text)
+                        .setCategory(NotificationCompat.CATEGORY_STATUS)
+                        .setSilent(silent)
+                        .setAutoCancel(true)
+                        .setContentIntent(contentIntent)
+                        .addAction(android.R.drawable.ic_menu_save, context.getString(R.string.notification_projection_open_to_save), contentIntent)
+                        .build()
+                }
             diagnostics.record("notifications", "dcc_transfer_post_finished") {
                 mapOf(
                     "network_id" to networkId,
@@ -1211,6 +1451,68 @@ class MotdNotifications
             }
         }
 
+        private fun NotificationCompat.Builder.previewBody(
+            preview: NotificationPreview,
+            body: String,
+        ): NotificationCompat.Builder = if (preview == NotificationPreview.FULL) setContentText(body).setStyle(NotificationCompat.BigTextStyle().bigText(body)) else this
+
+        private suspend fun postAuxiliary(
+            id: Int,
+            networkId: Long?,
+            build: (NotificationPreview, String?) -> Notification,
+        ): Boolean {
+            while (true) {
+                val (preview, revision) = previewSnapshot()
+                val network = networkId?.let { networkLabel(it, preview) }
+                if (networkId != null && preview != NotificationPreview.GENERIC && readPreview() != preview) continue
+                val posted =
+                    commitPreview(preview, revision) {
+                        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
+                            androidx.core.content.ContextCompat.checkSelfPermission(
+                                context,
+                                android.Manifest.permission.POST_NOTIFICATIONS,
+                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        ) {
+                            manager.notify(id, build(preview, network))
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                if (posted != null) return posted
+            }
+        }
+
+        private fun openBufferIntent(
+            bufferId: Long,
+            destination: Uri,
+            message: MessageEntity? = null,
+        ): Intent =
+            Intent(context, MainActivity::class.java)
+                .setAction(ACTION_OPEN_BUFFER)
+                .setData(destination)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(EXTRA_BUFFER_ID, bufferId)
+                .apply {
+                    if (message != null) {
+                        putExtra(EXTRA_JUMP_MSGID, message.msgid)
+                        putExtra(EXTRA_JUMP_TIME, message.serverTime)
+                        putExtra(EXTRA_EVENT_ID, message.id)
+                    }
+                }
+
+        private fun openBufferPendingIntent(
+            bufferId: Long,
+            destination: String,
+            message: MessageEntity? = null,
+        ): PendingIntent =
+            PendingIntent.getActivity(
+                context,
+                0,
+                openBufferIntent(bufferId, destination.toUri(), message),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+
         // -- failed notification replies --
 
         /** A pre-persistence rejection can safely offer a text-based manual retry. */
@@ -1218,7 +1520,7 @@ class MotdNotifications
             bufferId: Long,
             text: String,
             reason: SendRejectionReason,
-        ) = postReplyFailure(bufferId, text, sendRejectionText(reason), allowRetry = true)
+        ) = postReplyFailure(bufferId, text, context.getString(sendRejectionText(reason)), allowRetry = true)
 
         /** Durable rows may already have reached the server; require review instead of resending text. */
         suspend fun onReplyDeliveryUncertain(
@@ -1227,7 +1529,7 @@ class MotdNotifications
         ) = postReplyFailure(
             bufferId,
             text,
-            "Send status unknown. Check the conversation before retrying.",
+            context.getString(R.string.notification_projection_send_unknown_explanation),
             allowRetry = false,
         )
 
@@ -1237,56 +1539,51 @@ class MotdNotifications
             explanation: String,
             allowRetry: Boolean,
         ) {
-            val title =
-                if (allowRetry) {
-                    val buffer = runCatching { db.bufferDao().observeById(bufferId) }.getOrNull()
-                    buffer?.displayName?.let { "Not sent to $it" } ?: "Message not sent"
-                } else {
-                    "Send status unknown"
-                }
-            // Tapping opens the conversation to review durable rows and the preserved draft.
-            val contentIntent =
-                PendingIntent.getActivity(
-                    context,
-                    sendFailureNotificationId(bufferId) + 1,
-                    Intent(context, MainActivity::class.java)
-                        .setAction(ACTION_OPEN_BUFFER)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                        .putExtra(EXTRA_BUFFER_ID, bufferId),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                )
-            val body = "$explanation\n$text"
-            val notification =
-                NotificationCompat
-                    .Builder(context, CHANNEL_SEND_FAILURES)
-                    .setSmallIcon(io.github.trevarj.motd.R.drawable.ic_notification_motd)
-                    .setContentTitle(title)
-                    .setContentText(body)
-                    .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-                    .setCategory(NotificationCompat.CATEGORY_ERROR)
-                    .setLocalOnly(true)
-                    .setAutoCancel(true)
-                    .setContentIntent(contentIntent)
-            if (allowRetry) {
-                val retryIntent =
-                    PendingIntent.getBroadcast(
-                        context,
-                        sendFailureNotificationId(bufferId),
-                        Intent(context, ReplyReceiver::class.java)
-                            .setAction(ReplyReceiver.ACTION_RETRY_REPLY)
-                            .putExtra(ReplyReceiver.EXTRA_BUFFER_ID, bufferId)
-                            .putExtra(ReplyReceiver.EXTRA_REPLY_TEXT, text),
-                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                    )
-                notification.addAction(android.R.drawable.ic_menu_send, "Retry", retryIntent)
-            }
+            val buffer = optionalMetadata { db.bufferDao().observeById(bufferId) }
             val canPost =
-                android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU ||
-                    androidx.core.content.ContextCompat.checkSelfPermission(
-                        context,
-                        android.Manifest.permission.POST_NOTIFICATIONS,
-                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (canPost) manager.notify(sendFailureNotificationId(bufferId), notification.build())
+                postAuxiliary(sendFailureNotificationId(bufferId), buffer?.networkId) { preview, network ->
+                    val genericTitle =
+                        if (allowRetry) R.string.notification_projection_send_failed else R.string.notification_projection_send_unknown
+                    val title =
+                        preview.showIdentity {
+                            if (allowRetry) {
+                                buffer?.displayName?.let { context.getString(R.string.notification_projection_send_failed_to, it) }
+                            } else {
+                                null
+                            }
+                        } ?: context.getString(genericTitle)
+                    val destination = "motd://notification/send-failure/$bufferId"
+                    val notification =
+                        previewBuilder(CHANNEL_SEND_FAILURES, preview, genericTitle)
+                            .setContentTitle(title)
+                            .setSubText(network)
+                            .setContentText(explanation)
+                            .previewBody(preview, "$explanation\n$text")
+                            .setCategory(NotificationCompat.CATEGORY_ERROR)
+                            .setLocalOnly(true)
+                            .setAutoCancel(true)
+                            .setContentIntent(openBufferPendingIntent(bufferId, "$destination/open"))
+                    if (allowRetry) {
+                        val retryIntent =
+                            PendingIntent.getBroadcast(
+                                context,
+                                0,
+                                Intent(context, ReplyReceiver::class.java)
+                                    .setAction(ReplyReceiver.ACTION_RETRY_REPLY)
+                                    .setData("$destination/retry".toUri())
+                                    .putExtra(ReplyReceiver.EXTRA_BUFFER_ID, bufferId)
+                                    .putExtra(ReplyReceiver.EXTRA_REPLY_TEXT, text),
+                                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                            )
+                        notification.addAction(
+                            NotificationCompat.Action
+                                .Builder(android.R.drawable.ic_menu_send, context.getString(R.string.notification_projection_retry), retryIntent)
+                                .setAuthenticationRequired(true)
+                                .build(),
+                        )
+                    }
+                    notification.build()
+                }
             diagnostics.record("notifications", "reply_failure_post_finished") {
                 mapOf(
                     "buffer_id" to bufferId,
@@ -1317,7 +1614,7 @@ class MotdNotifications
         }
 
         companion object {
-            const val CHANNEL_STATUS = "status"
+            internal const val CHANNEL_STATUS = "status"
             const val CHANNEL_MESSAGES = "messages"
             const val CHANNEL_MENTIONS = "mentions"
             const val CHANNEL_INVITATIONS = "invitations"
@@ -1336,6 +1633,7 @@ class MotdNotifications
                     CHANNEL_SEND_FAILURES,
                 )
             private const val V10_NOTIFICATION_RESET = "v10_notification_reset"
+            private const val CONVERSATION_SHORTCUT_PREFIX = "motd:chat:"
             private const val MAX_RECOVERY_NOTIFICATIONS = 200
 
             /** Recovery only re-presents events this close to the newest stored one; older ones are stale. */
@@ -1358,14 +1656,16 @@ class MotdNotifications
              * [IrcForegroundService.STATUS_ID]: the conversation that happens to own buffer id 1
              * overwrote and then cancelled the pinned foreground-service notification. Namespace the id
              * like the invitation/transfer ids so it can never alias the status id or either of those
-             * ranges (invitations occupy `0x40000000..0x7fffffff`, transfers `0x50000000..0x5fffffff`).
+             * ranges (invitations occupy `0x40000000..0x4fffffff`, transfers `0x50000000..0x5fffffff`).
              */
             internal fun messageNotificationId(bufferId: Long): Int = MESSAGE_ID_NAMESPACE or (bufferId xor (bufferId ushr 32)).toInt().and(0x0fffffff)
 
             /** True only for ids minted by [messageNotificationId]; used to retire legacy raw ids. */
             internal fun isMessageNotificationId(id: Int): Boolean = (id and NAMESPACE_MASK) == MESSAGE_ID_NAMESPACE
 
-            internal fun invitationNotificationId(messageId: Long): Int = 0x40000000 or (messageId xor (messageId ushr 32)).toInt().and(0x3fffffff)
+            internal fun invitationNotificationId(messageId: Long): Int = INVITATION_ID_NAMESPACE or (messageId xor (messageId ushr 32)).toInt().and(0x0fffffff)
+
+            private fun legacyInvitationNotificationId(messageId: Long): Int = INVITATION_ID_NAMESPACE or (messageId xor (messageId ushr 32)).toInt().and(0x3fffffff)
 
             internal fun transferNotificationId(messageId: Long): Int = 0x50000000 or (messageId xor (messageId ushr 32)).toInt().and(0x0fffffff)
 
@@ -1379,38 +1679,24 @@ class MotdNotifications
             private const val MESSAGE_ID_NAMESPACE = 0x10000000
             private const val NAMESPACE_MASK = -0x10000000 // 0xf0000000
             private const val WATCH_ENDED_NAMESPACE = 0x30000000
+            private const val INVITATION_ID_NAMESPACE = 0x40000000
         }
     }
 
-internal fun statusNotificationText(
-    connectedCount: Int,
-    reconnecting: Boolean,
-    starting: Boolean,
-): String =
-    when {
-        starting -> "Keeping chats connected"
-        reconnecting -> "Reconnecting…"
-        else -> "Connected to $connectedCount networks"
-    }
-
-/**
- * User-facing reason for a rejected send, worded like the in-app snackbars
- * (`chat_send_rejected`, `chat_not_in_channel`).
- */
-internal fun sendRejectionText(reason: SendRejectionReason): String =
+private fun sendRejectionText(reason: SendRejectionReason): Int =
     when (reason) {
-        SendRejectionReason.NOT_IN_CHANNEL -> "You're not in this channel"
+        SendRejectionReason.NOT_IN_CHANNEL -> R.string.chat_not_in_channel
 
-        SendRejectionReason.CONNECTION_UNAVAILABLE -> "Couldn't connect. Open motd and try again."
+        SendRejectionReason.CONNECTION_UNAVAILABLE -> R.string.notification_projection_send_no_connection
 
-        SendRejectionReason.BUFFER_NOT_FOUND -> "This conversation is no longer available"
+        SendRejectionReason.BUFFER_NOT_FOUND -> R.string.notification_projection_send_no_chat
 
-        SendRejectionReason.UNSUPPORTED_BUFFER -> "This conversation can't receive messages"
+        SendRejectionReason.UNSUPPORTED_BUFFER -> R.string.notification_projection_send_unsupported
 
         SendRejectionReason.INVALID_CONTENT,
         SendRejectionReason.EVENT_NOT_RETRYABLE,
         SendRejectionReason.PERSISTENCE_FAILED,
-        -> "Couldn't save this message"
+        -> R.string.chat_send_rejected
     }
 
 /** Stable identity for one notification entry, independent of live/push delivery provenance. */
@@ -1488,3 +1774,5 @@ internal suspend fun resolveLatestNotificationAnchor(
 }
 
 private const val EXTRA_NOTIFICATION_EVENT_IDS = "motd.notificationEventIds"
+
+private const val EXTRA_PREVIEW = "motd.notificationPreview"

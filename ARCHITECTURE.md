@@ -674,6 +674,13 @@ flowchart TD
   Hidden can still notify when explicitly opted in, but never gains in-app attention.
   Cached/restored notification bodies reapply current category permissions on their
   next update; preference edits neither replay handled events nor rebuild posted rows.
+  The device-local preview choice projects the actual MessagingStyle payload used by
+  Android Auto as well as the phone card. Each alert has a private lock-screen policy
+  and a separate generic public version. A preview change retires older projections;
+  Generic also removes native chat shortcut metadata. Named query and channel
+  notifications share a canonical chat shortcut across lanes without changing
+  which lane bridges to Android Auto. Redaction retires affected active cards
+  after the Room commit; canonical merges retain the tombstone.
   Interrupted recovery retains the frozen decision and always presents silently.
   Recovery and live message presentation stage canonical reads and lane promotion without holding
   a presentation lock across suspension, including historical refreshes inside Room transactions.

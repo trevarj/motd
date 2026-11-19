@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.repo.NetworkRepository
 import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.NotificationMode
+import io.github.trevarj.motd.service.NotificationPreview
 import io.github.trevarj.motd.service.NotificationSettings
 import io.github.trevarj.motd.service.NotificationSettingsState
 import io.github.trevarj.motd.ui.components.ChannelNotificationPresentation
@@ -34,6 +35,7 @@ data class NotificationSettingsUiState(
     val global: NotificationMode = NotificationMode.MENTIONS,
     val networks: List<NetworkNotificationUi> = emptyList(),
     val deliveryMode: DeliveryMode = DeliveryMode.PERSISTENT_SOCKET,
+    val preview: NotificationPreview = NotificationPreview.FULL,
     /** The screen presents "Could not save notification settings." until dismissed. */
     val saveError: Boolean = false,
 )
@@ -64,7 +66,7 @@ class NotificationSettingsViewModel
         private val notificationSettings: NotificationSettings,
         networkRepository: NetworkRepository,
         bufferRepository: BufferRepository,
-        settingsRepository: SettingsRepository,
+        private val settingsRepository: SettingsRepository,
         private val clock: AppClock,
     ) : ViewModel() {
         private val saveError = MutableStateFlow(false)
@@ -135,11 +137,18 @@ class NotificationSettingsViewModel
                         )
                     }
                 },
+                settingsRepository.notificationPreview,
                 saveError,
-            ) { base, error -> base.copy(saveError = error) }
+            ) { base, preview, error -> base.copy(preview = preview, saveError = error) }
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NotificationSettingsUiState())
 
         fun setGlobal(mode: NotificationMode) = save { notificationSettings.setGlobal(mode) }
+
+        fun setPreview(preview: NotificationPreview) =
+            save {
+                settingsRepository.setNotificationPreview(preview)
+                true
+            }
 
         fun setServer(
             networkId: Long,

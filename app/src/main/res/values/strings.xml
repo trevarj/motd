@@ -279,7 +279,7 @@
     <string name="settings_show_folder_chats_in_all_disabled_explanation">Choose Tabs in Chat list folders to change this setting.</string>
     <string name="settings_delivery">Message delivery</string>
     <string name="settings_notifications">Notifications</string>
-    <string name="settings_notifications_summary">Global, server, and channel alerts and watches</string>
+    <string name="settings_notifications_summary">Alerts, watches, and message previews</string>
     <string name="notification_global_default">Global notifications</string>
     <string name="notification_server_default">Server notifications</string>
     <string name="notification_mode_all">All messages</string>

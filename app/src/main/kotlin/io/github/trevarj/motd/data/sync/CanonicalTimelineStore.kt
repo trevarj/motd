@@ -45,6 +45,7 @@ data class TimelineObservation(
 
 sealed interface IngestResult {
     val event: TimelineEventEntity
+    val redactionMerged: Boolean get() = false
 
     data class Inserted(
         override val event: TimelineEventEntity,
@@ -52,10 +53,12 @@ sealed interface IngestResult {
 
     data class Merged(
         override val event: TimelineEventEntity,
+        override val redactionMerged: Boolean = false,
     ) : IngestResult
 
     data class Enriched(
         override val event: TimelineEventEntity,
+        override val redactionMerged: Boolean = false,
     ) : IngestResult
 
     data class Ignored(
@@ -370,8 +373,8 @@ class CanonicalTimelineStore
                     } else if (existing.timelineEventId != currentEventId) {
                         val other = dao.eventById(existing.timelineEventId)
                         val current = dao.eventById(currentEventId)
-                        if (other != null && current != null && compatible(other, current) != null) {
-                            currentEventId = coalesce(current, other, current).id
+                        if (other != null && current != null) {
+                            currentEventId = coalesce(current, other, current)?.id ?: currentEventId
                         }
                     }
                 }
@@ -525,12 +528,15 @@ class CanonicalTimelineStore
             }
 
             var canonical = initial
+            var redactionMerged = false
             for ((namespace, value) in aliases) {
                 val existingAlias = dao.aliasByValue(observation.networkId, namespace, value)
                 if (existingAlias != null && existingAlias.timelineEventId != canonical.id) {
                     val other = dao.eventById(existingAlias.timelineEventId) ?: continue
                     if (compatible(other, incoming) == null) continue
-                    canonical = coalesce(canonical, other, incoming)
+                    val merged = coalesce(canonical, other, incoming) ?: continue
+                    redactionMerged = redactionMerged || merged.kind == MessageKind.REDACTED
+                    canonical = merged
                 } else if (existingAlias == null) {
                     dao.insertAliasIgnore(
                         EventAliasEntity(
@@ -543,7 +549,11 @@ class CanonicalTimelineStore
                 }
             }
             if (provisionalCandidate != null && provisionalCandidate.id != canonical.id) {
-                canonical = coalesce(canonical, provisionalCandidate, incoming)
+                val merged = coalesce(canonical, provisionalCandidate, incoming)
+                if (merged != null) {
+                    redactionMerged = redactionMerged || merged.kind == MessageKind.REDACTED
+                    canonical = merged
+                }
             }
 
             val enriched =
@@ -611,8 +621,8 @@ class CanonicalTimelineStore
 
             return when {
                 inserted -> IngestResult.Inserted(canonical)
-                canonical != initial -> IngestResult.Enriched(canonical)
-                else -> IngestResult.Merged(canonical)
+                canonical != initial -> IngestResult.Enriched(canonical, redactionMerged)
+                else -> IngestResult.Merged(canonical, redactionMerged)
             }
         }
 
@@ -701,10 +711,10 @@ class CanonicalTimelineStore
             first: TimelineEventEntity,
             second: TimelineEventEntity,
             incoming: TimelineEventEntity,
-        ): TimelineEventEntity {
+        ): TimelineEventEntity? {
             val winner = if (first.id <= second.id) first else second
             val loser = if (winner.id == first.id) second else first
-            if (compatible(winner, loser) == null) return first
+            if (compatible(winner, loser) == null) return null
             // Independent canonical rows may each have captured a different notify-capable decision.
             // Union those decisions only here, never when enriching a duplicate observation.
             val combined = enrich(winner, loser, provenanceOf(loser))
@@ -792,6 +802,9 @@ class CanonicalTimelineStore
             val authoritative = provenance == TimeProvenance.SERVER_TAG
             val notification =
                 if (!existing.notificationEligibilityResolved && incoming.notificationEligibilityResolved) incoming else existing
+            val redaction =
+                existing.takeIf { it.kind == MessageKind.REDACTED }
+                    ?: incoming.takeIf { it.kind == MessageKind.REDACTED }
             return existing.copy(
                 bufferId = existing.bufferId,
                 msgid = existing.msgid ?: incoming.msgid,
@@ -804,16 +817,17 @@ class CanonicalTimelineStore
                 sender = if (authoritative && incoming.sender.isNotEmpty()) incoming.sender else existing.sender,
                 normalizedActor = if (authoritative) incoming.normalizedActor else existing.normalizedActor,
                 senderAccount = existing.senderAccount ?: incoming.senderAccount,
+                kind = redaction?.kind ?: existing.kind,
                 text =
                     when {
-                        existing.kind == MessageKind.REDACTED -> existing.text
+                        redaction != null -> redaction.text
                         existing.pendingLabel != null -> incoming.text
                         authoritative && !existing.serverTimeAuthoritative -> incoming.text
                         else -> existing.text
                     },
                 ircFormattedText =
                     when {
-                        existing.kind == MessageKind.REDACTED -> null
+                        redaction != null -> null
                         existing.pendingLabel != null -> incoming.ircFormattedText
                         authoritative && !existing.serverTimeAuthoritative -> incoming.ircFormattedText
                         else -> existing.ircFormattedText
@@ -825,16 +839,15 @@ class CanonicalTimelineStore
                         existing.isSelf || incoming.isSelf
                     },
                 isBot = existing.isBot || incoming.isBot,
-                hasMention = existing.hasMention || incoming.hasMention,
-                highlightNick =
-                    if (existing.kind == MessageKind.REDACTED) null else existing.highlightNick ?: incoming.highlightNick,
+                hasMention = redaction == null && (existing.hasMention || incoming.hasMention),
+                highlightNick = if (redaction == null) existing.highlightNick ?: incoming.highlightNick else null,
                 highlightCaseMapping =
-                    if (existing.kind == MessageKind.REDACTED) null else existing.highlightCaseMapping ?: incoming.highlightCaseMapping,
+                    if (redaction == null) existing.highlightCaseMapping ?: incoming.highlightCaseMapping else null,
                 replyToMsgid = existing.replyToMsgid ?: incoming.replyToMsgid,
                 replyToEventId = existing.replyToEventId ?: incoming.replyToEventId,
                 channelContext = existing.channelContext ?: incoming.channelContext,
-                pendingLabel = if (incoming.pendingLabel == null) null else existing.pendingLabel,
-                failed = if (incoming.pendingLabel == null) false else existing.failed,
+                pendingLabel = if (redaction != null || incoming.pendingLabel == null) null else existing.pendingLabel,
+                failed = redaction == null && incoming.pendingLabel != null && existing.failed,
                 eventKey = existing.eventKey ?: incoming.eventKey,
                 eventPayload = existing.eventPayload ?: incoming.eventPayload,
                 inviteState = mergeInviteState(existing.inviteState, incoming.inviteState),

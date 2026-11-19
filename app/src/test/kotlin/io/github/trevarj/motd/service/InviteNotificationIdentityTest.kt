@@ -30,7 +30,6 @@ class InviteNotificationIdentityTest {
         val first = MotdNotifications.messageNotificationId(41)
         assertEquals(first, MotdNotifications.messageNotificationId(41))
         assertNotEquals(first, MotdNotifications.messageNotificationId(42))
-        // Invitations occupy 0x40000000..0x7fffffff and transfers 0x50000000..0x5fffffff.
         assertTrue(first in 0x10000000..0x1fffffff)
         assertNotEquals(first, MotdNotifications.invitationNotificationId(41))
         assertNotEquals(first, MotdNotifications.transferNotificationId(41))
@@ -50,5 +49,15 @@ class InviteNotificationIdentityTest {
         assertNotEquals(first, MotdNotifications.transferNotificationId(42))
         assertNotEquals(first, MotdNotifications.invitationNotificationId(41))
         assertTrue(first >= 0x50000000)
+    }
+
+    @Test fun `invitation namespace is disjoint even for ids using the old two high bits`() {
+        for (messageId in listOf(7L, 0x10000007L, 0x20000007L, 0x30000007L, (1L shl 60) + 7L)) {
+            val invitation = MotdNotifications.invitationNotificationId(messageId)
+            assertTrue(invitation in 0x40000000..0x4fffffff)
+            assertNotEquals(MotdNotifications.transferNotificationId(messageId), invitation)
+            assertNotEquals(MotdNotifications.watchEndedNotificationId(messageId), invitation)
+            assertNotEquals(MotdNotifications.sendFailureNotificationId(messageId), invitation)
+        }
     }
 }

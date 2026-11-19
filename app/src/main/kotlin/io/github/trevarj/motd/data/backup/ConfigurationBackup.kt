@@ -26,6 +26,7 @@ import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.InstalledPalette
+import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.PaletteChoice
 import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.PaletteSelection
@@ -210,7 +211,7 @@ class ConfigurationBackupRepositoryImpl
             return json.encodeToString(envelope)
         }
 
-        override fun isEncrypted(rawDocument: String): Boolean = decodeEnvelope(rawDocument).mode == BackupEnvelopeMode.ENCRYPTED_WITH_CREDENTIALS
+        override fun isEncrypted(rawDocument: String): Boolean = decodeEnvelope(parseBackupDocument(rawDocument)).mode == BackupEnvelopeMode.ENCRYPTED_WITH_CREDENTIALS
 
         override suspend fun preview(
             rawDocument: String,
@@ -250,6 +251,7 @@ class ConfigurationBackupRepositoryImpl
                 decoded.payload.settings,
                 includeSecrets = decoded.envelope.mode == BackupEnvelopeMode.ENCRYPTED_WITH_CREDENTIALS,
                 paletteRestore = paletteRestore,
+                launcherIcon = decoded.launcherIcon,
             )
             val idMap = mutableMapOf<String, Long>()
             val importedIds = mutableSetOf<Long>()
@@ -465,15 +467,36 @@ class ConfigurationBackupRepositoryImpl
             return PaletteRestore(target, normalizePaletteSelection(remapped, target))
         }
 
+        private fun parseBackupDocument(rawDocument: String): JsonObject {
+            if (rawDocument.encodeToByteArray().size > MAX_DOCUMENT_BYTES) throw BackupFormatException()
+            return compactJson.parseToJsonElement(rawDocument) as? JsonObject ?: throw BackupFormatException()
+        }
+
+        private fun decodeEnvelope(root: JsonObject): BackupEnvelope {
+            val plainPayload = root["payload"]
+            val validated =
+                if (plainPayload == null || plainPayload == JsonNull) {
+                    root
+                } else {
+                    JsonObject(root + ("payload" to validatePaletteStateTree(plainPayload)))
+                }
+            val envelope = compactJson.decodeFromJsonElement<BackupEnvelope>(validated)
+            if (envelope.formatVersion != FORMAT_VERSION) throw BackupFormatException()
+            return envelope
+        }
+
         private fun decodeDocument(
             rawDocument: String,
             password: String?,
         ): DecodedDocument {
-            val envelope = decodeEnvelope(rawDocument)
-            if (envelope.formatVersion != FORMAT_VERSION) throw BackupFormatException()
+            val root = parseBackupDocument(rawDocument)
+            val plainPayload = root["payload"]
+            val envelope = decodeEnvelope(root)
+            val payloadTree: JsonElement?
             val payload =
                 when (envelope.mode) {
                     BackupEnvelopeMode.CREDENTIALS_EXCLUDED -> {
+                        payloadTree = plainPayload
                         envelope.payload ?: throw BackupFormatException()
                     }
 
@@ -482,26 +505,18 @@ class ConfigurationBackupRepositoryImpl
                         val encryptedPayload = envelope.encryptedPayload ?: throw BackupFormatException()
                         val decrypted = decryptPayload(encryptedPayload, password, envelope.appVersion, envelope.exportedAtEpochMillis)
                         if (decrypted.size > MAX_DECRYPTED_BYTES) throw BackupFormatException()
-                        val tree = compactJson.parseToJsonElement(decrypted.decodeToString(throwOnInvalidSequence = true))
-                        compactJson.decodeFromJsonElement<BackupPayload>(validatePaletteStateTree(tree))
+                        payloadTree = compactJson.parseToJsonElement(decrypted.decodeToString(throwOnInvalidSequence = true))
+                        compactJson.decodeFromJsonElement<BackupPayload>(validatePaletteStateTree(payloadTree))
                     }
                 }
             validatePayload(payload)
-            return DecodedDocument(envelope, payload)
-        }
-
-        private fun decodeEnvelope(rawDocument: String): BackupEnvelope {
-            if (rawDocument.encodeToByteArray().size > MAX_DOCUMENT_BYTES) throw BackupFormatException()
-            val tree = compactJson.parseToJsonElement(rawDocument)
-            val root = tree as? JsonObject ?: throw BackupFormatException()
-            val payload = root["payload"]
-            val validated =
-                if (payload == null || payload == JsonNull) {
-                    root
-                } else {
-                    JsonObject(root + ("payload" to validatePaletteStateTree(payload)))
-                }
-            return compactJson.decodeFromJsonElement<BackupEnvelope>(validated)
+            val settingsTree = (payloadTree as? JsonObject)?.get("settings") as? JsonObject
+            val appearanceTree = settingsTree?.get("appearance") as? JsonObject
+            val launcherIcon =
+                payload.settings.appearance
+                    ?.launcherIcon
+                    ?.takeIf { appearanceTree?.containsKey("launcherIcon") == true }
+            return DecodedDocument(envelope, payload, launcherIcon)
         }
 
         private fun validatePaletteStateTree(tree: JsonElement): JsonElement {
@@ -728,6 +743,7 @@ class ConfigurationBackupRepositoryImpl
             settings: PortableSettings,
             includeSecrets: Boolean,
             paletteRestore: PaletteRestore?,
+            launcherIcon: LauncherIcon?,
         ) {
             settings.general?.let {
                 val current = settingsRepository.settings.first()
@@ -820,7 +836,7 @@ class ConfigurationBackupRepositoryImpl
                 appearancePrefs.restoreGlobalEffects(it)
                 appearancePrefs.setSentBubbleColor(it.sentBubbleColor)
                 appearancePrefs.setReceivedBubbleColor(it.receivedBubbleColor)
-                appearancePrefs.setLauncherIcon(it.launcherIcon)
+                if (launcherIcon != null) appearancePrefs.setLauncherIcon(launcherIcon)
                 appearancePrefs.setSplashScreenAnimation(it.splashScreenAnimation)
                 // The font binary itself is not backed up; only the display name travels. A restored
                 // CUSTOM choice falls back to system until the user re-imports the file (see AppFonts).
@@ -1121,6 +1137,7 @@ private data class PortableNetwork(
 private data class DecodedDocument(
     val envelope: BackupEnvelope,
     val payload: BackupPayload,
+    val launcherIcon: LauncherIcon?,
 )
 
 private data class ImportPlan(

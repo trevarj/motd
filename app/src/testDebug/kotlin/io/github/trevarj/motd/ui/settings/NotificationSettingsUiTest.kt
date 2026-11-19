@@ -80,6 +80,15 @@ class NotificationSettingsUiTest {
     }
 
     @Test
+    fun previewSelectionSurvivesClosingThePicker() {
+        openScreen()
+        row("notification_preview").assertTextContains("Full message").performClick()
+        compose.onNodeWithTag("notification_preview_generic").performClick()
+        row("notification_preview").assertTextContains("Generic notification").performClick()
+        compose.onNodeWithTag("notification_preview_generic").assertIsSelected()
+    }
+
+    @Test
     fun hierarchyEditsOneScopeAndKeepsSiblingState() {
         openScreen(target = SettingsTarget.NOTIFICATIONS)
         compose.onNodeWithTag("screen_notification_settings").assertIsDisplayed()

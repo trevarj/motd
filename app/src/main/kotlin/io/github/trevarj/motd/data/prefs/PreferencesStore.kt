@@ -10,7 +10,9 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.DeliveryMode
+import io.github.trevarj.motd.service.NotificationPreview
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
@@ -35,6 +37,7 @@ internal object PrefKeys {
     val THEME_MODE = stringPreferencesKey("theme_mode")
     val DYNAMIC_COLOR = stringPreferencesKey("dynamic_color")
     val DELIVERY_MODE = stringPreferencesKey("delivery_mode")
+    val NOTIFICATION_PREVIEW = stringPreferencesKey("notification_preview")
     val PUSH_ENDPOINTS = stringPreferencesKey("push_endpoints")
     val PUSH_KEYS = stringPreferencesKey("push_keys")
     val STS_POLICIES = stringPreferencesKey("sts_policies")
@@ -175,6 +178,9 @@ class DataStoreSettingsRepository
 
         // -- SettingsRepository --
 
+        override val notificationPreview: Flow<NotificationPreview> =
+            store.data.map { notificationPreviewFromPreference(it[PrefKeys.NOTIFICATION_PREVIEW]) }.distinctUntilChanged()
+
         override val settings: Flow<Settings> =
             store.data.map { prefs ->
                 val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS])
@@ -187,6 +193,7 @@ class DataStoreSettingsRepository
                     deliveryMode =
                         prefs[PrefKeys.DELIVERY_MODE]?.let { runCatching { DeliveryMode.valueOf(it) }.getOrNull() }
                             ?: DeliveryMode.PERSISTENT_SOCKET,
+                    notificationPreview = notificationPreviewFromPreference(prefs[PrefKeys.NOTIFICATION_PREVIEW]),
                     // Round 4: invalid enum strings fall back to defaults.
                     layoutDensity =
                         prefs[PrefKeys.LAYOUT_DENSITY]?.let { runCatching { LayoutDensity.valueOf(it) }.getOrNull() }
@@ -260,6 +267,17 @@ class DataStoreSettingsRepository
         override suspend fun setDeliveryMode(m: DeliveryMode) {
             store.edit { it[PrefKeys.DELIVERY_MODE] = m.name }
         }
+
+        override suspend fun setNotificationPreview(preview: NotificationPreview) {
+            store.edit { it[PrefKeys.NOTIFICATION_PREVIEW] = preview.name }
+        }
+
+        private fun notificationPreviewFromPreference(value: String?): NotificationPreview =
+            if (value == null) {
+                NotificationPreview.FULL
+            } else {
+                NotificationPreview.entries.firstOrNull { it.name == value } ?: NotificationPreview.GENERIC
+            }
 
         // -- Round 4: appearance/behavior settings --
 

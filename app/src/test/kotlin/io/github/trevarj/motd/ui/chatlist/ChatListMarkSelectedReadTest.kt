@@ -159,6 +159,8 @@ class ChatListMarkSelectedReadTest {
 
         override suspend fun setDeliveryMode(m: DeliveryMode) = Unit
 
+        override suspend fun setNotificationPreview(preview: io.github.trevarj.motd.service.NotificationPreview) = Unit
+
         override suspend fun setLayoutDensity(d: LayoutDensity) = Unit
 
         override suspend fun setCompactNickBrackets(value: io.github.trevarj.motd.data.prefs.CompactNickBrackets) {

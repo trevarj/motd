@@ -58,6 +58,8 @@ val ChannelWatchState.isForever: Boolean get() = expiresAt == Long.MAX_VALUE
 
 enum class NotificationMode { ALL, MENTIONS, OFF }
 
+enum class NotificationPreview { FULL, IDENTITY, GENERIC }
+
 enum class NotificationScope { GLOBAL, SERVER, CHANNEL }
 
 @Serializable

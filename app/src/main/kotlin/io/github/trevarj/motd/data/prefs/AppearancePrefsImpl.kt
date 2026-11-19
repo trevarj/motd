@@ -295,7 +295,7 @@ class AppearancePrefsImpl
                     receivedBubbleColor = storedComfortableBubbleColor(prefs[RECEIVED_BUBBLE_COLOR_ROLE], prefs[RECEIVED_BUBBLE_COLOR_CUSTOM]),
                     launcherIcon =
                         prefs[LAUNCHER_ICON]?.let { runCatching { LauncherIcon.valueOf(it) }.getOrNull() }
-                            ?: LauncherIcon.DEFAULT,
+                            ?: LauncherIcon.MONO,
                     splashScreenAnimation =
                         prefs[SPLASH_SCREEN_ANIMATION]
                             ?.let { runCatching { SplashScreenAnimation.valueOf(it) }.getOrNull() }

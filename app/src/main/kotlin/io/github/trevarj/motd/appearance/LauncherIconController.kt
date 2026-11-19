@@ -80,7 +80,7 @@ class LauncherIconController
          * launcher-icon refresh some home-screen implementations perform on every
          * `setComponentEnabledSetting` call.
          *
-         * The default alias ships `android:enabled="true"` in the manifest, so its unset
+         * The Mono alias ships `android:enabled="true"` in the manifest, so its unset
          * ([PackageManager.COMPONENT_ENABLED_STATE_DEFAULT]) state counts as enabled; every other
          * alias ships `android:enabled="false"`, so unset counts as disabled for them.
          */
@@ -90,12 +90,12 @@ class LauncherIconController
             enabled: Boolean,
         ) {
             val component = ComponentName(context.packageName, fqcn)
-            val manifestDefaultEnabled = fqcn == launcherAliasFqcn(LauncherIcon.DEFAULT)
+            val manifestDefaultEnabled = fqcn == launcherAliasFqcn(LauncherIcon.MONO)
             val currentlyEnabled =
                 when (packageManager.getComponentEnabledSetting(component)) {
                     PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> true
-                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED -> false
-                    else -> manifestDefaultEnabled
+                    PackageManager.COMPONENT_ENABLED_STATE_DEFAULT -> manifestDefaultEnabled
+                    else -> false
                 }
             if (currentlyEnabled == enabled) return
             val state =

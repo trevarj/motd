@@ -16,6 +16,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.google.common.collect.ImmutableList
 import dagger.hilt.android.AndroidEntryPoint
+import io.github.trevarj.motd.R
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -83,7 +84,11 @@ internal class SystemAdaptiveMediaNotificationProvider(
     context: Context,
 ) : MediaNotification.Provider {
     private val context = context.applicationContext
-    private val delegate = DefaultMediaNotificationProvider.Builder(this.context).build()
+    private val delegate =
+        DefaultMediaNotificationProvider
+            .Builder(this.context)
+            .build()
+            .apply { setSmallIcon(R.drawable.ic_notification_motd) }
 
     override fun createNotification(
         mediaSession: MediaSession,

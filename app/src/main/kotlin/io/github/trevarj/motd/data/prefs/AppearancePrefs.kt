@@ -430,7 +430,7 @@ data class AppearanceConfig(
     val linkGlobalBlur: Boolean = false,
     val sentBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
     val receivedBubbleColor: ComfortableBubbleColor = ComfortableBubbleColor(),
-    val launcherIcon: LauncherIcon = LauncherIcon.DEFAULT,
+    val launcherIcon: LauncherIcon = LauncherIcon.MONO,
     val splashScreenAnimation: SplashScreenAnimation = SplashScreenAnimation.EDGE_TRACE,
     // Display name of a user-imported custom font file; empty means nothing imported. The font
     // binary itself lives in CustomFontStore, not DataStore or backups.

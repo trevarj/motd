@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.RemoteInput
 import android.content.Intent
 import android.graphics.Bitmap
+import android.os.Build
 import android.os.Bundle
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
@@ -296,9 +297,16 @@ class RequiredHeadlessE2eTest {
                         }?.notification
                 postedMention != null
             }
-            val actions = checkNotNull(postedMention?.actions)
+            val notification = checkNotNull(postedMention)
+            assertEquals(0, notification.flags and Notification.FLAG_LOCAL_ONLY)
+            assertEquals(Notification.VISIBILITY_PRIVATE, notification.visibility)
+            assertTrue(checkNotNull(notification.publicVersion).extras.getCharSequence(Notification.EXTRA_TEXT) != mentionText)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) assertTrue(!notification.shortcutId.isNullOrBlank())
+            val actions = checkNotNull(notification.actions)
             val replyAction = actions.single { it.semanticAction == Notification.Action.SEMANTIC_ACTION_REPLY }
             val readAction = actions.single { it.semanticAction == Notification.Action.SEMANTIC_ACTION_MARK_AS_READ }
+            assertTrue(actions.indices.none { NotificationCompat.getAction(notification, it)?.showsUserInterface == true })
+            assertEquals(1, checkNotNull(replyAction.remoteInputs).size)
             runBlocking {
                 bootstrap.seams.connections().disconnect(network.childId)
                 connectionProbe.awaitDisconnected(network.childId)

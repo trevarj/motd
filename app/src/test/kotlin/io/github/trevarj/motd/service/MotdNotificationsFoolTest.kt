@@ -1043,7 +1043,10 @@ class MotdNotificationsFoolTest {
             }
             NotificationManagerCompat.from(context).notify(
                 IrcForegroundService.STATUS_ID,
-                notifications.statusNotification(connectedCount = 1, reconnecting = false),
+                buildStatusNotification(
+                    context,
+                    StatusNotificationShape(listOf(StatusNotificationRow("libera", StatusConnection.CONNECTED)), starting = false),
+                ),
             )
             val manager = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
             assertEquals(5, manager.activeNotifications.size)

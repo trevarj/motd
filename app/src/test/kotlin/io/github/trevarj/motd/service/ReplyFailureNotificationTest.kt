@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Application
 import android.app.Notification
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -17,10 +18,12 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.di.ForegroundBufferTrackerImpl
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -117,6 +120,36 @@ class ReplyFailureNotificationTest {
             val open = shadowOf(notification.contentIntent).savedIntent
             assertEquals(MotdNotifications.ACTION_OPEN_BUFFER, open.action)
             assertEquals(bufferId, open.getLongExtra(MotdNotifications.EXTRA_BUFFER_ID, -1))
+        }
+
+    @Test
+    @Config(sdk = [33])
+    fun unavailablePreviewPreferenceHidesReplyAndRoomWhileKeepingAnAuthenticatedRetry() =
+        runTest {
+            val generic =
+                MotdNotifications(
+                    context,
+                    db,
+                    ForegroundBufferTrackerImpl(),
+                    object : SettingsRepository by repo {
+                        override val notificationPreview = flow<NotificationPreview> { error("preview unavailable") }
+                    },
+                )
+            generic.onReplyFailed(bufferId, "lost private text", SendRejectionReason.NOT_IN_CHANNEL)
+
+            val posted = shadowManager.activeNotifications.single().notification
+            assertEquals("Message not sent", posted.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+            assertEquals("You're not in this channel", posted.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+            assertNull(posted.extras.getCharSequence(Notification.EXTRA_SUB_TEXT))
+            assertNull(posted.extras.getCharSequence(Notification.EXTRA_BIG_TEXT))
+            assertTrue(posted.publicVersion.actions.isNullOrEmpty())
+            val retry = posted.actions.single()
+            assertEquals("Retry", retry.title.toString())
+            assertTrue(retry.isAuthenticationRequired)
+            val pending = shadowOf(retry.actionIntent)
+            assertTrue(pending.flags and PendingIntent.FLAG_IMMUTABLE != 0)
+            assertEquals(ReplyReceiver::class.java.name, pending.savedIntent.component?.className)
+            assertEquals("lost private text", pending.savedIntent.getStringExtra(ReplyReceiver.EXTRA_REPLY_TEXT))
         }
 
     @Test

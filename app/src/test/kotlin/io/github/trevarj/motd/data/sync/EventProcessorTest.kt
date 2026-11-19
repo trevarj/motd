@@ -2830,6 +2830,25 @@ class EventProcessorTest {
     @Test
     fun redaction_tombstonesKnownMessageInTargetHistory_andRemovesItsReactions() =
         runTest {
+            val notified = mutableListOf<Pair<Long, Long>>()
+            val wrongRoom = IrcEvent.MessageRedacted(ctx(), Prefix("oper"), "#other", "m1", "wrong room")
+            BufferStore(db).getOrCreate(networkId, "#other", "#other", BufferType.CHANNEL)
+            processor =
+                EventProcessor(
+                    db,
+                    TypingTrackerImpl(),
+                    object : MessageNotifier by MessageNotifier.Noop {
+                        override suspend fun onMessageRedacted(
+                            bufferId: Long,
+                            messageId: Long,
+                        ) {
+                            assertFalse(db.inTransaction())
+                            assertEquals(MessageKind.REDACTED, db.messageDao().byId(messageId)?.kind)
+                            processor.process(networkId, wrongRoom)
+                            notified += bufferId to messageId
+                        }
+                    },
+                )
             processor.process(
                 networkId,
                 IrcEvent.ChatMessage(
@@ -2856,27 +2875,38 @@ class EventProcessorTest {
             val buffer = db.bufferDao().byName(networkId, "#chan")!!
 
             // A known msgid outside the command target must not be touched.
-            processor.process(
-                networkId,
-                IrcEvent.MessageRedacted(ctx(), Prefix("oper"), "#other", "m1", "wrong room"),
-            )
+            processor.process(networkId, wrongRoom)
             assertEquals(MessageKind.PRIVMSG, db.messageDao().byMsgid(buffer.id, "m1")!!.kind)
+            assertTrue(notified.isEmpty())
 
-            processor.process(
-                networkId,
-                IrcEvent.HistoryBatch(
-                    "#chan",
-                    listOf(
-                        IrcEvent.MessageRedacted(ctx(time = 2_000), Prefix("oper"), "#chan", "m1", "spam"),
+            val redaction = IrcEvent.MessageRedacted(ctx(time = 2_000), Prefix("oper"), "#chan", "m1", "spam")
+            val page =
+                HistoryPageWrite(
+                    ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#chan", limit = 2),
+                    ChatHistoryResponse.Messages(
+                        events = listOf(redaction),
+                        oldest = null,
+                        newest = null,
+                        endOfHistory = true,
+                        primaryMessageCount = 0,
                     ),
-                ),
-            )
+                )
+            val invalid = page.copy(request = page.request.copy(subcommand = ChatHistoryRequest.Subcommand.TARGETS))
+            val rollback = runCatching { processor.persistHistoryPagesResult(networkId, listOf(page, invalid), buffer.id) }
+            assertTrue(rollback.exceptionOrNull() is IllegalArgumentException)
+            assertEquals(MessageKind.PRIVMSG, db.messageDao().byMsgid(buffer.id, "m1")!!.kind)
+            assertTrue(notified.isEmpty())
+
+            processor.persistHistoryPage(networkId, page.request, page.response, expectedRoomId = buffer.id)
 
             val redacted = db.messageDao().byMsgid(buffer.id, "m1")!!
             assertEquals(MessageKind.REDACTED, redacted.kind)
             assertEquals("Message deleted by oper (spam)", redacted.text)
             assertNull(redacted.ircFormattedText)
             assertFalse(redacted.hasMention)
+            assertEquals(listOf(buffer.id to redacted.id), notified)
+            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(redaction)))
+            assertEquals(listOf(buffer.id to redacted.id), notified)
             assertTrue(
                 db
                     .reactionDao()
@@ -2906,6 +2936,78 @@ class EventProcessorTest {
             val replayed = db.messageDao().byMsgid(buffer.id, "m1")!!
             assertEquals(MessageKind.REDACTED, replayed.kind)
             assertEquals("Message deleted by oper (spam)", replayed.text)
+        }
+
+    @Test
+    fun historyIdentityMergeKeepsTheRedactedLosersTombstoneAndInvalidatesTheWinner() =
+        runTest {
+            val notified = mutableListOf<Pair<Long, Long>>()
+            processor =
+                EventProcessor(
+                    db,
+                    TypingTrackerImpl(),
+                    object : MessageNotifier {
+                        override suspend fun onIncoming(
+                            networkId: Long,
+                            bufferId: Long,
+                            type: BufferType,
+                            hasMention: Boolean,
+                            message: IrcEvent.ChatMessage,
+                        ) {
+                            error("interrupted presentation")
+                        }
+
+                        override suspend fun onMessageRedacted(
+                            bufferId: Long,
+                            messageId: Long,
+                        ) {
+                            assertFalse(db.inTransaction())
+                            notified += bufferId to messageId
+                        }
+                    },
+                )
+            val early =
+                IrcEvent.ChatMessage(
+                    ctx(time = 1_000).copy(serverTimeSource = ServerTimeSource.TAG),
+                    IrcEvent.ChatKind.PRIVMSG,
+                    Prefix("alice"),
+                    "#chan",
+                    "\u0002secret me\u000f",
+                    false,
+                    null,
+                )
+            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(early)))
+            val buffer = db.bufferDao().byName(networkId, "#chan")!!
+            val winnerId = pagingList(buffer.id).single().id
+            processor.process(networkId, early.copy(ctx = early.ctx.copy(msgid = "m1", serverTime = 2_000)))
+            val loser = db.messageDao().byMsgid(buffer.id, "m1")!!
+            assertNotEquals(winnerId, loser.id)
+            val timeline = CanonicalTimelineStore(db)
+            val dao = db.canonicalTimelineDao()
+            assertEquals(listOf(loser.id), dao.pendingNotifications(10, 60_000, 100).map { it.id })
+            assertTrue(timeline.claimNotification(loser.id))
+            processor.process(networkId, IrcEvent.MessageRedacted(ctx(), Prefix("oper"), "#chan", "m1", null))
+
+            val bridge = early.copy(ctx = early.ctx.copy(msgid = "m1"))
+            val playback = IrcEvent.HistoryBatch("#chan", listOf(bridge))
+            processor.process(networkId, playback)
+            processor.process(networkId, playback)
+
+            val stored = pagingList(buffer.id).single()
+            assertEquals(winnerId, stored.id)
+            assertEquals(winnerId, db.messageDao().byCanonicalId(loser.id)?.id)
+            assertEquals(MessageKind.REDACTED, stored.kind)
+            assertEquals("Message deleted by oper", stored.text)
+            assertNull(stored.ircFormattedText)
+            assertNull(stored.highlightNick)
+            assertFalse(stored.hasMention)
+            assertTrue(stored.notificationEligible)
+            assertTrue(stored.notificationEligibilityResolved)
+            assertTrue(stored.notificationClaimed)
+            assertEquals(listOf(buffer.id to loser.id, buffer.id to winnerId), notified)
+            timeline.releaseNotification(loser.id)
+            assertFalse(db.messageDao().byId(winnerId)!!.notificationClaimed)
+            assertTrue(dao.pendingNotifications(10, 60_000, 100).isEmpty())
         }
 
     @Test
@@ -5404,6 +5506,7 @@ class EventProcessorTest {
     fun historyLiveAndPushInvitePermutationsConvergeToOneActionableEvent() =
         runTest {
             val notifications = mutableListOf<Long>()
+            val recovered = mutableListOf<Long>()
             val recording =
                 EventProcessor(
                     db,
@@ -5423,6 +5526,14 @@ class EventProcessorTest {
                             messageId: Long,
                         ) {
                             notifications += messageId
+                        }
+
+                        override suspend fun onRecoveredInvitation(
+                            networkId: Long,
+                            bufferId: Long,
+                            messageId: Long,
+                        ) {
+                            recovered += messageId
                         }
                     },
                 )
@@ -5460,6 +5571,50 @@ class EventProcessorTest {
                 assertEquals(InviteState.PENDING, row.inviteState)
                 assertEquals(1, notifications.count { it == row.id })
             }
+            assertTrue(recovered.isEmpty())
+        }
+
+    @Test
+    fun interruptedInvitePresentationRetriesSilentlyOnAnotherLiveDelivery() =
+        runTest {
+            val firstPresentations = mutableListOf<Long>()
+            val recoveredPresentations = mutableListOf<Long>()
+            processor =
+                EventProcessor(
+                    db,
+                    TypingTrackerImpl(),
+                    object : MessageNotifier by MessageNotifier.Noop {
+                        override suspend fun onInvitation(
+                            networkId: Long,
+                            bufferId: Long,
+                            messageId: Long,
+                        ) {
+                            firstPresentations += messageId
+                            error("interrupted after posting")
+                        }
+
+                        override suspend fun onRecoveredInvitation(
+                            networkId: Long,
+                            bufferId: Long,
+                            messageId: Long,
+                        ) {
+                            recoveredPresentations += messageId
+                        }
+                    },
+                )
+            val invite = IrcEvent.Invited(ctx("retry-invite"), "alice", "me", "#retry-invite")
+            processor.process(networkId, invite)
+            val buffer = db.bufferDao().byName(networkId, "#retry-invite")!!
+            val row = pagingList(buffer.id).single()
+            assertFalse(row.notificationClaimed)
+            assertFalse(row.notificationHandled)
+
+            processor.process(networkId, invite)
+            processor.processPush(networkId, invite)
+
+            assertEquals(listOf(row.id), firstPresentations)
+            assertEquals(listOf(row.id), recoveredPresentations)
+            assertTrue(db.messageDao().byId(row.id)!!.notificationHandled)
         }
 
     @Test

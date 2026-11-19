@@ -277,6 +277,16 @@ is part of the existing send/reconnect journey, not a fifth test. Head-unit brid
 read-aloud, voice recognition, and OEM behavior remain unverified locally without an
 explicitly authorized Android Auto host; the default AOSP emulator is not such a host.
 
+For a [Desktop Head Unit](https://developer.android.com/training/cars/testing/dhu)
+or parked vehicle check, connect the phone, leave motd outside the target
+conversation, and send a fresh DM and a channel mention after projection starts.
+Confirm both appear on the phone before checking car display, read-aloud, voice
+reply, and mark-read. An ordinary watched channel message should remain phone-only.
+Repeat with restricted preview modes and confirm that hidden content is neither
+shown nor spoken. motd does not provide a car launcher tile or pre-session history.
+For sideloaded builds, check **Unknown sources** in Android Auto's developer
+settings ([installation guidance](https://developer.android.com/training/cars/testing#unknown-sources)).
+
 The emulator and stack remain alive after a passing run to make the next run
 fast. Manage their lifecycle explicitly:
 

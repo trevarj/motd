@@ -34,6 +34,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.service.ChannelWatchDuration
 import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.NotificationMode
+import io.github.trevarj.motd.service.NotificationPreview
 import io.github.trevarj.motd.ui.components.ChannelNotificationSheet
 import io.github.trevarj.motd.ui.components.label
 import io.github.trevarj.motd.ui.components.notificationIcon
@@ -52,6 +53,7 @@ fun NotificationSettingsScreen(
         state = state,
         onBack = onBack,
         onGlobal = viewModel::setGlobal,
+        onPreview = viewModel::setPreview,
         onServer = viewModel::setServer,
         onChannel = viewModel::setChannel,
         onStartWatch = { bufferId, duration -> viewModel.startWatch(bufferId, duration.millis) },
@@ -67,6 +69,7 @@ fun NotificationSettingsContent(
     state: NotificationSettingsUiState,
     onBack: () -> Unit,
     onGlobal: (NotificationMode) -> Unit,
+    onPreview: (NotificationPreview) -> Unit,
     onServer: (Long, NotificationMode?) -> Unit,
     onChannel: (Long, NotificationMode?) -> Unit,
     onStartWatch: (Long, ChannelWatchDuration) -> Unit,
@@ -77,6 +80,7 @@ fun NotificationSettingsContent(
 ) {
     var expandedNetwork by rememberSaveable { mutableStateOf<Long?>(null) }
     var globalPicker by remember { mutableStateOf(false) }
+    var previewPicker by rememberSaveable { mutableStateOf(false) }
     var serverPicker by remember { mutableStateOf<Long?>(null) }
     var channelPicker by remember { mutableStateOf<Long?>(null) }
     val available = !state.loading && !state.unavailable
@@ -113,6 +117,16 @@ fun NotificationSettingsContent(
                         onAction = onRetry,
                     )
                 }
+            }
+            item(key = "preview") {
+                SettingsNavigationRow(
+                    title = stringResource(R.string.notification_preview_title),
+                    icon = Icons.Outlined.Notifications,
+                    summary = state.preview.label(),
+                    enabled = available,
+                    modifier = Modifier.testTag("notification_preview"),
+                    onClick = { previewPicker = true },
+                )
             }
             item(key = "global") {
                 SettingsTarget(target?.name, SettingsTarget.NOTIFICATIONS.name) { targetModifier ->
@@ -187,6 +201,17 @@ fun NotificationSettingsContent(
             }
         }
     }
+    if (available && previewPicker) {
+        SingleChoiceSheet(
+            title = stringResource(R.string.notification_preview_title),
+            selected = state.preview,
+            options = NotificationPreview.entries.map { ChoiceOption(it, it.label(), tag = "notification_preview_${it.name.lowercase()}") },
+            onSelect = onPreview,
+            onDismiss = { previewPicker = false },
+            tag = "notification_preview_sheet",
+            footer = { PersistentStatusNotice(text = stringResource(R.string.notification_preview_system_privacy)) },
+        )
+    }
     if (available && globalPicker) {
         SingleChoiceSheet(
             title = stringResource(R.string.notification_global_default),
@@ -225,3 +250,13 @@ fun NotificationSettingsContent(
         )
     }
 }
+
+@Composable
+private fun NotificationPreview.label(): String =
+    stringResource(
+        when (this) {
+            NotificationPreview.FULL -> R.string.notification_preview_full
+            NotificationPreview.IDENTITY -> R.string.notification_preview_identity
+            NotificationPreview.GENERIC -> R.string.notification_preview_generic
+        },
+    )

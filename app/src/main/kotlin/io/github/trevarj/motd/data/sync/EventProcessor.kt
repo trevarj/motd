@@ -101,10 +101,11 @@ internal data class AdvertisedActivity(
     val latestMessageTime: Long,
 )
 
-/** Committed primary-event order and freshly inserted row count of one playback batch. */
+/** Committed primary-event order, freshly inserted row count, and notification invalidations of one playback batch. */
 internal data class PlaybackCommit(
     val primaryOrder: List<TimelineEventId> = emptyList(),
     val inserted: Int = 0,
+    val redactions: List<Pair<RoomId, TimelineEventId>> = emptyList(),
 )
 
 internal data class HistoryPageWrite(
@@ -401,12 +402,15 @@ class EventProcessor
             networkId: Long,
             event: IrcEvent,
         ) {
-            sequencer.withNetwork(networkId) {
-                processEvent(networkId, event, EventOrigin.LIVE)
-                completeCommandFromState(networkId, event)
-                if (event is IrcEvent.Disconnected) clearCommandResponses(networkId)
-                bufferStore.drainCommittedRoomMerges()
-            }
+            val redactions =
+                sequencer.withNetwork(networkId) {
+                    val redactions = processEvent(networkId, event, EventOrigin.LIVE)
+                    completeCommandFromState(networkId, event)
+                    if (event is IrcEvent.Disconnected) clearCommandResponses(networkId)
+                    bufferStore.drainCommittedRoomMerges()
+                    redactions
+                }
+            notifyCommittedRedactions(redactions)
         }
 
         /** Consecutive live peer membership changes share a commit, not a canonical event identity. */
@@ -433,10 +437,13 @@ class EventProcessor
             networkId: Long,
             event: IrcEvent,
         ) {
-            sequencer.withNetwork(networkId) {
-                processEvent(networkId, event, EventOrigin.PUSH)
-                bufferStore.drainCommittedRoomMerges()
-            }
+            val redactions =
+                sequencer.withNetwork(networkId) {
+                    val redactions = processEvent(networkId, event, EventOrigin.PUSH)
+                    bufferStore.drainCommittedRoomMerges()
+                    redactions
+                }
+            notifyCommittedRedactions(redactions)
         }
 
         /** Persist one event according to its provenance and, for history, its enclosing target. */
@@ -446,7 +453,7 @@ class EventProcessor
             origin: EventOrigin,
             historyTarget: String? = null,
             expectedHistoryRoomId: RoomId? = null,
-        ) {
+        ): List<Pair<RoomId, TimelineEventId>> {
             diagnostics.record("event_processor", "event_received") {
                 mapOf(
                     "network_id" to networkId,
@@ -458,7 +465,7 @@ class EventProcessor
                 diagnostics.record("event_processor", "event_ignored") {
                     mapOf("network_id" to networkId, "origin" to origin.name, "type" to event::class.simpleName)
                 }
-                return
+                return emptyList()
             }
             when (event) {
                 is IrcEvent.Registered -> {
@@ -468,7 +475,7 @@ class EventProcessor
                 }
 
                 is IrcEvent.ChatMessage -> {
-                    onChat(networkId, event, origin, historyTarget)
+                    return listOfNotNull(onChat(networkId, event, origin, historyTarget))
                 }
 
                 is IrcEvent.TagMessage -> {
@@ -476,19 +483,19 @@ class EventProcessor
                 }
 
                 is IrcEvent.MessageRedacted -> {
-                    onMessageRedacted(networkId, event, historyTarget)
+                    return listOfNotNull(onMessageRedacted(networkId, event, historyTarget))
                 }
 
                 is IrcEvent.HistoryBatch -> {
-                    onHistoryBatch(networkId, event, expectedHistoryRoomId)
+                    return onHistoryBatch(networkId, event, expectedHistoryRoomId).redactions
                 }
 
                 is IrcEvent.PlaybackBatch -> {
-                    onPlaybackBatch(networkId, event, expectedHistoryRoomId)
+                    return onPlaybackBatch(networkId, event, expectedHistoryRoomId).redactions
                 }
 
                 is IrcEvent.ReplayBatch -> {
-                    onReplayBatch(networkId, event)
+                    return onReplayBatch(networkId, event).redactions
                 }
 
                 is IrcEvent.NetworkBatch -> {
@@ -642,6 +649,7 @@ class EventProcessor
                 is IrcEvent.CapsChanged,
                 -> {} // not persisted
             }
+            return emptyList()
         }
 
         // -- chat / tags ---------------------------------------------------------
@@ -651,7 +659,7 @@ class EventProcessor
             e: IrcEvent.ChatMessage,
             origin: EventOrigin,
             historyTarget: String?,
-        ) {
+        ): Pair<RoomId, TimelineEventId>? {
             val st = stateFor(networkId)
             val sourceSelfCandidate = e.isSelf || st.isSelfNick(e.source.nick)
             if (!sourceSelfCandidate &&
@@ -666,7 +674,7 @@ class EventProcessor
                     )
                 }
                 if (origin.isHistorical) activeHistoryChatRoutes[networkId]?.removeFirstOrNull()
-                return
+                return null
             }
             val route =
                 if (origin.isHistorical) {
@@ -684,7 +692,7 @@ class EventProcessor
                     route.storedText,
                     origin = origin,
                 )
-                return
+                return null
             }
             if (origin == EventOrigin.LIVE || origin.isHistorical) {
                 validDickordChannelTag(route.bufferName, e.ctx.clientTags)?.let { json ->
@@ -706,10 +714,10 @@ class EventProcessor
             // CHATHISTORY and reconnect playback must both honor a forgotten query's discard boundary.
             val usesDiscardBoundary = origin.isHistorical
             if (isDm && usesDiscardBoundary && shouldDiscardHistoricalEvent(bufferId, e)) {
-                return
+                return null
             }
             if (isDm && !usesDiscardBoundary && isExactDiscardedEvent(bufferId, e.ctx)) {
-                return
+                return null
             }
             val formatted =
                 if (type == BufferType.SERVER || !containsIrcFormatting(routedText)) {
@@ -839,6 +847,9 @@ class EventProcessor
                     canonical,
                     origin != EventOrigin.LIVE,
                 )
+                if (canonical.kind == MessageKind.REDACTED) {
+                    return if (result.redactionMerged) canonical.bufferId to canonical.id else null
+                }
                 if (origin == EventOrigin.LIVE &&
                     !sourceIsSelf &&
                     type != BufferType.SERVER &&
@@ -953,7 +964,7 @@ class EventProcessor
                         )
                     }
                 }
-                return
+                return null
             }
         }
 
@@ -1033,26 +1044,28 @@ class EventProcessor
             networkId: Long,
             event: IrcEvent.MessageRedacted,
             historyTarget: String?,
-        ) {
+        ): Pair<RoomId, TimelineEventId>? {
             val st = stateFor(networkId)
             val route = resolveReactionRoute(networkId, event.source.nick, event.target, historyTarget, st)
-            val expectedRoomId = existingReactionRoomId(networkId, route, st, event.ctx.account) ?: return
-            val target =
-                db.canonicalTimelineDao().eventByAlias(
-                    networkId,
-                    EventAliasNamespace.MSGID,
-                    event.targetMsgid.toByteArray(Charsets.UTF_8),
-                ) ?: return
-            val canonicalExpectedRoomId = bufferDao.canonicalId(expectedRoomId) ?: expectedRoomId
-            if (target.bufferId != canonicalExpectedRoomId || target.kind !in REDACTABLE_MESSAGE_KINDS) return
+            val expectedRoomId = existingReactionRoomId(networkId, route, st, event.ctx.account) ?: return null
 
-            val tombstone =
-                "Message deleted by ${event.source.nick}" +
-                    event.reason
-                        ?.takeIf(String::isNotBlank)
-                        ?.let { " ($it)" }
-                        .orEmpty()
-            db.withTransaction {
+            return db.withTransaction {
+                val target =
+                    db.canonicalTimelineDao().eventByAlias(
+                        networkId,
+                        EventAliasNamespace.MSGID,
+                        event.targetMsgid.toByteArray(Charsets.UTF_8),
+                    ) ?: return@withTransaction null
+                val canonicalExpectedRoomId = bufferDao.canonicalId(expectedRoomId) ?: expectedRoomId
+                if (target.bufferId != canonicalExpectedRoomId || target.kind !in REDACTABLE_MESSAGE_KINDS) {
+                    return@withTransaction null
+                }
+                val tombstone =
+                    "Message deleted by ${event.source.nick}" +
+                        event.reason
+                            ?.takeIf(String::isNotBlank)
+                            ?.let { " ($it)" }
+                            .orEmpty()
                 messageDao.update(
                     target.copy(
                         kind = MessageKind.REDACTED,
@@ -1066,6 +1079,22 @@ class EventProcessor
                     ),
                 )
                 reactionDao.deleteForTarget(target.bufferId, event.targetMsgid)
+                if (target.kind == MessageKind.REDACTED) null else target.bufferId to target.id
+            }
+        }
+
+        private suspend fun notifyCommittedRedactions(redactions: List<Pair<RoomId, TimelineEventId>>) {
+            for ((bufferId, eventId) in redactions) {
+                try {
+                    val canonical = messageDao.byCanonicalId(eventId)
+                    notifier.onMessageRedacted(canonical?.bufferId ?: bufferId, canonical?.id ?: eventId)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    diagnostics.record("notifications", "redaction_failed") {
+                        mapOf("event_id" to eventId, "error" to error::class.simpleName)
+                    }
+                }
             }
         }
 
@@ -1149,6 +1178,7 @@ class EventProcessor
             }
             var primaryOrder = emptyList<TimelineEventId>()
             var insertedCount = 0
+            var redactions: MutableList<Pair<RoomId, TimelineEventId>>? = null
             try {
                 db.withTransaction {
                     activeHistoryChatRoutes[networkId] = ArrayDeque()
@@ -1204,7 +1234,11 @@ class EventProcessor
                     val primaryIds = mutableListOf<TimelineEventId>()
                     for (ev in events) {
                         val firstIndex = committedOrder.size
-                        processEvent(networkId, ev, origin, target)
+                        val eventRedactions = processEvent(networkId, ev, origin, target)
+                        if (eventRedactions.isNotEmpty()) {
+                            val collected = redactions ?: mutableListOf<Pair<RoomId, TimelineEventId>>().also { redactions = it }
+                            collected.addAll(eventRedactions)
+                        }
                         if (ev.historyEventMetadataOrNull()?.isContext != true) {
                             for (index in firstIndex until committedOrder.size) {
                                 primaryIds += committedOrder[index]
@@ -1237,7 +1271,7 @@ class EventProcessor
                     "source" to origin.name,
                 )
             }
-            return PlaybackCommit(primaryOrder, insertedCount)
+            return PlaybackCommit(primaryOrder, insertedCount, redactions.orEmpty())
         }
 
         /**
@@ -1368,52 +1402,64 @@ class EventProcessor
             expectedRoomId: RoomId?,
             historyGapId: Long? = null,
             preserveUnread: Boolean = false,
-        ): PersistedHistoryPage =
-            sequencer.withNetwork(networkId) {
-                val persisted =
-                    db.withTransaction {
-                        persistHistoryPageInTransaction(
-                            networkId,
-                            request,
-                            response,
-                            expectedRoomId,
-                            historyGapId,
-                            preserveUnread,
-                        )
-                    }
-                bufferStore.drainCommittedRoomMerges()
-                persisted
-            }
+        ): PersistedHistoryPage {
+            val redactions = mutableListOf<Pair<RoomId, TimelineEventId>>()
+            val persisted =
+                sequencer.withNetwork(networkId) {
+                    val persisted =
+                        db.withTransaction {
+                            persistHistoryPageInTransaction(
+                                networkId,
+                                request,
+                                response,
+                                expectedRoomId,
+                                historyGapId,
+                                redactions,
+                                preserveUnread,
+                            )
+                        }
+                    bufferStore.drainCommittedRoomMerges()
+                    persisted
+                }
+            notifyCommittedRedactions(redactions)
+            return persisted
+        }
 
         /** Publish a complete multi-page synchronization as one observable Room invalidation. */
         internal suspend fun persistHistoryPagesResult(
             networkId: Long,
             pages: List<HistoryPageWrite>,
             expectedRoomId: RoomId,
-        ): PersistedHistoryPage =
-            sequencer.withNetwork(networkId) {
-                require(pages.isNotEmpty()) { "history page batch is empty" }
-                val persisted =
-                    db.withTransaction {
-                        var canonicalRoomId = expectedRoomId
-                        var inserted = 0
-                        pages.forEach { page ->
-                            val persistedPage =
-                                persistHistoryPageInTransaction(
-                                    networkId,
-                                    page.request,
-                                    page.response,
-                                    canonicalRoomId,
-                                    page.historyGapId,
-                                )
-                            canonicalRoomId = persistedPage.roomId
-                            inserted += persistedPage.inserted
+        ): PersistedHistoryPage {
+            val redactions = mutableListOf<Pair<RoomId, TimelineEventId>>()
+            val persisted =
+                sequencer.withNetwork(networkId) {
+                    require(pages.isNotEmpty()) { "history page batch is empty" }
+                    val persisted =
+                        db.withTransaction {
+                            var canonicalRoomId = expectedRoomId
+                            var inserted = 0
+                            pages.forEach { page ->
+                                val persistedPage =
+                                    persistHistoryPageInTransaction(
+                                        networkId,
+                                        page.request,
+                                        page.response,
+                                        canonicalRoomId,
+                                        page.historyGapId,
+                                        redactions,
+                                    )
+                                canonicalRoomId = persistedPage.roomId
+                                inserted += persistedPage.inserted
+                            }
+                            PersistedHistoryPage(roomId = canonicalRoomId, inserted = inserted)
                         }
-                        PersistedHistoryPage(roomId = canonicalRoomId, inserted = inserted)
-                    }
-                bufferStore.drainCommittedRoomMerges()
-                persisted
-            }
+                    bufferStore.drainCommittedRoomMerges()
+                    persisted
+                }
+            notifyCommittedRedactions(redactions)
+            return persisted
+        }
 
         private suspend fun persistHistoryPageInTransaction(
             networkId: Long,
@@ -1421,6 +1467,7 @@ class EventProcessor
             response: ChatHistoryResponse.Messages,
             expectedRoomId: RoomId?,
             historyGapId: Long?,
+            redactions: MutableList<Pair<RoomId, TimelineEventId>>,
             preserveUnread: Boolean = false,
         ): PersistedHistoryPage {
             require(request.subcommand != ChatHistoryRequest.Subcommand.TARGETS) {
@@ -1496,6 +1543,7 @@ class EventProcessor
                 } else {
                     PlaybackCommit()
                 }
+            redactions.addAll(pageCommit.redactions)
 
             val canonicalRoomId = bufferDao.canonicalId(initialCanonicalId) ?: initialCanonicalId
             val after = db.historyCursorDao().byRoom(canonicalRoomId)
@@ -2529,27 +2577,44 @@ class EventProcessor
                     payload.encode(),
                     row.serverTime,
                 )
-            val result =
-                canonicalTimeline.ingest(
-                    TimelineObservation(
-                        networkId = networkId,
-                        event = row,
-                        origin = origin.toObservationOrigin(),
-                        connectionGeneration = connectionGenerations[networkId],
-                        label = e.ctx.label,
-                        batchId = e.ctx.batchId,
-                        timeProvenance = e.ctx.serverTimeSource.toTimeProvenance(),
-                        batchSemanticMultiplicity = multiplicity?.semantic ?: 1,
-                        batchExactMultiplicity = multiplicity?.exact ?: 1,
-                        batchExactOrdinal = nextHistoryExactOrdinal(networkId, batchKey),
-                        persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
-                    ),
+            val observation =
+                TimelineObservation(
+                    networkId = networkId,
+                    event = row,
+                    origin = origin.toObservationOrigin(),
+                    connectionGeneration = connectionGenerations[networkId],
+                    label = e.ctx.label,
+                    batchId = e.ctx.batchId,
+                    timeProvenance = e.ctx.serverTimeSource.toTimeProvenance(),
+                    batchSemanticMultiplicity = multiplicity?.semantic ?: 1,
+                    batchExactMultiplicity = multiplicity?.exact ?: 1,
+                    batchExactOrdinal = nextHistoryExactOrdinal(networkId, batchKey),
+                    persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
                 )
+            val (result, recovering) =
+                db.withTransaction {
+                    val previousActionableIds = if (actionable) messageDao.actionableInviteIds(bufferId) else emptyList()
+                    val result = canonicalTimeline.ingest(observation)
+                    val eventId = result.event.id
+                    val recovering =
+                        result.event.inviteState != InviteState.PENDING ||
+                            eventId in previousActionableIds ||
+                            (
+                                previousActionableIds.isNotEmpty() && result !is IngestResult.Inserted &&
+                                    db.canonicalTimelineDao().losingEventIds(eventId).any(previousActionableIds::contains)
+                            )
+                    result to recovering
+                }
             recordPlaybackResult(networkId, result)
             traceMessageWrite("canonical_invite", result.event, historical)
             if (actionable) {
-                presentNotification(result.event.id) {
-                    notifier.onInvitation(networkId, result.event.bufferId, result.event.id)
+                val event = result.event
+                presentNotification(event.id) {
+                    if (recovering) {
+                        notifier.onRecoveredInvitation(networkId, event.bufferId, event.id)
+                    } else {
+                        notifier.onInvitation(networkId, event.bufferId, event.id)
+                    }
                 }
             }
         }
@@ -4685,12 +4750,23 @@ interface MessageNotifier {
         loserId: RoomId,
     ) = Unit
 
+    suspend fun onMessageRedacted(
+        bufferId: Long,
+        messageId: Long,
+    ) = Unit
+
     /** A newly persisted, live, actionable invitation. */
     suspend fun onInvitation(
         networkId: Long,
         bufferId: Long,
         messageId: Long,
     ) = Unit
+
+    suspend fun onRecoveredInvitation(
+        networkId: Long,
+        bufferId: Long,
+        messageId: Long,
+    ) = onInvitation(networkId, bufferId, messageId)
 
     /** Cancel notification state after Join/Dismiss resolves an invitation. */
     suspend fun onInvitationResolved(messageId: Long) = Unit

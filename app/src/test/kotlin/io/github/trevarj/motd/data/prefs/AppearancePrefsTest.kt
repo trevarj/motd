@@ -152,10 +152,26 @@ class AppearancePrefsTest {
         assertEquals(BubbleCornerStyle.ROUNDED, AppearanceConfig().bubbleCornerStyle)
         assertEquals(false, AppearanceConfig().chatShadowsEnabled)
         assertEquals(false, AppearanceConfig().useThemeTextColors)
-        assertEquals(LauncherIcon.DEFAULT, AppearanceConfig().launcherIcon)
+        assertEquals(LauncherIcon.MONO, AppearanceConfig().launcherIcon)
         assertEquals(SplashScreenAnimation.EDGE_TRACE, AppearanceConfig().splashScreenAnimation)
         assertEquals("", AppearanceConfig().customFontName)
     }
+
+    @Test fun missingLauncherChoiceDefaultsToMonoButLegacyDefaultTokenStaysTeal() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val key = stringPreferencesKey("launcher_icon_v1")
+            val original = context.appearanceDataStore.data.first()[key]
+            try {
+                context.appearanceDataStore.edit { it.remove(key) }
+                assertEquals(LauncherIcon.MONO, prefs.config.first().launcherIcon)
+
+                context.appearanceDataStore.edit { it[key] = "DEFAULT" }
+                assertEquals(LauncherIcon.DEFAULT, AppearancePrefsImpl(context).config.first().launcherIcon)
+            } finally {
+                context.appearanceDataStore.edit { if (original == null) it.remove(key) else it[key] = original }
+            }
+        }
 
     @Test fun newAppearanceFields_roundTripNonDefaultValues() =
         runTest {
@@ -552,7 +568,7 @@ class AppearancePrefsTest {
             assertEquals(TimeFormat.AUTO, config.timeFormat)
             assertEquals(MessageSpacing.DEFAULT, config.messageSpacing)
             assertEquals(BubbleCornerStyle.ROUNDED, config.bubbleCornerStyle)
-            assertEquals(LauncherIcon.DEFAULT, config.launcherIcon)
+            assertEquals(LauncherIcon.MONO, config.launcherIcon)
             assertEquals(SplashScreenAnimation.EDGE_TRACE, config.splashScreenAnimation)
         }
 

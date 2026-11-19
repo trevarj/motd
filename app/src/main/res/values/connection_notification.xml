@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="connection_notification_channel">Connection status</string>
+    <string name="connection_notification_starting">Starting connections…</string>
+    <string name="connection_notification_empty">No active networks</string>
+    <string name="connection_notification_public">IRC connection service</string>
+    <string name="connection_notification_disconnect">Disconnect</string>
+    <string name="connection_notification_network">Network</string>
+    <string name="connection_notification_network_state">%1$s: %2$s</string>
+    <string name="connection_notification_count_separator">" · "</string>
+
+    <string name="connection_notification_connected">Connected</string>
+    <string name="connection_notification_connecting">Connecting</string>
+    <string name="connection_notification_waiting">Waiting for connectivity</string>
+    <string name="connection_notification_offline">Offline</string>
+    <string name="connection_notification_error">Connection error</string>
+
+    <plurals name="connection_notification_connected_count">
+        <item quantity="one">%d connected</item>
+        <item quantity="other">%d connected</item>
+    </plurals>
+    <plurals name="connection_notification_connecting_count">
+        <item quantity="one">%d connecting</item>
+        <item quantity="other">%d connecting</item>
+    </plurals>
+    <plurals name="connection_notification_waiting_count">
+        <item quantity="one">%d waiting</item>
+        <item quantity="other">%d waiting</item>
+    </plurals>
+    <plurals name="connection_notification_offline_count">
+        <item quantity="one">%d offline</item>
+        <item quantity="other">%d offline</item>
+    </plurals>
+    <plurals name="connection_notification_error_count">
+        <item quantity="one">%d error</item>
+        <item quantity="other">%d errors</item>
+    </plurals>
+</resources>

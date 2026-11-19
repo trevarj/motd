@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_preview_title">Notification previews</string>
+    <string name="notification_preview_full">Full message</string>
+    <string name="notification_preview_identity">Sender and chat only</string>
+    <string name="notification_preview_generic">Generic notification</string>
+    <string name="notification_preview_system_privacy">This also applies to Android Auto. Android controls what appears on your lock screen.</string>
+</resources>

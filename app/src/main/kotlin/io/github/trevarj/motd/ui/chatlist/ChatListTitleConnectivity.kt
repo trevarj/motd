@@ -20,11 +20,6 @@ import kotlinx.coroutines.flow.transformLatest
  * A plain [IrcClientState.Disconnected] is quiescent, not an episode. History sync is presented
  * independently by syncChrome; Connecting takes precedence in the shared title activity slot.
  *
- * The predicate is the one the status notification's `statusNotificationShape` already uses for
- * its "reconnecting" wording, minus that shape's connected==0 collapse: the notification hides
- * a reconnecting bouncer child behind "Connected to N networks", which is exactly the window (roots
- * Ready, children still dialing) this cue exists to make visible.
- *
  * [scopeIds] is [scopeNetworkIds]' answer: null reports on every network, a scoped list reports
  * only on the sockets whose rows it is showing, so a cue beside a network's name can never mean
  * some other network.

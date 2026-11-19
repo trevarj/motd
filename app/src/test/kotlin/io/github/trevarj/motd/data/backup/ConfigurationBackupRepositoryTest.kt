@@ -1004,6 +1004,46 @@ class ConfigurationBackupRepositoryTest {
         }
 
     @Test
+    fun launcherChoiceRoundTripsAndOldBackupsWithoutItPreserveLocalChoice() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val appearancePrefs = AppearancePrefsImpl(context)
+            val key = stringPreferencesKey("launcher_icon_v1")
+            val original = context.appearanceDataStore.data.first()[key]
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                context.appearanceDataStore.edit { it.remove(key) }
+                val mono = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                assertTrue(mono.contains("\"launcherIcon\": \"MONO\""))
+                val legacy = mono.replace(Regex(""",\s*"launcherIcon"\s*:\s*"MONO""""), "")
+                assertFalse(legacy.contains("\"launcherIcon\""))
+
+                for (mode in BackupImportMode.entries) {
+                    context.appearanceDataStore.edit { it.remove(key) }
+                    backup.import(legacy, importMode = mode)
+                    assertEquals(LauncherIcon.MONO, appearancePrefs.config.first().launcherIcon)
+                    assertNull(context.appearanceDataStore.data.first()[key])
+
+                    appearancePrefs.setLauncherIcon(LauncherIcon.GRUVBOX)
+                    backup.import(legacy, importMode = mode)
+                    assertEquals(LauncherIcon.GRUVBOX, appearancePrefs.config.first().launcherIcon)
+                }
+                appearancePrefs.setLauncherIcon(LauncherIcon.DEFAULT)
+                val teal = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                assertTrue(teal.contains("\"launcherIcon\": \"DEFAULT\""))
+
+                backup.import(mono, importMode = BackupImportMode.MERGE)
+                assertEquals(LauncherIcon.MONO, appearancePrefs.config.first().launcherIcon)
+                backup.import(teal, importMode = BackupImportMode.MERGE)
+                assertEquals(LauncherIcon.DEFAULT, appearancePrefs.config.first().launcherIcon)
+            } finally {
+                context.appearanceDataStore.edit { if (original == null) it.remove(key) else it[key] = original }
+                db.close()
+            }
+        }
+
+    @Test
     fun olderAppearanceBackupDefaultsComposerStyleAndTextColors() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()

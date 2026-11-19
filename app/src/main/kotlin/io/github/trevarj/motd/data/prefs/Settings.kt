@@ -3,9 +3,13 @@ package io.github.trevarj.motd.data.prefs
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.DeliveryMode
+import io.github.trevarj.motd.service.NotificationPreview
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
@@ -374,6 +378,7 @@ data class Settings(
     val mentionsEnabled: Boolean = true,
     /** Presentation location retained while [mentionsEnabled] is off. */
     val mentionsPlacement: MentionsPlacement = MentionsPlacement.DRAWER,
+    @Transient val notificationPreview: NotificationPreview = NotificationPreview.FULL,
 )
 
 /** Canonical key for friends/fools/override lookups: trimmed + lowercased.
@@ -393,11 +398,16 @@ fun IrcIdentityRules.matchesConfiguredNick(
 interface SettingsRepository {
     val settings: Flow<Settings>
 
+    val notificationPreview: Flow<NotificationPreview>
+        get() = settings.map { it.notificationPreview }.distinctUntilChanged()
+
     suspend fun setThemeMode(m: ThemeMode)
 
     suspend fun setDynamicColor(enabled: Boolean)
 
     suspend fun setDeliveryMode(m: DeliveryMode)
+
+    suspend fun setNotificationPreview(preview: NotificationPreview)
 
     // Round 4
     suspend fun setLayoutDensity(d: LayoutDensity)

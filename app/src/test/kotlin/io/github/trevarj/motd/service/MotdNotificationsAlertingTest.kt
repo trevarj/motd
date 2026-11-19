@@ -3,6 +3,7 @@ package io.github.trevarj.motd.service
 import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
+import android.content.pm.ShortcutManager
 import android.database.Cursor
 import android.os.CancellationSignal
 import android.provider.Settings
@@ -16,6 +17,7 @@ import androidx.sqlite.db.SupportSQLiteQuery
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.MainActivity
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -45,6 +47,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
@@ -62,6 +65,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowSystemClock
 import java.time.Duration
 import java.util.concurrent.CountDownLatch
@@ -372,6 +376,231 @@ class MotdNotificationsAlertingTest {
         assertNull(notification.group)
         assertEquals(NotificationCompat.GROUP_ALERT_ALL, notification.groupAlertBehavior)
     }
+
+    @Test
+    @Config(sdk = [30])
+    fun previewChangesRetireOldRowsAndProjectRestoredAndIncomingMessages() =
+        runTest {
+            val preview = MutableStateFlow(NotificationPreview.FULL)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), withPreview(preview), applicationScope = backgroundScope)
+            val processor = EventProcessor(db, TypingTrackerImpl(), notifications)
+            processor.onRegistered(networkId, "me", emptyMap())
+            processor.process(networkId, chat("alert-peer", "private history", "projection-history"))
+            val full = lane(null)
+            val shortcutId = requireNotNull(full.shortcutId)
+            val shortcuts = context.getSystemService(ShortcutManager::class.java)
+            val shortcut = shortcuts.dynamicShortcuts.single { it.id == shortcutId }
+            assertEquals("alert-peer", shortcut.shortLabel.toString())
+            assertEquals(dmBufferId, shortcut.intent!!.getLongExtra(MotdNotifications.EXTRA_BUFFER_ID, -1L))
+            assertEquals(Notification.VISIBILITY_PRIVATE, full.visibility)
+            assertEquals(Notification.VISIBILITY_PUBLIC, full.publicVersion.visibility)
+            assertEquals(context.getString(R.string.notification_projection_message), full.publicVersion.extras.getString(Notification.EXTRA_TEXT))
+            assertTrue(full.publicVersion.actions.isNullOrEmpty())
+            assertNull(full.publicVersion.shortcutId)
+            assertTrue(bodies(full.publicVersion).isEmpty())
+            assertEquals(listOf("private history"), bodies(full))
+
+            preview.value = NotificationPreview.IDENTITY
+            testScheduler.runCurrent()
+            assertTrue(postedNotifications().isEmpty())
+            processor.process(networkId, chat("alert-peer", "private current", "projection-current", 2_000))
+            val identity = lane(null)
+            val replacement = context.getString(R.string.notification_projection_message)
+            assertEquals(listOf(replacement, replacement), bodies(identity))
+            assertEquals("libera", identity.extras.getCharSequence(Notification.EXTRA_SUB_TEXT).toString())
+            assertEquals(shortcutId, identity.shortcutId)
+            val identityStyle = requireNotNull(NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(identity))
+            assertTrue(identityStyle.messages.all { it.person?.name?.toString() == "alert-peer" })
+            assertTrue(identityStyle.messages.all { it.person?.icon != null })
+
+            preview.value = NotificationPreview.GENERIC
+            testScheduler.runCurrent()
+            assertTrue(postedNotifications().isEmpty())
+            assertTrue(shortcuts.dynamicShortcuts.none { it.id == shortcutId })
+            processor.process(networkId, chat("alert-peer", "private next", "projection-next", 3_000))
+            val generic = lane(null)
+            assertEquals(listOf(replacement, replacement, replacement), bodies(generic))
+            assertNull(generic.extras.getCharSequence(Notification.EXTRA_SUB_TEXT))
+            assertNull(generic.shortcutId)
+            val genericStyle = requireNotNull(NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(generic))
+            assertEquals(replacement, genericStyle.conversationTitle.toString())
+            assertTrue(genericStyle.messages.all { it.person?.name?.toString() == context.getString(R.string.notification_projection_sender) })
+            assertTrue(genericStyle.messages.all { it.person?.key == null && it.person?.icon == null })
+            assertMessageActions(generic, dmBufferId, null, automotiveMessaging = true)
+        }
+
+    private fun withPreview(preview: MutableStateFlow<NotificationPreview>): SettingsRepository =
+        object : SettingsRepository by repo {
+            override val notificationPreview = preview
+        }
+
+    @Test
+    fun narrowingPreviewWhileCanonicalReadIsSuspendedCannotPostOldProjection() =
+        runBlocking {
+            resetImmediateFixture()
+            val preview = MutableStateFlow(NotificationPreview.FULL)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), withPreview(preview))
+            val incoming = chat("alert-peer", "private staged body", "projection-race")
+            val recorder = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier)
+            recorder.onRegistered(networkId, "me", emptyMap())
+            recorder.process(networkId, incoming)
+            val event = requireNotNull(db.messageDao().byMsgid(dmBufferId, "projection-race"))
+            val (paused, release) = pauseCanonicalRead(event.id)
+            val recovery = async(Dispatchers.Default) { notifications.recoverCanonicalNotifications() }
+            try {
+                assertTrue(paused.await(10, TimeUnit.SECONDS))
+                preview.value = NotificationPreview.GENERIC
+                release.countDown()
+                withTimeout(10_000) { recovery.await() }
+                val posted = lane(null)
+                assertEquals(listOf(context.getString(R.string.notification_projection_message)), bodies(posted))
+                assertNull(posted.shortcutId)
+                assertSilent(posted)
+            } finally {
+                beforeBoundDatabaseQuery = null
+                release.countDown()
+                recovery.cancel()
+                recovery.join()
+            }
+        }
+
+    @Test
+    @Config(sdk = [30])
+    fun ordinaryAndMentionLanesShareAConversationButOnlyMentionsBridge() =
+        runTest {
+            val channelId = channel()
+            val processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = allSettings())
+            processor.onRegistered(networkId, "me", emptyMap())
+            processor.process(networkId, chat("alert-peer", "ordinary", "shortcut-ordinary").copy(target = "#chan"))
+            processor.process(networkId, chat("alert-peer", "me: mention", "shortcut-mention", 2_000).copy(target = "#chan"))
+            val ordinary = lane(null)
+            val mention = lane("channel_mentions")
+            assertEquals(requireNotNull(ordinary.shortcutId), mention.shortcutId)
+            assertNull(ordinary.bubbleMetadata)
+            assertNull(mention.bubbleMetadata)
+            assertMessageActions(ordinary, channelId, null, automotiveMessaging = false)
+            assertMessageActions(mention, channelId, "channel_mentions", automotiveMessaging = true)
+        }
+
+    @Test
+    fun redactionRetiresAffectedAndroidRowAfterRecreationWithoutRestoringTheBody() =
+        runTest {
+            val channelId = channel()
+            val settings = allSettings()
+            val live = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
+            live.onRegistered(networkId, "me", emptyMap())
+            val original = chat("alert-peer", "private original", "redacted-notification").copy(target = "#chan")
+            live.process(networkId, original)
+            live.process(networkId, chat("alert-peer", "me: unaffected", "unaffected-notification", 2_000).copy(target = "#chan"))
+            assertEquals(listOf(original.text), bodies(lane(null)))
+            val mention = lane("channel_mentions")
+
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            val recreated = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
+            recreated.onRegistered(networkId, "me", emptyMap())
+            recreated.process(
+                networkId,
+                IrcEvent.MessageRedacted(original.ctx.copy(msgid = null, serverTime = 3_000), Prefix("oper"), "#chan", "redacted-notification", null),
+            )
+            val redacted = requireNotNull(db.messageDao().byMsgid(channelId, "redacted-notification"))
+            assertEquals(MessageKind.REDACTED, redacted.kind)
+            assertSame(mention, postedNotifications().single().notification)
+            notifications.onCanonicalIncoming(networkId, channelId, BufferType.CHANNEL, false, redacted.id, original, refreshOnly = false)
+            assertSame(mention, postedNotifications().single().notification)
+
+            recreated.process(networkId, chat("alert-peer", "new ordinary", "redaction-next", 4_000).copy(target = "#chan"))
+            assertEquals(listOf("new ordinary"), bodies(lane(null)))
+        }
+
+    @Test
+    fun offersAndInvitationsAlertLiveAndRecoverSilentlyWithPrivatePreviews() =
+        runTest {
+            val preview = MutableStateFlow(NotificationPreview.GENERIC)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), withPreview(preview))
+            val live = EventProcessor(db, TypingTrackerImpl(), notifications)
+            live.onRegistered(networkId, "me", emptyMap())
+            val ctx = chat("alert-peer", "").ctx
+            val invite = IrcEvent.Invited(ctx.copy(msgid = "live-invite"), "private-inviter", "me", "#private-channel")
+            val offer =
+                IrcEvent.DccSend(
+                    ctx = ctx.copy(msgid = "live-offer", serverTime = 2_000),
+                    source = Prefix("private-sender"),
+                    target = "me",
+                    offer =
+                        IrcEvent.DccSendOffer(
+                            protocol = IrcEvent.DccFileProtocol.SEND,
+                            filename = "private-file.txt",
+                            endpoint = IrcEvent.DccEndpoint("192.0.2.10", 49_152, IrcEvent.DccAddressKind.IPV4_DOTTED),
+                            sizeBytes = 1_024,
+                            token = null,
+                        ),
+                )
+            live.process(networkId, invite)
+            live.process(networkId, offer)
+            val inviteNotification = postedNotifications().single { it.notification.channelId == MotdNotifications.CHANNEL_INVITATIONS }.notification
+            val offerNotification = postedNotifications().single { it.notification.channelId == MotdNotifications.CHANNEL_TRANSFERS }.notification
+            for ((notification, title) in listOf(
+                inviteNotification to R.string.notification_projection_invitation,
+                offerNotification to R.string.notification_projection_offer,
+            )) {
+                assertAlerting(notification)
+                assertEquals(context.getString(title), notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+                assertNull(notification.extras.getCharSequence(Notification.EXTRA_TEXT))
+                assertNull(notification.extras.getCharSequence(Notification.EXTRA_BIG_TEXT))
+                assertNull(notification.extras.getCharSequence(Notification.EXTRA_SUB_TEXT))
+                assertTrue(notification.publicVersion.actions.isNullOrEmpty())
+            }
+            assertEquals(listOf("Join", "Dismiss"), inviteNotification.actions.map { it.title.toString() })
+            assertEquals(
+                "Open to save",
+                offerNotification.actions
+                    .single()
+                    .title
+                    .toString(),
+            )
+            val postedOfferId = postedNotifications().single { it.notification.channelId == MotdNotifications.CHANNEL_TRANSFERS }.id
+            val legacyInviteCollision = ((postedOfferId and 0x0fffffff) or 0x10000000).toLong()
+            notifications.onInvitationResolved(legacyInviteCollision)
+            assertSame(offerNotification, postedNotifications().single { it.id == postedOfferId }.notification)
+            val invitedRoom = requireNotNull(db.bufferDao().byName(networkId, "#private-channel"))
+            notifications.watchEnded(invitedRoom.id)
+            val watch = postedNotifications().single { it.id == MotdNotifications.watchEndedNotificationId(invitedRoom.id) }.notification
+            assertSilent(watch)
+            assertEquals(context.getString(R.string.notification_projection_watch_ended), watch.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+            context.getSystemService(android.app.NotificationManager::class.java).cancelAll()
+
+            val interrupted =
+                EventProcessor(
+                    db,
+                    TypingTrackerImpl(),
+                    object : MessageNotifier by MessageNotifier.Noop {
+                        override suspend fun onInvitation(
+                            networkId: Long,
+                            bufferId: Long,
+                            messageId: Long,
+                        ) {
+                            error("interrupted invitation")
+                        }
+
+                        override suspend fun onDccTransferOffer(
+                            networkId: Long,
+                            bufferId: Long,
+                            messageId: Long,
+                        ) {
+                            error("interrupted file offer")
+                        }
+                    },
+                )
+            interrupted.onRegistered(networkId, "me", emptyMap())
+            interrupted.process(networkId, invite.copy(ctx = ctx.copy(msgid = "recovered-invite", serverTime = 3_000)))
+            interrupted.process(networkId, offer.copy(ctx = ctx.copy(msgid = "recovered-offer", serverTime = 4_000)))
+            notifications.recoverCanonicalNotifications()
+            assertEquals(
+                setOf(MotdNotifications.CHANNEL_INVITATIONS, MotdNotifications.CHANNEL_TRANSFERS),
+                postedNotifications().map { it.notification.channelId }.toSet(),
+            )
+            postedNotifications().forEach { assertSilent(it.notification) }
+        }
 
     @Test
     fun eligibleBodies_slideQuietWindowToExactThirtySecondBoundary() =

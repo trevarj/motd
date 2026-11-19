@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_projection_message">New message</string>
+    <string name="notification_projection_sender">Sender</string>
+    <string name="notification_projection_you">You</string>
+    <string name="notification_projection_reply">Reply</string>
+    <string name="notification_projection_mark_read">Mark read</string>
+    <string name="notification_projection_invitation">New invitation</string>
+    <string name="notification_projection_invitation_to">Invitation to %1$s</string>
+    <string name="notification_projection_join">Join</string>
+    <string name="notification_projection_invitation_from">From %1$s</string>
+    <string name="notification_projection_dismiss">Dismiss</string>
+    <string name="notification_projection_offer">New file offer</string>
+    <string name="notification_projection_offer_from">File offer from %1$s</string>
+    <string name="notification_projection_open_to_save">Open to save</string>
+    <string name="notification_projection_watch_ended">No longer notifying on every message</string>
+    <string name="notification_projection_send_failed">Message not sent</string>
+    <string name="notification_projection_send_failed_to">Not sent to %1$s</string>
+    <string name="notification_projection_send_unknown">Send status unknown</string>
+    <string name="notification_projection_send_unknown_explanation">Send status unknown. Check the conversation before retrying.</string>
+    <string name="notification_projection_send_no_connection">Couldn\'t connect. Open motd and try again.</string>
+    <string name="notification_projection_send_no_chat">This conversation is no longer available</string>
+    <string name="notification_projection_send_unsupported">This conversation can\'t receive messages</string>
+    <string name="notification_projection_retry">Retry</string>
+    <string name="notification_projection_shortcut_on_network">%1$s on %2$s</string>
+</resources>

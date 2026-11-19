@@ -1,20 +1,37 @@
 package io.github.trevarj.motd.service
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Notification
+import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
+import android.os.Handler
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
+import io.github.trevarj.motd.MainActivity
+import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.di.NotificationPermissionStatus
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.event.IrcClientState
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -33,6 +50,17 @@ class IrcForegroundService : LifecycleService() {
 
     @Inject lateinit var diagnostics: DiagnosticLogger
 
+    @Inject lateinit var networkRepository: NetworkRepository
+
+    @Inject lateinit var notificationPermission: NotificationPermissionStatus
+
+    private val connectivity get() = getSystemService(ConnectivityManager::class.java)
+    private var networkNames = emptyMap<Long, String>()
+    private var foreground = false
+
+    private val contentIntent by lazy { statusContentIntent(this) }
+    private val disconnectIntent by lazy { statusDisconnectIntent(this) }
+
     /**
      * The shape currently on screen, whichever entry point put it there. Confined to the main
      * thread: [onStartCommand] is a main-thread callback and [lifecycleScope] dispatches there.
@@ -41,13 +69,17 @@ class IrcForegroundService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
-        // Reflect live connection state in the status notification, conflated on the wording rather
-        // than on the raw state map — see [statusNotificationShapes].
         lifecycleScope.launch {
-            val states =
-                (connectionManager as? ConnectionManagerImpl)?.connectionStates
-                    ?: return@launch
-            statusNotificationShapes(states).collect { shape -> updateStatus(shape) }
+            val names = networkRepository.observeNetworks().map { networks -> networks.associate { it.id to it.name } }
+            combine(
+                connectionManager.connectionActivity,
+                names.onStart { emit(emptyMap()) },
+                defaultNetworkAvailability(),
+                notificationPermission.granted,
+            ) { activity, latestNames, hasDefaultNetwork, _ ->
+                networkNames = latestNames
+                statusNotificationShape(activity, latestNames, hasDefaultNetwork)
+            }.collect(::updateStatus)
         }
     }
 
@@ -73,15 +105,18 @@ class IrcForegroundService : LifecycleService() {
     // service in isolation, so the check is suppressed here rather than disabled project-wide.
     @SuppressLint("ForegroundServiceType")
     private fun startAsForeground() {
-        // Seeded from the CURRENT connection state rather than from a fixed "starting" shape.
-        // onStartCommand is re-entered on an already-running session — every app foreground re-arms
-        // the keeper under PERSISTENT_SOCKET, and START_STICKY redelivers after a kill — while
-        // connectionStates is a conflated StateFlow that emits nothing further on a stable session.
-        // A generic notification posted here therefore had nothing to repaint it: "Connected to 3
-        // networks" reverted to "Keeping chats connected" on every foreground and stayed there.
-        // Still correct for the cold start this was written for: an empty state map is "starting".
-        val shape = statusNotificationShape(connectionManager.connectionStates.value)
-        val notification = statusNotification(shape)
+        // Re-entry may find live sockets before either metadata or connection state emits again.
+        val shape =
+            statusNotificationShape(
+                connectionManager.connectionActivity.value,
+                networkNames,
+                connectivity?.let { it.activeNetwork != null },
+            )
+        if (foreground) {
+            updateStatus(shape)
+            return
+        }
+        val notification = buildStatusNotification(this, shape, contentIntent, disconnectIntent)
         val started =
             startForegroundSafely(diagnostics, source = "service") {
                 // FOREGROUND_SERVICE_TYPE_SPECIAL_USE is an API 34 constant; only pass the type on 34+.
@@ -92,44 +127,49 @@ class IrcForegroundService : LifecycleService() {
                     startForeground(STATUS_ID, notification)
                 }
             }
-        // startForeground posts STATUS_ID itself, so seed the shared dedupe state with what is now
-        // on screen. A refused start posts nothing and must leave the collector free to repost.
-        if (started) postedShape = shape
-    }
-
-    /** The one place connection state becomes a status notification, shared by both entry points. */
-    private fun statusNotification(shape: StatusNotificationShape): Notification =
-        notifications.statusNotification(
-            connectedCount = shape.connectedCount,
-            reconnecting = shape.reconnecting,
-            starting = shape.starting,
-        )
-
-    private fun updateStatus(shape: StatusNotificationShape) {
-        // [statusNotificationShapes] already drops the collector's own repeats; this second check is
-        // what makes both entry points share one dedupe state, since startAsForeground posts out of
-        // band from that flow.
-        if (shape == postedShape) return
-        val notification = statusNotification(shape)
-        // POST_NOTIFICATIONS is only a runtime permission on API 33+; guard so lint's flow
-        // analysis is satisfied and we don't attempt to post the status update without it.
-        val canPost =
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-                androidx.core.content.ContextCompat.checkSelfPermission(
-                    this,
-                    android.Manifest.permission.POST_NOTIFICATIONS,
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (canPost) {
-            val posted =
-                runCatching {
-                    androidx.core.app.NotificationManagerCompat
-                        .from(this)
-                        .notify(STATUS_ID, notification)
-                }.isSuccess
-            // Only a notification that actually reached the shade may suppress the next repost.
-            if (posted) postedShape = shape
+        if (started) {
+            foreground = true
+            postedShape = shape.takeIf { notificationPermission.granted.value }
         }
     }
+
+    private fun updateStatus(shape: StatusNotificationShape) {
+        if (!foreground) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            postedShape = null
+            return
+        }
+        if (shape == postedShape) return
+        val notification = buildStatusNotification(this, shape, contentIntent, disconnectIntent)
+        if (runCatching { NotificationManagerCompat.from(this).notify(STATUS_ID, notification) }.isSuccess) {
+            postedShape = shape
+        }
+    }
+
+    private fun defaultNetworkAvailability(): Flow<Boolean?> =
+        callbackFlow {
+            val manager = connectivity
+            if (manager == null) {
+                trySend(null)
+                close()
+                return@callbackFlow
+            }
+            val callback =
+                object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        trySend(true)
+                    }
+
+                    override fun onLost(network: Network) {
+                        trySend(false)
+                    }
+                }
+            val registered = runCatching { manager.registerDefaultNetworkCallback(callback, Handler(mainLooper)) }.isSuccess
+            trySend(manager.activeNetwork != null)
+            awaitClose { if (registered) manager.unregisterNetworkCallback(callback) }
+        }
 
     // Service removal during a fully verified push hand-off must not disable the singleton
     // connection subsystem. Explicit ACTION_STOP performs stopAll above; process death naturally
@@ -175,42 +215,141 @@ internal fun startForegroundSafely(
         false
     }
 
-/** The three arguments [MotdNotifications.statusNotification] takes, derived from live state. */
+internal enum class StatusConnection(
+    val label: Int,
+    val countLabel: Int,
+) {
+    CONNECTED(R.string.connection_notification_connected, R.plurals.connection_notification_connected_count),
+    CONNECTING(R.string.connection_notification_connecting, R.plurals.connection_notification_connecting_count),
+    WAITING(R.string.connection_notification_waiting, R.plurals.connection_notification_waiting_count),
+    OFFLINE(R.string.connection_notification_offline, R.plurals.connection_notification_offline_count),
+    ERROR(R.string.connection_notification_error, R.plurals.connection_notification_error_count),
+}
+
+internal data class StatusNotificationRow(
+    val name: String?,
+    val state: StatusConnection,
+)
+
 internal data class StatusNotificationShape(
-    val connectedCount: Int,
-    val reconnecting: Boolean,
+    val rows: List<StatusNotificationRow>,
     val starting: Boolean,
 )
 
-/**
- * Connection state → status notification wording.
- *
- * "Starting" is the absence of any actor at all, not the act of (re-)starting the service: the
- * service is entered again on a session that is already connected, and reporting that as starting
- * is what reverted a truthful "Connected to N networks" to the generic text. Reconnecting is only
- * reported while nothing is connected, so one flapping network cannot hide the others.
- */
-internal fun statusNotificationShape(states: Map<Long, IrcClientState>): StatusNotificationShape {
-    val connected = states.values.count { it is IrcClientState.Ready }
-    val reconnecting =
-        states.values.any {
-            it is IrcClientState.Connecting || it is IrcClientState.Registering
+internal fun statusNotificationShape(
+    activity: ConnectionActivitySnapshot,
+    networkNames: Map<Long, String>,
+    hasDefaultNetwork: Boolean?,
+): StatusNotificationShape {
+    val active = if (hasDefaultNetwork == false) StatusConnection.WAITING else StatusConnection.CONNECTING
+    val ids = (networkNames.keys + activity.states.keys + activity.progressing.keys).sorted()
+    val rows =
+        ids.mapNotNull { id ->
+            val state =
+                when (activity.states[id]) {
+                    is IrcClientState.Ready -> {
+                        StatusConnection.CONNECTED
+                    }
+
+                    IrcClientState.Connecting, IrcClientState.Registering -> {
+                        active
+                    }
+
+                    is IrcClientState.Failed -> {
+                        StatusConnection.ERROR
+                    }
+
+                    IrcClientState.Disconnected, null -> {
+                        when {
+                            activity.progressing[id] == true -> active
+                            activity.states[id] != null || activity.initializationComplete -> StatusConnection.OFFLINE
+                            else -> return@mapNotNull null
+                        }
+                    }
+                }
+            val name =
+                networkNames[id]
+                    ?.replace('\r', ' ')
+                    ?.replace('\n', ' ')
+                    ?.trim()
+                    ?.takeIf(String::isNotEmpty)
+            StatusNotificationRow(name, state)
         }
-    return StatusNotificationShape(
-        connectedCount = connected,
-        reconnecting = reconnecting && connected == 0,
-        starting = states.isEmpty(),
-    )
+    return StatusNotificationShape(rows, starting = rows.isEmpty() && !activity.initializationComplete)
 }
 
-/**
- * Connection state → one emission per distinct piece of status wording.
- *
- * `connectionStates` republishes on every per-network transition and on every lag reading, while the
- * notification reads exactly the three fields of [StatusNotificationShape]. Collecting it raw meant
- * rebuilding and re-posting an identical notification for each of those, which is pure churn: the
- * shade re-animates and the NotificationManager rate limiter is spent on nothing.
- */
-internal fun statusNotificationShapes(
-    states: Flow<Map<Long, IrcClientState>>,
-): Flow<StatusNotificationShape> = states.map(::statusNotificationShape).distinctUntilChanged()
+private fun statusContentIntent(context: Context): PendingIntent =
+    // The enabled launcher alias can change with the app icon; keep this route explicit.
+    PendingIntent.getActivity(
+        context,
+        0,
+        Intent(context, MainActivity::class.java)
+            .setAction(Intent.ACTION_MAIN)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
+private fun statusDisconnectIntent(context: Context): PendingIntent =
+    PendingIntent.getService(
+        context,
+        1,
+        Intent(context, IrcForegroundService::class.java).setAction(IrcForegroundService.ACTION_STOP),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
+internal fun buildStatusNotification(
+    context: Context,
+    shape: StatusNotificationShape,
+    contentIntent: PendingIntent = statusContentIntent(context),
+    disconnectIntent: PendingIntent = statusDisconnectIntent(context),
+): Notification {
+    val counts = shape.rows.groupingBy { it.state }.eachCount()
+    val text =
+        if (counts.isEmpty()) {
+            context.getString(if (shape.starting) R.string.connection_notification_starting else R.string.connection_notification_empty)
+        } else {
+            StatusConnection.entries
+                .mapNotNull { state -> counts[state]?.let { context.resources.getQuantityString(state.countLabel, it, it) } }
+                .joinToString(context.getString(R.string.connection_notification_count_separator))
+        }
+
+    fun builder() =
+        NotificationCompat
+            .Builder(context, MotdNotifications.CHANNEL_STATUS)
+            .setSmallIcon(R.drawable.ic_notification_motd)
+            .setContentTitle(context.getString(R.string.app_name))
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setContentIntent(contentIntent)
+            .setShowWhen(false)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+
+    val publicVersion =
+        builder()
+            .setContentText(context.getString(R.string.connection_notification_public))
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
+
+    return builder()
+        .setContentText(text)
+        .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+        .setPublicVersion(publicVersion)
+        .apply {
+            if (shape.rows.isNotEmpty()) {
+                val details =
+                    shape.rows.joinToString("\n") { row ->
+                        context.getString(
+                            R.string.connection_notification_network_state,
+                            row.name ?: context.getString(R.string.connection_notification_network),
+                            context.getString(row.state.label),
+                        )
+                    }
+                setStyle(NotificationCompat.BigTextStyle().bigText(details))
+            }
+        }.addAction(
+            android.R.drawable.ic_menu_close_clear_cancel,
+            context.getString(R.string.connection_notification_disconnect),
+            disconnectIntent,
+        ).build()
+}

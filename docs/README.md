@@ -96,6 +96,25 @@ variants insert ordinary Unicode, never images. Unsupported sequences use the
 device fallback. Backups save the selection, not downloaded fonts; a missing or
 invalid restored set visibly falls back to System until reinstalled.
 
+## Notifications
+
+The connection service posts one quiet notification. Its compact view counts
+connected, connecting, waiting, offline, and failed networks; expand it for names
+and states. **Disconnect** stops the current session without changing auto-connect
+settings. Opening the app again can reconnect.
+
+**Settings → Notifications → Notification previews** offers **Full message**,
+**Sender and chat only**, and **Generic notification**. This controls what motd
+sends to Android Auto. Changing the setting clears older notifications on the phone.
+Android controls lock-screen visibility and alert sounds. Invitations and file
+offers request an alert; watch expiry and recovered deliveries are silent.
+Supported Android versions offer native conversation controls for named chat
+notifications, without bubbles.
+
+**Appearance → App icon** defaults to **Mono** when no choice is saved. **Teal
+ceramic** remains selectable. Notification small icons use the shared monochrome
+shape of the launcher artwork; Android controls its tint and system app badge.
+
 ## Chat navigation
 
 The drawer's Networks header shows total mentions, not total unread messages.

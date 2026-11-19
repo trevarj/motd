@@ -137,6 +137,10 @@ class PushInstanceCoordinatorTest {
             settings.value = settings.value.copy(deliveryMode = m)
         }
 
+        override suspend fun setNotificationPreview(preview: io.github.trevarj.motd.service.NotificationPreview) {
+            settings.value = settings.value.copy(notificationPreview = preview)
+        }
+
         // Round 4 members: unused by this test.
         override suspend fun setLayoutDensity(d: LayoutDensity) = Unit
 
