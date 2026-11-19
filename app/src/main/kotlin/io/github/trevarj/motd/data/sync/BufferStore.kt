@@ -5,6 +5,7 @@ import io.github.trevarj.motd.bouncer.isBouncerConsole
 import io.github.trevarj.motd.data.db.AppStateEntity
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.CHAT_WALLPAPER_EDIT_PREFIX
 import io.github.trevarj.motd.data.db.FolderIdentityKind
 import io.github.trevarj.motd.data.db.HistoryCursorEntity
 import io.github.trevarj.motd.data.db.HistoryGapEntity
@@ -12,14 +13,31 @@ import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.PENDING_CHAT_PLACEMENT_PREFIX
+import io.github.trevarj.motd.data.db.PENDING_CHAT_WALLPAPER_PREFIX
 import io.github.trevarj.motd.data.db.RoomAliasEntity
 import io.github.trevarj.motd.data.db.RoomAliasNamespace
 import io.github.trevarj.motd.data.db.RoomEntity
 import io.github.trevarj.motd.data.db.RoomId
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.WallpaperChatChoice
+import io.github.trevarj.motd.data.prefs.WallpaperLibrary
+import io.github.trevarj.motd.data.prefs.WallpaperPatternRef
+import io.github.trevarj.motd.data.prefs.WallpaperPatternRefKind
+import io.github.trevarj.motd.data.prefs.decodeWallpaperChatChoice
+import io.github.trevarj.motd.data.prefs.decodeWallpaperValue
+import io.github.trevarj.motd.data.prefs.isCanonicalWallpaperUuid
+import io.github.trevarj.motd.data.prefs.isValidIn
+import io.github.trevarj.motd.data.prefs.wallpaperJson
 import io.github.trevarj.motd.data.repo.ChatFolderRepository
+import io.github.trevarj.motd.data.repo.MAX_CHAT_WALLPAPER_ASSIGNMENTS
 import io.github.trevarj.motd.data.repo.PortableChatPlacement
+import io.github.trevarj.motd.data.repo.PortableChatWallpaper
+import io.github.trevarj.motd.data.repo.isPortableChatIdentity
+import io.github.trevarj.motd.data.repo.validatePortableChatIdentity
 import io.github.trevarj.motd.service.NotificationRoomMergeListener
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.Base64
@@ -37,16 +55,17 @@ class BufferStore
         private val chatFolders: ChatFolderRepository = ChatFolderRepository(db),
         private val notificationRoomMergeListener: NotificationRoomMergeListener = NotificationRoomMergeListener.Noop,
     ) {
-        private val placementEncoder = Base64.getUrlEncoder().withoutPadding()
+        private val identityEncoder = Base64.getUrlEncoder().withoutPadding()
 
         private fun pendingIdentityPrefix(
             networkId: Long,
             chatType: BufferType,
             identityKind: FolderIdentityKind,
             identityValue: String,
+            keyPrefix: String = PENDING_CHAT_PLACEMENT_PREFIX,
         ): String {
-            val encodedValue = placementEncoder.encodeToString(identityValue.encodeToByteArray())
-            return "$PENDING_CHAT_PLACEMENT_PREFIX$networkId:${chatType.name}:${identityKind.name}:$encodedValue:"
+            val encodedValue = identityEncoder.encodeToString(identityValue.encodeToByteArray())
+            return "$keyPrefix$networkId:${chatType.name}:${identityKind.name}:$encodedValue:"
         }
 
         private fun pendingKey(placement: PortableChatPlacement): String =
@@ -59,11 +78,11 @@ class BufferStore
 
         private suspend fun pending() = db.appStateDao().keysGlob("$PENDING_CHAT_PLACEMENT_PREFIX*").map { key -> key to decodePending(key) }
 
-        private suspend fun nextRevision(): Long {
-            val keys = db.appStateDao().keysLike("chat-placement-revision:%")
+        private suspend fun nextRevision(keyPrefix: String = "chat-placement-revision"): Long {
+            val keys = db.appStateDao().keysLike("$keyPrefix:%")
             val revision = (keys.maxOfOrNull { it.substringAfterLast(':').toLong() } ?: 0L) + 1L
             keys.forEach { db.appStateDao().delete(it) }
-            db.appStateDao().insert(AppStateEntity("chat-placement-revision:$revision"))
+            db.appStateDao().insert(AppStateEntity("$keyPrefix:$revision"))
             return revision
         }
 
@@ -127,36 +146,37 @@ class BufferStore
 
         private fun PortableChatPlacement.identity() = listOf(networkId, chatType, identityKind, identityValue)
 
+        private fun RoomEntity.portableIdentity(aliases: List<RoomAliasEntity>): Pair<FolderIdentityKind, String>? =
+            when (type) {
+                BufferType.CHANNEL -> {
+                    FolderIdentityKind.CHANNEL to
+                        (aliases.firstOrNull { it.namespace == RoomAliasNamespace.CHANNEL }?.value ?: name.substringBefore('\u0000'))
+                }
+
+                BufferType.QUERY -> {
+                    aliases
+                        .firstOrNull { it.namespace == RoomAliasNamespace.ACCOUNT && it.verified }
+                        ?.let { FolderIdentityKind.ACCOUNT to it.value }
+                        ?: aliases
+                            .firstOrNull { it.namespace == RoomAliasNamespace.VERIFIED_NICK }
+                            ?.let { FolderIdentityKind.NICK to it.value }
+                        ?: aliases
+                            .firstOrNull { it.namespace == RoomAliasNamespace.PROVISIONAL_NICK }
+                            ?.let { FolderIdentityKind.NICK to it.value }
+                        ?: (FolderIdentityKind.NICK to name.substringBefore('\u0000'))
+                }
+
+                BufferType.SERVER -> {
+                    null
+                }
+            }
+
         suspend fun chatPlacementSnapshot(): List<PortableChatPlacement> =
             db.withTransaction {
                 val aliases = db.roomAliasDao().allNow().groupBy { it.roomId }
                 val rooms =
                     db.bufferDao().chatPlacementRooms().mapNotNull { room ->
-                        val candidates = aliases[room.id].orEmpty()
-                        val identity =
-                            when (room.type) {
-                                BufferType.CHANNEL -> {
-                                    FolderIdentityKind.CHANNEL to
-                                        (candidates.firstOrNull { it.namespace == RoomAliasNamespace.CHANNEL }?.value ?: room.name.substringBefore('\u0000'))
-                                }
-
-                                BufferType.QUERY -> {
-                                    candidates
-                                        .firstOrNull { it.namespace == RoomAliasNamespace.ACCOUNT && it.verified }
-                                        ?.let { FolderIdentityKind.ACCOUNT to it.value }
-                                        ?: candidates
-                                            .firstOrNull { it.namespace == RoomAliasNamespace.VERIFIED_NICK }
-                                            ?.let { FolderIdentityKind.NICK to it.value }
-                                        ?: candidates
-                                            .firstOrNull { it.namespace == RoomAliasNamespace.PROVISIONAL_NICK }
-                                            ?.let { FolderIdentityKind.NICK to it.value }
-                                        ?: (FolderIdentityKind.NICK to room.name.substringBefore('\u0000'))
-                                }
-
-                                BufferType.SERVER -> {
-                                    null
-                                }
-                            } ?: return@mapNotNull null
+                        val identity = room.portableIdentity(aliases[room.id].orEmpty()) ?: return@mapNotNull null
                         PortableChatPlacement(room.networkId, room.type, identity.first, identity.second, room.pinned, room.anchorOrder)
                     }
                 val networks =
@@ -216,67 +236,96 @@ class BufferStore
             }
         }
 
-        private suspend fun resolve(placement: PortableChatPlacement): RoomEntity? {
+        private suspend fun resolve(placement: PortableChatPlacement): RoomEntity? = resolvePortableRoom(placement.networkId, placement.chatType, placement.identityKind, placement.identityValue)
+
+        private suspend fun resolvePortableRoom(
+            networkId: Long,
+            chatType: BufferType,
+            identityKind: FolderIdentityKind,
+            identityValue: String,
+            requireVerifiedAccount: Boolean = false,
+        ): RoomEntity? {
             val namespace =
-                when (placement.identityKind) {
+                when (identityKind) {
                     FolderIdentityKind.CHANNEL -> RoomAliasNamespace.CHANNEL
                     FolderIdentityKind.ACCOUNT -> RoomAliasNamespace.ACCOUNT
                     FolderIdentityKind.NICK -> RoomAliasNamespace.VERIFIED_NICK
                 }
             val alias =
-                db.roomAliasDao().byValue(placement.networkId, namespace, placement.identityValue)
-                    ?: if (placement.identityKind == FolderIdentityKind.NICK) {
-                        db.roomAliasDao().byValue(placement.networkId, RoomAliasNamespace.PROVISIONAL_NICK, placement.identityValue)
+                db.roomAliasDao().byValue(networkId, namespace, identityValue)
+                    ?: if (identityKind == FolderIdentityKind.NICK) {
+                        db.roomAliasDao().byValue(networkId, RoomAliasNamespace.PROVISIONAL_NICK, identityValue)
                     } else {
                         null
                     }
             return alias
+                ?.takeIf { !requireVerifiedAccount || identityKind != FolderIdentityKind.ACCOUNT || it.verified }
                 ?.let { db.bufferDao().observeById(it.roomId) }
-                ?.takeIf { it.type == placement.chatType }
-                ?: if (placement.identityKind != FolderIdentityKind.ACCOUNT) {
-                    db.bufferDao().byName(placement.networkId, placement.identityValue)?.takeIf { it.type == placement.chatType }
+                ?.takeIf { it.type == chatType }
+                ?: if (identityKind != FolderIdentityKind.ACCOUNT) {
+                    db.bufferDao().byName(networkId, identityValue)?.takeIf { it.type == chatType }
                 } else {
                     null
                 }
         }
 
-        private suspend fun claimPendingPlacement(room: RoomEntity) {
+        private suspend fun pendingIdentities(room: RoomEntity): Set<Pair<FolderIdentityKind, String>> {
+            val aliases = db.roomAliasDao().forRoom(room.id)
+            return buildSet {
+                val channel = room.type == BufferType.CHANNEL
+                add((if (channel) FolderIdentityKind.CHANNEL else FolderIdentityKind.NICK) to room.name)
+                for (alias in aliases) {
+                    if (alias.networkId != room.networkId) continue
+                    val kind =
+                        when (alias.namespace) {
+                            RoomAliasNamespace.CHANNEL -> if (channel) FolderIdentityKind.CHANNEL else null
+
+                            RoomAliasNamespace.ACCOUNT -> if (channel) null else FolderIdentityKind.ACCOUNT
+
+                            RoomAliasNamespace.VERIFIED_NICK,
+                            RoomAliasNamespace.PROVISIONAL_NICK,
+                            -> if (channel) null else FolderIdentityKind.NICK
+
+                            RoomAliasNamespace.LEGACY_NAME -> null
+                        }
+                    if (kind != null) add(kind to alias.value)
+                }
+            }
+        }
+
+        private suspend inline fun forEachPendingKey(
+            room: RoomEntity,
+            identities: Set<Pair<FolderIdentityKind, String>>,
+            keyPrefix: String,
+            action: (String) -> Unit,
+        ) {
+            for ((kind, value) in identities) {
+                val prefix = pendingIdentityPrefix(room.networkId, room.type, kind, value, keyPrefix)
+                for (key in db.appStateDao().keysGlob("$prefix*")) action(key)
+            }
+        }
+
+        private suspend fun claimPendingChatSettings(room: RoomEntity) {
             if (room.type == BufferType.SERVER) return
+            val identities = pendingIdentities(room)
+            claimPendingPlacement(room, identities)
+            claimPendingWallpaper(room, identities)
+        }
+
+        private suspend fun claimPendingPlacement(
+            room: RoomEntity,
+            identities: Set<Pair<FolderIdentityKind, String>>,
+        ) {
             val state = db.appStateDao()
             state.keysGlob("$PENDING_CHAT_PLACEMENT_PREFIX{*").forEach { key ->
                 state.insert(AppStateEntity(pendingKey(decodePending(key))))
                 state.delete(key)
             }
 
-            val aliases = db.roomAliasDao().forRoom(room.id)
-            val identities =
-                buildSet {
-                    val channel = room.type == BufferType.CHANNEL
-                    add((if (channel) FolderIdentityKind.CHANNEL else FolderIdentityKind.NICK) to room.name)
-                    for (alias in aliases) {
-                        if (alias.networkId != room.networkId) continue
-                        val kind =
-                            when (alias.namespace) {
-                                RoomAliasNamespace.CHANNEL -> if (channel) FolderIdentityKind.CHANNEL else null
-
-                                RoomAliasNamespace.ACCOUNT -> if (channel) null else FolderIdentityKind.ACCOUNT
-
-                                RoomAliasNamespace.VERIFIED_NICK,
-                                RoomAliasNamespace.PROVISIONAL_NICK,
-                                -> if (channel) null else FolderIdentityKind.NICK
-
-                                RoomAliasNamespace.LEGACY_NAME -> null
-                            }
-                        if (kind != null) add(kind to alias.value)
-                    }
-                }
             val matches = mutableListOf<Pair<String, PortableChatPlacement>>()
-            for ((kind, value) in identities) {
-                val identityPrefix = pendingIdentityPrefix(room.networkId, room.type, kind, value)
-                for (key in state.keysGlob("$identityPrefix*")) {
-                    val placement = decodePending(key)
-                    if (resolve(placement)?.id == room.id) matches.add(key to placement)
-                }
+            forEachPendingKey(room, identities, PENDING_CHAT_PLACEMENT_PREFIX) { key ->
+                val placement = decodePending(key)
+                if (resolve(placement)?.id == room.id) matches.add(key to placement)
             }
             if (matches.isEmpty()) return
 
@@ -301,6 +350,251 @@ class BufferStore
         ) {
             db.bufferDao().setPinned(roomId, placement.pinned)
             db.bufferDao().writeAnchorOrder(roomId, placement.anchorOrder)
+        }
+
+        fun observeWallpaperTarget(roomId: Long): Flow<RoomEntity?> =
+            db
+                .bufferDao()
+                .observe(roomId)
+                .map { it?.takeIf { room -> room.acceptsWallpaperEdits() } }
+                .distinctUntilChanged()
+
+        fun observeWallpaperUseCount(ref: WallpaperPatternRef): Flow<Int> =
+            db
+                .bufferDao()
+                .observeChatWallpaperEntries("$PENDING_CHAT_WALLPAPER_PREFIX*")
+                .map { entries ->
+                    entries.count { entry ->
+                        val choice =
+                            if (entry.startsWith(PENDING_CHAT_WALLPAPER_PREFIX)) {
+                                decodePendingWallpaper(entry)?.choice
+                            } else {
+                                decodeWallpaperChatChoice(entry)
+                            }
+                        choice?.pattern == ref
+                    }
+                }.distinctUntilChanged()
+
+        private fun RoomEntity.acceptsWallpaperEdits(): Boolean = type != BufferType.SERVER && redirectToRoomId == null && pendingCloseAt == null
+
+        /** Rechecked inside the write transaction; a dirty draft can check before saving its design. */
+        suspend fun checkWallpaperAssignment(
+            roomId: Long,
+            explicit: Boolean,
+        ): Boolean = db.withTransaction { wallpaperEditTarget(roomId, explicit) != null }
+
+        private suspend fun wallpaperEditTarget(
+            roomId: Long,
+            explicit: Boolean,
+        ): RoomEntity? {
+            val room = db.bufferDao().observeById(roomId)?.takeIf { it.acceptsWallpaperEdits() } ?: return null
+            if (explicit && decodeWallpaperChatChoice(room.wallpaperOverrideEncoded) == null) {
+                val liveCount =
+                    db.bufferDao().chatWallpaperRooms().count {
+                        decodeWallpaperChatChoice(it.wallpaperOverrideEncoded) != null
+                    }
+                requireWallpaperQuota(liveCount + pendingWallpapers().size + 1)
+            }
+            return room
+        }
+
+        // Workshop validates saved refs against its library while holding its mutation lock.
+        // Room never acquires that lock; it owns canonical identity, quota and edit ordering.
+        suspend fun setWallpaperOverride(
+            roomId: Long,
+            choice: WallpaperChatChoice?,
+        ): Boolean =
+            db.withTransaction {
+                val room = wallpaperEditTarget(roomId, choice != null) ?: return@withTransaction false
+                choice?.pattern?.let { ref ->
+                    require(ref.isValidIn(null) || ref.kind == WallpaperPatternRefKind.SAVED && isCanonicalWallpaperUuid(ref.id))
+                }
+                val encoded = choice?.let { wallpaperJson.encodeToString(it) }
+                if (db.bufferDao().setWallpaperOverride(roomId, encoded) != 1) return@withTransaction false
+                recordEdit(room.id, nextRevision("chat-wallpaper-revision"), room.wallpaperEditPrefix())
+                true
+            }
+
+        private fun RoomEntity.wallpaperEditPrefix(): String = "$CHAT_WALLPAPER_EDIT_PREFIX:$networkId"
+
+        private suspend fun wallpaperEditRevision(room: RoomEntity): Long = editRevision(room.id, room.wallpaperEditPrefix())
+
+        suspend fun clearWallpaperReferences(ref: WallpaperPatternRef) {
+            db.withTransaction {
+                for (room in db.bufferDao().chatWallpaperRooms()) {
+                    if (decodeWallpaperChatChoice(room.wallpaperOverrideEncoded)?.pattern == ref) {
+                        db.bufferDao().setWallpaperOverride(room.id, null)
+                    }
+                }
+                for ((key, assignment) in pendingWallpapers()) {
+                    if (assignment.choice.pattern == ref) db.appStateDao().delete(key)
+                }
+            }
+        }
+
+        private fun PortableChatWallpaper.identityPrefix(): String = pendingIdentityPrefix(networkId, chatType, identityKind, identityValue, PENDING_CHAT_WALLPAPER_PREFIX)
+
+        private fun PortableChatWallpaper.pendingWallpaperKey(): String = identityPrefix() + wallpaperJson.encodeToString(this)
+
+        private fun decodePendingWallpaper(key: String): PortableChatWallpaper? {
+            val payloadStart = key.indexOf('{', PENDING_CHAT_WALLPAPER_PREFIX.length)
+            if (payloadStart < 0) return null
+            return runCatching {
+                decodeWallpaperValue<PortableChatWallpaper>(wallpaperJson.parseToJsonElement(key.substring(payloadStart)))
+            }.getOrNull()?.takeIf {
+                it.networkId > 0 && it.restoreRevision > 0 &&
+                    isPortableChatIdentity(it.chatType, it.identityKind, it.identityValue) &&
+                    key.regionMatches(0, it.identityPrefix(), 0, payloadStart)
+            }
+        }
+
+        private suspend fun pendingWallpapers(): List<Pair<String, PortableChatWallpaper>> =
+            db.appStateDao().keysGlob("$PENDING_CHAT_WALLPAPER_PREFIX*").mapNotNull { key ->
+                decodePendingWallpaper(key)?.let { key to it }
+            }
+
+        private suspend fun resolve(assignment: PortableChatWallpaper): RoomEntity? = resolvePortableRoom(assignment.networkId, assignment.chatType, assignment.identityKind, assignment.identityValue, requireVerifiedAccount = true)
+
+        private val wallpaperIdentityOrder =
+            compareBy<PortableChatWallpaper>({ it.identityKind != FolderIdentityKind.ACCOUNT }, { it.identityValue })
+
+        private fun WallpaperChatChoice.isValidIn(library: WallpaperLibrary): Boolean = pattern?.isValidIn(library) != false
+
+        private suspend fun claimPendingWallpaper(
+            room: RoomEntity,
+            identities: Set<Pair<FolderIdentityKind, String>>,
+        ) {
+            var editedRevision: Long? = null
+            var winner: PortableChatWallpaper? = null
+            forEachPendingKey(room, identities, PENDING_CHAT_WALLPAPER_PREFIX) { key ->
+                val assignment = decodePendingWallpaper(key) ?: return@forEachPendingKey
+                if (resolve(assignment)?.id != room.id) return@forEachPendingKey
+                val edited = editedRevision ?: wallpaperEditRevision(room).also { editedRevision = it }
+                val best = winner
+                if (assignment.restoreRevision >= edited && (best == null || wallpaperIdentityOrder.compare(assignment, best) < 0)) {
+                    winner = assignment
+                }
+                db.appStateDao().delete(key)
+            }
+            winner?.let { db.bufferDao().setWallpaperOverride(room.id, wallpaperJson.encodeToString(it.choice)) }
+        }
+
+        suspend fun chatWallpaperSnapshot(library: WallpaperLibrary): List<PortableChatWallpaper> =
+            db.withTransaction {
+                val aliases = db.roomAliasDao().allNow().groupBy { it.roomId }
+                val live =
+                    db.bufferDao().chatWallpaperRooms().mapNotNull { room ->
+                        val (kind, value) = room.portableIdentity(aliases[room.id].orEmpty()) ?: return@mapNotNull null
+                        val choice = decodeWallpaperChatChoice(room.wallpaperOverrideEncoded) ?: return@mapNotNull null
+                        if (!choice.isValidIn(library) || !isPortableChatIdentity(room.type, kind, value)) return@mapNotNull null
+                        PortableChatWallpaper(room.networkId, room.type, kind, value, choice)
+                    }
+                val networkIds = db.networkDao().allNow().mapTo(mutableSetOf()) { it.id }
+                val pending =
+                    pendingWallpapers().mapNotNull { (_, assignment) ->
+                        if (assignment.networkId !in networkIds || !assignment.choice.isValidIn(library)) return@mapNotNull null
+                        val room = resolve(assignment)
+                        if (room != null && wallpaperEditRevision(room) > assignment.restoreRevision) return@mapNotNull null
+                        assignment
+                    }
+                (live + pending).distinctBy { it.identityPrefix() }
+            }
+
+        suspend fun preflightChatWallpaperAssignments(
+            assignments: List<PortableChatWallpaper>,
+            replace: Boolean,
+            library: WallpaperLibrary,
+        ) {
+            db.withTransaction {
+                planWallpaperRestore(assignments, replace, library, allowProvisionalNetworks = true)
+            }
+        }
+
+        suspend fun restoreChatWallpaperAssignments(
+            assignments: List<PortableChatWallpaper>,
+            replace: Boolean,
+            library: WallpaperLibrary,
+        ) {
+            db.withTransaction {
+                val restore = planWallpaperRestore(assignments, replace, library, allowProvisionalNetworks = false)
+                val revision = nextRevision("chat-wallpaper-revision")
+                val buffers = db.bufferDao()
+                for (room in restore.currentRooms) {
+                    if (room.id !in restore.rooms) buffers.setWallpaperOverride(room.id, null)
+                }
+                val currentChoices = restore.currentRooms.associate { it.id to it.wallpaperOverrideEncoded }
+                for ((id, choice) in restore.rooms) {
+                    val encoded = wallpaperJson.encodeToString(choice)
+                    if (currentChoices[id] != encoded) buffers.setWallpaperOverride(id, encoded)
+                }
+                val state = db.appStateDao()
+                val pendingKeys =
+                    restore.pending.values.mapTo(hashSetOf()) {
+                        val assignment = if (it.restoreRevision == 0L) it.copy(restoreRevision = revision) else it
+                        assignment.pendingWallpaperKey()
+                    }
+                val existingKeys = state.keysGlob("$PENDING_CHAT_WALLPAPER_PREFIX*").toHashSet()
+                for (key in existingKeys - pendingKeys) state.delete(key)
+                for (key in pendingKeys - existingKeys) state.insert(AppStateEntity(key))
+            }
+        }
+
+        private data class WallpaperRestore(
+            val currentRooms: List<RoomEntity>,
+            val rooms: Map<Long, WallpaperChatChoice>,
+            val pending: Map<String, PortableChatWallpaper>,
+        )
+
+        private suspend fun planWallpaperRestore(
+            assignments: List<PortableChatWallpaper>,
+            replace: Boolean,
+            library: WallpaperLibrary,
+            allowProvisionalNetworks: Boolean,
+        ): WallpaperRestore {
+            requireWallpaperQuota(assignments.size)
+            val networkIds = db.networkDao().allNow().mapTo(mutableSetOf()) { it.id }
+            val currentRooms = db.bufferDao().chatWallpaperRooms()
+            val rooms = mutableMapOf<Long, WallpaperChatChoice>()
+            val pending = mutableMapOf<String, PortableChatWallpaper>()
+            if (!replace) {
+                val localPending = pendingWallpapers().map { it.second }.sortedWith(wallpaperIdentityOrder)
+                for (assignment in localPending) {
+                    if (assignment.networkId !in networkIds || !assignment.choice.isValidIn(library)) continue
+                    val room = resolve(assignment)
+                    if (room == null) {
+                        pending.putIfAbsent(assignment.identityPrefix(), assignment)
+                    } else if (wallpaperEditRevision(room) <= assignment.restoreRevision) {
+                        rooms.putIfAbsent(room.id, assignment.choice)
+                    }
+                }
+                for (room in currentRooms) {
+                    val choice = decodeWallpaperChatChoice(room.wallpaperOverrideEncoded)
+                    if (choice != null && choice.isValidIn(library)) rooms[room.id] = choice
+                }
+            }
+            val incomingIdentities = hashSetOf<String>()
+            val incomingRooms = hashSetOf<Long>()
+            for (assignment in assignments.sortedWith(wallpaperIdentityOrder)) {
+                validatePortableChatIdentity(assignment.chatType, assignment.identityKind, assignment.identityValue)
+                require(assignment.networkId in networkIds || allowProvisionalNetworks && assignment.networkId < 0) {
+                    "Invalid chat wallpaper assignment network."
+                }
+                require(assignment.choice.isValidIn(library)) { "Invalid chat wallpaper assignment reference." }
+                val identity = assignment.identityPrefix()
+                require(incomingIdentities.add(identity)) { "Duplicate chat wallpaper assignment." }
+                val room = if (assignment.networkId > 0) resolve(assignment) else null
+                if (room == null) {
+                    pending[identity] = assignment.copy(restoreRevision = 0)
+                } else if (incomingRooms.add(room.id)) {
+                    rooms[room.id] = assignment.choice
+                }
+            }
+            requireWallpaperQuota(rooms.size + pending.size)
+            return WallpaperRestore(currentRooms, rooms, pending)
+        }
+
+        private fun requireWallpaperQuota(count: Int) {
+            require(count <= MAX_CHAT_WALLPAPER_ASSIGNMENTS) { "Too many chat wallpaper assignments." }
         }
 
         suspend fun getOrCreate(
@@ -378,7 +672,7 @@ class BufferStore
                             ),
                         )
                         chatFolders.claimPending(promoted.id, normalizedChannel = normalizedName)
-                        claimPendingPlacement(promoted)
+                        claimPendingChatSettings(promoted)
                         return@withTransaction checkNotNull(dao.observeById(promoted.id))
                     }
                 }
@@ -417,7 +711,7 @@ class BufferStore
                 if (effectiveType == BufferType.CHANNEL) {
                     chatFolders.claimPending(room.id, normalizedChannel = normalizedName)
                 }
-                claimPendingPlacement(room)
+                claimPendingChatSettings(room)
                 checkNotNull(dao.observeById(room.id))
             }
 
@@ -528,7 +822,7 @@ class BufferStore
                     }
                 }
                 chatFolders.claimPending(room.id, account = account, normalizedNick = normalizedNick)
-                claimPendingPlacement(room)
+                claimPendingChatSettings(room)
                 checkNotNull(db.bufferDao().observeById(room.id))
             }
 
@@ -586,6 +880,9 @@ class BufferStore
                     val pinEditedRevision = maxOf(editRevision(winner.id, "chat-placement-pin-edit"), editRevision(loser.id, "chat-placement-pin-edit"))
                     if (pinEditedRevision > 0L) recordEdit(winner.id, pinEditedRevision, "chat-placement-pin-edit")
                     db.appStateDao().keysLike("chat-placement-pin-edit:${loser.id}:%").forEach { db.appStateDao().delete(it) }
+                    val wallpaperRevision = maxOf(wallpaperEditRevision(winner), wallpaperEditRevision(loser))
+                    if (wallpaperRevision > 0L) recordEdit(winner.id, wallpaperRevision, winner.wallpaperEditPrefix())
+                    bufferDao.deleteChatWallpaperEdits(loser.networkId, loser.id)
                     val rooms = listOf(winner, loser)
                     val visibleRooms = rooms.filterNot { it.dismissed }
                     val readStateRooms = visibleRooms.ifEmpty { rooms }
@@ -634,6 +931,8 @@ class BufferStore
                             historySyncModeOverride = winner.historySyncModeOverride ?: loser.historySyncModeOverride,
                             avatarOverrideModel = winner.avatarOverrideModel ?: loser.avatarOverrideModel,
                             folderId = winner.folderId ?: loser.folderId,
+                            wallpaperOverrideEncoded =
+                                if (winner.type == BufferType.SERVER) null else winner.wallpaperOverrideEncoded ?: loser.wallpaperOverrideEncoded,
                         )
                     val mergedHistoryGaps = historyGapsForRoomMerge(winner.id, loser.id)
                     bufferDao.update(result)

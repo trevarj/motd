@@ -94,11 +94,12 @@ bundled.
 
 ## Brand lettering: Roboto
 
-The outlined lettering in the motd wordmark and lockups is derived from Roboto
-Bold, copyright © Google LLC. Roboto is licensed under the Apache License 2.0.
-The exact source pin and license are recorded in
-[`docs/assets/brand/`](docs/assets/brand/README.md). The font binary is not
-distributed; the SVG and Android assets contain converted glyph outlines.
+The outlined lettering in the motd wordmark, lockups, and Wallpaper Workshop
+uses Roboto Bold 700 v3.015, copyright 2011 The Roboto Project Authors.
+The pinned font is licensed under the [SIL Open Font License 1.1](https://github.com/googlefonts/roboto-3-classic/blob/v3.015/OFL.txt).
+See the [brand source pin](docs/assets/brand/README.md) and the
+[bundled license](app/src/main/assets/wallpaper-icons/licenses/Roboto-OFL-1.1.txt).
+Only the glyph artwork is distributed, not the font binary.
 
 ## Generated channel marks: Devicons and Guix
 
@@ -163,3 +164,17 @@ are retained. The palette icon retains its upstream filled dots.
 - [Complete upstream ISC and Feather-derived MIT notices](app/src/main/assets/lucide-static-LICENSE.txt),
   retained verbatim and included in the APK assets. Copyright (c) 2026 Lucide
   Icons and Contributors; Feather-derived icons copyright (c) 2013-present Cole Bemis.
+
+## Wallpaper Workshop outline artwork
+
+The [version-1 wallpaper catalog](app/src/main/assets/wallpaper-icons/manifest.json)
+ships original artwork, selected Lucide outlines (with SVG classes removed),
+and monochrome outline derivatives of Tux, the Debian Open Use Logo, NixOS,
+Guix, GNU Emacs, and Neovim. The System Crafters emblem is adapted with
+permission confirmed by the MOTD maintainer. Each motif lists its source
+and license or permission notice. The
+[APK-bundled artwork notice](app/src/main/assets/wallpaper-icons/NOTICE.txt)
+records upstream authors, changes, and license links; the applicable license
+texts are bundled alongside the artwork (the existing Lucide notice is shared).
+Other distro or game search references identify themes for original motifs;
+they are not bundled third-party logos or claims of endorsement.

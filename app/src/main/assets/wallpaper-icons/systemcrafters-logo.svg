@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 438 444" fill="none" stroke="currentColor" stroke-width="16" stroke-linejoin="round">
+  <path d="M52 221 Q52 204 55 189 L29 166 Q20 157 26 145 L54 96 Q62 80 77 85 L110 95 Q135 73 165 63 L172 30 Q175 16 188 16 H249 Q263 16 266 30 L273 63 Q303 73 327 95 L361 85 Q376 80 384 96 L412 145 Q418 157 409 166 L382 189 Q385 205 385 221" />
+  <path d="M140 221 A78.5 79 0 0 1 297 221" />
+  <g stroke-width="5" stroke-linejoin="miter">
+    <rect x="48" y="240" width="82" height="10.5" /><rect x="149.5" y="240" width="138.5" height="10.5" /><rect x="307.5" y="240" width="82" height="10.5" />
+    <rect x="18" y="276" width="57.5" height="10.5" /><rect x="94.5" y="276" width="50.5" height="10.5" /><rect x="164" y="276" width="195.5" height="10.5" /><rect x="378.5" y="276" width="41" height="10.5" />
+    <rect x="33" y="312.5" width="97" height="10.5" /><rect x="149.5" y="312.5" width="112.5" height="10.5" /><rect x="281" y="312.5" width="123" height="10.5" />
+    <rect x="53.5" y="348.5" width="36" height="10.5" /><rect x="109" y="348.5" width="44.5" height="10.5" /><rect x="173" y="348.5" width="142" height="10.5" /><rect x="334" y="348.5" width="49.5" height="10.5" />
+    <rect x="157" y="384.5" width="34" height="10.5" /><rect x="209.5" y="384.5" width="71" height="10.5" />
+    <rect x="167.5" y="420.5" width="62" height="10.5" /><rect x="249" y="420.5" width="21" height="10.5" />
+  </g>
+</svg>

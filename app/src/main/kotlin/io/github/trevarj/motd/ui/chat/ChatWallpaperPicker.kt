@@ -5,7 +5,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,23 +17,19 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -45,26 +40,31 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
+import io.github.trevarj.motd.data.prefs.WallpaperPatternRef
+import io.github.trevarj.motd.data.prefs.WallpaperPatternRefKind
+import io.github.trevarj.motd.data.prefs.WallpaperRenderSpec
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.WallpaperStarters
+import io.github.trevarj.motd.data.prefs.resolveWallpaper
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readableTextButtonColors
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -72,13 +72,16 @@ import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 @Composable
 fun ChatWallpaperPicker(
-    current: WallpaperSelection,
+    appearance: AppearanceConfig,
     onChange: (WallpaperSelection) -> Unit,
+    onOpenWallpaperWorkshop: () -> Unit,
     modifier: Modifier = Modifier,
     onImportImage: (Uri) -> Unit = {},
     importedSelection: WallpaperSelection? = null,
     importing: Boolean = false,
 ) {
+    val wallpaper = resolveWallpaper(appearance)
+    val current = wallpaper.selection
     var showEditor by rememberSaveable { mutableStateOf(false) }
     val launcher =
         rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -87,15 +90,7 @@ fun ChatWallpaperPicker(
     ListItem(
         headlineContent = { Text(stringResource(R.string.settings_wallpaper)) },
         supportingContent = {
-            Text(
-                if (current.localImageName != null) {
-                    "${stringResource(R.string.settings_wallpaper_custom)} · ${current.intensity}%"
-                } else if (current.preset == ChatWallpaperPreset.NONE) {
-                    wallpaperLabel(current.preset)
-                } else {
-                    "${wallpaperLabel(current.preset)} · ${current.intensity}%"
-                },
-            )
+            Text(wallpaperSummary(wallpaper, appearance))
         },
         leadingContent = { Icon(Icons.Outlined.Image, contentDescription = null) },
         trailingContent = { Icon(Icons.Outlined.ChevronRight, contentDescription = null) },
@@ -103,8 +98,12 @@ fun ChatWallpaperPicker(
     )
     if (showEditor) {
         WallpaperEditorSheet(
-            current = current,
+            appearance = appearance,
             onDismiss = { showEditor = false },
+            onOpenWallpaperWorkshop = {
+                showEditor = false
+                onOpenWallpaperWorkshop()
+            },
             onChange = onChange,
             onImport = { launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
             importedSelection = importedSelection,
@@ -116,8 +115,9 @@ fun ChatWallpaperPicker(
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 private fun WallpaperEditorSheet(
-    current: WallpaperSelection,
+    appearance: AppearanceConfig,
     onDismiss: () -> Unit,
+    onOpenWallpaperWorkshop: () -> Unit,
     onChange: (WallpaperSelection) -> Unit,
     onImport: () -> Unit,
     importedSelection: WallpaperSelection?,
@@ -135,6 +135,11 @@ private fun WallpaperEditorSheet(
                         it.outlineColor?.toString().orEmpty(),
                         it.scenicFollowSystem,
                         it.scenicAnimationEnabled,
+                        it.patternRef
+                            ?.kind
+                            ?.name
+                            .orEmpty(),
+                        it.patternRef?.id.orEmpty(),
                     )
                 },
                 restore = {
@@ -145,152 +150,131 @@ private fun WallpaperEditorSheet(
                         (it[3] as String).toIntOrNull(),
                         it.getOrNull(4) as? Boolean ?: true,
                         it.getOrNull(5) as? Boolean ?: true,
+                        (it.getOrNull(7) as? String)?.takeIf(String::isNotEmpty)?.let { id ->
+                            WallpaperPatternRef(WallpaperPatternRefKind.valueOf(it[6] as String), id)
+                        },
                     )
                 },
             ),
-    ) { mutableStateOf(current.normalized()) }
-    var showColorEditor by rememberSaveable { mutableStateOf(false) }
+    ) { mutableStateOf(appearance.wallpaper.normalized()) }
     val importAtOpen = remember { importedSelection }
     LaunchedEffect(importedSelection) {
         // Only an explicit successful import may replace the active edit, never stale preferences.
         importedSelection?.takeIf { it != importAtOpen }?.let { selection = it.normalized() }
     }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val gridState = rememberLazyGridState()
+    val scope = rememberCoroutineScope()
+    val previewAppearance = appearance.copy(wallpaper = selection)
+    val wallpaper = resolveWallpaper(previewAppearance)
+    val hasPhoto = selection.localImageName != null
+    val showIntensity = hasPhoto || selection.preset.isScenic
 
     fun updateSelection(next: WallpaperSelection) {
         selection = next.normalized()
         onChange(selection)
     }
 
-    if (!showColorEditor) {
-        ModalBottomSheet(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            onDismissRequest = onDismiss,
-            sheetState = sheetState,
-            modifier = Modifier.testTag("settings_wallpaper_sheet"),
+    ModalBottomSheet(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        modifier = Modifier.testTag("settings_wallpaper_sheet"),
+    ) {
+        SheetSystemBars()
+        LazyColumn(
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 680.dp)
+                    .selectableGroup()
+                    .testTag("settings_wallpaper_list"),
         ) {
-            SheetSystemBars()
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                state = gridState,
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier =
+            item(key = "title") {
+                Text(stringResource(R.string.settings_wallpaper), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
+                Text(wallpaperSummary(wallpaper, previewAppearance), style = MaterialTheme.typography.bodyMedium)
+            }
+            item(key = "preview") {
+                WallpaperPreview(
+                    wallpaper,
                     Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 680.dp)
-                        .selectableGroup()
-                        .testTag("settings_wallpaper_list"),
-            ) {
-                item(key = "title", span = { GridItemSpan(maxLineSpan) }) {
-                    Text(stringResource(R.string.settings_wallpaper), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
+                        .height(if (!hasPhoto && selection.preset.isScenic) 315.dp else 190.dp)
+                        .testTag("settings_wallpaper_preview"),
+                )
+            }
+            item(key = "workshop") {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            sheetState.hide()
+                            if (!sheetState.isVisible) onOpenWallpaperWorkshop()
+                        }
+                    },
+                    enabled = !importing,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("settings_wallpaper_workshop"),
+                ) {
+                    Text(stringResource(R.string.wallpaper_workshop_title))
                 }
-                item(key = "preview", span = { GridItemSpan(maxLineSpan) }) {
-                    WallpaperPreview(
-                        selection,
+            }
+            item(key = "photo") {
+                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (hasPhoto) {
+                        WallpaperOptionThumbnail(
+                            wallpaper,
+                            "settings_wallpaper_photo_thumbnail",
+                            Modifier.padding(start = 16.dp, end = 8.dp),
+                        )
+                    }
+                    TextButton(colors = readableTextButtonColors(), onClick = onImport, enabled = !importing, modifier = Modifier.weight(1f).testTag("settings_wallpaper_custom")) {
+                        Text(
+                            stringResource(
+                                when {
+                                    importing -> R.string.settings_wallpaper_importing
+                                    hasPhoto -> R.string.settings_wallpaper_change
+                                    else -> R.string.settings_wallpaper_import
+                                },
+                            ),
+                        )
+                    }
+                    TextButton(
+                        colors = readableTextButtonColors(),
+                        onClick = { updateSelection(selection.copy(localImageName = null)) },
+                        enabled = !importing && hasPhoto,
+                        modifier = Modifier.weight(1f).testTag("settings_wallpaper_remove"),
+                    ) {
+                        Text(stringResource(R.string.settings_wallpaper_remove))
+                    }
+                }
+            }
+            items(wallpaperSheetPresets, key = { it.name }) { preset ->
+                val selected = !hasPhoto && selection.preset == preset
+                val description = wallpaperDescription(preset)
+                val tag = "settings_wallpaper_preset_${preset.name.lowercase()}"
+                ListItem(
+                    headlineContent = { Text(wallpaperLabel(preset)) },
+                    supportingContent = description?.let { { Text(it) } },
+                    leadingContent = {
+                        WallpaperOptionThumbnail(
+                            WallpaperRenderSpec(
+                                WallpaperSelection(preset, intensity = 100, scenicFollowSystem = selection.scenicFollowSystem),
+                                pattern = null,
+                            ),
+                            "${tag}_thumbnail",
+                        )
+                    },
+                    trailingContent = { RadioButton(selected = selected, onClick = null, enabled = !importing) },
+                    modifier =
                         Modifier
-                            .fillMaxWidth()
-                            .height(if (selection.localImageName == null && selection.preset.isScenic) 315.dp else 190.dp)
-                            .testTag("settings_wallpaper_preview"),
-                    )
-                }
-                if (!selection.preset.isScenic) {
-                    item(key = "color", span = { GridItemSpan(maxLineSpan) }) {
-                        val enabled = !importing && selection.localImageName == null && selection.preset != ChatWallpaperPreset.NONE
-                        ListItem(
-                            colors =
-                                androidx.compose.material3.ListItemDefaults
-                                    .colors(containerColor = Color.Transparent),
-                            headlineContent = { Text(stringResource(R.string.settings_wallpaper_outline_color)) },
-                            supportingContent = {
-                                Text(
-                                    when {
-                                        selection.localImageName != null -> stringResource(R.string.settings_wallpaper_color_builtin_only)
-                                        selection.preset == ChatWallpaperPreset.NONE -> stringResource(R.string.settings_wallpaper_color_none)
-                                        else -> selection.outlineColor?.let(::wallpaperColorHex) ?: stringResource(R.string.settings_wallpaper_color_default, wallpaperColorHex(MaterialTheme.colorScheme.onSurfaceVariant.toArgb()))
-                                    },
-                                )
-                            },
-                            leadingContent = {
-                                Box(
-                                    Modifier
-                                        .size(28.dp)
-                                        .clip(CircleShape)
-                                        .background(selection.outlineColor?.let(::Color) ?: MaterialTheme.colorScheme.onSurfaceVariant)
-                                        .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
-                                )
-                            },
-                            trailingContent = { if (enabled) Icon(Icons.Outlined.ChevronRight, contentDescription = null) },
-                            modifier = Modifier.clickable(enabled = enabled) { showColorEditor = true }.testTag("settings_wallpaper_outline_color"),
-                        )
-                    }
-                }
-                if (selection.localImageName == null && selection.preset.isScenic) {
-                    item(key = "scenic-system", span = { GridItemSpan(maxLineSpan) }) {
-                        ListItem(
-                            headlineContent = { Text(stringResource(R.string.settings_wallpaper_scenic_follow_system)) },
-                            supportingContent = { Text(stringResource(R.string.settings_wallpaper_scenic_follow_system_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = selection.scenicFollowSystem,
-                                    onCheckedChange = { updateSelection(selection.copy(scenicFollowSystem = it)) },
-                                    enabled = !importing,
-                                    modifier = Modifier.testTag("settings_wallpaper_scenic_follow_system"),
-                                )
-                            },
-                        )
-                    }
-                    item(key = "scenic-animation", span = { GridItemSpan(maxLineSpan) }) {
-                        ListItem(
-                            headlineContent = { Text(stringResource(R.string.settings_wallpaper_scenic_animation)) },
-                            supportingContent = { Text(stringResource(R.string.settings_wallpaper_scenic_animation_desc)) },
-                            trailingContent = {
-                                Switch(
-                                    checked = selection.scenicAnimationEnabled,
-                                    onCheckedChange = { updateSelection(selection.copy(scenicAnimationEnabled = it)) },
-                                    enabled = !importing,
-                                    modifier = Modifier.testTag("settings_wallpaper_scenic_animation"),
-                                )
-                            },
-                        )
-                    }
-                }
-                item(key = "custom", span = { GridItemSpan(maxLineSpan) }) {
-                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(colors = readableTextButtonColors(), onClick = onImport, enabled = !importing, modifier = Modifier.weight(1f).testTag("settings_wallpaper_custom")) {
-                            Text(
-                                stringResource(
-                                    when {
-                                        importing -> R.string.settings_wallpaper_importing
-                                        selection.localImageName != null -> R.string.settings_wallpaper_change
-                                        else -> R.string.settings_wallpaper_import
-                                    },
-                                ),
-                            )
-                        }
-                        TextButton(
-                            colors = readableTextButtonColors(),
-                            onClick = { updateSelection(selection.copy(localImageName = null)) },
-                            enabled = !importing && selection.localImageName != null,
-                            modifier = Modifier.weight(1f).testTag("settings_wallpaper_remove"),
-                        ) {
-                            Text(stringResource(R.string.settings_wallpaper_remove))
-                        }
-                    }
-                }
-                items(ChatWallpaperPreset.entries, key = { it.name }) { preset ->
-                    WallpaperCard(
-                        preset = preset,
-                        selection = selection,
-                        selected = selection.localImageName == null && selection.preset == preset,
-                        enabled = !importing,
-                        onClick = { updateSelection(selection.copy(preset = preset, localImageName = null)) },
-                    )
-                }
-                item(key = "intensity", span = { GridItemSpan(maxLineSpan) }) {
+                            .selectable(selected = selected, enabled = !importing, role = Role.RadioButton) {
+                                updateSelection(selection.copy(preset = preset, localImageName = null, patternRef = null))
+                            }.testTag(tag),
+                )
+            }
+            if (showIntensity) {
+                item(key = "intensity") {
                     Column {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(stringResource(R.string.settings_wallpaper_intensity), modifier = Modifier.weight(1f))
@@ -301,42 +285,84 @@ private fun WallpaperEditorSheet(
                             onValueChange = { updateSelection(selection.copy(intensity = it.roundToInt())) },
                             valueRange = 0f..100f,
                             steps = 19,
-                            enabled = !importing && (selection.localImageName != null || selection.preset != ChatWallpaperPreset.NONE),
+                            enabled = !importing,
                             modifier = Modifier.testTag("settings_wallpaper_intensity"),
                         )
                     }
                 }
-                item(key = "done", span = { GridItemSpan(maxLineSpan) }) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        Button(onClick = onDismiss, modifier = Modifier.testTag("settings_wallpaper_done")) {
-                            Text(stringResource(R.string.settings_wallpaper_done))
-                        }
+            }
+            if (!hasPhoto && selection.preset.isScenic) {
+                item(key = "scenic-system") {
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.settings_wallpaper_scenic_follow_system)) },
+                        supportingContent = { Text(stringResource(R.string.settings_wallpaper_scenic_follow_system_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = selection.scenicFollowSystem,
+                                onCheckedChange = { updateSelection(selection.copy(scenicFollowSystem = it)) },
+                                enabled = !importing,
+                                modifier = Modifier.testTag("settings_wallpaper_scenic_follow_system"),
+                            )
+                        },
+                    )
+                }
+                item(key = "scenic-animation") {
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.settings_wallpaper_scenic_animation)) },
+                        supportingContent = { Text(stringResource(R.string.settings_wallpaper_scenic_animation_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = selection.scenicAnimationEnabled,
+                                onCheckedChange = { updateSelection(selection.copy(scenicAnimationEnabled = it)) },
+                                enabled = !importing,
+                                modifier = Modifier.testTag("settings_wallpaper_scenic_animation"),
+                            )
+                        },
+                    )
+                }
+            }
+            item(key = "done") {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    Button(onClick = onDismiss, modifier = Modifier.testTag("settings_wallpaper_done")) {
+                        Text(stringResource(R.string.settings_wallpaper_done))
                     }
                 }
             }
         }
     }
-    if (showColorEditor) {
-        WallpaperOutlineColorDialog(
-            selection = selection,
-            onApply = {
-                updateSelection(selection.copy(outlineColor = it))
-                showColorEditor = false
-            },
-            onDismiss = { showColorEditor = false },
-        )
+}
+
+private val wallpaperSheetPresets = ChatWallpaperPreset.entries.filter { it == ChatWallpaperPreset.NONE || it.isScenic }
+
+@Composable
+private fun WallpaperOptionThumbnail(
+    wallpaper: WallpaperRenderSpec,
+    tag: String,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier
+            .size(36.dp, 60.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.background)
+            .testTag(tag),
+    ) {
+        ChatWallpaperBackground(wallpaper, Modifier.matchParentSize(), tilePeriodDp = WALLPAPER_THUMBNAIL_TILE_PERIOD_DP, animate = false)
     }
 }
 
 @Composable
 internal fun WallpaperPreview(
-    selection: WallpaperSelection,
+    wallpaper: WallpaperRenderSpec,
     modifier: Modifier = Modifier,
+    artworkOnly: Boolean = false,
+    tilePeriodDp: Float = if (artworkOnly) WALLPAPER_THUMBNAIL_TILE_PERIOD_DP else WALLPAPER_TILE_PERIOD_DP,
 ) {
+    val selection = wallpaper.selection
     val shape = RoundedCornerShape(22.dp)
     Box(modifier.clip(shape).background(MaterialTheme.colorScheme.background)) {
         val previewModifier =
-            if (selection.localImageName == null && selection.preset.isScenic) {
+            if (!artworkOnly && selection.localImageName == null && selection.preset.isScenic) {
                 Modifier
                     .align(Alignment.Center)
                     .width(180.dp)
@@ -346,86 +372,71 @@ internal fun WallpaperPreview(
                 Modifier.matchParentSize()
             }
         Box(previewModifier) {
-            ChatWallpaperBackground(selection, Modifier.matchParentSize())
-            Column(
-                Modifier.align(Alignment.Center).fillMaxWidth().padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-                    Text(stringResource(R.string.settings_wallpaper_preview_incoming), Modifier.padding(12.dp))
-                }
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.align(Alignment.End),
-                ) {
-                    Text(stringResource(R.string.settings_wallpaper_preview_outgoing), Modifier.padding(12.dp))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun WallpaperCard(
-    preset: ChatWallpaperPreset,
-    selection: WallpaperSelection,
-    selected: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    val shape = RoundedCornerShape(16.dp)
-    val border = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.outlineVariant
-    Column(
-        Modifier.selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick).testTag("settings_wallpaper_preset_${preset.name.lowercase()}"),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(84.dp)
-                .clip(shape)
-                .background(MaterialTheme.colorScheme.background)
-                .border(if (selected) 3.dp else 1.dp, border, shape),
-        ) {
             ChatWallpaperBackground(
-                wallpaper = selection.copy(preset = preset, localImageName = null),
-                modifier = Modifier.matchParentSize(),
-                tilePeriodDp = WALLPAPER_THUMBNAIL_TILE_PERIOD_DP,
-                animate = false,
+                wallpaper,
+                Modifier.matchParentSize(),
+                tilePeriodDp = tilePeriodDp,
+                animate = !artworkOnly,
             )
-            if (selected) {
-                Surface(color = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer, shape = RoundedCornerShape(bottomStart = 10.dp), modifier = Modifier.align(Alignment.TopEnd)) {
-                    Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(20.dp).padding(2.dp))
+            if (!artworkOnly) {
+                Column(
+                    Modifier.align(Alignment.Center).fillMaxWidth().padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                        Text(stringResource(R.string.settings_wallpaper_preview_incoming), Modifier.padding(12.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.align(Alignment.End),
+                    ) {
+                        Text(stringResource(R.string.settings_wallpaper_preview_outgoing), Modifier.padding(12.dp))
+                    }
                 }
             }
         }
-        Text(wallpaperLabel(preset), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 5.dp))
-        Text(
-            wallpaperDescription(preset).orEmpty(),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.height(20.dp),
-        )
     }
 }
 
 @Composable
-private fun wallpaperLabel(preset: ChatWallpaperPreset): String =
+private fun wallpaperSummary(
+    wallpaper: WallpaperRenderSpec,
+    appearance: AppearanceConfig,
+): String {
+    val selection = wallpaper.selection
+    if (selection.localImageName != null) {
+        return "${stringResource(R.string.settings_wallpaper_custom)} · ${selection.intensity}%"
+    }
+    val label = selection.patternRef?.let { wallpaperPatternLabel(it, appearance) } ?: wallpaperLabel(selection.preset)
+    return if (selection.preset == ChatWallpaperPreset.NONE) label else "$label · ${wallpaper.pattern?.intensity ?: selection.intensity}%"
+}
+
+@Composable
+internal fun wallpaperPatternLabel(
+    ref: WallpaperPatternRef,
+    appearance: AppearanceConfig,
+): String? =
+    when (ref.kind) {
+        WallpaperPatternRefKind.STARTER -> {
+            WallpaperStarters.find(ref.id)?.let { stringResource(it.label) }
+        }
+
+        WallpaperPatternRefKind.SAVED -> {
+            appearance.wallpaperLibrary
+                .takeIf { appearance.wallpaperLibraryReadError == null }
+                ?.designs
+                ?.firstOrNull { it.id == ref.id }
+                ?.name
+        }
+    }
+
+@Composable
+internal fun wallpaperLabel(preset: ChatWallpaperPreset): String =
     stringResource(
         when (preset) {
             ChatWallpaperPreset.NONE -> R.string.settings_wallpaper_none
-            ChatWallpaperPreset.MOTD -> R.string.settings_wallpaper_motd
-            ChatWallpaperPreset.DEEP_SPACE -> R.string.settings_wallpaper_deep_space
-            ChatWallpaperPreset.RETRO_GAMING -> R.string.settings_wallpaper_retro_gaming
-            ChatWallpaperPreset.RADIO_CLUB -> R.string.settings_wallpaper_radio_club
-            ChatWallpaperPreset.INTERNET_ODDITIES -> R.string.settings_wallpaper_internet_oddities
-            ChatWallpaperPreset.RETRO_CHAT -> R.string.settings_wallpaper_retro_chat
-            ChatWallpaperPreset.MEMES -> R.string.settings_wallpaper_memes
-            ChatWallpaperPreset.LINUX -> R.string.settings_wallpaper_linux
-            ChatWallpaperPreset.SYSTEMCRAFTERS -> R.string.settings_wallpaper_systemcrafters
+            ChatWallpaperPreset.PATTERN -> R.string.settings_wallpaper_motd
             ChatWallpaperPreset.JAPANESE_COUNTRYSIDE -> R.string.settings_wallpaper_japanese_countryside
             ChatWallpaperPreset.RAINY_CAFE -> R.string.settings_wallpaper_rainy_cafe
             ChatWallpaperPreset.MOTD_ARCADE -> R.string.settings_wallpaper_motd_arcade
@@ -437,16 +448,7 @@ private fun wallpaperLabel(preset: ChatWallpaperPreset): String =
 @Composable
 private fun wallpaperDescription(preset: ChatWallpaperPreset): String? =
     when (preset) {
-        ChatWallpaperPreset.NONE -> null
-        ChatWallpaperPreset.MOTD -> stringResource(R.string.settings_wallpaper_motd_desc)
-        ChatWallpaperPreset.DEEP_SPACE -> stringResource(R.string.settings_wallpaper_deep_space_desc)
-        ChatWallpaperPreset.RETRO_GAMING -> stringResource(R.string.settings_wallpaper_retro_gaming_desc)
-        ChatWallpaperPreset.RADIO_CLUB -> stringResource(R.string.settings_wallpaper_radio_club_desc)
-        ChatWallpaperPreset.INTERNET_ODDITIES -> stringResource(R.string.settings_wallpaper_internet_oddities_desc)
-        ChatWallpaperPreset.RETRO_CHAT -> stringResource(R.string.settings_wallpaper_retro_chat_desc)
-        ChatWallpaperPreset.MEMES -> stringResource(R.string.settings_wallpaper_memes_desc)
-        ChatWallpaperPreset.LINUX -> stringResource(R.string.settings_wallpaper_linux_desc)
-        ChatWallpaperPreset.SYSTEMCRAFTERS -> stringResource(R.string.settings_wallpaper_systemcrafters_desc)
+        ChatWallpaperPreset.NONE, ChatWallpaperPreset.PATTERN -> null
         ChatWallpaperPreset.JAPANESE_COUNTRYSIDE -> stringResource(R.string.settings_wallpaper_japanese_countryside_desc)
         ChatWallpaperPreset.RAINY_CAFE -> stringResource(R.string.settings_wallpaper_rainy_cafe_desc)
         ChatWallpaperPreset.MOTD_ARCADE -> stringResource(R.string.settings_wallpaper_motd_arcade_desc)

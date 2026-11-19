@@ -14,7 +14,7 @@ Source pin:
 - Font: `unhinted/static/Roboto-Bold.ttf`
 - Font SHA-256: `f02bf7a9869c58b9bb61130f55c6b1a489ea85f2ac1de75b3421dcb133bc57f3`
 - Style: Bold, weight 700
-- License: Apache License 2.0; see [ROBOTO-LICENSE.txt](ROBOTO-LICENSE.txt)
+- License: [SIL Open Font License 1.1](https://github.com/googlefonts/roboto-3-classic/blob/v3.015/OFL.txt) for this pinned release.
 
 The final assets contain glyph outlines only; the font binary is not vendored.
 Use the pinned font and FontTools `pens.svgPathPen` when regenerating lettering,

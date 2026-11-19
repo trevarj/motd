@@ -50,6 +50,7 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.customPalette
 import io.github.trevarj.motd.data.prefs.paletteSelection
+import io.github.trevarj.motd.data.prefs.resolveWallpaper
 import io.github.trevarj.motd.di.NotificationPermissionStatus
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.dickord.DickordLabsPrefs
@@ -62,7 +63,7 @@ import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.IrcForegroundService
 import io.github.trevarj.motd.service.MotdNotifications
 import io.github.trevarj.motd.service.startForegroundSafely
-import io.github.trevarj.motd.ui.chat.PreloadChatWallpaperTile
+import io.github.trevarj.motd.ui.chat.PreloadWallpaperPatternTile
 import io.github.trevarj.motd.ui.components.CertPromptViewModel
 import io.github.trevarj.motd.ui.components.CertTrustDialog
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
@@ -288,7 +289,11 @@ class MainActivity :
                                     .semantics { testTagsAsResourceId = true },
                             color = MaterialTheme.colorScheme.background,
                         ) {
-                            PreloadChatWallpaperTile(appearance.wallpaper)
+                            val wallpaper =
+                                remember(appearance.wallpaper, appearance.wallpaperLibrary, appearance.wallpaperLibraryReadError) {
+                                    resolveWallpaper(appearance)
+                                }
+                            PreloadWallpaperPatternTile(wallpaper, MaterialTheme.colorScheme.onSurfaceVariant)
                             io.github.trevarj.motd.ui.components.SurfaceBackdropRoot(content = {
                                 val notificationIntent = notificationSource
                                 MotdNavGraph(

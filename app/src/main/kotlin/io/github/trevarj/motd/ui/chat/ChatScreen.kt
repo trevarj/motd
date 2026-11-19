@@ -83,6 +83,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.GroupAdd
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.PeopleOutline
@@ -226,7 +227,11 @@ import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NicknameTapAction
 import io.github.trevarj.motd.data.prefs.PaletteDocument
+import io.github.trevarj.motd.data.prefs.WallpaperChatChoiceKind
+import io.github.trevarj.motd.data.prefs.WallpaperRenderSpec
+import io.github.trevarj.motd.data.prefs.decodeWallpaperChatChoice
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
+import io.github.trevarj.motd.data.prefs.resolveWallpaper
 import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
@@ -401,6 +406,7 @@ fun ChatScreen(
     bufferId: Long,
     appearance: AppearanceConfig,
     onOpenPalette: (PaletteDocument, String) -> Unit,
+    onOpenWallpaperWorkshop: (Long) -> Unit,
     onBack: () -> Unit = {},
     showBack: Boolean = true,
     onOpenChannelInfo: (Long) -> Unit = {},
@@ -604,6 +610,12 @@ fun ChatScreen(
     val timelineSeams by viewModel.timelineSeams.collectAsStateWithLifecycle()
     val isServerBuffer = state.buffer?.type == BufferType.SERVER
     val titleTarget = chatTitleTarget(state.buffer?.type)
+    val wallpaperOverride = state.buffer?.takeUnless { isServerBuffer }?.wallpaperOverrideEncoded
+    val wallpaperChoice = remember(wallpaperOverride) { decodeWallpaperChatChoice(wallpaperOverride) }
+    val wallpaper =
+        remember(appearance.wallpaper, appearance.wallpaperLibrary, appearance.wallpaperLibraryReadError, wallpaperChoice) {
+            resolveWallpaper(appearance, wallpaperChoice)
+        }
 
     if (items == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -611,6 +623,12 @@ fun ChatScreen(
         }
         return
     }
+    val wallpaperName =
+        when (wallpaperChoice?.kind) {
+            WallpaperChatChoiceKind.NONE -> wallpaperLabel(ChatWallpaperPreset.NONE)
+            WallpaperChatChoiceKind.PATTERN -> wallpaperChoice.pattern?.let { wallpaperPatternLabel(it, appearance) }
+            null -> null
+        }
     ChatContent(
         state = state,
         ebooksHelperRoomId = ebooksHelperRoomId,
@@ -634,7 +652,9 @@ fun ChatScreen(
         hiddenFoolsRevealed = hiddenFoolsRevealed,
         expandAllFools = expandAllFools,
         onExpandAllFoolsChange = viewModel::setExpandAllFools,
-        chatWallpaper = appearance.wallpaper,
+        chatWallpaper = wallpaper,
+        onOpenWallpaperWorkshop = onOpenWallpaperWorkshop,
+        wallpaperName = wallpaperName,
         collapseTitleBar = appearance.collapseTitleBar,
         conversationFontScalePercent = appearance.conversationFontScalePercent,
         messageSpacing = appearance.messageSpacing,
@@ -1174,9 +1194,9 @@ internal fun ChatContent(
     hiddenFoolsRevealed: Boolean = false,
     expandAllFools: Boolean = false,
     onExpandAllFoolsChange: (Boolean) -> Unit = {},
-    chatWallpaper: io.github.trevarj.motd.data.prefs.WallpaperSelection =
-        io.github.trevarj.motd.data.prefs
-            .WallpaperSelection(),
+    chatWallpaper: WallpaperRenderSpec = remember { resolveWallpaper(AppearanceConfig()) },
+    onOpenWallpaperWorkshop: ((Long) -> Unit)? = null,
+    wallpaperName: String? = null,
     collapseTitleBar: Boolean = true,
     conversationFontScalePercent: Int = io.github.trevarj.motd.data.prefs.DEFAULT_FONT_SCALE_PERCENT,
     messageSpacing: io.github.trevarj.motd.data.prefs.MessageSpacing =
@@ -3506,6 +3526,25 @@ internal fun ChatContent(
                         conversationLayoutSheetOpen = true
                     },
                 )
+                if (onOpenWallpaperWorkshop != null && buffer != null && (buffer.type == BufferType.CHANNEL || buffer.type == BufferType.QUERY)) {
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_wallpaper_menu"),
+                        text = {
+                            Column {
+                                Text(stringResource(R.string.settings_wallpaper))
+                                Text(
+                                    wallpaperName ?: stringResource(R.string.wallpaper_workshop_inherit_global),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        },
+                        leadingIcon = { Icon(Icons.Outlined.Image, contentDescription = null) },
+                        onClick = {
+                            overflowOpen = false
+                            onOpenWallpaperWorkshop(buffer.id)
+                        },
+                    )
+                }
                 if (buffer?.type == BufferType.CHANNEL || buffer?.type == BufferType.QUERY) {
                     DropdownMenuItem(
                         modifier = Modifier.testTag("chat_read_aloud_toggle").semantics { selected = readAloudState.enabled },
@@ -3828,15 +3867,37 @@ internal fun ChatContent(
                 val wallpaperBackdrop = rememberMessageWallpaperBackdrop(effectiveBlur)
                 val wallpaperIme = WindowInsets.ime
                 val wallpaperDensity = LocalDensity.current
+                val photoLoaded = rememberWallpaperPhotoLoaded(chatWallpaper)
+                val photoVisible = photoLoaded.value
+                val wallpaperBacking = wallpaperNeedsReadableBacking(chatWallpaper, photoVisible)
+                val wallpaperTag =
+                    remember(chatWallpaper.selection, photoVisible) {
+                        val selection = chatWallpaper.selection
+                        when {
+                            photoVisible -> {
+                                "chat_wallpaper_photo"
+                            }
+
+                            selection.preset == ChatWallpaperPreset.PATTERN -> {
+                                val ref = selection.patternRef
+                                if (ref == null) "chat_wallpaper_pattern_default" else "chat_wallpaper_pattern_${ref.kind.name.lowercase()}_${ref.id}"
+                            }
+
+                            else -> {
+                                "chat_wallpaper_${selection.preset.name.lowercase()}"
+                            }
+                        }
+                    }
                 ChatWallpaperBackground(
                     chatWallpaper,
                     modifier =
                         Modifier
                             .matchParentSize()
+                            .testTag(wallpaperTag)
                             .captureSurfaceBackdrop(wallpaperSource)
                             .recordMessageWallpaper(wallpaperBackdrop, MaterialTheme.colorScheme.surface)
                             .then(
-                                if (chatWallpaper.preset != ChatWallpaperPreset.NONE || chatWallpaper.localImageName != null) {
+                                if (chatWallpaper.selection.preset != ChatWallpaperPreset.NONE || chatWallpaper.selection.localImageName != null) {
                                     Modifier.fadeChatEdges(
                                         MaterialTheme.colorScheme.background,
                                         readTopHostHeightPx,
@@ -3849,6 +3910,7 @@ internal fun ChatContent(
                                     Modifier
                                 },
                             ),
+                    photoLoaded = photoLoaded,
                 )
                 // No composition-phase IME read here on purpose: the composer samples the animated inset
                 // in its own measure phase, so the whole timeline stays skippable while the keyboard
@@ -4149,6 +4211,7 @@ internal fun ChatContent(
                                     LocalMessageBackgroundOpacityPercent provides conversationLayout.effectiveMessageBackgroundOpacity(LocalMessageBackgroundOpacityPercent.current),
                                     LocalMessageBackgroundBlur provides effectiveBlur,
                                     LocalMessageWallpaperBackdrop provides wallpaperBackdrop,
+                                    LocalWallpaperNeedsReadableBacking provides wallpaperBacking,
                                 ) {
                                     Box(
                                         modifier =
@@ -4507,6 +4570,7 @@ internal fun ChatContent(
                             LocalMessageBackgroundOpacityPercent provides conversationLayout.effectiveMessageBackgroundOpacity(LocalMessageBackgroundOpacityPercent.current),
                             LocalMessageBackgroundBlur provides effectiveBlur,
                             LocalMessageWallpaperBackdrop provides wallpaperBackdrop,
+                            LocalWallpaperNeedsReadableBacking provides wallpaperBacking,
                         ) {
                             Box(
                                 modifier =

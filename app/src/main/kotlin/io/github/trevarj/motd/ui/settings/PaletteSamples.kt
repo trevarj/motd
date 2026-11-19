@@ -37,6 +37,7 @@ import io.github.trevarj.motd.data.prefs.PaletteColors
 import io.github.trevarj.motd.data.prefs.PaletteDocument
 import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.resolveWallpaper
 import io.github.trevarj.motd.ui.chatlist.SettingSampleChatRow
 import io.github.trevarj.motd.ui.chatlist.settingSampleChats
 import io.github.trevarj.motd.ui.components.ChatLayoutPreview
@@ -108,7 +109,7 @@ internal fun PaletteSamples(
                         density = layout,
                         messageSpacing = appearance.messageSpacing,
                         bubbleCorners = appearance.bubbleCornerStyle,
-                        wallpaper = appearance.wallpaper,
+                        wallpaper = resolveWallpaper(appearance),
                         conversationFontScalePercent = appearance.conversationFontScalePercent,
                         tagPrefix = "palette_sample_chat",
                     )

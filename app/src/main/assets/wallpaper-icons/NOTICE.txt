@@ -1,0 +1,73 @@
+MOTD Wallpaper Workshop — version 1 outline artwork
+
+The manifest lists each motif's source and bundled license. Original artwork,
+including the MOTD speech logo, emoji, game-genre and other themed drawings,
+is distributed under the MOTD project's GNU GPL v3 (licenses/GPL-3.0.txt).
+The games and distro products referenced in search terms do not endorse MOTD.
+
+The graffiti-*.svg doodles and captions are original MOTD vector paths authored
+with GPT-6.2-Astra. Lettering uses pen strokes, not a font; see licenses/GPL-3.0.txt.
+
+The /motd wordmark (motd-wordmark.svg) uses the five Roboto Bold 700 glyphs,
+copyright 2011 The Roboto Project Authors, from the v3.015 release:
+https://github.com/googlefonts/roboto-3-classic/releases/tag/v3.015
+Roboto_v3.015.zip, unhinted/static/Roboto-Bold.ttf; SHA-256:
+f02bf7a9869c58b9bb61130f55c6b1a489ea85f2ac1de75b3421dcb133bc57f3
+The original advances and visible contours are retained, with overlapping glyph
+components united and fills replaced by monochrome strokes. No font is bundled.
+Source font license: SIL Open Font License 1.1 (licenses/Roboto-OFL-1.1.txt).
+
+Lucide: https://github.com/lucide-icons/lucide, lucide-static 1.69.0.
+Sources are named per motif; unused SVG class attributes were removed, and the
+original vector geometry and presentation attributes were retained. See
+../lucide-static-LICENSE.txt for the upstream ISC and Feather-derived MIT
+notices. The source repository records original SVGs and digests in
+third_party/lucide-static/provenance.json.
+
+Tux (tux.svg): originally drawn by Larry Ewing in the GIMP, re-illustrated by
+Garrett LeSage in Inkscape and refined and cleaned up by IFo Hancroft.
+https://github.com/garrett/Tux — CC0 1.0; see licenses/CC0-1.0.txt.
+MOTD adapts the seated character to a simplified monochrome stroke outline.
+
+Debian Open Use Logo (debian-swirl.svg): created by Raul Silva; copyright
+(c) 1999 Software in the Public Interest, Inc. https://www.debian.org/logos/
+MOTD adapts the open-use swirl, not the restricted logo, to a simplified
+unfilled monochrome ribbon under CC BY-SA 3.0 Unported.
+https://creativecommons.org/licenses/by-sa/3.0/ — licenses/CC-BY-SA-3.0.txt.
+
+NixOS Logo (nixos-flake.svg) by Simon Frankau, Tim Cuthbertson and Daniel Baker,
+NixOS Project and contributors, maintained by the NixOS Marketing Team.
+https://github.com/NixOS/branding — CC BY 4.0; see licenses/CC-BY-4.0.txt.
+https://creativecommons.org/licenses/by/4.0/
+MOTD adapts the stylized snowflake to simplified monochrome stroke geometry.
+
+Guix Logo (guix-horns.svg) copyright (c) 2015 Luis Felipe López Acevedo.
+https://commons.wikimedia.org/wiki/File:Guix_logo.svg
+MOTD adapts the horns to a simplified outline under CC BY-SA 4.0 International.
+https://creativecommons.org/licenses/by-sa/4.0/ — licenses/CC-BY-SA-4.0.txt.
+
+GNU Emacs Icon (emacs-ribbon.svg) by Nicolas Petton, copyright (C) 2008–2025
+Free Software Foundation, Inc., from GNU Emacs 30.2:
+https://github.com/emacs-mirror/emacs/blob/emacs-30.2/etc/images/icons/hicolor/scalable/apps/emacs.svg
+MOTD retains the original outer badge and complete inner ribbon paths, with
+monochrome strokes instead of fills, gradients, or shadows. This adaptation
+is licensed under GNU GPL v3 or later; see licenses/GPL-3.0.txt.
+
+Neovim Logo (neovim-mark.svg) by Jason Long, Neovim:
+https://commons.wikimedia.org/wiki/File:Neovim-logo.svg
+https://creativecommons.org/licenses/by/3.0/ — licenses/CC-BY-3.0.txt.
+MOTD adapts the folded N to a monochrome stroke outline, referencing the same
+artwork as the existing channel marks from devicon v2.16.0 (MIT, copyright
+(c) 2015 konpa; see licenses/Devicon-MIT.txt):
+https://github.com/devicons/devicon/blob/v2.16.0/icons/neovim/neovim-original.svg
+
+System Crafters emblem (systemcrafters-logo.svg): original mark by System Crafters,
+https://systemcrafters.net/img/sc_logo.png. MOTD redrew the standalone half-gear
+and staggered blocks as a monochrome outline, without the wordmark. Permission
+to use this adaptation in MOTD was confirmed by the MOTD maintainer. No broader
+license for the System Crafters mark is asserted.
+
+Alpine Arch, Fedora Hat, and Community Circle are original thematic alternatives,
+not copies of the Arch Linux, Fedora, or Ubuntu project marks. The Field Toolkit,
+Lane Tower, Quest Sword, Arcane Rune, City Getaway Car, and Open-world Skyline
+are original genre motifs, not game assets, logos, or claims of affiliation.

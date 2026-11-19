@@ -1,6 +1,8 @@
 package io.github.trevarj.motd.data.backup
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.test.core.app.ApplicationProvider
@@ -10,7 +12,9 @@ import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.audio.VoicePrefs
 import io.github.trevarj.motd.avatar.AvatarPrefsImpl
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.FolderIdentityKind
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
@@ -36,6 +40,7 @@ import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
+import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.FontChoice
@@ -57,19 +62,33 @@ import io.github.trevarj.motd.data.prefs.PaletteSelection
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
+import io.github.trevarj.motd.data.prefs.SavedWallpaperDesign
 import io.github.trevarj.motd.data.prefs.SplashScreenAnimation
 import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.TypingIndicatorPlacement
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
+import io.github.trevarj.motd.data.prefs.WallpaperChatChoice
+import io.github.trevarj.motd.data.prefs.WallpaperChatChoiceKind
+import io.github.trevarj.motd.data.prefs.WallpaperLibrary
+import io.github.trevarj.motd.data.prefs.WallpaperPattern
+import io.github.trevarj.motd.data.prefs.WallpaperPatternIcon
+import io.github.trevarj.motd.data.prefs.WallpaperPatternRef
+import io.github.trevarj.motd.data.prefs.WallpaperPatternRefKind
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.WallpaperSvg
+import io.github.trevarj.motd.data.prefs.WallpaperTexture
+import io.github.trevarj.motd.data.prefs.WallpaperWorkshopStore
 import io.github.trevarj.motd.data.prefs.appearanceDataStore
 import io.github.trevarj.motd.data.prefs.canonicalPalette
+import io.github.trevarj.motd.data.prefs.decodeWallpaperChatChoice
 import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.data.prefs.settingsDataStore
 import io.github.trevarj.motd.data.prefs.supportsMode
 import io.github.trevarj.motd.data.prefs.validateInstalledPalettes
 import io.github.trevarj.motd.data.repo.ChatFolderRepository
+import io.github.trevarj.motd.data.repo.MAX_CHAT_WALLPAPER_ASSIGNMENTS
+import io.github.trevarj.motd.data.repo.PortableChatWallpaper
 import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.gesture.GestureMenuConfig
 import io.github.trevarj.motd.gesture.GestureNode
@@ -93,6 +112,8 @@ import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.GraphicsMode
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 class ConfigurationBackupRepositoryTest {
@@ -148,6 +169,236 @@ class ConfigurationBackupRepositoryTest {
                 source.close()
                 target.close()
                 relay.close()
+            }
+        }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun wallpaperWorkshopRoundTripsRemappedAndDeferredAssignments() =
+        runTest {
+            withPaletteBackupState { context ->
+                val source = inMemoryDb()
+                val target = inMemoryDb()
+                val relay = inMemoryDb()
+                val svgFile = File(context.cacheDir, "backup-outline.svg")
+                val photoFile = File(context.cacheDir, "backup-photo.png")
+                val prefs = AppearancePrefsImpl(context)
+                val photos = CustomWallpaperStore(context)
+                val workshop = WallpaperWorkshopStore(context, prefs, photos)
+                try {
+                    svgFile.writeText(
+                        """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 4 L20 20"/></svg>""",
+                    )
+                    val icon = WallpaperSvg.import(context, Uri.fromFile(svgFile))
+                    val incoming =
+                        SavedWallpaperDesign(
+                            "00000000-0000-0000-0000-000000000001",
+                            "Imported outline",
+                            WallpaperPattern(seed = 17, icons = listOf(WallpaperPatternIcon(icon.id)), texture = WallpaperTexture.SPECKS),
+                        )
+                    val originalRef = WallpaperPatternRef(WallpaperPatternRefKind.SAVED, incoming.id)
+                    val originalChoice = WallpaperChatChoice(WallpaperChatChoiceKind.PATTERN, originalRef)
+                    val none = WallpaperChatChoice(WallpaperChatChoiceKind.NONE)
+                    workshop.saveDesign(incoming, expected = null, imports = listOf(icon), applyGlobally = true)
+
+                    val sourceNetwork = source.networkDao().insert(secretNetwork(null))
+                    val sourceStore = BufferStore(source)
+                    val sourceChannel = sourceStore.getOrCreate(sourceNetwork, "#outline", "#Outline", BufferType.CHANNEL)
+                    assertFalse(sourceChannel.pinned)
+                    assertTrue(sourceStore.setWallpaperOverride(sourceChannel.id, originalChoice))
+                    for ((nick, account) in listOf("alice" to "alice-account", "bob" to "bob-account")) {
+                        val room = sourceStore.getOrCreate(sourceNetwork, nick, nick, BufferType.QUERY)
+                        val verified = sourceStore.bindQueryIdentity(room.id, sourceNetwork, nick, nick, account)
+                        assertTrue(sourceStore.setWallpaperOverride(verified.id, originalChoice))
+                    }
+                    val nickOnly = sourceStore.getOrCreate(sourceNetwork, "renamed", "Renamed", BufferType.QUERY)
+                    assertTrue(sourceStore.setWallpaperOverride(nickOnly.id, none))
+
+                    val bitmap = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888)
+                    try {
+                        bitmap.eraseColor(android.graphics.Color.MAGENTA)
+                        photoFile.outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                    } finally {
+                        bitmap.recycle()
+                    }
+                    val photo = workshop.importWallpaper(Uri.fromFile(photoFile))
+                    val photoName = requireNotNull(photo.localImageName)
+                    assertTrue(CustomWallpaperStore.resolve(context, photoName)?.isFile == true)
+                    assertEquals(originalRef, photo.patternRef)
+                    val settings = DataStoreSettingsRepository(context)
+                    settings.setNickMentionStyle(NickMentionStyle.CHIP)
+                    val raw = repository(source).exportToString(BackupExportMode.CREDENTIALS_EXCLUDED)
+                    val password = "workshop-backup-password"
+                    val encrypted = repository(source).exportToString(BackupExportMode.ENCRYPTED_WITH_CREDENTIALS, password = password)
+                    assertFalse(raw.contains("localImageName"))
+                    assertFalse(raw.contains(photoName))
+                    assertFalse(raw.contains(svgFile.path))
+
+                    val assignments =
+                        Json
+                            .parseToJsonElement(raw)
+                            .jsonObject
+                            .getValue("payload")
+                            .jsonObject
+                            .getValue("chatWallpaperAssignments")
+                            .jsonArray
+                    val identities = assignments.map { it.jsonObject.getValue("identityValue") }.toSet()
+                    assertEquals(setOf("#outline", "alice-account", "bob-account", "renamed").map { JsonPrimitive(it) }.toSet(), identities)
+
+                    val local = incoming.copy(name = "Local outline", pattern = incoming.pattern.copy(seed = 42))
+                    val localIcon = icon.copy(name = "Local icon label")
+                    val localLibrary = WallpaperLibrary(designs = listOf(local), imports = listOf(localIcon))
+                    workshop.restore(workshop.librarySnapshot(), localLibrary, WallpaperSelection(ChatWallpaperPreset.NONE), replace = true)
+                    val targetPhoto = workshop.importWallpaper(Uri.fromFile(photoFile))
+                    assertTrue(targetPhoto.localImageName != photoName)
+                    settings.setNickMentionStyle(NickMentionStyle.NONE)
+                    target.networkDao().insert(secretNetwork(null).copy(name = "unrelated", host = "unrelated.example"))
+                    val targetNetwork = target.networkDao().insert(secretNetwork(null))
+                    assertTrue(targetNetwork != sourceNetwork)
+                    val targetStore = BufferStore(target)
+                    val targetChannel = targetStore.getOrCreate(targetNetwork, "#outline", "#Outline", BufferType.CHANNEL)
+                    val localRoom = targetStore.getOrCreate(targetNetwork, "#local", "#Local", BufferType.CHANNEL)
+                    target.bufferDao().setPinned(targetChannel.id, true)
+                    target.bufferDao().writeAnchorOrder(targetChannel.id, 0)
+                    assertTrue(targetStore.setWallpaperOverride(targetChannel.id, none))
+                    assertTrue(targetStore.setWallpaperOverride(localRoom.id, originalChoice))
+                    assertInvalidWallpaperBackups(context, target, localLibrary, raw, assignments)
+                    assertTrue(CustomWallpaperStore.resolve(context, targetPhoto.localImageName)?.isFile == true)
+
+                    val backup = repository(target)
+                    backup.import(raw, importMode = BackupImportMode.MERGE)
+                    val restored = prefs.config.first()
+                    val mergedLibrary = requireNotNull(restored.wallpaperLibrary)
+                    val remapped = mergedLibrary.designs.single { it.name == incoming.name }
+                    val remappedRef = WallpaperPatternRef(WallpaperPatternRefKind.SAVED, remapped.id)
+                    val remappedChoice = originalChoice.copy(pattern = remappedRef)
+                    assertTrue(remapped.id != incoming.id)
+                    assertEquals(incoming.pattern, remapped.pattern)
+                    assertEquals(local, mergedLibrary.designs.single { it.id == incoming.id })
+                    assertEquals(listOf(localIcon), mergedLibrary.imports)
+                    assertEquals(ChatWallpaperPreset.PATTERN, restored.wallpaper.preset)
+                    assertEquals(remappedRef, restored.wallpaper.patternRef)
+                    assertNull(restored.wallpaper.localImageName)
+                    assertNull(CustomWallpaperStore.resolve(context, targetPhoto.localImageName))
+                    assertEquals(
+                        targetNetwork,
+                        target
+                            .networkDao()
+                            .allNow()
+                            .single { it.name == "libera" }
+                            .id,
+                    )
+                    assertEquals(remappedChoice, decodeWallpaperChatChoice(target.bufferDao().observeById(targetChannel.id)?.wallpaperOverrideEncoded))
+                    assertEquals(originalChoice, decodeWallpaperChatChoice(target.bufferDao().observeById(localRoom.id)?.wallpaperOverrideEncoded))
+                    assertEquals(3, target.appStateDao().keysGlob("pending-chat-wallpaper:$targetNetwork:*").size)
+
+                    // A matching nick is not proof of account identity. When the account is proved,
+                    // its pattern takes precedence over the assignment claimed by nick.
+                    val unverified = targetStore.getOrCreate(targetNetwork, "alice", "Alice", BufferType.QUERY)
+                    assertNull(unverified.wallpaperOverrideEncoded)
+                    val renamed = targetStore.getOrCreate(targetNetwork, "renamed", "Renamed", BufferType.QUERY)
+                    assertEquals(none, decodeWallpaperChatChoice(renamed.wallpaperOverrideEncoded))
+                    val verified = targetStore.bindQueryIdentity(renamed.id, targetNetwork, "renamed", "Renamed", "alice-account")
+                    assertEquals(remappedChoice, decodeWallpaperChatChoice(verified.wallpaperOverrideEncoded))
+                    assertEquals(1, target.appStateDao().keysGlob("pending-chat-wallpaper:$targetNetwork:*").size)
+                    val deferredExport = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED)
+                    val deferredAssignments =
+                        Json
+                            .parseToJsonElement(deferredExport)
+                            .jsonObject
+                            .getValue("payload")
+                            .jsonObject
+                            .getValue("chatWallpaperAssignments")
+                            .jsonArray
+                    assertTrue(deferredAssignments.any { it.jsonObject.getValue("identityValue") == JsonPrimitive("bob-account") })
+
+                    val legacyAppearance =
+                        editBackupAppearance(raw) { appearance ->
+                            val selection = appearance.getValue("wallpaper").jsonObject + mapOf("preset" to JsonPrimitive("NONE"), "patternRef" to JsonNull)
+                            JsonObject((appearance - "wallpaperLibrary") + ("wallpaper" to JsonObject(selection)))
+                        }
+                    val legacy = editBackupPayload(legacyAppearance) { JsonObject(it - "chatWallpaperAssignments" - "chatPlacements") }
+                    val beforeLegacy = targetStore.chatWallpaperSnapshot(mergedLibrary)
+                    backup.import(legacy, importMode = BackupImportMode.REPLACE)
+                    assertEquals(mergedLibrary, prefs.config.first().wallpaperLibrary)
+                    assertEquals(
+                        ChatWallpaperPreset.NONE,
+                        prefs.config
+                            .first()
+                            .wallpaper.preset,
+                    )
+                    assertEquals(beforeLegacy, targetStore.chatWallpaperSnapshot(mergedLibrary))
+
+                    val emptyLibrary =
+                        editBackupAppearance(legacyAppearance) {
+                            JsonObject(it + ("wallpaperLibrary" to JsonObject(mapOf("version" to JsonPrimitive(1)))))
+                        }
+                    val empty =
+                        editBackupPayload(emptyLibrary) {
+                            JsonObject((it - "chatPlacements") + ("chatWallpaperAssignments" to JsonArray(emptyList())))
+                        }
+                    backup.import(empty, importMode = BackupImportMode.MERGE)
+                    assertEquals(beforeLegacy, targetStore.chatWallpaperSnapshot(mergedLibrary))
+                    backup.import(empty, importMode = BackupImportMode.REPLACE)
+                    assertEquals(WallpaperLibrary(), prefs.config.first().wallpaperLibrary)
+                    assertNull(target.bufferDao().observeById(targetChannel.id)?.wallpaperOverrideEncoded)
+                    assertNull(target.bufferDao().observeById(localRoom.id)?.wallpaperOverrideEncoded)
+                    assertNull(target.bufferDao().observeById(verified.id)?.wallpaperOverrideEncoded)
+                    assertTrue(target.appStateDao().keysGlob("pending-chat-wallpaper:*").isEmpty())
+                    assertTrue(target.bufferDao().observeById(targetChannel.id)?.pinned == true)
+                    assertEquals(0, target.bufferDao().observeById(targetChannel.id)?.anchorOrder)
+
+                    val relayNetwork = relay.networkDao().insert(secretNetwork(null).copy(host = "quota.example"))
+                    val relayStore = BufferStore(relay)
+                    val quotaRoom = relayStore.getOrCreate(relayNetwork, "#live", "#Live", BufferType.CHANNEL)
+                    assertTrue(relayStore.setWallpaperOverride(quotaRoom.id, none))
+                    val quota =
+                        List(MAX_CHAT_WALLPAPER_ASSIGNMENTS - 1) { index ->
+                            PortableChatWallpaper(relayNetwork, BufferType.CHANNEL, FolderIdentityKind.CHANNEL, "#quota-$index", none)
+                        }
+                    val quotaLibrary = WallpaperLibrary()
+                    relayStore.restoreChatWallpaperAssignments(quota, replace = false, library = quotaLibrary)
+                    assertEquals(MAX_CHAT_WALLPAPER_ASSIGNMENTS, relayStore.chatWallpaperSnapshot(quotaLibrary).size)
+                    repository(relay).preview(raw, importMode = BackupImportMode.REPLACE)
+                    settings.setNickMentionStyle(NickMentionStyle.NONE)
+                    assertWallpaperImportRejectedWithoutMutation(context, relay, quotaLibrary, raw, BackupImportMode.MERGE)
+
+                    val relayPhoto = workshop.importWallpaper(Uri.fromFile(photoFile))
+                    repository(relay).import(encrypted, password = password, importMode = BackupImportMode.REPLACE)
+                    val decrypted = prefs.config.first()
+                    assertEquals(WallpaperLibrary(designs = listOf(incoming), imports = listOf(icon)), decrypted.wallpaperLibrary)
+                    assertEquals(originalRef, decrypted.wallpaper.patternRef)
+                    assertNull(decrypted.wallpaper.localImageName)
+                    assertNull(CustomWallpaperStore.resolve(context, relayPhoto.localImageName))
+                    val importedNetwork =
+                        relay
+                            .networkDao()
+                            .allNow()
+                            .single()
+                            .id
+                    val relayChannel = relayStore.getOrCreate(importedNetwork, "#outline", "#Outline", BufferType.CHANNEL)
+                    assertEquals(originalChoice, decodeWallpaperChatChoice(relayChannel.wallpaperOverrideEncoded))
+
+                    // A local clear to Inherit, even though no value is stored, beats a delayed claim.
+                    val bob = relayStore.getOrCreate(importedNetwork, "bob", "Bob", BufferType.QUERY)
+                    assertNull(bob.wallpaperOverrideEncoded)
+                    assertTrue(relayStore.setWallpaperOverride(bob.id, none))
+                    assertTrue(relayStore.setWallpaperOverride(bob.id, null))
+                    val verifiedBob = relayStore.bindQueryIdentity(bob.id, importedNetwork, "bob", "Bob", "bob-account")
+                    assertNull(verifiedBob.wallpaperOverrideEncoded)
+                    assertFalse(relayStore.chatWallpaperSnapshot(requireNotNull(decrypted.wallpaperLibrary)).any { it.identityValue == "bob-account" })
+                } finally {
+                    photos.delete(
+                        prefs.config
+                            .first()
+                            .wallpaper.localImageName,
+                    )
+                    photoFile.delete()
+                    svgFile.delete()
+                    source.close()
+                    target.close()
+                    relay.close()
+                }
             }
         }
 
@@ -968,14 +1219,14 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setAdjustPaletteReadability(true)
             appearancePrefs.setLauncherIcon(LauncherIcon.GRUVBOX)
             appearancePrefs.setSplashScreenAnimation(SplashScreenAnimation.SOFT_WASH)
-            appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, "12345678-1234-1234-1234-123456789abc.image", 0xff12ab34.toInt()))
+            appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.PATTERN, 73, "12345678-1234-1234-1234-123456789abc.image", 0xff12ab34.toInt()))
             // Only the display name travels; the font binary itself is not part of the backup payload.
             appearancePrefs.setCustomFontName("Iosevka Term.ttf")
 
             val raw =
                 source
                     .exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
-                    .replace("\"RETRO_CHAT\"", "\"CHATTER\"")
+                    .replace("\"PATTERN\"", "\"CHATTER\"")
             assertFalse(raw.contains("12345678-1234-1234-1234-123456789abc.image"))
             assertFalse(raw.contains("localImageName"))
 
@@ -1004,7 +1255,7 @@ class ConfigurationBackupRepositoryTest {
             appearancePrefs.setAdjustPaletteReadability(false)
             appearancePrefs.setLauncherIcon(LauncherIcon.DEFAULT)
             appearancePrefs.setSplashScreenAnimation(SplashScreenAnimation.STATIC)
-            appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.MEMES, 20))
+            appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.NONE, 20))
             appearancePrefs.setCustomFontName("")
 
             source.import(raw, importMode = BackupImportMode.MERGE)
@@ -1034,11 +1285,11 @@ class ConfigurationBackupRepositoryTest {
             assertEquals(LauncherIcon.GRUVBOX, config.launcherIcon)
             assertEquals(SplashScreenAnimation.SOFT_WASH, config.splashScreenAnimation)
             assertEquals("Iosevka Term.ttf", config.customFontName)
-            assertEquals(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, outlineColor = 0xff12ab34.toInt()), config.wallpaper)
+            assertEquals(WallpaperSelection(ChatWallpaperPreset.PATTERN, 73, outlineColor = 0xff12ab34.toInt()), config.wallpaper)
             assertTrue(
                 source
                     .exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 2_000L)
-                    .contains("\"RETRO_CHAT\""),
+                    .contains("\"PATTERN\""),
             )
             appearancePrefs.setAdjustPaletteReadability(false)
             val authoredBackup = source.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 3_000L)
@@ -1103,7 +1354,7 @@ class ConfigurationBackupRepositoryTest {
                 appearancePrefs.setMessageBackgroundOpacity(37)
                 appearancePrefs.setMessageBackgroundBlur(63)
                 appearancePrefs.setSplashScreenAnimation(SplashScreenAnimation.TRAVELING_PULSE)
-                appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80, outlineColor = 0xffffffff.toInt()))
+                appearancePrefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.PATTERN, 80, outlineColor = 0xffffffff.toInt()))
                 val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
                 val oldRaw =
                     raw
@@ -1149,7 +1400,7 @@ class ConfigurationBackupRepositoryTest {
                     appearancePrefs.config.first().surfaceEffects,
                 )
                 assertEquals(SplashScreenAnimation.EDGE_TRACE, appearancePrefs.config.first().splashScreenAnimation)
-                assertEquals(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80), appearancePrefs.config.first().wallpaper)
+                assertEquals(WallpaperSelection(ChatWallpaperPreset.PATTERN, 80), appearancePrefs.config.first().wallpaper)
                 for (percent in listOf(-12, 130)) {
                     backup.import(
                         raw.replace(Regex(""""messageBackgroundOpacityPercent"\s*:\s*37"""), """"messageBackgroundOpacityPercent":$percent"""),
@@ -1163,11 +1414,7 @@ class ConfigurationBackupRepositoryTest {
                     assertEquals(percent.coerceIn(0, 100), AppearancePrefsImpl(context).config.first().messageBackgroundBlur)
                 }
 
-                val withoutAppearance =
-                    raw.replace(
-                        Regex(""",?\s*"appearance"\s*:\s*\{.*?\}(?=,\s*"contentPreviews")""", RegexOption.DOT_MATCHES_ALL),
-                        "",
-                    )
+                val withoutAppearance = editBackupAppearance(raw) { null }
                 assertFalse(withoutAppearance.contains("\"appearance\""))
                 appearancePrefs.setComposerStyle(ComposerStyle.LARGE)
                 appearancePrefs.setUseThemeTextColors(true)
@@ -1252,11 +1499,7 @@ class ConfigurationBackupRepositoryTest {
                 assertEquals(UiCornerStyle.DEFAULT, legacy.chatCardCornerStyle)
                 assertEquals(UiCornerStyle.DEFAULT, legacy.mediaCornerStyle)
 
-                val withoutAppearance =
-                    raw.replace(
-                        Regex(""",?\s*"appearance"\s*:\s*\{.*?\}(?=,\s*"contentPreviews")""", RegexOption.DOT_MATCHES_ALL),
-                        "",
-                    )
+                val withoutAppearance = editBackupAppearance(raw) { null }
                 assertFalse(withoutAppearance.contains("\"appearance\""))
                 prefs.setInputCornerStyle(UiCornerStyle.SOFT)
                 prefs.setAvatarShape(AvatarShape.SQUARE)
@@ -1294,11 +1537,7 @@ class ConfigurationBackupRepositoryTest {
                 backup.import(legacy, importMode = BackupImportMode.MERGE)
                 assertEquals(UiIconSet.MATERIAL, AppearancePrefsImpl(context).config.first().uiIconSet)
 
-                val absent =
-                    raw.replace(
-                        Regex(""",?\s*"appearance"\s*:\s*\{.*?\}(?=,\s*"contentPreviews")""", RegexOption.DOT_MATCHES_ALL),
-                        "",
-                    )
+                val absent = editBackupAppearance(raw) { null }
                 assertFalse(absent.contains("\"appearance\""))
                 prefs.setUiIconSet(UiIconSet.LUCIDE)
                 backup.import(absent, importMode = BackupImportMode.MERGE)
@@ -2219,13 +2458,93 @@ class ConfigurationBackupRepositoryTest {
     private fun editBackupAppearance(
         raw: String,
         transform: (JsonObject) -> JsonObject?,
+    ): String =
+        editBackupPayload(raw) { payload ->
+            val settings = payload.getValue("settings").jsonObject
+            val replacement = transform(settings.getValue("appearance").jsonObject)
+            val updated = if (replacement == null) settings - "appearance" else settings + ("appearance" to replacement)
+            val pairedPayload = if (replacement == null) payload - "chatWallpaperAssignments" else payload
+            JsonObject(pairedPayload + ("settings" to JsonObject(updated)))
+        }
+
+    private fun editBackupPayload(
+        raw: String,
+        transform: (JsonObject) -> JsonObject,
     ): String {
         val envelope = Json.parseToJsonElement(raw).jsonObject
-        val payload = envelope.getValue("payload").jsonObject
-        val settings = payload.getValue("settings").jsonObject
-        val replacement = transform(settings.getValue("appearance").jsonObject)
-        val updated = if (replacement == null) settings - "appearance" else settings + ("appearance" to replacement)
-        return JsonObject(envelope + ("payload" to JsonObject(payload + ("settings" to JsonObject(updated))))).toString()
+        return JsonObject(envelope + ("payload" to transform(envelope.getValue("payload").jsonObject))).toString()
+    }
+
+    private suspend fun assertInvalidWallpaperBackups(
+        context: Context,
+        db: MotdDatabase,
+        localLibrary: WallpaperLibrary,
+        raw: String,
+        assignments: JsonArray,
+    ) {
+        val badDigest =
+            editBackupAppearance(raw) { appearance ->
+                val library = appearance.getValue("wallpaperLibrary").jsonObject
+                val icon =
+                    library
+                        .getValue("imports")
+                        .jsonArray
+                        .single()
+                        .jsonObject
+                val differentSvg = """<svg viewBox="0 0 24 24" stroke="currentColor"><line x1="3" y1="3" x2="19" y2="21"/></svg>"""
+                val imports = JsonArray(listOf(JsonObject(icon + ("svg" to JsonPrimitive(differentSvg)))))
+                JsonObject(appearance + ("wallpaperLibrary" to JsonObject(library + ("imports" to imports))))
+            }
+        val channel = assignments.single { it.jsonObject.getValue("identityValue") == JsonPrimitive("#outline") }.jsonObject
+        val choice = channel.getValue("choice").jsonObject
+        val missingRef = JsonObject(choice.getValue("pattern").jsonObject + ("id" to JsonPrimitive("00000000-0000-0000-0000-000000000002")))
+        val choiceWithMissingRef = JsonObject(choice + ("pattern" to missingRef))
+        val badReference = JsonObject(channel + ("choice" to choiceWithMissingRef))
+        val badType = JsonObject(channel + ("identityValue" to JsonPrimitive(42)))
+        val malformedAssignments =
+            listOf(badReference, badType).map { malformed ->
+                editBackupPayload(raw) { payload ->
+                    val modified = JsonArray(assignments.map { if (it == channel) malformed else it })
+                    JsonObject(payload + ("chatWallpaperAssignments" to modified))
+                }
+            }
+        val missingLibrary = editBackupAppearance(raw) { JsonObject(it - "wallpaperLibrary") }
+        val missingAssignments = editBackupPayload(raw) { JsonObject(it - "chatWallpaperAssignments") }
+        for (invalid in malformedAssignments + listOf(badDigest, missingLibrary, missingAssignments)) {
+            for (mode in BackupImportMode.entries) {
+                assertWallpaperImportRejectedWithoutMutation(context, db, localLibrary, invalid, mode)
+            }
+        }
+    }
+
+    private suspend fun assertWallpaperImportRejectedWithoutMutation(
+        context: Context,
+        db: MotdDatabase,
+        library: WallpaperLibrary,
+        raw: String,
+        mode: BackupImportMode,
+    ) {
+        val appearance = context.appearanceDataStore.data.first()
+        val settings = context.settingsDataStore.data.first()
+        val networks = db.networkDao().allNow()
+        val store = BufferStore(db)
+        val assignments = store.chatWallpaperSnapshot(library)
+        val pending = db.appStateDao().keysGlob("pending-chat-wallpaper:*").toSet()
+
+        suspend fun assertUnchanged() {
+            assertEquals(appearance, context.appearanceDataStore.data.first())
+            assertEquals(settings, context.settingsDataStore.data.first())
+            assertEquals(networks, db.networkDao().allNow())
+            assertEquals(assignments, store.chatWallpaperSnapshot(library))
+            assertEquals(pending, db.appStateDao().keysGlob("pending-chat-wallpaper:*").toSet())
+        }
+        val backup = repository(db)
+        val previewError = runCatching { backup.preview(raw, importMode = mode) }.exceptionOrNull()
+        assertTrue("Expected $mode wallpaper preview rejection, got $previewError", previewError is BackupFormatException)
+        assertUnchanged()
+        val importError = runCatching { backup.import(raw, importMode = mode) }.exceptionOrNull()
+        assertTrue("Expected $mode wallpaper import rejection, got $importError", importError is BackupFormatException)
+        assertUnchanged()
     }
 
     private fun mutateBackupRecord(
@@ -2261,13 +2580,14 @@ class ConfigurationBackupRepositoryTest {
         assertEquals(networks, db.networkDao().allNow())
     }
 
-    private fun repository(db: io.github.trevarj.motd.data.db.MotdDatabase): ConfigurationBackupRepositoryImpl {
+    private fun repository(db: MotdDatabase): ConfigurationBackupRepositoryImpl {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val settings = DataStoreSettingsRepository(context)
+        val appearancePrefs = AppearancePrefsImpl(context)
         return ConfigurationBackupRepositoryImpl(
             db = db,
             settingsRepository = settings,
-            appearancePrefs = AppearancePrefsImpl(context),
+            appearancePrefs = appearancePrefs,
             contentPreviewPrefs = ContentPreviewPrefsImpl(context),
             chatSoundPrefs = ChatSoundPrefs(context),
             replyPrefs = ReplyPrefsImpl(context),
@@ -2276,6 +2596,7 @@ class ConfigurationBackupRepositoryTest {
             avatarPrefs = AvatarPrefsImpl(context),
             bouncerKindPrefs = BouncerKindPrefsImpl(context),
             gesturePrefs = GesturePrefsImpl(context),
+            wallpaperStore = WallpaperWorkshopStore(context, appearancePrefs, CustomWallpaperStore(context)),
         )
     }
 

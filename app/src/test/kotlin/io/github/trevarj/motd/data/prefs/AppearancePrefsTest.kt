@@ -136,7 +136,7 @@ class AppearancePrefsTest {
         assertEquals(
             AppearanceConfig(
                 ColorThemePreset.SYSTEM,
-                WallpaperSelection(ChatWallpaperPreset.MOTD, 50),
+                WallpaperSelection(ChatWallpaperPreset.PATTERN, 50),
                 100,
                 100,
             ),
@@ -576,7 +576,7 @@ class AppearancePrefsTest {
         runTest {
             prefs.selectPalette(PaletteSelection(light = PaletteChoice(ColorThemePreset.KANAGAWA_WAVE, null), dark = PaletteChoice(ColorThemePreset.KANAGAWA_WAVE, null), mode = PaletteMode.SYSTEM))
             prefs.setTrueBlack(true)
-            prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.INTERNET_ODDITIES, 73))
+            prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.PATTERN, 73))
             assertEquals(ColorThemePreset.KANAGAWA_WAVE, prefs.config.first().theme)
             assertEquals(true, prefs.config.first().trueBlack)
             assertEquals(
@@ -585,13 +585,13 @@ class AppearancePrefsTest {
                     .first()
                     .paletteSelection.mode,
             )
-            assertEquals(WallpaperSelection(ChatWallpaperPreset.INTERNET_ODDITIES, 73), prefs.config.first().wallpaper)
+            assertEquals(WallpaperSelection(ChatWallpaperPreset.PATTERN, 73), prefs.config.first().wallpaper)
         }
 
     @Test fun wallpaperOutlineColorPersistsNormalizesAndResetsWithoutChangingTheSelection() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()
-            val selection = WallpaperSelection(ChatWallpaperPreset.LINUX, 73, outlineColor = 0x0012ab34)
+            val selection = WallpaperSelection(ChatWallpaperPreset.PATTERN, 73, outlineColor = 0x0012ab34)
             prefs.setWallpaper(selection)
             assertEquals(selection.copy(outlineColor = 0xff12ab34.toInt()), AppearancePrefsImpl(context).config.first().wallpaper)
             prefs.setWallpaper(selection.copy(outlineColor = null))
@@ -703,19 +703,19 @@ class AppearancePrefsTest {
 
     @Test fun wallpaperIntensity_isClampedAtomically() =
         runTest {
-            prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RADIO_CLUB, 500))
-            assertEquals(WallpaperSelection(ChatWallpaperPreset.RADIO_CLUB, 100), prefs.config.first().wallpaper)
-            prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RETRO_GAMING, -9))
-            assertEquals(WallpaperSelection(ChatWallpaperPreset.RETRO_GAMING, 0), prefs.config.first().wallpaper)
+            prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.PATTERN, 500))
+            assertEquals(WallpaperSelection(ChatWallpaperPreset.PATTERN, 100), prefs.config.first().wallpaper)
+            prefs.setWallpaper(WallpaperSelection(ChatWallpaperPreset.RAINY_CAFE, -9))
+            assertEquals(WallpaperSelection(ChatWallpaperPreset.RAINY_CAFE, 0), prefs.config.first().wallpaper)
         }
 
     @Test fun customWallpaperPersistsAtomicallyAndBuiltinSelectionClearsLocalReference() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()
-            val selection = WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 500, "12345678-1234-1234-1234-123456789abc.image")
+            val selection = WallpaperSelection(ChatWallpaperPreset.PATTERN, 500, "12345678-1234-1234-1234-123456789abc.image")
             prefs.setWallpaper(selection)
             assertEquals(selection.copy(intensity = 100), AppearancePrefsImpl(context).config.first().wallpaper)
-            for (preset in listOf(ChatWallpaperPreset.MEMES, ChatWallpaperPreset.NONE)) {
+            for (preset in listOf(ChatWallpaperPreset.RAINY_CAFE, ChatWallpaperPreset.NONE)) {
                 prefs.setWallpaper(selection)
                 prefs.setWallpaper(selection.copy(preset = preset, intensity = 73, localImageName = null))
                 assertEquals(WallpaperSelection(preset, 73), AppearancePrefsImpl(context).config.first().wallpaper)
@@ -723,55 +723,51 @@ class AppearancePrefsTest {
             }
         }
 
-    @Test fun storedWallpaperAliasesAndUnknownsResolveToTheNewCollection() {
-        val expected =
-            mapOf(
-                "MOTD" to ChatWallpaperPreset.MOTD,
-                "CHATTER" to ChatWallpaperPreset.RETRO_CHAT,
-                "CHANNELS" to ChatWallpaperPreset.RETRO_CHAT,
-                "TERMINAL" to ChatWallpaperPreset.MOTD,
-                "NIGHT_SHIFT" to ChatWallpaperPreset.MOTD,
-                "RELAY" to ChatWallpaperPreset.INTERNET_ODDITIES,
-                "SIGNALS" to ChatWallpaperPreset.RADIO_CLUB,
-                "PIXELS" to ChatWallpaperPreset.RETRO_GAMING,
-                "NONE" to ChatWallpaperPreset.NONE,
-                "MEMES" to ChatWallpaperPreset.MEMES,
-                "LINUX" to ChatWallpaperPreset.LINUX,
-                "SYSTEMCRAFTERS" to ChatWallpaperPreset.SYSTEMCRAFTERS,
+    @Test fun retiredWallpaperAliasesAndUnknownsUseTheDefaultPattern() {
+        val legacyNames =
+            listOf(
+                "MOTD",
+                "DEEP_SPACE",
+                "RETRO_GAMING",
+                "RADIO_CLUB",
+                "INTERNET_ODDITIES",
+                "RETRO_CHAT",
+                "MEMES",
+                "LINUX",
+                "SYSTEMCRAFTERS",
+                "CHATTER",
+                "CHANNELS",
+                "TERMINAL",
+                "NIGHT_SHIFT",
+                "RELAY",
+                "SIGNALS",
+                "PIXELS",
+                "future-wallpaper",
+                null,
             )
-        expected.forEach { (stored, preset) -> assertEquals(stored, preset, chatWallpaperPresetFromStored(stored)) }
-        assertEquals(ChatWallpaperPreset.MOTD, chatWallpaperPresetFromStored(null))
-        assertEquals(ChatWallpaperPreset.MOTD, chatWallpaperPresetFromStored("future-wallpaper"))
+        legacyNames.forEach { assertEquals(it, ChatWallpaperPreset.PATTERN, chatWallpaperPresetFromStored(it)) }
+        ChatWallpaperPreset.entries.forEach { assertEquals(it, chatWallpaperPresetFromStored(it.name)) }
     }
 
     @Test fun wallpaperJsonDecodesLegacyNamesAndWritesCurrentNames() {
         assertEquals(
-            WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73),
+            WallpaperSelection(ChatWallpaperPreset.PATTERN, 73),
             Json.decodeFromString<WallpaperSelection>("""{"preset":"CHATTER","intensity":73}"""),
         )
-        assertEquals(
-            """{"preset":"RETRO_CHAT","intensity":73,"outlineColor":null,"scenicFollowSystem":true,"scenicAnimationEnabled":true}""",
-            jsonWithDefaults.encodeToString(WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, "private-wallpaper.image")),
-        )
-        assertEquals(
-            WallpaperSelection(ChatWallpaperPreset.LINUX, 73),
-            Json.decodeFromString<WallpaperSelection>("""{"preset":"LINUX","intensity":73}"""),
-        )
-        assertEquals(
-            """{"preset":"LINUX","intensity":73,"outlineColor":null,"scenicFollowSystem":true,"scenicAnimationEnabled":true}""",
-            jsonWithDefaults.encodeToString(WallpaperSelection(ChatWallpaperPreset.LINUX, 73)),
-        )
-        assertEquals(
-            WallpaperSelection(ChatWallpaperPreset.SYSTEMCRAFTERS, 73),
-            Json.decodeFromString<WallpaperSelection>("""{"preset":"SYSTEMCRAFTERS","intensity":73}"""),
-        )
-        assertEquals(
-            """{"preset":"SYSTEMCRAFTERS","intensity":73,"outlineColor":null,"scenicFollowSystem":true,"scenicAnimationEnabled":true}""",
-            jsonWithDefaults.encodeToString(WallpaperSelection(ChatWallpaperPreset.SYSTEMCRAFTERS, 73)),
-        )
+        val selection =
+            WallpaperSelection(
+                ChatWallpaperPreset.PATTERN,
+                73,
+                localImageName = "private-wallpaper.image",
+                patternRef = WallpaperPatternRef(WallpaperPatternRefKind.STARTER, "linux"),
+            )
+        val portable = jsonWithDefaults.encodeToString(selection)
+        assertTrue(""""preset":"PATTERN"""" in portable)
+        assertTrue("localImageName" !in portable)
+        assertEquals(selection.copy(localImageName = null), Json.decodeFromString<WallpaperSelection>(portable))
         for (color in listOf(0xffffffff.toInt(), 0xff000000.toInt(), 0xff12ab34.toInt())) {
-            val selection = WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, outlineColor = color)
-            assertEquals(selection, Json.decodeFromString<WallpaperSelection>(jsonWithDefaults.encodeToString(selection)))
+            val legacy = WallpaperSelection(ChatWallpaperPreset.PATTERN, 73, outlineColor = color)
+            assertEquals(legacy, Json.decodeFromString<WallpaperSelection>(jsonWithDefaults.encodeToString(legacy)))
         }
         for (
         preset in

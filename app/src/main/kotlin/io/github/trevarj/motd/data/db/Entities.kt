@@ -366,6 +366,8 @@ data class RoomEntity(
     val dickordChannelJson: String? = null,
     /** Null leaves activity sorting intact; non-null is the global anchored-chat rank. */
     val anchorOrder: Int? = null,
+    /** Validated chat wallpaper choice; null inherits the global wallpaper. */
+    val wallpaperOverrideEncoded: String? = null,
 )
 
 /** Compatibility name retained while callers migrate to the canonical room vocabulary. */

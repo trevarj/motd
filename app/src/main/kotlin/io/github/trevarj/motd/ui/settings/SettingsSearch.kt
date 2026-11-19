@@ -179,7 +179,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_message_spacing, R.string.settings_appearance_messages_section, "compact relaxed standard 1× spacing default", SettingsSearchPage.APPEARANCE, SettingsTarget.MESSAGE_SPACING),
         spec(R.string.settings_bubble_corners, R.string.settings_bubble_corners_desc, "shape corners rounded square", SettingsSearchPage.APPEARANCE, SettingsTarget.BUBBLE_CORNERS),
         spec(R.string.settings_bubble_colors, R.string.settings_bubble_colors_desc, "chat bubble background composer input palette custom color wheel sent received accent blend secondary surface default", SettingsSearchPage.APPEARANCE, SettingsTarget.BUBBLE_COLORS),
-        spec(R.string.settings_wallpaper, R.string.settings_appearance_summary, "background image drawing outline tint color wheel", SettingsSearchPage.APPEARANCE, SettingsTarget.WALLPAPER),
+        spec(R.string.settings_wallpaper, R.string.settings_appearance_summary, "background image drawing outline tint color wheel wallpaper workshop pattern icon svg", SettingsSearchPage.APPEARANCE, SettingsTarget.WALLPAPER),
         spec(R.string.settings_app_icon_section, R.string.settings_appearance_summary, "launcher teal ceramic original default", SettingsSearchPage.APPEARANCE, SettingsTarget.LAUNCHER_ICON),
         spec(R.string.settings_presence_title, R.string.settings_presence_smart_desc, "join part quit away", SettingsSearchPage.CHAT, SettingsTarget.PRESENCE),
         spec(R.string.settings_show_redacted_messages, R.string.settings_show_redacted_messages_desc, "deleted accountability", SettingsSearchPage.CHAT, SettingsTarget.DELETED_MESSAGES),

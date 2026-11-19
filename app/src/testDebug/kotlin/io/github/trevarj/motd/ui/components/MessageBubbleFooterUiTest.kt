@@ -71,6 +71,7 @@ import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioPlaybackState
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
@@ -83,8 +84,14 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
+import io.github.trevarj.motd.data.prefs.SavedWallpaperDesign
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
+import io.github.trevarj.motd.data.prefs.WallpaperLibrary
+import io.github.trevarj.motd.data.prefs.WallpaperPatternRef
+import io.github.trevarj.motd.data.prefs.WallpaperPatternRefKind
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.WallpaperStarters
+import io.github.trevarj.motd.data.prefs.resolveWallpaper
 import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
@@ -1597,9 +1604,45 @@ class MessageBubbleFooterUiTest {
     }
 
     @Test
+    fun chatPreviewReportsRecipeIntensitySeparatelyFromPhotoOpacity() {
+        val design =
+            SavedWallpaperDesign(
+                "a0000000-0000-4000-8000-000000000000",
+                "Preview Only",
+                checkNotNull(WallpaperStarters.find("motd")).pattern.copy(intensity = 35),
+            )
+        val selection =
+            WallpaperSelection(
+                ChatWallpaperPreset.PATTERN,
+                intensity = 80,
+                patternRef = WallpaperPatternRef(WallpaperPatternRefKind.SAVED, design.id),
+            )
+        val appearance = AppearanceConfig(wallpaper = selection, wallpaperLibrary = WallpaperLibrary(designs = listOf(design)))
+        val wallpaper = mutableStateOf(resolveWallpaper(appearance))
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                ChatLayoutPreview(
+                    LayoutDensity.COMPACT,
+                    MessageSpacing.DEFAULT,
+                    BubbleCornerStyle.ROUNDED,
+                    wallpaper.value,
+                    100,
+                    "preview",
+                )
+            }
+        }
+        compose.onNodeWithTag("preview_wallpaper_pattern_35").assertIsDisplayed()
+        compose.runOnIdle {
+            wallpaper.value = resolveWallpaper(appearance.copy(wallpaper = selection.copy(localImageName = "a0000000-0000-4000-8000-000000000001.image")))
+        }
+        compose.onNodeWithTag("preview_wallpaper_custom_80").assertIsDisplayed()
+    }
+
+    @Test
     fun compactPreviewUsesExplicitPairOrInheritsThemePair() {
         val pair = mutableStateOf(CompactNickBrackets.SQUARE)
         val explicit = mutableStateOf(false)
+        val wallpaper = resolveWallpaper(AppearanceConfig(wallpaper = WallpaperSelection(ChatWallpaperPreset.PATTERN)))
         compose.setContent {
             MotdTheme(dynamicColor = false, compactNickBrackets = pair.value) {
                 if (explicit.value) {
@@ -1607,7 +1650,7 @@ class MessageBubbleFooterUiTest {
                         LayoutDensity.COMPACT,
                         MessageSpacing.DEFAULT,
                         BubbleCornerStyle.ROUNDED,
-                        WallpaperSelection(),
+                        wallpaper,
                         100,
                         "preview",
                         compactNickBrackets = CompactNickBrackets.NONE,
@@ -1617,7 +1660,7 @@ class MessageBubbleFooterUiTest {
                         LayoutDensity.COMPACT,
                         MessageSpacing.DEFAULT,
                         BubbleCornerStyle.ROUNDED,
-                        WallpaperSelection(),
+                        wallpaper,
                         100,
                         "preview",
                     )
@@ -2410,7 +2453,9 @@ class MessageBubbleFooterUiTest {
                         .background(canvasColor ?: MaterialTheme.colorScheme.background)
                         .testTag("contrast_sample"),
                 ) {
-                    wallpaperIntensity?.let { ChatWallpaperBackground(WallpaperSelection(ChatWallpaperPreset.MOTD, it, wallpaperImage)) }
+                    wallpaperIntensity?.let {
+                        ChatWallpaperBackground(resolveWallpaper(AppearanceConfig(wallpaper = WallpaperSelection(ChatWallpaperPreset.PATTERN, it, wallpaperImage))))
+                    }
                     Column(Modifier.padding(top = 96.dp)) {
                         if (audio) {
                             AudioAttachmentPlayers(

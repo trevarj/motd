@@ -136,13 +136,18 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.NicknameTapAction
+import io.github.trevarj.motd.data.prefs.WallpaperPatternRef
+import io.github.trevarj.motd.data.prefs.WallpaperPatternRefKind
+import io.github.trevarj.motd.data.prefs.WallpaperRenderSpec
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.resolveWallpaper
 import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
 import io.github.trevarj.motd.dcc.EbooksResultCache
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
@@ -511,7 +516,7 @@ class ComposerSendClearUiTest {
         aiSheet: @Composable () -> Unit = {},
         dickordEnabled: () -> Boolean = { false },
         layoutDensity: () -> LayoutDensity = { LayoutDensity.COMFORTABLE },
-        chatWallpaper: WallpaperSelection = WallpaperSelection(),
+        chatWallpaper: WallpaperRenderSpec = resolveWallpaper(AppearanceConfig()),
         collapseTitleBar: () -> Boolean = { true },
         onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
         initialTarget: () -> ChatPositionTarget? = { null },
@@ -2935,7 +2940,7 @@ class ComposerSendClearUiTest {
         setContent(
             draft = { ComposerDraftState("hello", hydrated = true, revision = 1) },
             pages = flowOf(PagingData.from(headerHistory())),
-            chatWallpaper = WallpaperSelection(ChatWallpaperPreset.NONE),
+            chatWallpaper = WallpaperRenderSpec(WallpaperSelection(ChatWallpaperPreset.NONE), null),
             aiSheet = {
                 val primary = MaterialTheme.colorScheme.primary.toArgb()
                 val fab = FloatingActionButtonDefaults.containerColor.toArgb()
@@ -3319,7 +3324,7 @@ class ComposerSendClearUiTest {
                             ),
                     ),
                 ),
-            chatWallpaper = WallpaperSelection(ChatWallpaperPreset.NONE),
+            chatWallpaper = WallpaperRenderSpec(WallpaperSelection(ChatWallpaperPreset.NONE), null),
             knownNicks = setOf("body-peer"),
             initialTarget = { target },
             entryState = { entry },
@@ -3642,8 +3647,11 @@ class ComposerSendClearUiTest {
     }
 
     @Test
-    fun nativeBuiltinWallpaperStaysFixedWhileHistoryHeaderResizes() {
-        assertWallpaperAnchoredDuringHeaderResize(WallpaperSelection(ChatWallpaperPreset.MOTD, 100))
+    fun nativePatternWallpaperStaysFixedWhileHistoryHeaderResizes() {
+        val ref = WallpaperPatternRef(WallpaperPatternRefKind.STARTER, "motd")
+        val wallpaper = resolveWallpaper(AppearanceConfig(wallpaper = WallpaperSelection(ChatWallpaperPreset.PATTERN, patternRef = ref)))
+        val pattern = requireNotNull(wallpaper.pattern).copy(intensity = 100, ink = 0xff000000.toInt(), background = 0xffffffff.toInt())
+        assertWallpaperAnchoredDuringHeaderResize(wallpaper.copy(pattern = pattern))
     }
 
     @Test
@@ -3666,7 +3674,7 @@ class ComposerSendClearUiTest {
         val loader = ImageLoader.Builder(context).allowHardware(false).build()
         Coil.setImageLoader(loader)
         try {
-            assertWallpaperAnchoredDuringHeaderResize(WallpaperSelection(ChatWallpaperPreset.NONE, 100, file.name))
+            assertWallpaperAnchoredDuringHeaderResize(WallpaperRenderSpec(WallpaperSelection(ChatWallpaperPreset.NONE, 100, file.name), null))
         } finally {
             Coil.setImageLoader(originalLoader)
             loader.shutdown()
@@ -3674,7 +3682,7 @@ class ComposerSendClearUiTest {
         }
     }
 
-    private fun assertWallpaperAnchoredDuringHeaderResize(wallpaper: WallpaperSelection) {
+    private fun assertWallpaperAnchoredDuringHeaderResize(wallpaper: WallpaperRenderSpec) {
         setContent(
             draft = { ComposerDraftState(hydrated = true) },
             pages = flowOf(PagingData.from(headerHistory())),
@@ -4869,7 +4877,7 @@ class ComposerSendClearUiTest {
                                 .testTag("bubble_sample"),
                         ) {
                             val backdrop = rememberMessageWallpaperBackdrop(blur)
-                            ChatWallpaperBackground(wallpaper, Modifier.matchParentSize().recordMessageWallpaper(backdrop, MaterialTheme.colorScheme.background))
+                            ChatWallpaperBackground(WallpaperRenderSpec(wallpaper, null), Modifier.matchParentSize().recordMessageWallpaper(backdrop, MaterialTheme.colorScheme.background))
                             CompositionLocalProvider(LocalMessageWallpaperBackdrop provides backdrop) {
                                 if (!renderFlight) {
                                     MessageBubble(
@@ -4947,7 +4955,7 @@ class ComposerSendClearUiTest {
                 MotdTheme(dynamicColor = false, messageBackgroundOpacityPercent = 0, messageBackgroundBlur = 75) {
                     val backdrop = rememberMessageWallpaperBackdrop(75)
                     Box(Modifier.width(380.dp).height(400.dp).background(MaterialTheme.colorScheme.background)) {
-                        ChatWallpaperBackground(wallpaper, Modifier.matchParentSize().recordMessageWallpaper(backdrop, MaterialTheme.colorScheme.background))
+                        ChatWallpaperBackground(WallpaperRenderSpec(wallpaper, null), Modifier.matchParentSize().recordMessageWallpaper(backdrop, MaterialTheme.colorScheme.background))
                         CompositionLocalProvider(LocalMessageWallpaperBackdrop provides backdrop) {
                             val density = LocalDensity.current
                             Column(

@@ -32,6 +32,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.EffectSurface
 import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.resolveWallpaper
 import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
 import io.github.trevarj.motd.ui.components.captureSurfaceBackdrop
 import io.github.trevarj.motd.ui.components.rememberSurfaceBackdropSource
@@ -217,7 +218,7 @@ private fun SurfaceEffectPreview(
             .testTag("surface_effects_preview"),
     ) {
         Box(Modifier.matchParentSize().captureSurfaceBackdrop(source).background(MaterialTheme.colorScheme.surface)) {
-            ChatWallpaperBackground(appearance.wallpaper, Modifier.matchParentSize(), animate = false)
+            ChatWallpaperBackground(resolveWallpaper(appearance), Modifier.matchParentSize(), animate = false)
             Text(stringResource(R.string.settings_surface_preview_backdrop), modifier = Modifier.padding(8.dp))
         }
         Box(

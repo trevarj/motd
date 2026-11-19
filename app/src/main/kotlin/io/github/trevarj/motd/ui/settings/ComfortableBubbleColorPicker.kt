@@ -53,6 +53,7 @@ import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.customPalette
 import io.github.trevarj.motd.data.prefs.paletteSelection
+import io.github.trevarj.motd.data.prefs.resolveWallpaper
 import io.github.trevarj.motd.ui.chat.ColorComponentSlider
 import io.github.trevarj.motd.ui.chat.ColorWheel
 import io.github.trevarj.motd.ui.chat.parseColorHex
@@ -271,7 +272,7 @@ private fun AppearanceBubblePreview(
             density = LayoutDensity.COMFORTABLE,
             messageSpacing = appearance.messageSpacing,
             bubbleCorners = appearance.bubbleCornerStyle,
-            wallpaper = appearance.wallpaper,
+            wallpaper = resolveWallpaper(appearance),
             conversationFontScalePercent = appearance.conversationFontScalePercent,
             tagPrefix = "settings_bubble_color_preview",
         )

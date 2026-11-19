@@ -10,8 +10,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -39,6 +41,8 @@ private val WALLPAPER_IMAGE = stringPreferencesKey("wallpaper_local_image_v1")
 private val WALLPAPER_OUTLINE_COLOR = intPreferencesKey("wallpaper_outline_color_v1")
 private val WALLPAPER_SCENIC_FOLLOW_SYSTEM = booleanPreferencesKey("wallpaper_scenic_follow_system_v1")
 private val WALLPAPER_SCENIC_ANIMATION = booleanPreferencesKey("wallpaper_scenic_animation_v1")
+private val WALLPAPER_PATTERN_REF = stringPreferencesKey("wallpaper_pattern_ref_v1")
+internal val WALLPAPER_LIBRARY = stringPreferencesKey("wallpaper_library_v1")
 private val UI_FONT_SCALE = intPreferencesKey("ui_font_scale_percent_v1")
 private val CONVERSATION_FONT_SCALE = intPreferencesKey("conversation_font_scale_percent_v1")
 private val FONT_CHOICE = stringPreferencesKey("font_choice_v1")
@@ -185,6 +189,92 @@ private fun MutablePreferences.writePaletteSelection(selection: PaletteSelection
     remove(FOLLOW_SYSTEM)
 }
 
+internal class WallpaperLibrarySnapshot(
+    internal val raw: String?,
+    val library: WallpaperLibrary?,
+    val readError: WallpaperLibraryReadError? = null,
+) {
+    fun requireLibrary(): WallpaperLibrary = library ?: throw WallpaperLibraryException(requireNotNull(readError))
+}
+
+@Volatile
+private var cachedWallpaperLibrary = WallpaperLibrarySnapshot(null, WallpaperLibrary())
+private val wallpaperLibraryCacheLock = Any()
+
+internal suspend fun Preferences.wallpaperLibrarySnapshot(): WallpaperLibrarySnapshot {
+    val raw = this[WALLPAPER_LIBRARY]
+    cachedWallpaperLibrary.let { if (it.raw == raw) return it }
+    return withContext(Dispatchers.Default) {
+        synchronized(wallpaperLibraryCacheLock) {
+            cachedWallpaperLibrary.let { if (it.raw == raw) return@synchronized it }
+            val snapshot =
+                try {
+                    WallpaperLibrarySnapshot(raw, decodeWallpaperLibrary(raw))
+                } catch (error: WallpaperLibraryException) {
+                    WallpaperLibrarySnapshot(raw, null, error.error)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    WallpaperLibrarySnapshot(raw, null, WallpaperLibraryReadError.INVALID)
+                }
+            cachedWallpaperLibrary = snapshot
+            snapshot
+        }
+    }
+}
+
+// A malformed explicit reference must not pick up the legacy null-reference ink and intensity.
+private val invalidWallpaperRef = WallpaperPatternRef(WallpaperPatternRefKind.SAVED, "")
+
+@Volatile
+private var cachedWallpaperRef: Pair<String, WallpaperPatternRef>? = null
+
+private fun Preferences.storedWallpaperRef(): WallpaperPatternRef? {
+    val raw = this[WALLPAPER_PATTERN_REF] ?: return null
+    cachedWallpaperRef?.let { if (it.first == raw) return it.second }
+    val ref =
+        if (raw.length <= 512) {
+            try {
+                decodeWallpaperValue<WallpaperPatternRef>(wallpaperJson.parseToJsonElement(raw))
+            } catch (_: IllegalArgumentException) {
+                invalidWallpaperRef
+            }
+        } else {
+            invalidWallpaperRef
+        }
+    cachedWallpaperRef = raw to ref
+    return ref
+}
+
+internal fun Preferences.storedWallpaper(): WallpaperSelection {
+    val preset = chatWallpaperPresetFromStored(this[WALLPAPER])
+    return WallpaperSelection(
+        preset = preset,
+        intensity = (this[WALLPAPER_INTENSITY] ?: DEFAULT_WALLPAPER_INTENSITY).coerceIn(0, 100),
+        localImageName = this[WALLPAPER_IMAGE],
+        outlineColor = this[WALLPAPER_OUTLINE_COLOR]?.or(0xff000000.toInt()),
+        scenicFollowSystem = this[WALLPAPER_SCENIC_FOLLOW_SYSTEM] ?: true,
+        scenicAnimationEnabled = this[WALLPAPER_SCENIC_ANIMATION] ?: true,
+        patternRef = if (preset == ChatWallpaperPreset.PATTERN) storedWallpaperRef() else null,
+    )
+}
+
+internal fun MutablePreferences.writeWallpaper(selection: WallpaperSelection) {
+    val normalized = selection.normalized()
+    this[WALLPAPER] = normalized.preset.name
+    this[WALLPAPER_INTENSITY] = normalized.intensity
+    normalized.localImageName?.let { this[WALLPAPER_IMAGE] = it } ?: remove(WALLPAPER_IMAGE)
+    normalized.outlineColor?.let { this[WALLPAPER_OUTLINE_COLOR] = it } ?: remove(WALLPAPER_OUTLINE_COLOR)
+    this[WALLPAPER_SCENIC_FOLLOW_SYSTEM] = normalized.scenicFollowSystem
+    this[WALLPAPER_SCENIC_ANIMATION] = normalized.scenicAnimationEnabled
+    val ref = normalized.patternRef.takeIf { normalized.preset == ChatWallpaperPreset.PATTERN }
+    if (ref == null) {
+        remove(WALLPAPER_PATTERN_REF)
+    } else if (ref != storedWallpaperRef()) {
+        this[WALLPAPER_PATTERN_REF] = wallpaperJson.encodeToString(ref)
+    }
+}
+
 @Singleton
 class AppearancePrefsImpl
     @Inject
@@ -223,18 +313,12 @@ class AppearancePrefsImpl
             store.data.map { prefs ->
                 val storedTheme = resolveStoredTheme(prefs[THEME], prefs[TRUE_BLACK])
                 val (palettes, paletteReadError) = readPalettes(prefs[CUSTOM_PALETTES])
+                val wallpaperLibrary = prefs.wallpaperLibrarySnapshot()
                 AppearanceConfig(
                     theme = storedTheme.theme,
-                    wallpaper =
-                        WallpaperSelection(
-                            preset =
-                                chatWallpaperPresetFromStored(prefs[WALLPAPER]),
-                            intensity = (prefs[WALLPAPER_INTENSITY] ?: DEFAULT_WALLPAPER_INTENSITY).coerceIn(0, 100),
-                            localImageName = prefs[WALLPAPER_IMAGE],
-                            outlineColor = prefs[WALLPAPER_OUTLINE_COLOR]?.or(0xff000000.toInt()),
-                            scenicFollowSystem = prefs[WALLPAPER_SCENIC_FOLLOW_SYSTEM] ?: true,
-                            scenicAnimationEnabled = prefs[WALLPAPER_SCENIC_ANIMATION] ?: true,
-                        ),
+                    wallpaper = prefs.storedWallpaper(),
+                    wallpaperLibrary = wallpaperLibrary.library,
+                    wallpaperLibraryReadError = wallpaperLibrary.readError,
                     uiFontScalePercent =
                         normalizeFontScalePercent(
                             prefs[UI_FONT_SCALE] ?: DEFAULT_FONT_SCALE_PERCENT,
@@ -404,16 +488,12 @@ class AppearancePrefsImpl
         }
 
         override suspend fun setWallpaper(selection: WallpaperSelection) {
-            val normalized = selection.normalized()
-            store.edit {
-                it[WALLPAPER] = normalized.preset.name
-                it[WALLPAPER_INTENSITY] = normalized.intensity
-                normalized.localImageName?.let { name -> it[WALLPAPER_IMAGE] = name }
-                    ?: it.remove(WALLPAPER_IMAGE)
-                normalized.outlineColor?.let { color -> it[WALLPAPER_OUTLINE_COLOR] = color }
-                    ?: it.remove(WALLPAPER_OUTLINE_COLOR)
-                it[WALLPAPER_SCENIC_FOLLOW_SYSTEM] = normalized.scenicFollowSystem
-                it[WALLPAPER_SCENIC_ANIMATION] = normalized.scenicAnimationEnabled
+            store.edit { prefs ->
+                val ref = selection.patternRef.takeIf { selection.preset == ChatWallpaperPreset.PATTERN }
+                if (ref != null && ref != prefs.storedWallpaper().patternRef) {
+                    require(ref.isValidIn(prefs.wallpaperLibrarySnapshot().requireLibrary())) { "Invalid wallpaper reference" }
+                }
+                prefs.writeWallpaper(selection)
             }
         }
 

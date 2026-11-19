@@ -2052,23 +2052,14 @@
     <string name="channel_list_joined">Joined</string>
 
     <string name="settings_wallpaper_motd">MOTD</string>
-    <string name="settings_wallpaper_motd_desc">Logo graffiti on a gloriously bad bathroom wall.</string>
     <string name="settings_wallpaper_deep_space">Deep Space</string>
-    <string name="settings_wallpaper_deep_space_desc">Rovers, satellites, and curious cosmic visitors.</string>
     <string name="settings_wallpaper_retro_gaming">Retro Gaming</string>
-    <string name="settings_wallpaper_retro_gaming_desc">CRTs, LAN cables, and classic game-night gear.</string>
     <string name="settings_wallpaper_radio_club">Radio Club</string>
-    <string name="settings_wallpaper_radio_club_desc">Radios, antennas, tapes, and waveforms.</string>
     <string name="settings_wallpaper_internet_oddities">Internet Oddities</string>
-    <string name="settings_wallpaper_internet_oddities_desc">Cable creatures, cursor critters, and tiny bots.</string>
     <string name="settings_wallpaper_retro_chat">Retro Chat</string>
-    <string name="settings_wallpaper_retro_chat_desc">Buddy lists, away messages, and IRC nostalgia.</string>
     <string name="settings_wallpaper_memes">Memes</string>
-    <string name="settings_wallpaper_memes_desc">Chaotic classics from the early internet.</string>
     <string name="settings_wallpaper_linux">Linux</string>
-    <string name="settings_wallpaper_linux_desc">Free-software mascots, terminals, and late-night tinkering.</string>
     <string name="settings_wallpaper_systemcrafters">System Crafters</string>
-    <string name="settings_wallpaper_systemcrafters_desc">Emacs ribbons, Guix horns, and #systemcrafters.</string>
     <string name="settings_wallpaper_japanese_countryside">Japanese countryside</string>
     <string name="settings_wallpaper_japanese_countryside_desc">A mountain village that follows the season on your phone.</string>
     <string name="settings_wallpaper_rainy_cafe">Rainy cafe</string>
@@ -2093,10 +2084,6 @@
     <string name="settings_wallpaper_remove">Remove image</string>
     <string name="settings_wallpaper_importing">Importing image…</string>
     <string name="settings_wallpaper_invalid">Could not save wallpaper. Choose a valid image up to 20 MiB.</string>
-    <string name="settings_wallpaper_outline_color">Outline color</string>
-    <string name="settings_wallpaper_color_default">Theme color · %1$s</string>
-    <string name="settings_wallpaper_color_builtin_only">Outline color applies to builtin drawings only. Your color is retained for the fallback; photos keep their original colors.</string>
-    <string name="settings_wallpaper_color_none">Choose a builtin wallpaper to change its outline color.</string>
     <string name="settings_wallpaper_color_wheel">Color wheel: hue and saturation. The sliders below also adjust these values.</string>
     <string name="settings_wallpaper_color_hue">Hue</string>
     <string name="settings_wallpaper_color_saturation">Saturation</string>
@@ -2381,6 +2368,7 @@
     <string name="backup_error_password_corrupt">Password is wrong or encrypted backup is corrupt.</string>
     <string name="backup_error_invalid">Backup is invalid or uses an unsupported format.</string>
     <string name="backup_error_oversized">Backup is too large.</string>
+    <string name="backup_error_wallpaper_library">Saved wallpaper designs could not be read. To recover, choose Replace with a backup that contains a wallpaper library.</string>
     <string name="backup_error_read">Could not read selected backup.</string>
     <string name="backup_error_write">Could not write configuration to selected destination.</string>
     <string name="backup_error_export">Could not prepare configuration for export.</string>

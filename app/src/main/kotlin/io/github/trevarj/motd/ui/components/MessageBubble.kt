@@ -94,6 +94,7 @@ import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.InlineTextSegment
+import io.github.trevarj.motd.ui.chat.LocalWallpaperNeedsReadableBacking
 import io.github.trevarj.motd.ui.chat.extractUrls
 import io.github.trevarj.motd.ui.chat.parseInlineCode
 import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
@@ -116,6 +117,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.NickColorScheme
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.cornerRadius
+import io.github.trevarj.motd.ui.theme.effectBackingAlpha
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.lottieStrokeColor
 import io.github.trevarj.motd.ui.theme.readableForeground
@@ -145,6 +147,12 @@ internal fun messageContainerColor(
     canvas: Color,
     dimmed: Boolean,
 ): Color = if (dimmed) lerp(normal.compositeOver(canvas.copy(alpha = 1f)), canvas.copy(alpha = 1f), 0.35f) else normal
+
+@Composable
+internal fun messageBackingFill(
+    fill: Color,
+    backgroundAlpha: Float,
+): Color = fill.copy(alpha = if (LocalWallpaperNeedsReadableBacking.current) 1f else effectBackingAlpha(fill.alpha * backgroundAlpha))
 
 internal fun messageContentColor(
     normal: Color,
@@ -694,12 +702,7 @@ fun MessageBubble(
             )
         }
     val backgroundAlpha = if (mentionHighlighted) 1f else LocalMessageBackgroundOpacityPercent.current / 100f
-    val bubbleFill =
-        bubbleRoles.container.copy(
-            alpha =
-                io.github.trevarj.motd.ui.theme
-                    .effectBackingAlpha(bubbleRoles.container.alpha * backgroundAlpha),
-        )
+    val bubbleFill = messageBackingFill(bubbleRoles.container, backgroundAlpha)
     val bubbleColor = bubbleFill.compositeOver(scheme.background)
     val textColor = messageContentColor(bubbleRoles.normalContent, bubbleColor, dimmed, bubbleRoles.normalContainer, adjustPaletteReadability = true)
     val bodyInk = readingInk(scheme)
@@ -1050,12 +1053,7 @@ private fun ComfortableActionBubble(
             messageBubbleRoleColors(scheme, isSelf, hasMention, MessageKind.ACTION, semanticColors, dimmed)
         }
     val backgroundAlpha = LocalMessageBackgroundOpacityPercent.current / 100f
-    val rowFill =
-        roles.container.copy(
-            alpha =
-                io.github.trevarj.motd.ui.theme
-                    .effectBackingAlpha(roles.container.alpha * backgroundAlpha),
-        )
+    val rowFill = messageBackingFill(roles.container, backgroundAlpha)
     val rowColor = rowFill.compositeOver(scheme.background)
     val bodyInk = readingInk(scheme)
     val bodyColor = remember(bodyInk, rowColor, roles, dimmed, adjustPaletteReadability) { messageContentColor(bodyInk, rowColor, dimmed, roles.normalContainer, adjustPaletteReadability) }
@@ -1355,12 +1353,7 @@ private fun ActionMessageRow(
     val paintedRow = messageContainerColor(normalPaintedRow, MaterialTheme.colorScheme.background, dimmed)
     val baselineFill = if (spacing.twoLine && !dimmed) twoLineContrastFill(paintedRow) else paintedRow
     val backgroundAlpha = LocalMessageBackgroundOpacityPercent.current / 100f
-    val drawFill =
-        baselineFill.copy(
-            alpha =
-                io.github.trevarj.motd.ui.theme
-                    .effectBackingAlpha(baselineFill.alpha * backgroundAlpha),
-        )
+    val drawFill = messageBackingFill(baselineFill, backgroundAlpha)
     val contrastRow = drawFill.compositeOver(MaterialTheme.colorScheme.background)
     val bodyInk = readingInk(MaterialTheme.colorScheme)
     val adjustPaletteReadability = LocalAdjustPaletteReadability.current
@@ -1789,12 +1782,7 @@ private fun TwoLineMessageRow(
             paintedRow
         }
     val backgroundAlpha = if (hasMention) 1f else LocalMessageBackgroundOpacityPercent.current / 100f
-    val drawFill =
-        baselineFill.copy(
-            alpha =
-                io.github.trevarj.motd.ui.theme
-                    .effectBackingAlpha(baselineFill.alpha * backgroundAlpha),
-        )
+    val drawFill = messageBackingFill(baselineFill, backgroundAlpha)
     val contrastRow = drawFill.compositeOver(canvas)
     val bodyInk = codeColor
     val adjustPaletteReadability = LocalAdjustPaletteReadability.current

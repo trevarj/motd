@@ -42,9 +42,9 @@ test("gallery remains usable when the preview manifest is absent or malformed", 
   assert.equal(buildGallery(root).themes.flatMap(theme => theme.assets).length, 0);
 });
 
-test("all registered shipped PNGs are available without a draft manifest", () => {
+test("all registered historical PNG finals are available without a draft manifest", () => {
   const root = testRoot();
-  const directory = path.join(root, "app/src/main/assets/chat-wallpapers");
+  const directory = path.join(root, "build/wallpaper-previews/legacy-finals");
   fs.mkdirSync(directory, { recursive: true });
   for (const theme of themes) fs.writeFileSync(path.join(directory, `${theme.id}.png`), "png");
   const gallery = buildGallery(root);
@@ -175,7 +175,7 @@ test("revision-02 rejects non-restoring frames, duplicate pixels, and wrong mast
 test("HTTP serves exact PNG finals and studies without exposing unregistered or escaped files", async t => {
   const root = testRoot();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const finals = path.join(root, "app/src/main/assets/chat-wallpapers");
+  const finals = path.join(root, "build/wallpaper-previews/legacy-finals");
   const atlases = path.join(root, "tools/wallpapers/atlases");
   fs.mkdirSync(finals, { recursive: true });
   fs.mkdirSync(atlases, { recursive: true });

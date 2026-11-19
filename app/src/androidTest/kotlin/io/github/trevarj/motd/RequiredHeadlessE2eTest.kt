@@ -44,6 +44,7 @@ import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.emoji.EmojiSetStore
 import io.github.trevarj.motd.data.emoji.EmojiSets
 import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
+import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
@@ -51,6 +52,11 @@ import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.PaletteChoice
 import io.github.trevarj.motd.data.prefs.PaletteMode
+import io.github.trevarj.motd.data.prefs.WallpaperChatChoice
+import io.github.trevarj.motd.data.prefs.WallpaperChatChoiceKind
+import io.github.trevarj.motd.data.prefs.WallpaperPatternLayout
+import io.github.trevarj.motd.data.prefs.WallpaperPatternRefKind
+import io.github.trevarj.motd.data.prefs.decodeWallpaperChatChoice
 import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.e2e.BootstrappedNetwork
 import io.github.trevarj.motd.e2e.BufferProbe
@@ -1029,7 +1035,7 @@ class RequiredHeadlessE2eTest {
         )
         SettingsRobot(compose).selectThemeTextColors()
         SettingsRobot(compose).selectIrcSprites()
-        SettingsRobot(compose).selectWallpaperAndIntensity()
+        exerciseHostedWallpaper(bootstrap, roomId, palettePrefs)
         SettingsRobot(compose).selectComfortableBubbleColors()
         SettingsRobot(compose).disableNicknameBackgrounds(opacityPercent = 37, blurIntensity = 63)
         exerciseSurfaceEffects()
@@ -1069,6 +1075,69 @@ class RequiredHeadlessE2eTest {
         NetworksRobot(compose).openRoot(network.rootId)
         BouncerRobot(compose).assertPanels()
         milestones.record("settings_bouncer_smoke", "root=${network.rootId}")
+    }
+
+    private fun exerciseHostedWallpaper(
+        bootstrap: E2eBootstrap,
+        roomId: Long,
+        prefs: AppearancePrefsImpl,
+    ) {
+        val robot = SettingsRobot(compose)
+        robot.selectWallpaperAndIntensity()
+        val applied = runBlocking { prefs.config.first() }
+        val ref = requireNotNull(applied.wallpaper.patternRef)
+        assertEquals(ChatWallpaperPreset.PATTERN, applied.wallpaper.preset)
+        assertEquals(WallpaperPatternRefKind.SAVED, ref.kind)
+        val pattern = requireNotNull(applied.wallpaperLibrary).designs.single { it.id == ref.id }.pattern
+        assertEquals(WallpaperPatternLayout.WAVES, pattern.layout)
+        assertEquals(80, pattern.intensity)
+        assertEquals(0xFFFFFFFF.toInt(), pattern.ink)
+        assertTrue(pattern.icons.any { it.assetId == "builtin:four-point-spark" })
+        robot.assertSavedWallpaperControls(ref.id)
+
+        robot.selectScenicWallpaper()
+        runBlocking {
+            withTimeout(10_000) { prefs.config.first { it.wallpaper.preset == ChatWallpaperPreset.JAPANESE_COUNTRYSIDE } }
+        }
+        robot.reapplyGlobalWallpaper(ref.id)
+        val globalWallpaper = runBlocking { prefs.config.first() }.wallpaper
+        assertEquals(ref, globalWallpaper.patternRef)
+        assertEquals(ChatWallpaperPreset.PATTERN, globalWallpaper.preset)
+
+        robot.returnToRoot()
+        robot.click("settings_back")
+        val chatList = ChatListRobot(compose)
+        chatList.scrollContainerTo("chatlist_rows", "chatlist_row_$roomId")
+        chatList.open(roomId)
+        val chat = ChatRobot(compose)
+        val savedTag = "chat_wallpaper_pattern_saved_${ref.id}"
+        val noneTag = "chat_wallpaper_none"
+
+        fun assertWallpaper(
+            tag: String,
+            choice: WallpaperChatChoice?,
+        ) {
+            chat.assertDisplayed(tag)
+            val room = runBlocking { requireNotNull(bootstrap.seams.buffers().buffer(roomId)) }
+            val storedChoice = room.wallpaperOverrideEncoded?.let { requireNotNull(decodeWallpaperChatChoice(it)) }
+            assertEquals(choice, storedChoice)
+            assertEquals(globalWallpaper, runBlocking { prefs.config.first() }.wallpaper)
+        }
+
+        assertWallpaper(savedTag, null)
+        robot.applyConversationWallpaper("wallpaper_saved_${ref.id}")
+        assertWallpaper(savedTag, WallpaperChatChoice(WallpaperChatChoiceKind.PATTERN, ref))
+        robot.applyConversationWallpaper("wallpaper_choice_none")
+        assertWallpaper(noneTag, WallpaperChatChoice(WallpaperChatChoiceKind.NONE))
+        chat.awaitTagGone(savedTag)
+        robot.applyConversationWallpaper("wallpaper_choice_inherit")
+        assertWallpaper(savedTag, null)
+        chat.awaitTagGone(noneTag)
+
+        scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        chatList.awaitTag("chatlist_row_$roomId")
+        robot.open()
+        robot.appearance()
     }
 
     /** Starts and ends on the chat list, without changing the surrounding palette/settings stack. */

@@ -12,7 +12,7 @@ import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
-import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.WallpaperRenderSpec
 import io.github.trevarj.motd.ui.components.ChatLayoutPreview
 import io.github.trevarj.motd.ui.components.densityDescription
 import io.github.trevarj.motd.ui.components.densityLabel
@@ -37,7 +37,7 @@ fun ConversationLayoutSheet(
     globalCompactNickBrackets: CompactNickBrackets,
     onCompactNickBracketsOverride: (CompactNickBrackets?) -> Unit,
     onDismiss: () -> Unit,
-    wallpaper: WallpaperSelection,
+    wallpaper: WallpaperRenderSpec,
     conversationFontScalePercent: Int,
     messageSpacing: MessageSpacing,
     bubbleCorners: BubbleCornerStyle,

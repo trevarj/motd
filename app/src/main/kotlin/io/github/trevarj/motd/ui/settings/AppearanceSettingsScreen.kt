@@ -107,10 +107,13 @@ import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.prefs.TypingIndicatorPlacement
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
+import io.github.trevarj.motd.data.prefs.WallpaperRenderSpec
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.prefs.customPalette
 import io.github.trevarj.motd.data.prefs.normalizePaletteSelection
 import io.github.trevarj.motd.data.prefs.paletteSelection
+import io.github.trevarj.motd.data.prefs.resolveWallpaper
+import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
 import io.github.trevarj.motd.ui.chat.ChatWallpaperPicker
 import io.github.trevarj.motd.ui.chatlist.FolderLayoutPreview
 import io.github.trevarj.motd.ui.components.ChatLayoutPreview
@@ -121,6 +124,7 @@ import io.github.trevarj.motd.ui.components.densityLabel
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.ConversationTypography
 import io.github.trevarj.motd.ui.theme.MotdMotion
+import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.TimestampConfig
@@ -143,6 +147,7 @@ fun AppearanceSettingsScreen(
     onBack: () -> Unit = {},
     onOpenNickColors: () -> Unit = {},
     onOpenPalettes: () -> Unit,
+    onOpenWallpaperWorkshop: () -> Unit,
     onOpenSurfaceEffects: (SettingsTarget?) -> Unit = {},
     target: SettingsTarget? = null,
     viewModel: AppearanceSettingsViewModel = hiltViewModel(),
@@ -188,6 +193,7 @@ fun AppearanceSettingsScreen(
         onBack = onBack,
         onOpenNickColors = onOpenNickColors,
         onOpenPalettes = onOpenPalettes,
+        onOpenWallpaperWorkshop = onOpenWallpaperWorkshop,
         onOpenSurfaceEffects = onOpenSurfaceEffects,
         onSelectPalette = viewModel::selectPalette,
         onTrueBlack = viewModel::setTrueBlack,
@@ -275,6 +281,7 @@ fun AppearanceSettingsContent(
     onChatShadowsEnabled: (Boolean) -> Unit = {},
     onNicknameBackgroundsEnabled: (Boolean) -> Unit = {},
     onOpenSurfaceEffects: (SettingsTarget?) -> Unit = {},
+    onOpenWallpaperWorkshop: () -> Unit = {},
     onSentBubbleColor: (ComfortableBubbleColor) -> Unit = {},
     onReceivedBubbleColor: (ComfortableBubbleColor) -> Unit = {},
     onLauncherIcon: (LauncherIcon) -> Unit,
@@ -832,12 +839,13 @@ fun AppearanceSettingsContent(
         SettingsTarget(target?.name, SettingsTarget.WALLPAPER.name) { targetModifier ->
             SettingsGroup(title = stringResource(R.string.settings_wallpaper), modifier = targetModifier) {
                 ChatWallpaperPicker(
-                    current = previewAppearance.wallpaper,
+                    appearance = previewAppearance,
                     onChange = {
                         pendingWallpaper = it
                         previewAppearance = previewAppearance.copy(wallpaper = it)
                         onWallpaper(it)
                     },
+                    onOpenWallpaperWorkshop = onOpenWallpaperWorkshop,
                     onImportImage = onImportWallpaper,
                     importedSelection = importedWallpaper,
                     importing = wallpaperImporting,
@@ -1189,8 +1197,12 @@ internal fun AppearanceChatLayoutPreview(
     chatShadowsEnabled: Boolean,
     tagPrefix: String,
     modifier: Modifier = Modifier,
+    wallpaper: WallpaperRenderSpec = resolveWallpaper(appearance),
+    previewPaletteMode: PaletteMode? = null,
+    wallpaperOnly: Boolean = false,
 ) {
-    val selection = appearance.paletteSelection
+    val configuredPalette = appearance.paletteSelection
+    val selection = previewPaletteMode?.let { configuredPalette.copy(mode = it) } ?: configuredPalette
     val mode = selection.resolvedMode(isSystemInDarkTheme())
     val choice = selection.choiceFor(mode == PaletteMode.DARK)
     MotdTheme(
@@ -1233,16 +1245,28 @@ internal fun AppearanceChatLayoutPreview(
         receivedBubbleColor = appearance.receivedBubbleColor,
         syncSystemBars = false,
     ) {
-        ChatLayoutPreview(
-            density = density,
-            messageSpacing = messageSpacing,
-            bubbleCorners = bubbleCorners,
-            wallpaper = appearance.wallpaper,
-            conversationFontScalePercent = appearance.conversationFontScalePercent,
-            chatShadowsEnabled = chatShadowsEnabled,
-            tagPrefix = tagPrefix,
-            modifier = modifier,
-        )
+        if (wallpaperOnly) {
+            Box(
+                modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 180.dp)
+                    .clip(MotdShapes.card)
+                    .background(MaterialTheme.colorScheme.background),
+            ) {
+                ChatWallpaperBackground(wallpaper, Modifier.matchParentSize())
+            }
+        } else {
+            ChatLayoutPreview(
+                density = density,
+                messageSpacing = messageSpacing,
+                bubbleCorners = bubbleCorners,
+                wallpaper = wallpaper,
+                conversationFontScalePercent = appearance.conversationFontScalePercent,
+                chatShadowsEnabled = chatShadowsEnabled,
+                tagPrefix = tagPrefix,
+                modifier = modifier,
+            )
+        }
     }
 }
 
@@ -1303,7 +1327,7 @@ private fun ComposerStylePreview(
                 .rememberSurfaceBackdropSource()
         Box {
             io.github.trevarj.motd.ui.chat.ChatWallpaperBackground(
-                appearance.wallpaper,
+                resolveWallpaper(appearance),
                 Modifier.matchParentSize().captureSurfaceBackdrop(backdrop).background(MaterialTheme.colorScheme.surface),
                 animate = false,
             )

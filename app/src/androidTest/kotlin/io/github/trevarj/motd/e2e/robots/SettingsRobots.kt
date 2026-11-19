@@ -313,33 +313,87 @@ internal class SettingsRobot(
         dismissChoiceSheet(sheet)
     }
 
-    fun selectWallpaperAndIntensity() {
+    private fun openWallpaperWorkshop() {
         scrollToAndClick("settings_wallpaper_picker")
         assertDisplayed("settings_wallpaper_sheet")
-        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_preset_systemcrafters")
-        click("settings_wallpaper_preset_systemcrafters")
-        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_intensity")
-        compose.onNodeWithTag("settings_wallpaper_intensity").performSemanticsAction(SemanticsActions.SetProgress) { it(80f) }
-        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_outline_color")
-        click("settings_wallpaper_outline_color")
+        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_workshop")
+        click("settings_wallpaper_workshop")
+        assertDisplayed("wallpaper_workshop")
+    }
+
+    private fun openWallpaperCard(tag: String) {
+        scrollContainerTo("wallpaper_workshop_hub", tag)
+        click(tag)
+    }
+
+    fun selectWallpaperAndIntensity() {
+        openWallpaperWorkshop()
+        openWallpaperCard("wallpaper_starter_systemcrafters")
+        click("wallpaper_detail_edit")
+        click("wallpaper_tab_icons")
+        scrollToAndClick("wallpaper_add_icons")
+        assertDisplayed("wallpaper_icon_picker")
+        scrollToAndClick("wallpaper_category_doodles")
+        val doodle = "wallpaper_icon_builtin_four-point-spark"
+        scrollContainerTo("wallpaper_icon_grid", doodle)
+        click(doodle)
+        click("wallpaper_icons_done")
+        awaitTagGone("wallpaper_icon_picker")
+
+        click("wallpaper_tab_pattern")
+        scrollToAndClick("wallpaper_layout_waves")
+        click("wallpaper_tab_color")
+        compose
+            .onNodeWithTag("wallpaper_intensity", useUnmergedTree = true)
+            .performScrollTo()
+            .performSemanticsAction(SemanticsActions.SetProgress) { it(80f) }
+        scrollToAndClick("wallpaper_default_ink")
         compose.onNodeWithTag("settings_wallpaper_color_hex").performScrollTo()
         replace("settings_wallpaper_color_hex", "#FFFFFF")
         click("settings_wallpaper_color_apply")
         awaitTagGone("settings_wallpaper_color_dialog")
-        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_done")
-        click("settings_wallpaper_done")
-        awaitTagGone("settings_wallpaper_sheet")
-        assertDisplayed("settings_wallpaper_picker")
-        // Reopening reads the saved color, not a dialog-local draft.
-        scrollToAndClick("settings_wallpaper_picker")
-        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_outline_color")
-        click("settings_wallpaper_outline_color")
-        compose.onNodeWithTag("settings_wallpaper_color_hex").performScrollTo().assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#FFFFFF")))
+
+        click("wallpaper_editor_preview")
+        click("wallpaper_preview_chat")
+        compose.onNodeWithTag("wallpaper_preview_chat", useUnmergedTree = true).assertIsSelected()
+        click("settings_back")
+        click("wallpaper_editor_apply")
+        awaitTagGone("wallpaper_workshop")
+    }
+
+    fun assertSavedWallpaperControls(id: String) {
+        openWallpaperWorkshop()
+        openWallpaperCard("wallpaper_saved_$id")
+        click("wallpaper_detail_edit")
+        click("wallpaper_tab_icons")
+        val doodle = "wallpaper_mix_builtin_four-point-spark"
+        compose.onNodeWithTag(doodle, useUnmergedTree = true).performScrollTo()
+        assertDisplayed(doodle)
+        click("wallpaper_tab_pattern")
+        compose.onNodeWithTag("wallpaper_layout_waves", useUnmergedTree = true).performScrollTo().assertIsSelected()
+        click("wallpaper_tab_color")
+        compose
+            .onNodeWithTag("wallpaper_intensity", useUnmergedTree = true)
+            .performScrollTo()
+            .assert(
+                SemanticsMatcher("Saved wallpaper intensity is 80%") {
+                    it.config[SemanticsProperties.ProgressBarRangeInfo].current == 80f
+                },
+            )
+        scrollToAndClick("wallpaper_default_ink")
+        compose
+            .onNodeWithTag("settings_wallpaper_color_hex")
+            .performScrollTo()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#FFFFFF")))
         click("settings_wallpaper_color_cancel")
-        scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_done")
-        click("settings_wallpaper_done")
-        awaitTagGone("settings_wallpaper_sheet")
-        // Scenic controls are persisted separately from the existing motif outline color.
+        awaitTagGone("settings_wallpaper_color_dialog")
+        click("settings_back")
+        click("settings_back")
+        click("settings_back")
+        awaitTagGone("wallpaper_workshop")
+    }
+
+    fun selectScenicWallpaper() {
         scrollToAndClick("settings_wallpaper_picker")
         scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_preset_japanese_countryside")
         click("settings_wallpaper_preset_japanese_countryside")
@@ -350,6 +404,21 @@ internal class SettingsRobot(
         scrollContainerTo("settings_wallpaper_list", "settings_wallpaper_done")
         click("settings_wallpaper_done")
         awaitTagGone("settings_wallpaper_sheet")
+    }
+
+    fun reapplyGlobalWallpaper(id: String) {
+        openWallpaperWorkshop()
+        openWallpaperCard("wallpaper_saved_$id")
+        click("wallpaper_detail_apply")
+        awaitTagGone("wallpaper_workshop")
+    }
+
+    fun applyConversationWallpaper(choiceTag: String) {
+        click("chat_overflow")
+        click("chat_wallpaper_menu")
+        openWallpaperCard(choiceTag)
+        click("wallpaper_detail_apply")
+        awaitTagGone("wallpaper_workshop")
     }
 
     fun selectComfortableBubbleColors() {

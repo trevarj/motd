@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.settings
 
+import android.content.Context
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
@@ -55,6 +56,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.FolderIconKind
 import io.github.trevarj.motd.data.emoji.EmojiDownloadProgress
@@ -1260,14 +1262,22 @@ class AppearanceFolderLayoutUiTest {
     }
 
     @Test
-    fun wallpaperPreviewKeepsImmediateEditsAcrossStaleEmissionsAndExplicitImport() {
-        val appearance = mutableStateOf(AppearanceConfig())
+    fun wallpaperPreviewKeepsImmediateEditsAcrossStaleEmissionsAndClosesBeforeWorkshop() {
+        val appearance = mutableStateOf(AppearanceConfig(wallpaper = WallpaperSelection(scenicAnimationEnabled = false)))
         val imported = mutableStateOf<WallpaperSelection?>(null)
         var applied: WallpaperSelection? = null
         var changes = 0
+        var workshopOpens = 0
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val entries = buildSettingsSearchEntries(emptyList(), { context.getString(it) }, { network, section -> "$network · $section" })
+        val destination = SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.WALLPAPER)
+        for (query in listOf("wallpaper workshop", "workshop", "pattern", "icon", "svg")) {
+            assertTrue("Wallpaper search should match '$query'", searchSettings(query, entries).any { it.destination == destination })
+        }
         setContent(
             appearanceProvider = { appearance.value },
             importedWallpaperProvider = { imported.value },
+            onOpenWallpaperWorkshop = { workshopOpens++ },
             onWallpaper = {
                 changes++
                 applied = it
@@ -1280,17 +1290,14 @@ class AppearanceFolderLayoutUiTest {
         )
         compose.onNodeWithTag("settings_wallpaper_picker").performScrollTo().performClick()
         val list = compose.onNodeWithTag("settings_wallpaper_list")
-        list.performScrollToNode(hasTestTag("settings_wallpaper_preset_deep_space"))
-        compose.onNodeWithTag("settings_wallpaper_preset_deep_space").performClick()
+        list.performScrollToNode(hasTestTag("settings_wallpaper_preset_rainy_cafe"))
+        compose.onNodeWithTag("settings_wallpaper_preset_rainy_cafe").performClick().assertIsSelected()
         list.performScrollToNode(hasTestTag("settings_wallpaper_intensity"))
         compose.onNodeWithTag("settings_wallpaper_intensity").performSemanticsAction(SemanticsActions.SetProgress) { it(80f) }
-        list.performScrollToNode(hasTestTag("settings_wallpaper_outline_color"))
-        compose.onNodeWithTag("settings_wallpaper_outline_color").performClick()
-        compose.onNodeWithTag("settings_wallpaper_color_hex").performScrollTo().performTextReplacement("#12AB34")
-        compose.onNodeWithTag("settings_wallpaper_color_apply").performClick()
-        assertEquals(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80, outlineColor = 0xff12ab34.toInt()), applied)
+        val scenic = WallpaperSelection(ChatWallpaperPreset.RAINY_CAFE, 80, scenicAnimationEnabled = false)
+        assertEquals(scenic, applied)
         compose.runOnIdle {
-            imported.value = WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80, "12345678-1234-1234-1234-123456789abc.image", 0xff12ab34.toInt())
+            imported.value = scenic.copy(localImageName = "12345678-1234-1234-1234-123456789abc.image")
         }
         list.performScrollToNode(hasTestTag("settings_wallpaper_remove"))
         compose.onNodeWithTag("settings_wallpaper_remove").assertIsEnabled()
@@ -1300,10 +1307,12 @@ class AppearanceFolderLayoutUiTest {
         compose.onNodeWithTag("settings_wallpaper_picker").performScrollTo().performClick()
         list.performScrollToNode(hasTestTag("settings_wallpaper_remove"))
         compose.onNodeWithTag("settings_wallpaper_remove").performClick()
-        assertEquals(WallpaperSelection(ChatWallpaperPreset.DEEP_SPACE, 80, outlineColor = 0xff12ab34.toInt()), applied)
-        list.performScrollToNode(hasTestTag("settings_wallpaper_done"))
-        compose.onNodeWithTag("settings_wallpaper_done").performClick()
-        compose.onNodeWithTag("settings_chat_preview_inline_wallpaper_deep_space_80").performScrollTo().assertIsDisplayed()
+        assertEquals(scenic, applied)
+        list.performScrollToNode(hasTestTag("settings_wallpaper_workshop"))
+        compose.onNodeWithTag("settings_wallpaper_workshop").performClick()
+        compose.onNodeWithTag("settings_wallpaper_sheet").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(1, workshopOpens) }
+        compose.onNodeWithTag("settings_chat_preview_inline_wallpaper_rainy_cafe_80").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -1635,6 +1644,7 @@ class AppearanceFolderLayoutUiTest {
         onUseThemeTextColors: (Boolean) -> Unit = {},
         onAdjustPaletteReadability: (Boolean) -> Unit = {},
         onOpenSurfaceEffects: (SettingsTarget?) -> Unit = {},
+        onOpenWallpaperWorkshop: () -> Unit = {},
         onWallpaper: (WallpaperSelection) -> Unit = {},
         importedWallpaperProvider: () -> WallpaperSelection? = { null },
         targetProvider: () -> SettingsTarget? = { null },
@@ -1691,6 +1701,7 @@ class AppearanceFolderLayoutUiTest {
                         onNickMentionStyle = onNickMentionStyle,
                         onTypingIndicatorPlacement = onTypingIndicatorPlacement,
                         onWallpaper = onWallpaper,
+                        onOpenWallpaperWorkshop = onOpenWallpaperWorkshop,
                         importedWallpaper = importedWallpaperProvider(),
                         onUiFontScale = {},
                         onConversationFontScale = {},

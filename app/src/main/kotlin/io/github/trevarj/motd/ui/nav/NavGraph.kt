@@ -84,6 +84,7 @@ import io.github.trevarj.motd.ui.settings.SettingsSearchDestination
 import io.github.trevarj.motd.ui.settings.SettingsSearchPage
 import io.github.trevarj.motd.ui.settings.SurfaceEffectsSettingsScreen
 import io.github.trevarj.motd.ui.settings.UploadsSettingsScreen
+import io.github.trevarj.motd.ui.settings.WallpaperWorkshopScreen
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkScreen
 import io.github.trevarj.motd.ui.settings.bouncer.BouncerNetworksScreen
 import io.github.trevarj.motd.ui.settings.labs.AiLabsScreen
@@ -308,6 +309,7 @@ fun MotdNavGraph(
                                     null
                                 },
                             onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
+                            onOpenWallpaperWorkshop = { navController.navigate(WallpaperWorkshopRoute(it)) },
                             onOpenSearch = { navController.navigate(SearchRoute(it)) },
                             onOpenImage = { url, networkId ->
                                 navController.navigate(ImageViewerRoute(url, networkId))
@@ -418,11 +420,15 @@ fun MotdNavGraph(
                 onBack = { navController.popBackStack() },
                 onOpenNickColors = { navController.navigate(NickColorsRoute) },
                 onOpenPalettes = { navController.navigate(PaletteHubRoute) },
+                onOpenWallpaperWorkshop = { navController.navigate(WallpaperWorkshopRoute()) },
                 onOpenSurfaceEffects = {
                     openedEffectsTarget = true
                     navController.navigate(SurfaceEffectsRoute(it))
                 },
             )
+        }
+        composable<WallpaperWorkshopRoute> { entry ->
+            WallpaperWorkshopScreen(viewModel = hiltViewModel(entry), onBack = { navController.popBackStack() })
         }
         composable<PaletteHubRoute> {
             PaletteHubScreen(

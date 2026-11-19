@@ -7,11 +7,9 @@ import { crc32, deflateSync } from "node:zlib";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const atlasDir = path.join(root, "tools/wallpapers/atlases");
-// Drafts can be exported outside app assets for gallery review. Keep the
-// default destination stable so existing builtins remain byte-for-byte stable.
 const outDir = process.env.WALLPAPER_OUTPUT_DIR
   ? path.resolve(root, process.env.WALLPAPER_OUTPUT_DIR)
-  : path.join(root, "app/src/main/assets/chat-wallpapers");
+  : path.join(root, "build/wallpaper-previews/legacy-finals");
 const previewDir = path.join(root, "build/wallpaper-previews/export-qa");
 const builtinNames = ["motd", "deep-space", "retro-gaming", "radio-club", "internet-oddities", "retro-chat", "memes", "linux", "systemcrafters"];
 const names = builtinNames;

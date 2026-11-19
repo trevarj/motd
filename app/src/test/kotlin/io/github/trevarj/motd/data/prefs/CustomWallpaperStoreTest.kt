@@ -129,7 +129,7 @@ class CustomWallpaperStoreTest {
         runTest {
             Dispatchers.setMain(StandardTestDispatcher(testScheduler))
             val initialName = store.import(Uri.fromFile(source)).getOrThrow()
-            val initial = WallpaperSelection(ChatWallpaperPreset.RETRO_CHAT, 73, initialName)
+            val initial = WallpaperSelection(ChatWallpaperPreset.PATTERN, 73, initialName)
             val configFlow = MutableStateFlow(AppearanceConfig(wallpaper = initial))
             var reject = true
             var persistenceStarted: CompletableDeferred<Unit>? = null
@@ -152,7 +152,14 @@ class CustomWallpaperStoreTest {
                         configFlow.value = configFlow.value.copy(wallpaper = selection)
                     }
                 }
-            val vm = AppearanceSettingsViewModel(DataStoreSettingsRepository(context), prefs, CustomFontStore(context), store, EmojiSetStore(context))
+            val vm =
+                AppearanceSettingsViewModel(
+                    DataStoreSettingsRepository(context),
+                    prefs,
+                    CustomFontStore(context),
+                    WallpaperWorkshopStore(context, prefs, store),
+                    EmojiSetStore(context),
+                )
             try {
                 vm.importWallpaper(Uri.fromFile(source)).join()
                 assertEquals(initial, configFlow.value.wallpaper)

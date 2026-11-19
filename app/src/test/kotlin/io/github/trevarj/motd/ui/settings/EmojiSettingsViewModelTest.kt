@@ -13,6 +13,7 @@ import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.AppearancePrefsImpl
 import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.WallpaperWorkshopStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
@@ -109,7 +110,7 @@ class EmojiSettingsViewModelTest {
                     DataStoreSettingsRepository(context),
                     prefs,
                     CustomFontStore(context),
-                    CustomWallpaperStore(context),
+                    WallpaperWorkshopStore(context, prefs, CustomWallpaperStore(context)),
                     store,
                 )
             models += model

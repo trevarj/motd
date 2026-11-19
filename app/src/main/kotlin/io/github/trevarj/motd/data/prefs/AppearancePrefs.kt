@@ -249,15 +249,7 @@ fun prepareLocalPaletteSave(
 @Serializable(with = ChatWallpaperPresetSerializer::class)
 enum class ChatWallpaperPreset {
     NONE,
-    MOTD,
-    DEEP_SPACE,
-    RETRO_GAMING,
-    RADIO_CLUB,
-    INTERNET_ODDITIES,
-    RETRO_CHAT,
-    MEMES,
-    LINUX,
-    SYSTEMCRAFTERS,
+    PATTERN,
     JAPANESE_COUNTRYSIDE,
     RAINY_CAFE,
     MOTD_ARCADE,
@@ -265,26 +257,16 @@ enum class ChatWallpaperPreset {
     CYBERPUNK_CANAL,
 }
 
-/** Decode current wallpaper names plus the seven retired SVG selections from preferences and backups. */
+/** Retired patterns and unrecognized names use the default MOTD recipe. */
 internal fun chatWallpaperPresetFromStored(saved: String?): ChatWallpaperPreset =
     when (saved) {
         "NONE" -> ChatWallpaperPreset.NONE
-        "MOTD", "NIGHT_SHIFT", "TERMINAL" -> ChatWallpaperPreset.MOTD
-        "DEEP_SPACE" -> ChatWallpaperPreset.DEEP_SPACE
-        "RETRO_GAMING", "PIXELS" -> ChatWallpaperPreset.RETRO_GAMING
-        "RADIO_CLUB", "SIGNALS" -> ChatWallpaperPreset.RADIO_CLUB
-        "INTERNET_ODDITIES", "RELAY" -> ChatWallpaperPreset.INTERNET_ODDITIES
-        "RETRO_CHAT", "CHATTER", "CHANNELS" -> ChatWallpaperPreset.RETRO_CHAT
-        "MEMES" -> ChatWallpaperPreset.MEMES
-        "LINUX" -> ChatWallpaperPreset.LINUX
-        "SYSTEMCRAFTERS" -> ChatWallpaperPreset.SYSTEMCRAFTERS
         "JAPANESE_COUNTRYSIDE" -> ChatWallpaperPreset.JAPANESE_COUNTRYSIDE
         "RAINY_CAFE" -> ChatWallpaperPreset.RAINY_CAFE
         "MOTD_ARCADE" -> ChatWallpaperPreset.MOTD_ARCADE
         "MIDNIGHT_TERMINAL" -> ChatWallpaperPreset.MIDNIGHT_TERMINAL
         "CYBERPUNK_CANAL" -> ChatWallpaperPreset.CYBERPUNK_CANAL
-        null -> ChatWallpaperPreset.MOTD
-        else -> ChatWallpaperPreset.MOTD
+        else -> ChatWallpaperPreset.PATTERN
     }
 
 internal object ChatWallpaperPresetSerializer : KSerializer<ChatWallpaperPreset> {
@@ -353,7 +335,7 @@ enum class SplashScreenAnimation { EDGE_TRACE, SOFT_WASH, TRAVELING_PULSE, STATI
 
 @Serializable
 data class WallpaperSelection(
-    val preset: ChatWallpaperPreset = ChatWallpaperPreset.MOTD,
+    val preset: ChatWallpaperPreset = ChatWallpaperPreset.PATTERN,
     val intensity: Int = DEFAULT_WALLPAPER_INTENSITY,
     // Local-only; portable backups retain the builtin fallback instead of a private file reference.
     @Transient val localImageName: String? = null,
@@ -363,6 +345,7 @@ data class WallpaperSelection(
     val scenicFollowSystem: Boolean = true,
     // Static scenic artwork remains available when rare authored events are disabled.
     val scenicAnimationEnabled: Boolean = true,
+    val patternRef: WallpaperPatternRef? = null,
 ) {
     fun normalized() = copy(intensity = intensity.coerceIn(0, 100), outlineColor = outlineColor?.or(0xff000000.toInt()))
 }
@@ -450,6 +433,8 @@ data class AppearanceConfig(
     val lightPalette: PaletteChoice? = null,
     val darkPalette: PaletteChoice? = null,
     @Transient val customPaletteReadError: PaletteReadError? = null,
+    val wallpaperLibrary: WallpaperLibrary? = null,
+    @Transient val wallpaperLibraryReadError: WallpaperLibraryReadError? = null,
 )
 
 interface AppearancePrefs {

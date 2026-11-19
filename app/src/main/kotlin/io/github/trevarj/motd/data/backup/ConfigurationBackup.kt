@@ -22,11 +22,15 @@ import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.ChatSoundConfig
 import io.github.trevarj.motd.data.prefs.ChatSoundPrefs
+import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.DEFAULT_WALLPAPER_INTENSITY
 import io.github.trevarj.motd.data.prefs.InstalledPalette
 import io.github.trevarj.motd.data.prefs.LauncherIcon
+import io.github.trevarj.motd.data.prefs.MAX_WALLPAPER_DESIGNS
+import io.github.trevarj.motd.data.prefs.MAX_WALLPAPER_IMPORTS
 import io.github.trevarj.motd.data.prefs.PaletteChoice
 import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.PaletteSelection
@@ -35,9 +39,21 @@ import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.prefs.WallpaperChatChoice
+import io.github.trevarj.motd.data.prefs.WallpaperLibrary
+import io.github.trevarj.motd.data.prefs.WallpaperLibraryException
+import io.github.trevarj.motd.data.prefs.WallpaperLibrarySnapshot
+import io.github.trevarj.motd.data.prefs.WallpaperPatternRef
+import io.github.trevarj.motd.data.prefs.WallpaperPatternRefKind
+import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.WallpaperWorkshopStore
+import io.github.trevarj.motd.data.prefs.chatWallpaperPresetFromStored
 import io.github.trevarj.motd.data.prefs.decodePalette
 import io.github.trevarj.motd.data.prefs.decodePaletteTree
+import io.github.trevarj.motd.data.prefs.decodeWallpaperValue
 import io.github.trevarj.motd.data.prefs.encodePalette
+import io.github.trevarj.motd.data.prefs.encodeWallpaperLibrary
+import io.github.trevarj.motd.data.prefs.isValidIn
 import io.github.trevarj.motd.data.prefs.normalizeEmojiSetId
 import io.github.trevarj.motd.data.prefs.normalizePaletteSelection
 import io.github.trevarj.motd.data.prefs.paletteSelection
@@ -48,8 +64,11 @@ import io.github.trevarj.motd.data.repo.ChatFolderRepository
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.data.repo.FolderPortableAssignment
 import io.github.trevarj.motd.data.repo.FolderPortableDefinition
+import io.github.trevarj.motd.data.repo.MAX_CHAT_WALLPAPER_ASSIGNMENTS
 import io.github.trevarj.motd.data.repo.PortableChatPlacement
+import io.github.trevarj.motd.data.repo.PortableChatWallpaper
 import io.github.trevarj.motd.data.repo.networkIdentityKey
+import io.github.trevarj.motd.data.repo.validatePortableChatIdentity
 import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.gesture.GestureMenuConfig
 import io.github.trevarj.motd.gesture.GesturePrefs
@@ -76,7 +95,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val FORMAT_VERSION = 1
-private const val MAX_DOCUMENT_BYTES = 4 * 1024 * 1024
+internal const val MAX_BACKUP_DOCUMENT_BYTES = 4 * 1024 * 1024
 private const val MAX_DECRYPTED_BYTES = 2 * 1024 * 1024
 private const val MAX_NETWORKS = 512
 private const val MAX_FOLDERS = 512
@@ -95,9 +114,19 @@ enum class BackupExportMode { CREDENTIALS_EXCLUDED, ENCRYPTED_WITH_CREDENTIALS }
 enum class BackupImportMode { MERGE, REPLACE }
 
 /** Valid backup envelope or payload that this build cannot safely accept. */
-internal class BackupFormatException(
+internal open class BackupFormatException(
     cause: Exception? = null,
 ) : IllegalArgumentException(cause)
+
+internal class BackupDocumentTooLargeException : BackupFormatException()
+
+internal class BackupLocalWallpaperLibraryException(
+    cause: WallpaperLibraryException,
+) : IllegalStateException(cause)
+
+internal class BackupWallpaperMergeException(
+    cause: IllegalArgumentException,
+) : BackupFormatException(cause)
 
 data class ConfigurationImportPreview(
     val appVersion: String,
@@ -158,6 +187,7 @@ class ConfigurationBackupRepositoryImpl
         private val avatarPrefs: AvatarPrefs,
         private val bouncerKindPrefs: BouncerKindPrefs,
         private val gesturePrefs: GesturePrefs,
+        private val wallpaperStore: WallpaperWorkshopStore,
         private val chatFolders: ChatFolderRepository = ChatFolderRepository(db),
     ) : ConfigurationBackupRepository {
         private val json =
@@ -172,6 +202,7 @@ class ConfigurationBackupRepositoryImpl
                 ignoreUnknownKeys = true
             }
         private val random = SecureRandom()
+        private val buffers = BufferStore(db)
 
         override suspend fun exportToString(
             mode: BackupExportMode,
@@ -187,9 +218,11 @@ class ConfigurationBackupRepositoryImpl
             val payload = snapshotPayload(includeSecrets)
             val envelope =
                 if (includeSecrets) {
+                    val plainText = compactJson.encodeToString(payload).encodeToByteArray()
+                    if (plainText.size > MAX_DECRYPTED_BYTES) throw BackupDocumentTooLargeException()
                     val encryptedPayload =
                         encryptPayload(
-                            compactJson.encodeToString(payload).encodeToByteArray(),
+                            plainText,
                             password.orEmpty(),
                             BuildConfig.VERSION_NAME,
                             nowEpochMillis,
@@ -208,7 +241,10 @@ class ConfigurationBackupRepositoryImpl
                         payload = payload,
                     )
                 }
-            return json.encodeToString(envelope)
+            val document = json.encodeToString(envelope)
+            if (document.encodeToByteArray().size > MAX_BACKUP_DOCUMENT_BYTES) throw BackupDocumentTooLargeException()
+            validatePayload(payload)
+            return document
         }
 
         override fun isEncrypted(rawDocument: String): Boolean = decodeEnvelope(parseBackupDocument(rawDocument)).mode == BackupEnvelopeMode.ENCRYPTED_WITH_CREDENTIALS
@@ -219,8 +255,9 @@ class ConfigurationBackupRepositoryImpl
             importMode: BackupImportMode,
         ): ConfigurationImportPreview {
             val decoded = decodeDocument(rawDocument, password)
-            val plan = planImport(decoded.payload, importMode)
+            val plan = planImport(decoded.payload, importMode, db.networkDao().allNow())
             preflightPalettes(decoded.payload.settings.appearance, importMode)
+            preflightWallpaper(decoded.payload, importMode, plan)
             return ConfigurationImportPreview(
                 appVersion = decoded.envelope.appVersion,
                 exportedAtEpochMillis = decoded.envelope.exportedAtEpochMillis,
@@ -243,63 +280,43 @@ class ConfigurationBackupRepositoryImpl
             importMode: BackupImportMode,
         ): ConfigurationImportResult {
             val decoded = decodeDocument(rawDocument, password)
-            validatePayload(decoded.payload)
-            val plan = planImport(decoded.payload, importMode)
+            val plan = planImport(decoded.payload, importMode, db.networkDao().allNow())
             val paletteRestore = preflightPalettes(decoded.payload.settings.appearance, importMode)
 
-            applySettings(
-                decoded.payload.settings,
-                includeSecrets = decoded.envelope.mode == BackupEnvelopeMode.ENCRYPTED_WITH_CREDENTIALS,
-                paletteRestore = paletteRestore,
-                launcherIcon = decoded.launcherIcon,
-            )
-            val idMap = mutableMapOf<String, Long>()
-            val importedIds = mutableSetOf<Long>()
-            db.withTransaction {
-                val current = db.networkDao().allNow()
-                val rootsAndDirect =
-                    decoded.payload.networks
-                        .filter { it.role != NetworkRole.BOUNCER_CHILD }
-                        .sortedBy { it.ordering }
-                rootsAndDirect.forEach { portable ->
-                    val resolved =
-                        portable.toEntity(
-                            includeSecrets = decoded.envelope.mode == BackupEnvelopeMode.ENCRYPTED_WITH_CREDENTIALS,
-                            parentId = null,
-                            local = matchTopLevel(portable, current),
-                        )
-                    val id = upsertResolvedNetwork(resolved)
-                    idMap[portable.exportId] = id
-                    importedIds += id
-                }
-                decoded.payload.networks
-                    .filter { it.role == NetworkRole.BOUNCER_CHILD }
-                    .sortedBy { it.ordering }
-                    .forEach { portable ->
-                        val parentId = idMap[portable.parentExportId] ?: return@forEach
-                        val local =
-                            current.firstOrNull {
-                                it.role == NetworkRole.BOUNCER_CHILD &&
-                                    it.parentId == parentId &&
-                                    it.bouncerNetId == portable.bouncerNetId
+            val wallpaperRestore = preflightWallpaper(decoded.payload, importMode, plan)
+            val includeSecrets = decoded.envelope.mode == BackupEnvelopeMode.ENCRYPTED_WITH_CREDENTIALS
+            val replace = importMode == BackupImportMode.REPLACE
+
+            suspend fun settings() {
+                applySettings(decoded.payload.settings, includeSecrets, paletteRestore, decoded.launcherIcon)
+            }
+            lateinit var idMap: Map<String, Long>
+            if (wallpaperRestore == null) {
+                settings()
+                idMap = restoreNetworks(decoded.payload, includeSecrets, importMode)
+            } else {
+                wallpaperStore.restore(
+                    expected = wallpaperRestore.expected,
+                    library = wallpaperRestore.library,
+                    selection = wallpaperRestore.selection,
+                    replace = replace,
+                    beforeCommit = {
+                        idMap =
+                            restoreNetworks(decoded.payload, includeSecrets, importMode) { current ->
+                                preflightWallpaperAssignments(wallpaperRestore, current, replace)
                             }
-                        val resolved =
-                            portable.toEntity(
-                                includeSecrets = decoded.envelope.mode == BackupEnvelopeMode.ENCRYPTED_WITH_CREDENTIALS,
-                                parentId = parentId,
-                                local = local,
+                    },
+                    afterCommit = {
+                        if (wallpaperRestore.library != null) {
+                            buffers.restoreChatWallpaperAssignments(
+                                wallpaperRestore.assignments.map { it.toRepository(idMap.getValue(it.networkExportId)) },
+                                replace,
+                                wallpaperRestore.library,
                             )
-                        val id = upsertResolvedNetwork(resolved)
-                        idMap[portable.exportId] = id
-                        importedIds += id
-                    }
-                if (importMode == BackupImportMode.REPLACE) {
-                    current
-                        .asSequence()
-                        .filter { it.id !in importedIds }
-                        .filter { it.parentId == null || it.parentId !in importedIds }
-                        .forEach { db.networkDao().deleteLocalTree(it.id) }
-                }
+                        }
+                    },
+                )
+                settings()
             }
             chatFolders.restore(
                 folders = decoded.payload.folders.map(PortableFolder::toRepository),
@@ -315,7 +332,7 @@ class ConfigurationBackupRepositoryImpl
                 replace = importMode == BackupImportMode.REPLACE,
             )
             decoded.payload.chatPlacements?.let { placements ->
-                BufferStore(db).restoreChatPlacements(
+                buffers.restoreChatPlacements(
                     placements =
                         placements.map { placement ->
                             placement.toRepository(idMap.getValue(placement.networkExportId))
@@ -332,11 +349,49 @@ class ConfigurationBackupRepositoryImpl
             )
         }
 
+        private suspend fun restoreNetworks(
+            payload: BackupPayload,
+            includeSecrets: Boolean,
+            importMode: BackupImportMode,
+            preflight: suspend (ImportPlan) -> Unit = {},
+        ): Map<String, Long> =
+            db.withTransaction {
+                val current = db.networkDao().allNow()
+                val plan = planImport(payload, importMode, current)
+                preflight(plan)
+                val existing = current.associateBy(NetworkEntity::id)
+                val idMap = mutableMapOf<String, Long>()
+                val byOrder = payload.networks.sortedBy(PortableNetwork::ordering)
+
+                suspend fun restore(
+                    portable: PortableNetwork,
+                    parentId: Long?,
+                ) {
+                    val local = existing[plan.networkIds.getValue(portable.exportId)]
+                    idMap[portable.exportId] = upsertResolvedNetwork(portable.toEntity(includeSecrets, parentId, local))
+                }
+                byOrder.filter { it.role != NetworkRole.BOUNCER_CHILD }.forEach { restore(it, null) }
+                byOrder.filter { it.role == NetworkRole.BOUNCER_CHILD }.forEach { portable ->
+                    restore(portable, idMap.getValue(requireNotNull(portable.parentExportId)))
+                }
+                if (importMode == BackupImportMode.REPLACE) {
+                    val importedIds = idMap.values.toSet()
+                    current
+                        .asSequence()
+                        .filter { it.id !in importedIds }
+                        .filter { it.parentId == null || it.parentId !in importedIds }
+                        .forEach { db.networkDao().deleteLocalTree(it.id) }
+                }
+                idMap
+            }
+
         private suspend fun snapshotPayload(includeSecrets: Boolean): BackupPayload {
             val networks = db.networkDao().allNow().sortedWith(compareBy<NetworkEntity> { it.parentId ?: 0L }.thenBy { it.ordering })
             val exportIds = networks.associate { it.id to "network-${it.id}" }
             val zncIds = bouncerKindPrefs.zncNetworkIds.first()
             val folderSnapshot = chatFolders.backupSnapshot()
+            val appearance = snapshotAppearance()
+            val library = requireNotNull(appearance.wallpaperLibrary)
             val selfAvatars =
                 networks.mapNotNull { network ->
                     val setting = avatarPrefs.selfSetting(network.id).first()
@@ -352,8 +407,12 @@ class ConfigurationBackupRepositoryImpl
             return BackupPayload(
                 networks = networks.map { it.toPortable(exportIds, includeSecrets, zncIds) },
                 chatPlacements =
-                    BufferStore(db).chatPlacementSnapshot().mapNotNull { placement ->
+                    buffers.chatPlacementSnapshot().mapNotNull { placement ->
                         exportIds[placement.networkId]?.let { PortablePlacement.fromRepository(placement, it) }
+                    },
+                chatWallpaperAssignments =
+                    buffers.chatWallpaperSnapshot(library).mapNotNull { assignment ->
+                        exportIds[assignment.networkId]?.let { PortableWallpaperAssignment.fromRepository(assignment, it) }
                     },
                 folders = folderSnapshot.folders.map(PortableFolder::fromRepository),
                 folderAssignments =
@@ -367,7 +426,7 @@ class ConfigurationBackupRepositoryImpl
                 settings =
                     PortableSettings(
                         general = settingsRepository.settings.first(),
-                        appearance = snapshotAppearance(),
+                        appearance = appearance,
                         contentPreviews = contentPreviewPrefs.config.first(),
                         chatSounds = chatSoundPrefs.config.first(),
                         replies = replyPrefs.config.first(),
@@ -392,6 +451,17 @@ class ConfigurationBackupRepositoryImpl
 
         private suspend fun snapshotAppearance(): AppearanceConfig {
             val appearance = appearancePrefs.config.first()
+            appearance.wallpaperLibraryReadError?.let {
+                throw BackupLocalWallpaperLibraryException(WallpaperLibraryException(it))
+            }
+            val library = requireNotNull(appearance.wallpaperLibrary)
+            val selected = appearance.wallpaper.copy(localImageName = null)
+            val wallpaper =
+                if (selected.patternRef != null && (selected.preset != ChatWallpaperPreset.PATTERN || !selected.patternRef.isValidIn(library))) {
+                    selected.copy(patternRef = null, intensity = DEFAULT_WALLPAPER_INTENSITY, outlineColor = null)
+                } else {
+                    selected
+                }
             require(appearance.customPaletteReadError == null) { "Installed palettes cannot be read." }
             validateInstalledPalettes(appearance.customPalettes)
             val selection = appearance.paletteSelection
@@ -419,6 +489,8 @@ class ConfigurationBackupRepositoryImpl
                 darkPalette = selection.dark,
                 customPalettes = appearance.customPalettes.map(::canonicalPalette),
                 trueBlack = appearance.trueBlack || (appearance.paletteMode == null && appearance.theme == ColorThemePreset.AMOLED),
+                wallpaper = wallpaper,
+                wallpaperLibrary = library,
             )
         }
 
@@ -467,8 +539,153 @@ class ConfigurationBackupRepositoryImpl
             return PaletteRestore(target, normalizePaletteSelection(remapped, target))
         }
 
+        private suspend fun preflightWallpaper(
+            payload: BackupPayload,
+            importMode: BackupImportMode,
+            plan: ImportPlan,
+        ): WallpaperRestore? {
+            val appearance = payload.settings.appearance
+            val incoming = appearance?.wallpaperLibrary
+            val replace = importMode == BackupImportMode.REPLACE
+            val expected = wallpaperStore.librarySnapshot()
+            val current =
+                if (replace && incoming != null) {
+                    null // A validated modern replacement is the recovery path for a damaged local library.
+                } else {
+                    try {
+                        expected.requireLibrary()
+                    } catch (failure: WallpaperLibraryException) {
+                        throw BackupLocalWallpaperLibraryException(failure)
+                    }
+                }
+            if (appearance == null) return null
+            val selection = appearance.wallpaper
+            if (incoming == null) return WallpaperRestore(expected, null, selection, emptyList())
+
+            try {
+                val remaps = mutableMapOf<String, String>()
+                val target =
+                    when {
+                        current == null -> incoming
+                        incoming.designs.isEmpty() -> current
+                        else -> mergeWallpaperLibraries(current, incoming, remaps)
+                    }
+
+                fun WallpaperPatternRef.remap(): WallpaperPatternRef = if (kind == WallpaperPatternRefKind.SAVED) remaps[id]?.let { copy(id = it) } ?: this else this
+                val assignments = requireNotNull(payload.chatWallpaperAssignments)
+                val restore =
+                    if (remaps.isEmpty()) {
+                        WallpaperRestore(expected, target, selection, assignments)
+                    } else {
+                        val remappedAssignments =
+                            assignments.map { assignment ->
+                                val ref = assignment.choice.pattern
+                                val mapped = ref?.remap()
+                                if (mapped === ref) assignment else assignment.copy(choice = assignment.choice.copy(pattern = mapped))
+                            }
+                        WallpaperRestore(expected, target, selection.copy(patternRef = selection.patternRef?.remap()), remappedAssignments)
+                    }
+                preflightWallpaperAssignments(restore, plan, replace)
+                return restore
+            } catch (failure: IllegalArgumentException) {
+                if (!replace) throw BackupWallpaperMergeException(failure)
+                throw BackupFormatException(failure)
+            }
+        }
+
+        private fun mergeWallpaperLibraries(
+            current: WallpaperLibrary,
+            incoming: WallpaperLibrary,
+            remaps: MutableMap<String, String>,
+        ): WallpaperLibrary {
+            val designs = current.designs.associateBy { it.id }.toMutableMap()
+            val reserved = designs.keys.toMutableSet()
+            incoming.designs.mapTo(reserved) { it.id }
+            for (design in incoming.designs) {
+                val previous = designs[design.id]
+                if (previous == null) {
+                    designs[design.id] = design
+                } else if (previous != design) {
+                    var id: String
+                    do {
+                        id = UUID.randomUUID().toString()
+                    } while (!reserved.add(id))
+                    remaps[design.id] = id
+                    designs[id] = design.copy(id = id)
+                }
+            }
+            val imports = current.imports.associateBy { it.id }.toMutableMap()
+            for (icon in incoming.imports) {
+                val previous = imports[icon.id]
+                if (previous == null) {
+                    imports[icon.id] = icon
+                } else {
+                    require(previous.svg == icon.svg) { "Wallpaper icon digest matches different SVG bytes." }
+                }
+            }
+            return WallpaperLibrary(designs = designs.values.toList(), imports = imports.values.toList()).also {
+                encodeWallpaperLibrary(it)
+            }
+        }
+
+        private suspend fun preflightWallpaperAssignments(
+            restore: WallpaperRestore,
+            plan: ImportPlan,
+            replace: Boolean,
+        ) {
+            val library = restore.library ?: return
+            buffers.preflightChatWallpaperAssignments(
+                restore.assignments.map { it.toRepository(plan.networkIds.getValue(it.networkExportId)) },
+                replace,
+                library,
+            )
+        }
+
+        private fun validatePayloadTree(tree: JsonElement): JsonElement {
+            try {
+                validateWallpaperStateTree(tree as? JsonObject ?: throw BackupFormatException())
+            } catch (failure: IllegalArgumentException) {
+                throw BackupFormatException(failure)
+            }
+            return validatePaletteStateTree(tree)
+        }
+
+        private fun validateWallpaperStateTree(payload: JsonObject) {
+            val appearance = (payload["settings"] as? JsonObject)?.get("appearance") as? JsonObject
+            val library = appearance?.get("wallpaperLibrary")?.takeUnless { it == JsonNull }
+            val assignments = payload["chatWallpaperAssignments"]?.takeUnless { it == JsonNull }
+            require((library == null) == (assignments == null)) { "Wallpaper library and assignments must be present together." }
+            if (library != null) {
+                require(library is JsonObject)
+                for ((key, limit) in listOf("designs" to MAX_WALLPAPER_DESIGNS, "imports" to MAX_WALLPAPER_IMPORTS)) {
+                    library[key]?.let { require(it is JsonArray && it.size <= limit) }
+                }
+                decodeWallpaperValue<WallpaperLibrary>(library)
+                require(assignments is JsonArray && assignments.size <= MAX_CHAT_WALLPAPER_ASSIGNMENTS)
+                assignments.forEach { decodeWallpaperValue<PortableWallpaperAssignment>(it) }
+            }
+            appearance?.get("wallpaper")?.let { raw ->
+                require(raw is JsonObject)
+                val ref = raw["patternRef"]?.takeUnless { it == JsonNull }
+                val preset = raw["preset"]
+                require(ref == null || (library != null && preset == JsonPrimitive("PATTERN")))
+                // The preset decoder intentionally accepts legacy and future names. Other fields
+                // use the strict Workshop profile rather than JSON primitive coercion.
+                val canonical =
+                    if (preset == null) {
+                        raw
+                    } else {
+                        require(preset is JsonPrimitive && preset.isString)
+                        JsonObject(raw + ("preset" to JsonPrimitive(chatWallpaperPresetFromStored(preset.content).name)))
+                    }
+                decodeWallpaperValue<WallpaperSelection>(canonical)
+            }
+        }
+
         private fun parseBackupDocument(rawDocument: String): JsonObject {
-            if (rawDocument.encodeToByteArray().size > MAX_DOCUMENT_BYTES) throw BackupFormatException()
+            if (rawDocument.length > MAX_BACKUP_DOCUMENT_BYTES || rawDocument.encodeToByteArray().size > MAX_BACKUP_DOCUMENT_BYTES) {
+                throw BackupDocumentTooLargeException()
+            }
             return compactJson.parseToJsonElement(rawDocument) as? JsonObject ?: throw BackupFormatException()
         }
 
@@ -478,7 +695,7 @@ class ConfigurationBackupRepositoryImpl
                 if (plainPayload == null || plainPayload == JsonNull) {
                     root
                 } else {
-                    JsonObject(root + ("payload" to validatePaletteStateTree(plainPayload)))
+                    JsonObject(root + ("payload" to validatePayloadTree(plainPayload)))
                 }
             val envelope = compactJson.decodeFromJsonElement<BackupEnvelope>(validated)
             if (envelope.formatVersion != FORMAT_VERSION) throw BackupFormatException()
@@ -504,9 +721,9 @@ class ConfigurationBackupRepositoryImpl
                         require(!password.isNullOrBlank())
                         val encryptedPayload = envelope.encryptedPayload ?: throw BackupFormatException()
                         val decrypted = decryptPayload(encryptedPayload, password, envelope.appVersion, envelope.exportedAtEpochMillis)
-                        if (decrypted.size > MAX_DECRYPTED_BYTES) throw BackupFormatException()
+                        if (decrypted.size > MAX_DECRYPTED_BYTES) throw BackupDocumentTooLargeException()
                         payloadTree = compactJson.parseToJsonElement(decrypted.decodeToString(throwOnInvalidSequence = true))
-                        compactJson.decodeFromJsonElement<BackupPayload>(validatePaletteStateTree(payloadTree))
+                        compactJson.decodeFromJsonElement<BackupPayload>(validatePayloadTree(payloadTree))
                     }
                 }
             validatePayload(payload)
@@ -614,6 +831,26 @@ class ConfigurationBackupRepositoryImpl
             val networksById = payload.networks.associateBy(PortableNetwork::exportId)
             require(networksById.size == payload.networks.size) { "Backup contains duplicate network ids." }
             val idSet = networksById.keys
+            val library = payload.settings.appearance?.wallpaperLibrary
+            val assignments = payload.chatWallpaperAssignments
+            require((library == null) == (assignments == null))
+            if (library != null) encodeWallpaperLibrary(library)
+            payload.settings.appearance?.wallpaper?.let { wallpaper ->
+                require(
+                    wallpaper.patternRef == null ||
+                        (library != null && wallpaper.preset == ChatWallpaperPreset.PATTERN && wallpaper.patternRef.isValidIn(library)),
+                ) { "Backup contains an invalid global wallpaper reference." }
+            }
+            require(assignments.orEmpty().size <= MAX_CHAT_WALLPAPER_ASSIGNMENTS) { "Too many chat wallpaper assignments in backup." }
+            val wallpaperIdentities = mutableSetOf<List<Any>>()
+            assignments.orEmpty().forEach { assignment ->
+                require(assignment.networkExportId in idSet) { "Backup contains an invalid chat wallpaper network." }
+                validatePortableChatIdentity(assignment.chatType, assignment.identityKind, assignment.identityValue)
+                require(wallpaperIdentities.add(listOf(assignment.networkExportId, assignment.chatType, assignment.identityKind, assignment.identityValue))) {
+                    "Backup contains duplicate chat wallpaper assignments."
+                }
+                require(assignment.choice.pattern?.isValidIn(library) != false) { "Backup contains an invalid chat wallpaper reference." }
+            }
             payload.networks.forEach { network ->
                 require(network.exportId.isNotBlank()) { "Backup contains a network without an id." }
                 require(network.name.isNotBlank()) { "Backup contains a network without a name." }
@@ -639,14 +876,7 @@ class ConfigurationBackupRepositoryImpl
             val anchorOrders = mutableSetOf<Int>()
             payload.chatPlacements.orEmpty().forEach { placement ->
                 require(placement.networkExportId in idSet) { "Backup contains an invalid chat placement network." }
-                require(
-                    (placement.chatType == BufferType.CHANNEL && placement.identityKind == FolderIdentityKind.CHANNEL) ||
-                        (placement.chatType == BufferType.QUERY && placement.identityKind != FolderIdentityKind.CHANNEL),
-                ) { "Backup contains an invalid chat placement type." }
-                require(
-                    placement.identityValue.isNotBlank() && placement.identityValue.length <= MAX_PORTABLE_IDENTITY_LENGTH &&
-                        placement.identityValue.none(Char::isISOControl),
-                ) { "Backup contains an invalid chat placement identity." }
+                validatePortableChatIdentity(placement.chatType, placement.identityKind, placement.identityValue)
                 require(placementIdentities.add(listOf(placement.networkExportId, placement.chatType, placement.identityKind, placement.identityValue))) {
                     "Backup contains duplicate chat placements."
                 }
@@ -680,47 +910,46 @@ class ConfigurationBackupRepositoryImpl
             }
         }
 
-        private suspend fun planImport(
+        private fun planImport(
             payload: BackupPayload,
             importMode: BackupImportMode,
+            current: List<NetworkEntity>,
         ): ImportPlan {
-            val current = db.networkDao().allNow()
-            val matched = mutableSetOf<Long>()
             var added = 0
             var updated = 0
             var retainedLocalCredentials = 0
             var missingCredentialNetworks = 0
-            val parentMatches = mutableMapOf<String, Long>()
-            payload.networks.filter { it.role != NetworkRole.BOUNCER_CHILD }.forEach { portable ->
-                val local = matchTopLevel(portable, current)
+            val networkIds = LinkedHashMap<String, Long>(payload.networks.size)
+
+            fun record(
+                portable: PortableNetwork,
+                local: NetworkEntity?,
+            ) {
                 if (local == null) {
                     added++
+                    networkIds[portable.exportId] = -added.toLong()
                 } else {
                     updated++
-                    matched += local.id
-                    parentMatches[portable.exportId] = local.id
+                    networkIds[portable.exportId] = local.id
                     if (portable.retainsAnyLocalSecret(local)) retainedLocalCredentials++
                 }
                 if (portable.missingCredentials(local)) missingCredentialNetworks++
             }
+            payload.networks.filter { it.role != NetworkRole.BOUNCER_CHILD }.forEach { portable ->
+                record(portable, matchTopLevel(portable, current))
+            }
             payload.networks.filter { it.role == NetworkRole.BOUNCER_CHILD }.forEach { portable ->
-                val parentId = parentMatches[portable.parentExportId]
+                val parentId = networkIds[portable.parentExportId]
                 val local =
                     current.firstOrNull {
                         parentId != null && it.role == NetworkRole.BOUNCER_CHILD &&
                             it.parentId == parentId && it.bouncerNetId == portable.bouncerNetId
                     }
-                if (local == null) {
-                    added++
-                } else {
-                    updated++
-                    matched += local.id
-                    if (portable.retainsAnyLocalSecret(local)) retainedLocalCredentials++
-                }
-                if (portable.missingCredentials(local)) missingCredentialNetworks++
+                record(portable, local)
             }
+            val matched = networkIds.values.toSet()
             val removed = if (importMode == BackupImportMode.REPLACE) current.count { it.id !in matched } else 0
-            return ImportPlan(added, updated, removed, retainedLocalCredentials, missingCredentialNetworks)
+            return ImportPlan(added, updated, removed, retainedLocalCredentials, missingCredentialNetworks, networkIds)
         }
 
         private fun matchTopLevel(
@@ -813,7 +1042,6 @@ class ConfigurationBackupRepositoryImpl
                 appearancePrefs.setTrueBlack(it.trueBlack || (it.paletteMode == null && it.theme == ColorThemePreset.AMOLED))
                 appearancePrefs.setUseThemeTextColors(it.useThemeTextColors)
                 appearancePrefs.setAdjustPaletteReadability(it.adjustPaletteReadability)
-                appearancePrefs.setWallpaper(it.wallpaper)
                 appearancePrefs.setUiFontScale(it.uiFontScalePercent)
                 appearancePrefs.setConversationFontScale(it.conversationFontScalePercent)
                 appearancePrefs.setFontChoice(it.fontChoice)
@@ -958,6 +1186,13 @@ private data class PaletteRestore(
     val selection: PaletteSelection,
 )
 
+private data class WallpaperRestore(
+    val expected: WallpaperLibrarySnapshot,
+    val library: WallpaperLibrary?,
+    val selection: WallpaperSelection,
+    val assignments: List<PortableWallpaperAssignment>,
+)
+
 @Serializable
 private data class BackupEnvelope(
     val formatVersion: Int = FORMAT_VERSION,
@@ -997,6 +1232,7 @@ private data class BackupPayload(
     val folderAssignments: List<PortableFolderAssignment> = emptyList(),
     val ignoredAutoGroupPatterns: List<PortableIgnoredAutoGroupPattern> = emptyList(),
     val chatPlacements: List<PortablePlacement>? = null,
+    val chatWallpaperAssignments: List<PortableWallpaperAssignment>? = null,
 )
 
 @Serializable
@@ -1015,6 +1251,24 @@ private data class PortablePlacement(
             placement: PortableChatPlacement,
             networkExportId: String,
         ) = PortablePlacement(networkExportId, placement.chatType, placement.identityKind, placement.identityValue, placement.pinned, placement.anchorOrder)
+    }
+}
+
+@Serializable
+private data class PortableWallpaperAssignment(
+    val networkExportId: String,
+    val chatType: BufferType,
+    val identityKind: FolderIdentityKind,
+    val identityValue: String,
+    val choice: WallpaperChatChoice,
+) {
+    fun toRepository(networkId: Long) = PortableChatWallpaper(networkId, chatType, identityKind, identityValue, choice)
+
+    companion object {
+        fun fromRepository(
+            assignment: PortableChatWallpaper,
+            networkExportId: String,
+        ) = PortableWallpaperAssignment(networkExportId, assignment.chatType, assignment.identityKind, assignment.identityValue, assignment.choice)
     }
 }
 
@@ -1146,6 +1400,7 @@ private data class ImportPlan(
     val removed: Int,
     val retainedLocalCredentials: Int,
     val missingCredentialNetworks: Int,
+    val networkIds: Map<String, Long>,
 )
 
 private fun FolderPortableAssignment.toPortable(networkExportId: String) =

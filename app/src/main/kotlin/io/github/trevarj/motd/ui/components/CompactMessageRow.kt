@@ -137,12 +137,7 @@ internal fun CompactMessageRow(
     val normalPaintedRow = rowTint.compositeOver(canvas)
     val paintedRow = messageContainerColor(normalPaintedRow, canvas, dimmed)
     val backgroundAlpha = if (hasMention) 1f else LocalMessageBackgroundOpacityPercent.current / 100f
-    val drawFill =
-        paintedRow.copy(
-            alpha =
-                io.github.trevarj.motd.ui.theme
-                    .effectBackingAlpha(paintedRow.alpha * backgroundAlpha),
-        )
+    val drawFill = messageBackingFill(paintedRow, backgroundAlpha)
     val contrastRow = drawFill.compositeOver(canvas)
     val linkColor = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, contrastRow)
     val bodyInk = codeColor

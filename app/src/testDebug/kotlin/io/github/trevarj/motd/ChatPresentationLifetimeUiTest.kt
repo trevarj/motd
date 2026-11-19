@@ -71,6 +71,7 @@ import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.Settings
+import io.github.trevarj.motd.data.prefs.WallpaperRenderSpec
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.prefs.settingsDataStore
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
@@ -1298,7 +1299,7 @@ class ChatPresentationLifetimeUiTest {
                 loadPreview = { _, _ -> null },
                 showImages = false,
                 showLinkPreviews = false,
-                chatWallpaper = WallpaperSelection(ChatWallpaperPreset.NONE),
+                chatWallpaper = WallpaperRenderSpec(WallpaperSelection(ChatWallpaperPreset.NONE), null),
                 initialTarget = pending,
                 entryState = entryState,
                 viewportReadEnabled = resumed,
@@ -1459,7 +1460,7 @@ class ChatPresentationLifetimeUiTest {
                 loadPreview = { _, _ -> null },
                 showImages = false,
                 showLinkPreviews = false,
-                chatWallpaper = WallpaperSelection(ChatWallpaperPreset.NONE),
+                chatWallpaper = WallpaperRenderSpec(WallpaperSelection(ChatWallpaperPreset.NONE), null),
                 fools = settings.fools,
                 foolsMode = settings.foolsMode,
                 foolPreferences = settings.foolPreferences,

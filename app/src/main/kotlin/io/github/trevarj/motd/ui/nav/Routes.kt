@@ -200,6 +200,10 @@ enum class NetworkSettingsTarget { CONNECTION, AUTHENTICATION, OBFUSCATION, AVAT
     val target: SettingsTarget? = null,
 )
 
+@Serializable data class WallpaperWorkshopRoute(
+    val bufferId: Long? = null,
+)
+
 @Serializable data object PaletteHubRoute
 
 @Serializable data class PaletteEditorRoute(

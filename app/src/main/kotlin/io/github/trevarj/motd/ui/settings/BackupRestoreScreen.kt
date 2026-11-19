@@ -415,6 +415,7 @@ private fun backupFailureText(category: BackupFailure): String =
             BackupFailure.WRONG_PASSWORD_OR_CORRUPT -> R.string.backup_error_password_corrupt
             BackupFailure.UNSUPPORTED_OR_INVALID -> R.string.backup_error_invalid
             BackupFailure.OVERSIZED -> R.string.backup_error_oversized
+            BackupFailure.LOCAL_WALLPAPER_LIBRARY -> R.string.backup_error_wallpaper_library
             BackupFailure.READ -> R.string.backup_error_read
             BackupFailure.WRITE -> R.string.backup_error_write
             BackupFailure.EXPORT -> R.string.backup_error_export

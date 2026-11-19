@@ -415,9 +415,14 @@ flowchart TD
   is open. Dismissal cancels that subscription and clears its targets; preview edits do
   not restart it. Confirmation still freshly validates the source, destination and connection.
 - Chat wallpaper fills the outer Scaffold's unpadded viewport, so header collapse
-  and reexpansion cannot translate builtin tiles or resize a cropped image.
-  Builtin alpha masks are process-cached by preset and pixel size; a matching ready
-  tile paints without dispatching another worker lookup.
+  and reexpansion cannot translate pattern tiles or resize a cropped image.
+  Workshop layouts repeat at 512dp with seeded toroidal placement and a bounded
+  vector, geometry and ARGB tile cache. Matching ready tiles paint immediately;
+  background and intensity do not invalidate rasterized geometry or pigments.
+  Global selection and authored library share one DataStore transaction; canonical
+  chat overrides and deferred portable identities are independent from placement in Room 53.
+  Only validated outlines enter the renderer. Low pattern contrast uses the existing
+  opaque message role backings without recoloring the artwork.
   Normal Two-line message and action fills admit subtle wallpaper while retaining their
   speaker/mention tint. Opaque ink is contrast-normalized for wallpaper extremes;
   Dimmed and contrast-limited fills remain opaque.

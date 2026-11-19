@@ -43,11 +43,13 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.resolveWallpaper
 import io.github.trevarj.motd.ui.components.LocalMessageWallpaperBackdrop
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.captureSurfaceBackdrop
@@ -101,7 +103,7 @@ class ScenicWallpaperUiTest {
                 CompositionLocalProvider(LocalConfiguration provides configuration, LocalDensity provides Density(1f)) {
                     MotdTheme(themePreset = appTheme, dynamicColor = false, syncSystemBars = false) {
                         Box(Modifier.size(256.dp, 448.dp).testTag("scenic")) {
-                            ChatWallpaperBackground(selection, Modifier.matchParentSize())
+                            ChatWallpaperBackground(resolveWallpaper(AppearanceConfig(wallpaper = selection)), Modifier.matchParentSize())
                         }
                     }
                 }
@@ -154,7 +156,7 @@ class ScenicWallpaperUiTest {
                             val backdrop = rememberMessageWallpaperBackdrop(10)
                             Box(Modifier.size(256.dp, 448.dp).background(Color.Magenta).testTag("scenic_blur")) {
                                 ChatWallpaperBackground(
-                                    selection,
+                                    resolveWallpaper(AppearanceConfig(wallpaper = selection)),
                                     Modifier
                                         .matchParentSize()
                                         .recordMessageWallpaper(backdrop, Color.Magenta)
@@ -252,7 +254,7 @@ class ScenicWallpaperUiTest {
                     val messageSource = requireNotNull(rememberMessageWallpaperBackdrop(1))
                     Box(Modifier.size(128.dp, height.dp).background(background).testTag("edge_fade")) {
                         ChatWallpaperBackground(
-                            selection,
+                            resolveWallpaper(AppearanceConfig(wallpaper = selection)),
                             Modifier
                                 .matchParentSize()
                                 .captureSurfaceBackdrop(surfaceSource)

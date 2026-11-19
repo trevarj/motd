@@ -1,4 +1,22 @@
 {
+  "workshopTextures": {
+    "designer": "GPT-6.2-Astra",
+    "brief": "Six original, subdued materials beneath outline motifs and chat text. Keep each identifiable at a 128dp period on light, dark, black and saturated canvases; None draws nothing.",
+    "directory": "app/src/main/assets/wallpaper-textures/",
+    "format": "256x256 lossless 8-bit straight RGBA PNG; signed pigment samples map to black (negative) or white (positive) with rounded absolute magnitude as alpha. No background, border, tint or external source art.",
+    "technique": "Original signed-pigment pixel art. The first four tiles were authored in the pinned sprite-studies Node 22 shell; ImageMagick PNG32 export, byte-checked after RGBA decode. For those four initialize a uint32 LCG at 0x4D4F5444 + zero-based asset index, advancing s = 1664525*s + 1013904223 mod 2^32, u = s/2^32. First fill 256x256 row-major white noise n = 2u-1. Coordinate lookups and stamps wrap modulo 256; screen and weave phases have integral periods on both axes. Scanline and Stars were authored directly in Python and exported as RGBA with Pillow, without source images.",
+    "assets": [
+      {"file": "specks.png", "maxAlpha": 40, "recipe": "Scatter 570 independently rotated signed elliptical flecks at uniform continuous centers. Semiaxes .7+1.7u² and .55+.8u pixels, signed amplitude 23+19u, antialiased radial edge; strongest absolute sample wins where flecks overlap. Clamp at 40."},
+      {"file": "comic-paper.png", "maxAlpha": 32, "recipe": "Oblique editorial screen: pixel-center normalized coordinates (X,Y) projected onto (24,8),(-8,24) cycles, gently displaced by .018 and .023 cycle periodic sinusoids. Paired black/white dot lattices half a cell apart, radius .161±.022 cycles, antialiased one-pixel edges, amplitude 29. Add 3.7n + 2 times the four-neighbor mean as stock tooth. Clamp at 32."},
+      {"file": "grain.png", "maxAlpha": 35, "recipe": "Dense fine emulsion: 25n + 17 times the four axial neighbors' mean + 5 times the northwest neighbor; clamp at 35. Both signs survive downsampling without a repeating screen."},
+      {"file": "linen.png", "maxAlpha": 29, "recipe": "Interlace 38 warp and 32 weft cycles with gently meandering sine phases (up to .30/.20 cycles). Half-frequency cosine products modulate opposing thread strengths by ±5; warp strength 13 with ±4 periodic slubbing, weft strength 9. Finish with 3n for fiber tooth; clamp at 31."},
+      {"file": "scanline.png", "maxAlpha": 16, "recipe": "Repeat signed row samples [-4,-10,-15,-16,-12,-6,-1,0,3,8,12,13,10,6,2,0] across every column, 16 cycles down the tile. The static 8dp band period stays resolved at mdpi."},
+      {"file": "stars.png", "maxAlpha": 40, "recipe": "Start transparent. Use the above LCG at seed 0x53544152, no noise prefill. For i=0..79 draw x=256u then y=256u, retrying both until toroidal distance from every earlier center is >=10. Next draw radius r=4.5+2u for the first eight four-point stars or 1+1.35u for subsequent pinpoints, then amplitude A=round(28+12u). At 4x4 uniform subpixel centers per pixel, let dx,dy be absolute wrapped axis distances. Count n samples with max(dx,dy)+2.65*min(dx,dy)<=r for stars, dx²+dy²<=r² for pinpoints. Use round(A*n/16) alpha (Python ties-to-even), white for even i and black for odd; retain the larger alpha at overlaps. Finally wrap-shift by (-floor(x0),-floor(y0)) to carry the first star across the four tile corners."}
+    ],
+    "proofDirectory": "build/wallpaper-previews/workshop/textures/",
+    "proofs": ["specks-3x3.png", "comic-paper-3x3.png", "grain-3x3.png", "linen-3x3.png", "phone-sheet.png", "scanline-stars/offset-mdpi.png"],
+    "proofMethod": "First four: composite decoded pixels over #F6F3ED, #1F232D, #000000 and #3C45B1 quadrants, area-sample 2x2 texels per pixel into 384x384 mdpi three-period squares, with a 71,53 source-pixel origin offset. Sheet order: specks / comic paper above grain / linen. Scanline and Stars: separate sheet with one row per texture, pure white then pure black, same offset, box sample and 3x3 mdpi repeats."
+  },
   "tool": "imagegen (built-in)",
   "default": "motd",
   "sourceSize": "Per-atlas native dimensions are recorded in periodicAtlasGeneration.themes; earlier source masters are historical.",

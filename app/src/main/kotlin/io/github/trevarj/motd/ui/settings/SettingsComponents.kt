@@ -76,6 +76,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
@@ -106,6 +107,7 @@ internal fun SettingsScaffold(
     status: (@Composable () -> Unit)? = null,
     scroll: Boolean = true,
     pagePadding: Boolean = true,
+    maxPageWidth: Dp = 720.dp,
     content: @Composable () -> Unit,
 ) {
     Scaffold(
@@ -132,7 +134,7 @@ internal fun SettingsScaffold(
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
             val base =
                 Modifier
-                    .widthIn(max = 720.dp)
+                    .widthIn(max = maxPageWidth)
                     .fillMaxWidth()
                     .imePadding()
                     .testTag("settings_scroll")

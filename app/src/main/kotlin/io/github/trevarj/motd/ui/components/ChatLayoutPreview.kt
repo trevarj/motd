@@ -22,9 +22,12 @@ import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
-import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.WallpaperRenderSpec
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.ChatWallpaperBackground
+import io.github.trevarj.motd.ui.chat.LocalWallpaperNeedsReadableBacking
+import io.github.trevarj.motd.ui.chat.rememberWallpaperPhotoLoaded
+import io.github.trevarj.motd.ui.chat.wallpaperNeedsReadableBacking
 import io.github.trevarj.motd.ui.theme.ConversationTypography
 import io.github.trevarj.motd.ui.theme.LocalChatShadowsEnabled
 import io.github.trevarj.motd.ui.theme.LocalCompactNickBrackets
@@ -41,7 +44,7 @@ internal fun ChatLayoutPreview(
     density: LayoutDensity,
     messageSpacing: MessageSpacing,
     bubbleCorners: BubbleCornerStyle,
-    wallpaper: WallpaperSelection,
+    wallpaper: WallpaperRenderSpec,
     conversationFontScalePercent: Int,
     tagPrefix: String,
     modifier: Modifier = Modifier,
@@ -76,59 +79,65 @@ internal fun ChatLayoutPreview(
                 shape = MotdShapes.card,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
-                val wallpaperKind = if (wallpaper.localImageName == null) wallpaper.preset.name.lowercase() else "custom"
-                Box(Modifier.testTag("${tagPrefix}_wallpaper_${wallpaperKind}_${wallpaper.intensity}")) {
+                val selection = wallpaper.selection
+                val wallpaperKind = if (selection.localImageName == null) selection.preset.name.lowercase() else "custom"
+                val intensity = if (selection.localImageName == null) wallpaper.pattern?.intensity ?: selection.intensity else selection.intensity
+                val photoLoaded = rememberWallpaperPhotoLoaded(wallpaper)
+                Box(Modifier.testTag("${tagPrefix}_wallpaper_${wallpaperKind}_$intensity")) {
                     ChatWallpaperBackground(
                         wallpaper,
                         Modifier.matchParentSize().recordMessageWallpaper(backdrop, MaterialTheme.colorScheme.surfaceContainerLow),
+                        photoLoaded = photoLoaded,
                     )
-                    ConversationTypography(conversationFontScalePercent) {
-                        Column(
-                            Modifier
-                                .padding(vertical = 8.dp)
-                                .testTag("${tagPrefix}_timestamps_${timestamps.show}_${timestamps.format.name.lowercase()}"),
-                        ) {
-                            Column(Modifier.testTag("${tagPrefix}_shadows_$chatShadowsEnabled")) {
-                                MessageBubble(
-                                    sender = stringResource(R.string.settings_chat_preview_sender),
-                                    text = stringResource(R.string.settings_chat_preview_message),
-                                    timeMs = PREVIEW_MESSAGE_TIME_MILLIS,
-                                    isSelf = false,
-                                    kind = MessageKind.PRIVMSG,
-                                    showSender = true,
-                                    knownNicks = knownNicks,
-                                    modifier = Modifier.testTag("${tagPrefix}_incoming"),
-                                )
-                                Spacer(Modifier.height(spacing.bubbleBurstGap))
-                                MessageBubble(
-                                    sender = stringResource(R.string.settings_chat_preview_sender),
-                                    text = stringResource(R.string.settings_chat_preview_followup),
-                                    timeMs = PREVIEW_MESSAGE_TIME_MILLIS + 60_000,
-                                    isSelf = false,
-                                    kind = MessageKind.PRIVMSG,
-                                    showSender = false,
-                                    knownNicks = knownNicks,
-                                )
-                                Spacer(Modifier.height(spacing.bubbleBreakGap))
-                                MessageBubble(
-                                    sender = stringResource(R.string.settings_chat_preview_self),
-                                    text = stringResource(R.string.settings_chat_preview_reply),
-                                    timeMs = PREVIEW_MESSAGE_TIME_MILLIS + 120_000,
-                                    isSelf = true,
-                                    kind = MessageKind.PRIVMSG,
-                                    showSender = true,
-                                    knownNicks = knownNicks,
-                                )
-                                Spacer(Modifier.height(spacing.bubbleBreakGap))
-                                MessageBubble(
-                                    sender = stringResource(R.string.settings_chat_preview_sender),
-                                    text = stringResource(R.string.settings_chat_preview_action),
-                                    timeMs = PREVIEW_MESSAGE_TIME_MILLIS + 180_000,
-                                    isSelf = false,
-                                    kind = MessageKind.ACTION,
-                                    showSender = true,
-                                    knownNicks = knownNicks,
-                                )
+                    CompositionLocalProvider(LocalWallpaperNeedsReadableBacking provides wallpaperNeedsReadableBacking(wallpaper, photoLoaded.value)) {
+                        ConversationTypography(conversationFontScalePercent) {
+                            Column(
+                                Modifier
+                                    .padding(vertical = 8.dp)
+                                    .testTag("${tagPrefix}_timestamps_${timestamps.show}_${timestamps.format.name.lowercase()}"),
+                            ) {
+                                Column(Modifier.testTag("${tagPrefix}_shadows_$chatShadowsEnabled")) {
+                                    MessageBubble(
+                                        sender = stringResource(R.string.settings_chat_preview_sender),
+                                        text = stringResource(R.string.settings_chat_preview_message),
+                                        timeMs = PREVIEW_MESSAGE_TIME_MILLIS,
+                                        isSelf = false,
+                                        kind = MessageKind.PRIVMSG,
+                                        showSender = true,
+                                        knownNicks = knownNicks,
+                                        modifier = Modifier.testTag("${tagPrefix}_incoming"),
+                                    )
+                                    Spacer(Modifier.height(spacing.bubbleBurstGap))
+                                    MessageBubble(
+                                        sender = stringResource(R.string.settings_chat_preview_sender),
+                                        text = stringResource(R.string.settings_chat_preview_followup),
+                                        timeMs = PREVIEW_MESSAGE_TIME_MILLIS + 60_000,
+                                        isSelf = false,
+                                        kind = MessageKind.PRIVMSG,
+                                        showSender = false,
+                                        knownNicks = knownNicks,
+                                    )
+                                    Spacer(Modifier.height(spacing.bubbleBreakGap))
+                                    MessageBubble(
+                                        sender = stringResource(R.string.settings_chat_preview_self),
+                                        text = stringResource(R.string.settings_chat_preview_reply),
+                                        timeMs = PREVIEW_MESSAGE_TIME_MILLIS + 120_000,
+                                        isSelf = true,
+                                        kind = MessageKind.PRIVMSG,
+                                        showSender = true,
+                                        knownNicks = knownNicks,
+                                    )
+                                    Spacer(Modifier.height(spacing.bubbleBreakGap))
+                                    MessageBubble(
+                                        sender = stringResource(R.string.settings_chat_preview_sender),
+                                        text = stringResource(R.string.settings_chat_preview_action),
+                                        timeMs = PREVIEW_MESSAGE_TIME_MILLIS + 180_000,
+                                        isSelf = false,
+                                        kind = MessageKind.ACTION,
+                                        showSender = true,
+                                        knownNicks = knownNicks,
+                                    )
+                                }
                             }
                         }
                     }

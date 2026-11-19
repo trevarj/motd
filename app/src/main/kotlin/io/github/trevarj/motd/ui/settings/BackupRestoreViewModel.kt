@@ -7,12 +7,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.data.backup.BackupDocumentTooLargeException
 import io.github.trevarj.motd.data.backup.BackupExportMode
 import io.github.trevarj.motd.data.backup.BackupFormatException
 import io.github.trevarj.motd.data.backup.BackupImportMode
+import io.github.trevarj.motd.data.backup.BackupLocalWallpaperLibraryException
+import io.github.trevarj.motd.data.backup.BackupWallpaperMergeException
 import io.github.trevarj.motd.data.backup.ConfigurationBackupRepository
 import io.github.trevarj.motd.data.backup.ConfigurationImportPreview
 import io.github.trevarj.motd.data.backup.ConfigurationImportResult
+import io.github.trevarj.motd.data.backup.MAX_BACKUP_DOCUMENT_BYTES
 import io.github.trevarj.motd.di.IoDispatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -26,13 +30,20 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import javax.inject.Inject
 
-private class BackupDocumentTooLargeException : IOException()
-
 enum class BackupExportPhase { IDLE, EXPORTING }
 
 enum class BackupImportPhase { EMPTY, READING, PASSWORD_REQUIRED, PREVIEW, APPLYING, COMPLETE }
 
-enum class BackupFailure { WRONG_PASSWORD_OR_CORRUPT, UNSUPPORTED_OR_INVALID, OVERSIZED, READ, WRITE, EXPORT, IMPORT }
+enum class BackupFailure {
+    WRONG_PASSWORD_OR_CORRUPT,
+    UNSUPPORTED_OR_INVALID,
+    OVERSIZED,
+    LOCAL_WALLPAPER_LIBRARY,
+    READ,
+    WRITE,
+    EXPORT,
+    IMPORT,
+}
 
 sealed interface BackupExportOutcome {
     data object Success : BackupExportOutcome
@@ -105,9 +116,15 @@ class BackupRestoreViewModel
                         withContext(ioDispatcher) { repository.exportToString(mode, password.takeIf(String::isNotBlank)) }
                     } catch (cancelled: CancellationException) {
                         throw cancelled
-                    } catch (_: Exception) {
+                    } catch (failure: Exception) {
+                        val category =
+                            when (failure) {
+                                is BackupDocumentTooLargeException -> BackupFailure.OVERSIZED
+                                is BackupLocalWallpaperLibraryException -> BackupFailure.LOCAL_WALLPAPER_LIBRARY
+                                else -> BackupFailure.EXPORT
+                            }
                         _state.update {
-                            it.copy(exportPhase = BackupExportPhase.IDLE, exportOutcome = BackupExportOutcome.Failure(BackupFailure.EXPORT))
+                            it.copy(exportPhase = BackupExportPhase.IDLE, exportOutcome = BackupExportOutcome.Failure(category))
                         }
                         return@launch
                     }
@@ -211,9 +228,16 @@ class BackupRestoreViewModel
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
+                val canChangeMode = failure is BackupLocalWallpaperLibraryException || failure is BackupWallpaperMergeException
+                if (canChangeMode) acceptedPassword = password.takeIf(String::isNotBlank)
                 _state.update {
                     it.copy(
-                        importPhase = if (it.importEncrypted) BackupImportPhase.PASSWORD_REQUIRED else BackupImportPhase.EMPTY,
+                        importPhase =
+                            when {
+                                canChangeMode -> BackupImportPhase.PREVIEW
+                                it.importEncrypted -> BackupImportPhase.PASSWORD_REQUIRED
+                                else -> BackupImportPhase.EMPTY
+                            },
                         importOutcome = BackupImportOutcome.Failure(classifyPreviewFailure(failure, it.importEncrypted)),
                     )
                 }
@@ -246,11 +270,17 @@ class BackupRestoreViewModel
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
-                } catch (_: Exception) {
+                } catch (failure: Exception) {
+                    val category =
+                        when (failure) {
+                            is BackupDocumentTooLargeException -> BackupFailure.OVERSIZED
+                            is BackupLocalWallpaperLibraryException -> BackupFailure.LOCAL_WALLPAPER_LIBRARY
+                            else -> BackupFailure.IMPORT
+                        }
                     _state.update {
                         it.copy(
                             importPhase = BackupImportPhase.PREVIEW,
-                            importOutcome = BackupImportOutcome.Failure(BackupFailure.IMPORT),
+                            importOutcome = BackupImportOutcome.Failure(category),
                         )
                     }
                 }
@@ -273,7 +303,7 @@ class BackupRestoreViewModel
                     val read = input.read(buffer)
                     if (read < 0) break
                     total += read
-                    if (total > MAX_IMPORT_BYTES) throw BackupDocumentTooLargeException()
+                    if (total > MAX_BACKUP_DOCUMENT_BYTES) throw BackupDocumentTooLargeException()
                     output.write(buffer, 0, read)
                 }
             } ?: throw IOException("source unavailable")
@@ -292,13 +322,11 @@ class BackupRestoreViewModel
             encrypted: Boolean,
         ): BackupFailure =
             when {
+                failure is BackupDocumentTooLargeException -> BackupFailure.OVERSIZED
+                failure is BackupLocalWallpaperLibraryException -> BackupFailure.LOCAL_WALLPAPER_LIBRARY
                 failure is BackupFormatException -> BackupFailure.UNSUPPORTED_OR_INVALID
                 failure is IOException -> BackupFailure.READ
                 encrypted -> BackupFailure.WRONG_PASSWORD_OR_CORRUPT
                 else -> BackupFailure.UNSUPPORTED_OR_INVALID
             }
-
-        private companion object {
-            const val MAX_IMPORT_BYTES = 4 * 1024 * 1024
-        }
     }

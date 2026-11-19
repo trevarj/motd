@@ -19,6 +19,11 @@ import io.github.trevarj.motd.data.prefs.PresenceMode
 import kotlinx.coroutines.flow.Flow
 
 internal const val PENDING_CHAT_PLACEMENT_PREFIX = "pending-chat-placement:"
+internal const val PENDING_CHAT_WALLPAPER_PREFIX = "pending-chat-wallpaper:"
+internal const val CHAT_WALLPAPER_EDIT_PREFIX = "chat-wallpaper-edit"
+
+private const val CHAT_WALLPAPER_ROWS =
+    "type IN ('CHANNEL', 'QUERY') AND redirectToRoomId IS NULL AND wallpaperOverrideEncoded IS NOT NULL"
 
 // Room is the authoritative boundary for fixed persistence queries. Prefer typed entity or
 // projection methods here; keep raw SQL at callers only when predicates are genuinely dynamic.
@@ -134,6 +139,10 @@ interface NetworkDao {
             deletePendingChatPlacements(
                 "$PENDING_CHAT_PLACEMENT_PREFIX$networkId:*",
                 "$PENDING_CHAT_PLACEMENT_PREFIX{\"networkId\":$networkId,*",
+            )
+            deletePendingChatPlacements(
+                "$PENDING_CHAT_WALLPAPER_PREFIX$networkId:*",
+                "$CHAT_WALLPAPER_EDIT_PREFIX:$networkId:*",
             )
         }
         deleteNetworkRows(networkIds)
@@ -535,6 +544,26 @@ interface BufferDao {
 
     @Query("SELECT * FROM buffers WHERE type IN ('CHANNEL', 'QUERY') AND redirectToRoomId IS NULL AND (pinned = 1 OR anchorOrder IS NOT NULL) ORDER BY id")
     suspend fun chatPlacementRooms(): List<RoomEntity>
+
+    @Query("SELECT * FROM buffers WHERE " + CHAT_WALLPAPER_ROWS + " ORDER BY id")
+    suspend fun chatWallpaperRooms(): List<RoomEntity>
+
+    @Query(
+        "SELECT wallpaperOverrideEncoded FROM buffers WHERE " + CHAT_WALLPAPER_ROWS +
+            " UNION ALL SELECT `key` FROM app_state WHERE `key` GLOB :pendingPattern",
+    )
+    fun observeChatWallpaperEntries(pendingPattern: String): Flow<List<String>>
+
+    /** Write only to a canonical channel/query, including through a stale route ID. */
+    @Query(
+        """UPDATE buffers SET wallpaperOverrideEncoded = :encoded
+           WHERE type IN ('CHANNEL', 'QUERY') AND redirectToRoomId IS NULL
+             AND id = (SELECT COALESCE(redirectToRoomId, id) FROM buffers WHERE id = :requestedId)""",
+    )
+    suspend fun setWallpaperOverride(
+        requestedId: Long,
+        encoded: String?,
+    ): Int
 
     @Query("UPDATE buffers SET anchorOrder = :anchorOrder WHERE id = :id AND type IN ('CHANNEL', 'QUERY') AND redirectToRoomId IS NULL")
     suspend fun writeAnchorOrder(
@@ -1027,6 +1056,12 @@ interface BufferDao {
     @Query("DELETE FROM buffers WHERE redirectToRoomId = :id")
     suspend fun deleteRedirectsTo(id: Long)
 
+    @Query("DELETE FROM app_state WHERE `key` GLOB '$CHAT_WALLPAPER_EDIT_PREFIX:' || :networkId || ':' || :roomId || ':*'")
+    suspend fun deleteChatWallpaperEdits(
+        networkId: Long,
+        roomId: Long,
+    )
+
     @Query("DELETE FROM messages WHERE bufferId = :id")
     suspend fun deleteMessagesForBuffer(id: RoomId)
 
@@ -1061,6 +1096,7 @@ interface BufferDao {
         }
         deleteMembersForBuffer(id)
         deleteReactionsForBuffer(id)
+        deleteChatWallpaperEdits(room.networkId, id)
         deleteRedirectsTo(id)
         deleteBufferRow(id) // cascades to messages + messages_fts
     }

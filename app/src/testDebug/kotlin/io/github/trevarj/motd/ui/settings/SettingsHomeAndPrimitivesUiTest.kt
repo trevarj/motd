@@ -84,12 +84,15 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
+import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.resolveWallpaper
 import io.github.trevarj.motd.ui.chat.ConversationLayoutSheet
 import io.github.trevarj.motd.ui.chat.ConversationLayoutState
 import io.github.trevarj.motd.ui.components.SurfaceBackdropSource
@@ -643,7 +646,7 @@ class SettingsHomeAndPrimitivesUiTest {
                     globalCompactNickBrackets = global,
                     onCompactNickBracketsOverride = { if (!rejectWrite) saved = saved.copy(compactNickBracketsOverride = it) },
                     onDismiss = {},
-                    wallpaper = WallpaperSelection(),
+                    wallpaper = resolveWallpaper(AppearanceConfig(wallpaper = WallpaperSelection(ChatWallpaperPreset.PATTERN))),
                     conversationFontScalePercent = 100,
                     messageSpacing = MessageSpacing.DEFAULT,
                     bubbleCorners = BubbleCornerStyle.ROUNDED,
@@ -720,7 +723,7 @@ class SettingsHomeAndPrimitivesUiTest {
                     globalCompactNickBrackets = CompactNickBrackets.ANGLE,
                     onCompactNickBracketsOverride = { if (!rejectWrite) saved = saved.copy(compactNickBracketsOverride = it) },
                     onDismiss = { dismissals++ },
-                    wallpaper = WallpaperSelection(),
+                    wallpaper = resolveWallpaper(AppearanceConfig(wallpaper = WallpaperSelection(ChatWallpaperPreset.PATTERN))),
                     conversationFontScalePercent = 140,
                     messageSpacing = MessageSpacing.DEFAULT,
                     bubbleCorners = BubbleCornerStyle.ROUNDED,
@@ -793,7 +796,7 @@ class SettingsHomeAndPrimitivesUiTest {
                     globalCompactNickBrackets = CompactNickBrackets.ANGLE,
                     onCompactNickBracketsOverride = { if (!rejectWrite) saved = saved.copy(compactNickBracketsOverride = it) },
                     onDismiss = {},
-                    wallpaper = WallpaperSelection(io.github.trevarj.motd.data.prefs.ChatWallpaperPreset.NONE),
+                    wallpaper = resolveWallpaper(AppearanceConfig(wallpaper = WallpaperSelection(ChatWallpaperPreset.NONE))),
                     conversationFontScalePercent = 100,
                     messageSpacing = MessageSpacing.DEFAULT,
                     bubbleCorners = BubbleCornerStyle.ROUNDED,
@@ -861,7 +864,7 @@ class SettingsHomeAndPrimitivesUiTest {
                         globalCompactNickBrackets = CompactNickBrackets.ANGLE,
                         onCompactNickBracketsOverride = { if (!rejectWrite) saved = saved.copy(compactNickBracketsOverride = it) },
                         onDismiss = {},
-                        wallpaper = wallpaper,
+                        wallpaper = resolveWallpaper(AppearanceConfig(wallpaper = wallpaper)),
                         conversationFontScalePercent = 100,
                         messageSpacing = MessageSpacing.DEFAULT,
                         bubbleCorners = BubbleCornerStyle.ROUNDED,

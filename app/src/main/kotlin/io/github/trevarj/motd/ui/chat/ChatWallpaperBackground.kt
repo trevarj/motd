@@ -1,22 +1,19 @@
 package io.github.trevarj.motd.ui.chat
 
-import android.content.res.AssetManager
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.BitmapShader
 import android.graphics.LinearGradient
 import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
 import android.graphics.Shader
-import android.util.LruCache
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -35,33 +32,40 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
-import androidx.core.graphics.scale
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
-import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.WallpaperRenderSpec
+import io.github.trevarj.motd.data.prefs.WallpaperTexture
 import io.github.trevarj.motd.ui.theme.contrastSafeOverlay
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import android.graphics.Color as AndroidColor
 
-/** Full-color private image, or theme-adaptive gradient with a repeated monochrome builtin tile. */
+@Composable
+internal fun rememberWallpaperPhotoLoaded(wallpaper: WallpaperRenderSpec): MutableState<Boolean> = remember(wallpaper.selection.localImageName) { mutableStateOf(false) }
+
+/** The wallpaper plane is independent of the chat content and its insets. */
 @Composable
 fun ChatWallpaperBackground(
-    wallpaper: WallpaperSelection,
+    wallpaper: WallpaperRenderSpec,
     modifier: Modifier = Modifier,
     tilePeriodDp: Float = WALLPAPER_TILE_PERIOD_DP,
     animate: Boolean = true,
+    photoLoaded: MutableState<Boolean> = rememberWallpaperPhotoLoaded(wallpaper),
 ) {
     val context = LocalContext.current
-    if (wallpaper.localImageName != null) {
-        val file = remember(wallpaper.localImageName) { CustomWallpaperStore.resolve(context, wallpaper.localImageName) }
-        var loaded by remember(wallpaper.localImageName) { mutableStateOf(false) }
+    val selection = wallpaper.selection
+    if (selection.localImageName != null) {
+        val file = remember(selection.localImageName) { CustomWallpaperStore.resolve(context, selection.localImageName) }
+        var loaded by photoLoaded
         Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            if (!loaded) ChatWallpaperBackground(wallpaper.copy(localImageName = null), Modifier.matchParentSize(), tilePeriodDp, animate)
+            if (!loaded) {
+                ChatWallpaperBackground(wallpaper.copy(selection = selection.copy(localImageName = null)), Modifier.matchParentSize(), tilePeriodDp, animate)
+            }
             if (file != null) {
                 AsyncImage(
                     model =
@@ -74,7 +78,7 @@ fun ChatWallpaperBackground(
                         },
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    alpha = wallpaperInkAlpha(wallpaper.intensity),
+                    alpha = wallpaperInkAlpha(selection.intensity),
                     onSuccess = { loaded = true },
                     onError = { loaded = false },
                     modifier = Modifier.matchParentSize(),
@@ -83,44 +87,30 @@ fun ChatWallpaperBackground(
         }
         return
     }
-    if (wallpaper.preset == ChatWallpaperPreset.NONE) {
+    if (selection.preset == ChatWallpaperPreset.NONE) {
         Box(modifier)
         return
     }
-    if (wallpaper.preset.isScenic) {
-        ScenicWallpaperBackground(wallpaper, modifier, animate)
+    if (selection.preset.isScenic) {
+        ScenicWallpaperBackground(selection, modifier, animate)
         return
     }
 
-    val density = LocalDensity.current.density
-    val requestedTileKey =
-        remember(wallpaper.preset, density, tilePeriodDp) {
-            wallpaperTileKey(wallpaper.preset, density, tilePeriodDp)
-        }
-    val tile by produceState<WallpaperTile?>(
-        initialValue = WallpaperTileCache[requestedTileKey]?.let { WallpaperTile(requestedTileKey, it) },
-        requestedTileKey,
-    ) {
-        if (value?.key == requestedTileKey) return@produceState
-        value =
-            WallpaperTile(
-                requestedTileKey,
-                withContext(Dispatchers.Default) {
-                    WallpaperTileCache.getOrRender(context.assets, requestedTileKey)
-                },
-            )
-    }
-    // A preset switch keeps the previous complete wallpaper until its replacement tile is ready.
-    val renderedPreset = tile?.key?.preset ?: wallpaper.preset
     val scheme = MaterialTheme.colorScheme
-    val base = scheme.background
-    val foregrounds = listOf(scheme.onBackground, scheme.onSurface, scheme.onSurfaceVariant)
+    val fixedBackground = wallpaper.pattern?.background
+    val patternPaint = rememberWallpaperPatternPaint(wallpaper, scheme.onSurfaceVariant, tilePeriodDp)
+    val texturePaint = rememberWallpaperTexturePaint(wallpaper.pattern?.texture ?: WallpaperTexture.NONE)
     val gradient =
-        remember(renderedPreset, scheme) {
-            gradientColors(renderedPreset, base, scheme.primary, scheme.secondary, scheme.tertiary, foregrounds)
+        remember(scheme, fixedBackground) {
+            if (fixedBackground == null) {
+                val foregrounds = listOf(scheme.onBackground, scheme.onSurface, scheme.onSurfaceVariant)
+                gradientColors(scheme.background, scheme.primary, scheme.secondary, scheme.tertiary, foregrounds)
+                    .map(Color::toArgb)
+                    .toIntArray()
+            } else {
+                null
+            }
         }
-    // The source PNG carries the anti-alias alpha; intensity controls the ink opacity directly.
-    val pattern = wallpaperInkColor(wallpaper.outlineColor?.let(::Color) ?: scheme.onSurfaceVariant, wallpaper.intensity)
     var gradientCoverage by remember { mutableStateOf(IntSize.Zero) }
 
     Box(
@@ -132,34 +122,70 @@ fun ChatWallpaperBackground(
             }.drawWithCache {
                 val canvasSize = IntSize(size.width.toInt(), size.height.toInt())
                 val coverage = expandedWallpaperCoverage(gradientCoverage, canvasSize)
-                val gradientPaint =
+                val backdropPaint =
                     Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        shader =
-                            LinearGradient(
-                                0f,
-                                0f,
-                                coverage.width.toFloat(),
-                                coverage.height.toFloat(),
-                                gradient.map(Color::toArgb).toIntArray(),
-                                null,
-                                Shader.TileMode.CLAMP,
-                            )
-                    }
-                val patternPaint =
-                    tile?.bitmap?.let { bitmap ->
-                        Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-                            shader = BitmapShader(bitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
-                            colorFilter = PorterDuffColorFilter(pattern.toArgb(), PorterDuff.Mode.SRC_IN)
+                        if (fixedBackground != null) {
+                            color = fixedBackground
+                        } else {
+                            shader =
+                                LinearGradient(
+                                    0f,
+                                    0f,
+                                    coverage.width.toFloat(),
+                                    coverage.height.toFloat(),
+                                    checkNotNull(gradient),
+                                    null,
+                                    Shader.TileMode.CLAMP,
+                                )
                         }
                     }
                 onDrawBehind {
                     drawIntoCanvas { canvas ->
-                        canvas.nativeCanvas.drawRect(0f, 0f, size.width, size.height, gradientPaint)
+                        canvas.nativeCanvas.drawRect(0f, 0f, size.width, size.height, backdropPaint)
+                        texturePaint?.let { canvas.nativeCanvas.drawRect(0f, 0f, size.width, size.height, it) }
                         patternPaint?.let { canvas.nativeCanvas.drawRect(0f, 0f, size.width, size.height, it) }
                     }
                 }
             },
     )
+}
+
+internal const val WALLPAPER_TEXTURE_MAX_ALPHA = 40
+private const val WALLPAPER_TEXTURE_PERIOD_DP = 128f
+private val textureTiles = ConcurrentHashMap<WallpaperTexture, Bitmap>(4)
+
+internal suspend fun loadWallpaperTexture(
+    context: Context,
+    texture: WallpaperTexture,
+): Bitmap? {
+    if (texture == WallpaperTexture.NONE) return null
+    return textureTiles[texture] ?: withContext(Dispatchers.IO) {
+        try {
+            textureTiles.computeIfAbsent(texture) {
+                val file = it.name.lowercase().replace('_', '-')
+                context.assets.open("wallpaper-textures/$file.png").use { stream ->
+                    BitmapFactory.decodeStream(stream) ?: throw IOException("Invalid bundled texture: $file")
+                }
+            }
+        } catch (_: IOException) {
+            null
+        }
+    }
+}
+
+@Composable
+private fun rememberWallpaperTexturePaint(texture: WallpaperTexture): Paint? {
+    if (texture == WallpaperTexture.NONE) return null
+    val context = LocalContext.current.applicationContext
+    val bitmap =
+        key(texture) {
+            val tile by produceState(textureTiles[texture]) {
+                if (value == null) value = loadWallpaperTexture(context, texture)
+            }
+            tile
+        } ?: return null
+    val periodPx = LocalDensity.current.density * WALLPAPER_TEXTURE_PERIOD_DP
+    return remember(bitmap, periodPx) { wallpaperPatternPaint(bitmap, periodPx, intensity = 100) }
 }
 
 internal fun Modifier.fadeChatEdges(
@@ -189,20 +215,7 @@ internal fun Modifier.fadeChatEdges(
         }
     }
 
-/** Warm the selected full-size motif before a chat destination needs to draw it. */
-@Composable
-internal fun PreloadChatWallpaperTile(wallpaper: WallpaperSelection) {
-    if (wallpaper.localImageName != null || wallpaper.preset == ChatWallpaperPreset.NONE || wallpaper.preset.isScenic) return
-    val assets = LocalContext.current.assets
-    val density = LocalDensity.current.density
-    val key = remember(wallpaper.preset, density) { wallpaperTileKey(wallpaper.preset, density) }
-    LaunchedEffect(key) {
-        withContext(Dispatchers.Default) { WallpaperTileCache.getOrRender(assets, key) }
-    }
-}
-
 internal fun gradientColors(
-    preset: ChatWallpaperPreset,
     base: Color,
     primary: Color,
     secondary: Color,
@@ -211,134 +224,14 @@ internal fun gradientColors(
 ): List<Color> {
     // AMOLED remains genuinely black: the pattern supplies texture without colored surface glow.
     if (base.toArgb() == AndroidColor.BLACK) return List(4) { base }
-    val accents =
-        when (preset) {
-            ChatWallpaperPreset.MOTD -> listOf(primary, secondary, tertiary)
-
-            ChatWallpaperPreset.DEEP_SPACE -> listOf(tertiary, primary, secondary)
-
-            ChatWallpaperPreset.RETRO_GAMING -> listOf(primary, tertiary, secondary)
-
-            ChatWallpaperPreset.RADIO_CLUB -> listOf(tertiary, primary, secondary)
-
-            ChatWallpaperPreset.INTERNET_ODDITIES -> listOf(secondary, tertiary, primary)
-
-            ChatWallpaperPreset.RETRO_CHAT -> listOf(primary, tertiary, secondary)
-
-            ChatWallpaperPreset.MEMES -> listOf(secondary, primary, tertiary)
-
-            ChatWallpaperPreset.LINUX -> listOf(primary, secondary, tertiary)
-
-            ChatWallpaperPreset.SYSTEMCRAFTERS -> listOf(tertiary, secondary, primary)
-
-            ChatWallpaperPreset.JAPANESE_COUNTRYSIDE,
-            ChatWallpaperPreset.RAINY_CAFE,
-            ChatWallpaperPreset.MOTD_ARCADE,
-            ChatWallpaperPreset.MIDNIGHT_TERMINAL,
-            ChatWallpaperPreset.CYBERPUNK_CANAL,
-            ChatWallpaperPreset.NONE,
-            -> listOf(base, base, base)
-        }
+    val accents = listOf(primary, secondary, tertiary)
     return listOf(.06f, .04f, .05f, .03f).mapIndexed { index, alpha ->
         contrastSafeOverlay(base, accents[index % accents.size], alpha, foregrounds).compositeOver(base)
     }
 }
 
-/** The selected intensity is direct ink opacity in every appearance mode. */
+/** Intensity controls opacity directly. */
 internal fun wallpaperInkAlpha(intensity: Int): Float = intensity.coerceIn(0, 100) / 100f
-
-internal fun wallpaperInkColor(
-    ink: Color,
-    intensity: Int,
-): Color = ink.copy(alpha = wallpaperInkAlpha(intensity))
-
-internal data class WallpaperTileKey(
-    val preset: ChatWallpaperPreset,
-    val tileSizePx: Int,
-)
-
-private data class WallpaperTile(
-    val key: WallpaperTileKey,
-    val bitmap: Bitmap,
-)
-
-/** A 4 MiB cache keeps the theme- and intensity-independent alpha masks bounded. */
-private object WallpaperTileCache : LruCache<WallpaperTileKey, Bitmap>(WALLPAPER_TILE_CACHE_KIB) {
-    private val renderMutex = Mutex()
-
-    override fun sizeOf(
-        key: WallpaperTileKey,
-        value: Bitmap,
-    ): Int = (value.allocationByteCount / 1024).coerceAtLeast(1)
-
-    suspend fun getOrRender(
-        assets: AssetManager,
-        key: WallpaperTileKey,
-    ): Bitmap {
-        get(key)?.let { return it }
-        return renderMutex.withLock {
-            get(key) ?: renderWallpaperTile(assets, key).also { put(key, it) }
-        }
-    }
-}
-
-/** Decode the transparent PNG off the main thread, then keep only a compact alpha mask in memory. */
-internal fun renderWallpaperTile(
-    assets: AssetManager,
-    key: WallpaperTileKey,
-): Bitmap {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    assets.open("chat-wallpapers/${assetName(key.preset)}").use { BitmapFactory.decodeStream(it, null, bounds) }
-    require(bounds.outWidth > 0 && bounds.outHeight > 0) { "wallpaper PNG could not be decoded" }
-
-    val decoded =
-        assets.open("chat-wallpapers/${assetName(key.preset)}").use { input ->
-            BitmapFactory.decodeStream(
-                input,
-                null,
-                BitmapFactory.Options().apply {
-                    inPreferredConfig = Bitmap.Config.ARGB_8888
-                    inSampleSize = wallpaperDecodeSampleSize(bounds.outWidth, bounds.outHeight, key.tileSizePx)
-                    inScaled = false
-                },
-            )
-        } ?: error("wallpaper PNG could not be decoded")
-    val alphaMask =
-        try {
-            decoded.extractAlpha()
-        } finally {
-            decoded.recycle()
-        }
-    return if (alphaMask.width == key.tileSizePx && alphaMask.height == key.tileSizePx) {
-        alphaMask
-    } else {
-        alphaMask.scale(key.tileSizePx, key.tileSizePx, true).also {
-            if (it !== alphaMask) alphaMask.recycle()
-        }
-    }
-}
-
-internal fun wallpaperDecodeSampleSize(
-    sourceWidth: Int,
-    sourceHeight: Int,
-    targetSizePx: Int,
-): Int {
-    var sample = 1
-    while (sourceWidth / (sample * 2) >= targetSizePx && sourceHeight / (sample * 2) >= targetSizePx) {
-        sample *= 2
-    }
-    return sample
-}
-
-internal fun wallpaperTileKey(
-    preset: ChatWallpaperPreset,
-    density: Float,
-    tilePeriodDp: Float = WALLPAPER_TILE_PERIOD_DP,
-): WallpaperTileKey =
-    WallpaperTileKey(
-        preset = preset,
-        tileSizePx = (tilePeriodDp * density).toInt().coerceAtLeast(1),
-    )
 
 /** Keep the gradient stationary when a transient inset shrinks the chat viewport. */
 internal fun expandedWallpaperCoverage(
@@ -350,36 +243,5 @@ internal fun expandedWallpaperCoverage(
         height = maxOf(current.height, measured.height),
     )
 
-internal fun assetName(preset: ChatWallpaperPreset): String =
-    when (preset) {
-        ChatWallpaperPreset.NONE -> error("NONE has no wallpaper asset")
-
-        ChatWallpaperPreset.MOTD -> "motd.png"
-
-        ChatWallpaperPreset.DEEP_SPACE -> "deep-space.png"
-
-        ChatWallpaperPreset.RETRO_GAMING -> "retro-gaming.png"
-
-        ChatWallpaperPreset.RADIO_CLUB -> "radio-club.png"
-
-        ChatWallpaperPreset.INTERNET_ODDITIES -> "internet-oddities.png"
-
-        ChatWallpaperPreset.RETRO_CHAT -> "retro-chat.png"
-
-        ChatWallpaperPreset.MEMES -> "memes.png"
-
-        ChatWallpaperPreset.LINUX -> "linux.png"
-
-        ChatWallpaperPreset.SYSTEMCRAFTERS -> "systemcrafters.png"
-
-        ChatWallpaperPreset.JAPANESE_COUNTRYSIDE,
-        ChatWallpaperPreset.RAINY_CAFE,
-        ChatWallpaperPreset.MOTD_ARCADE,
-        ChatWallpaperPreset.MIDNIGHT_TERMINAL,
-        ChatWallpaperPreset.CYBERPUNK_CANAL,
-        -> error("scenic wallpapers use the scenic asset catalog")
-    }
-
 internal const val WALLPAPER_TILE_PERIOD_DP = 512f
 internal const val WALLPAPER_THUMBNAIL_TILE_PERIOD_DP = 128f
-private const val WALLPAPER_TILE_CACHE_KIB = 4 * 1024

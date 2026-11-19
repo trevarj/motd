@@ -67,13 +67,16 @@ import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.BubbleCornerStyle
+import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.resolveWallpaper
 import io.github.trevarj.motd.dickord.DICKORD_PORTAL_DMS_KEY
 import io.github.trevarj.motd.dickord.DickordChannelDescriptor
 import io.github.trevarj.motd.dickord.DickordPortalContent
@@ -864,7 +867,7 @@ class AvatarRoutingTest {
                             density = density.value,
                             messageSpacing = MessageSpacing.DEFAULT,
                             bubbleCorners = BubbleCornerStyle.ROUNDED,
-                            wallpaper = WallpaperSelection(),
+                            wallpaper = resolveWallpaper(AppearanceConfig(wallpaper = WallpaperSelection(ChatWallpaperPreset.PATTERN))),
                             conversationFontScalePercent = 100,
                             tagPrefix = "fictional",
                         )
