@@ -1075,6 +1075,7 @@ private fun ComfortableActionBubble(
             onSenderClick?.takeUnless { selecting }?.let { callback ->
                 LinkAnnotation.Clickable(
                     tag = "action-sender",
+                    styles = TextLinkStyles(style = SpanStyle()),
                     linkInteractionListener = { callback() },
                 )
             }
@@ -1370,6 +1371,7 @@ private fun ActionMessageRow(
             onSenderClick?.takeUnless { selecting }?.let { callback ->
                 LinkAnnotation.Clickable(
                     tag = "action-sender",
+                    styles = TextLinkStyles(style = SpanStyle()),
                     linkInteractionListener = { callback() },
                 )
             }

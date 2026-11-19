@@ -1572,6 +1572,81 @@ class MessageBubbleFooterUiTest {
     }
 
     @Test
+    @Config(sdk = [35])
+    fun clickableCompactSendersRetainTheirNickOverrideInk() {
+        val overrides = mapOf("alice" to 0, "bob" to 120)
+        val kind = mutableStateOf(MessageKind.PRIVMSG)
+        val clickable = mutableStateOf(false)
+        val taps = mutableListOf<String>()
+        compose.setContent {
+            MotdTheme(
+                dynamicColor = false,
+                themePreset = ColorThemePreset.LIGHT,
+                layoutDensity = LayoutDensity.COMPACT,
+                compactNickBrackets = CompactNickBrackets.ANGLE,
+                nickColorPalette = NickColorPalette.VIVID,
+                nickColorOverrides = overrides,
+                nicknameBackgroundsEnabled = false,
+                uiFontScalePercent = 160,
+                timestampConfig = TimestampConfig(show = false),
+            ) {
+                Surface(Modifier.width(380.dp)) {
+                    Column {
+                        for (sender in overrides.keys) {
+                            MessageBubble(
+                                sender = sender,
+                                text = BODY,
+                                timeMs = 0,
+                                isSelf = false,
+                                kind = kind.value,
+                                showSender = true,
+                                onSenderClick = if (clickable.value) ({ taps += sender }) else null,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        for (messageKind in listOf(MessageKind.PRIVMSG, MessageKind.ACTION)) {
+            compose.runOnIdle {
+                kind.value = messageKind
+                clickable.value = false
+            }
+            val nodes =
+                overrides.keys.associateWith { sender ->
+                    val prefix = if (messageKind == MessageKind.ACTION) "* $sender" else "<$sender>"
+                    compose.onNodeWithText("$prefix $BODY", useUnmergedTree = true).assertIsDisplayed()
+                }
+            // Unlinked rows supply the expected override ink after each row's contrast fitting.
+            val expectedInks = nodes.mapValues { (sender, node) -> node.textLayout().inkAt(sender) }
+            assertEquals(2, expectedInks.values.toSet().size)
+            compose.runOnIdle { clickable.value = true }
+            for ((sender, node) in nodes) {
+                val ink = expectedInks.getValue(sender)
+                val layout = node.textLayout()
+                assertEquals("$messageKind $sender layout ink", ink, layout.inkAt(sender))
+                val start = layout.layoutInput.text.indexOf(sender)
+                val bounds = layout.getPathForRange(start, start + sender.length).getBounds()
+                val pixels = node.captureToImage().asAndroidBitmap()
+                val argb = ink.toArgb()
+                assertTrue(
+                    "$messageKind $sender paints the override ink in the native paragraph",
+                    (bounds.top.toInt() until bounds.bottom.toInt().coerceAtMost(pixels.height)).any { y ->
+                        (bounds.left.toInt() until bounds.right.toInt().coerceAtMost(pixels.width)).any { x ->
+                            pixels.getPixel(x, y) == argb
+                        }
+                    },
+                )
+                node.performTouchInput { click(layout.getBoundingBox(start + 1).center) }
+            }
+            compose.runOnIdle {
+                assertEquals("$messageKind sender taps", overrides.keys.toList(), taps)
+                taps.clear()
+            }
+        }
+    }
+
+    @Test
     fun twoLineSenderIsPlainBoldColoredAndKeepsNativeClick() {
         var senderClicks = 0
         compose.setContent {

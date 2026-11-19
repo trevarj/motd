@@ -314,9 +314,10 @@ flowchart TD
   split into bounded native fragments. Selecting text temporarily flattens chips to
   ordinary nick text for character-by-character copying, and may reflow the message.
   Literal characters and body offsets stay unchanged. Known mentions and sender names
-  follow the configured nickname-tap action; matching excludes URLs/code. Holding a
-  nickname opens its user/WHOIS sheet, while holding other message content opens
-  message actions. Concealment and transcript selection suppress nickname gestures.
+  follow the configured nickname-tap action and retain their nickname colors instead
+  of inheriting URL styling. Mention matching excludes URLs/code. Holding a nickname
+  opens its user/WHOIS sheet, while holding other message content opens message
+  actions. Concealment and transcript selection suppress nickname gestures.
   Sender prefixes and composer styling remain separate.
   Appearance → Transparency and blur owns continuous 0–100 controls for ordinary PRIVMSG, NOTICE, and ACTION
   backings in every layout, with or without nickname tint: opacity defaults to 100%, and independent

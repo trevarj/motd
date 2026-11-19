@@ -21,7 +21,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -354,8 +356,11 @@ internal fun buildCompactLine(
             }
             onSenderClick?.let { callback ->
                 addLink(
-                    androidx.compose.ui.text.LinkAnnotation
-                        .Clickable("action-sender", linkInteractionListener = { callback() }),
+                    LinkAnnotation.Clickable(
+                        tag = "action-sender",
+                        styles = TextLinkStyles(style = SpanStyle()),
+                        linkInteractionListener = { callback() },
+                    ),
                     senderStart,
                     length - if (kind != MessageKind.NOTICE && brackets == CompactNickBrackets.NONE) 2 else 1,
                 )
