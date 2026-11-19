@@ -3881,7 +3881,7 @@ internal fun ChatContent(
                                 runwayHeight = flightAnchors.ghostHeight + gapPx,
                                 liftFraction = flightMotion.lift.value,
                                 revealedGap = revealed,
-                                footDrop = flightAnchors.composerShrink(),
+                                footDrop = flightAnchors.composerFootDrop(),
                             )
                         }
                         shift

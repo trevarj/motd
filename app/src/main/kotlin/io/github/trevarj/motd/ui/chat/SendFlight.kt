@@ -68,13 +68,6 @@ internal class SendFlightAnchors {
      */
     var ghostHeight by mutableStateOf(0f)
 
-    /**
-     * The composer field's height on the tap frame, pinned alongside the motion reset. A
-     * multi-line draft collapses the field to one line when it clears, which grows the timeline
-     * pane and drops the list foot by the difference on that same frame; [composerShrink] feeds
-     * that drop into the runway and hover so the vacated-space math survives the collapse.
-     */
-    var launchFieldHeight by mutableStateOf(0f)
     var launchField by mutableStateOf<Rect?>(null)
     var launchTextOrigin by mutableStateOf<Offset?>(null)
     private var pendingLaunchField: Rect? = null
@@ -92,7 +85,6 @@ internal class SendFlightAnchors {
         // Promote only when a new flight starts; external launches use the latest geometry.
         launchField = if (launchCaptured) pendingLaunchField else composerField
         launchTextOrigin = if (launchCaptured) pendingLaunchTextOrigin else composerTextOrigin
-        launchFieldHeight = launchField?.height ?: 0f
         launchCaptured = false
         pendingLaunchField = null
         pendingLaunchTextOrigin = null
@@ -100,10 +92,11 @@ internal class SendFlightAnchors {
         ghostHeight = 0f
     }
 
-    /** How much the composer has shrunk since the tap frame (0 while it has not). */
-    fun composerShrink(): Float {
-        val current = composerField?.height ?: return 0f
-        return max(0f, launchFieldHeight - current)
+    /** How far the composer field has moved down in window space since the tap frame. */
+    fun composerFootDrop(): Float {
+        val launch = launchField ?: return 0f
+        val current = composerField ?: return 0f
+        return current.top - launch.top
     }
 
     fun reportLandingRow(
@@ -170,12 +163,10 @@ internal fun sendFlightEntryFade(liftFraction: Float): Float {
  * mispredicted runway height self-corrects here too -- both terms are animated, so the error
  * drains through the springs instead of jumping.
  *
- * [footDrop] is how far the list foot fell when a multi-line composer collapsed on the tap
- * frame ([SendFlightAnchors.composerShrink]). It is absorbed into the shift IMMEDIATELY -- not
- * on the spring -- so the neighbour never visibly drops toward the collapsed bar; from there
- * the spring carries the remaining (runway - drop) of travel, and the reveal drains the whole
- * shift exactly as before. Without this term a long message's ghost outran the vacated space
- * by the collapse amount and rode over the neighbour on both presentations.
+ * [footDrop] is the composer's window-space movement since the tap frame
+ * ([SendFlightAnchors.composerFootDrop]), including field collapse and picker or IME movement.
+ * It is absorbed into the shift immediately so the neighbour stays clear of the launch; the
+ * spring carries the remaining (runway - drop) travel and the reveal drains the shift.
  *
  * The lift fraction is capped at 1 so the flight spring's deliberate bounce stays on the
  * bubble; an underdamped shift would nod the entire conversation.
@@ -190,21 +181,14 @@ internal fun sendFlightListShift(
 /**
  * The ghost's absolute top for one frame.
  *
- * While the landing row has not reported (and while the flight is still short of the hover
- * line), the lift holds the bubble in-flight feedback above the composer. The hover rise is the
- * ghost height LESS [footDrop]: a collapsing multi-line composer already moved the resting slot
- * down by the drop, so a full-height rise from the pinned (pre-collapse) field top would
- * overshoot the slot by exactly that amount and poke into the neighbour above. The runway
- * ([sendFlightListShift]) opens beneath the reduced rise on the same spring and always faster,
- * so the hover sits in vacated space by construction. min keeps whichever of hover and flight
- * is higher, so the flight takes over smoothly once it climbs past the hover line.
+ * Until the landing row reports, the lift moves the ghost by its height less [footDrop].
+ * A drop larger than the ghost moves the hover down toward its lower slot instead of pinning
+ * it at launch. The runway ([sendFlightListShift]) opens beneath that motion on the same spring.
  *
- * The flight aims at the row's *resting* foot: the reported [landingBottom] is a visual
- * coordinate that rides the runway shift, so [listShift] is added back to keep the target
- * stationary while the shift drains. The flight term is floored at [landingTop] (the reported
- * rect is clipped to the opened gap, and its coordinates already include the shift): a safety
- * net that only bites when the spring's overshoot would poke the bubble past the vacated edge
- * into the neighbour, and then by at most the overshoot itself.
+ * The flight aims at the row's resting foot: [landingBottom] rides the runway, so [listShift]
+ * is added back. The hover converges to this real target with the flight, allowing a landing
+ * below launch even when it differs from the predicted hover. [landingTop] bounds the final
+ * position so neither lift nor flight overshoot can enter the neighbour's occupied space.
  */
 internal fun sendFlightGhostTop(
     startTop: Float,
@@ -216,11 +200,13 @@ internal fun sendFlightGhostTop(
     liftFraction: Float,
     footDrop: Float = 0f,
 ): Float {
-    val hoverTop = startTop - max(0f, ghostHeight - footDrop) * liftFraction
+    val hoverTop = startTop - (ghostHeight - footDrop) * liftFraction
     val restingFoot = landingBottom?.plus(listShift) ?: return hoverTop
-    val flightTop = startTop + (restingFoot - ghostHeight - startTop) * flightFraction
-    val flooredFlight = landingTop?.let { max(flightTop, it) } ?: flightTop
-    return min(hoverTop, flooredFlight)
+    val targetTop = restingFoot - ghostHeight
+    val flightTop = startTop + (targetTop - startTop) * flightFraction
+    val landingHover = hoverTop + (targetTop - hoverTop) * flightFraction.coerceIn(0f, 1f)
+    val ghostTop = min(landingHover, flightTop)
+    return landingTop?.let { max(ghostTop, it) } ?: ghostTop
 }
 
 /**
@@ -290,7 +276,7 @@ internal fun BoxScope.SendFlightOverlay(
                             landingBottom = landing?.bottom,
                             flightFraction = motion.progress.value,
                             liftFraction = motion.lift.value,
-                            footDrop = anchors.composerShrink(),
+                            footDrop = anchors.composerFootDrop(),
                         )
                 }.clearAndSetSemantics {},
     ) {

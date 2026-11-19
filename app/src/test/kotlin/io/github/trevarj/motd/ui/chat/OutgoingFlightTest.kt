@@ -157,8 +157,68 @@ class OutgoingFlightTest {
         // than a fixed-foot rise assumes, so the full hover is 160, not 200.
         assertEquals(820f, sendFlightGhostTop(900f, 200f, 40f, null, null, 0f, 0.5f, footDrop = 40f), 0.001f)
         assertEquals(740f, sendFlightGhostTop(900f, 200f, 80f, null, null, 0f, 1f, footDrop = 40f), 0.001f)
-        // A drop taller than the ghost pins the hover at the field: the slot is BELOW the start.
-        assertEquals(900f, sendFlightGhostTop(900f, 60f, 0f, null, null, 0f, 1f, footDrop = 80f), 0.001f)
+    }
+
+    @Test
+    fun `picker dismissal carries the ghost down into its real landing without crossing the neighbour`() {
+        val anchors = SendFlightAnchors()
+        anchors.hostOrigin = Offset(0f, 100f)
+        anchors.composerField = Rect(20f, 500f, 380f, 540f)
+        anchors.captureLaunch()
+        anchors.beginFlight()
+        anchors.composerField = Rect(20f, 820f, 380f, 860f)
+
+        val startTop = anchors.local(anchors.launchField!!).top
+        val footDrop = anchors.composerFootDrop()
+        assertEquals(320f, footDrop, 0.001f)
+        assertEquals(530f, sendFlightGhostTop(startTop, 60f, 0f, null, null, 0f, 0.5f, footDrop), 0.001f)
+        assertEquals(660f, sendFlightGhostTop(startTop, 60f, 0f, null, null, 0f, 1f, footDrop), 0.001f)
+
+        val partialShift = sendFlightListShift(66f, 0.5f, 30f, footDrop)
+        anchors.reportLandingRow(7L, Rect(0f, 619f, 400f, 649f))
+        val partialLanding = anchors.local(anchors.landingRow!!.second)
+        val partialTop =
+            sendFlightGhostTop(
+                startTop,
+                60f,
+                partialShift,
+                partialLanding.top,
+                partialLanding.bottom,
+                0.5f,
+                0.5f,
+                footDrop,
+            )
+        assertEquals(526f, partialTop, 0.001f)
+        assertTrue(partialTop >= partialLanding.top)
+
+        anchors.reportLandingRow(7L, Rect(0f, 746f, 400f, 812f))
+        val landing = anchors.local(anchors.landingRow!!.second)
+        assertEquals(
+            652f,
+            sendFlightGhostTop(
+                startTop,
+                60f,
+                sendFlightListShift(66f, 1f, landing.height, footDrop),
+                landing.top,
+                landing.bottom,
+                1f,
+                1f,
+                footDrop,
+            ),
+            0.001f,
+        )
+    }
+
+    @Test
+    fun `composer foot movement is signed and absent geometry has no displacement`() {
+        val anchors = SendFlightAnchors()
+        assertEquals(0f, anchors.composerFootDrop(), 0.001f)
+        anchors.composerField = Rect(20f, 900f, 380f, 940f)
+        anchors.beginFlight()
+        anchors.composerField = Rect(20f, 860f, 380f, 900f)
+        assertEquals(-40f, anchors.composerFootDrop(), 0.001f)
+        anchors.composerField = null
+        assertEquals(0f, anchors.composerFootDrop(), 0.001f)
     }
 
     @Test
@@ -224,7 +284,7 @@ class OutgoingFlightTest {
 
         assertEquals(field, anchors.launchField)
         assertEquals(textOrigin, anchors.launchTextOrigin)
-        assertEquals(40f, anchors.composerShrink(), 0.001f)
+        assertEquals(40f, anchors.composerFootDrop(), 0.001f)
         // An externally launched next flight cannot reuse the previous tap's pinned geometry.
         anchors.beginFlight()
         assertEquals(anchors.composerField, anchors.launchField)
@@ -252,7 +312,7 @@ class OutgoingFlightTest {
                 null,
                 0f,
                 1f,
-                footDrop = anchors.composerShrink(),
+                footDrop = anchors.composerFootDrop(),
             )
         assertEquals(740f, hoverTop(), 0.001f)
 
@@ -260,7 +320,7 @@ class OutgoingFlightTest {
         anchors.captureLaunch()
         assertEquals(field, anchors.launchField)
         assertEquals(textOrigin, anchors.launchTextOrigin)
-        assertEquals(40f, anchors.composerShrink(), 0.001f)
+        assertEquals(40f, anchors.composerFootDrop(), 0.001f)
         assertEquals(740f, hoverTop(), 0.001f)
 
         // A subsequent actual flight adopts its own tap geometry, not the previous command's.
@@ -270,7 +330,7 @@ class OutgoingFlightTest {
         anchors.beginFlight()
         assertEquals(920f, anchors.launchField!!.top, 0.001f)
         assertEquals(Offset(32f, 932f), anchors.launchTextOrigin)
-        assertEquals(0f, anchors.composerShrink(), 0.001f)
+        assertEquals(0f, anchors.composerFootDrop(), 0.001f)
         assertEquals(720f, hoverTop(), 0.001f)
     }
 

@@ -124,7 +124,7 @@
         };
         # Standalone raster studies and browser verification, without the Android SDK.
         devShells.sprite-studies = pkgs.mkShell {
-          packages = [ pkgs.nodejs_22 pkgs.imagemagick pkgs.chromium ];
+          packages = [ pkgs.nodejs_22 pkgs.imagemagick pkgs.ffmpeg pkgs.chromium ];
           FONTCONFIG_FILE = pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; };
         };
         devShells.emulator = pkgs.mkShell {

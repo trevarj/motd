@@ -106,6 +106,7 @@ window, rather than dropping newer rows and then loading them back page by page.
 Comfortable chat sends grow the actual formatted message bubble from the composer
 over a 500ms morph, keeping its body and metadata aligned through the landing.
 Replies and denser message styles retain their ordinary send-flight presentation.
+Flights track picker/keyboard-driven composer movement and hand off at the measured row.
 Accepted sends clear the composer once saved to chat. Their bubbles settle while a spinner
 shows pending delivery, then show confirmation or failure with Retry and Delete.
 
