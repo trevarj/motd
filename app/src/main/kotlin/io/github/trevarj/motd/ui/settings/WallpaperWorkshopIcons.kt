@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -58,6 +59,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.withTranslation
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.ImportedWallpaperIcon
 import io.github.trevarj.motd.data.prefs.MAX_WALLPAPER_ICONS
@@ -181,7 +183,14 @@ internal fun WorkshopIconPicker(
             }
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
-            Text(stringResource(R.string.wallpaper_workshop_icon_count, picker.selectedIds.size, MAX_WALLPAPER_ICONS))
+            Text(
+                pluralStringResource(
+                    R.plurals.wallpaper_workshop_icon_count,
+                    MAX_WALLPAPER_ICONS,
+                    picker.selectedIds.size,
+                    MAX_WALLPAPER_ICONS,
+                ),
+            )
             Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = viewModel::cancelPicker, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text(stringResource(R.string.action_cancel))
@@ -381,14 +390,12 @@ private fun WorkshopGlyph(
             glyph?.let { drawing ->
                 val fit = size.minDimension / kotlin.math.hypot(drawing.width, drawing.height) * scale
                 drawIntoCanvas { canvas ->
-                    val native = canvas.nativeCanvas
-                    val save = native.save()
-                    native.translate(center.x, center.y)
-                    native.rotate(rotation.toFloat())
-                    native.scale(fit, fit)
-                    native.translate(-drawing.width / 2f, -drawing.height / 2f)
-                    drawing.draw(native, argb, paint)
-                    native.restoreToCount(save)
+                    canvas.nativeCanvas.withTranslation(center.x, center.y) {
+                        rotate(rotation.toFloat())
+                        scale(fit, fit)
+                        translate(-drawing.width / 2f, -drawing.height / 2f)
+                        drawing.draw(this, argb, paint)
+                    }
                 }
             }
         }

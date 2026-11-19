@@ -34,7 +34,10 @@
     <string name="wallpaper_workshop_category_space">Space &amp; Radio</string>
     <string name="wallpaper_workshop_category_doodles">Doodles</string>
     <string name="wallpaper_workshop_category_imports">Imports</string>
-    <string name="wallpaper_workshop_icon_count">%1$d of %2$d icons selected</string>
+    <plurals name="wallpaper_workshop_icon_count">
+        <item quantity="one">%1$d of %2$d icon selected</item>
+        <item quantity="other">%1$d of %2$d icons selected</item>
+    </plurals>
     <string name="wallpaper_workshop_icon_limit">The mix is full. Deselect an icon to add another.</string>
     <string name="wallpaper_workshop_no_icons">No matching icons.</string>
     <string name="wallpaper_workshop_done">Done</string>

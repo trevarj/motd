@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.withTranslation
 import io.github.trevarj.motd.data.prefs.ImportedWallpaperIcon
 import io.github.trevarj.motd.data.prefs.WallpaperCatalog
 import io.github.trevarj.motd.data.prefs.WallpaperGlyph
@@ -209,7 +211,7 @@ internal suspend fun renderWallpaperPatternTile(
         request.mutex.withLock {
             tiles[key] ?: rasterSlots.withPermit {
                 withContext(Dispatchers.Default) {
-                    val bitmap = Bitmap.createBitmap(key.edge, key.edge, Bitmap.Config.ARGB_8888)
+                    val bitmap = createBitmap(key.edge, key.edge)
                     var complete = false
                     try {
                         drawWallpaperPatternPeriod(context, key, imports, Canvas(bitmap), key.edge.toFloat())
@@ -301,13 +303,12 @@ private fun drawStamp(
     dx: Float,
     dy: Float,
 ) {
-    val save = canvas.save()
-    canvas.translate(stamp.x + dx, stamp.y + dy)
-    canvas.rotate(stamp.rotation)
-    canvas.scale(scale, if (stamp.mirror) -scale else scale)
-    canvas.translate(-glyph.width / 2f, -glyph.height / 2f)
-    glyph.draw(canvas, ink, paint)
-    canvas.restoreToCount(save)
+    canvas.withTranslation(stamp.x + dx, stamp.y + dy) {
+        rotate(stamp.rotation)
+        scale(scale, if (stamp.mirror) -scale else scale)
+        translate(-glyph.width / 2f, -glyph.height / 2f)
+        glyph.draw(this, ink, paint)
+    }
 }
 
 private class Orbit(
