@@ -9,11 +9,14 @@ import androidx.compose.ui.platform.PlatformTextInputSession
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
@@ -24,11 +27,13 @@ import androidx.compose.ui.text.input.TextFieldValue
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.emoji.EmojiDataset
 import io.github.trevarj.motd.data.emoji.EmojiEntry
+import io.github.trevarj.motd.data.emoji.EmojiSequenceCatalog
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IRC_RESET
 import io.github.trevarj.motd.irc.format.IrcEditorDocument
 import io.github.trevarj.motd.ui.theme.EmojiRenderer
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -243,6 +248,41 @@ class ComposerEmojiIntegrationTest {
             compose.runOnIdle { assertEquals(text, sent.last()) }
         }
         compose.runOnIdle { assertEquals(listOf(text, text, text), sent) }
+    }
+
+    @Test
+    fun pickerSearchChangesFromNoMatchesToExactZwjSelection() {
+        val dataset = runBlocking { EmojiSequenceCatalog(RuntimeEnvironment.getApplication()).load() }
+        val roots = emojiPickerRoots(dataset)
+        val picked = mutableListOf<String>()
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                EmojiPickerSearchContent(
+                    dataset = dataset,
+                    roots = roots,
+                    sticky = emptyMap(),
+                    tagPrefix = "chat_composer_emoji_search",
+                    onPick = { picked += it.sequence },
+                    onVariants = {},
+                    onDismiss = {},
+                )
+            }
+        }
+
+        val field = compose.onNodeWithTag("chat_composer_emoji_search_field")
+        val results = compose.onNodeWithTag("chat_composer_emoji_search_grid")
+        val empty = compose.onNodeWithTag("chat_composer_emoji_search_empty")
+        compose.onNodeWithTag("chat_composer_emoji_search_prompt").assertIsDisplayed()
+        results.assertDoesNotExist()
+        field.performTextReplacement("zzzzzzzzzzzzzzzz")
+        empty.assertIsDisplayed().assertTextEquals("No matching emoji")
+        results.assertDoesNotExist()
+
+        field.performTextReplacement("rainbow flag")
+        empty.assertDoesNotExist()
+        results.assertIsDisplayed()
+        compose.onNodeWithTag("chat_composer_emoji_search_cell_1f3f3_fe0f_200d_1f308").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals(listOf("🏳️‍🌈"), picked) }
     }
 
     private fun assertEmojiSpans(

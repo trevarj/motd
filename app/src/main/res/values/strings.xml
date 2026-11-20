@@ -800,6 +800,10 @@
     <string name="emoji_picker_show_variants">Show variants</string>
     <string name="emoji_picker_variants">Variants for %1$s</string>
     <string name="emoji_picker_close_variants">Close variants</string>
+    <string name="emoji_picker_search">Search emoji</string>
+    <string name="emoji_picker_close_search">Close emoji search</string>
+    <string name="emoji_picker_search_prompt">Search by emoji name</string>
+    <string name="emoji_picker_search_empty">No matching emoji</string>
     <string name="emoji_category_smileys_emotion">Smileys &amp; emotion</string>
     <string name="emoji_category_people_body">People &amp; body</string>
     <string name="emoji_category_animals_nature">Animals &amp; nature</string>

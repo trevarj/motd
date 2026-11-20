@@ -300,6 +300,8 @@ flowchart TD
   set coverage. Shared text/editor renderers preserve raw Unicode, formatting and
   offsets; unsupported sequences retain native fallback. The Compose picker shares
   recents and sticky variants across composer/reactions without bundling artwork.
+  Picker search uses the bundled catalog across categories in a separate dialog,
+  preserving the category and scroll position and keeping the query out of the draft.
 - Receipt-time highlight nick and IRC case mapping persist with each message in Room 52.
   Recorded own-nick body matches share the roster's None/Bold/Chip pipeline, using
   stored case mapping and normal URL/code exclusions without duplicate chips.
