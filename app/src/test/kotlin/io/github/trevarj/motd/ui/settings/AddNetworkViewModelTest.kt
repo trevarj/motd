@@ -47,7 +47,10 @@ class AddNetworkViewModelTest {
 
         override fun observeNetworks() = flowOf(networks.values.toList())
 
-        override suspend fun addNetwork(n: NetworkEntity): Long {
+        override suspend fun addNetwork(
+            n: NetworkEntity,
+            requireNew: Boolean,
+        ): Long {
             existingResult?.let { return it }
             val id = ids.incrementAndGet()
             networks[id] = n.copy(id = id)

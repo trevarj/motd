@@ -68,7 +68,10 @@ class BouncerNetworksViewModelTest {
                 object : NetworkRepository {
                     override fun observeNetworks() = flowOf(listOf(root))
 
-                    override suspend fun addNetwork(n: NetworkEntity) = error("unused")
+                    override suspend fun addNetwork(
+                        n: NetworkEntity,
+                        requireNew: Boolean,
+                    ) = error("unused")
 
                     override suspend fun updateNetwork(n: NetworkEntity) = error("unused")
 
@@ -114,7 +117,10 @@ class BouncerNetworksViewModelTest {
                 object : NetworkRepository {
                     override fun observeNetworks() = flowOf(listOf(root))
 
-                    override suspend fun addNetwork(n: NetworkEntity) = error("unused")
+                    override suspend fun addNetwork(
+                        n: NetworkEntity,
+                        requireNew: Boolean,
+                    ) = error("unused")
 
                     override suspend fun updateNetwork(n: NetworkEntity) = error("unused")
 

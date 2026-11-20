@@ -440,7 +440,10 @@ class AccountSetupViewModelTest {
 
         override fun observeNetworks(): Flow<List<NetworkEntity>> = rows
 
-        override suspend fun addNetwork(n: NetworkEntity): Long = error("Unexpected network creation")
+        override suspend fun addNetwork(
+            n: NetworkEntity,
+            requireNew: Boolean,
+        ): Long = error("Unexpected network creation")
 
         override suspend fun updateNetwork(n: NetworkEntity) {
             updates += n

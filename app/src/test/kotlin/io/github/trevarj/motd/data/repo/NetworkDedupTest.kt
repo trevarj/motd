@@ -13,6 +13,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -175,6 +176,20 @@ class NetworkDedupTest {
             val second = repo.addNetwork(direct("irc.libera.chat"))
             assertEquals(first, second)
             assertEquals(1, dao.rows.size)
+        }
+
+    @Test
+    fun `required new network rejects an equivalent identity without replacing its TLS settings`() =
+        runBlocking {
+            val dao = InMemoryNetworkDao()
+            val repo = NetworkRepositoryImpl(dao)
+            val existing = direct("irc.libera.chat").copy(tls = false)
+            val id = repo.addNetwork(existing)
+
+            val failure = runCatching { repo.addNetwork(existing.copy(tls = true), requireNew = true) }.exceptionOrNull()
+
+            assertTrue(failure is IllegalStateException)
+            assertEquals(listOf(existing.copy(id = id)), dao.rows.values.toList())
         }
 
     @Test

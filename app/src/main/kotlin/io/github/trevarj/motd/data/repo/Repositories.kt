@@ -34,7 +34,10 @@ import kotlinx.coroutines.flow.map
 interface NetworkRepository {
     fun observeNetworks(): Flow<List<NetworkEntity>>
 
-    suspend fun addNetwork(n: NetworkEntity): Long
+    suspend fun addNetwork(
+        n: NetworkEntity,
+        requireNew: Boolean = false,
+    ): Long
 
     suspend fun updateNetwork(n: NetworkEntity)
 

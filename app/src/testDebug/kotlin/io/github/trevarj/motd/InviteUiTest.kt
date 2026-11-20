@@ -1,5 +1,9 @@
 package io.github.trevarj.motd
 
+import android.content.Context
+import androidx.activity.ComponentDialog
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -20,6 +24,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.prefs.AccountEnrollmentProvider
 import io.github.trevarj.motd.invite.JoinInviteCodec
 import io.github.trevarj.motd.invite.JoinInviteV1
@@ -47,6 +52,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowDialog
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -135,6 +141,48 @@ class InviteUiTest {
         compose.onNodeWithTag("invite_details_toggle").performClick()
         compose.onNodeWithText("irc.example").assertExists()
         compose.onNodeWithTag("invite_review_continue").assertExists()
+    }
+
+    @Test
+    fun recipientBackUsesSameActionAndDismissesPlaintextDialogFirst() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val invite = JoinInviteV1(networkName = "Ergo", host = "irc.example", port = 6667, tls = false, channel = "#friends")
+        var state by mutableStateOf(JoinInviteUiState(invite = invite, phase = JoinInvitePhase.IDENTITY))
+        var backCalls = 0
+        lateinit var dispatcher: OnBackPressedDispatcher
+        compose.setContent {
+            dispatcher = requireNotNull(LocalOnBackPressedDispatcherOwner.current).onBackPressedDispatcher
+            MotdTheme {
+                JoinInviteContent(
+                    state = state,
+                    onBack = { backCalls++ },
+                    onContinue = {},
+                    onNickChange = {},
+                    onConnect = { state = state.copy(showPlaintextWarning = true) },
+                    onRetry = {},
+                    onSetupAccount = {},
+                    onConfirmPlaintext = {},
+                    onDismissPlaintext = { state = state.copy(showPlaintextWarning = false) },
+                )
+            }
+        }
+
+        val warning = compose.onNodeWithText(context.getString(R.string.add_network_plaintext_title))
+        compose.onNodeWithTag("invite_connect").performClick()
+        warning.assertIsDisplayed()
+        compose.runOnIdle {
+            (ShadowDialog.getLatestDialog() as ComponentDialog).onBackPressedDispatcher.onBackPressed()
+        }
+        warning.assertDoesNotExist()
+        compose.onNodeWithTag("invite_nick").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(0, backCalls) }
+
+        compose.onNodeWithContentDescription(context.getString(R.string.onboarding_back)).performClick()
+        compose.runOnIdle {
+            assertEquals(1, backCalls)
+            dispatcher.onBackPressed()
+            assertEquals(2, backCalls)
+        }
     }
 
     @Test

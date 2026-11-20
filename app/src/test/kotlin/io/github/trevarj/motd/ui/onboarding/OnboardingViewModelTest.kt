@@ -61,7 +61,10 @@ class OnboardingViewModelTest {
 
         override fun observeNetworks() = flowOf(rows.values.toList())
 
-        override suspend fun addNetwork(n: NetworkEntity): Long = ids.incrementAndGet().also { rows[it] = n.copy(id = it) }
+        override suspend fun addNetwork(
+            n: NetworkEntity,
+            requireNew: Boolean,
+        ): Long = ids.incrementAndGet().also { rows[it] = n.copy(id = it) }
 
         override suspend fun updateNetwork(n: NetworkEntity) {
             rows[n.id] = n

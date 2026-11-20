@@ -1,6 +1,8 @@
 package io.github.trevarj.motd.data.prefs
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -82,12 +84,19 @@ object NoopInviteEnrollmentCleanup : InviteEnrollmentCleanup {
 /** App-private transient enrollment state. Activated account credentials move into NetworkEntity. */
 @Singleton
 class InviteEnrollmentStore
-    @Inject
-    constructor(
-        @ApplicationContext context: Context,
+    private constructor(
+        private val store: DataStore<Preferences>,
     ) : InviteEnrollmentCleanup,
         AccountReminderStore {
-        private val store = context.inviteEnrollmentDataStore
+        @Inject
+        constructor(
+            @ApplicationContext context: Context,
+        ) : this(context.inviteEnrollmentDataStore)
+
+        internal companion object {
+            fun fromDataStore(store: DataStore<Preferences>) = InviteEnrollmentStore(store)
+        }
+
         private val json = Json { ignoreUnknownKeys = true }
 
         suspend fun channelKey(
@@ -134,10 +143,18 @@ class InviteEnrollmentStore
             }
         }
 
-        suspend fun clearChannelKeyBackup(networkId: Long) {
+        suspend fun commitInvite(
+            networkId: Long,
+            enableAccountReminder: Boolean,
+        ) {
             store.edit { prefs ->
+                prefs[PROVISIONAL_NETWORKS] = (decodeReminderIds(prefs[PROVISIONAL_NETWORKS]) - networkId).sorted().joinToString(",")
+                prefs[IMPORTED_CERT_PINS] = (decodeReminderIds(prefs[IMPORTED_CERT_PINS]) - networkId).sorted().joinToString(",")
                 val backups = decodeChannelKeyBackups(prefs[CHANNEL_KEY_BACKUPS]).toMutableMap()
                 if (backups.remove(networkId) != null) prefs[CHANNEL_KEY_BACKUPS] = json.encodeToString(backups.values.toList())
+                if (enableAccountReminder) {
+                    prefs[ACCOUNT_REMINDERS] = (decodeReminderIds(prefs[ACCOUNT_REMINDERS]) + networkId).sorted().joinToString(",")
+                }
             }
         }
 

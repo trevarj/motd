@@ -32,12 +32,18 @@ class NetworkRepositoryImpl
          * duplicate. Two rows are "the same server" when [networkIdentityKey] matches (see there for
          * the per-role key). The dedup is at the data layer so every add path (onboarding, Add
          * network, soju child import) is covered transparently and callers keep the "returns the row
-         * id" contract — they just get the pre-existing id on a duplicate.
+         * id" contract unless [requireNew] requires the caller to own the new row.
          */
-        override suspend fun addNetwork(n: NetworkEntity): Long =
+        override suspend fun addNetwork(
+            n: NetworkEntity,
+            requireNew: Boolean,
+        ): Long =
             addMutex.withLock {
                 val key = networkIdentityKey(n)
-                networkDao.allNow().firstOrNull { networkIdentityKey(it) == key }?.let { return it.id }
+                networkDao.allNow().firstOrNull { networkIdentityKey(it) == key }?.let {
+                    check(!requireNew) { "A network with this connection identity already exists" }
+                    return it.id
+                }
                 // Appended, never inserted at an arbitrary position: a new network belongs at the end of
                 // whatever manual drawer order the user has already arranged.
                 networkDao.insertLast(n)

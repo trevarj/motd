@@ -75,7 +75,10 @@ class ChatListReorderTest {
 
         override fun observeNetworks(): Flow<List<NetworkEntity>> = networks.onEach { observedNetworkEmissions++ }
 
-        override suspend fun addNetwork(n: NetworkEntity): Long = 0
+        override suspend fun addNetwork(
+            n: NetworkEntity,
+            requireNew: Boolean,
+        ): Long = 0
 
         override suspend fun updateNetwork(n: NetworkEntity) = Unit
 

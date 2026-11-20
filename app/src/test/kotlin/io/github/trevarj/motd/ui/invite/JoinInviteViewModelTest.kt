@@ -1,5 +1,8 @@
 package io.github.trevarj.motd.ui.invite
 
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.ChatListRow
@@ -15,15 +18,17 @@ import io.github.trevarj.motd.data.prefs.OnboardingPrefs
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.data.repo.networkIdentityKey
 import io.github.trevarj.motd.invite.JoinInviteCodec
 import io.github.trevarj.motd.invite.JoinInviteV1
 import io.github.trevarj.motd.invite.JoinInviteV2
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.service.ChannelJoinOutcome
+import io.github.trevarj.motd.service.ChannelJoinRejectionKind
 import io.github.trevarj.motd.testing.NoopConnectionManager
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,7 +65,6 @@ class JoinInviteViewModelTest {
             val onboarding = FakeOnboarding()
             val vm = JoinInviteViewModel(networkRepo, bufferRepo, connections, FakeCerts(), enrollment, onboarding)
             val invite = JoinInviteV1(networkName = "Ergo", host = "irc.example", port = 6697, channel = "#friends", channelKey = "secret")
-            val event = async(start = CoroutineStart.UNDISPATCHED) { vm.events.first() }
 
             vm.init(JoinInviteCodec.encode(invite))
             vm.continueToIdentity()
@@ -69,11 +73,14 @@ class JoinInviteViewModelTest {
 
             val opened =
                 try {
-                    withContext(Dispatchers.Default) { withTimeout(5_000) { event.await() } }
+                    vm.awaitPhase(JoinInvitePhase.READY).pendingBufferId
                 } catch (error: Exception) {
                     throw AssertionError("state=${vm.state.value} rows=${networkRepo.rows.value} joins=${connections.joins}", error)
                 }
-            assertEquals(JoinInviteEvent.OpenBuffer(99), opened)
+            assertEquals(99L, opened)
+            assertEquals(99L, vm.state.first { it.pendingBufferId != null }.pendingBufferId)
+            vm.onBufferOpened(99)
+            assertEquals(null, vm.state.value.pendingBufferId)
             assertEquals(
                 "alice",
                 networkRepo.rows.value
@@ -100,7 +107,6 @@ class JoinInviteViewModelTest {
                     InviteEnrollmentStore(ApplicationProvider.getApplicationContext()),
                     onboarding,
                 )
-            val event = async(start = CoroutineStart.UNDISPATCHED) { vm.events.first() }
             vm.init(
                 JoinInviteCodec.encode(
                     JoinInviteV2(networkName = "Ergo", host = "irc.example", port = 6697, contactNick = "inviter"),
@@ -110,10 +116,7 @@ class JoinInviteViewModelTest {
             vm.editNick("new-user")
             vm.connect()
 
-            assertEquals(
-                JoinInviteEvent.OpenBuffer(77),
-                withContext(Dispatchers.Default) { withTimeout(5_000) { event.await() } },
-            )
+            assertEquals(77L, vm.awaitPhase(JoinInvitePhase.READY).pendingBufferId)
             assertEquals(listOf(42L to "inviter"), connections.queries)
             assertEquals(0, connections.joins)
             assertEquals(1, networkRepo.rows.value.size)
@@ -135,7 +138,6 @@ class JoinInviteViewModelTest {
                     InviteEnrollmentStore(ApplicationProvider.getApplicationContext()),
                     FakeOnboarding(),
                 )
-            val event = async(start = CoroutineStart.UNDISPATCHED) { vm.events.first() }
             vm.init(
                 JoinInviteCodec.encode(
                     JoinInviteV2(networkName = "Ergo", host = "irc.example", port = 6697, contactNick = "inviter"),
@@ -145,37 +147,144 @@ class JoinInviteViewModelTest {
             vm.editNick("ignored")
             vm.connect()
 
-            assertEquals(
-                JoinInviteEvent.OpenBuffer(77),
-                withContext(Dispatchers.Default) { withTimeout(5_000) { event.await() } },
-            )
+            assertEquals(77L, vm.awaitPhase(JoinInvitePhase.READY).pendingBufferId)
             assertEquals(listOf(7L to "inviter"), connections.queries)
             assertEquals(0, connections.joins)
             assertEquals(1, networkRepo.rows.value.size)
         }
 
     @Test
-    fun `cancel after failed connection removes only provisional network`() =
+    fun `identity back preserves nick and review exit cleans up failed invite after retry`() =
         runTest {
-            val networkRepo = FakeNetworks()
+            val existing = direct(id = 7).copy(host = "unrelated.example")
+            val networkRepo = FakeNetworks(listOf(existing))
             val bufferRepo = FakeBuffers()
             val connections = FakeConnections(bufferRepo, failConnection = true)
             val enrollment = InviteEnrollmentStore(ApplicationProvider.getApplicationContext())
             enrollment.clearNetwork(42)
-            val vm = JoinInviteViewModel(networkRepo, bufferRepo, connections, FakeCerts(), enrollment, FakeOnboarding())
-            vm.init(JoinInviteCodec.encode(JoinInviteV1(networkName = "Ergo", host = "irc.example", port = 6697, channel = "#friends")))
+            val certs = FakeCerts()
+            val vm = JoinInviteViewModel(networkRepo, bufferRepo, connections, certs, enrollment, FakeOnboarding())
+            val invite =
+                JoinInviteV1(
+                    networkName = "Ergo",
+                    host = "irc.example",
+                    port = 6697,
+                    channel = "#friends",
+                    certSha256 = "ab".repeat(32),
+                )
+            vm.init(JoinInviteCodec.encode(invite))
             vm.continueToIdentity()
             vm.editNick("alice")
             vm.connect()
             withContext(Dispatchers.Default) {
                 withTimeout(5_000) { vm.state.first { it.phase == JoinInvitePhase.FAILED } }
             }
-            val done = CompletableDeferred<Unit>()
-            vm.cancel { done.complete(Unit) }
-            withContext(Dispatchers.Default) { withTimeout(5_000) { done.await() } }
+            assertTrue(enrollment.isProvisionalNetwork(42))
+            assertTrue(enrollment.hasImportedCertPin(42))
+            assertEquals(invite.certSha256, certs.pinnedFor(invite.host, invite.port))
 
-            assertTrue(networkRepo.rows.value.isEmpty())
+            vm.retry()
+            vm.onBack()
+            assertEquals(JoinInvitePhase.REVIEW, vm.state.value.phase)
+            vm.continueToIdentity()
+            assertEquals("alice", vm.state.value.nick)
+            vm.onBack()
+            assertEquals(false, vm.state.value.exitRequested)
+            assertTrue(enrollment.isProvisionalNetwork(42))
+
+            vm.onBack()
+            vm.awaitExit()
+            assertEquals(listOf(existing), networkRepo.rows.value)
             assertEquals(false, enrollment.isProvisionalNetwork(42))
+            assertEquals(false, enrollment.hasImportedCertPin(42))
+            assertEquals(null, certs.pinnedFor(invite.host, invite.port))
+        }
+
+    @Test
+    fun `failed join back restores the channel key on a reused network before exit`() =
+        runTest {
+            val existing = direct(id = 7)
+            val networkRepo = FakeNetworks(listOf(existing))
+            val enrollment = InviteEnrollmentStore(ApplicationProvider.getApplicationContext())
+            enrollment.clearNetwork(existing.id)
+            enrollment.putChannelKey(existing.id, "#friends", "old-key")
+            val ready = IrcClientState.Ready("alice", emptySet(), emptyMap())
+            val connections =
+                object : NoopConnectionManager(initialStates = mapOf(existing.id to ready)) {
+                    override val channelJoinOutcomes = MutableSharedFlow<ChannelJoinOutcome>(replay = 1)
+
+                    override suspend fun joinChannel(
+                        networkId: Long,
+                        channel: String,
+                        key: String?,
+                    ): Boolean {
+                        enrollment.putChannelKey(networkId, channel, key)
+                        channelJoinOutcomes.emit(
+                            ChannelJoinOutcome.Rejected(
+                                networkId,
+                                channel,
+                                "Join requires an account",
+                                "477",
+                                ChannelJoinRejectionKind.ACCOUNT_REQUIRED,
+                            ),
+                        )
+                        return true
+                    }
+                }
+            val vm = JoinInviteViewModel(networkRepo, FakeBuffers(), connections, FakeCerts(), enrollment, FakeOnboarding())
+            val invite = JoinInviteV1(networkName = "Ergo", host = "irc.example", port = 6697, channel = "#friends", channelKey = "new-key")
+            vm.init(JoinInviteCodec.encode(invite))
+            vm.continueToIdentity()
+            vm.editNick("alice")
+            vm.connect()
+            withContext(Dispatchers.Default) {
+                withTimeout(5_000) { vm.state.first { it.phase == JoinInvitePhase.FAILED } }
+            }
+            assertTrue(vm.state.value.accountSetupAvailable)
+            assertEquals("new-key", enrollment.channelKey(existing.id, "#friends"))
+
+            vm.onBack()
+            vm.awaitExit()
+            assertEquals("old-key", enrollment.channelKey(existing.id, "#friends"))
+            assertEquals(listOf(existing), networkRepo.rows.value)
+        }
+
+    @Test
+    fun `connecting back waits for cleanup and retains exit until acknowledged`() =
+        runTest {
+            val inserted = CompletableDeferred<Unit>()
+            val finishInsert = CompletableDeferred<Unit>()
+            val networkRepo =
+                FakeNetworks(
+                    afterInsert = {
+                        inserted.complete(Unit)
+                        finishInsert.await()
+                    },
+                )
+            val bufferRepo = FakeBuffers()
+            val enrollment = InviteEnrollmentStore(ApplicationProvider.getApplicationContext())
+            enrollment.clearNetwork(42)
+            val vm = JoinInviteViewModel(networkRepo, bufferRepo, FakeConnections(bufferRepo), FakeCerts(), enrollment, FakeOnboarding())
+            vm.init(JoinInviteCodec.encode(JoinInviteV1(networkName = "Ergo", host = "irc.example", port = 6697, channel = "#friends")))
+            vm.continueToIdentity()
+            vm.editNick("alice")
+            vm.connect()
+            try {
+                withContext(Dispatchers.Default) { withTimeout(5_000) { inserted.await() } }
+                assertEquals(JoinInvitePhase.CONNECTING, vm.state.value.phase)
+                vm.onBack()
+                vm.onBack()
+                assertEquals(false, vm.state.value.exitRequested)
+                finishInsert.complete(Unit)
+                vm.awaitExit()
+                assertTrue(networkRepo.rows.value.isEmpty())
+                assertTrue(vm.state.first().exitRequested)
+                vm.onExitHandled()
+                vm.onBack()
+                assertEquals(false, vm.state.value.exitRequested)
+            } finally {
+                finishInsert.complete(Unit)
+            }
         }
 
     @Test
@@ -195,25 +304,216 @@ class JoinInviteViewModelTest {
                     InviteEnrollmentStore(ApplicationProvider.getApplicationContext()),
                     FakeOnboarding(),
                 )
-            val event = async(start = CoroutineStart.UNDISPATCHED) { vm.events.first() }
             vm.init(JoinInviteCodec.encode(JoinInviteV1(networkName = "Ergo", host = "irc.example", port = 6697, channel = "#friends")))
             vm.continueToIdentity()
             vm.editNick("ignored")
             vm.connect()
 
-            assertEquals(
-                JoinInviteEvent.OpenBuffer(99),
-                withContext(Dispatchers.Default) { withTimeout(5_000) { event.await() } },
-            )
+            assertEquals(99L, vm.awaitPhase(JoinInvitePhase.READY).pendingBufferId)
             assertEquals(0, connections.joins)
             assertEquals(1, networkRepo.rows.value.size)
         }
+
+    @Test
+    fun `invite cannot claim a deduplicated incompatible network`() =
+        runTest {
+            val existing = direct(id = 7).copy(tls = false, nick = "alice", username = "alice")
+            val networkRepo = FakeNetworks(listOf(existing))
+            val buffers = FakeBuffers()
+            val connections = FakeConnections(buffers)
+            val enrollment = InviteEnrollmentStore.fromDataStore(FakeEnrollmentDataStore())
+            val vm = JoinInviteViewModel(networkRepo, buffers, connections, FakeCerts(), enrollment, FakeOnboarding())
+            vm.init(JoinInviteCodec.encode(JoinInviteV1(networkName = "Ergo", host = "irc.example", port = 6697, channel = "#friends")))
+            vm.continueToIdentity()
+            vm.editNick("alice")
+            vm.connect()
+
+            assertEquals(null, vm.awaitPhase(JoinInvitePhase.FAILED).networkId)
+            vm.onBack()
+            vm.awaitExit()
+            assertEquals(listOf(existing), networkRepo.rows.value)
+            assertTrue(connections.states.value.isEmpty())
+            assertEquals(false, enrollment.isProvisionalNetwork(existing.id))
+        }
+
+    @Test
+    fun `back during completion lookup still rolls back the invite`() =
+        runTest {
+            val lookupStarted = CompletableDeferred<Unit>()
+            val networkRepo =
+                FakeNetworks(
+                    beforeLookup = {
+                        lookupStarted.complete(Unit)
+                        awaitCancellation()
+                    },
+                )
+            val buffers = FakeBuffers(joinedId = 99, joinedNames = setOf("#friends"))
+            val enrollment = InviteEnrollmentStore.fromDataStore(FakeEnrollmentDataStore())
+            val certs = FakeCerts()
+            val onboarding = FakeOnboarding()
+            val vm = JoinInviteViewModel(networkRepo, buffers, FakeConnections(buffers), certs, enrollment, onboarding)
+            val invite =
+                JoinInviteV1(
+                    networkName = "Ergo",
+                    host = "irc.example",
+                    port = 6697,
+                    channel = "#friends",
+                    certSha256 = "ab".repeat(32),
+                )
+            vm.init(JoinInviteCodec.encode(invite))
+            vm.continueToIdentity()
+            vm.editNick("alice")
+            vm.connect()
+            withContext(Dispatchers.Default) { withTimeout(5_000) { lookupStarted.await() } }
+            assertTrue(enrollment.isProvisionalNetwork(42))
+            assertTrue(enrollment.hasImportedCertPin(42))
+
+            vm.onBack()
+            vm.awaitExit()
+            assertTrue(networkRepo.rows.value.isEmpty())
+            assertEquals(null, certs.pinnedFor(invite.host, invite.port))
+            assertEquals(null, vm.state.value.pendingBufferId)
+            assertEquals(false, onboarding.completedState.value)
+        }
+
+    @Test
+    fun `back during a resumed pin marker write clears it without deleting the reused network`() =
+        runTest {
+            val markerStarted = CompletableDeferred<Unit>()
+            val existing = direct(id = 7)
+            val networkRepo = FakeNetworks(listOf(existing))
+            val dataStore = FakeEnrollmentDataStore()
+            val enrollment = InviteEnrollmentStore.fromDataStore(dataStore)
+            val certs = FakeCerts()
+            val pin = "ab".repeat(32)
+            certs.pin(existing.host, existing.port, pin)
+            enrollment.setImportedCertPin(existing.id, true)
+            dataStore.beforeNextUpdate = {
+                markerStarted.complete(Unit)
+                awaitCancellation()
+            }
+            val buffers = FakeBuffers()
+            val connections = FakeConnections(buffers)
+            val vm = JoinInviteViewModel(networkRepo, buffers, connections, certs, enrollment, FakeOnboarding())
+            vm.init(JoinInviteCodec.encode(JoinInviteV1(networkName = "Ergo", host = existing.host, port = existing.port, channel = "#friends")))
+            vm.continueToIdentity()
+            vm.editNick("alice")
+            vm.connect()
+            withContext(Dispatchers.Default) { withTimeout(5_000) { markerStarted.await() } }
+            assertEquals(existing.id, vm.state.value.networkId)
+
+            vm.onBack()
+            vm.awaitExit()
+            assertEquals(listOf(existing), networkRepo.rows.value)
+            assertEquals(false, enrollment.hasImportedCertPin(existing.id))
+            assertEquals(null, certs.pinnedFor(existing.host, existing.port))
+            assertTrue(connections.states.value.isEmpty())
+        }
+
+    @Test
+    fun `failed enrollment commit preserves rollback and a failed exit can be retried`() =
+        runTest {
+            val dataStore = FakeEnrollmentDataStore()
+            val enrollment = InviteEnrollmentStore.fromDataStore(dataStore)
+            enrollment.putChannelKey(42, "#friends", "old-key")
+            val networkRepo =
+                FakeNetworks(
+                    beforeLookup = {
+                        enrollment.putChannelKey(42, "#friends", "new-key")
+                        dataStore.beforeNextUpdate = { error("Enrollment write failed") }
+                    },
+                )
+            val buffers = FakeBuffers()
+            val certs = FakeCerts()
+            val onboarding = FakeOnboarding()
+            val vm = JoinInviteViewModel(networkRepo, buffers, FakeConnections(buffers), certs, enrollment, onboarding)
+            val invite =
+                JoinInviteV1(
+                    networkName = "Ergo",
+                    host = "irc.example",
+                    port = 6697,
+                    channel = "#friends",
+                    channelKey = "new-key",
+                    certSha256 = "ab".repeat(32),
+                )
+            vm.init(JoinInviteCodec.encode(invite))
+            vm.continueToIdentity()
+            vm.editNick("alice")
+            vm.connect()
+
+            assertEquals("Enrollment write failed", vm.awaitPhase(JoinInvitePhase.FAILED).error)
+            assertEquals(false, onboarding.completedState.value)
+            assertTrue(enrollment.isProvisionalNetwork(42))
+            assertTrue(enrollment.hasImportedCertPin(42))
+            assertEquals("new-key", enrollment.channelKey(42, "#friends"))
+
+            dataStore.beforeNextUpdate = { error("Cleanup write failed") }
+            vm.onBack()
+            withContext(Dispatchers.Default) { withTimeout(5_000) { vm.state.first { it.error == "Cleanup write failed" } } }
+            assertEquals(false, vm.state.value.exitRequested)
+            vm.retry()
+            vm.awaitExit()
+            assertTrue(networkRepo.rows.value.isEmpty())
+            assertEquals(null, certs.pinnedFor(invite.host, invite.port))
+            assertEquals("old-key", enrollment.channelKey(42, "#friends"))
+        }
+
+    @Test
+    fun `onboarding failure retries finalization without reconnecting or committing twice`() =
+        runTest {
+            val dataStore = FakeEnrollmentDataStore()
+            val enrollment = InviteEnrollmentStore.fromDataStore(dataStore)
+            val networkRepo = FakeNetworks()
+            val buffers = FakeBuffers()
+            val connections = FakeConnections(buffers)
+            var attempts = 0
+            val onboarding = FakeOnboarding { if (++attempts == 1) error("Onboarding write failed") }
+            val vm = JoinInviteViewModel(networkRepo, buffers, connections, FakeCerts(), enrollment, onboarding)
+            vm.init(JoinInviteCodec.encode(JoinInviteV1(networkName = "Ergo", host = "irc.example", port = 6697, channel = "#friends")))
+            vm.continueToIdentity()
+            vm.editNick("alice")
+            vm.connect()
+
+            assertEquals("Onboarding write failed", vm.awaitPhase(JoinInvitePhase.FAILED).error)
+            assertEquals(false, enrollment.isProvisionalNetwork(42))
+            assertEquals(null, vm.state.value.pendingBufferId)
+
+            dataStore.beforeNextUpdate = { error("Enrollment must not be committed twice") }
+            vm.retry()
+            assertEquals(99L, vm.awaitPhase(JoinInvitePhase.READY).pendingBufferId)
+            assertEquals(1, connections.joins)
+            assertEquals(
+                42L,
+                networkRepo.rows.value
+                    .single()
+                    .id,
+            )
+            assertTrue(onboarding.completedState.value)
+        }
+
+    private suspend fun JoinInviteViewModel.awaitExit() {
+        withContext(Dispatchers.Default) { withTimeout(5_000) { state.first { it.exitRequested } } }
+    }
+
+    private suspend fun JoinInviteViewModel.awaitPhase(phase: JoinInvitePhase): JoinInviteUiState = withContext(Dispatchers.Default) { withTimeout(5_000) { state.first { it.phase == phase } } }
+
+    private class FakeEnrollmentDataStore : DataStore<Preferences> {
+        override val data = MutableStateFlow(emptyPreferences())
+        var beforeNextUpdate: (suspend () -> Unit)? = null
+
+        override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences {
+            val beforeUpdate = beforeNextUpdate
+            beforeNextUpdate = null
+            beforeUpdate?.invoke()
+            return transform(data.value).also { data.value = it }
+        }
+    }
 
     private class FakeConnections(
         private val buffers: FakeBuffers,
         private val failConnection: Boolean = false,
     ) : NoopConnectionManager() {
-        override val channelJoinOutcomes = MutableSharedFlow<io.github.trevarj.motd.service.ChannelJoinOutcome>()
+        override val channelJoinOutcomes = MutableSharedFlow<ChannelJoinOutcome>()
         var joins = 0
         var lastKey: String? = null
         val queries = mutableListOf<Pair<Long, String>>()
@@ -254,14 +554,25 @@ class JoinInviteViewModelTest {
 
     private class FakeNetworks(
         initial: List<NetworkEntity> = emptyList(),
+        private val afterInsert: suspend () -> Unit = {},
+        private val beforeLookup: suspend () -> Unit = {},
     ) : NetworkRepository {
         val rows = MutableStateFlow(initial)
 
         override fun observeNetworks(): Flow<List<NetworkEntity>> = rows
 
-        override suspend fun addNetwork(n: NetworkEntity): Long {
+        override suspend fun addNetwork(
+            n: NetworkEntity,
+            requireNew: Boolean,
+        ): Long {
+            val key = networkIdentityKey(n)
+            rows.value.firstOrNull { networkIdentityKey(it) == key }?.let {
+                check(!requireNew)
+                return it.id
+            }
             val id = 42L
             rows.value = rows.value + n.copy(id = id)
+            afterInsert()
             return id
         }
 
@@ -275,7 +586,10 @@ class JoinInviteViewModelTest {
 
         override suspend fun reorderNetworks(orderedIds: List<Long>) = Unit
 
-        override suspend fun networkById(id: Long): NetworkEntity? = rows.value.firstOrNull { it.id == id }
+        override suspend fun networkById(id: Long): NetworkEntity? {
+            beforeLookup()
+            return rows.value.firstOrNull { it.id == id }
+        }
 
         override suspend fun childrenOf(rootId: Long): List<NetworkEntity> = emptyList()
     }
@@ -379,7 +693,9 @@ class JoinInviteViewModelTest {
         }
     }
 
-    private class FakeOnboarding : OnboardingPrefs {
+    private class FakeOnboarding(
+        private val beforeComplete: () -> Unit = {},
+    ) : OnboardingPrefs {
         val completedState = MutableStateFlow(false)
         override val completed: Flow<Boolean> = completedState
         override val communityInvitationHandled = MutableStateFlow(false)
@@ -389,6 +705,7 @@ class JoinInviteViewModelTest {
         }
 
         override suspend fun markCompleted() {
+            beforeComplete()
             completedState.value = true
         }
     }

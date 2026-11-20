@@ -86,6 +86,11 @@ flowchart TD
   delivery ownership and source-matched consumption survive recreation; generic
   unmarked JSON shares remain attachments. SAF and narrow FileProvider exports
   preserve authored data without retaining provider URIs as installed palette data.
+- Invite identity Back returns to review; exiting waits for rollback before navigating.
+  A returned duplicate network is never treated as an invite-created row.
+  Enrollment metadata commits atomically before marking onboarding complete, and
+  retrying that last write does not reconnect. Exit and completed-buffer navigation
+  remain pending until the current screen handles them.
 - Community refresh uses explicit direct HTTPS and an atomically replaced,
   validated last-good cache, never an IRC connection's proxy. Only gallery
   installation grants catalog tracking; updates compare the chosen installed

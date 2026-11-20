@@ -122,7 +122,10 @@ class ChatListMarkSelectedReadTest {
     private class FakeNetworkRepository : NetworkRepository {
         override fun observeNetworks(): Flow<List<NetworkEntity>> = flowOf(emptyList())
 
-        override suspend fun addNetwork(n: NetworkEntity): Long = 0
+        override suspend fun addNetwork(
+            n: NetworkEntity,
+            requireNew: Boolean,
+        ): Long = 0
 
         override suspend fun updateNetwork(n: NetworkEntity) = Unit
 

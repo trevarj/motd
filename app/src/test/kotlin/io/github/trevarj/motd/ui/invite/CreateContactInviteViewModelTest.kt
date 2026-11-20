@@ -93,7 +93,10 @@ class CreateContactInviteViewModelTest {
 
         override fun observeNetworks(): Flow<List<NetworkEntity>> = rows
 
-        override suspend fun addNetwork(n: NetworkEntity): Long = error("not used")
+        override suspend fun addNetwork(
+            n: NetworkEntity,
+            requireNew: Boolean,
+        ): Long = error("not used")
 
         override suspend fun updateNetwork(n: NetworkEntity) = Unit
 

@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.invite
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -69,16 +70,27 @@ fun JoinInviteScreen(
         }
     }
     LaunchedEffect(viewModel) {
-        viewModel.events.collect { event ->
-            when (event) {
-                is JoinInviteEvent.OpenBuffer -> onOpenBuffer(event.bufferId)
-                is JoinInviteEvent.OpenAccountSetup -> onOpenAccountSetup(event.networkId, event.channel)
-            }
+        viewModel.accountSetupEvents.collect { event ->
+            onOpenAccountSetup(event.networkId, event.channel)
+        }
+    }
+    val bufferId = state.pendingBufferId
+    LaunchedEffect(viewModel, bufferId) {
+        if (bufferId != null) {
+            onOpenBuffer(bufferId)
+            viewModel.onBufferOpened(bufferId)
+        }
+    }
+    val exitRequested = state.exitRequested
+    LaunchedEffect(viewModel, exitRequested) {
+        if (exitRequested) {
+            onBack()
+            viewModel.onExitHandled()
         }
     }
     JoinInviteContent(
         state = state,
-        onBack = { viewModel.cancel(onBack) },
+        onBack = viewModel::onBack,
         onContinue = viewModel::continueToIdentity,
         onNickChange = viewModel::editNick,
         onConnect = viewModel::connect,
@@ -105,6 +117,7 @@ fun JoinInviteContent(
     onDismissPlaintext: () -> Unit,
 ) {
     var detailsExpanded by rememberSaveable { mutableStateOf(false) }
+    BackHandler(onBack = onBack)
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
         topBar = {

@@ -46,7 +46,10 @@ class NetworkSettingsViewModelTest {
 
         override fun observeNetworks() = flowOf(networks.values.toList())
 
-        override suspend fun addNetwork(n: NetworkEntity): Long = error("unused")
+        override suspend fun addNetwork(
+            n: NetworkEntity,
+            requireNew: Boolean,
+        ): Long = error("unused")
 
         override suspend fun updateNetwork(n: NetworkEntity) {
             operations += "update:${n.id}"
@@ -517,7 +520,10 @@ class NetworkSettingsViewModelTest {
                 object : NetworkRepository {
                     override fun observeNetworks() = flowOf(listOf(root))
 
-                    override suspend fun addNetwork(n: NetworkEntity) = error("unused")
+                    override suspend fun addNetwork(
+                        n: NetworkEntity,
+                        requireNew: Boolean,
+                    ) = error("unused")
 
                     override suspend fun updateNetwork(n: NetworkEntity) = error("unused")
 
