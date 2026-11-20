@@ -1,5 +1,8 @@
 package io.github.trevarj.motd.ui.settings
 
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -134,12 +137,16 @@ class SettingsHomeAndPrimitivesUiTest {
         var state by mutableStateOf(SettingsHomeUiState(networks = listOf(network(4, "Libera"))))
         var opened: SettingsSearchDestination? = null
         var notificationsOpened = false
+        var exits = 0
+        lateinit var backDispatcher: OnBackPressedDispatcher
         compose.setContent {
+            backDispatcher = requireNotNull(LocalOnBackPressedDispatcherOwner.current).onBackPressedDispatcher
+            BackHandler { exits++ }
             MotdTheme(dynamicColor = false) {
                 SettingsContent(
                     state = state,
                     onQueryChange = { state = state.copy(query = it) },
-                    onBack = {},
+                    onBack = { exits++ },
                     onOpenAppearance = {},
                     onOpenChat = {},
                     onOpenDelivery = {},
@@ -205,6 +212,26 @@ class SettingsHomeAndPrimitivesUiTest {
         compose.onNodeWithTag("settings_search_action").performClick()
         compose.onNodeWithTag("settings_search_field").assertIsFocused()
         compose.runOnIdle { assertEquals("", state.query) }
+
+        compose.onNodeWithTag("settings_search_field").performTextInput("theme")
+        compose.runOnIdle { backDispatcher.onBackPressed() }
+        compose.onNodeWithTag("settings_search_field").assertDoesNotExist()
+        compose.onNodeWithTag("settings_category_appearance").assertExists()
+        compose.runOnIdle {
+            assertEquals("", state.query)
+            assertEquals(0, exits)
+        }
+
+        compose.onNodeWithTag("settings_search_action").performClick()
+        compose.onNodeWithTag("settings_search_field").performTextInput("theme")
+        compose.onNodeWithTag("settings_back").performClick()
+        compose.onNodeWithTag("settings_search_field").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals("", state.query)
+            assertEquals(0, exits)
+        }
+        compose.runOnIdle { backDispatcher.onBackPressed() }
+        compose.runOnIdle { assertEquals(1, exits) }
     }
 
     @Test

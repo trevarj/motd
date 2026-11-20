@@ -108,6 +108,8 @@ flowchart TD
   content swatches and conversation colors are not utility chrome.
 - Settings search localizes its catalog only for a nonblank query and reuses it
   while the query changes. Configuration, network, and upload changes refresh it.
+  Android Back and toolbar Back close active search before leaving Settings;
+  the X action still closes search directly.
 - The chat-list canvas, section headers and chat rows share theme `surface`; other utility
   canvases keep `surfaceContainerLowest`. The scrolling viewport extends to the Scaffold's
   window top, including the status area. Its initial content padding reserves the measured

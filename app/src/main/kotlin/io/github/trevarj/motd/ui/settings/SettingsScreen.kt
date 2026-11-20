@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.settings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Send
@@ -103,16 +104,20 @@ fun SettingsContent(
 ) {
     var searching by rememberSaveable { mutableStateOf(state.query.isNotEmpty()) }
     var searchFocusRequested by rememberSaveable(searching) { mutableStateOf(false) }
+    val closeSearch = {
+        searching = false
+        onQueryChange("")
+    }
+    BackHandler(enabled = searching, onBack = closeSearch)
 
     SettingsScaffold(
         title = stringResource(R.string.settings_title),
-        onBack = onBack,
+        onBack = if (searching) closeSearch else onBack,
         modifier = Modifier.testTag("screen_settings"),
         topActions = {
             IconButton(
                 onClick = {
-                    searching = !searching
-                    if (!searching) onQueryChange("")
+                    if (searching) closeSearch() else searching = true
                 },
                 modifier = Modifier.testTag("settings_search_action"),
             ) {
