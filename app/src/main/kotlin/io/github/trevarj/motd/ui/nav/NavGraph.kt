@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -148,14 +149,13 @@ fun MotdNavGraph(
         IncomingContentNavigation(it, navController, onIncomingShare, onIncomingConsumed)
     }
     val presentations = remember(navController) { ChatPresentationRegistry() }
+    val listWidth = rememberSaveable { mutableFloatStateOf(CHAT_LIST_INITIAL_DP) }
     NavHost(
         navController = navController,
         startDestination = ChatListRoute,
         enterTransition = {
             if (isChatTarget() && isChatInitial()) {
                 EnterTransition.None
-            } else if (isChatTarget()) {
-                slideIntoContainer(SlideDirection.Start, MotdMotion.navigationDrawerSpatial)
             } else {
                 slideIntoContainer(SlideDirection.Start, MotdMotion.navigationDrawerSpatial)
             }
@@ -193,6 +193,7 @@ fun MotdNavGraph(
             val chatListViewModel: ChatListViewModel = hiltViewModel(entry)
             var openedDefault by rememberSaveable { mutableStateOf(false) }
             ChatWorkspace(
+                listWidth = listWidth,
                 listPane = { twoPane ->
                     ChatListPane(
                         navController = navController,
@@ -222,6 +223,7 @@ fun MotdNavGraph(
                 if (!portalState.loading && !portalState.enabled) navController.returnToChatList()
             }
             ChatWorkspace(
+                listWidth = listWidth,
                 listPane = {
                     DickordPortalPane(
                         navController = navController,
@@ -268,6 +270,7 @@ fun MotdNavGraph(
                 }
             } else {
                 ChatWorkspace(
+                    listWidth = listWidth,
                     listPane = {
                         if (portalOwned) {
                             DickordPortalPane(

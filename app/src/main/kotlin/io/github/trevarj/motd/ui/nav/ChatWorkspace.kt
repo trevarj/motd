@@ -18,10 +18,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,20 +58,23 @@ internal fun chatWorkspacePolicy(
     if (availableWidthDp < CHAT_WORKSPACE_RESIZABLE_DP) {
         return ChatWorkspacePolicy(ChatWorkspaceMode.DUAL_FIXED, CHAT_LIST_MIN_DP)
     }
-    val maximumListWidth =
-        minOf(
-            CHAT_LIST_MAX_DP,
-            availableWidthDp - CHAT_DETAIL_MIN_DP - CHAT_PANE_DIVIDER_DP,
-        ).coerceAtLeast(CHAT_LIST_MIN_DP)
+    val maximumListWidth = maximumChatListWidthDp(availableWidthDp)
     return ChatWorkspacePolicy(
         ChatWorkspaceMode.DUAL_RESIZABLE,
         requestedListWidthDp.coerceIn(CHAT_LIST_MIN_DP, maximumListWidth),
     )
 }
 
+private fun maximumChatListWidthDp(availableWidthDp: Float): Float =
+    minOf(
+        CHAT_LIST_MAX_DP,
+        availableWidthDp - CHAT_DETAIL_MIN_DP - CHAT_PANE_DIVIDER_DP,
+    ).coerceAtLeast(CHAT_LIST_MIN_DP)
+
 /** List/detail shell whose fit decision is based on the pane's actual safe content width. */
 @Composable
 internal fun ChatWorkspace(
+    listWidth: MutableFloatState,
     listPane: @Composable (twoPane: Boolean) -> Unit,
     detailPane: (@Composable (showBack: Boolean) -> Unit)? = null,
 ) {
@@ -84,11 +85,8 @@ internal fun ChatWorkspace(
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
     ) {
         val availableWidth = maxWidth
-        var requestedListWidthDp by rememberSaveable { mutableFloatStateOf(CHAT_LIST_INITIAL_DP) }
+        var requestedListWidthDp by listWidth
         val policy = chatWorkspacePolicy(availableWidth.value, requestedListWidthDp)
-        LaunchedEffect(availableWidth, policy.mode) {
-            requestedListWidthDp = policy.listWidthDp
-        }
         if (policy.mode == ChatWorkspaceMode.SINGLE) {
             if (detailPane == null) listPane(false) else detailPane(true)
             return@BoxWithConstraints
@@ -113,10 +111,16 @@ internal fun ChatWorkspace(
                                 Modifier
                                     .semantics { contentDescription = resizeDescription }
                                     .pointerInput(availableWidth, layoutDirection) {
+                                        val maximumListWidth = maximumChatListWidthDp(availableWidth.value)
+                                        val direction = if (layoutDirection == LayoutDirection.Ltr) 1f else -1f
                                         detectDragGestures { change, dragAmount ->
                                             change.consume()
-                                            val direction = if (layoutDirection == LayoutDirection.Ltr) 1f else -1f
-                                            requestedListWidthDp += dragAmount.x.toDp().value * direction
+                                            val visibleWidth =
+                                                requestedListWidthDp.coerceIn(CHAT_LIST_MIN_DP, maximumListWidth)
+                                            val resizedWidth =
+                                                (visibleWidth + dragAmount.x.toDp().value * direction)
+                                                    .coerceIn(CHAT_LIST_MIN_DP, maximumListWidth)
+                                            if (resizedWidth != visibleWidth) requestedListWidthDp = resizedWidth
                                         }
                                     }
                             } else {

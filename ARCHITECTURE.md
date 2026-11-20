@@ -128,6 +128,8 @@ flowchart TD
   blur are involved. Title, icons, system status glyphs, tab text and badges stay sharp.
   Selected pills, coverage glyphs and activity dots use the secondary-container pair;
   unread and mention badges retain their independent semantic colors.
+- The chat list, conversation and portal share one saveable split-pane width.
+  Narrower windows constrain the displayed width without overwriting the preference.
 - Anchored channels and queries occupy a manually ordered tier above ordinary pins,
   within the current network/folder/archive scope. Drag handles and accessible moves
   exchange the visible rooms' global slots without shifting hidden rooms; unanchoring
