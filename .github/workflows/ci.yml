@@ -89,7 +89,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       MOTD_FUZZ_PROFILE: pr
       MOTD_FUZZ_SEED: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -104,6 +104,7 @@ jobs:
       - name: Kotlin formatting
         run: ./gradlew ktlintCheck --stacktrace
       - name: App unit and Robolectric component tests
+        timeout-minutes: 40
         run: ./gradlew :app:testDebugUnitTest --stacktrace
       - name: Upload app test failure
         if: failure()

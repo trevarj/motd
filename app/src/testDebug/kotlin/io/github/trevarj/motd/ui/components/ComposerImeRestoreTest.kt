@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.components
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalFocusManager
@@ -151,8 +152,12 @@ class ComposerImeRestoreTest {
     fun shorterKeyboardContinuouslyReleasesTheResidualViewport() {
         openPickerOverFocusedKeyboard()
         beginRestore()
-        compose.runOnIdle { imeHeightPx.value = 120 }
+        compose.runOnIdle {
+            imeHeightPx.value = 120
+            Snapshot.sendApplyNotifications()
+        }
         compose.mainClock.advanceTimeByFrame()
+        compose.waitUntil(timeoutMillis = 5_000) { panelHeight() != 320 }
         assertEquals(320, 120 + panelHeight())
 
         val viewportHeights = mutableListOf(120 + panelHeight())
