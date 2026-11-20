@@ -155,7 +155,7 @@ for (const [density, factor] of densities) {
   const folder = path.join(res, `drawable-${density}`);
   save(path.join(folder, "motd_logo_mark.png"), resize(canonicalCrop(source), Math.round(96 * factor), Math.round(92 * factor)));
   for (const [name, data] of [["ic_launcher_foreground", white], ["ic_launcher_foreground_light", black], ["ic_launcher_foreground_terminal", terminal], ["ic_launcher_monochrome", mask]]) {
-    save(path.join(folder, `${name}.png`), normalized(data, Math.round(108 * factor), .54));
+    save(path.join(folder, `${name}.png`), normalized(data, Math.round(108 * factor), .55));
   }
   // System notification tinting requires an unshaded white alpha silhouette.
   save(path.join(folder, "ic_notification_motd.png"), resize(mask, Math.round(24 * factor), Math.round(24 * factor)));

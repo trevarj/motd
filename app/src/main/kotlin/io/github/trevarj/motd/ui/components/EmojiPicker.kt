@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.components
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -12,11 +13,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -24,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Search
@@ -50,6 +50,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -79,6 +80,8 @@ import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 @Composable
 internal fun EmojiPickerPanel(
     onPick: (String) -> Unit,
+    searchOpen: Boolean,
+    onSearchOpenChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     tagPrefix: String = "chat_composer",
 ) {
@@ -93,7 +96,7 @@ internal fun EmojiPickerPanel(
                 Text(stringResource(R.string.emoji_picker_loading))
             }
         } else {
-            EmojiPickerContent(data, onPick, tagPrefix, context)
+            EmojiPickerContent(data, onPick, tagPrefix, context, searchOpen, onSearchOpenChange)
         }
     }
 }
@@ -104,6 +107,8 @@ private fun EmojiPickerContent(
     onPick: (String) -> Unit,
     tagPrefix: String,
     context: Context,
+    searchOpen: Boolean,
+    onSearchOpenChange: (Boolean) -> Unit,
 ) {
     val preferences = remember(context) { context.getSharedPreferences(EMOJI_PICKER_PREFERENCES, Context.MODE_PRIVATE) }
     var history by remember(dataset, preferences) { mutableStateOf(readEmojiPickerHistory(preferences, dataset)) }
@@ -126,8 +131,16 @@ private fun EmojiPickerContent(
     val categories = remember(dataset) { listOf("recents") + dataset.groups.filter { it != "Component" } }
     var category by rememberSaveable { mutableStateOf(if (history.recents.isEmpty()) categories[1] else "recents") }
     val gridStates = remember(dataset) { categories.associateWith { LazyGridState() } }
-    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    val categoryRowState = rememberLazyListState()
     var variantBase by rememberSaveable { mutableStateOf<String?>(null) }
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    fun closeSearch() {
+        focusManager.clearFocus()
+        keyboard?.hide()
+        onSearchOpenChange(false)
+    }
     val containGridScroll =
         remember {
             object : NestedScrollConnection {
@@ -159,15 +172,31 @@ private fun EmojiPickerContent(
         val updated = recordEmojiPickerSelection(readEmojiPickerHistory(preferences, dataset), entry, rememberVariant)
         history = updated
         writeEmojiPickerHistory(preferences, updated)
-        searchOpen = false
+        if (searchOpen) closeSearch()
         onPick(entry.sequence)
+    }
+    if (searchOpen) {
+        EmojiPickerSearchContent(
+            dataset = dataset,
+            roots = roots,
+            sticky = history.sticky,
+            tagPrefix = "${tagPrefix}_emoji_search",
+            onPick = ::pick,
+            onDismiss = ::closeSearch,
+            gridModifier = Modifier.nestedScroll(containGridScroll),
+        )
+        return
     }
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { searchOpen = true }, modifier = Modifier.testTag("${tagPrefix}_emoji_search")) {
+            IconButton(onClick = { onSearchOpenChange(true) }, modifier = Modifier.testTag("${tagPrefix}_emoji_search")) {
                 Icon(Icons.Outlined.Search, stringResource(R.string.emoji_picker_search))
             }
-            LazyRow(Modifier.weight(1f).testTag("${tagPrefix}_emoji_categories"), contentPadding = PaddingValues(end = 4.dp)) {
+            LazyRow(
+                modifier = Modifier.weight(1f).testTag("${tagPrefix}_emoji_categories"),
+                state = categoryRowState,
+                contentPadding = PaddingValues(end = 4.dp),
+            ) {
                 items(categories, key = { it }) { group ->
                     val isSelected = category == group
                     TextButton(
@@ -212,17 +241,6 @@ private fun EmojiPickerContent(
             )
         }
     }
-    if (searchOpen) {
-        EmojiPickerSearch(
-            dataset = dataset,
-            roots = roots,
-            sticky = history.sticky,
-            tagPrefix = "${tagPrefix}_emoji_search",
-            onPick = { pick(it, false) },
-            onVariants = { variantBase = it },
-            onDismiss = { searchOpen = false },
-        )
-    }
     variantBase?.let { base ->
         val variants = remember(dataset, base) { emojiPickerVariants(dataset, base) }
         val root = dataset.entry(base)
@@ -265,49 +283,26 @@ private fun EmojiPickerContent(
 }
 
 @Composable
-private fun EmojiPickerSearch(
+private fun EmojiPickerSearchContent(
     dataset: EmojiDataset,
     roots: List<EmojiEntry>,
     sticky: Map<String, String>,
     tagPrefix: String,
-    onPick: (EmojiEntry) -> Unit,
-    onVariants: (String) -> Unit,
+    onPick: (EmojiEntry, Boolean) -> Unit,
     onDismiss: () -> Unit,
-) {
-    Dialog(onDismissRequest = onDismiss) {
-        val focus = remember { FocusRequester() }
-        val keyboard = LocalSoftwareKeyboardController.current
-        LaunchedEffect(Unit) {
-            focus.requestFocus()
-            keyboard?.show()
-        }
-        Surface(shape = MaterialTheme.shapes.large, tonalElevation = 6.dp, modifier = Modifier.widthIn(max = 480.dp)) {
-            EmojiPickerSearchContent(
-                dataset = dataset,
-                roots = roots,
-                sticky = sticky,
-                tagPrefix = tagPrefix,
-                onPick = onPick,
-                onVariants = onVariants,
-                onDismiss = onDismiss,
-                fieldModifier = Modifier.focusRequester(focus),
-            )
-        }
-    }
-}
-
-@Composable
-internal fun EmojiPickerSearchContent(
-    dataset: EmojiDataset,
-    roots: List<EmojiEntry>,
-    sticky: Map<String, String>,
-    tagPrefix: String,
-    onPick: (EmojiEntry) -> Unit,
-    onVariants: (String) -> Unit,
-    onDismiss: () -> Unit,
-    fieldModifier: Modifier = Modifier,
+    gridModifier: Modifier = Modifier,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
+    var variantBase by rememberSaveable { mutableStateOf<String?>(null) }
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    BackHandler {
+        if (variantBase == null) onDismiss() else variantBase = null
+    }
+    LaunchedEffect(Unit) {
+        focus.requestFocus()
+        keyboard?.show()
+    }
     val index = remember(roots) { roots.map { EmojiSearchEntry(it.sequence, it.name) } }
     val results =
         remember(dataset, index, query) {
@@ -315,23 +310,55 @@ internal fun EmojiPickerSearchContent(
             if (exact != null) listOf(exact) else searchEmojis(index, query, limit = index.size).mapNotNull { dataset.entry(it.emoji) }
         }
     val gridState = rememberLazyGridState()
-    Column(Modifier.fillMaxWidth().height(360.dp).padding(12.dp)) {
+    Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             EmojiOutlinedTextField(
                 value = query,
                 onValueChange = {
                     query = it
+                    variantBase = null
                     gridState.requestScrollToItem(0)
                 },
                 label = { Text(stringResource(R.string.emoji_picker_search)) },
                 singleLine = true,
-                modifier = Modifier.weight(1f).then(fieldModifier).testTag("${tagPrefix}_field"),
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .padding(start = 8.dp, top = 4.dp)
+                        .focusRequester(focus)
+                        .testTag("${tagPrefix}_field"),
             )
             IconButton(onClick = onDismiss, modifier = Modifier.testTag("${tagPrefix}_close")) {
                 Icon(Icons.Filled.Close, stringResource(R.string.emoji_picker_close_search))
             }
         }
-        if (results.isEmpty()) {
+        val base = variantBase
+        if (base != null) {
+            val variants = remember(dataset, base) { emojiPickerVariants(dataset, base) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(R.string.emoji_picker_variants, checkNotNull(dataset.entry(base)).name),
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp).semantics { heading() },
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                TextButton(onClick = { variantBase = null }, colors = readableTextButtonColors()) {
+                    Text(stringResource(R.string.emoji_picker_close_variants))
+                }
+            }
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(48.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f).then(gridModifier),
+            ) {
+                items(variants, key = { it.sequence }) { variant ->
+                    EmojiPickerCell(
+                        entry = variant,
+                        tag = "${tagPrefix}_variant_${emojiPickerTag(variant.sequence)}",
+                        isSelected = variant.sequence == (sticky[base] ?: base),
+                        onClick = { onPick(variant, true) },
+                    )
+                }
+            }
+        } else if (results.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 Text(
                     stringResource(if (query.isBlank()) R.string.emoji_picker_search_prompt else R.string.emoji_picker_search_empty),
@@ -345,9 +372,9 @@ internal fun EmojiPickerSearchContent(
                 sticky = sticky,
                 state = gridState,
                 tagPrefix = tagPrefix,
-                onPick = onPick,
-                onVariants = onVariants,
-                modifier = Modifier.fillMaxWidth().weight(1f),
+                onPick = { onPick(it, false) },
+                onVariants = { variantBase = it },
+                modifier = Modifier.fillMaxWidth().weight(1f).then(gridModifier),
             )
         }
     }

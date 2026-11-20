@@ -26,7 +26,9 @@ then preserve the current 2048-unit em advances (`m` 1774, `o` 1156, `t` 693,
 In-app logos and launcher choices stay **theme-colored matte ceramic**. The
 `#motd` chat-list tile keeps its deterministic theme background and highlight;
 runtime marks use `ceramicLogoColorMatrix` with their existing theme targets.
-Launcher palette backgrounds and the terminal-green artwork are unchanged.
+Launcher palette backgrounds and ceramic colors are unchanged.
+The Android launcher mark measures at least 48×48 dp within its 108×108 dp
+adaptive icon layer; the launcher controls the size of the outer tile.
 
 Splash and README branding settle on neutral black/white treatment: splash uses
 a white ceramic mark on black in both OS modes (including status/navigation bars),

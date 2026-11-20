@@ -546,6 +546,7 @@ fun Composer(
 
     var emojiPickerSession by remember { mutableStateOf<EmojiPickerSession?>(null) }
     var toolsOpen by remember { mutableStateOf(false) }
+    var emojiSearchOpen by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf(false) }
     var inputFocused by remember { mutableStateOf(false) }
     var colorSheetVisible by remember { mutableStateOf(false) }
@@ -741,6 +742,13 @@ fun Composer(
     fun dismissEmojiPicker() {
         val session = emojiPickerSession ?: return
         if (session.phase == EmojiPickerPhase.OPEN) {
+            if (emojiSearchOpen) {
+                emojiSearchOpen = false
+                if (!session.restoresKeyboard) {
+                    focusManager.clearFocus()
+                    keyboard?.hide()
+                }
+            }
             collapsingResidual = false
             emojiPickerSession = closeEmojiPickerSession(session)
         }
@@ -756,6 +764,7 @@ fun Composer(
             )
         // Measure the picker content once per session; the restore tail only shrinks the viewport.
         pickerContentHeightPx = session.capturedImeHeightPx
+        emojiSearchOpen = false
         emojiPickerSession = session
         keyboard?.hide()
     }
@@ -1307,6 +1316,8 @@ fun Composer(
                 EmojiPickerReplacementSurface(
                     session = emojiPickerSession,
                     contentHeightPx = pickerContentHeightPx,
+                    searchOpen = emojiSearchOpen && emojiPickerSession?.phase == EmojiPickerPhase.OPEN,
+                    onSearchOpenChange = { emojiSearchOpen = it },
                     readRestoringHeightPx = { if (collapsingResidual) restoringHeight.value.toInt() else null },
                     readImeContentHeightPx = readImeContentHeightPx,
                     onPick = { emoji -> applyEditorValue(insertAtCursor(editorValue, emoji)) },
@@ -1944,6 +1955,8 @@ private fun rememberImeContentHeightReader(overridePx: Int?): (Density) -> Int {
 private fun EmojiPickerReplacementSurface(
     session: EmojiPickerSession?,
     contentHeightPx: Int,
+    searchOpen: Boolean,
+    onSearchOpenChange: (Boolean) -> Unit,
     readRestoringHeightPx: () -> Int?,
     readImeContentHeightPx: (Density) -> Int,
     onPick: (String) -> Unit,
@@ -1960,24 +1973,33 @@ private fun EmojiPickerReplacementSurface(
         content = {
             // Measure the picker once at the captured keyboard height. Only the clipping viewport
             // changes during the IME animation, so the pager/grid does not relayout every frame.
-            EmojiPickerPanel(onPick = onPick, modifier = Modifier.fillMaxWidth())
+            EmojiPickerPanel(
+                onPick = onPick,
+                searchOpen = searchOpen,
+                onSearchOpenChange = onSearchOpenChange,
+                modifier = Modifier.fillMaxWidth(),
+            )
         },
     ) { measurables, constraints ->
         val fullHeightPx = contentHeightPx.coerceAtMost(constraints.maxHeight)
         // Measure-phase inset read: the ancestor `imePadding()` samples the very same frame, so the
         // input row never moves by one frame of keyboard travel and the timeline viewport is stable.
         val visibleHeightPx =
-            session?.let {
-                emojiPickerReplacementHeight(
-                    capturedImeHeightPx =
-                        if (it.phase == EmojiPickerPhase.RESTORING_IME) {
-                            readRestoringHeightPx() ?: it.capturedImeHeightPx
-                        } else {
-                            it.capturedImeHeightPx
-                        },
-                    currentImeHeightPx = readImeContentHeightPx(this),
-                ).coerceAtMost(fullHeightPx)
-            } ?: 0
+            if (searchOpen) {
+                fullHeightPx
+            } else {
+                session?.let {
+                    emojiPickerReplacementHeight(
+                        capturedImeHeightPx =
+                            if (it.phase == EmojiPickerPhase.RESTORING_IME) {
+                                readRestoringHeightPx() ?: it.capturedImeHeightPx
+                            } else {
+                                contentHeightPx
+                            },
+                        currentImeHeightPx = readImeContentHeightPx(this),
+                    ).coerceAtMost(fullHeightPx)
+                } ?: 0
+            }
         val placeable =
             measurables.single().measure(
                 constraints.copy(minHeight = fullHeightPx, maxHeight = fullHeightPx),

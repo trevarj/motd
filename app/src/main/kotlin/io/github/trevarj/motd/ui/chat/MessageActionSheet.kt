@@ -319,6 +319,7 @@ internal fun MessageReactionPicker(
     reactionEnabled: (String) -> Boolean,
 ) {
     var unavailable by remember { mutableStateOf(false) }
+    var searchOpen by remember { mutableStateOf(false) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -351,6 +352,8 @@ internal fun MessageReactionPicker(
                         unavailable = true
                     }
                 },
+                searchOpen = searchOpen,
+                onSearchOpenChange = { searchOpen = it },
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 tagPrefix = "message_reaction",
             )

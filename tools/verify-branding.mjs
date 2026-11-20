@@ -77,12 +77,15 @@ for (const [density, factor] of [["mdpi", 1], ["hdpi", 1.5], ["xhdpi", 2], ["xxh
   const expectedMarkAlpha = magick([ceramicMaster, "-crop", masterBounds, "+repage", "-filter", "Lanczos", "-resize", `${Math.round(96 * factor)}x${Math.round(92 * factor)}!`, "-alpha", "extract", "-depth", "8", "gray:-"]);
   assert.deepEqual(magick([markFile, "-alpha", "extract", "-depth", "8", "gray:-"]), expectedMarkAlpha, `${markFile}: runtime contour changed`);
   checked++;
+  const silhouetteFile = path.join(folder, "ic_launcher_monochrome.png");
+  const silhouette = magick([silhouetteFile, "-alpha", "extract", "-depth", "8", "gray:-"]);
+  const [logoWidth, logoHeight] = magick([silhouetteFile, "-alpha", "extract", "-threshold", "50%", "-format", "%@", "info:"]).toString().match(/\d+/g).map(Number);
+  assert.ok(Math.min(logoWidth, logoHeight) >= 48 * factor, `${silhouetteFile}: visible logo must be at least 48x48dp`);
   for (const name of ["ic_launcher_foreground", "ic_launcher_foreground_light", "ic_launcher_foreground_terminal", "ic_launcher_monochrome"]) {
     const file = path.join(folder, `${name}.png`);
     inspect(file, Math.round(108 * factor), Math.round(108 * factor), 33 * factor);
     assertFractionalAlpha(file, 8);
     const alpha = magick([file, "-alpha", "extract", "-depth", "8", "gray:-"]);
-    const silhouette = magick([path.join(folder, "ic_launcher_monochrome.png"), "-alpha", "extract", "-depth", "8", "gray:-"]);
     assert.deepEqual(alpha, silhouette, `${name} must retain the authoritative silhouette`);
     checked++;
   }
