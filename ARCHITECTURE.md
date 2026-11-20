@@ -314,6 +314,8 @@ flowchart TD
 - Appearance's input style is an IRC-only preference shared by channel, query,
   and server buffers. Floating, Large, and Nickname use one editor/draft path;
   Nickname's network-owned identity is decoration, never submitted text.
+  Live nickname roster updates recolor draft mentions without restarting the
+  active keyboard input session.
   The input host overlays the full timeline; matching scroll padding keeps the
   newest row clear, and fully covered rows do not advance read state. Floating and
   Nickname keep tools/send/record inside their floating inputs; Large keeps its

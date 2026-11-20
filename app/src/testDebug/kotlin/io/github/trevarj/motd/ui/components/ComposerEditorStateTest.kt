@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.ui.components
 
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
@@ -91,8 +93,10 @@ class ComposerEditorStateTest {
     val compose = createComposeRule()
 
     @Test
-    fun typingDoesNotRestartTheInputMethod() {
+    fun typingAndLiveRosterUpdatesDoNotRestartTheInputMethod() {
         val draft = mutableStateOf(TextFieldValue())
+        val roster = mutableStateOf(emptySet<String>())
+        lateinit var connection: InputConnection
         var inputSessions = 0
         compose.setContent {
             InterceptPlatformTextInput(
@@ -103,17 +107,19 @@ class ComposerEditorStateTest {
                             nextHandler: PlatformTextInputSession,
                         ): Nothing {
                             inputSessions++
+                            if (inputSessions == 1) connection = request.createInputConnection(EditorInfo())
                             return nextHandler.startInputMethod(request)
                         }
                     },
             ) {
-                MotdTheme(dynamicColor = false) {
+                MotdTheme(dynamicColor = false, nickColorsEnabled = true) {
                     Composer(
                         value = draft.value,
                         onValueChange = { draft.value = it },
                         onSend = {},
                         enabled = true,
                         ircFormattingEnabled = true,
+                        knownNicks = roster.value,
                     )
                 }
             }
@@ -130,6 +136,20 @@ class ComposerEditorStateTest {
             compose.runOnIdle { assertEquals(1, inputSessions) }
         }
         compose.runOnIdle { assertEquals("flicker", draft.value.text) }
+
+        compose.runOnIdle {
+            assertTrue(connection.setComposingText(" go", 1))
+            assertTrue(connection.commitText(" to ", 1))
+            assertTrue(connection.setComposingText("g", 1))
+            roster.value = setOf("flicker", "go")
+        }
+        field.assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(1, inputSessions)
+            assertTrue(connection.setComposingText("go", 1))
+            assertTrue(connection.finishComposingText())
+        }
+        field.assertTextEquals("flicker to go")
     }
 
     @Test

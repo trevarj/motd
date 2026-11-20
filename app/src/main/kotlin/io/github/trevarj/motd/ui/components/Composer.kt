@@ -2102,12 +2102,14 @@ private fun ComposerTextField(
     var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val emojiRenderer = LocalEmojiRenderer.current
     val latestEmojiRenderer = rememberUpdatedState(emojiRenderer)
+    val latestMentionColor = rememberUpdatedState(mentionColor.takeIf { mentionsActive })
     val outputTransformation =
-        remember(ircFormattingEnabled, fieldBackground, fieldForeground, commandForeground, commandFontSize, mentionsActive, mentionColor) {
+        remember(ircFormattingEnabled, fieldBackground, fieldForeground, commandForeground, commandFontSize) {
             // OutputTransformation identity is part of BasicTextField's input-session state.
-            // Keep it installed in System mode and read renderer changes without replacing it.
+            // Read renderer and live roster updates without replacing it.
             OutputTransformation {
-                if (ircFormattingEnabled || mentionsActive || latestEmojiRenderer.value != null) {
+                val colorMention = latestMentionColor.value
+                if (ircFormattingEnabled || colorMention != null || latestEmojiRenderer.value != null) {
                     val visibleText = toString()
                     if (ircFormattingEnabled) {
                         val displayed = latestDocument.value.let { if (it.text == visibleText) it else it.replaceText(visibleText) }
@@ -2118,7 +2120,7 @@ private fun ComposerTextField(
                             addStyle(SpanStyle(color = commandForeground, fontFamily = FontFamily.Monospace, fontSize = commandFontSize), 0, end)
                         }
                     }
-                    if (mentionsActive && !visibleText.startsWith("/")) {
+                    if (colorMention != null && !visibleText.startsWith("/")) {
                         var i = 0
                         while (i < visibleText.length) {
                             val start = i
@@ -2130,7 +2132,7 @@ private fun ComposerTextField(
                             }
                             val nickStart = i
                             while (i < visibleText.length && visibleText[i].isComposerNickChar()) i++
-                            val color = mentionColor(visibleText.substring(nickStart, i)) ?: continue
+                            val color = colorMention(visibleText.substring(nickStart, i)) ?: continue
                             addStyle(SpanStyle(color = color), start, i)
                         }
                     }
