@@ -13,10 +13,14 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.core.app.ActivityOptionsCompat
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.SavedStateHandle
@@ -264,6 +268,52 @@ class WallpaperWorkshopUiTest {
         assertEquals(inherited, effective(roomId))
         assertEquals(inherited, effective(otherRoomId))
         assertEquals(global, current().wallpaper)
+    }
+
+    @Test
+    @Config(sdk = [35], fontScale = 1.1f)
+    fun designNameKeepsFocusWhenKeyboardMakesEditorCompact() {
+        openWorkshop()
+        compose.setContent {
+            MotdTheme(dynamicColor = false, syncSystemBars = false) {
+                WallpaperWorkshopScreen(requireNotNull(editor), onBack = {})
+            }
+        }
+        awaitWorkshop()
+        assertEquals(1.1f, context.resources.configuration.fontScale, 0f)
+        click("wallpaper_workshop_new", "wallpaper_workshop_hub")
+        val name = node("wallpaper_editor_name")
+        val preview = node("wallpaper_editor_preview")
+
+        fun previewHeight() = preview.getUnclippedBoundsInRoot().let { it.bottom - it.top }
+        val tallPreview = previewHeight()
+        name.performClick().assertIsFocused()
+        name.performTextReplacement("Star")
+
+        val view = (name.fetchSemanticsNode().root as ViewRootForTest).view
+
+        fun setKeyboardInset(height: Int) {
+            compose.runOnIdle {
+                ViewCompat.dispatchApplyWindowInsets(
+                    view,
+                    WindowInsetsCompat
+                        .Builder()
+                        .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, height))
+                        .setVisible(WindowInsetsCompat.Type.ime(), height > 0)
+                        .build(),
+                )
+            }
+        }
+
+        setKeyboardInset((300 * context.resources.displayMetrics.density).toInt())
+        assertTrue(previewHeight() < tallPreview)
+        name.assertIsDisplayed().assertIsFocused()
+        name.performTextInput(" trail")
+        assertEquals("Star trail", state.draft?.name)
+
+        setKeyboardInset(0)
+        assertEquals(tallPreview, previewHeight())
+        name.assertIsFocused().assertTextContains("Star trail")
     }
 
     private fun openWorkshop(restored: SavedStateHandle = SavedStateHandle(mapOf("bufferId" to roomId))) {

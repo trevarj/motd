@@ -421,6 +421,8 @@ flowchart TD
 - Forwarding destinations observe the whole chat list only while the forwarding picker
   is open. Dismissal cancels that subscription and clears its targets; preview edits do
   not restart it. Confirmation still freshly validates the source, destination and connection.
+- Wallpaper Workshop keeps the design-name field mounted when the keyboard
+  switches the editor to its compact layout, so typing retains focus.
 - Chat wallpaper fills the outer Scaffold's unpadded viewport, so header collapse
   and reexpansion cannot translate pattern tiles or resize a cropped image.
   Workshop layouts repeat at 512dp with seeded toroidal placement and a bounded

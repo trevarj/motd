@@ -97,22 +97,23 @@ internal fun WorkshopEditor(
     short: Boolean,
 ) {
     val spec = state.renderSpec
-    val scrollHero = short || LocalDensity.current.fontScale >= 1.35f
+    val largeText = LocalDensity.current.fontScale >= 1.35f
+    val scrollHero = short || largeText
     val tabs = rememberSaveableStateHolder()
     var colorTarget by rememberSaveable(draft.id) { mutableStateOf<String?>(null) }
-    val nameAndHero: @Composable () -> Unit = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-                value = draft.name,
-                onValueChange = viewModel::setName,
-                label = { Text(stringResource(R.string.wallpaper_workshop_name)) },
-                isError = draft.name.any(Char::isISOControl) || !isWallpaperName(draft.name.trim()),
-                enabled = !state.busy,
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("wallpaper_editor_name"),
-            )
-            WorkshopHero(spec, draft.pattern.icons.isEmpty(), short, viewModel::preview)
-        }
+    val nameField: @Composable () -> Unit = {
+        OutlinedTextField(
+            value = draft.name,
+            onValueChange = viewModel::setName,
+            label = { Text(stringResource(R.string.wallpaper_workshop_name)) },
+            isError = draft.name.any(Char::isISOControl) || !isWallpaperName(draft.name.trim()),
+            enabled = !state.busy,
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("wallpaper_editor_name"),
+        )
+    }
+    val hero: @Composable () -> Unit = {
+        WorkshopHero(spec, draft.pattern.icons.isEmpty(), short, viewModel::preview)
     }
     val controls: @Composable (Modifier, Boolean) -> Unit = { modifier, includeHero ->
         Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -126,7 +127,10 @@ internal fun WorkshopEditor(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (includeHero) nameAndHero()
+                    if (includeHero) {
+                        if (largeText) nameField()
+                        hero()
+                    }
                     if (scrollHero) {
                         WorkshopTabs(state.tab, viewModel::setTab)
                         WorkshopUsage(state)
@@ -154,14 +158,19 @@ internal fun WorkshopEditor(
     ) {
         if (wide) {
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Box(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) { nameAndHero() }
+                Column(
+                    Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    nameField()
+                    hero()
+                }
                 controls(Modifier.weight(1f).fillMaxHeight(), false)
             }
-        } else if (scrollHero) {
-            controls(Modifier.weight(1f).fillMaxWidth(), true)
         } else {
-            nameAndHero()
-            controls(Modifier.weight(1f).fillMaxWidth(), false)
+            if (!largeText) nameField()
+            if (!scrollHero) hero()
+            controls(Modifier.weight(1f).fillMaxWidth(), scrollHero)
         }
         if (!scrollHero) WorkshopUsage(state)
         FlowRow(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
