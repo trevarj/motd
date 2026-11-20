@@ -2071,7 +2071,6 @@
     <string name="chatlist_invitation_failed_hint">Could not join. You can retry or ignore this invitation.</string>
     <string name="bouncer_network_preset">Network preset</string>
     <string name="channel_list_joining">Joining</string>
-    <string name="channel_list_joined">Joined</string>
 
     <string name="settings_wallpaper_motd">MOTD</string>
     <string name="settings_wallpaper_deep_space">Deep Space</string>

@@ -183,7 +183,7 @@ private fun EmojiPickerContent(
             tagPrefix = "${tagPrefix}_emoji_search",
             onPick = ::pick,
             onDismiss = ::closeSearch,
-            gridModifier = Modifier.nestedScroll(containGridScroll),
+            modifier = Modifier.nestedScroll(containGridScroll),
         )
         return
     }
@@ -290,7 +290,7 @@ private fun EmojiPickerSearchContent(
     tagPrefix: String,
     onPick: (EmojiEntry, Boolean) -> Unit,
     onDismiss: () -> Unit,
-    gridModifier: Modifier = Modifier,
+    modifier: Modifier = Modifier,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var variantBase by rememberSaveable { mutableStateOf<String?>(null) }
@@ -347,7 +347,7 @@ private fun EmojiPickerSearchContent(
             }
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(48.dp),
-                modifier = Modifier.fillMaxWidth().weight(1f).then(gridModifier),
+                modifier = Modifier.fillMaxWidth().weight(1f).then(modifier),
             ) {
                 items(variants, key = { it.sequence }) { variant ->
                     EmojiPickerCell(
@@ -374,7 +374,7 @@ private fun EmojiPickerSearchContent(
                 tagPrefix = tagPrefix,
                 onPick = { onPick(it, false) },
                 onVariants = { variantBase = it },
-                modifier = Modifier.fillMaxWidth().weight(1f).then(gridModifier),
+                modifier = Modifier.fillMaxWidth().weight(1f).then(modifier),
             )
         }
     }
