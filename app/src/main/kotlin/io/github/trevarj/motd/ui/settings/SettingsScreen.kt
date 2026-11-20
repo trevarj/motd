@@ -27,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -102,15 +103,6 @@ fun SettingsContent(
 ) {
     var searching by rememberSaveable { mutableStateOf(state.query.isNotEmpty()) }
     var searchFocusRequested by rememberSaveable(searching) { mutableStateOf(false) }
-    val resources = LocalResources.current
-    val entries =
-        buildSettingsSearchEntries(
-            networks = state.networks,
-            uploads = state.uploads,
-            resolve = resources::getString,
-            networkTitle = { network, section -> resources.getString(R.string.settings_search_network_title, network, section) },
-        )
-    val results = searchSettings(state.query, entries)
 
     SettingsScaffold(
         title = stringResource(R.string.settings_title),
@@ -152,6 +144,18 @@ fun SettingsContent(
             if (state.query.isBlank()) {
                 Text(stringResource(R.string.settings_search_prompt), modifier = Modifier.testTag("settings_search_prompt"))
             } else {
+                val resources = LocalResources.current
+                val configuration = LocalConfiguration.current
+                val entries =
+                    remember(resources, configuration, state.networks, state.uploads) {
+                        buildSettingsSearchEntries(
+                            networks = state.networks,
+                            uploads = state.uploads,
+                            resolve = resources::getString,
+                            networkTitle = { network, section -> resources.getString(R.string.settings_search_network_title, network, section) },
+                        )
+                    }
+                val results = remember(state.query, entries) { searchSettings(state.query, entries) }
                 Text(
                     stringResource(R.string.settings_search_results),
                     style = MaterialTheme.typography.titleSmall,
