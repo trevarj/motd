@@ -104,6 +104,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -127,6 +128,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.withFrameNanos
@@ -256,6 +258,7 @@ fun ChatListScreen(
     onDefaultBufferAvailable: (Long) -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
     audioViewModel: AudioPlaybackViewModel = hiltViewModel(),
+    newConversationSheetActive: () -> Boolean = { true },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val community by viewModel.community.collectAsStateWithLifecycle()
@@ -394,6 +397,7 @@ fun ChatListScreen(
         selectedBufferId = selectedBufferId,
         nickSuggestions = nickSuggestions,
         onNickSuggestionQuery = viewModel::queryNickSuggestions,
+        newConversationSheetActive = newConversationSheetActive,
     )
 }
 
@@ -491,14 +495,16 @@ fun ChatListContent(
     onClearNetworkActivityHistory: () -> Unit = {},
     onActivityAction: (NetworkActivityIssue, NetworkActivityAction) -> Unit = { _, _ -> },
     onActivityNetworkAction: (Long, NetworkActivityAction) -> Unit = { _, _ -> },
+    newConversationSheetActive: () -> Boolean = { true },
 ) {
     var archiveMode by rememberSaveable { mutableStateOf(false) }
     val swipeAction = if (archiveMode) ChatListSwipeAction.ARCHIVE else state.chatListSwipeAction
     var invitationMode by rememberSaveable { mutableStateOf(false) }
-    var showSheet by remember { mutableStateOf(false) }
+    var showSheet by rememberSaveable { mutableStateOf(false) }
+    val newConversationStateHolder = rememberSaveableStateHolder()
+    val newConversationDraftKey = "new_conversation"
     var showMarkAllReadDialog by remember { mutableStateOf(false) }
     var showFolderAssignment by remember { mutableStateOf(false) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showActivitySheet by remember { mutableStateOf(false) }
     val activitySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val showNewNetworkActivity = hasUnseenNetworkActivity && networkActivity.unacknowledgedCount > 0
@@ -1271,27 +1277,41 @@ fun ChatListContent(
             )
         }
 
-        if (showSheet) {
-            NewConversationSheet(
-                networks = state.networks,
-                preselectedNetworkId = state.selectedNetworkId,
-                sheetState = sheetState,
-                onDismiss = { showSheet = false },
-                onJoinChannel = { networkId, channel, key ->
-                    onJoinChannel(networkId, channel, key)
-                    scope.launch { sheetState.hide() }.invokeOnCompletion { showSheet = false }
-                },
-                onMessageUser = { networkId, nick ->
-                    onMessageUser(networkId, nick)
-                    scope.launch { sheetState.hide() }.invokeOnCompletion { showSheet = false }
-                },
-                onBrowseChannels = { networkId ->
-                    onOpenChannelList(networkId)
-                    scope.launch { sheetState.hide() }.invokeOnCompletion { showSheet = false }
-                },
-                nickSuggestions = nickSuggestions,
-                onNickSuggestionQuery = onNickSuggestionQuery,
-            )
+        if (showSheet && newConversationSheetActive()) {
+            val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+            fun canAct() = showSheet && newConversationSheetActive() && sheetState.targetValue != SheetValue.Hidden
+
+            fun discardDraft() {
+                newConversationStateHolder.removeState(newConversationDraftKey)
+                showSheet = false
+            }
+
+            newConversationStateHolder.SaveableStateProvider(newConversationDraftKey) {
+                NewConversationSheet(
+                    networks = state.networks,
+                    preselectedNetworkId = state.selectedNetworkId,
+                    sheetState = sheetState,
+                    onDismiss = { if (showSheet && newConversationSheetActive()) discardDraft() },
+                    onJoinChannel = { networkId, channel, key ->
+                        if (canAct()) {
+                            discardDraft()
+                            onJoinChannel(networkId, channel, key)
+                        }
+                    },
+                    onMessageUser = { networkId, nick ->
+                        if (canAct()) {
+                            discardDraft()
+                            onMessageUser(networkId, nick)
+                        }
+                    },
+                    onBrowseChannels = { networkId ->
+                        if (canAct()) onOpenChannelList(networkId)
+                    },
+                    nickSuggestions = nickSuggestions,
+                    onNickSuggestionQuery = onNickSuggestionQuery,
+                )
+            }
         }
 
         if (showMarkAllReadDialog) {

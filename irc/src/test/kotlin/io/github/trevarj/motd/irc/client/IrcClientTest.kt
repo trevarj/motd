@@ -2059,10 +2059,10 @@ class IrcClientTest {
         runTest {
             val events = MutableSharedFlow<IrcEvent>()
 
-            val collector = backgroundScope.launchUnlabeledChannelListCollector(events) {}
+            val collector = UnlabeledChannelListCollector(backgroundScope, events, isRecipient = { true }, onListLine = {})
 
             assertEquals(1, events.subscriptionCount.value)
-            collector.cancel()
+            collector.job.cancel()
         }
 
     @Test
@@ -2096,6 +2096,30 @@ class IrcClientTest {
         }
 
     @Test
+    fun `labeled LIST surfaces throttling and batch FAIL as rejections`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registered(ft)
+
+            val throttled = clientScope().async { runCatching { client.listChannels() } }
+            runCurrent()
+            val throttleLabel = responseLabel(ft.sent.last { it.contains("LIST") })
+            ft.feed("@label=$throttleLabel :srv 263 motd LIST :Try again soon")
+            runCurrent()
+            assertEquals("263", (throttled.await().exceptionOrNull() as IrcCommandException).code)
+
+            val failed = clientScope().async { runCatching { client.listChannels() } }
+            runCurrent()
+            val failureLabel = responseLabel(ft.sent.last { it.contains("LIST") })
+            ft.feed("@label=$failureLabel BATCH +failure draft/labeled-response")
+            ft.feed("@batch=failure :srv FAIL LIST THROTTLED :Try again later")
+            ft.feed("@batch=failure :srv 323 motd :End of /LIST")
+            ft.feed("BATCH -failure")
+            runCurrent()
+            assertEquals("THROTTLED", (failed.await().exceptionOrNull() as IrcCommandException).code)
+        }
+
+    @Test
     fun `labeled LIST cap retains the most populated rows`() =
         runTest {
             val ft = FakeTransport()
@@ -2114,6 +2138,59 @@ class IrcClientTest {
             runCurrent()
 
             assertEquals(listOf("#largest", "#large"), result.await().map { it.name })
+        }
+
+    @Test
+    fun `LIST applies user bounds before the cap without ELIST U`() =
+        runTest {
+            for (useLabels in listOf(false, true)) {
+                val ft = FakeTransport()
+                val client = if (useLabels) registered(ft) else registeredNoCaps(ft)
+                val result = clientScope().async { client.listChannels(minUsers = 10, cap = 3, maxUsers = 40) }
+                runCurrent()
+
+                val prefix =
+                    if (useLabels) {
+                        val label = responseLabel(ft.sent.last { it.contains("LIST") })
+                        ft.feed("@label=$label BATCH +list draft/labeled-response")
+                        "@batch=list "
+                    } else {
+                        ""
+                    }
+                ft.feed("$prefix:srv 322 motd #small 11 :small")
+                ft.feed("$prefix:srv 322 motd #too-small 10 :too small")
+                ft.feed("$prefix:srv 322 motd #upper-bound 40 :upper bound")
+                repeat(3) { ft.feed("$prefix:srv 322 motd #large$it ${41 + it} :large") }
+                ft.feed("$prefix:srv 323 motd :End of /LIST")
+                if (useLabels) ft.feed("BATCH -list")
+                runCurrent()
+
+                assertEquals(listOf("#upper-bound", "#small"), result.await().map { it.name })
+            }
+        }
+
+    @Test
+    fun `LIST matches case mapped literal names before applying the cap`() =
+        runTest {
+            for (elist in listOf("U", "MU")) {
+                val ft = FakeTransport()
+                val client = registeredWithIsupport(ft, "CASEMAPPING=rfc1459-strict ELIST=$elist")
+                val result = clientScope().async { client.listChannels(cap = 1, nameContains = "QUIET{^") }
+                runCurrent()
+
+                val line = ft.sent.last { it.contains("LIST") }
+                assertEquals(if (elist == "MU") " *QUIET{^*" else "", line.substringAfter(" LIST"))
+                val label = responseLabel(line)
+                ft.feed("@label=$label BATCH +list draft/labeled-response")
+                ft.feed("@batch=list :srv 322 motd #quiet[^ 3 :match")
+                ft.feed("@batch=list :srv 322 motd #quiet[~ 100 :not equivalent in strict RFC1459")
+                ft.feed("@batch=list :srv 322 motd #unrelated 200 :unrelated")
+                ft.feed("@batch=list :srv 323 motd :End of /LIST")
+                ft.feed("BATCH -list")
+                runCurrent()
+
+                assertEquals(listOf("#quiet[^"), result.await().map { it.name })
+            }
         }
 
     @Test
@@ -2187,6 +2264,81 @@ class IrcClientTest {
         }
 
     @Test
+    fun `raw LIST ignores a rejected request's terminator even after PONG and retry write`() =
+        runTest {
+            val rejections = listOf("263" to "263 motd LIST :Try again soon", "THROTTLED" to "FAIL LIST THROTTLED :Try again later")
+            for ((code, rejection) in rejections) {
+                val ft = FakeTransport()
+                val client = registeredNoCaps(ft)
+                val first = clientScope().async { runCatching { client.listChannels() } }
+                runCurrent()
+
+                ft.feed(":srv 263 motd WHO :Not a LIST response")
+                ft.feed(":srv 263 other LIST :Not our LIST response")
+                ft.feed(":srv FAIL WHO THROTTLED :Not a LIST response")
+                runCurrent()
+                assertFalse(first.isCompleted)
+
+                ft.feed(":srv $rejection")
+                runCurrent()
+                assertTrue(first.isCompleted)
+                val error = first.await().exceptionOrNull() as IrcCommandException
+                assertEquals("LIST", error.ircCommand)
+                assertEquals(code, error.code)
+
+                val retry = clientScope().async { client.listChannels() }
+                runCurrent()
+                val ping = ft.sent.single { it.startsWith("PING list-") }.substringAfter("PING ")
+                ft.feed(":srv PONG srv :unrelated")
+                runCurrent()
+                assertEquals(1, ft.sent.count { it == "LIST" })
+
+                ft.feed(":srv PONG srv :$ping")
+                runCurrent()
+                assertEquals(2, ft.sent.count { it == "LIST" })
+                if (code == "263") ft.feed(":srv 323 motd :Optional end of rejected LIST")
+                runCurrent()
+                assertFalse(retry.isCompleted)
+                ft.feed(":srv 321 motd Channel :Users Name")
+                ft.feed(":srv 322 motd #found 17 :Retry result")
+                ft.feed(":srv 323 motd :End of /LIST")
+                runCurrent()
+                assertEquals(listOf("#found"), retry.await().map { it.name })
+
+                val ordinary = clientScope().async { client.listChannels() }
+                runCurrent()
+                assertEquals(3, ft.sent.count { it == "LIST" })
+                assertEquals(1, ft.sent.count { it.startsWith("PING list-") })
+                ft.feed(":srv 323 motd :Empty LIST")
+                runCurrent()
+                assertTrue(ordinary.await().isEmpty())
+            }
+        }
+
+    @Test
+    fun `raw LIST accepts a bare empty retry when the rejected reply already ended`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            val first = clientScope().async { runCatching { client.listChannels() } }
+            runCurrent()
+            ft.feed(":srv 263 motd LIST :Try again soon")
+            runCurrent()
+            assertTrue(first.await().exceptionOrNull() is IrcCommandException)
+
+            ft.feed(":srv 323 motd :End of rejected LIST")
+            runCurrent()
+            val retry = clientScope().async { client.listChannels() }
+            runCurrent()
+            assertEquals(2, ft.sent.count { it == "LIST" })
+            assertFalse(ft.sent.any { it.startsWith("PING list-") })
+
+            ft.feed(":srv 323 motd :Empty LIST")
+            runCurrent()
+            assertTrue(retry.await().isEmpty())
+        }
+
+    @Test
     fun `timed out raw LIST drains its response before sending the queued search`() =
         runTest {
             val ft = FakeTransport()
@@ -2217,21 +2369,27 @@ class IrcClientTest {
         }
 
     @Test
-    fun `ELIST U gates the minUsers filter param`() =
+    fun `ELIST U gates user count filter params`() =
         runTest {
-            // ELIST advertises 'U' -> the ">n" filter is appended.
             val ftU = FakeTransport()
             val clientU = registeredWithIsupport(ftU, "CHATHISTORY=100 ELIST=CMNTU")
-            clientScope().async { clientU.listChannels(minUsers = 50) }
+            clientScope().async { clientU.listChannels(minUsers = 50, maxUsers = 100, nameContains = "quiet") }
             runCurrent()
-            assertTrue(ftU.sent.last { it.contains("LIST") }.contains(">50"))
+            assertEquals(" *quiet*,>50,<101", ftU.sent.last { it.contains("LIST") }.substringAfter(" LIST"))
 
-            // ELIST without 'U' -> the filter is dropped.
             val ftNo = FakeTransport()
             val clientNo = registeredWithIsupport(ftNo, "CHATHISTORY=100 ELIST=CMNT")
-            clientScope().async { clientNo.listChannels(minUsers = 50) }
+            clientScope().async { clientNo.listChannels(minUsers = 50, maxUsers = 100) }
             runCurrent()
-            assertTrue(!ftNo.sent.last { it.contains("LIST") }.contains(">50"))
+            assertEquals("", ftNo.sent.last { it.contains("LIST") }.substringAfter(" LIST"))
+
+            clientScope().async { clientU.listChannels(mask = "*motd*", maxUsers = Int.MAX_VALUE) }
+            runCurrent()
+            assertEquals(" *motd*", ftU.sent.last { it.contains("LIST") }.substringAfter(" LIST"))
+
+            clientScope().async { clientU.listChannels(nameContains = "quiet,?") }
+            runCurrent()
+            assertEquals("", ftU.sent.last { it.contains("LIST") }.substringAfter(" LIST"))
         }
 
     @Test

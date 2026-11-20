@@ -147,6 +147,7 @@ internal class FakeConnections : NoopConnectionManager() {
         networkId: Long,
         channel: String,
         key: String?,
+        rememberKey: Boolean,
     ): Boolean {
         joins += Triple(networkId, channel, key)
         return true

@@ -447,6 +447,37 @@ class NotificationReplyReadinessTest {
         }
 
     @Test
+    fun transientJoinKeyReachesTransportWithoutChangingRememberedKeys() =
+        runBlocking {
+            val fixture = managerFixture()
+            try {
+                val (_, connection) = startNetwork(fixture)
+                val networkId = fixture.networkId
+                val store = fixture.enrollmentStore
+                val savedChannel = "#saved"
+                val newChannel = "#unsaved"
+                store.putChannelKey(networkId, savedChannel, "saved-key")
+
+                assertTrue(fixture.manager.joinChannel(networkId, savedChannel, "retry-key", rememberKey = false))
+                assertEquals("JOIN #saved retry-key", connection.awaitLine { it.startsWith("JOIN ") })
+                assertEquals("saved-key", store.channelKey(networkId, savedChannel))
+
+                assertTrue(fixture.manager.joinChannel(networkId, newChannel, "retry-key", rememberKey = false))
+                assertEquals("JOIN #unsaved retry-key", connection.awaitLine { it.startsWith("JOIN ") })
+                assertEquals(null, store.channelKey(networkId, newChannel))
+
+                assertTrue(fixture.manager.joinChannel(networkId, savedChannel, rememberKey = false))
+                assertEquals("JOIN #saved saved-key", connection.awaitLine { it.startsWith("JOIN ") })
+
+                assertTrue(fixture.manager.joinChannel(networkId, savedChannel, "replacement-key"))
+                assertEquals("JOIN #saved replacement-key", connection.awaitLine { it.startsWith("JOIN ") })
+                assertEquals("replacement-key", store.channelKey(networkId, savedChannel))
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
     fun channelClosingWhileWaitingForItsJoinIsRejectedByTheManagerBeforePersistence() =
         runBlocking {
             val fixture = managerFixture()
@@ -777,6 +808,7 @@ class NotificationReplyReadinessTest {
         settings.setDeliveryMode(DeliveryMode.PERSISTENT_SOCKET)
         val processor = EventProcessor(db, TypingTrackerImpl(scope, AppClock(System::currentTimeMillis)), notifier)
         val loader = HistoryPageLoader(processor)
+        val enrollmentStore = InviteEnrollmentStore(context)
         lateinit var manager: ConnectionManagerImpl
         val avatarCoordinator =
             AvatarCoordinator(
@@ -797,7 +829,7 @@ class NotificationReplyReadinessTest {
                 pushPrefs = settings,
                 replyPrefs = ReplyPrefsImpl(context),
                 certStore = settings,
-                inviteEnrollmentStore = InviteEnrollmentStore(context),
+                inviteEnrollmentStore = enrollmentStore,
                 baseTransportFactory = TransportFactory { host, port, tls, _, proxy -> OkioLineTransport(host, port, tls, proxy = proxy) },
                 localSocksProvider = LocalSocksProvider(context, DiagnosticLogger.Noop),
                 historyResyncCoordinator = HistoryResyncCoordinator(db, processor, scope = scope, settingsRepository = settings),
@@ -824,7 +856,7 @@ class NotificationReplyReadinessTest {
                         )
                     },
             )
-        return ManagerFixture(db, avatars, manager, networkId, peer, scope)
+        return ManagerFixture(db, avatars, manager, networkId, peer, scope, enrollmentStore)
     }
 
     private class ManagerFixture(
@@ -834,6 +866,7 @@ class NotificationReplyReadinessTest {
         val networkId: Long,
         val peer: LocalIrcPeer,
         private val scope: CoroutineScope,
+        val enrollmentStore: InviteEnrollmentStore,
     ) {
         suspend fun room(
             type: BufferType,

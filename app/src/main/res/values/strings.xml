@@ -119,26 +119,22 @@
 
     <!-- New-conversation bottom sheet (WP6) -->
     <string name="new_sheet_title">New conversation</string>
-    <string name="new_sheet_supporting">Join a channel or start a direct message on one of your networks.</string>
     <string name="new_sheet_join_channel">Join channel</string>
-    <string name="new_sheet_join_description">Enter channel details or browse channels on the selected network.</string>
     <string name="new_sheet_message_user">Message user</string>
-    <string name="new_sheet_message_description">Start a direct conversation with a nickname on the selected network.</string>
     <string name="new_sheet_network">Network</string>
     <string name="new_sheet_network_selected">Network: %1$s</string>
     <string name="new_sheet_no_networks">No eligible networks are available. Add a network before starting a conversation.</string>
     <string name="new_sheet_channel_prefix">#</string>
     <string name="new_sheet_channel_hint">Channel name</string>
     <string name="new_sheet_channel_guidance">Enter a name without #. Include # to join a ## channel.</string>
-    <string name="new_sheet_channel_password">Channel password (optional)</string>
-    <string name="new_sheet_channel_password_guidance">Used only for keyed channels.</string>
+    <string name="new_sheet_channel_key_optional">Channel key (optional)</string>
+    <string name="new_sheet_channel_key">Channel key</string>
+    <string name="new_sheet_hide_channel_key">Hide channel key field</string>
     <string name="new_sheet_expanded">Expanded</string>
     <string name="new_sheet_collapsed">Collapsed</string>
     <string name="new_sheet_nick_hint">Nickname</string>
     <string name="new_sheet_nick_guidance">Type a nickname. Known nicks appear as suggestions.</string>
-    <string name="new_sheet_join">Join</string>
-    <string name="new_sheet_message">Message</string>
-    <string name="new_sheet_browse">Browse channels…</string>
+    <string name="new_sheet_browse">Browse channels</string>
 
     <!-- Onboarding (WP8) -->
     <string name="onboarding_welcome_title">Welcome to motd</string>
@@ -1781,34 +1777,48 @@
 
     <!-- Channel browser (WP-V4, §5.7) -->
     <string name="channel_list_title">Browse channels</string>
-    <string name="channel_list_search_hint">Search channels</string>
+    <string name="channel_list_network">Network</string>
+    <string name="channel_list_search_hint">Filter names and topics</string>
     <string name="channel_list_root_cant_browse">This soju account can\'t browse channels. Open one of its networks instead.</string>
     <string name="channel_list_empty">No channels found</string>
-    <string name="channel_list_empty_message">Try a different channel name or search term.</string>
-    <string name="channel_list_search_title">Find a channel</string>
-    <string name="channel_list_search_ready">Search this network by channel name.</string>
-    <string name="channel_list_search_action">Search channels</string>
+    <string name="channel_list_search_action">Search network</string>
     <string name="channel_list_refresh">Refresh channel list</string>
     <string name="channel_list_loading">Loading channels…</string>
-    <string name="channel_list_popular">Popular channels</string>
-    <plurals name="channel_list_results">
-        <item quantity="one">%1$d channel</item>
-        <item quantity="other">%1$d channels</item>
-    </plurals>
+    <string name="channel_list_popular">Most populated</string>
+    <string name="channel_list_include_smaller">Include smaller channels</string>
+    <string name="channel_list_smaller">Smaller channels first</string>
+    <string name="channel_list_local">Local matches</string>
+    <string name="channel_list_local_scope">Only channels already loaded. Search the network to look up more channel names.</string>
+    <string name="channel_list_remote">Network results</string>
+    <string name="channel_list_remote_duplicates">All network matches are already in the local results.</string>
+    <string name="channel_list_show_topic">Expand topic</string>
+    <string name="channel_list_hide_topic">Collapse topic</string>
     <string name="channel_list_join">Join</string>
+    <string name="channel_list_join_exact">Join %1$s</string>
+    <string name="channel_list_open">Open</string>
+    <string name="channel_list_open_exact">Open %1$s</string>
+    <string name="channel_list_key">Channel key</string>
+    <string name="channel_list_join_not_sent">Couldn\'t send the join. Try again.</string>
+    <string name="channel_list_join_timeout">The network didn\'t confirm the join. Try again.</string>
+    <string name="channel_list_join_invalid_key">Enter a channel key without spaces or commas.</string>
+    <string name="channel_list_join_bad_key">This channel requires a valid key.</string>
+    <string name="channel_list_join_rejected">The network rejected the join.</string>
     <plurals name="channel_list_users">
         <item quantity="one">%1$d user</item>
         <item quantity="other">%1$d users</item>
     </plurals>
-    <string name="channel_list_error_title">Couldn\'t load channels</string>
     <string name="channel_list_retry">Try again</string>
+    <string name="channel_list_load_failed">Couldn\'t load channels.</string>
     <string name="channel_list_checking">Checking network…</string>
     <string name="channel_list_checking_message">Looking for the active IRC connection.</string>
     <string name="channel_list_connecting">Connecting…</string>
     <string name="channel_list_connecting_message">Channels will appear when this network is ready.</string>
     <string name="channel_list_unavailable">Connection unavailable</string>
     <string name="channel_list_offline">Network offline</string>
-    <string name="channel_list_offline_message">Reconnect this network from the network drawer, then return here to browse channels.</string>
+    <string name="channel_list_offline_message">Connect this network to browse its channels.</string>
+    <string name="channel_list_connect">Connect</string>
+    <string name="channel_list_connect_failed">Couldn\'t connect. Try again.</string>
+    <string name="channel_list_no_networks">No saved networks are available to browse.</string>
 
     <!-- Nick action sheet + whois (WP-V3, §5.8) -->
     <string name="nick_sheet_message">Message</string>

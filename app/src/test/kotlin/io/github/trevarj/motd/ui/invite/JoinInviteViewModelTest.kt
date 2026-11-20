@@ -217,8 +217,9 @@ class JoinInviteViewModelTest {
                         networkId: Long,
                         channel: String,
                         key: String?,
+                        rememberKey: Boolean,
                     ): Boolean {
-                        enrollment.putChannelKey(networkId, channel, key)
+                        if (rememberKey && !key.isNullOrBlank()) enrollment.putChannelKey(networkId, channel, key)
                         channelJoinOutcomes.emit(
                             ChannelJoinOutcome.Rejected(
                                 networkId,
@@ -543,6 +544,7 @@ class JoinInviteViewModelTest {
             networkId: Long,
             channel: String,
             key: String?,
+            rememberKey: Boolean,
         ): Boolean {
             joins++
             lastKey = key

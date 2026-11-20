@@ -103,6 +103,7 @@ class CommunityTest {
             networkId: Long,
             channel: String,
             key: String?,
+            rememberKey: Boolean,
         ): Boolean {
             joins += networkId to channel
             rejection?.let { channelJoinOutcomes.emit(it) }

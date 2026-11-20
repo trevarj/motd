@@ -117,7 +117,7 @@ internal fun channelJoinOutcome(
                 ChannelJoinRejectionKind.INVITE_ONLY
             }
 
-            code == "475" -> {
+            code == "475" || code.equals("BAD_KEY", ignoreCase = true) || code.equals("BAD_CHANNEL_KEY", ignoreCase = true) -> {
                 ChannelJoinRejectionKind.BAD_KEY
             }
 
@@ -284,11 +284,13 @@ interface ConnectionManager {
     /**
      * JOIN [channel], optionally with [key]. Both stay in their comma-joined wire form so a
      * multi-channel `/join #a,#b key-a,key-b` keeps JOIN's positional channel/key pairing.
+     * Set [rememberKey] to false to send a supplied key without replacing the saved key.
      */
     suspend fun joinChannel(
         networkId: Long,
         channel: String,
         key: String? = null,
+        rememberKey: Boolean = true,
     ): Boolean
 
     /** Write one IRC INVITE for a canonical joined channel. True means the live transport accepted it. */

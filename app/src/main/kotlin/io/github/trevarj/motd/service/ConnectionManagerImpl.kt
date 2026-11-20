@@ -3015,6 +3015,7 @@ class ConnectionManagerImpl
             networkId: Long,
             channel: String,
             key: String?,
+            rememberKey: Boolean,
         ): Boolean {
             val client = clientFor(networkId) ?: return false
             val normalizedChannel = client.isupport.normalize(channel)
@@ -3027,7 +3028,7 @@ class ConnectionManagerImpl
                         params = listOfNotNull(channel, effectiveKey),
                     ),
                 )
-            if (accepted && suppliedKey != null) {
+            if (accepted && rememberKey && suppliedKey != null) {
                 inviteEnrollmentStore.putChannelKey(networkId, normalizedChannel, suppliedKey)
             }
             return accepted

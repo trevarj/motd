@@ -120,19 +120,95 @@ data class ChannelListing(
 )
 
 /** Collects one unlabelled LIST response. The caller must start this before writing LIST. */
-internal fun CoroutineScope.launchUnlabeledChannelListCollector(
+internal class UnlabeledChannelListCollector(
+    scope: CoroutineScope,
     events: SharedFlow<IrcEvent>,
-    onListLine: (IrcMessage) -> Unit,
-): Job =
-    launch(start = CoroutineStart.UNDISPATCHED) {
-        events.collect { event ->
-            if (event !is IrcEvent.Raw) return@collect
-            when (event.message.command) {
-                "322" -> onListLine(event.message)
-                "323" -> throw CancellationException("LIST end")
+    private val isRecipient: (String) -> Boolean,
+    private val onListLine: (IrcMessage) -> Unit,
+    optionalTerminators: Int = 0,
+) {
+    val terminal = CompletableDeferred<IrcCommandException?>()
+
+    @Volatile
+    var optionalTerminators = optionalTerminators
+        private set
+
+    val job =
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                events.first(::observe)
+            } finally {
+                terminal.cancel()
             }
         }
+
+    private fun observe(event: IrcEvent): Boolean {
+        when (event) {
+            is IrcEvent.Raw -> {
+                val message = event.message
+                val command = message.command
+                if (command != "321" && command != "322" && command != "323" && command != "263") return false
+                if ("label" in message.tags || "batch" in message.tags) return false
+                if (message.params.firstOrNull()?.let(isRecipient) != true) return false
+                if (command == "323") {
+                    if (optionalTerminators > 0) {
+                        optionalTerminators--
+                        return terminal.isCompleted && optionalTerminators == 0
+                    }
+                    terminal.complete(null)
+                    return true
+                }
+                if (terminal.isCompleted) return false
+                if (command == "321" || command == "322") {
+                    optionalTerminators = 0
+                    if (command == "322") onListLine(message)
+                } else {
+                    message.listRejection()?.let(::reject)
+                }
+            }
+
+            is IrcEvent.StandardReply -> {
+                if (!terminal.isCompleted && event.ctx.label == null && event.ctx.batchId == null &&
+                    event.severity == IrcEvent.StandardReplySeverity.FAIL && event.commandName.equals("LIST", ignoreCase = true)
+                ) {
+                    reject(IrcCommandException("LIST", event.code, event.description))
+                }
+            }
+
+            else -> {
+                return false
+            }
+        }
+        return false
     }
+
+    private fun reject(error: IrcCommandException) {
+        optionalTerminators++
+        terminal.complete(error)
+    }
+}
+
+private fun IrcMessage.isListThrottle(): Boolean = command == "263" && params.getOrNull(1).equals("LIST", ignoreCase = true)
+
+private fun IrcMessage.listRejection(): IrcCommandException? =
+    when {
+        isListThrottle() -> {
+            IrcCommandException("LIST", command, params.getOrNull(2).orEmpty())
+        }
+
+        command == "FAIL" && params.firstOrNull().equals("LIST", ignoreCase = true) -> {
+            IrcCommandException("LIST", params.getOrNull(1) ?: "FAIL", params.lastOrNull().orEmpty())
+        }
+
+        else -> {
+            null
+        }
+    }
+
+private data class UnlabeledChannelListResponse(
+    val transport: IrcTransport,
+    val collector: UnlabeledChannelListCollector,
+)
 
 /** Memory-bounded accumulator that retains the busiest channels and preserves arrival order ties. */
 private class BoundedChannelListings(
@@ -233,7 +309,7 @@ class IrcClient(
     private val unlabeledWhois = UnlabeledWhoisCorrelator()
     private val unlabeledWhoisLock = Mutex()
     private val unlabeledChannelListLock = Mutex()
-    private var unlabeledChannelListDrain: Job? = null
+    private var unlabeledChannelListDrain: UnlabeledChannelListResponse? = null
     private val accountRegistrationLock = Mutex()
     private val sensitiveEchoes = ConcurrentHashMap<String, Int>()
     private val outboundLock = Mutex()
@@ -1625,86 +1701,139 @@ class IrcClient(
     // -- channel list (LIST / ELIST) --
 
     /**
-     * LIST. [mask] filters server-side when given; [minUsers] appends the ELIST ">n" filter only
-     * when ISUPPORT ELIST contains 'U'. Uses labeled-response when available; otherwise collects
-     * raw 322s until 323 or a 15s timeout. Returns only the [cap] most populated rows; the raw
-     * collector stays memory-bounded even for a large unfiltered LIST.
+     * LIST. [mask] is a server-side filter; otherwise a safe [nameContains] can use an ELIST 'M'
+     * mask. [nameContains] is always matched literally under the server's CASEMAPPING. [minUsers]
+     * is exclusive and [maxUsers] is inclusive. ELIST 'U' also sends the count filters; multiple
+     * wire filters share one comma-separated argument. Uses labeled-response when available;
+     * otherwise collects raw 322s until 323, a rejection, or a 15s timeout. Returns the [cap]
+     * most populated matching rows, keeping memory bounded even for a large unfiltered LIST.
      */
     suspend fun listChannels(
         mask: String? = null,
         minUsers: Int? = null,
         cap: Int = 2000,
+        maxUsers: Int? = null,
+        nameContains: String? = null,
     ): List<ChannelListing> {
-        val params =
-            buildList {
-                mask?.takeIf { it.isNotBlank() }?.let { add(it) }
-                // The user-count filter is only appended when the server advertises ELIST 'U'.
-                val elistU = _isupport.get()["ELIST"]?.contains('U', ignoreCase = true) == true
-                if (minUsers != null && elistU) add(">$minUsers")
+        val support = _isupport.get()
+        val caseMapping = support.identityRules.caseMapping
+        val elist = support["ELIST"]
+        val nameTerm = nameContains?.takeIf { it.isNotEmpty() }
+        val nameMatches =
+            nameTerm?.let { term ->
+                val foldedTerm = caseMapping.normalize(term)
+
+                fun(channel: String) = caseMapping.normalize(channel).contains(foldedTerm)
             }
+        val wireMask =
+            mask?.takeIf { it.isNotBlank() }
+                ?: nameTerm
+                    ?.takeIf {
+                        elist?.contains('M', ignoreCase = true) == true &&
+                            it.none { char -> char in "*?\\,[]" || char.isWhitespace() || char.isISOControl() }
+                    }?.let { "*$it*" }
+        val filters =
+            buildList {
+                wireMask?.let { add(it) }
+                if (elist?.contains('U', ignoreCase = true) == true) {
+                    if (minUsers != null) add(">$minUsers")
+                    if (maxUsers != null && maxUsers < Int.MAX_VALUE) add("<${maxUsers + 1}")
+                }
+            }
+        val params = if (filters.size <= 1) filters else listOf(filters.joinToString(","))
         val msg = IrcMessage(command = "LIST", params = params)
+        val out = BoundedChannelListings(cap)
+        val collectRow: (IrcMessage) -> Unit = { message -> parseListMessage(message, minUsers, maxUsers, nameMatches)?.let(out::add) }
 
         if (hasCap("labeled-response")) {
-            val out = BoundedChannelListings(cap)
-            sendLabeledResponse(msg) { message -> parseListLine(message)?.let(out::add) }
+            var rejection: IrcCommandException? = null
+            sendLabeledResponse(msg) { message ->
+                rejection = rejection ?: message.listRejection()
+                if (rejection == null) collectRow(message)
+            }
+            rejection?.let { throw it }
             return out.toList()
         }
 
         // Raw LIST numerics carry no request identity. Serialize requests and synchronously enter
         // collection before writing so a fast server cannot answer before the subscriber exists.
         return unlabeledChannelListLock.withLock {
-            awaitPreviousChannelListResponse()
             val t = transport ?: throw IrcDisconnectedException("LIST", null)
-            val out = BoundedChannelListings(cap)
-            val collector =
-                scope.launchUnlabeledChannelListCollector(broadcastEvents) { message ->
-                    parseListMessage(message)?.let(out::add)
-                }
+            val optionalTerminators = awaitPreviousChannelListResponse(t)
+            if (transport !== t) throw IrcDisconnectedException("LIST", null)
+            val isRecipient: (String) -> Boolean = { recipient ->
+                val nick = selfNick.get()
+                recipient == nick || caseMapping.normalize(recipient) == caseMapping.normalize(nick)
+            }
+            val collector = UnlabeledChannelListCollector(scope, broadcastEvents, isRecipient, collectRow, optionalTerminators)
             var sent = false
+            var drained = false
             try {
                 sendSerialized(t, msg)
                 sent = true
                 val completed =
                     withTimeoutOrNull(LIST_TIMEOUT_MS) {
-                        collector.join()
+                        collector.terminal.join()
                         true
                     } == true
-                if (!completed) {
-                    // Keep consuming this response through its 323 terminator. A later raw LIST
-                    // must not see the tail of this response as its own result.
-                    unlabeledChannelListDrain = collector
-                    throw IrcTimeoutException("channel list")
-                }
+                if (!completed) throw IrcTimeoutException("channel list")
+                collector.terminal.await()?.let { throw it }
+                drained = true
                 out.toList()
-            } catch (cancelled: CancellationException) {
-                if (sent && collector.isActive) unlabeledChannelListDrain = collector
-                throw cancelled
             } finally {
-                if (unlabeledChannelListDrain !== collector) collector.cancelAndJoin()
+                if (sent && !drained) {
+                    unlabeledChannelListDrain = UnlabeledChannelListResponse(t, collector)
+                } else {
+                    if (sent) unlabeledChannelListDrain = null
+                    collector.job.cancelAndJoin()
+                }
             }
         }
     }
 
-    /** Waits for a timed-out raw LIST's 323 before another uncorrelated LIST can be sent. */
-    private suspend fun awaitPreviousChannelListResponse() {
-        val previous = unlabeledChannelListDrain ?: return
+    /** Drains the previous response. A bouncer's PONG can precede the upstream's optional 323. */
+    private suspend fun awaitPreviousChannelListResponse(t: IrcTransport): Int {
+        val previous = unlabeledChannelListDrain ?: return 0
+        val collector = previous.collector
+        if (previous.transport !== t) {
+            collector.job.cancel()
+            unlabeledChannelListDrain = null
+            return 0
+        }
         val drained =
             withTimeoutOrNull(LIST_DRAIN_WAIT_MS) {
-                previous.join()
+                if (collector.terminal.await() != null && collector.optionalTerminators > 0) {
+                    coroutineScope {
+                        val token = "list-${labels.next()}"
+                        val pong =
+                            async(start = CoroutineStart.UNDISPATCHED) {
+                                broadcastEvents.first { event ->
+                                    event is IrcEvent.Raw && event.message.command == "PONG" && event.message.params.lastOrNull() == token
+                                }
+                            }
+                        sendSerialized(t, "PING $token")
+                        pong.await()
+                    }
+                }
                 true
             } == true
         if (!drained) throw IrcTimeoutException("previous channel list")
-        if (unlabeledChannelListDrain === previous) unlabeledChannelListDrain = null
+        collector.job.cancelAndJoin()
+        return collector.optionalTerminators
     }
 
-    /** Parse an [IrcMessage] that is (or wraps) an RPL_LIST 322 into a [ChannelListing]. */
-    private fun parseListLine(msg: IrcMessage): ChannelListing? = if (msg.command == "322") parseListMessage(msg) else null
-
     /** RPL_LIST: params = [me, channel, count, topic]. */
-    private fun parseListMessage(msg: IrcMessage): ChannelListing? {
+    private fun parseListMessage(
+        msg: IrcMessage,
+        minUsers: Int?,
+        maxUsers: Int?,
+        nameMatches: ((String) -> Boolean)?,
+    ): ChannelListing? {
         if (msg.command != "322") return null
         val channel = msg.params.getOrNull(1) ?: return null
         val count = msg.params.getOrNull(2)?.toIntOrNull() ?: 0
+        if ((minUsers != null && count <= minUsers) || (maxUsers != null && count > maxUsers)) return null
+        if (nameMatches != null && !nameMatches(channel)) return null
         val topic = msg.params.getOrNull(3).orEmpty()
         return ChannelListing(channel, count, topic)
     }

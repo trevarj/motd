@@ -9,23 +9,29 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertHasNoClickAction
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isHeading
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -34,8 +40,11 @@ import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -62,7 +71,7 @@ class NewConversationSheetUiTest {
     val compose = createComposeRule()
 
     @Test
-    fun selectedTabsAndNetworkOptionsPaintTheSameAccessiblePair() {
+    fun selectedActionPillsAreRoundedAndUseTheNetworkSelectionColors() {
         var fill = Color.Unspecified
         var ink = Color.Unspecified
         compose.setContent {
@@ -83,7 +92,8 @@ class NewConversationSheetUiTest {
         for (tab in listOf("new_conversation_join_tab", "new_conversation_message_tab", "new_conversation_join_tab")) {
             val row = compose.onNodeWithTag(tab).performClick().assertIsSelected()
             val pixels = row.captureToImage().toPixelMap()
-            assertEquals(fill, pixels[2, pixels.height / 2])
+            assertEquals(fill, pixels[pixels.width / 2, pixels.height / 4])
+            assertTrue(pixels[2, 2] != fill)
         }
         compose.onNodeWithTag("new_conversation_network_selector").performClick()
         val option = compose.onNodeWithTag("new_conversation_network_option_2").assertIsSelected()
@@ -105,17 +115,83 @@ class NewConversationSheetUiTest {
     }
 
     @Test
-    fun hierarchyUsesHeadingTabsDescriptionsAndSingleNetworkValue() {
+    fun joinAndMessageKeepTheSameSheetFieldAndFooterPositions() {
         setContent(networks = listOf(network()))
 
-        compose.onNodeWithTag("new_conversation_header").assert(isHeading())
-        compose.onNodeWithTag("new_conversation_join_tab").assertIsSelected()
-        compose.onNodeWithTag("new_conversation_join_description").assertTextEquals(
-            "Enter channel details or browse channels on the selected network.",
-        )
-        compose.onNodeWithTag("new_conversation_network_value").assertHasNoClickAction()
-        compose.onNodeWithTag("new_conversation_network_selector").assertDoesNotExist()
-        compose.onNodeWithTag("new_conversation_browse").assertIsEnabled()
+        val content = compose.onNodeWithTag("new_conversation_content")
+        val input = compose.onNodeWithTag("new_conversation_input")
+        val submit = compose.onNodeWithTag("new_conversation_submit")
+        val join = compose.onNodeWithTag("new_conversation_join_tab").assertIsSelected()
+        val message = compose.onNodeWithTag("new_conversation_message_tab")
+        val browse = compose.onNodeWithTag("new_conversation_browse").assertIsEnabled()
+        val shell = content.getUnclippedBoundsInRoot()
+        val fieldTop = input.getUnclippedBoundsInRoot().top
+        val footer = submit.getUnclippedBoundsInRoot()
+        listOf(join, message, browse).forEach {
+            val bounds = it.getUnclippedBoundsInRoot()
+            assertTrue(bounds.bottom - bounds.top >= 48.dp)
+        }
+        val networkBounds = compose.onNodeWithTag("new_conversation_network_value").getUnclippedBoundsInRoot()
+        val browseBounds = browse.getUnclippedBoundsInRoot()
+        assertTrue(networkBounds.right < browseBounds.left)
+        assertTrue(networkBounds.top < browseBounds.bottom && browseBounds.top < networkBounds.bottom)
+        val joinBounds = join.getUnclippedBoundsInRoot()
+        val messageBounds = message.getUnclippedBoundsInRoot()
+        assertEquals(joinBounds.top, messageBounds.top)
+        assertEquals(joinBounds.bottom, messageBounds.bottom)
+        assertEquals(footer.left, joinBounds.left)
+        assertEquals(footer.right, messageBounds.right)
+        assertTrue(kotlin.math.abs((joinBounds.right - joinBounds.left - (messageBounds.right - messageBounds.left)).value) <= 1f)
+        assertTrue(browse.getUnclippedBoundsInRoot().top < fieldTop)
+
+        input.performClick().assertIsFocused()
+        compose.onNodeWithTag("new_conversation_password_toggle").performClick()
+        assertEquals(shell, content.getUnclippedBoundsInRoot())
+        assertEquals(footer, submit.getUnclippedBoundsInRoot())
+        message.performClick().assertIsSelected()
+        input.assertIsFocused()
+        assertEquals(shell, content.getUnclippedBoundsInRoot())
+        assertEquals(fieldTop, input.getUnclippedBoundsInRoot().top)
+        assertEquals(footer, submit.getUnclippedBoundsInRoot())
+        browse.assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Selected))
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h360dp")
+    fun narrowLargeTextKeepsBrowseAndTheFormReachable() {
+        var browsedNetwork: Long? = null
+        compose.setContent {
+            MotdTheme {
+                CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale = 1.6f)) {
+                    NewConversationSheetContent(
+                        networks = listOf(network()),
+                        onBrowseChannels = { browsedNetwork = it },
+                        onJoinChannel = { _, _, _ -> },
+                        onMessageUser = { _, _ -> },
+                        nickSuggestions = NickSuggestions(1, "al", listOf("Alice", "Albert", "Alfred")),
+                    )
+                }
+            }
+        }
+
+        val submit = compose.onNodeWithTag("new_conversation_submit").assertIsDisplayed()
+        val footer = submit.getUnclippedBoundsInRoot()
+        val browse = compose.onNodeWithTag("new_conversation_browse").performScrollTo()
+        val networkBounds = compose.onNodeWithTag("new_conversation_network_value").getUnclippedBoundsInRoot()
+        assertTrue(networkBounds.bottom <= browse.getUnclippedBoundsInRoot().top)
+        val joinBounds = compose.onNodeWithTag("new_conversation_join_tab").getUnclippedBoundsInRoot()
+        val messageBounds = compose.onNodeWithTag("new_conversation_message_tab").getUnclippedBoundsInRoot()
+        assertEquals(joinBounds.top, messageBounds.top)
+        assertEquals(joinBounds.bottom, messageBounds.bottom)
+        browse.assertIsDisplayed().performClick()
+        compose.onNodeWithTag("new_conversation_message_tab").performScrollTo().performClick()
+        compose.onNodeWithTag("new_conversation_input").performScrollTo().performTextInput("al")
+        compose.onNodeWithTag("new_conversation_autocomplete_panel").performScrollTo().assertIsDisplayed()
+        val suggestion = compose.onNodeWithTag("new_conversation_autocomplete_item_0").performScrollTo()
+        suggestion.assertIsDisplayed().performClick()
+        compose.onNodeWithTag("new_conversation_input").assertInputText("Alice")
+        assertEquals(footer, submit.getUnclippedBoundsInRoot())
+        compose.runOnIdle { assertEquals(1L, browsedNetwork) }
     }
 
     @Test
@@ -143,6 +219,22 @@ class NewConversationSheetUiTest {
         compose.onNodeWithTag("new_conversation_network_selector").assert(
             SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Libera"),
         )
+    }
+
+    @Test
+    fun browseFromMessageTabUsesTheSelectedNetwork() {
+        var browsedNetworkId: Long? = null
+        setContent(
+            networks = listOf(network(1, "Libera"), network(2, "OFTC")),
+            onBrowseChannels = { browsedNetworkId = it },
+        )
+
+        compose.onNodeWithTag("new_conversation_network_selector").performClick()
+        compose.onNodeWithTag("new_conversation_network_option_2").performClick()
+        compose.onNodeWithTag("new_conversation_message_tab").performClick().assertIsSelected()
+        compose.onNodeWithTag("new_conversation_browse").assertIsDisplayed().performClick()
+
+        compose.runOnIdle { assertEquals(2L, browsedNetworkId) }
     }
 
     @Test
@@ -197,6 +289,50 @@ class NewConversationSheetUiTest {
     }
 
     @Test
+    fun stateRestorationKeepsChannelDraftButNotKey() {
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            MotdTheme {
+                NewConversationSheetContent(
+                    networks = listOf(network()),
+                    onJoinChannel = { _, _, _ -> },
+                    onMessageUser = { _, _ -> },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("new_conversation_input").performTextInput("motd")
+        compose.onNodeWithTag("new_conversation_password_toggle").performClick()
+        compose.onNodeWithTag("new_conversation_password").performTextInput("temporary-key")
+        restoration.emulateSavedInstanceStateRestore()
+
+        compose.onNodeWithTag("new_conversation_input").assertInputText("motd")
+        compose.onNodeWithTag("new_conversation_password").assertDoesNotExist()
+        compose.onNodeWithTag("new_conversation_password_toggle").performClick()
+        compose.onNodeWithTag("new_conversation_password").assertInputText("")
+    }
+
+    @Test
+    fun switchingNetworkClearsKeyBeforeJoining() {
+        var joined: Triple<Long, String, String?>? = null
+        setContent(
+            networks = listOf(network(1, "Libera"), network(2, "OFTC")),
+            onJoinChannel = { networkId, channel, key -> joined = Triple(networkId, channel, key) },
+        )
+
+        compose.onNodeWithTag("new_conversation_input").performTextInput("motd")
+        compose.onNodeWithTag("new_conversation_password_toggle").performClick()
+        compose.onNodeWithTag("new_conversation_password").performTextInput("libera-test-key")
+        compose.onNodeWithTag("new_conversation_network_selector").performClick()
+        compose.onNodeWithTag("new_conversation_network_option_2").performClick()
+
+        compose.onNodeWithTag("new_conversation_password").assertDoesNotExist()
+        compose.onNodeWithTag("new_conversation_submit").assertIsDisplayed().performClick()
+
+        compose.runOnIdle { assertEquals(Triple(2L, "#motd", null), joined) }
+    }
+
+    @Test
     fun collapsingPasswordClearsItBeforeSubmit() {
         var joined: Triple<Long, String, String?>? = null
         setContent(
@@ -205,11 +341,19 @@ class NewConversationSheetUiTest {
         )
 
         compose.onNodeWithTag("new_conversation_input").performTextInput("motd")
-        compose.onNodeWithTag("new_conversation_password_toggle").performClick()
-        compose.onNodeWithTag("new_conversation_password").performTextInput("discarded")
-        compose.onNodeWithTag("new_conversation_password_toggle").performClick()
-        compose.onNodeWithTag("new_conversation_password").assertDoesNotExist()
-        compose.onNodeWithTag("new_conversation_submit").performScrollTo().performClick()
+        val toggle = compose.onNodeWithTag("new_conversation_password_toggle")
+        val input = compose.onNodeWithTag("new_conversation_password")
+        val submit = compose.onNodeWithTag("new_conversation_submit")
+        val footer = submit.getUnclippedBoundsInRoot()
+        toggle.assertContentDescriptionEquals("Channel key (optional)")
+        toggle.performTouchInput { click() }
+        assertEquals(footer, submit.getUnclippedBoundsInRoot())
+        input.assertIsDisplayed().performTextInput("discarded")
+        toggle.performClick()
+        input.assertDoesNotExist()
+        toggle.assertContentDescriptionEquals("Channel key (optional)")
+        assertEquals(footer, submit.getUnclippedBoundsInRoot())
+        submit.assertIsDisplayed().performClick()
 
         compose.runOnIdle { assertEquals(Triple(1L, "#motd", null), joined) }
     }
@@ -341,6 +485,7 @@ class NewConversationSheetUiTest {
         nickSuggestions: NickSuggestions = NickSuggestions(),
         onJoinChannel: (Long, String, String?) -> Unit = { _, _, _ -> },
         onMessageUser: (Long, String) -> Unit = { _, _ -> },
+        onBrowseChannels: (Long) -> Unit = {},
     ) {
         compose.setContent {
             MotdTheme {
@@ -349,6 +494,7 @@ class NewConversationSheetUiTest {
                     preselectedNetworkId = preselectedNetworkId,
                     onJoinChannel = onJoinChannel,
                     onMessageUser = onMessageUser,
+                    onBrowseChannels = onBrowseChannels,
                     nickSuggestions = nickSuggestions,
                 )
             }

@@ -39,22 +39,31 @@ class ChannelJoinOutcomeTest {
     }
 
     @Test
-    fun `ircv3 fail join produces a target keyed rejection`() {
-        val outcome =
-            channelJoinOutcome(
-                networkId = 7,
-                event =
-                    IrcEvent.StandardReply(
-                        ctx = MessageContext(null, 0, null, null, null, ServerTimeSource.LOCAL),
-                        severity = IrcEvent.StandardReplySeverity.FAIL,
-                        commandName = "JOIN",
-                        code = "CANNOT_JOIN",
-                        context = listOf("#locked"),
-                        description = "Cannot join channel",
-                    ),
-                identityRules = IrcIdentityRules(),
+    fun `ircv3 fail join classifies bad key codes and keeps the target`() {
+        val replies =
+            listOf(
+                "CANNOT_JOIN" to ChannelJoinRejectionKind.OTHER,
+                "BAD_KEY" to ChannelJoinRejectionKind.BAD_KEY,
+                "BAD_CHANNEL_KEY" to ChannelJoinRejectionKind.BAD_KEY,
             )
+        for ((code, kind) in replies) {
+            val outcome =
+                channelJoinOutcome(
+                    networkId = 7,
+                    event =
+                        IrcEvent.StandardReply(
+                            ctx = MessageContext(null, 0, null, null, null, ServerTimeSource.LOCAL),
+                            severity = IrcEvent.StandardReplySeverity.FAIL,
+                            commandName = "JOIN",
+                            code = code,
+                            context = listOf("#locked"),
+                            description = "Cannot join channel",
+                        ),
+                    identityRules = IrcIdentityRules(),
+                ) as ChannelJoinOutcome.Rejected
 
-        assertEquals("#locked", (outcome as ChannelJoinOutcome.Rejected).channel)
+            assertEquals("#locked", outcome.channel)
+            assertEquals(kind, outcome.kind)
+        }
     }
 }

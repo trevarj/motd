@@ -9,7 +9,9 @@ import android.os.Build
 import android.os.Bundle
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
@@ -18,6 +20,7 @@ import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -27,6 +30,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
 import androidx.core.view.ViewCompat
@@ -903,6 +907,41 @@ class RequiredHeadlessE2eTest {
             }
             milestones.record("anchored_chats_reordered_and_restored", "channel=$roomId query=$queryId")
         }
+        val directoryTarget = "#browse${bootstrap.args.runId.filter(Char::isLetterOrDigit).takeLast(16)}"
+        val directory = ChatListRobot(compose)
+        directory.click("chatlist_new_conversation")
+        val messageDraft = "DirectoryDraft"
+        directory.click("new_conversation_message_tab")
+        directory.replace("new_conversation_input", messageDraft)
+        directory.click("new_conversation_browse")
+        directory.assertDisplayed("channel_list_screen")
+        directory.awaitTagGone("new_conversation_sheet")
+        directory.replace("channel_list_search_field", directoryTarget)
+        directory.click("channel_list_search_network")
+        directory.assertDisplayed("channel_list_search_empty")
+        assertEquals(null, runBlocking { bootstrap.seams.buffers().joinedBufferId(network.childId, directoryTarget) })
+        directory.click("channel_list_join_exact")
+        ChatRobot(compose).assertDisplayed("chat_timeline")
+        directory.awaitTagGone("new_conversation_sheet")
+        val expectedTitle = hasText(directoryTarget) and hasAnyAncestor(hasTestTag("chat_title"))
+        compose.waitUntil(15_000) { compose.onAllNodes(expectedTitle, useUnmergedTree = true).fetchSemanticsNodes().size == 1 }
+        compose.onNode(expectedTitle, useUnmergedTree = true).assertIsDisplayed()
+        val directoryRoom =
+            runBlocking { BufferProbe(bootstrap.seams.buffers(), milestones).awaitJoinedChannel(network.childId, directoryTarget) }
+        scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        directory.assertDisplayed("channel_list_screen")
+        directory.awaitTagGone("new_conversation_sheet")
+        scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        directory.assertDisplayed("new_conversation_sheet")
+        compose.onNodeWithTag("new_conversation_message_tab", useUnmergedTree = true).assertIsSelected()
+        compose.onNodeWithTag("new_conversation_input", useUnmergedTree = true).assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.InputText, AnnotatedString(messageDraft)),
+        )
+        val sheet = hasTestTag("new_conversation_sheet")
+        val dismiss = SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and (sheet or hasAnyAncestor(sheet))
+        compose.onAllNodes(dismiss, useUnmergedTree = true)[0].performSemanticsAction(SemanticsActions.Dismiss)
+        directory.awaitTagGone("new_conversation_sheet")
+        milestones.record("directory_search_and_exact_join", "buffer=$directoryRoom")
         assertEquals(originalSettings, runBlocking { settings.settings.first() })
         assertEquals(null, runBlocking { bootstrap.seams.buffers().joinedBufferId(network.childId, "#motd") })
         val communityNetwork =

@@ -59,6 +59,16 @@ flowchart TD
   fallback and restores protocol defaults; the ViewModel resolves the same immutable Ready snapshot.
 - UI observes repositories and ViewModel state. Connection and protocol actions
   go through `ConnectionManager` instead of constructing IRC clients in screens.
+- Channel discovery stays scoped to one saved IRC network, excluding unbound bouncer roots.
+  Bounded LIST results separate the most populated and smaller channels; the field filters loaded names
+  and topics locally, and explicit name searches never send JOIN. Switching networks invalidates directory
+  and pending action state without mixing results. Room's canonical self-JOIN confirms membership and
+  authorizes Open; only an explicit exact-name join opens the chat automatically.
+- New conversation keeps a window-constrained sheet of the same height across Join and Message,
+  with a scrollable form and fixed submit position. Both modes share one full-width row.
+  Browse sits with the network selector; returning restores the selected network, form and
+  non-secret drafts, never the channel key.
+  The muted optional-key panel reveals a masked input immediately without moving the footer.
 - Fixed theme roles are cached on demand per preset, text-color mode and readability
   policy. `SYSTEM`, `LIGHT`, `DARK`, and `AMOLED` never warm the fixed palette catalog.
 - Appearance stores independent light and dark palette identities plus System/Light/Dark

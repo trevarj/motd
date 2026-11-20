@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavController
@@ -727,6 +728,11 @@ fun MotdNavGraph(
             ChannelListScreen(
                 networkId = route.networkId,
                 onBack = { navController.popBackStack() },
+                onOpenChat = { bufferId ->
+                    if (navController.currentBackStackEntry == entry) {
+                        navController.openChat(ChatRoute(bufferId), replaceCurrentChat = false)
+                    }
+                },
             )
         }
     }
@@ -824,6 +830,9 @@ private fun ChatListPane(
     appContentVisible: Boolean = true,
     onDefaultBufferAvailable: (Long) -> Unit = {},
 ) {
+    val owner = LocalLifecycleOwner.current
+    val currentEntry by navController.currentBackStackEntryAsState()
+
     ChatListScreen(
         viewModel = viewModel,
         onOpenBuffer = {
@@ -860,6 +869,8 @@ private fun ChatListPane(
         suppressOnboarding = suppressOnboarding,
         appContentVisible = appContentVisible,
         onDefaultBufferAvailable = onDefaultBufferAvailable,
+        // Observe the committed entry for composition and check it synchronously for queued actions.
+        newConversationSheetActive = { currentEntry == owner && navController.currentBackStackEntry == owner },
     )
 }
 
