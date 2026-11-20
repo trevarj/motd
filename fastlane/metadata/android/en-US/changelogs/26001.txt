@@ -1,0 +1,5 @@
+- Save your network avatar even offline, with an optional image preview.
+- Browse and filter channels by network. The new conversation form stays the same size when switching modes.
+- Search emoji inline in the composer and reaction pickers.
+- Fix keyboard interruptions in chat and Wallpaper Workshop, preserve folder drafts and split-pane width, and improve Back in Settings and invites.
+- Adjust launcher icon sizing and restore message order after push delivery.
