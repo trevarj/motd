@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.IOException
 import javax.inject.Inject
 
 data class NetworkSettingsUiState(
@@ -73,10 +74,10 @@ data class NetworkSettingsUiState(
     val parentName: String? = null, // root name for a BOUNCER_CHILD's "Managed by" row
     /** A bouncer transport/login change can invalidate all locally imported child mirrors. */
     val pendingBouncerIdentityChange: BouncerIdentityChange? = null,
-    val selfAvatar: SelfAvatarSetting = SelfAvatarSetting.Unmanaged,
-    val avatarInput: String = "",
+    val selfAvatar: SelfAvatarSetting? = null,
     val avatarPublishingAvailable: Boolean = false,
-    val avatarPublishError: Boolean = false,
+    val avatarSaving: Boolean = false,
+    val avatarSaveFailed: Boolean = false,
 ) {
     val vlessLinkError: String?
         get() = if (obfsMode == ObfsMode.EMBEDDED_REALITY) vlessLinkValidationError(obfsLink) else null
@@ -253,11 +254,7 @@ class NetworkSettingsViewModel
             }
             viewModelScope.launch {
                 avatarPrefs.selfSetting(networkId).collect { setting ->
-                    _state.value =
-                        _state.value.copy(
-                            selfAvatar = setting,
-                            avatarInput = (setting as? SelfAvatarSetting.Set)?.url.orEmpty(),
-                        )
+                    _state.update { it.copy(selfAvatar = setting) }
                 }
             }
         }
@@ -329,29 +326,29 @@ class NetworkSettingsViewModel
             _state.value = _state.value.copy(autoConnect = enabled)
         }
 
-        fun editAvatarUrl(url: String) {
-            _state.value = _state.value.copy(avatarInput = url, avatarPublishError = false)
-        }
-
-        fun publishAvatar() =
-            viewModelScope.launch {
-                val value = _state.value.avatarInput
-                val published =
-                    validateAvatarUrl(value) != null &&
-                        _state.value.avatarPublishingAvailable &&
-                        avatarController.setSelfAvatar(networkId, value)
-                _state.value = _state.value.copy(avatarPublishError = !published)
-            }
-
-        fun clearPublishedAvatar() =
-            viewModelScope.launch {
-                avatarController.setSelfAvatar(networkId, null)
-                _state.value = _state.value.copy(avatarPublishError = false)
+        fun saveAvatar(url: String?) =
+            updateAvatar {
+                if (url != null && validateAvatarUrl(url) == null) false else avatarController.setSelfAvatar(networkId, url)
             }
 
         fun stopManagingAvatar() =
-            viewModelScope.launch {
+            updateAvatar {
                 avatarController.stopManagingSelfAvatar(networkId)
+                true
+            }
+
+        private fun updateAvatar(save: suspend () -> Boolean) =
+            viewModelScope.launch {
+                val current = _state.value
+                if (current.entity == null || current.selfAvatar == null || current.avatarSaving) return@launch
+                _state.update { it.copy(avatarSaving = true, avatarSaveFailed = false) }
+                try {
+                    if (!save()) _state.update { it.copy(avatarSaveFailed = true) }
+                } catch (_: IOException) {
+                    _state.update { it.copy(avatarSaveFailed = true) }
+                } finally {
+                    _state.update { it.copy(avatarSaving = false) }
+                }
             }
 
         fun openServerBuffer(onOpen: (Long) -> Unit) =

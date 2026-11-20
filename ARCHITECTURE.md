@@ -634,6 +634,9 @@ flowchart TD
   or dismissal invalidates the proposal. Local avatar and image-document proposals accept only
   `content`, `file` and `android.resource` URIs, with avatar imports staged until Use image.
   Inspection preserves explicit Save/Publish/Upload and reversible Cancel boundaries.
+  A network's self-avatar editor saves HTTPS URLs locally regardless of connection
+  support. Eligible connections try to apply the saved choice; local confirmation
+  does not claim the server accepted it.
   YouTube video links use the public, bounded JSON oEmbed endpoint through that
   same unauthenticated route, preserving the original clickable URL. Missing
   videos are negative-cached; denied or transient endpoint failures remain

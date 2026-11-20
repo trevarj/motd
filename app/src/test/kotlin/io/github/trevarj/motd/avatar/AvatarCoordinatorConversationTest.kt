@@ -10,22 +10,40 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.dickord.DICKORD_AVATAR_TAG
+import io.github.trevarj.motd.irc.client.IrcClient
+import io.github.trevarj.motd.irc.client.IrcClientConfig
+import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.proto.Prefix
+import io.github.trevarj.motd.irc.transport.IrcTransport
+import io.github.trevarj.motd.irc.transport.TransportFactory
+import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.testing.NoopConnectionManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.consumeAsFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.IOException
 
 @RunWith(RobolectricTestRunner::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 class AvatarCoordinatorConversationTest {
     private lateinit var db: MotdDatabase
     private lateinit var local: LocalAvatarStore
@@ -141,17 +159,186 @@ class AvatarCoordinatorConversationTest {
             assertEquals(emptyList<StoredAvatar>(), store.upserts)
         }
 
+    @Test fun self_avatar_saved_without_metadata_is_replayed_only_on_its_capable_network() =
+        runTest {
+            val prefs = FakePrefs()
+            val store = FakeStore()
+            val connections = FakeConnections()
+            val coordinator = coordinator(this, store, prefs, connections)
+            val networkId = 1L
+            val otherNetworkId = 2L
+            val url = "https://example.com/avatar.png"
+            val unsupported = FakeTransport()
+            val client = readyClient(unsupported, caps = "batch")
+            connections.clients[networkId] = client
+
+            assertFalse(coordinator.publishingAvailable(networkId))
+            assertTrue(coordinator.setSelfAvatar(networkId, " $url "))
+            assertFalse(coordinator.setSelfAvatar(networkId, "http://example.com/invalid.png"))
+            assertEquals(SelfAvatarSetting.Set(url), prefs.selfSetting(networkId).first())
+            assertEquals(SelfAvatarSetting.Unmanaged, prefs.selfSetting(otherNetworkId).first())
+            assertTrue(unsupported.avatarWrites.isEmpty())
+            assertTrue(store.upserts.isEmpty())
+            client.stop()
+
+            val other = FakeTransport()
+            val otherClient = readyClient(other, caps = "batch $METADATA_CAP")
+            connections.clients[otherNetworkId] = otherClient
+            coordinator.onReady(otherNetworkId, otherClient)
+            assertTrue(other.avatarWrites.isEmpty())
+
+            val reconnected = FakeTransport()
+            val replacement = readyClient(reconnected, caps = "batch $METADATA_CAP=max-keys=1,max-value-bytes=128")
+            connections.clients[networkId] = replacement
+            assertTrue(coordinator.publishingAvailable(networkId))
+            coordinator.onReady(networkId, replacement)
+            assertEquals(listOf("METADATA * SET avatar $url"), reconnected.avatarWrites)
+            assertTrue(store.upserts.isEmpty())
+
+            assertTrue(coordinator.setSelfAvatar(networkId, url))
+            assertEquals(listOf(StoredAvatar(networkId, "me", null, url)), store.upserts)
+            assertTrue(coordinator.setSelfAvatar(networkId, null))
+            assertEquals(SelfAvatarSetting.ExplicitlyCleared, prefs.selfSetting(networkId).first())
+            assertEquals("METADATA * SET avatar", reconnected.avatarWrites.last())
+            assertEquals(listOf(RemovedAvatar(networkId, "me", null)), store.removals)
+            coordinator.stopManagingSelfAvatar(networkId)
+            assertEquals(SelfAvatarSetting.Unmanaged, prefs.selfSetting(networkId).first())
+            val writes = reconnected.avatarWrites
+            coordinator.onReady(networkId, replacement)
+            assertEquals(writes, reconnected.avatarWrites)
+        }
+
+    @Test fun self_avatar_write_limits_and_optional_failures_do_not_undo_local_saves() =
+        runTest {
+            val prefs = FakePrefs()
+            val store = FakeStore()
+            val connections = FakeConnections()
+            val coordinator = coordinator(this, store, prefs, connections)
+            val networkId = 1L
+            val url = "https://example.com/avatar.png"
+            val limited = FakeTransport()
+            val limitedClient = readyClient(limited, caps = "batch $METADATA_CAP=max-value-bytes=16")
+            connections.clients[networkId] = limitedClient
+
+            assertTrue(coordinator.publishingAvailable(networkId))
+            assertTrue(coordinator.setSelfAvatar(networkId, url))
+            assertEquals(SelfAvatarSetting.Set(url), prefs.selfSetting(networkId).first())
+            coordinator.onReady(networkId, limitedClient)
+            assertTrue(limited.avatarWrites.isEmpty())
+            assertTrue(store.upserts.isEmpty())
+            limitedClient.stop()
+
+            val capable = FakeTransport()
+            val capableClient = readyClient(capable, caps = "batch $METADATA_CAP=max-value-bytes=2048")
+            connections.clients[networkId] = capableClient
+            capable.writeFailure = { line -> if (line.startsWith("METADATA ")) IOException("socket closed") else null }
+            assertTrue(coordinator.setSelfAvatar(networkId, url))
+            coordinator.onReady(networkId, capableClient)
+            assertTrue(capable.avatarWrites.isEmpty())
+            assertTrue(store.upserts.isEmpty())
+
+            capable.writeFailure = { line -> if (line.startsWith("METADATA * SUB ")) IOException("socket closed") else null }
+            coordinator.onReady(networkId, capableClient)
+            assertEquals(listOf("METADATA * SET avatar $url"), capable.avatarWrites)
+
+            val oversizedUrl = "https://example.com/${"a".repeat(512)}"
+            assertTrue(coordinator.setSelfAvatar(networkId, oversizedUrl))
+            assertEquals(SelfAvatarSetting.Set(oversizedUrl), prefs.selfSetting(networkId).first())
+            coordinator.onReady(networkId, capableClient)
+            assertEquals(listOf("METADATA * SET avatar $url"), capable.avatarWrites)
+            assertTrue(store.upserts.isEmpty())
+        }
+
+    @Test fun self_avatar_optional_cache_io_is_nonfatal_but_cancellation_and_unexpected_errors_propagate() =
+        runTest {
+            val prefs = FakePrefs()
+            val store = FakeStore()
+            val connections = FakeConnections()
+            val coordinator = coordinator(this, store, prefs, connections)
+            val networkId = 1L
+            val url = "https://example.com/avatar.png"
+            val transport = FakeTransport()
+            val client = readyClient(transport, caps = "batch $METADATA_CAP")
+            connections.clients[networkId] = client
+            store.upsertFailure = IOException("disk unavailable")
+            assertTrue(coordinator.setSelfAvatar(networkId, url))
+            assertEquals(SelfAvatarSetting.Set(url), prefs.selfSetting(networkId).first())
+            assertEquals(listOf("METADATA * SET avatar $url"), transport.avatarWrites)
+
+            val unexpected = IllegalStateException("broken cache")
+            store.upsertFailure = unexpected
+            assertSame(unexpected, runCatching { coordinator.setSelfAvatar(networkId, url) }.exceptionOrNull())
+            val cancelled = CancellationException("disconnected")
+            transport.writeFailure = { cancelled }
+            assertSame(cancelled, runCatching { coordinator.setSelfAvatar(networkId, url) }.exceptionOrNull())
+            assertSame(cancelled, runCatching { coordinator.onReady(networkId, client) }.exceptionOrNull())
+        }
+
+    private fun TestScope.readyClient(
+        transport: FakeTransport,
+        caps: String,
+    ): IrcClient {
+        val client =
+            IrcClient(
+                IrcClientConfig("irc.example", 6697, true, "me", "me", "Me"),
+                TransportFactory { _, _, _, _, _ -> transport },
+                backgroundScope,
+            )
+        client.start()
+        runCurrent()
+        transport.feed(":srv CAP * LS :$caps")
+        runCurrent()
+        val requested = transport.sent.single { it.startsWith("CAP REQ :") }.substringAfter("CAP REQ :")
+        transport.feed(":srv CAP me ACK :$requested")
+        transport.feed(":srv 005 me CHANTYPES=# :supported")
+        transport.feed(":srv 001 me :Welcome")
+        runCurrent()
+        check(client.state.value is IrcClientState.Ready)
+        return client
+    }
+
+    private class FakeConnections : NoopConnectionManager() {
+        val clients = mutableMapOf<Long, IrcClient>()
+
+        override fun clientFor(networkId: Long): IrcClient? = clients[networkId]
+    }
+
+    private class FakeTransport : IrcTransport {
+        private val inbound = Channel<String>(Channel.UNLIMITED)
+        val sent = mutableListOf<String>()
+        val avatarWrites get() = sent.filter { it.startsWith("METADATA * SET avatar") }
+        var writeFailure: ((String) -> Exception?)? = null
+
+        override val incoming = inbound.consumeAsFlow()
+
+        override suspend fun connect() = Unit
+
+        override suspend fun send(line: String) {
+            writeFailure?.invoke(line)?.let { throw it }
+            sent += line
+        }
+
+        override suspend fun close() {
+            inbound.close()
+        }
+
+        fun feed(line: String) {
+            inbound.trySend(line).getOrThrow()
+        }
+    }
+
     private fun coordinator(
         scope: CoroutineScope,
         store: AvatarStore,
         prefs: AvatarPrefs = FakePrefs(),
+        connections: ConnectionManager = NoopConnectionManager(),
     ) = AvatarCoordinator(
         prefs = prefs,
         store = store,
         userDao = db.userDao(),
         bufferDao = db.bufferDao(),
         localAvatars = local,
-        connections = Lazy { NoopConnectionManager() },
+        connections = Lazy { connections },
         scope = scope,
     )
 
@@ -195,20 +382,25 @@ class AvatarCoordinatorConversationTest {
     ) : AvatarPrefs {
         override val config = MutableStateFlow(AvatarConfig(showSharedAvatars))
 
-        override fun selfSetting(networkId: Long) = MutableStateFlow<SelfAvatarSetting>(SelfAvatarSetting.Unmanaged)
+        private val selfSettings = mutableMapOf<Long, MutableStateFlow<SelfAvatarSetting>>()
+
+        override fun selfSetting(networkId: Long) = selfSettings.getOrPut(networkId) { MutableStateFlow(SelfAvatarSetting.Unmanaged) }
 
         override suspend fun setShowSharedAvatars(show: Boolean) = Unit
 
         override suspend fun setSelfSetting(
             networkId: Long,
             setting: SelfAvatarSetting,
-        ) = Unit
+        ) {
+            selfSetting(networkId).value = setting
+        }
     }
 
     private class FakeStore : AvatarStore {
         override val records = MutableStateFlow(emptyList<AvatarRecord>())
         val upserts = mutableListOf<StoredAvatar>()
         val removals = mutableListOf<RemovedAvatar>()
+        var upsertFailure: Exception? = null
 
         override suspend fun upsert(
             networkId: Long,
@@ -216,6 +408,7 @@ class AvatarCoordinatorConversationTest {
             account: String?,
             url: String,
         ) {
+            upsertFailure?.let { throw it }
             upserts += StoredAvatar(networkId, nick, account, url)
         }
 

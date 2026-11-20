@@ -35,6 +35,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.IOException
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class NetworkSettingsViewModelTest {
@@ -107,6 +108,7 @@ class NetworkSettingsViewModelTest {
 
     private object FakeAvatarController : AvatarController {
         var available = false
+        var failSave = false
         val published = mutableListOf<Pair<Long, String?>>()
         val cleared = mutableListOf<Long>()
 
@@ -116,8 +118,9 @@ class NetworkSettingsViewModelTest {
             networkId: Long,
             url: String?,
         ): Boolean {
+            if (failSave) throw IOException("Test write failure")
             published += networkId to url
-            return available
+            return true
         }
 
         override suspend fun stopManagingSelfAvatar(networkId: Long) = Unit
@@ -134,6 +137,7 @@ class NetworkSettingsViewModelTest {
     @Before fun setUp() {
         Dispatchers.setMain(dispatcher)
         FakeAvatarController.available = false
+        FakeAvatarController.failSave = false
         FakeAvatarController.published.clear()
         FakeAvatarController.cleared.clear()
     }
@@ -488,7 +492,7 @@ class NetworkSettingsViewModelTest {
         }
 
     @Test
-    fun unavailableAvatarPublishing_isNotAttempted_andShowsFailure() =
+    fun unavailableAvatarPublishing_stillSaves() =
         runTest {
             val repo = FakeNetworkRepository(listOf(root()))
             val ready = IrcClientState.Ready("motd", emptySet(), emptyMap())
@@ -501,13 +505,30 @@ class NetworkSettingsViewModelTest {
                 )
             vm.init(1)
             runCurrent()
-            vm.editAvatarUrl("https://example.com/avatar.png")
-
-            vm.publishAvatar()
+            vm.saveAvatar("https://example.com/avatar.png")
             runCurrent()
 
-            assertTrue(FakeAvatarController.published.isEmpty())
-            assertTrue(vm.state.value.avatarPublishError)
+            assertEquals(listOf(1L to "https://example.com/avatar.png"), FakeAvatarController.published)
+            assertFalse(vm.state.value.avatarSaveFailed)
+        }
+
+    @Test
+    fun avatarWriteFailure_isVisibleAndCanBeRetried() =
+        runTest {
+            val vm = loadedVm(FakeNetworkRepository(listOf(root())))
+            val url = "https://example.com/avatar.png"
+            FakeAvatarController.failSave = true
+            vm.saveAvatar(url)
+            runCurrent()
+
+            assertTrue(vm.state.value.avatarSaveFailed)
+            assertFalse(vm.state.value.avatarSaving)
+            FakeAvatarController.failSave = false
+            vm.saveAvatar(url)
+            runCurrent()
+
+            assertEquals(listOf(1L to url), FakeAvatarController.published)
+            assertFalse(vm.state.value.avatarSaveFailed)
         }
 
     @Test

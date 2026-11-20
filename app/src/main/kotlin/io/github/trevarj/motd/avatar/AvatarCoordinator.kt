@@ -1,5 +1,8 @@
 package io.github.trevarj.motd.avatar
 
+import android.database.sqlite.SQLiteCantOpenDatabaseException
+import android.database.sqlite.SQLiteDiskIOException
+import android.database.sqlite.SQLiteFullException
 import android.net.Uri
 import dagger.Lazy
 import io.github.trevarj.motd.data.db.BufferDao
@@ -10,8 +13,11 @@ import io.github.trevarj.motd.dickord.DICKORD_AVATAR_TAG
 import io.github.trevarj.motd.dickord.isDickordChannel
 import io.github.trevarj.motd.dickord.isDickordRelayNick
 import io.github.trevarj.motd.irc.client.IrcClient
+import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.service.ConnectionManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,6 +25,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -123,28 +130,22 @@ class AvatarCoordinator
             networkId: Long,
             client: IrcClient,
         ) {
-            if (!client.hasCap(METADATA_CAP)) return
-            client.send(
+            if (client.state.value !is IrcClientState.Ready || !client.hasCap(METADATA_CAP)) return
+            client.sendOptionalMetadata(
                 if (prefs.config.first().showSharedAvatars && supportsMetadataSubscription(client.caps)) {
                     subscribeMetadataMessage(AVATAR_KEY)
                 } else {
                     unsubscribeMetadataMessage(AVATAR_KEY)
                 },
             )
-            when (val self = prefs.selfSetting(networkId).first()) {
-                SelfAvatarSetting.Unmanaged -> {}
-
-                SelfAvatarSetting.ExplicitlyCleared -> {
-                    if (supportsAvatarMutation(client.caps)) {
-                        client.send(publishAvatarMessage(null))
-                    }
+            val url =
+                when (val self = prefs.selfSetting(networkId).first()) {
+                    SelfAvatarSetting.Unmanaged -> return
+                    SelfAvatarSetting.ExplicitlyCleared -> null
+                    is SelfAvatarSetting.Set -> self.url
                 }
-
-                is SelfAvatarSetting.Set -> {
-                    if (supportsAvatarPublishing(client.caps, self.url)) {
-                        client.send(publishAvatarMessage(self.url))
-                    }
-                }
+            if (connections.get().clientFor(networkId) === client) {
+                client.publishSelfAvatarIfReady(url)
             }
         }
 
@@ -326,30 +327,42 @@ class AvatarCoordinator
         ): Boolean {
             val validated = url?.let(::validateAvatarUrl)
             if (url != null && validated == null) return false
-            val client = connections.get().clientFor(networkId)
-            if (validated != null && client != null && !supportsAvatarPublishing(client.caps, validated)) {
-                return false
-            }
             val setting = validated?.let(SelfAvatarSetting::Set) ?: SelfAvatarSetting.ExplicitlyCleared
             prefs.setSelfSetting(networkId, setting)
-            client
-                ?.takeIf {
-                    if (validated == null) {
-                        supportsAvatarMutation(it.caps)
+            val client = connections.get().clientFor(networkId) ?: return true
+            val selfNick = client.publishSelfAvatarIfReady(validated) ?: return true
+            try {
+                if (prefs.config.first().showSharedAvatars) {
+                    if (validated != null) {
+                        store.upsert(networkId, selfNick, account = null, url = validated)
                     } else {
-                        supportsAvatarPublishing(it.caps, validated)
+                        store.remove(networkId, selfNick)
                     }
-                }?.send(publishAvatarMessage(validated))
-            val selfNick = (client?.state?.value as? io.github.trevarj.motd.irc.event.IrcClientState.Ready)?.nick
-            if (selfNick != null && prefs.config.first().showSharedAvatars) {
-                if (validated != null) {
-                    store.upsert(networkId, selfNick, account = null, url = validated)
-                } else {
-                    store.remove(networkId, selfNick)
+                }
+            } catch (failure: Exception) {
+                // The preference is already saved; temporary storage failures only affect the shared cache.
+                when (failure) {
+                    is IOException, is SQLiteDiskIOException, is SQLiteFullException, is SQLiteCantOpenDatabaseException -> Unit
+                    else -> throw failure
                 }
             }
             return true
         }
+
+        private suspend fun IrcClient.publishSelfAvatarIfReady(url: String?): String? {
+            val ready = state.value as? IrcClientState.Ready ?: return null
+            val supported = if (url == null) supportsAvatarMutation(ready.caps) else supportsAvatarPublishing(ready.caps, url)
+            return ready.nick.takeIf { supported && sendOptionalMetadata(publishAvatarMessage(url)) }
+        }
+
+        private suspend fun IrcClient.sendOptionalMetadata(message: IrcMessage): Boolean =
+            try {
+                sendIfConnected(message)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                false
+            }
 
         override suspend fun stopManagingSelfAvatar(networkId: Long) {
             prefs.setSelfSetting(networkId, SelfAvatarSetting.Unmanaged)
@@ -472,7 +485,11 @@ class AvatarCoordinator
             }
         }
 
-        override fun publishingAvailable(networkId: Long): Boolean = connections.get().clientFor(networkId)?.let { supportsAvatarPublishing(it.caps) } == true
+        override fun publishingAvailable(networkId: Long): Boolean {
+            val client = connections.get().clientFor(networkId) ?: return false
+            val ready = client.state.value as? IrcClientState.Ready ?: return false
+            return supportsAvatarPublishing(ready.caps)
+        }
 
         private companion object {
             const val MAX_SYNC_DELAY_SECONDS = 60L * 60L

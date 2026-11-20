@@ -57,9 +57,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -68,6 +72,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.avatar.SelfAvatarSetting
+import io.github.trevarj.motd.avatar.validateAvatarUrl
 import io.github.trevarj.motd.bouncer.BouncerKind
 import io.github.trevarj.motd.bouncer.SojuLoginForm
 import io.github.trevarj.motd.bouncer.ZncLoginForm
@@ -76,6 +82,7 @@ import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncDepth
 import io.github.trevarj.motd.data.sync.HistorySyncOutcome
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.ui.components.ExplicitAvatarUrlPreview
 import io.github.trevarj.motd.ui.nav.NetworkSettingsTarget
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
@@ -144,9 +151,7 @@ fun NetworkSettingsScreen(
         onOpenServerMessages = { viewModel.openServerBuffer(onOpenBuffer) },
         onOpenNetworkTools = { onOpenNetworkTools(networkId) },
         onOpenAccountSetup = { onOpenAccountSetup(networkId) },
-        onAvatarUrlChange = viewModel::editAvatarUrl,
-        onPublishAvatar = viewModel::publishAvatar,
-        onClearAvatar = viewModel::clearPublishedAvatar,
+        onSaveAvatar = viewModel::saveAvatar,
         onStopManagingAvatar = viewModel::stopManagingAvatar,
     )
 }
@@ -181,9 +186,7 @@ fun NetworkSettingsContent(
     onOpenServerMessages: () -> Unit = {},
     onOpenNetworkTools: () -> Unit = {},
     onOpenAccountSetup: () -> Unit = {},
-    onAvatarUrlChange: (String) -> Unit = {},
-    onPublishAvatar: () -> Unit = {},
-    onClearAvatar: () -> Unit = {},
+    onSaveAvatar: (String?) -> Unit = {},
     onStopManagingAvatar: () -> Unit = {},
     snackbarHostState: SnackbarHostState? = null,
     onResyncHistory: (HistorySyncDepth) -> Unit = {},
@@ -192,6 +195,7 @@ fun NetworkSettingsContent(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showDiscardConfirm by remember { mutableStateOf(false) }
     var resyncSheetOpen by remember { mutableStateOf(false) }
+    var avatarEditorOpen by rememberSaveable { mutableStateOf(false) }
     val requestBack = { if (state.hasUnsavedChanges) showDiscardConfirm = true else onBack() }
     BackHandler(enabled = state.hasUnsavedChanges) { showDiscardConfirm = true }
 
@@ -310,70 +314,16 @@ fun NetworkSettingsContent(
                 }
             }
         }
-        SettingsTarget(target?.name, NetworkSettingsTarget.AVATAR.name) { targetModifier ->
-            SettingsGroup(
-                title = stringResource(R.string.network_settings_avatar_section),
-                modifier = targetModifier,
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = stringResource(R.string.network_settings_avatar_experimental),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        if (state.entity != null) {
+            SettingsTarget(target?.name, NetworkSettingsTarget.AVATAR.name) { targetModifier ->
+                SettingsGroup(modifier = targetModifier) {
+                    SettingsNavigationRow(
+                        title = stringResource(R.string.network_settings_avatar_section),
+                        summary = stringResource(networkAvatarStatus(state.selfAvatar)),
+                        enabled = state.selfAvatar != null,
+                        modifier = Modifier.testTag("network_avatar_edit"),
+                        onClick = { avatarEditorOpen = true },
                     )
-                    OutlinedTextField(
-                        colors = readableOutlinedTextFieldColors(),
-                        value = state.avatarInput,
-                        onValueChange = onAvatarUrlChange,
-                        label = { Text(stringResource(R.string.network_settings_avatar_url)) },
-                        supportingText = {
-                            Text(
-                                if (state.avatarPublishError) {
-                                    stringResource(R.string.network_settings_avatar_publish_failed)
-                                } else if (state.avatarPublishingAvailable) {
-                                    stringResource(R.string.network_settings_avatar_url_desc)
-                                } else {
-                                    stringResource(R.string.network_settings_avatar_unavailable)
-                                },
-                            )
-                        },
-                        isError =
-                            state.avatarPublishError || (
-                                state.avatarInput.isNotBlank() &&
-                                    io.github.trevarj.motd.avatar
-                                        .validateAvatarUrl(state.avatarInput) == null
-                            ),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag("network_avatar_url"),
-                    )
-                    io.github.trevarj.motd.ui.components.CurrentAvatarInspection(
-                        state.entity?.nick.orEmpty(),
-                        isChannel = false,
-                        currentModel = (state.selfAvatar as? io.github.trevarj.motd.avatar.SelfAvatarSetting.Set)?.url,
-                    )
-                    io.github.trevarj.motd.ui.components.ExplicitAvatarUrlPreview(
-                        url = state.avatarInput,
-                        networkId = state.entity?.id,
-                        identity = "network:${state.entity?.id}:${state.entity?.nick}",
-                        isChannel = false,
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = onPublishAvatar,
-                            enabled =
-                                state.avatarPublishingAvailable &&
-                                    io.github.trevarj.motd.avatar
-                                        .validateAvatarUrl(state.avatarInput) != null,
-                        ) { Text(stringResource(R.string.network_settings_avatar_publish)) }
-                        TextButton(colors = readableTextButtonColors(), onClick = onClearAvatar) {
-                            Text(stringResource(R.string.network_settings_avatar_clear))
-                        }
-                        if (state.selfAvatar !is io.github.trevarj.motd.avatar.SelfAvatarSetting.Unmanaged) {
-                            TextButton(colors = readableTextButtonColors(), onClick = onStopManagingAvatar) {
-                                Text(stringResource(R.string.network_settings_avatar_unmanage))
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -446,6 +396,16 @@ fun NetworkSettingsContent(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
             ) { Text(stringResource(R.string.network_settings_delete), color = MaterialTheme.colorScheme.error) }
         }
+    }
+
+    if (avatarEditorOpen && state.entity != null && state.selfAvatar != null) {
+        NetworkAvatarEditor(
+            state = state,
+            networkId = state.entity.id,
+            onSave = onSaveAvatar,
+            onStopManaging = onStopManagingAvatar,
+            onDismiss = { avatarEditorOpen = false },
+        )
     }
 
     if (showDiscardConfirm) {
@@ -554,6 +514,111 @@ fun NetworkSettingsContent(
             },
         )
     }
+}
+
+private fun networkAvatarStatus(setting: SelfAvatarSetting?): Int =
+    when (setting) {
+        null -> R.string.network_settings_avatar_loading
+        SelfAvatarSetting.Unmanaged -> R.string.network_settings_avatar_unsaved
+        SelfAvatarSetting.ExplicitlyCleared -> R.string.network_settings_avatar_removal_saved
+        is SelfAvatarSetting.Set -> R.string.network_settings_avatar_saved
+    }
+
+@Composable
+private fun NetworkAvatarEditor(
+    state: NetworkSettingsUiState,
+    networkId: Long,
+    onSave: (String?) -> Unit,
+    onStopManaging: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val savedUrl = (state.selfAvatar as? SelfAvatarSetting.Set)?.url.orEmpty()
+    var url by rememberSaveable(networkId, savedUrl) { mutableStateOf(savedUrl) }
+    val validUrl = remember(url) { validateAvatarUrl(url) }
+    val dirty = url.trim() != savedUrl
+    val invalid = dirty && url.isNotBlank() && validUrl == null
+    val focus = LocalFocusManager.current
+    AlertDialog(
+        onDismissRequest = { if (!state.avatarSaving) onDismiss() },
+        title = { Text(stringResource(R.string.network_settings_avatar_section)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text =
+                        stringResource(
+                            when {
+                                state.avatarSaving -> R.string.network_settings_avatar_saving
+                                state.avatarSaveFailed -> R.string.avatar_result_failed
+                                else -> networkAvatarStatus(state.selfAvatar)
+                            },
+                        ),
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    color = if (state.avatarSaveFailed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                Text(
+                    stringResource(
+                        when {
+                            state.avatarPublishingAvailable -> R.string.network_settings_avatar_sharing_available
+                            state.connState is IrcClientState.Ready -> R.string.network_settings_avatar_unavailable
+                            else -> R.string.network_settings_avatar_offline
+                        },
+                    ),
+                )
+                OutlinedTextField(
+                    colors = readableOutlinedTextFieldColors(),
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text(stringResource(R.string.network_settings_avatar_url)) },
+                    supportingText = { Text(stringResource(if (invalid) R.string.avatar_url_invalid else R.string.network_settings_avatar_url_desc)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                    isError = invalid,
+                    enabled = !state.avatarSaving,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("network_avatar_url"),
+                )
+                if (validUrl != null) {
+                    ExplicitAvatarUrlPreview(url, networkId, "network:$networkId:${state.entity?.nick}", isChannel = false)
+                }
+                if (!dirty && state.selfAvatar != SelfAvatarSetting.ExplicitlyCleared) {
+                    TextButton(
+                        colors = readableTextButtonColors(),
+                        enabled = !state.avatarSaving,
+                        onClick = { onSave(null) },
+                        modifier = Modifier.testTag("network_avatar_clear"),
+                    ) { Text(stringResource(R.string.network_settings_avatar_clear)) }
+                }
+                if (!dirty && state.selfAvatar != SelfAvatarSetting.Unmanaged) {
+                    Column {
+                        TextButton(
+                            colors = readableTextButtonColors(),
+                            enabled = !state.avatarSaving,
+                            onClick = onStopManaging,
+                        ) { Text(stringResource(R.string.network_settings_avatar_unmanage)) }
+                        Text(stringResource(R.string.network_settings_avatar_unmanage_desc), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val value = validUrl ?: return@Button
+                    focus.clearFocus()
+                    onSave(value)
+                },
+                enabled = dirty && validUrl != null && !state.avatarSaving,
+                modifier = Modifier.testTag("network_avatar_save"),
+            ) { Text(stringResource(R.string.network_settings_avatar_save)) }
+        },
+        dismissButton = {
+            TextButton(
+                colors = readableTextButtonColors(),
+                enabled = !state.avatarSaving,
+                onClick = onDismiss,
+            ) { Text(stringResource(if (dirty) R.string.action_cancel else R.string.network_settings_avatar_done)) }
+        },
+    )
 }
 
 /** Status header: a dot + state label with a state-appropriate action button. */
