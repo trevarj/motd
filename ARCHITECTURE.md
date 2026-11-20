@@ -140,6 +140,9 @@ flowchart TD
   Deferred identities are indexed in app-state storage and deleted with their
   networks. Newer user edits win over late identity claims. Legacy snapshots
   without placement data leave local placement unchanged.
+- Folder editing seeds the draft from the first combined folder and chat snapshot.
+  Unsaved names, icons, memberships and filters survive activity recreation and later
+  chat changes. A missing folder cannot be saved or deleted; each chat is one labeled checkbox.
 - Archive pull hints, the revealed folder and the archive-only route share the chat-card
   8dp horizontal/2dp vertical gutters, 16dp shape, 12dp inner inset and density-scaled
   avatar host/vertical padding. `titleMedium` labels may wrap at accessible font scales;

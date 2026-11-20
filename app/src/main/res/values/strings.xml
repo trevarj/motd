@@ -1969,6 +1969,7 @@
     <string name="folders_edit">Edit folder</string>
     <string name="folders_delete">Delete folder</string>
     <string name="folders_delete_confirm">Delete this folder? Chats return to their ungrouped list.</string>
+    <string name="folders_missing">This folder no longer exists</string>
     <string name="folders_name">Folder name</string>
     <string name="folders_choose_icon">Choose icon</string>
     <string name="folders_search_chats">Search chats</string>
