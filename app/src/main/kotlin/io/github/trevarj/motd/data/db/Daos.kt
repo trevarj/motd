@@ -2316,6 +2316,28 @@ interface CanonicalTimelineDao {
     )
 
     @Query(
+        """SELECT COUNT(*) > 0 AND COUNT(*) = COUNT(CASE WHEN origin = 'PUSH' THEN 1 END)
+           FROM event_observations WHERE timelineEventId = :eventId""",
+    )
+    suspend fun hasOnlyPushObservations(eventId: TimelineEventId): Boolean
+
+    @Query(
+        """SELECT m.id FROM messages m
+           WHERE m.bufferId = :roomId AND m.serverTime = :serverTime
+             AND (m.timelineOrder > :timelineOrder OR (m.timelineOrder = :timelineOrder AND m.id > :eventId))
+             AND EXISTS (
+               SELECT 1 FROM event_observations o WHERE o.timelineEventId = m.id AND o.origin = 'LIVE'
+             )
+           ORDER BY m.timelineOrder DESC, m.id DESC LIMIT 1""",
+    )
+    suspend fun lastLiveTieAfter(
+        roomId: RoomId,
+        serverTime: Long,
+        timelineOrder: Long,
+        eventId: TimelineEventId,
+    ): TimelineEventId?
+
+    @Query(
         """SELECT batchExactOrdinal FROM event_observations
            WHERE timelineEventId = :eventId AND batchExactOrdinal IS NOT NULL
            ORDER BY id LIMIT 1""",

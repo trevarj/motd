@@ -556,6 +556,17 @@ class CanonicalTimelineStore
                 }
             }
 
+            if (!inserted &&
+                observation.origin == ObservationOrigin.LIVE &&
+                observation.timeProvenance == TimeProvenance.SERVER_TAG &&
+                canonical.serverTime == incoming.serverTime &&
+                !canonical.timelineOrderConfirmed &&
+                !canonical.hasContentConflict(incoming) &&
+                dao.hasOnlyPushObservations(canonical.id)
+            ) {
+                canonical = followEarlierLiveTies(canonical)
+            }
+
             val enriched =
                 applySelfSendSortFloor(
                     canonical,
@@ -624,6 +635,33 @@ class CanonicalTimelineStore
                 canonical != initial -> IngestResult.Enriched(canonical, redactionMerged)
                 else -> IngestResult.Merged(canonical, redactionMerged)
             }
+        }
+
+        private suspend fun followEarlierLiveTies(event: TimelineEventEntity): TimelineEventEntity {
+            val after = dao.lastLiveTieAfter(event.bufferId, event.serverTime, event.timelineOrder, event.id) ?: return event
+            val tied = dao.eventsAtTime(event.bufferId, event.serverTime)
+            val from = tied.indexOfFirst { it.id == event.id }
+            val to = tied.indexOfFirst { it.id == after }
+
+            tied.forEachIndexed { index, current ->
+                val row =
+                    when {
+                        index == to -> event
+                        index >= from && index < to -> tied[index + 1]
+                        else -> current
+                    }
+                updateProvisionalTimelineOrder(row, index.toLong())
+            }
+            return event.copy(timelineOrder = to.toLong())
+        }
+
+        private suspend fun updateProvisionalTimelineOrder(
+            event: TimelineEventEntity,
+            order: Long,
+        ) {
+            if (event.timelineOrder == order) return
+            dao.updateTimelineOrder(event.id, order, confirmed = false)
+            db.historyGapDao().repointEventBoundary(event.id, event.id, event.serverTime, order)
         }
 
         private suspend fun updateHistoryCursor(

@@ -3908,6 +3908,45 @@ class EventProcessorTest {
         }
 
     @Test
+    fun pushFirstNickServNoticesFollowSocketOrderAtSameTimestamp() =
+        runTest {
+            val first =
+                IrcEvent.ChatMessage(
+                    ctx = ctx(time = 5_000),
+                    kind = IrcEvent.ChatKind.NOTICE,
+                    source = Prefix("NickServ"),
+                    target = "me",
+                    text = "This nickname is registered and protected.",
+                    isSelf = false,
+                    replyToMsgid = null,
+                )
+            val second = first.copy(text = "Authenticate yourself to services with the IDENTIFY command.")
+            val third = first.copy(text = "You have been automatically identified.")
+            val pushOnly = first.copy(text = "This notice did not reach the socket.")
+            processor.processPush(networkId, third)
+            processor.processPush(networkId, first)
+            processor.processPush(networkId, pushOnly)
+
+            val room = requireNotNull(db.bufferDao().byName(networkId, "nickserv"))
+            val pushedIds = pagingList(room.id).associate { it.text to it.id }
+            processor.process(networkId, first)
+            assertEquals(listOf(pushOnly.text, first.text, third.text), pagingList(room.id).map { it.text })
+
+            processor.process(networkId, second)
+            val laterPush = first.copy(text = "This notice is still awaiting a socket copy.")
+            processor.processPush(networkId, laterPush)
+
+            val last = first.copy(text = "Welcome back.")
+            for (notice in listOf(third, last, first)) {
+                processor.process(networkId, notice)
+            }
+
+            val rows = pagingList(room.id)
+            assertEquals(listOf(last.text, laterPush.text, third.text, second.text, pushOnly.text, first.text), rows.map { it.text })
+            assertEquals(pushedIds, rows.filter { it.text in pushedIds }.associate { it.text to it.id })
+        }
+
+    @Test
     fun serverError_insertsErrorRow() =
         runTest {
             processor.process(networkId, IrcEvent.ServerError("482", listOf("me", "#chan"), "You're not a channel operator"))
