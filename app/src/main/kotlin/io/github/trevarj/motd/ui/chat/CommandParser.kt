@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chat
 
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.irc.format.IrcEditorDocument
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.irc.format.plainIrcText
@@ -111,6 +112,12 @@ sealed interface ChatCommand {
         val nick: String,
     ) : ChatCommand
 
+    /** `/op [nick]` or `/deop [nick]` in the current channel. An omitted nick means self. */
+    data class ChannelOperator(
+        val nick: String?,
+        val grant: Boolean,
+    ) : ChatCommand
+
     /** `/invite nick [channel]` — null channel invites to the current channel. */
     data class Invite(
         val nick: String,
@@ -145,42 +152,84 @@ sealed interface ChatCommand {
 
 /** Commands that only mean something inside a channel conversation. */
 val CHANNEL_ONLY_COMMANDS: Set<String> =
-    setOf("/topic", "/kick", "/ban", "/invite", "/hop", "/part")
+    setOf("/topic", "/kick", "/ban", "/invite", "/hop", "/part", "/op", "/deop")
 
-/**
- * The slash-commands offered in the composer hint popup, in display order. Aliases are deliberately
- * absent: they stay accepted on input without doubling the length of the popup.
- */
-val COMMAND_HINTS: List<String> =
-    listOf(
-        "/me",
-        "/join",
-        "/part",
-        "/hop",
-        "/msg",
-        "/query",
-        "/notice",
-        "/nick",
-        "/setname",
-        "/topic",
-        "/mode",
-        "/away",
-        "/whois",
-        "/list",
-        "/kick",
-        "/ban",
-        "/invite",
-        "/knock",
-        "/ctcp",
-        "/motd",
-        "/raw",
+internal data class CommandParameter(
+    val label: Int,
+    val optional: Boolean = false,
+)
+
+private val nickParameter = CommandParameter(R.string.chat_parameter_nick)
+private val channelParameter = CommandParameter(R.string.chat_parameter_channel)
+private val messageParameter = CommandParameter(R.string.chat_parameter_message)
+private val reasonParameter = CommandParameter(R.string.chat_parameter_reason, optional = true)
+private val targetParameter = CommandParameter(R.string.chat_parameter_target)
+private val argumentsParameter = CommandParameter(R.string.chat_parameter_arguments, optional = true)
+private val commandParameters =
+    mapOf(
+        "/me" to listOf(CommandParameter(R.string.chat_parameter_action)),
+        "/join" to listOf(CommandParameter(R.string.chat_parameter_channels), CommandParameter(R.string.chat_parameter_keys, optional = true)),
+        "/part" to listOf(reasonParameter),
+        "/hop" to listOf(reasonParameter),
+        "/msg" to listOf(nickParameter, messageParameter),
+        "/query" to listOf(nickParameter),
+        "/notice" to listOf(targetParameter, messageParameter),
+        "/nick" to listOf(CommandParameter(R.string.chat_parameter_new_nick)),
+        "/setname" to listOf(CommandParameter(R.string.chat_parameter_real_name)),
+        "/topic" to listOf(CommandParameter(R.string.chat_parameter_topic)),
+        "/mode" to listOf(targetParameter.copy(optional = true), CommandParameter(R.string.chat_parameter_modes, optional = true), argumentsParameter),
+        "/away" to listOf(messageParameter.copy(optional = true)),
+        "/whois" to listOf(nickParameter),
+        "/list" to emptyList(),
+        "/kick" to listOf(nickParameter, reasonParameter),
+        "/ban" to listOf(nickParameter),
+        "/op" to listOf(nickParameter.copy(optional = true)),
+        "/deop" to listOf(nickParameter.copy(optional = true)),
+        "/invite" to listOf(nickParameter, channelParameter.copy(optional = true)),
+        "/knock" to listOf(channelParameter, reasonParameter),
+        "/ctcp" to listOf(nickParameter, CommandParameter(R.string.chat_parameter_request), argumentsParameter),
+        "/motd" to listOf(CommandParameter(R.string.chat_parameter_server, optional = true)),
+        "/raw" to listOf(CommandParameter(R.string.chat_parameter_irc_line)),
     )
+
+private val commandAliases =
+    mapOf(
+        "describe" to "me",
+        "j" to "join",
+        "leave" to "part",
+        "rejoin" to "hop",
+        "t" to "topic",
+        "m" to "mode",
+        "quote" to "raw",
+    )
+
+/** Aliases stay accepted without doubling the length of the composer popup. */
+val COMMAND_HINTS: List<String> = commandParameters.keys.toList()
 
 /**
  * Hints appropriate for the conversation the composer is in. Channel-only commands are withheld
  * outside a channel rather than offered and then silently ignored.
  */
 fun commandHintsFor(isChannel: Boolean): List<String> = if (isChannel) COMMAND_HINTS else COMMAND_HINTS.filterNot { it in CHANNEL_ONLY_COMMANDS }
+
+internal fun remainingCommandParameters(
+    text: String,
+    isChannel: Boolean,
+): List<CommandParameter> {
+    if (!text.startsWith('/') || text.startsWith("//") || '\n' in text || '\r' in text) return emptyList()
+    val command = text.substring(1).firstWord().lowercase()
+    val canonical = "/${commandAliases[command] ?: command}"
+    if (!isChannel && canonical in CHANNEL_ONLY_COMMANDS) return emptyList()
+    val parameters = commandParameters[canonical] ?: return emptyList()
+    var rest = text.afterFirstWord()
+    // A leading sign is the mode string, not an explicit target.
+    var supplied = if (canonical == "/mode" && (rest.startsWith('+') || rest.startsWith('-'))) 1 else 0
+    while (supplied < parameters.size && rest.isNotEmpty()) {
+        supplied++
+        if (supplied < parameters.size) rest = rest.afterFirstWord()
+    }
+    return if (supplied == 0) parameters else parameters.drop(supplied)
+}
 
 /** Parse [raw] composer input into a [ChatCommand]. See the type doc for the rules. */
 fun parseCommand(raw: String): ChatCommand {
@@ -283,23 +332,23 @@ private fun parsePlainCommand(raw: String): ChatCommand {
     // Bare "/" — nothing to send.
     if (cmd.isEmpty()) return ChatCommand.None
 
-    return when (cmd) {
-        "me", "describe" -> {
+    return when (commandAliases[cmd] ?: cmd) {
+        "me" -> {
             if (rest.isEmpty()) ChatCommand.None else ChatCommand.Message("/me $rest")
         }
 
-        "join", "j" -> {
+        "join" -> {
             // JOIN's two parameters are positional lists: "#a,#b key-a,key-b".
             val channels = rest.firstWord()
             val keys = rest.afterFirstWord().firstWord().ifEmpty { null }
             if (channels.isEmpty()) ChatCommand.None else ChatCommand.Join(channels, keys)
         }
 
-        "part", "leave" -> {
+        "part" -> {
             ChatCommand.Part(rest.ifEmpty { null })
         }
 
-        "hop", "rejoin" -> {
+        "hop" -> {
             ChatCommand.Hop(rest.ifEmpty { null })
         }
 
@@ -329,11 +378,11 @@ private fun parsePlainCommand(raw: String): ChatCommand {
             if (rest.isEmpty()) ChatCommand.None else ChatCommand.SetName(rest)
         }
 
-        "topic", "t" -> {
+        "topic" -> {
             if (rest.isEmpty()) ChatCommand.None else ChatCommand.Topic(rest)
         }
 
-        "mode", "m" -> {
+        "mode" -> {
             parseMode(rest)
         }
 
@@ -366,6 +415,10 @@ private fun parsePlainCommand(raw: String): ChatCommand {
             if (nick.isEmpty()) ChatCommand.None else ChatCommand.Ban(nick)
         }
 
+        "op", "deop" -> {
+            ChatCommand.ChannelOperator(rest.firstWord().ifEmpty { null }, grant = cmd == "op")
+        }
+
         "invite" -> {
             val nick = rest.firstWord()
             val channel = rest.afterFirstWord().firstWord().ifEmpty { null }
@@ -390,7 +443,7 @@ private fun parsePlainCommand(raw: String): ChatCommand {
 
         // Explicit escape hatch, so a line can reach the server even when its first word collides
         // with a command handled above.
-        "raw", "quote" -> {
+        "raw" -> {
             if (rest.isEmpty()) ChatCommand.None else ChatCommand.RawLine(rest)
         }
 

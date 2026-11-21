@@ -29,6 +29,9 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHasNoClickAction
@@ -1378,6 +1381,85 @@ class ComposerUiTest {
         }
         field.assertTextEquals("/join #motd")
         chip.assertDoesNotExist()
+    }
+
+    @Test
+    fun commandParameterHintFollowsDraftWithoutChangingEditableTextOrSend() {
+        val draft = mutableStateOf(TextFieldValue())
+        val commandContext = mutableStateOf<Boolean?>(true)
+        var sent: String? = null
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = { sent = draft.value.text },
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                    composerStyle = ComposerStyle.COMPACT,
+                    commandContextIsChannel = commandContext.value,
+                )
+            }
+        }
+
+        val field = compose.onNodeWithTag("chat_composer_field")
+        val ghost = compose.onNodeWithTag("chat_composer_command_hint", useUnmergedTree = true)
+        val chip = compose.onNodeWithTag("chat_composer_command_chip", useUnmergedTree = true)
+        val send = compose.onNodeWithTag("chat_composer_send")
+
+        fun assertParameterHint(
+            typed: String,
+            hint: String,
+            inline: Boolean? = null,
+        ) {
+            field.assertTextEquals(typed)
+            field.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, hint))
+            ghost.assertIsDisplayed()
+            val layouts = mutableListOf<TextLayoutResult>()
+            field.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val draftBounds = chip.fetchSemanticsNode().boundsInRoot
+            val caret = layouts.single().getCursorRect(typed.length)
+            val ghostBounds = ghost.fetchSemanticsNode().boundsInRoot
+            val belowCaret = ghostBounds.top >= draftBounds.top + caret.bottom - 1f
+            inline?.let { assertEquals(!it, belowCaret) }
+            assertTrue(belowCaret || ghostBounds.left > draftBounds.left + caret.right)
+            assertTrue(ghostBounds.right <= field.fetchSemanticsNode().boundsInRoot.right)
+        }
+
+        field.performTextInput("/ms")
+        ghost.assertDoesNotExist()
+        field.performTextInput("g")
+        assertParameterHint("/msg", "<nick> <message>")
+        val longNickDraft = "/msg motdObserverWithALongName"
+        field.performTextReplacement(longNickDraft)
+        assertParameterHint(longNickDraft, "<message>", inline = false)
+        field.performTextReplacement("/msg")
+
+        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        assertParameterHint("/msg", "<nick> <message>", inline = true)
+        field.performSemanticsAction(SemanticsActions.SetSelection) { it(0, 4, false) }
+        ghost.assertDoesNotExist()
+        field.performSemanticsAction(SemanticsActions.SetSelection) { it(4, 4, false) }
+        field.performTextInput(" alice")
+        assertParameterHint("/msg alice", "<message>", inline = true)
+        send.performClick()
+        compose.runOnIdle { assertEquals("/msg alice", sent) }
+
+        field.performTextInput(" hello")
+        ghost.assertDoesNotExist()
+        field.assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+        field.assertTextEquals("/msg alice hello")
+        send.performClick()
+        compose.runOnIdle { assertEquals("/msg alice hello", sent) }
+
+        field.performTextReplacement("//msg")
+        ghost.assertDoesNotExist()
+        field.performTextReplacement("/msg")
+        assertParameterHint("/msg", "<nick> <message>", inline = true)
+        compose.runOnIdle { commandContext.value = null }
+        ghost.assertDoesNotExist()
+        field.assertTextEquals("/msg")
     }
 
     @Test

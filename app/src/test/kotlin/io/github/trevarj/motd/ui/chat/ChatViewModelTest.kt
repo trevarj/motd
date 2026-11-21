@@ -3224,9 +3224,11 @@ class ChatViewModelTest {
 
             vm.submit("/kick alice", {}, {})
             vm.submit("/ban alice", {}, {})
+            vm.submit("/op", {}, {})
+            vm.submit("/deop alice", {}, {})
             advanceUntilIdle()
 
-            assertTrue(manager.sentLines.isEmpty())
+            assertTrue(manager.commandOrigins.isEmpty())
         }
 
     @Test
@@ -3340,6 +3342,28 @@ class ChatViewModelTest {
 
             client.stop()
             runCurrent()
+        }
+
+    @Test
+    fun `operator commands use services for self grant and MODE for revocation or other nicks`() =
+        runTest {
+            val manager = FakeConnectionManager(network.id, state = IrcClientState.Ready("LiveNick", emptySet(), emptyMap()))
+            val room = channel.copy(name = "#chan\u0000collision", displayName = "#WireChan")
+            val vm = viewModel(room, manager)
+            vm.state.first { it.buffer != null }
+
+            listOf("/op", "/op livenick", "/deop", "/op alice", "/deop bob").forEach { vm.submit(it, {}, {}).join() }
+
+            assertEquals(
+                listOf(
+                    "PRIVMSG ChanServ :OP #WireChan",
+                    "PRIVMSG ChanServ :OP #WireChan",
+                    "MODE #WireChan -o LiveNick",
+                    "MODE #WireChan +o alice",
+                    "MODE #WireChan -o bob",
+                ),
+                manager.commandOrigins.map { (_, message) -> message.serialize() },
+            )
         }
 
     @Test

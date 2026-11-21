@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chat
 
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IRC_RESET
 import io.github.trevarj.motd.irc.format.IrcTextStyle
@@ -246,12 +247,28 @@ class CommandParserTest {
 
     @Test fun channel_only_hints_are_withheld_outside_a_channel() {
         val queryHints = commandHintsFor(isChannel = false)
-        listOf("/topic", "/kick", "/ban", "/invite", "/hop", "/part").forEach {
+        listOf("/topic", "/kick", "/ban", "/invite", "/hop", "/part", "/op", "/deop").forEach {
             assertTrue("$it should be channel-only", it !in queryHints)
         }
         listOf("/msg", "/join", "/whois", "/mode", "/raw").forEach {
             assertTrue("$it should always be offered", it in queryHints)
         }
         assertEquals(COMMAND_HINTS, commandHintsFor(isChannel = true))
+    }
+
+    @Test fun remaining_parameters_follow_aliases_optional_arguments_and_implicit_targets() {
+        val nick = CommandParameter(R.string.chat_parameter_nick)
+        val reason = CommandParameter(R.string.chat_parameter_reason, optional = true)
+        val modeArgs = CommandParameter(R.string.chat_parameter_arguments, optional = true)
+        assertEquals(listOf(nick, reason), remainingCommandParameters("/kick", isChannel = true))
+        assertEquals(listOf(reason), remainingCommandParameters("/KICK  alice  ", isChannel = true))
+        assertEquals(emptyList<CommandParameter>(), remainingCommandParameters("/kick alice off topic", isChannel = true))
+        assertEquals(listOf(modeArgs), remainingCommandParameters("/m +o", isChannel = true))
+        assertEquals(listOf(modeArgs), remainingCommandParameters("/mode #room +o", isChannel = true))
+        assertEquals(listOf(reason), remainingCommandParameters("/leave", isChannel = true))
+        assertEquals(listOf(nick.copy(optional = true)), remainingCommandParameters("/deop", isChannel = true))
+        assertEquals(emptyList<CommandParameter>(), remainingCommandParameters("/deop", isChannel = false))
+        assertEquals(emptyList<CommandParameter>(), remainingCommandParameters("//kick", isChannel = true))
+        assertEquals(emptyList<CommandParameter>(), remainingCommandParameters("/ki", isChannel = true))
     }
 }

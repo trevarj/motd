@@ -129,6 +129,8 @@ private fun commandDescription(command: String): Int? =
         "/list" -> R.string.chat_command_list
         "/kick" -> R.string.chat_command_kick
         "/ban" -> R.string.chat_command_ban
+        "/op" -> R.string.chat_command_op
+        "/deop" -> R.string.chat_command_deop
         "/invite" -> R.string.chat_command_invite
         "/knock" -> R.string.chat_command_knock
         "/ctcp" -> R.string.chat_command_ctcp

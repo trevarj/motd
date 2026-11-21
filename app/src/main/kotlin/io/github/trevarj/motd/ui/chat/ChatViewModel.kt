@@ -2685,6 +2685,20 @@ class ChatViewModel
                     }
                 }
 
+                is ChatCommand.ChannelOperator -> {
+                    val channel = current?.takeIf { it.type == BufferType.CHANNEL } ?: return@launch
+                    val ready = connectionManager.connectionStates.value[channel.networkId] as? IrcClientState.Ready ?: return@launch
+                    val nick = cmd.nick ?: ready.nick
+                    val rules = identityRules.value
+                    val message =
+                        if (cmd.grant && rules.normalize(nick) == rules.normalize(ready.nick)) {
+                            IrcMessage(command = "PRIVMSG", params = listOf("ChanServ", "OP ${channel.ircTarget}"))
+                        } else {
+                            IrcMessage(command = "MODE", params = listOf(channel.ircTarget, if (cmd.grant) "+o" else "-o", nick))
+                        }
+                    sendCommand(channel.networkId, message)
+                }
+
                 is ChatCommand.RawLine -> {
                     networkId?.let { nid -> sendCommand(nid, IrcMessage.parse(cmd.line)) }
                 }

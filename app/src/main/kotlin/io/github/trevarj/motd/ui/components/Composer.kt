@@ -54,6 +54,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.contextmenu.builder.item
@@ -129,6 +130,8 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.FirstBaseline
+import androidx.compose.ui.layout.LastBaseline
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
@@ -145,20 +148,25 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -184,6 +192,7 @@ import io.github.trevarj.motd.ui.chat.COMMAND_HINTS
 import io.github.trevarj.motd.ui.chat.EmojiSearchEntry
 import io.github.trevarj.motd.ui.chat.emojiSearchEntries
 import io.github.trevarj.motd.ui.chat.messageFormattingRange
+import io.github.trevarj.motd.ui.chat.remainingCommandParameters
 import io.github.trevarj.motd.ui.chat.searchEmojis
 import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.LocalComfortableBubbleColors
@@ -206,6 +215,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.roundToInt
 import androidx.compose.foundation.lazy.items as lazyItems
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -475,6 +485,7 @@ fun Composer(
     composerStyle: ComposerStyle = ComposerStyle.COMFORTABLE,
     currentNick: String? = null,
     onSchedule: (() -> Unit)? = null,
+    commandContextIsChannel: Boolean? = true,
 ) {
     val initialEditor = remember { IrcEditorDocument.fromRaw(value.text, value.selection.start, value.selection.end) }
     val textFieldState =
@@ -1278,6 +1289,7 @@ fun Composer(
                                             onTextLayout = { editorTextLayout = it },
                                             scrollState = editorScrollState,
                                             ircFormattingEnabled = ircFormattingEnabled,
+                                            commandContextIsChannel = commandContextIsChannel,
                                             expanded = expanded,
                                             expandedHeight = expandedHeight,
                                             backgroundColor = composerFill,
@@ -2100,6 +2112,7 @@ private fun ComposerTextField(
     collapsedVerticalPadding: Dp,
     scrollState: ScrollState,
     ircFormattingEnabled: Boolean = false,
+    commandContextIsChannel: Boolean?,
     expanded: Boolean = false,
     expandedHeight: Dp = 148.dp,
     onColor: () -> Unit = {},
@@ -2162,8 +2175,23 @@ private fun ComposerTextField(
             null
         }
     val commandEnd = if (ircFormattingEnabled) completedCommandEnd(text) else null
-    var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val commandHint =
+        if (commandContextIsChannel != null && state.selection == TextRange(text.length)) {
+            remainingCommandParameters(text, commandContextIsChannel)
+                .map { parameter ->
+                    val label = stringResource(parameter.label)
+                    if (parameter.optional) "[$label]" else "<$label>"
+                }.joinToString(" ")
+                .takeIf { it.isNotEmpty() }
+        } else {
+            null
+        }
     val emojiRenderer = LocalEmojiRenderer.current
+    val editorTextStyle =
+        MaterialTheme.typography.bodyLarge
+            .copy(color = fieldForeground)
+            .let { emojiRenderer?.textStyle(it) ?: it }
+    var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val latestEmojiRenderer = rememberUpdatedState(emojiRenderer)
     val latestMentionColor = rememberUpdatedState(mentionColor.takeIf { mentionsActive })
     val outputTransformation =
@@ -2255,11 +2283,9 @@ private fun ComposerTextField(
                     ).onFocusChanged {
                         onFocusChanged(it.isFocused)
                         if (it.isFocused) onFocused()
-                    }.testTag("chat_composer_field"),
-            textStyle =
-                MaterialTheme.typography.bodyLarge
-                    .copy(color = fieldForeground)
-                    .let { emojiRenderer?.textStyle(it) ?: it },
+                    }.testTag("chat_composer_field")
+                    .semantics { commandHint?.let { stateDescription = it } },
+            textStyle = editorTextStyle,
             cursorBrush = SolidColor(cursorColor),
             keyboardOptions =
                 KeyboardOptions(
@@ -2295,42 +2321,112 @@ private fun ComposerTextField(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Box(
-                        modifier =
-                            Modifier
-                                .then(if (commandEnd != null) Modifier.testTag("chat_composer_command_chip") else Modifier)
-                                .then(if (prefixChip != null) Modifier.testTag("chat_composer_nick_chip") else Modifier)
-                                .drawBehind {
-                                    val end = commandEnd ?: prefixChip?.first ?: return@drawBehind
-                                    val color = if (commandEnd != null) commandBackground else prefixChip!!.second.copy(alpha = 0.16f)
-                                    val layout = textLayout?.takeIf { it.layoutInput.text.text == text } ?: return@drawBehind
-                                    val horizontalPadding = 3.dp.toPx()
-                                    val verticalPadding = 1.dp.toPx()
-                                    // ponytail: paint behind the same editor glyphs; no second field or draft state.
-                                    for (line in 0..layout.getLineForOffset(end - 1)) {
-                                        val start = layout.getLineStart(line)
-                                        val lineEnd = minOf(end, layout.getLineEnd(line, visibleEnd = true))
-                                        if (lineEnd <= start) continue
-                                        val first = layout.getBoundingBox(start)
-                                        val last = layout.getBoundingBox(lineEnd - 1)
-                                        drawRoundRect(
-                                            color = color,
-                                            topLeft = Offset(first.left - horizontalPadding, first.top - verticalPadding),
-                                            size =
-                                                Size(
-                                                    last.right - first.left + horizontalPadding * 2,
-                                                    first.height + verticalPadding * 2,
-                                                ),
-                                            cornerRadius = CornerRadius(6.dp.toPx()),
-                                        )
-                                    }
-                                }.onGloballyPositioned { onTextPositioned(it.positionInWindow()) },
+                    ComposerInlineHint(
+                        hint = commandHint,
+                        draft = text,
+                        style = editorTextStyle,
+                        readTextLayout = { textLayout },
+                        readScroll = { scrollState.value },
                     ) {
-                        inner()
+                        Box(
+                            modifier =
+                                Modifier
+                                    .then(if (commandEnd != null) Modifier.testTag("chat_composer_command_chip") else Modifier)
+                                    .then(if (prefixChip != null) Modifier.testTag("chat_composer_nick_chip") else Modifier)
+                                    .drawBehind {
+                                        val end = commandEnd ?: prefixChip?.first ?: return@drawBehind
+                                        val color = if (commandEnd != null) commandBackground else prefixChip!!.second.copy(alpha = 0.16f)
+                                        val layout = textLayout?.takeIf { it.layoutInput.text.text == text } ?: return@drawBehind
+                                        val horizontalPadding = 3.dp.toPx()
+                                        val verticalPadding = 1.dp.toPx()
+                                        // ponytail: paint behind the same editor glyphs; no second field or draft state.
+                                        for (line in 0..layout.getLineForOffset(end - 1)) {
+                                            val start = layout.getLineStart(line)
+                                            val lineEnd = minOf(end, layout.getLineEnd(line, visibleEnd = true))
+                                            if (lineEnd <= start) continue
+                                            val first = layout.getBoundingBox(start)
+                                            val last = layout.getBoundingBox(lineEnd - 1)
+                                            drawRoundRect(
+                                                color = color,
+                                                topLeft = Offset(first.left - horizontalPadding, first.top - verticalPadding),
+                                                size =
+                                                    Size(
+                                                        last.right - first.left + horizontalPadding * 2,
+                                                        first.height + verticalPadding * 2,
+                                                    ),
+                                                cornerRadius = CornerRadius(6.dp.toPx()),
+                                            )
+                                        }
+                                    }.onGloballyPositioned { onTextPositioned(it.positionInWindow()) },
+                        ) {
+                            inner()
+                        }
                     }
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun ComposerInlineHint(
+    hint: String?,
+    draft: String,
+    style: TextStyle,
+    readTextLayout: () -> TextLayoutResult?,
+    readScroll: () -> Int,
+    editorContent: @Composable () -> Unit,
+) {
+    Layout(
+        content = {
+            editorContent()
+            if (hint != null) {
+                BasicText(
+                    hint,
+                    modifier = Modifier.testTag("chat_composer_command_hint").clearAndSetSemantics { hideFromAccessibility() },
+                    style = style.copy(color = style.color.copy(alpha = style.color.alpha * 0.6f)),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        },
+    ) { measurables, constraints ->
+        val editor = measurables[0].measure(constraints)
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else editor.width
+        val textLayout = if (measurables.size > 1) readTextLayout()?.takeIf { it.layoutInput.text.text == draft } else null
+        if (textLayout == null || width == 0) {
+            layout(width, editor.height) { editor.placeRelative(0, 0) }
+        } else {
+            val caret = textLayout.getCursorRect(draft.length)
+            val line = textLayout.getLineForOffset(draft.length)
+            val rtl = textLayout.getParagraphDirection(draft.length) == ResolvedTextDirection.Rtl
+            val editorLeft = if (layoutDirection == LayoutDirection.Rtl) width - editor.width else 0
+            val gap = 6.dp.roundToPx()
+            val edge = editorLeft + if (rtl) caret.left.roundToInt() - gap else caret.right.roundToInt() + gap
+            val available = if (rtl) edge else width - edge
+            val ghost = measurables[1].measure(Constraints(maxWidth = width, maxHeight = constraints.maxHeight))
+            val inline = ghost.width <= available && ghost[FirstBaseline] == ghost[LastBaseline]
+            val scroll = readScroll()
+            val top =
+                if (inline) {
+                    (textLayout.getLineBaseline(line).roundToInt() - ghost[FirstBaseline] - scroll).coerceAtLeast(0)
+                } else {
+                    (textLayout.getLineBottom(line).roundToInt() - scroll).coerceAtLeast(0)
+                }
+            val height = maxOf(editor.height, top + ghost.height).coerceAtMost(constraints.maxHeight)
+            val anchor =
+                when {
+                    inline -> edge
+                    rtl -> width
+                    else -> 0
+                }
+            layout(width, height) {
+                editor.placeRelative(0, 0)
+                if (caret.bottom > scroll && caret.top < scroll + editor.height && top + ghost.height <= height) {
+                    ghost.place(if (rtl) anchor - ghost.width else anchor, top)
+                }
+            }
+        }
     }
 }
 

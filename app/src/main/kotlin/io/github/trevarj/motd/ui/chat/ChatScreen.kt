@@ -4345,6 +4345,12 @@ internal fun ChatContent(
                                         showFormattingTools = showComposerFormattingTools,
                                         knownNicks = knownNicks,
                                         identityRules = identityRules,
+                                        commandContextIsChannel =
+                                            when (state.buffer?.type) {
+                                                BufferType.CHANNEL -> true
+                                                BufferType.QUERY -> false
+                                                BufferType.SERVER, null -> null
+                                            },
                                         ircFormattingEnabled =
                                             !isServerBuffer &&
                                                 !state.buffer?.displayName.equals("BouncerServ", ignoreCase = true),
