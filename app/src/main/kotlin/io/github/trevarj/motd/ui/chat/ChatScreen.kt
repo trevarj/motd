@@ -81,6 +81,7 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.GroupAdd
 import androidx.compose.material.icons.outlined.Image
@@ -1742,40 +1743,30 @@ internal fun ChatContent(
         val scheduleAttachmentPending =
             attachmentSheetOpen || sharedFile != null ||
                 voiceState.recording != null || voiceState.staged != null || voiceState.sending
+
+        fun scheduleDraftRejection(text: String): Int? =
+            when {
+                scheduleAttachmentPending -> R.string.scheduled_attachment_unsupported
+                state.replyTo != null -> R.string.scheduled_reply_unsupported
+                isSchedulableMessage(text) && !isEbooksSearchOnly(text) -> null
+                plainIrcText(text).isBlank() -> R.string.scheduled_text_required
+                else -> R.string.scheduled_text_unsupported
+            }
+
         val openSchedule: () -> Unit = {
             if (scheduledComposer != null) {
                 val text = composerText.text
                 val reason =
-                    when {
-                        scheduleAttachmentPending -> {
-                            R.string.scheduled_attachment_unsupported
+                    scheduleDraftRejection(text) ?: when (val capture = scheduledComposer.capture(text)) {
+                        is ScheduledDraftCapture.Refused -> {
+                            capture.reason
                         }
 
-                        state.replyTo != null -> {
-                            R.string.scheduled_reply_unsupported
-                        }
-
-                        plainIrcText(text).isBlank() -> {
-                            R.string.scheduled_text_required
-                        }
-
-                        !isSchedulableMessage(text) || isEbooksSearchOnly(text) -> {
-                            R.string.scheduled_text_unsupported
-                        }
-
-                        else -> {
-                            when (val capture = scheduledComposer.capture(text)) {
-                                is ScheduledDraftCapture.Refused -> {
-                                    capture.reason
-                                }
-
-                                is ScheduledDraftCapture.Captured -> {
-                                    scheduleFocus.clearFocus()
-                                    scheduleKeyboard?.hide()
-                                    scheduledDraft = capture.draft
-                                    null
-                                }
-                            }
+                        is ScheduledDraftCapture.Captured -> {
+                            scheduleFocus.clearFocus()
+                            scheduleKeyboard?.hide()
+                            scheduledDraft = capture.draft
+                            null
                         }
                     }
                 if (reason != null) scope.launch { snackbarHostState.showSnackbar(resources.getString(reason)) }
@@ -3570,23 +3561,22 @@ internal fun ChatContent(
                     )
                     HorizontalDivider()
                 }
-                if (showScheduleActions && buffer != null && scheduledComposer != null) {
-                    DropdownMenuItem(
-                        modifier = Modifier.testTag("scheduled_open_composer"),
-                        text = { Text(stringResource(R.string.scheduled_open)) },
-                        onClick = {
-                            overflowOpen = false
-                            openSchedule()
-                        },
-                    )
+                if (showScheduleActions) {
+                    val canScheduleDraft =
+                        composerEnabled && composerDraft.hydrated && buffer.canScheduleMessage() && scheduleDraftRejection(composerText.text) == null
                     DropdownMenuItem(
                         modifier = Modifier.testTag("scheduled_open_chat"),
-                        text = { Text(stringResource(R.string.scheduled_title)) },
+                        text = { Text(stringResource(if (canScheduleDraft) R.string.scheduled_open else R.string.scheduled_title)) },
+                        leadingIcon = { Icon(Icons.Outlined.DateRange, contentDescription = null) },
                         onClick = {
                             overflowOpen = false
-                            scheduleFocus.clearFocus()
-                            scheduleKeyboard?.hide()
-                            scheduledComposer.openList(buffer.id)
+                            if (canScheduleDraft) {
+                                openSchedule()
+                            } else {
+                                scheduleFocus.clearFocus()
+                                scheduleKeyboard?.hide()
+                                scheduledComposer.openList(buffer.id)
+                            }
                         },
                     )
                 }
@@ -4973,6 +4963,10 @@ internal fun ChatContent(
                 target = schedule.room.ircTarget,
                 initialText = schedule.text,
                 onDismiss = { scheduledDraft = null },
+                onOpenList = {
+                    scheduledDraft = null
+                    scheduledComposer.openList(schedule.room.id)
+                },
                 onSave = { _, timing ->
                     if (scheduleAttachmentPending) R.string.scheduled_attachment_unsupported else scheduledComposer.enqueue(schedule, timing)
                 },

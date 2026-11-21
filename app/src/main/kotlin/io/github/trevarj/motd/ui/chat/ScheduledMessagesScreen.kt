@@ -141,6 +141,7 @@ internal fun ScheduleMessageSheet(
     onSave: suspend (String, ScheduledTiming) -> Int?,
     onSaved: () -> Unit,
     editing: ScheduledMessageEntity? = null,
+    onOpenList: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val locale = LocalConfiguration.current.locales[0]
@@ -329,6 +330,14 @@ internal fun ScheduleMessageSheet(
                         },
                     ),
                 )
+            }
+            if (onOpenList != null) {
+                TextButton(
+                    onClick = onOpenList,
+                    enabled = !saving,
+                    modifier = Modifier.align(Alignment.CenterHorizontally).testTag("scheduled_sheet_open_list"),
+                    colors = readableTextButtonColors(),
+                ) { Text(stringResource(R.string.scheduled_title)) }
             }
         }
     }

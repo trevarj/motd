@@ -8,8 +8,13 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -18,6 +23,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.TextFieldValue
@@ -35,10 +41,14 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ScheduledMessageState
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.chat.ChatContent
+import io.github.trevarj.motd.ui.chat.ChatState
 import io.github.trevarj.motd.ui.chat.ChatViewModel
 import io.github.trevarj.motd.ui.chat.ChatViewModelTest
+import io.github.trevarj.motd.ui.chat.ComposerDraftState
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chat.ScheduledComposerActions
+import io.github.trevarj.motd.ui.chat.ScheduledDraft
+import io.github.trevarj.motd.ui.chat.ScheduledDraftCapture
 import io.github.trevarj.motd.ui.chat.ScheduledMessagesScreen
 import io.github.trevarj.motd.ui.chat.ScheduledMessagesViewModel
 import io.github.trevarj.motd.ui.components.Composer
@@ -91,6 +101,77 @@ class ScheduledComposerUiTest {
             assertEquals(1, sent)
             assertEquals(0, scheduled)
         }
+    }
+
+    @Test
+    fun conversationOverflowSchedulesOnlyEligibleDraftAndKeepsQueueReachable() {
+        val context = RuntimeEnvironment.getApplication()
+        val room = BufferEntity(id = 42, networkId = 1, name = "#kotlin", displayName = "#Kotlin", type = BufferType.CHANNEL, joined = true)
+        val pages = flowOf(PagingData.empty<MessageEntity>())
+        var draft by mutableStateOf(ComposerDraftState(hydrated = true))
+        val openedQueues = mutableListOf<Long>()
+        compose.setContent {
+            MotdTheme {
+                ChatContent(
+                    state = ChatState(buffer = room, connState = IrcClientState.Disconnected),
+                    items = pages.collectAsLazyPagingItems(),
+                    composerEnabled = true,
+                    onBack = {},
+                    onOpenChannelInfo = {},
+                    onOpenSearch = {},
+                    onOpenImage = {},
+                    onOpenPalette = { _, _ -> },
+                    nickNormalizer = { it.lowercase() },
+                    onSubmit = { error("Overflow must not send the draft") },
+                    onTyping = {},
+                    onSetReply = {},
+                    onReact = { _, _ -> },
+                    onRetry = {},
+                    loadPreview = { _, _ -> null },
+                    composerDraft = draft,
+                    onDraftChanged = { draft = draft.copy(text = it, revision = draft.revision + 1) },
+                    scheduledComposer =
+                        ScheduledComposerActions(
+                            capture = { ScheduledDraftCapture.Captured(ScheduledDraft(room, it, draft.revision)) },
+                            enqueue = { _, _ -> error("Opening the queue must not schedule the draft") },
+                            openList = { openedQueues += it },
+                        ),
+                )
+            }
+        }
+        val overflow = compose.onNodeWithTag("chat_overflow")
+        val scheduleItem = compose.onNodeWithTag("scheduled_open_chat")
+        val composer = compose.onNodeWithTag("chat_composer_field")
+        val openLabel = context.getString(R.string.scheduled_open)
+        val listLabel = context.getString(R.string.scheduled_title)
+        overflow.performClick()
+        compose.onAllNodesWithTag("scheduled_open_chat").assertCountEquals(1)
+        compose.onNodeWithText(openLabel).assertDoesNotExist()
+        scheduleItem.assertTextEquals(listLabel).performClick()
+        compose.runOnIdle { assertEquals(listOf(room.id), openedQueues) }
+
+        composer.performTextReplacement("/me waves")
+        overflow.performClick()
+        scheduleItem.assertTextEquals(listLabel).performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(room.id, room.id), openedQueues)
+            assertEquals("/me waves", draft.text)
+        }
+
+        val entered = "Ordinary draft"
+        composer.performTextReplacement(entered)
+        overflow.performClick()
+        compose.onAllNodesWithTag("scheduled_open_chat").assertCountEquals(1)
+        compose.onNodeWithText(listLabel).assertDoesNotExist()
+        scheduleItem.assertTextEquals(openLabel).performClick()
+        compose.onNodeWithTag("scheduled_sheet").assertIsDisplayed()
+        compose
+            .onNode(hasText(entered) and hasAnyAncestor(hasTestTag("scheduled_sheet")), useUnmergedTree = true)
+            .assertIsDisplayed()
+        compose.onNodeWithTag("scheduled_sheet_open_list").assertTextEquals(listLabel).performClick()
+        compose.onNodeWithTag("scheduled_sheet").assertDoesNotExist()
+        composer.assertTextEquals(entered)
+        compose.runOnIdle { assertEquals(listOf(room.id, room.id, room.id), openedQueues) }
     }
 
     @Test
