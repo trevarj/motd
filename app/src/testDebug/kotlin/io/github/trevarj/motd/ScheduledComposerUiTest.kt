@@ -4,6 +4,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -12,6 +13,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -27,6 +29,10 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
@@ -63,6 +69,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -175,6 +182,7 @@ class ScheduledComposerUiTest {
     }
 
     @Test
+    @Config(sdk = [35])
     fun offlineLongPressQueuesCapturedFormattingAndKeepsNewerDraft() {
         val context = RuntimeEnvironment.getApplication()
         val db =
@@ -286,7 +294,29 @@ class ScheduledComposerUiTest {
             assertEquals("#Kotlin", queued.target)
             assertEquals(ScheduledMessageState.QUEUED, queued.state)
             assertNull(queued.dueAt)
-            compose.onNodeWithTag("scheduled_view").performClick()
+            val viewAction = compose.onNodeWithTag("scheduled_view")
+            val actionNode = viewAction.fetchSemanticsNode()
+            val view = (checkNotNull(actionNode.root) as ViewRootForTest).view
+            val navigationPx = with(actionNode.layoutInfo.density) { 48.dp.roundToPx() }
+            compose.runOnIdle {
+                ViewCompat.dispatchApplyWindowInsets(
+                    view,
+                    WindowInsetsCompat
+                        .Builder()
+                        .setInsets(WindowInsetsCompat.Type.navigationBars(), Insets.of(0, 0, 0, navigationPx))
+                        .setVisible(WindowInsetsCompat.Type.navigationBars(), true)
+                        .build(),
+                )
+            }
+            val positionedAction = viewAction.assertIsDisplayed().fetchSemanticsNode()
+            val actionBottom =
+                maxOf(positionedAction.positionInRoot.y + positionedAction.size.height, positionedAction.touchBoundsInRoot.bottom)
+            val navigationTop = view.height - navigationPx
+            assertTrue(
+                "View action bottom ($actionBottom px) overlaps navigation starting at $navigationTop px",
+                actionBottom <= navigationTop,
+            )
+            viewAction.performTouchInput { click() }
             compose.onNodeWithTag("scheduled_list").assertIsDisplayed()
             compose.waitUntil(5_000) { compose.onAllNodesWithTag("scheduled_message_${queued.id}").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText(context.getString(R.string.scheduled_status_waiting)).assertIsDisplayed()

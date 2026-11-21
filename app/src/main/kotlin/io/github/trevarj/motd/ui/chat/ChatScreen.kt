@@ -3801,7 +3801,10 @@ internal fun ChatContent(
                         }
                     },
             snackbarHost = {
-                SnackbarHost(snackbarHostState) { data ->
+                SnackbarHost(
+                    hostState = snackbarHostState,
+                    modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)),
+                ) { data ->
                     if (data.visuals is ScheduledConfirmation) {
                         ScheduledConfirmationSnackbar(data)
                     } else {
