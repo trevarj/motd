@@ -112,6 +112,15 @@ class AudioModelsTest {
         assertFalse(candidates.any { it.startsWith("http://") })
     }
 
+    @Test fun ignores_audio_urls_nested_in_non_web_tokens() {
+        val nonWeb =
+            "IPFS://cid/voice.ogg ftps://files.test/track.opus " +
+                "intent:https://files.test/hidden.mp3 other://https://files.test/extensionless"
+        val real = "https://files.test/real"
+        assertTrue(parseAudioAttachments(nonWeb).isEmpty())
+        assertEquals(listOf(real), extensionlessAudioCandidates("$nonWeb $real"))
+    }
+
     @Test fun downloadProgressUsesActualCachedBytes() {
         assertEquals(0.25f, audioDownloadFraction(cachedBytes = 250, totalBytes = 1_000))
         assertEquals(0f, audioDownloadFraction(cachedBytes = -1, totalBytes = 1_000))

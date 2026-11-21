@@ -131,6 +131,22 @@ class AddNetworkViewModelTest {
     }
 
     @Test
+    fun endpointPrefillOnlyEditsTheFormAndDoesNotOverwriteUserEdits() {
+        val networks = FakeNetworkRepository()
+        val connections = FakeConnectionManager()
+        val model = vm(networks, connections)
+        model.prefillEndpoint("irc.example.test", 7000, false)
+        assertEquals(ServerForm(host = "irc.example.test", port = "7000", tls = false), model.state.value.server)
+        assertEquals(AddNetworkPhase.FORM, model.state.value.phase)
+        val server = model.state.value.server
+        model.editServer(server.copy(host = "edited.example.test"))
+        model.prefillEndpoint("irc.example.test", 7000, false)
+        assertEquals("edited.example.test", model.state.value.server.host)
+        assertTrue(networks.networks.isEmpty())
+        assertTrue(connections.connected.isEmpty())
+    }
+
+    @Test
     fun soju_kind_uses_separate_plain_login() =
         runTest {
             val vm = vm(FakeNetworkRepository(), FakeConnectionManager())

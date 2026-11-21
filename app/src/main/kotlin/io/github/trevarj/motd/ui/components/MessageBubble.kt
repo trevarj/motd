@@ -93,10 +93,14 @@ import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.ui.chat.ChatLinkKind
 import io.github.trevarj.motd.ui.chat.InlineTextSegment
 import io.github.trevarj.motd.ui.chat.LocalWallpaperNeedsReadableBacking
-import io.github.trevarj.motd.ui.chat.extractUrls
+import io.github.trevarj.motd.ui.chat.chatLinkKind
+import io.github.trevarj.motd.ui.chat.isHttpLink
 import io.github.trevarj.motd.ui.chat.parseInlineCode
+import io.github.trevarj.motd.ui.chat.trimUrl
+import io.github.trevarj.motd.ui.chat.uriTokens
 import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.LocalAvatarShape
 import io.github.trevarj.motd.ui.theme.LocalChatShadowsEnabled
@@ -893,6 +897,7 @@ fun MessageBubble(
                             highlightNick = triggerNick,
                             highlightCaseMapping = highlightCaseMapping,
                             receiptNickColor = nickColors::mention,
+                            includeNonWebLinks = true,
                         ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
                     }
                 if (body.isNotBlank()) {
@@ -1946,6 +1951,7 @@ private fun TwoLineMessageRow(
                             highlightNick = highlightNick,
                             highlightCaseMapping = highlightCaseMapping,
                             receiptNickColor = nickColors::mention,
+                            includeNonWebLinks = true,
                         ).let { if (selecting) it else it.withoutPreviewUrls(mediaUrls, audioPreviewUrls) }
                     }
                 if (richBody.isNotBlank()) {
@@ -2297,10 +2303,9 @@ internal fun AnnotatedString.withoutPreviewUrls(
 }
 
 /**
- * Build an [AnnotatedString] where each http(s) URL in [text] is a tappable [LinkAnnotation.Url]
- * and each @mention of a known nick is colored with that nick's own color. URL
- * boundaries come from [extractUrls], matched left-to-right in the raw text; the runs between URLs
- * get mention coloring via [appendMentionColored]. [mentionColor] returns the nick's color for a
+ * Build an [AnnotatedString] with links and colored mentions. URI tokens are scanned before mentions;
+ * only the runs between tokens get mention coloring via [appendMentionColored].
+ * [mentionColor] returns the nick's color for a
  * known token (matched with the active IRC identity rules) or null for a plain word; when null
  * for everything (no known nicks) the body is a single unstyled run.
  */
@@ -2324,10 +2329,11 @@ internal fun linkifiedBody(
     highlightNick: String? = null,
     highlightCaseMapping: String? = null,
     receiptNickColor: (String) -> Color = { linkColor },
+    includeNonWebLinks: Boolean = false,
 ): AnnotatedString {
     // Most chat rows are plain text. Avoid the URL regex, nick token walk, and builder allocation
     // when neither link annotations, mention styling, nor mIRC formatting can affect the result.
-    if (highlightNick == null && !mentionsActive && onMentionClick == null && !text.contains("http://") && !text.contains("https://") && !text.contains('`') &&
+    if (highlightNick == null && !mentionsActive && onMentionClick == null && ':' !in text && '`' !in text &&
         text.none { it.code in 0x01..0x1F }
     ) {
         return AnnotatedString(text)
@@ -2358,6 +2364,7 @@ internal fun linkifiedBody(
             highlightNick = highlightNick,
             highlightCaseMapping = highlightCaseMapping,
             receiptNickColor = receiptNickColor,
+            includeNonWebLinks = includeNonWebLinks,
         )
     }
 }
@@ -2385,6 +2392,7 @@ internal fun AnnotatedString.Builder.appendRichText(
     highlightNick: String? = null,
     highlightCaseMapping: String? = null,
     receiptNickColor: (String) -> Color = { linkStyle.color },
+    includeNonWebLinks: Boolean = true,
 ) {
     val formatted = parseIrcFormatting(text)
     val segments = parseInlineCode(formatted.visibleText)
@@ -2458,6 +2466,7 @@ internal fun AnnotatedString.Builder.appendRichText(
                     onMentionClick,
                     if (receiptRules != null && highlightNick != null) receiptRules.mentionRanges(segment.text, highlightNick) else emptyList(),
                     receiptColor,
+                    includeNonWebLinks,
                 )
             }
         }
@@ -2541,6 +2550,7 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendPlainLinksAnd
     onMentionClick: ((String) -> Unit)?,
     receiptRanges: List<IntRange>,
     receiptColor: (String) -> Color,
+    includeNonWebLinks: Boolean,
 ) {
     fun appendPlain(
         start: Int,
@@ -2551,12 +2561,26 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendPlainLinksAnd
         }
     }
     var cursor = 0
-    for (url in extractUrls(text)) {
-        val at = text.indexOf(url, cursor)
-        if (at < 0) continue
-        appendPlain(cursor, at)
-        withLink(LinkAnnotation.Url(url)) { withStyle(linkStyle) { append(url) } }
-        cursor = at + url.length
+    for (match in uriTokens(text)) {
+        val start = match.range.first
+        val url = trimUrl(match.value)
+        appendPlain(cursor, start)
+        when (if (includeNonWebLinks) chatLinkKind(url) else ChatLinkKind.WEB.takeIf { url.isHttpLink() }) {
+            ChatLinkKind.WEB -> {
+                withLink(LinkAnnotation.Url(url)) { withStyle(linkStyle) { append(url) } }
+            }
+
+            ChatLinkKind.EXTERNAL, ChatLinkKind.IRC -> {
+                val from = length
+                withStyle(linkStyle) { append(url) }
+                addStringAnnotation(NON_WEB_LINK_RANGE, url, from, length)
+            }
+
+            null -> {
+                withStyle(plainStyle) { append(url) }
+            }
+        }
+        cursor = start + url.length
     }
     if (cursor == 0 || cursor < text.length) {
         appendPlain(cursor, text.length)

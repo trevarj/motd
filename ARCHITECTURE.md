@@ -355,10 +355,16 @@ flowchart TD
   Literal characters and body offsets stay unchanged. Known mentions and sender names
   follow the configured nickname-tap action and retain their nickname colors instead
   of inheriting URL styling. Mention matching excludes URLs/code. Holding a nickname
-  opens its user/WHOIS sheet; holding linked text or a link preview card offers
-  the default app, a browser, and Copy for that URL. Taps retain native routing.
+  opens its user/WHOIS sheet; holding an HTTP(S) text link or preview card offers
+  the default app, a browser, and Copy for that URL. HTTP(S) taps retain native routing.
   Ordinary message holds still open message actions. Concealment and transcript
   selection suppress gestures on the concealed or selected body.
+  Gemini, Gopher, IPFS/IPNS, FTP/FTPS, and Telegram profile/post links open through
+  Android, with Open with and exact Copy on hold. Only HTTP(S) can feed remote
+  previews or media discovery, even when a non-web URI contains a nested web URL.
+  IRC(S) channel links open a Motd confirmation, not an external app. Joining uses
+  an exact saved host, port and TLS match and waits for current-session membership
+  and its canonical row. Unmatched endpoints can prefill network setup without connecting.
   Sender prefixes and composer styling remain separate.
   Appearance → Transparency and blur owns continuous 0–100 controls for ordinary PRIVMSG, NOTICE, and ACTION
   backings in every layout, with or without nickname tint: opacity defaults to 100%, and independent

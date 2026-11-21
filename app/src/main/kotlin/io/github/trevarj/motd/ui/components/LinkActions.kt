@@ -32,11 +32,27 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.chat.ChatLinkKind
+import io.github.trevarj.motd.ui.chat.IrcChannelLink
+import io.github.trevarj.motd.ui.chat.chatLinkKind
+import io.github.trevarj.motd.ui.chat.parseIrcChannelLink
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 
 internal val LocalChatLinksEnabled = staticCompositionLocalOf { true }
 
-internal fun String.isHttpLink(): Boolean = startsWith("https://", ignoreCase = true) || startsWith("http://", ignoreCase = true)
+internal val LocalOpenIrcChannelLink = staticCompositionLocalOf<((IrcChannelLink) -> Unit)?> { null }
+internal const val NON_WEB_LINK_RANGE = "non_web_link"
+
+internal fun Context.openChatNonWebLink(
+    url: String,
+    openIrcLink: ((IrcChannelLink) -> Unit)?,
+) {
+    when (chatLinkKind(url)) {
+        ChatLinkKind.IRC -> if (openIrcLink != null) parseIrcChannelLink(url)?.let(openIrcLink)
+        ChatLinkKind.EXTERNAL -> launchLink(externalLinkIntent(url), R.string.chat_link_no_app)
+        else -> Unit
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,6 +61,7 @@ internal fun LinkActionsSheet(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
+    val openIrcLink = LocalOpenIrcChannelLink.current
     var selected by remember(urls) { mutableStateOf(urls.singleOrNull()) }
     EffectModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -65,7 +82,7 @@ internal fun LinkActionsSheet(
             }
             return@EffectModalBottomSheet
         }
-        val link = Uri.parse(url)
+        val kind = remember(url) { chatLinkKind(url) }
         Text(
             text = url,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -73,22 +90,55 @@ internal fun LinkActionsSheet(
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
         )
-        ListItem(
-            headlineContent = { Text(stringResource(R.string.chat_link_open_default)) },
-            modifier =
-                Modifier.testTag("link_action_open_default").clickable {
-                    onDismiss()
-                    context.launchLink(Intent(Intent.ACTION_VIEW, link), R.string.chat_link_no_app)
-                },
-        )
-        ListItem(
-            headlineContent = { Text(stringResource(R.string.chat_link_open_browser)) },
-            modifier =
-                Modifier.testTag("link_action_open_browser").clickable {
-                    onDismiss()
-                    context.launchLink(browserLinkIntent(context.packageManager, link), R.string.chat_link_no_browser)
-                },
-        )
+        when (kind) {
+            ChatLinkKind.WEB -> {
+                val link = Uri.parse(url)
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.chat_link_open_default)) },
+                    modifier =
+                        Modifier.testTag("link_action_open_default").clickable {
+                            onDismiss()
+                            context.launchLink(Intent(Intent.ACTION_VIEW, link), R.string.chat_link_no_app)
+                        },
+                )
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.chat_link_open_browser)) },
+                    modifier =
+                        Modifier.testTag("link_action_open_browser").clickable {
+                            onDismiss()
+                            context.launchLink(browserLinkIntent(context.packageManager, link), R.string.chat_link_no_browser)
+                        },
+                )
+            }
+
+            ChatLinkKind.EXTERNAL -> {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.chat_link_open_with)) },
+                    modifier =
+                        Modifier.testTag("link_action_open_with").clickable {
+                            onDismiss()
+                            context.launchLink(Intent.createChooser(externalLinkIntent(url), null), R.string.chat_link_no_app)
+                        },
+                )
+            }
+
+            ChatLinkKind.IRC -> {
+                if (openIrcLink != null) {
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.new_sheet_join_channel)) },
+                        modifier =
+                            Modifier.testTag("link_action_join_channel").clickable {
+                                onDismiss()
+                                parseIrcChannelLink(url)?.let(openIrcLink)
+                            },
+                    )
+                }
+            }
+
+            null -> {
+                Unit
+            }
+        }
         ListItem(
             headlineContent = { Text(stringResource(R.string.upload_copy_link)) },
             modifier =
@@ -100,13 +150,19 @@ internal fun LinkActionsSheet(
     }
 }
 
-private fun webIntent(link: Uri): Intent = Intent(Intent.ACTION_VIEW, link).addCategory(Intent.CATEGORY_BROWSABLE)
+private fun browsableIntent(link: Uri): Intent = Intent(Intent.ACTION_VIEW, link).addCategory(Intent.CATEGORY_BROWSABLE)
+
+private fun externalLinkIntent(url: String): Intent {
+    val scheme = url.substringBefore(':')
+    val normalized = scheme.lowercase()
+    return browsableIntent(Uri.parse(if (scheme == normalized) url else url.replaceRange(0, scheme.length, normalized)))
+}
 
 private fun browserLinkIntent(
     packageManager: PackageManager,
     link: Uri,
 ): Intent? {
-    val probe = webIntent(Uri.parse("${link.scheme?.lowercase()}://browser.invalid/"))
+    val probe = browsableIntent(Uri.parse("${link.scheme?.lowercase()}://browser.invalid/"))
     val candidates =
         packageManager
             .queryIntentActivities(probe, PackageManager.MATCH_DEFAULT_ONLY)
@@ -114,10 +170,10 @@ private fun browserLinkIntent(
             .distinct()
     if (candidates.isEmpty()) return null
     val preferred = packageManager.resolveActivity(probe, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.let { ComponentName(it.packageName, it.name) }
-    if (preferred in candidates) return webIntent(link).setComponent(preferred)
-    if (candidates.size == 1) return webIntent(link).setComponent(candidates.single())
-    return Intent.createChooser(webIntent(link).setComponent(candidates.first()), null).apply {
-        putExtra(Intent.EXTRA_ALTERNATE_INTENTS, candidates.drop(1).map { webIntent(link).setComponent(it) }.toTypedArray())
+    if (preferred in candidates) return browsableIntent(link).setComponent(preferred)
+    if (candidates.size == 1) return browsableIntent(link).setComponent(candidates.single())
+    return Intent.createChooser(browsableIntent(link).setComponent(candidates.first()), null).apply {
+        putExtra(Intent.EXTRA_ALTERNATE_INTENTS, candidates.drop(1).map { browsableIntent(link).setComponent(it) }.toTypedArray())
     }
 }
 

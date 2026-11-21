@@ -16,6 +16,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
@@ -31,6 +32,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
 import androidx.core.view.ViewCompat
@@ -1011,6 +1013,7 @@ class RequiredHeadlessE2eTest {
         scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         ChatListRobot(compose).awaitTag("chatlist_row_$communityId")
         exerciseDownloadedEmojiPicker(bootstrap, communityId, token)
+        exerciseHostedIrcChannelLink(bootstrap, communityId, token)
         exerciseHostedPaletteLink(bootstrap, network, communityId, token)
         SettingsRobot(compose).apply {
             open()
@@ -1305,6 +1308,75 @@ class RequiredHeadlessE2eTest {
                 if (!hadFile) store.remove(noto.id)
             }
         }
+    }
+
+    private fun exerciseHostedIrcChannelLink(
+        bootstrap: E2eBootstrap,
+        bufferId: Long,
+        token: String,
+    ) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val host = bootstrap.args.host
+        val authority = if (':' in host) "[$host]" else host
+        val port = bootstrap.args.port
+        val channel = "#review"
+        val link = "ircs://$authority:$port/%23review"
+        val prefix = "$token irc "
+        val text = "$prefix$link"
+        val networks = bootstrap.seams.networks()
+        val before = runBlocking { networks.observeNetworks().first() }
+        ChatListRobot(compose).open(bufferId)
+        ChatRobot(compose).send(text)
+        val message =
+            awaitWhileComposing("IRC link arrives through the owning network", 20_000) {
+                MessageLifecycleProbe(bootstrap.seams.search(), milestones).awaitCanonicalContaining(
+                    query = "$token irc",
+                    expectedSubstring = text,
+                    bufferId = bufferId,
+                )
+            }
+        TimelineRobot(compose).assertMessageVisible(message.tag())
+        val body = compose.onNode(hasText(text) and hasAnyAncestor(hasTestTag(message.tag())), useUnmergedTree = true)
+        val layouts = mutableListOf<TextLayoutResult>()
+        body.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val point = layouts.single().getBoundingBox(prefix.length + 1).center
+        val title = hasText(context.getString(R.string.irc_link_title))
+        val setup = hasText(context.getString(R.string.irc_link_setup))
+
+        fun awaitSetup() {
+            compose.waitUntil("IRC review identifies an unmatched endpoint", 10_000) {
+                compose.onAllNodes(setup).fetchSemanticsNodes().size == 1
+            }
+        }
+
+        body.performTouchInput { click(point) }
+        awaitSetup()
+        compose.onNode(title).assertIsDisplayed()
+        compose.onNode(hasText(channel)).assertIsDisplayed()
+        compose.onNode(setup).assertIsDisplayed()
+        compose.onNode(hasText(context.getString(R.string.action_cancel))).performClick()
+        compose.onAllNodes(title).assertCountEquals(0)
+        assertEquals(before, runBlocking { networks.observeNetworks().first() })
+
+        body.performTouchInput { click(point) }
+        awaitSetup()
+        compose.onNode(setup).performClick()
+        compose
+            .onNodeWithTag("network_host_field", useUnmergedTree = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(host)))
+        compose
+            .onNodeWithTag("network_port_field", useUnmergedTree = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(port.toString())))
+        assertEquals(before, runBlocking { networks.observeNetworks().first() })
+        scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        compose.onNodeWithTag("chat_timeline").assertIsDisplayed()
+        scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        ChatListRobot(compose).awaitTag("chatlist_row_$bufferId")
+        milestones.record("irc_link_review_cancelled_and_setup_prefilled", "buffer=$bufferId")
     }
 
     private fun exerciseHostedPaletteLink(

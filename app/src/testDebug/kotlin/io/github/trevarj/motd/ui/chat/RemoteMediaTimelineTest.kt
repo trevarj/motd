@@ -40,6 +40,7 @@ import io.github.trevarj.motd.data.repo.RetryableLinkPreviewException
 import io.github.trevarj.motd.ui.components.LinkActionsSheet
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
 import io.github.trevarj.motd.ui.components.LocalNetworkMediaHttp
+import io.github.trevarj.motd.ui.components.LocalOpenIrcChannelLink
 import io.github.trevarj.motd.ui.components.RoutedInlineMediaFixture
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.CompletableDeferred
@@ -154,6 +155,85 @@ class RemoteMediaTimelineTest {
                 assertTrue(rowHolds.isEmpty())
                 shortTaps.clear()
             }
+        }
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    @Config(qualifiers = "w411dp-h891dp")
+    fun nonWebBodyTapAndHoldUseOnlyTheirOwnActions() {
+        val gemini = "GeMiNi://Host.test/a%2Fb#Anchor"
+        val irc = "IRCS://chat.test/%23motd"
+        val text = "$gemini $irc intent:https://files.test/nested"
+        val app = RuntimeEnvironment.getApplication()
+        val appShadow = shadowOf(app)
+        val packageShadow = shadowOf(app.packageManager)
+        val handler = ComponentName("test.gemini", "test.gemini.OpenLink")
+        packageShadow.addActivityIfNotPresent(handler)
+        packageShadow.addIntentFilterForActivity(
+            handler,
+            IntentFilter(Intent.ACTION_VIEW).apply {
+                addCategory(Intent.CATEGORY_DEFAULT)
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                addDataScheme("gemini")
+            },
+        )
+        val openedIrc = mutableListOf<IrcChannelLink>()
+        var networkLoads = 0
+        render(
+            automatic = true,
+            text = text,
+            loadPreview = { _, _ ->
+                networkLoads++
+                null
+            },
+            loadAudioMetadata = { _, _ ->
+                networkLoads++
+                null
+            },
+            openIrcLink = openedIrc::add,
+        )
+        val body = compose.onNodeWithText(text, substring = true, useUnmergedTree = true)
+        val layouts = mutableListOf<TextLayoutResult>()
+        body.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val result = layouts.single()
+        val bodyText = result.layoutInput.text.text
+
+        fun at(url: String): Offset {
+            val glyph = result.getBoundingBox(bodyText.indexOf(url) + 2)
+            return Offset(glyph.left + glyph.width * 0.75f, glyph.center.y)
+        }
+
+        body.performTouchInput { click(at(gemini)) }
+        val view = requireNotNull(appShadow.nextStartedActivity)
+        assertEquals(Intent.ACTION_VIEW, view.action)
+        assertEquals(setOf(Intent.CATEGORY_BROWSABLE), view.categories)
+        assertEquals("gemini://Host.test/a%2Fb#Anchor", view.dataString)
+        assertNull(view.component)
+
+        body.performTouchInput { longClick(at(gemini)) }
+        compose.onNodeWithTag("link_action_open_browser").assertDoesNotExist()
+        assertCopiedLink(gemini)
+        body.performTouchInput { longClick(at(gemini)) }
+        compose.onNodeWithTag("link_action_open_with").performClick()
+        val chooser = requireNotNull(appShadow.nextStartedActivity)
+        assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+        val choice = requireNotNull(IntentCompat.getParcelableExtra(chooser, Intent.EXTRA_INTENT, Intent::class.java))
+        assertEquals(view.action, choice.action)
+        assertEquals(view.categories, choice.categories)
+        assertEquals(view.dataString, choice.dataString)
+        assertNull(choice.component)
+
+        body.performTouchInput { click(at(irc)) }
+        assertEquals(listOf(IrcChannelLink("chat.test", 6697, true, "#motd")), openedIrc)
+        body.performTouchInput { longClick(at(irc)) }
+        compose.onNodeWithTag("link_action_open_with").assertDoesNotExist()
+        compose.onNodeWithTag("link_action_open_browser").assertDoesNotExist()
+        compose.onNodeWithTag("link_action_join_channel").performClick()
+        compose.runOnIdle {
+            assertEquals(List(2) { IrcChannelLink("chat.test", 6697, true, "#motd") }, openedIrc)
+            assertNull(appShadow.nextStartedActivity)
+            assertEquals(0, networkLoads)
         }
     }
 
@@ -624,6 +704,7 @@ class RemoteMediaTimelineTest {
         messageKind: () -> MessageKind = { MessageKind.PRIVMSG },
         onLongPress: (MessageEntity) -> Unit = {},
         uriHandler: UriHandler? = null,
+        openIrcLink: ((IrcChannelLink) -> Unit)? = null,
     ) {
         val initialMessage = message(text)
         compose.setContent {
@@ -633,6 +714,7 @@ class RemoteMediaTimelineTest {
                 CompositionLocalProvider(
                     LocalAutomaticRemoteMedia provides automatic,
                     LocalNetworkMediaHttp provides networkMediaHttp,
+                    LocalOpenIrcChannelLink provides openIrcLink,
                     LocalUriHandler provides (uriHandler ?: LocalUriHandler.current),
                 ) {
                     MessageList(

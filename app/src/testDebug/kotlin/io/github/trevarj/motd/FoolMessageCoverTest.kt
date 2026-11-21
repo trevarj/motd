@@ -59,6 +59,7 @@ import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.SurfaceEffects
 import io.github.trevarj.motd.ui.chat.InlineMessageTranslation
 import io.github.trevarj.motd.ui.chat.InlineTranslation
+import io.github.trevarj.motd.ui.chat.IrcChannelLink
 import io.github.trevarj.motd.ui.chat.VoiceTranscriptState
 import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
 import io.github.trevarj.motd.ui.components.FOOL_BODY_RANGE
@@ -66,9 +67,11 @@ import io.github.trevarj.motd.ui.components.FoolBodyConcealment
 import io.github.trevarj.motd.ui.components.FoolBodyText
 import io.github.trevarj.motd.ui.components.FoolMessageScope
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
+import io.github.trevarj.motd.ui.components.LocalOpenIrcChannelLink
 import io.github.trevarj.motd.ui.components.MessageBubble
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
+import io.github.trevarj.motd.ui.components.linkifiedBody
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
@@ -129,6 +132,69 @@ class FoolMessageCoverTest {
         compose.onNodeWithTag("link_action_choices").assertDoesNotExist()
         compose.onNodeWithTag("link_action_copy").assertIsDisplayed()
         compose.onNode(lastChoice).assertIsDisplayed()
+    }
+
+    @Test
+    fun concealedIrcLinkRevealsBeforeItCanOpenJoin() {
+        val concealed = mutableStateOf(false)
+        val opened = mutableListOf<IrcChannelLink>()
+        val link = linkifiedBody("ircs://chat.test/#motd", Color.Blue, includeNonWebLinks = true)
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                CompositionLocalProvider(LocalOpenIrcChannelLink provides { opened.add(it) }) {
+                    Column(Modifier.testTag("irc_body")) {
+                        FoolBodyText(
+                            link,
+                            concealment = FoolBodyConcealment(concealed.value, { concealed.value = false }, "irc_reveal"),
+                        )
+                    }
+                }
+            }
+        }
+        val body = compose.onNodeWithTag("irc_body", useUnmergedTree = true)
+        val point =
+            compose
+                .onNodeWithText(link.text, useUnmergedTree = true)
+                .layout()
+                .getBoundingBox(3)
+                .center
+        compose.runOnIdle { concealed.value = true }
+        body.performTouchInput { longClick(point) }
+        compose.onNodeWithTag("link_action_sheet").assertDoesNotExist()
+        compose.runOnIdle {
+            assertFalse(concealed.value)
+            assertTrue(opened.isEmpty())
+        }
+        body.performTouchInput { click(point) }
+        compose.runOnIdle { assertEquals(listOf(IrcChannelLink("chat.test", 6697, true, "#motd")), opened) }
+    }
+
+    @Test
+    fun ownerlessIrcLinkLeavesRowTapAndOtherLinksIntact() {
+        val web = "https://files.test/read"
+        val telegram = "tg://resolve?domain=example"
+        val content = "IRCS://chat.test/#motd\n\n$web $telegram"
+        var rowTaps = 0
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                MessageBubble(
+                    sender = "alice",
+                    text = content,
+                    timeMs = 1000L,
+                    isSelf = false,
+                    kind = MessageKind.PRIVMSG,
+                    showSender = false,
+                    onClick = { rowTaps++ },
+                )
+            }
+        }
+        val body = compose.onNodeWithText(content, substring = true, useUnmergedTree = true)
+        val layout = body.layout()
+        val displayed = layout.layoutInput.text
+        val links = displayed.getLinkAnnotations(0, displayed.length).mapNotNull { (it.item as? LinkAnnotation.Url)?.url }
+        assertEquals(listOf(web, telegram), links)
+        body.performTouchInput { click(layout.getBoundingBox(7).center) }
+        compose.runOnIdle { assertEquals(1, rowTaps) }
     }
 
     @Test

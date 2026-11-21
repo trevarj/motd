@@ -1,7 +1,12 @@
 package io.github.trevarj.motd.ui.chat
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.LinkAnnotation
+import io.github.trevarj.motd.ui.components.NON_WEB_LINK_RANGE
+import io.github.trevarj.motd.ui.components.linkifiedBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -81,6 +86,89 @@ class LinkifyTest {
             MessageUrls.Empty,
             messageUrls("`https://inside.example/photo.png'"),
         )
+    }
+
+    @Test fun recognizes_only_curated_external_and_irc_links() {
+        listOf(
+            "GeMiNi://[2001:db8::1]:1965/capsule",
+            "gopher://gopher.example/1/docs",
+            "ipfs://QmRaZ1/here",
+            "ipns://docs.example/",
+            "ftp://files.example/file",
+            "ftps://files.example:990/file",
+            "TG://resolve?domain=example",
+            "tg://resolve?domain=example&profile",
+            "tg://resolve?domain=example_123&post=42",
+        ).forEach { assertEquals(it, ChatLinkKind.EXTERNAL, chatLinkKind(it)) }
+        listOf("irc://chat.example/#motd", "IRCS://chat.example/%23motd").forEach {
+            assertEquals(it, ChatLinkKind.IRC, chatLinkKind(it))
+        }
+        listOf(
+            "gemini:/capsule",
+            "gopher:///1/docs",
+            "ftp://alice@files.example/file",
+            "ftps://files.example:/file",
+            "ftp://files.example:65536/file",
+            "ftp://[broken]/file",
+            "ipfs://id%40other",
+            "tg://resolve?domain=",
+            "tg://resolve?domain=example&post=0",
+            "tg://resolve?domain=example&post=-1",
+            "tg://resolve?domain=example&profile&post=1",
+            "tg://resolve?domain=example&profile&start=payload",
+            "tg://resolve?domain=example&post=1&post=2",
+            "tg://resolve?domain=example&domain=other",
+            "tg://resolve?domain=example&start=payload",
+            "tg://resolve?domain=example%26start%3Dpayload",
+            "tg://resolve/?domain=example",
+            "tg://resolve:99?domain=example",
+            "tg://user@resolve?domain=example",
+            "tg://resolve?domain=example#fragment",
+            "tg://login?token=abc",
+            "tg://proxy?server=example",
+            "tg://invoice?slug=example",
+            "tg://join?invite=example",
+            "irc://chat.example",
+            "ircs://chat.example/#motd,other",
+            "ssh://example.org/",
+        ).forEach { assertNull(it, chatLinkKind(it)) }
+    }
+
+    @Test fun rendered_ranges_use_whole_uri_tokens_and_skip_code_and_nicks() {
+        val gemini = "GeMiNi://[2001:db8::1]/peer"
+        val irc = "ircs://chat.example/#peer"
+        val web = "https://example.test/peer"
+        val body = "[$gemini], ...$gemini unknown:https://example.test/@peer $irc `$gemini` $web @peer:)"
+        val annotated =
+            linkifiedBody(
+                body,
+                Color.Blue,
+                mentionColor = { if (it == "peer") Color.Red else null },
+                onMentionClick = {},
+                includeNonWebLinks = true,
+            )
+        assertEquals(body.replace("`", ""), annotated.text)
+        val ranges = annotated.getStringAnnotations(NON_WEB_LINK_RANGE, 0, annotated.length)
+        assertEquals(listOf(gemini, gemini, irc), ranges.map { it.item })
+        assertEquals(ranges.map { it.item }, ranges.map { annotated.text.substring(it.start, it.end) })
+        val links = annotated.getLinkAnnotations(0, annotated.length)
+        assertEquals(listOf(LinkAnnotation.Url(web)), links.mapNotNull { it.item as? LinkAnnotation.Url })
+        val mention = links.single { (it.item as? LinkAnnotation.Clickable)?.tag == "mention:peer" }
+        assertEquals(annotated.text.lastIndexOf("@peer"), mention.start)
+    }
+
+    @Test fun non_web_tokens_cannot_supply_network_urls() {
+        val text =
+            "gemini://host/photo.jpg gopher://host/clip.mp4 ipfs://cid/track.opus " +
+                "ftp://host/sample.motd-palette.json ircs://host/channel " +
+                "other://https://files.test/photo.png intent:https://files.test/swap.motd-palette.json " +
+                "javascript:https://files.test/clip.webm tg://resolve?domain=peer&post=https://files.test/example " +
+                "...gemini://capsule.example/?next=https://files.test/pixel.png"
+        assertEquals(emptyList<String>(), extractUrls(text))
+        assertEquals(MessageUrls.Empty, messageUrls(text))
+        val real = "https://files.test/real.motd-palette.json"
+        assertEquals(listOf(real), extractUrls("$text $real"))
+        assertEquals(real, messageUrls("$text $real").linkUrl)
     }
 
     @Test fun process_cache_retains_positive_and_empty_url_parses() {

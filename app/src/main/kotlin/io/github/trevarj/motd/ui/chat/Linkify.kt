@@ -3,15 +3,17 @@ package io.github.trevarj.motd.ui.chat
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.isImmediateAudioUrl
 import io.github.trevarj.motd.audio.parseAudioAttachments
+import java.net.URI
+import java.net.URISyntaxException
 import java.util.LinkedHashMap
 
-/** URL detection shared by the composer/bubble. Deliberately conservative (http/https only). */
-private val URL_REGEX = Regex("""https?://[^\s<>]+""")
+private val URI_TOKEN = Regex("""(?<![A-Za-z0-9+._-])[.+-]*([A-Za-z0-9_][A-Za-z0-9+._-]*:[^\s<>]+)""")
+private val TELEGRAM_RESOLVE = Regex("""//resolve\?domain=[A-Za-z][A-Za-z0-9_]{0,31}(?:&profile|&post=([0-9]+))?""")
 
 private val IMAGE_EXT = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif")
 private val VIDEO_EXT = setOf("mp4", "webm", "m4v", "mov")
 
-/** Ordered inline-media URLs, first previewable link, and audio links discovered in one URL-regex pass. */
+/** Ordered inline-media URLs, first previewable link, and audio links. */
 data class MessageUrls(
     val mediaUrls: List<String>,
     val linkUrl: String?,
@@ -56,8 +58,56 @@ fun extractUrls(text: String): List<String> =
     parseInlineCode(text)
         .asSequence()
         .filterIsInstance<InlineTextSegment.Plain>()
-        .flatMap { segment -> URL_REGEX.findAll(segment.text).map { trimUrl(it.value) } }
-        .toList()
+        .flatMap { segment -> uriTokens(segment.text) }
+        .mapNotNull { match ->
+            val token = match.value
+            if (token.isHttpLink()) trimUrl(token).takeIf(String::isHttpLink) else null
+        }.toList()
+
+internal fun uriTokens(text: String): Sequence<MatchGroup> = URI_TOKEN.findAll(text).mapNotNull { it.groups[1]?.takeIf { token -> "://" in token.value } }
+
+internal fun String.isHttpLink(): Boolean =
+    length > 8 && startsWith("https://", ignoreCase = true) ||
+        length > 7 && startsWith("http://", ignoreCase = true)
+
+internal enum class ChatLinkKind {
+    WEB,
+    EXTERNAL,
+    IRC,
+}
+
+internal fun chatLinkKind(url: String): ChatLinkKind? {
+    if (url.isHttpLink()) return ChatLinkKind.WEB
+    return when (url.substringBefore(':').lowercase()) {
+        "irc", "ircs" -> {
+            if (parseIrcChannelLink(url) != null) ChatLinkKind.IRC else null
+        }
+
+        "gemini", "gopher", "ipfs", "ipns", "ftp", "ftps" -> {
+            if (hasServerAuthority(url)) ChatLinkKind.EXTERNAL else null
+        }
+
+        "tg" -> {
+            val match = TELEGRAM_RESOLVE.matchEntire(url.substringAfter(':')) ?: return null
+            val post = match.groups[1]?.value
+            if (post == null || (post.toIntOrNull() ?: 0) > 0) ChatLinkKind.EXTERNAL else null
+        }
+
+        else -> {
+            null
+        }
+    }
+}
+
+private fun hasServerAuthority(url: String): Boolean {
+    val uri =
+        try {
+            URI(url)
+        } catch (_: URISyntaxException) {
+            return false
+        }
+    return uri.host != null && uri.rawUserInfo == null && !uri.rawAuthority.endsWith(':') && (uri.port == -1 || uri.port in 1..65535)
+}
 
 /**
  * Trim trailing punctuation that commonly abuts a URL in prose. A closing `)` is only stripped when

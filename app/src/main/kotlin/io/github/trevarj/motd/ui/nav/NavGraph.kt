@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,11 +49,14 @@ import io.github.trevarj.motd.ui.chat.ChatPresentationHost
 import io.github.trevarj.motd.ui.chat.ChatPresentationRegistry
 import io.github.trevarj.motd.ui.chat.ChatScreen
 import io.github.trevarj.motd.ui.chat.ChatViewModel
+import io.github.trevarj.motd.ui.chat.IrcLinkDialog
+import io.github.trevarj.motd.ui.chat.IrcLinkViewModel
 import io.github.trevarj.motd.ui.chatlist.AutoGroupScreen
 import io.github.trevarj.motd.ui.chatlist.ChatListScreen
 import io.github.trevarj.motd.ui.chatlist.ChatListViewModel
 import io.github.trevarj.motd.ui.chatlist.FolderEditorScreen
 import io.github.trevarj.motd.ui.chatlist.ManageFoldersScreen
+import io.github.trevarj.motd.ui.components.LocalOpenIrcChannelLink
 import io.github.trevarj.motd.ui.feed.GlobalFeedScreen
 import io.github.trevarj.motd.ui.feed.MentionsScreen
 import io.github.trevarj.motd.ui.imageviewer.ImageViewerScreen
@@ -88,6 +92,7 @@ import io.github.trevarj.motd.ui.settings.SurfaceEffectsSettingsScreen
 import io.github.trevarj.motd.ui.settings.UploadsSettingsScreen
 import io.github.trevarj.motd.ui.settings.WallpaperWorkshopScreen
 import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkScreen
+import io.github.trevarj.motd.ui.settings.addnetwork.AddNetworkViewModel
 import io.github.trevarj.motd.ui.settings.bouncer.BouncerNetworksScreen
 import io.github.trevarj.motd.ui.settings.labs.AiLabsScreen
 import io.github.trevarj.motd.ui.settings.labs.AiModelLibraryScreen
@@ -298,48 +303,70 @@ fun MotdNavGraph(
                     detailPane = { showBack ->
                         val chatViewModel: ChatViewModel = hiltViewModel(entry)
                         ChatTranslationSessionEffect(navController, entry, chatViewModel::clearExternalTranslationSession)
-                        ChatScreen(
-                            bufferId = route.bufferId,
-                            appearance = appearance,
-                            viewModel = chatViewModel,
-                            pageCache = chatListViewModel.chatPageCache,
-                            presentations = presentations,
-                            onBack = { navController.popBackStack() },
-                            showBack = showBack,
-                            onOpenConversationList =
-                                if (portalOwned && showBack) {
-                                    { navController.openDickordNavigator() }
-                                } else {
-                                    null
-                                },
-                            onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
-                            onOpenWallpaperWorkshop = { navController.navigate(WallpaperWorkshopRoute(it)) },
-                            onOpenSearch = { navController.navigate(SearchRoute(it)) },
-                            onOpenImage = { url, networkId ->
-                                navController.navigate(ImageViewerRoute(url, networkId))
+                        val ircLinkViewModel: IrcLinkViewModel = hiltViewModel(entry)
+                        IrcLinkDialog(
+                            viewModel = ircLinkViewModel,
+                            onSetup = { link ->
+                                if (navController.currentBackStackEntry == entry) {
+                                    navController.navigate(AddNetworkRoute(link.host, link.port, link.tls))
+                                }
                             },
-                            onOpenPalette = { palette, sourceLink ->
-                                navController.navigate(
-                                    PalettePreviewRoute(encodePalette(palette).decodeToString(), sourceLink = sourceLink),
-                                )
-                            },
-                            // /msg and /query replace the detail on wide layouts and push on phones.
-                            onOpenBuffer = {
-                                navController.openChat(ChatRoute(it), replaceCurrentChat = !showBack)
-                            },
-                            onOpenAudioOrigin = { origin ->
-                                navController.openChat(
-                                    ChatRoute(origin.bufferId, origin.msgid, origin.serverTime, origin.eventId),
-                                    replaceCurrentChat = !showBack,
-                                )
-                            },
-                            onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
-                            onOpenAccountSetup = { navController.navigate(AccountSetupRoute(it)) },
-                            onOpenAiSetup = { navController.navigate(AiLabsRoute(SettingsTarget.AI_TEXT_TOOLS)) },
-                            onOpenNetworkSettings = {
-                                navController.navigate(NetworkSettingsRoute(it, NetworkSettingsTarget.CONNECTION))
+                            onOpen = { bufferId ->
+                                if (navController.currentBackStackEntry == entry && bufferId != route.bufferId) {
+                                    navController.openChat(ChatRoute(bufferId), replaceCurrentChat = !showBack)
+                                }
                             },
                         )
+                        CompositionLocalProvider(
+                            LocalOpenIrcChannelLink provides { link ->
+                                if (navController.currentBackStackEntry == entry) {
+                                    ircLinkViewModel.review(link, route.bufferId)
+                                }
+                            },
+                        ) {
+                            ChatScreen(
+                                bufferId = route.bufferId,
+                                appearance = appearance,
+                                viewModel = chatViewModel,
+                                pageCache = chatListViewModel.chatPageCache,
+                                presentations = presentations,
+                                onBack = { navController.popBackStack() },
+                                showBack = showBack,
+                                onOpenConversationList =
+                                    if (portalOwned && showBack) {
+                                        { navController.openDickordNavigator() }
+                                    } else {
+                                        null
+                                    },
+                                onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
+                                onOpenWallpaperWorkshop = { navController.navigate(WallpaperWorkshopRoute(it)) },
+                                onOpenSearch = { navController.navigate(SearchRoute(it)) },
+                                onOpenImage = { url, networkId ->
+                                    navController.navigate(ImageViewerRoute(url, networkId))
+                                },
+                                onOpenPalette = { palette, sourceLink ->
+                                    navController.navigate(
+                                        PalettePreviewRoute(encodePalette(palette).decodeToString(), sourceLink = sourceLink),
+                                    )
+                                },
+                                // /msg and /query replace the detail on wide layouts and push on phones.
+                                onOpenBuffer = {
+                                    navController.openChat(ChatRoute(it), replaceCurrentChat = !showBack)
+                                },
+                                onOpenAudioOrigin = { origin ->
+                                    navController.openChat(
+                                        ChatRoute(origin.bufferId, origin.msgid, origin.serverTime, origin.eventId),
+                                        replaceCurrentChat = !showBack,
+                                    )
+                                },
+                                onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },
+                                onOpenAccountSetup = { navController.navigate(AccountSetupRoute(it)) },
+                                onOpenAiSetup = { navController.navigate(AiLabsRoute(SettingsTarget.AI_TEXT_TOOLS)) },
+                                onOpenNetworkSettings = {
+                                    navController.navigate(NetworkSettingsRoute(it, NetworkSettingsTarget.CONNECTION))
+                                },
+                            )
+                        }
                     },
                 )
             }
@@ -523,7 +550,7 @@ fun MotdNavGraph(
                 target = entry.toRoute<NetworksSettingsRoute>().target,
                 onBack = { navController.popBackStack() },
                 onOpenNetwork = { navController.navigate(NetworkSettingsRoute(it)) },
-                onOpenAddNetwork = { navController.navigate(AddNetworkRoute) },
+                onOpenAddNetwork = { navController.navigate(AddNetworkRoute()) },
                 onScanInvite = { navController.navigate(QrInviteScannerRoute) },
             )
         }
@@ -703,7 +730,12 @@ fun MotdNavGraph(
             )
         }
         // Round 5: app-shell / network-management destinations.
-        composable<AddNetworkRoute> {
+        composable<AddNetworkRoute> { entry ->
+            val route = entry.toRoute<AddNetworkRoute>()
+            val viewModel: AddNetworkViewModel = hiltViewModel(entry)
+            LaunchedEffect(viewModel, route) {
+                route.prefillHost?.let { viewModel.prefillEndpoint(it, route.prefillPort, route.prefillTls) }
+            }
             AddNetworkScreen(
                 onBack = { navController.popBackStack() },
                 onScanInvite = { navController.navigate(QrInviteScannerRoute) },
@@ -713,6 +745,7 @@ fun MotdNavGraph(
                         popUpTo<AddNetworkRoute> { inclusive = true }
                     }
                 },
+                viewModel = viewModel,
             )
         }
         composable<BouncerNetworksRoute> { entry ->
@@ -861,7 +894,7 @@ private fun ChatListPane(
         onOpenOnboarding = { navController.navigate(OnboardingRoute) },
         onOpenNetworkSettings = { navController.navigate(NetworkSettingsRoute(it)) },
         onOpenBouncerSettings = { navController.navigate(BouncerNetworksRoute(rootNetworkId = it)) },
-        onOpenAddNetwork = { navController.navigate(AddNetworkRoute) },
+        onOpenAddNetwork = { navController.navigate(AddNetworkRoute()) },
         onCreateContactInvite = { navController.navigate(CreateContactInviteRoute(it)) },
         onScanInvite = { navController.navigate(QrInviteScannerRoute) },
         onOpenChannelList = { navController.navigate(ChannelListRoute(it)) },

@@ -51,6 +51,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -65,6 +66,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.LinkInteractionListener
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.TextLayoutResult
@@ -244,16 +246,53 @@ private fun FoolBodyTextHost(
     val senderLink = remember(text, start, concealed) { if (concealed) text.getLinkAnnotations(0, start).firstOrNull()?.item as? LinkAnnotation.Clickable else null }
     val linksEnabled = LocalChatLinksEnabled.current && LocalMessageSelection.current == null
     val actionsEnabled = LocalMessageSelection.current == null && LocalMessageActionsEnabled.current
-    // Retain characters, styles and paragraph metrics, but remove inaccessible link focus nodes.
-    val displayed =
-        remember(text, concealed, start, end, linksEnabled) {
-            if (!concealed && linksEnabled) {
-                text
-            } else {
-                text.flatMapAnnotations { annotation ->
-                    val hidden = concealed && annotation.item is LinkAnnotation && annotation.start < end && annotation.end > start
-                    if (hidden || (!linksEnabled && annotation.item is LinkAnnotation.Url)) emptyList() else listOf(annotation)
+    val openIrcLink = LocalOpenIrcChannelLink.current
+    val hasIrcOwner = openIrcLink != null
+    val nonWebLinks =
+        remember(text, concealed, start, end, linksEnabled, hasIrcOwner) {
+            if (linksEnabled) {
+                val ranges = text.getStringAnnotations(NON_WEB_LINK_RANGE, 0, text.length)
+                if (ranges.isNotEmpty() && (concealed || !hasIrcOwner)) {
+                    ranges.filterNot {
+                        concealed && it.start < end && it.end > start ||
+                            !hasIrcOwner && (it.item.startsWith("irc://", ignoreCase = true) || it.item.startsWith("ircs://", ignoreCase = true))
+                    }
+                } else {
+                    ranges
                 }
+            } else {
+                emptyList()
+            }
+        }
+    val openNonWebLink =
+        if (nonWebLinks.isNotEmpty()) {
+            val context = LocalContext.current
+            val latestOpenIrcLink by rememberUpdatedState(openIrcLink)
+            remember(context) {
+                LinkInteractionListener { link -> context.openChatNonWebLink((link as LinkAnnotation.Url).url, latestOpenIrcLink) }
+            }
+        } else {
+            null
+        }
+    val displayed =
+        remember(text, concealed, start, end, linksEnabled, nonWebLinks, openNonWebLink) {
+            val visible =
+                if (!concealed && linksEnabled) {
+                    text
+                } else {
+                    text.flatMapAnnotations { annotation ->
+                        val hidden = concealed && annotation.item is LinkAnnotation && annotation.start < end && annotation.end > start
+                        if (hidden || (!linksEnabled && annotation.item is LinkAnnotation.Url)) emptyList() else listOf(annotation)
+                    }
+                }
+            if (openNonWebLink == null) {
+                visible
+            } else {
+                val builder = AnnotatedString.Builder(visible)
+                for (range in nonWebLinks) {
+                    builder.addLink(LinkAnnotation.Url(range.item, linkInteractionListener = openNonWebLink), range.start, range.end)
+                }
+                builder.toAnnotatedString()
             }
         }
     val latestLinkLongPress by rememberUpdatedState(onLinkLongPress)
@@ -262,7 +301,7 @@ private fun FoolBodyTextHost(
     val links = remember(displayed) { displayed.getLinkAnnotations(0, displayed.length) }
     val linkUrls =
         if (actionsEnabled && !concealed && linksEnabled && links.isNotEmpty()) {
-            remember(links) { links.mapNotNull { (it.item as? LinkAnnotation.Url)?.url?.takeIf(String::isHttpLink) }.distinct() }
+            remember(links) { links.mapNotNull { (it.item as? LinkAnnotation.Url)?.url }.distinct() }
         } else {
             emptyList()
         }
@@ -349,7 +388,7 @@ private fun FoolBodyTextHost(
                         when {
                             tag == "action-sender" && latestSenderLongClick != null -> latestSenderLongClick?.invoke()
                             tag?.startsWith("mention:") == true && latestMentionLongClick != null -> latestMentionLongClick?.invoke(tag.removePrefix("mention:"))
-                            linkActionTargets != null && url?.isHttpLink() == true -> linkActionTargets.value = listOf(url)
+                            linkActionTargets != null && url != null -> linkActionTargets.value = listOf(url)
                             else -> latestLinkLongPress?.invoke()
                         }
                         do {

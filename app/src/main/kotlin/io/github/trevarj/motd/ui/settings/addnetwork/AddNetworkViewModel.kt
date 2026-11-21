@@ -90,6 +90,17 @@ class AddNetworkViewModel
         // Live connect-test collector; cancelled when the test is abandoned/retried so a stale row's
         // state can never drive navigation after we deleted it.
         private var testJob: Job? = null
+        private var endpointPrefilled = false
+
+        internal fun prefillEndpoint(
+            host: String,
+            port: Int,
+            tls: Boolean,
+        ) {
+            if (endpointPrefilled) return
+            endpointPrefilled = true
+            editServer(_state.value.server.copy(host = host, port = port.toString(), tls = tls))
+        }
 
         fun setKind(kind: ConnectionChoice) {
             _state.value =

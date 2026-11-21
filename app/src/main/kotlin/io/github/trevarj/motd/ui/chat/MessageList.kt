@@ -1950,7 +1950,7 @@ private fun MessageRow(
     // come from a bounded process cache first; only a genuine miss waits for the fling to settle.
     val mayContainUrl =
         remember(msg.text) {
-            msg.text.contains("http://") || msg.text.contains("https://")
+            msg.text.contains("http://", ignoreCase = true) || msg.text.contains("https://", ignoreCase = true)
         }
     var richUrls by remember(msg.id, msg.text) {
         mutableStateOf(if (mayContainUrl) MessageUrlCache.get(msg.text) else MessageUrls.Empty)

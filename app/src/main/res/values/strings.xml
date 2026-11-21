@@ -1232,6 +1232,7 @@
     <string name="chat_link_actions">Link actions</string>
     <string name="chat_link_open_default">Open in default app</string>
     <string name="chat_link_open_browser">Open in browser</string>
+    <string name="chat_link_open_with">Open with</string>
     <string name="chat_link_no_app">No app is available to open this link.</string>
     <string name="chat_link_no_browser">No browser is available to open this link.</string>
     <string name="settings_show_shared_avatars">Show shared user avatars</string>
@@ -2642,4 +2643,18 @@
     <string name="settings_emoji_progress">Downloading %1$s of %2$s</string>
     <string name="settings_emoji_sample" translatable="false">A 😀 👍🏽 🤝 🫱🏻‍🫲🏿 👨‍👩‍👧‍👦 🚶🏽‍➡️ 🇺🇳 ❤️ Z</string>
     <string name="settings_emoji_sample_error">The comparison could not be loaded. System emoji remain available.</string>
+    <string name="irc_link_title">IRC channel link</string>
+    <string name="irc_link_endpoint">%1$s · %2$s</string>
+    <string name="irc_link_tls">TLS</string>
+    <string name="irc_link_plaintext">Plaintext</string>
+    <string name="irc_link_account">%1$s · %2$s (IRC user: %3$s)</string>
+    <string name="irc_link_account_login">%1$s · %2$s (IRC user: %3$s, SASL: %4$s)</string>
+    <string name="irc_link_checking">Checking saved connections…</string>
+    <string name="irc_link_no_match">No saved connection matches this server. Set up a network first, then open the link again to join.</string>
+    <string name="irc_link_setup">Set up network…</string>
+    <string name="irc_link_open">Open %1$s</string>
+    <string name="irc_link_join">Join %1$s</string>
+    <string name="irc_link_connect">Connect and join</string>
+    <string name="irc_link_connecting">Connecting…</string>
+    <string name="irc_link_joining">Waiting for the server to confirm the join…</string>
 </resources>

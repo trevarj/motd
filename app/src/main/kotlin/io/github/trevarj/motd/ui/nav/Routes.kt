@@ -345,7 +345,11 @@ data class NotificationTarget(
 )
 
 // Round 5: app shell / network management.
-@Serializable data object AddNetworkRoute
+@Serializable data class AddNetworkRoute(
+    val prefillHost: String? = null,
+    val prefillPort: Int = 6697,
+    val prefillTls: Boolean = true,
+)
 
 @Serializable data class BouncerNetworksRoute(
     val rootNetworkId: Long,

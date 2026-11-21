@@ -61,6 +61,7 @@ import io.github.trevarj.motd.data.prefs.PaletteColors
 import io.github.trevarj.motd.data.prefs.PaletteDocument
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewKind
+import io.github.trevarj.motd.ui.chat.isHttpLink
 import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.LocalMediaCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalUseThemeTextColors
