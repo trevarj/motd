@@ -1,9 +1,9 @@
 [versions]
-agp = "9.4.1"
+agp = "9.5.1"
 kotlin = "2.4.21"
 ktlint = "1.8.0"
 ktlintGradle = "14.2.0"
-ksp = "2.3.12"
+ksp = "2.3.13"
 hilt = "2.60.1"
 hiltNavigationCompose = "1.4.0"
 composeBom = "2026.09.00"
@@ -26,7 +26,7 @@ okio = "3.18.2"
 # Explicit runtime pin for the WSS transport and MockWebServer-backed tests.
 okhttp = "5.5.1"
 coroutines = "1.11.0"
-serialization = "1.12.0"
+serialization = "1.13.0"
 # 2.4.0 was never published to Maven Central (JitPack-only under
 # com.github.UnifiedPush); 2.5.0 is the first Central release.
 unifiedpush = "3.3.5"
