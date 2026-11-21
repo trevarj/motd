@@ -1608,6 +1608,7 @@ internal fun ChatContent(
         // Anchors for the send flight. Held in their own holder so the per-layout writes recompose the
         // overlay that reads them and nothing else on this surface.
         val flightAnchors = remember(traceBufferId) { SendFlightAnchors() }
+        val flightLandingId by remember(flightAnchors) { derivedStateOf { flightAnchors.landingRow?.first } }
         // Rows a flight has already delivered. Their entrance was the ghost, so they must never also
         // play the ordinary live-arrival reveal once the flight is gone.
         var flownRowIds by remember(traceBufferId) { mutableStateOf(emptySet<Long>()) }
@@ -4600,9 +4601,9 @@ internal fun ChatContent(
                             ) {
                                 val flightMessage =
                                     outgoingFlight?.let { flight ->
-                                        val landingId = flightAnchors.landingRow?.first
+                                        val landingId = if (flight.eventIds.isEmpty()) flightLandingId else null
                                         items.itemSnapshotList.items.firstOrNull { row ->
-                                            if (flight.eventIds.isEmpty() && landingId != null) {
+                                            if (landingId != null) {
                                                 row.id == landingId
                                             } else {
                                                 flight.matches(row)

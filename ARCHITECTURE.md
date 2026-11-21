@@ -485,6 +485,10 @@ flowchart TD
   glyph without shortening the morph or taking ownership from the accessible real row.
   Landing-row discovery is capped at one second; an absent/offscreen row cannot keep
   the flight alive or restore submitted text to the composer.
+  A zero-height landing gap still reports its real window position, never the viewport origin.
+  Landing geometry updates stay in layout and drawing; the status lookup observes only the
+  landing ID until acceptance supplies canonical event IDs. Updating a room's read anchor
+  does not resubscribe to its roster; member queries switch only when the resolved room ID changes.
 - Outgoing acceptance transfers ownership from the draft to durable transcript rows before
   waiting for transport. Ordered per-network service work retains lifecycle protection;
   immediate-wire consumers explicitly await its outcome. Pending rows show a spinner,

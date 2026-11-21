@@ -1211,6 +1211,34 @@ class MessageTimelineUiTest {
     }
 
     @Test
+    fun sendLandingKeepsItsWindowAnchorWhileTheGapOpens() {
+        val sent = message(2, 2_000, MessageKind.PRIVMSG, "outgoing", self = true, pending = true)
+        val previous = message(1, 1_000, MessageKind.PRIVMSG, "previous")
+        val flight = OutgoingFlight(token = 1, text = sent.text, launchedAtMs = sent.serverTime, eventIds = setOf(sent.id))
+        var progress by mutableStateOf(0f)
+        var landing: Rect? = null
+        render(
+            flowOf(PagingData.from(listOf(sent, previous))),
+            outgoingFlight = { flight },
+            flightProgress = { progress },
+            onFlightRowPositioned = { id, rect -> if (id == sent.id) landing = rect },
+        )
+        compose.onNodeWithText(previous.text, useUnmergedTree = true).assertIsDisplayed()
+        val closed = compose.runOnIdle { checkNotNull(landing) }
+        assertEquals(0f, closed.height, 0f)
+
+        compose.runOnIdle { progress = 0.5f }
+        val halfway = compose.runOnIdle { checkNotNull(landing) }
+        compose.runOnIdle { progress = 1f }
+        val open = compose.runOnIdle { checkNotNull(landing) }
+
+        assertTrue(open.height > 0f)
+        assertEquals(open.height / 2f, halfway.height, 1f)
+        assertEquals(open.bottom, halfway.bottom, 1f)
+        assertEquals(open.bottom, closed.bottom, 1f)
+    }
+
+    @Test
     fun specialMessageHoldsPreserveNestedActions() {
         var joined = 0L
         var dismissed = 0L
@@ -1882,6 +1910,8 @@ class MessageTimelineUiTest {
         automaticRemoteMedia: Boolean = false,
         loadAudioMetadata: suspend (String, Long?) -> AudioMetadata? = { _, _ -> null },
         outgoingFlight: () -> OutgoingFlight? = { null },
+        flightProgress: () -> Float = { 1f },
+        onFlightRowPositioned: (Long, Rect) -> Unit = { _, _ -> },
     ) {
         compose.setContent {
             var ai by androidx.compose.runtime.remember { mutableStateOf<AiTextUiState>(AiTextUiState.Closed) }
@@ -1956,6 +1986,8 @@ class MessageTimelineUiTest {
                         cachedPreview = cachedPreview,
                         loadAudioMetadata = loadAudioMetadata,
                         outgoingFlight = outgoingFlight(),
+                        flightProgress = flightProgress,
+                        onFlightRowPositioned = onFlightRowPositioned,
                         richContentReady = richContentReady,
                         showImages = false,
                         showLinkPreviews = showLinkPreviews,

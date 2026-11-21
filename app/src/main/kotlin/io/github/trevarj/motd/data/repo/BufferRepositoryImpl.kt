@@ -96,15 +96,15 @@ class BufferRepositoryImpl
         // Not a Flow: registering an observer can need the writer (see ChatPageCache's reads).
         override suspend fun buffer(id: Long): BufferEntity? = withContext(Dispatchers.IO) { bufferDao.canonicalNow(id) }
 
-        override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> =
-            bufferDao.observe(bufferId).flatMapLatest { room ->
-                memberDao.observe(room?.id ?: bufferId)
-            }
+        override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = canonicalRoomIdFlow(bufferId).flatMapLatest { memberDao.observe(it) }
 
-        override fun observeMemberNicks(bufferId: Long): Flow<List<String>> =
-            bufferDao.observe(bufferId).flatMapLatest { room ->
-                memberDao.observeNicks(room?.id ?: bufferId)
-            }
+        override fun observeMemberNicks(bufferId: Long): Flow<List<String>> = canonicalRoomIdFlow(bufferId).flatMapLatest { memberDao.observeNicks(it) }
+
+        private fun canonicalRoomIdFlow(bufferId: Long): Flow<Long> =
+            bufferDao
+                .observe(bufferId)
+                .map { it?.id ?: bufferId }
+                .distinctUntilChanged()
 
         override fun observeLastSpokeByNick(bufferId: Long): Flow<Map<String, Long>> =
             bufferDao.observe(bufferId).flatMapLatest { room ->

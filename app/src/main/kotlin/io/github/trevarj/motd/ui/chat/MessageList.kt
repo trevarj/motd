@@ -66,10 +66,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -80,6 +80,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.toSize
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.ItemSnapshotList
 import androidx.paging.LoadState
@@ -1342,7 +1343,9 @@ private fun FlightLandingEntry(
         modifier =
             modifier
                 .fillMaxWidth()
-                .clipToBounds()
+                .onGloballyPositioned {
+                    latestOnPositioned.value(messageId, Rect(it.positionInWindow(), it.size.toSize()))
+                }.clipToBounds()
                 .layout { measurable, constraints ->
                     val placeable = measurable.measure(constraints)
                     // Clamped, so the spring's overshoot stays on the bubble alone: the gap opens to
@@ -1354,8 +1357,7 @@ private fun FlightLandingEntry(
                     layout(placeable.width, revealedHeight) {
                         placeable.placeRelative(0, revealedHeight - placeable.height)
                     }
-                }.graphicsLayer { alpha = 0f }
-                .onGloballyPositioned { latestOnPositioned.value(messageId, it.boundsInWindow()) },
+                }.graphicsLayer { alpha = 0f },
     ) {
         content()
     }
