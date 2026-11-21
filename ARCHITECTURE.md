@@ -352,8 +352,10 @@ flowchart TD
   Literal characters and body offsets stay unchanged. Known mentions and sender names
   follow the configured nickname-tap action and retain their nickname colors instead
   of inheriting URL styling. Mention matching excludes URLs/code. Holding a nickname
-  opens its user/WHOIS sheet, while holding other message content opens message
-  actions. Concealment and transcript selection suppress nickname gestures.
+  opens its user/WHOIS sheet; holding linked text or a link preview card offers
+  the default app, a browser, and Copy for that URL. Taps retain native routing.
+  Ordinary message holds still open message actions. Concealment and transcript
+  selection suppress gestures on the concealed or selected body.
   Sender prefixes and composer styling remain separate.
   Appearance → Transparency and blur owns continuous 0–100 controls for ordinary PRIVMSG, NOTICE, and ACTION
   backings in every layout, with or without nickname tint: opacity defaults to 100%, and independent

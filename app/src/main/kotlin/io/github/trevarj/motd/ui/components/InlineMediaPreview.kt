@@ -80,6 +80,13 @@ internal fun MediaOriginCaption(
     color: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
     val origin = remember(url) { mediaOriginLabel(url) } ?: return
+    val linksEnabled =
+        LocalChatLinksEnabled.current && LocalMessageSelection.current == null && !LocalFoolBodyConcealment.current.concealed
+    val captionModifier = modifier.padding(top = 4.dp).testTag("media_origin_caption")
+    if (!linksEnabled) {
+        Text(origin, captionModifier, color = color, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+        return
+    }
     val caption =
         remember(url, origin, color) {
             buildAnnotatedString {
@@ -88,13 +95,14 @@ internal fun MediaOriginCaption(
                 }
             }
         }
-    Text(
+    FoolBodyText(
         text = caption,
-        modifier = modifier.padding(top = 4.dp).testTag("media_origin_caption"),
+        modifier = captionModifier,
         style = MaterialTheme.typography.bodySmall,
         color = color,
         maxLines = 1,
         overflow = TextOverflow.MiddleEllipsis,
+        concealment = FoolBodyConcealment(),
     )
 }
 

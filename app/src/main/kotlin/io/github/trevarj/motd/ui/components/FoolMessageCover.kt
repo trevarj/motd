@@ -86,6 +86,7 @@ import kotlinx.coroutines.flow.first
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 internal const val FOOL_BODY_RANGE = "fool_body"
+private const val MAX_TEXT_CUSTOM_ACTIONS = 31
 
 internal data class FoolBodyConcealment(
     val concealed: Boolean = false,
@@ -98,7 +99,7 @@ internal val LocalFoolBodyConcealment = staticCompositionLocalOf { FoolBodyConce
 internal val LocalMessageSelection = staticCompositionLocalOf<(() -> Unit)?> { null }
 internal val LocalMessageSelectionBounds = staticCompositionLocalOf<(androidx.compose.ui.geometry.Rect) -> Unit> { {} }
 
-/** Scope only: authors, media, metadata and their input/semantics are never covered. */
+/** Only the body is painted as concealed; preview links also respect the concealment state. */
 @Composable
 internal fun FoolMessageScope(
     concealed: Boolean,
@@ -241,39 +242,65 @@ private fun FoolBodyTextHost(
             if (concealed && pathLayout != null && pathLayout.layoutInput.text.text == text.text) pathLayout.getPathForRange(start, end) else null
         }
     val senderLink = remember(text, start, concealed) { if (concealed) text.getLinkAnnotations(0, start).firstOrNull()?.item as? LinkAnnotation.Clickable else null }
-    // Retain characters, styles and paragraph metrics, but remove body links and focus nodes.
+    val linksEnabled = LocalChatLinksEnabled.current && LocalMessageSelection.current == null
+    val actionsEnabled = LocalMessageSelection.current == null && LocalMessageActionsEnabled.current
+    // Retain characters, styles and paragraph metrics, but remove inaccessible link focus nodes.
     val displayed =
-        remember(text, concealed, start, end) {
-            if (!concealed) {
+        remember(text, concealed, start, end, linksEnabled) {
+            if (!concealed && linksEnabled) {
                 text
             } else {
                 text.flatMapAnnotations { annotation ->
-                    if (annotation.item is LinkAnnotation && annotation.start < end && annotation.end > start) emptyList() else listOf(annotation)
+                    val hidden = concealed && annotation.item is LinkAnnotation && annotation.start < end && annotation.end > start
+                    if (hidden || (!linksEnabled && annotation.item is LinkAnnotation.Url)) emptyList() else listOf(annotation)
                 }
             }
         }
     val latestLinkLongPress by rememberUpdatedState(onLinkLongPress)
     val latestSenderLongClick by rememberUpdatedState(onSenderLongClick)
     val latestMentionLongClick by rememberUpdatedState(onMentionLongClick)
+    val links = remember(displayed) { displayed.getLinkAnnotations(0, displayed.length) }
+    val linkUrls =
+        if (actionsEnabled && !concealed && linksEnabled && links.isNotEmpty()) {
+            remember(links) { links.mapNotNull { (it.item as? LinkAnnotation.Url)?.url?.takeIf(String::isHttpLink) }.distinct() }
+        } else {
+            emptyList()
+        }
+    val linkActionTargets = if (linkUrls.isNotEmpty()) remember(displayed) { mutableStateOf<List<String>?>(null) } else null
+    val linkMenuLabel = if (linkActionTargets != null) stringResource(R.string.chat_link_actions) else ""
     val userMenuLabel = stringResource(R.string.settings_nickname_tap_user_menu)
-    val nicknameActionsEnabled = LocalMessageSelection.current == null && LocalMessageActionsEnabled.current
-    val nicknameActions =
-        remember(displayed, onSenderLongClick, onMentionLongClick, userMenuLabel, nicknameActionsEnabled) {
-            if (!nicknameActionsEnabled) {
+    val accessibilityActions =
+        remember(displayed, onSenderLongClick, onMentionLongClick, userMenuLabel, actionsEnabled, senderLink, linkActionTargets, linkMenuLabel) {
+            if (!actionsEnabled || links.isEmpty()) {
                 emptyList()
             } else {
-                displayed.getLinkAnnotations(0, displayed.length).mapNotNull { range ->
-                    val tag = (range.item as? LinkAnnotation.Clickable)?.tag
-                    val callback: (() -> Unit)? =
-                        when {
-                            tag == "action-sender" -> onSenderLongClick
-                            tag?.startsWith("mention:") == true -> onMentionLongClick?.let { action -> { action(tag.removePrefix("mention:")) } }
-                            else -> null
-                        }
-                    callback?.let {
-                        CustomAccessibilityAction("$userMenuLabel: ${displayed.text.substring(range.start, range.end)}") {
-                            it()
-                            true
+                buildList {
+                    if (linkActionTargets != null) {
+                        val label = linkUrls.singleOrNull()?.let { "$linkMenuLabel: $it" } ?: linkMenuLabel
+                        add(
+                            CustomAccessibilityAction(label) {
+                                linkActionTargets.value = linkUrls
+                                true
+                            },
+                        )
+                    }
+                    val limit = MAX_TEXT_CUSTOM_ACTIONS - if (senderLink != null) 1 else 0
+                    for (range in links) {
+                        if (size == limit) break
+                        val tag = (range.item as? LinkAnnotation.Clickable)?.tag
+                        val callback: (() -> Unit)? =
+                            when {
+                                tag == "action-sender" -> onSenderLongClick
+                                tag?.startsWith("mention:") == true -> onMentionLongClick?.let { action -> { action(tag.removePrefix("mention:")) } }
+                                else -> null
+                            }
+                        if (callback != null) {
+                            add(
+                                CustomAccessibilityAction("$userMenuLabel: ${displayed.text.substring(range.start, range.end)}") {
+                                    callback()
+                                    true
+                                },
+                            )
                         }
                     }
                 }
@@ -281,11 +308,11 @@ private fun FoolBodyTextHost(
         }
     val haptic = LocalHapticFeedback.current
     val linkLongPressModifier =
-        if (LocalMessageSelection.current == null && LocalMessageActionsEnabled.current &&
-            (onLinkLongPress != null || onSenderLongClick != null || onMentionLongClick != null) &&
-            displayed.hasLinkAnnotations(0, displayed.length)
+        if (actionsEnabled &&
+            (linkActionTargets != null || onLinkLongPress != null || onSenderLongClick != null || onMentionLongClick != null) &&
+            links.isNotEmpty()
         ) {
-            Modifier.pointerInput(displayed, haptic) {
+            Modifier.pointerInput(displayed, concealed, linkActionTargets, haptic) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = true, pass = PointerEventPass.Initial)
                     if (currentEvent.changes.size != 1) return@awaitEachGesture
@@ -318,9 +345,11 @@ private fun FoolBodyTextHost(
                     if (releasedOrMoved == null) {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         val tag = (link as? LinkAnnotation.Clickable)?.tag
+                        val url = (link as? LinkAnnotation.Url)?.url
                         when {
                             tag == "action-sender" && latestSenderLongClick != null -> latestSenderLongClick?.invoke()
                             tag?.startsWith("mention:") == true && latestMentionLongClick != null -> latestMentionLongClick?.invoke(tag.removePrefix("mention:"))
+                            linkActionTargets != null && url?.isHttpLink() == true -> linkActionTargets.value = listOf(url)
                             else -> latestLinkLongPress?.invoke()
                         }
                         do {
@@ -345,7 +374,7 @@ private fun FoolBodyTextHost(
             modifier =
                 textModifier
                     .then(linkLongPressModifier)
-                    .then(if (nicknameActions.isEmpty() || concealed) Modifier else Modifier.semantics { customActions = nicknameActions })
+                    .then(if (accessibilityActions.isEmpty() || concealed) Modifier else Modifier.semantics { customActions = accessibilityActions })
                     .then(
                         if (!concealed) {
                             Modifier
@@ -378,7 +407,7 @@ private fun FoolBodyTextHost(
                                                     link.linkInteractionListener?.onClick(link)
                                                     true
                                                 },
-                                            ) + nicknameActions
+                                            ) + accessibilityActions
                                     }
                                 }.pointerInput(concealed, start, end, concealment.onReveal) {
                                     awaitEachGesture {
@@ -459,6 +488,7 @@ private fun FoolBodyTextHost(
             onDispose { latestDismiss() }
         }
     }
+    linkActionTargets?.value?.let { urls -> LinkActionsSheet(urls, onDismiss = { linkActionTargets.value = null }) }
 }
 
 private fun TextLayoutResult.nativeOffsetAt(position: Offset): Int? {
@@ -467,6 +497,7 @@ private fun TextLayoutResult.nativeOffsetAt(position: Offset): Int? {
     }
     val offset = getOffsetForPosition(position)
     return offset.takeIf { it < layoutInput.text.length && getBoundingBox(it).contains(position) }
+        ?: (offset - 1).takeIf { it >= 0 && getBoundingBox(it).contains(position) }
 }
 
 @Composable

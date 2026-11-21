@@ -7,6 +7,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,17 +29,24 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -66,6 +75,12 @@ import io.github.trevarj.motd.ui.theme.toRawColorScheme
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
+internal data class LinkPreviewActions(
+    val url: String,
+    val onLoadingClick: (() -> Unit)?,
+)
+
+internal val LocalLinkPreviewActions = staticCompositionLocalOf<LinkPreviewActions?> { null }
 internal val LocalLinkPreviewAwaiting = staticCompositionLocalOf { false }
 internal val LocalLinkPreviewFailed = staticCompositionLocalOf { false }
 
@@ -136,6 +151,14 @@ fun LinkPreviewCard(
     awaiting: Boolean = false,
     failed: Boolean = false,
 ) {
+    val actions = LocalLinkPreviewActions.current
+    val linksEnabled =
+        actions == null ||
+            (LocalChatLinksEnabled.current && LocalMessageSelection.current == null && !LocalFoolBodyConcealment.current.concealed)
+    val url = actions?.url?.takeIf { linksEnabled && LocalMessageActionsEnabled.current && it.isHttpLink() }
+    var showingLinkActions by remember(url) { mutableStateOf(false) }
+    val onLongClick = if (url != null) ({ showingLinkActions = true }) else null
+    val onShortClick = onClick.takeIf { linksEnabled }
     val renderState =
         resolveLinkPreviewRenderState(
             preview,
@@ -160,23 +183,50 @@ fun LinkPreviewCard(
         label = "link_preview_content",
     ) { state ->
         when (state) {
-            LinkPreviewRenderState.Awaiting -> LinkPreviewAwaiting(onClick)
-            LinkPreviewRenderState.Loading -> LinkPreviewSkeleton()
-            is LinkPreviewRenderState.Available -> LinkPreviewContent(state.preview, networkId, onClick)
-            LinkPreviewRenderState.Failed -> LinkPreviewFailed(onClick)
-            LinkPreviewRenderState.Unavailable -> LinkPreviewUnavailable(onClick)
+            LinkPreviewRenderState.Awaiting -> LinkPreviewAwaiting(onShortClick, onLongClick)
+            LinkPreviewRenderState.Loading -> LinkPreviewSkeleton(actions?.onLoadingClick, onLongClick)
+            is LinkPreviewRenderState.Available -> LinkPreviewContent(state.preview, networkId, onShortClick, onLongClick)
+            LinkPreviewRenderState.Failed -> LinkPreviewFailed(onShortClick, onLongClick)
+            LinkPreviewRenderState.Unavailable -> LinkPreviewUnavailable(onShortClick, onLongClick)
         }
     }
+    if (url != null && showingLinkActions) LinkActionsSheet(listOf(url), onDismiss = { showingLinkActions = false })
 }
+
+@Composable
+private fun Modifier.linkPreviewClicks(
+    onClick: (() -> Unit)?,
+    onLongClick: (() -> Unit)?,
+    onClickLabel: String? = null,
+): Modifier =
+    when {
+        onClick == null -> {
+            this
+        }
+
+        onLongClick == null -> {
+            clickable(onClickLabel = onClickLabel, onClick = onClick)
+        }
+
+        else -> {
+            combinedClickable(
+                onClickLabel = onClickLabel,
+                onClick = onClick,
+                onLongClickLabel = stringResource(R.string.chat_link_actions),
+                onLongClick = onLongClick,
+            )
+        }
+    }
 
 @Composable
 private fun LinkPreviewContent(
     preview: LinkPreview,
     networkId: Long?,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)?,
+    onLongClick: (() -> Unit)?,
 ) {
     if (preview.kind == LinkPreviewKind.PALETTE) {
-        PaletteLinkPreview(requireNotNull(preview.palette), onClick)
+        PaletteLinkPreview(requireNotNull(preview.palette), onClick, onLongClick)
         return
     }
     val scheme = MaterialTheme.colorScheme
@@ -188,7 +238,7 @@ private fun LinkPreviewContent(
                 .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
                 .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(12.dp)))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                .clickable { onClick() }
+                .linkPreviewClicks(onClick, onLongClick)
                 .padding(8.dp),
     ) {
         LinkPreviewLeading(preview, networkId)
@@ -238,7 +288,8 @@ private fun LinkPreviewContent(
 @Composable
 private fun PaletteLinkPreview(
     palette: PaletteDocument,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)?,
+    onLongClick: (() -> Unit)?,
 ) {
     val scheme = MaterialTheme.colorScheme
     val ink = if (LocalAdjustPaletteReadability.current) ensureContrast(readingInk(scheme), listOf(scheme.surfaceContainerHighest.compositeOver(scheme.background)), MESSAGE_TEXT_CONTRAST) else readingInk(scheme)
@@ -251,7 +302,7 @@ private fun PaletteLinkPreview(
             .background(scheme.surfaceContainerHighest)
             .testTag("link_preview_palette")
             .semantics { contentDescription = action }
-            .clickable(onClickLabel = action, onClick = onClick)
+            .linkPreviewClicks(onClick, onLongClick, action)
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -385,7 +436,10 @@ private fun LinkPreviewLeading(
 }
 
 @Composable
-private fun LinkPreviewAwaiting(onClick: () -> Unit) {
+private fun LinkPreviewAwaiting(
+    onClick: (() -> Unit)?,
+    onLongClick: (() -> Unit)?,
+) {
     val description = stringResource(R.string.chat_link_preview_download)
     Box(
         modifier =
@@ -394,7 +448,7 @@ private fun LinkPreviewAwaiting(onClick: () -> Unit) {
                 .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
                 .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(12.dp)))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                .clickable(onClickLabel = description, onClick = onClick)
+                .linkPreviewClicks(onClick, onLongClick, description)
                 .semantics { contentDescription = description }
                 .testTag("link_preview_awaiting")
                 .padding(8.dp),
@@ -405,8 +459,33 @@ private fun LinkPreviewAwaiting(onClick: () -> Unit) {
 }
 
 @Composable
-private fun LinkPreviewSkeleton() {
+private fun LinkPreviewSkeleton(
+    onClick: (() -> Unit)?,
+    onHold: (() -> Unit)?,
+) {
     val description = stringResource(R.string.chat_link_preview_loading)
+    val holdModifier =
+        if (onHold != null) {
+            val label = stringResource(R.string.chat_link_actions)
+            val haptic = LocalHapticFeedback.current
+            Modifier
+                .semantics {
+                    onLongClick(label) {
+                        onHold()
+                        true
+                    }
+                }.pointerInput(onClick, onHold, haptic) {
+                    detectTapGestures(
+                        onTap = { onClick?.invoke() },
+                        onLongPress = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onHold()
+                        },
+                    )
+                }
+        } else {
+            Modifier
+        }
     // A per-card infinite transition continuously invalidated the chat while previews were in
     // flight. A static skeleton communicates the same loading state without consuming scroll-frame
     // work; the card is replaced as soon as the preview resolves.
@@ -420,6 +499,7 @@ private fun LinkPreviewSkeleton() {
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 .semantics { contentDescription = description }
                 .testTag("link_preview_loading")
+                .then(holdModifier)
                 .padding(8.dp),
     ) {
         androidx.compose.foundation.layout.Box(
@@ -437,7 +517,10 @@ private fun LinkPreviewSkeleton() {
 }
 
 @Composable
-private fun LinkPreviewFailed(onClick: () -> Unit) {
+private fun LinkPreviewFailed(
+    onClick: (() -> Unit)?,
+    onLongClick: (() -> Unit)?,
+) {
     val description = stringResource(R.string.chat_link_preview_failed)
     Row(
         modifier =
@@ -446,7 +529,7 @@ private fun LinkPreviewFailed(onClick: () -> Unit) {
                 .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
                 .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(12.dp)))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                .clickable(onClickLabel = description, onClick = onClick)
+                .linkPreviewClicks(onClick, onLongClick, description)
                 .semantics { contentDescription = description }
                 .testTag("link_preview_failed")
                 .padding(8.dp),
@@ -458,7 +541,10 @@ private fun LinkPreviewFailed(onClick: () -> Unit) {
 }
 
 @Composable
-private fun LinkPreviewUnavailable(onClick: () -> Unit) {
+private fun LinkPreviewUnavailable(
+    onClick: (() -> Unit)?,
+    onLongClick: (() -> Unit)?,
+) {
     val description = stringResource(R.string.chat_link_preview_unavailable)
     Row(
         modifier =
@@ -467,7 +553,7 @@ private fun LinkPreviewUnavailable(onClick: () -> Unit) {
                 .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
                 .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(12.dp)))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                .clickable(onClickLabel = description, onClick = onClick)
+                .linkPreviewClicks(onClick, onLongClick, description)
                 .semantics { contentDescription = description }
                 .testTag("link_preview_unavailable")
                 .padding(8.dp),

@@ -128,8 +128,11 @@ import io.github.trevarj.motd.ui.components.AudioAttachmentPlayers
 import io.github.trevarj.motd.ui.components.DaySeparator
 import io.github.trevarj.motd.ui.components.DccDownloadMenu
 import io.github.trevarj.motd.ui.components.HistoryGapDivider
+import io.github.trevarj.motd.ui.components.LinkPreviewActions
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
+import io.github.trevarj.motd.ui.components.LocalChatLinksEnabled
 import io.github.trevarj.motd.ui.components.LocalLinkMediaConsent
+import io.github.trevarj.motd.ui.components.LocalLinkPreviewActions
 import io.github.trevarj.motd.ui.components.LocalLinkPreviewAwaiting
 import io.github.trevarj.motd.ui.components.LocalLinkPreviewFailed
 import io.github.trevarj.motd.ui.components.MessageBubble
@@ -785,6 +788,7 @@ fun MessageList(
                     MessageRow(
                         msg = msg,
                         selecting = selectionMessageId == msg.id && renderExpanded == expanded,
+                        linksEnabled = selectionMessageId == null,
                         onSelectionDismiss = onSelectionDismiss,
                         onSelectionBounds = onSelectionBounds,
                         networkId = networkId,
@@ -1791,6 +1795,7 @@ private sealed interface PreviewState {
 private fun MessageRow(
     msg: MessageEntity,
     selecting: Boolean,
+    linksEnabled: Boolean,
     onSelectionDismiss: () -> Unit,
     onSelectionBounds: (androidx.compose.ui.geometry.Rect) -> Unit,
     networkId: Long?,
@@ -2095,6 +2100,7 @@ private fun MessageRow(
         } else {
             null
         }
+    val onReadClick = readMessage?.let { read -> { read(msg) } }
 
     // Gap sits on the older-neighbor side (before the bubble) so it separates this row from the
     // previous burst; day separators and read markers live on the newer side (after the bubble), so
@@ -2136,7 +2142,9 @@ private fun MessageRow(
         Column(modifier = rowModifier.fillMaxWidth()) {
             val messageBubble: @Composable () -> Unit = {
                 CompositionLocalProvider(
+                    LocalChatLinksEnabled provides linksEnabled,
                     LocalLinkMediaConsent provides linkMediaConsent,
+                    LocalLinkPreviewActions provides linkUrl?.let { LinkPreviewActions(it, onReadClick) },
                     LocalLinkPreviewAwaiting provides previewAwaiting,
                     LocalLinkPreviewFailed provides previewFailed,
                     io.github.trevarj.motd.ui.components.LocalMessageSelection provides onSelectionDismiss.takeIf { selecting },
@@ -2183,7 +2191,7 @@ private fun MessageRow(
                         knownNicks = knownNicks,
                         identityRules = identityRules,
                         onLongPress = { onLongPress(msg) },
-                        onClick = readMessage?.let { read -> { read(msg) } },
+                        onClick = onReadClick,
                         onClickLabel = if (readMessage != null) stringResource(R.string.read_aloud_message) else null,
                         // Pass the entity, not just msgid: the VM handles pending reactions uniformly.
                         onReact = { emoji -> onReact(msg, emoji) },

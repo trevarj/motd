@@ -25,10 +25,14 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -38,10 +42,13 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioCacheStatus
@@ -71,6 +78,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
@@ -86,6 +94,42 @@ class FoolMessageCoverTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun overflowingAccessibilityActionsStillReachEveryExactLink() {
+        val urls = List(36) { "https://example.org/p$it?ref=a%2Fb#last" }
+        val body =
+            buildAnnotatedString {
+                repeat(36) {
+                    withLink(LinkAnnotation.Clickable("mention:peer$it", linkInteractionListener = {})) { append("@peer$it") }
+                    append(' ')
+                }
+                for (url in urls) {
+                    withLink(LinkAnnotation.Url(url)) { append(url) }
+                    append(' ')
+                }
+            }
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                FoolBodyText(body, Modifier.testTag("overflowing_links"), concealment = FoolBodyConcealment(), onMentionLongClick = {})
+            }
+        }
+        val actions =
+            compose
+                .onNodeWithTag("overflowing_links")
+                .fetchSemanticsNode()
+                .config[SemanticsActions.CustomActions]
+        assertEquals(31, actions.size)
+        val linkLabel = RuntimeEnvironment.getApplication().getString(R.string.chat_link_actions)
+        compose.runOnIdle { assertTrue(actions.single { it.label == linkLabel }.action()) }
+
+        compose.onNodeWithTag("link_action_choices").performScrollToIndex(urls.lastIndex)
+        val lastChoice = hasText(urls.last()) and hasAnyAncestor(hasTestTag("link_action_sheet"))
+        compose.onNode(lastChoice).performClick()
+        compose.onNodeWithTag("link_action_choices").assertDoesNotExist()
+        compose.onNodeWithTag("link_action_copy").assertIsDisplayed()
+        compose.onNode(lastChoice).assertIsDisplayed()
+    }
 
     @Test
     fun onlyBodyPixelsChangeWithIdenticalWrapAcrossDensitiesActionsAndEffects() {
@@ -427,7 +471,15 @@ class FoolMessageCoverTest {
                 assertEquals(0, rows)
                 concealed.value = true
             }
-            compose.onNodeWithTag("sample").performTouchInput { click(bodyPoint) }
+            val hiddenActions =
+                revealBody()
+                    .fetchSemanticsNode()
+                    .config
+                    .getOrNull(SemanticsActions.CustomActions)
+                    .orEmpty()
+            assertTrue(hiddenActions.none { it.label.contains("https://") })
+            compose.onNodeWithTag("sample").performTouchInput { longClick(bodyPoint) }
+            compose.onNodeWithTag("link_action_sheet").assertDoesNotExist()
             compose.runOnIdle {
                 assertFalse(concealed.value)
                 assertEquals(0, rows)

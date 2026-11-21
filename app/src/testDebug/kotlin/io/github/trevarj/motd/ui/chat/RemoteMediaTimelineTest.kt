@@ -1,11 +1,17 @@
 package io.github.trevarj.motd.ui.chat
 
+import android.content.ClipboardManager
+import android.content.ComponentName
+import android.content.Intent
+import android.content.IntentFilter
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
@@ -15,9 +21,13 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.core.content.IntentCompat
 import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.NetworkMediaHttp
@@ -27,6 +37,7 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.repo.CachedLinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.RetryableLinkPreviewException
+import io.github.trevarj.motd.ui.components.LinkActionsSheet
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
 import io.github.trevarj.motd.ui.components.LocalNetworkMediaHttp
 import io.github.trevarj.motd.ui.components.RoutedInlineMediaFixture
@@ -36,13 +47,17 @@ import kotlinx.coroutines.flow.flowOf
 import okhttp3.mockwebserver.MockResponse
 import okio.Buffer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowToast
 import java.util.Base64
 import java.util.UUID
 
@@ -71,16 +86,144 @@ class RemoteMediaTimelineTest {
         )
 
         awaitTag("link_preview_awaiting")
+        compose.onNodeWithTag("link_preview_awaiting", useUnmergedTree = true).performTouchInput { longClick() }
+        assertCopiedLink(url)
         assertEquals(0, loads)
         compose.onNodeWithTag("link_preview_awaiting", useUnmergedTree = true).performTouchInput { click() }
         compose.waitUntil(10_000) { loads == 1 }
         awaitTag("link_preview_loading")
+        compose.onNodeWithTag("link_preview_loading", useUnmergedTree = true).performTouchInput { longClick() }
+        assertCopiedLink(url)
         result.complete(PREVIEW.copy(url = url))
         compose.onNodeWithText("Example preview").assertIsDisplayed().performTouchInput { click() }
 
         compose.runOnIdle {
             assertEquals(1, loads)
             assertEquals(1, opens)
+        }
+    }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    @Config(qualifiers = "w411dp-h891dp")
+    fun bodyAndCardHoldCopyTheirOwnExactUrlInEveryLayout() {
+        val first = "https://example.test/article?ref=one%2Ftwo#details"
+        val second = "https://github.com/owner/repo?tab=docs%2Fapi#readme"
+        val text = "First $first and $second"
+        val density = mutableStateOf(LayoutDensity.COMFORTABLE)
+        val shortTaps = mutableListOf<String>()
+        val rowHolds = mutableListOf<MessageEntity>()
+        val uriHandler =
+            object : UriHandler {
+                override fun openUri(uri: String) {
+                    shortTaps += uri
+                }
+            }
+        render(
+            automatic = false,
+            text = text,
+            layoutDensity = { density.value },
+            cachedPreview = { _, _ -> CachedLinkPreview(PREVIEW.copy(url = "https://redirected.test/article")) },
+            loadPreview = { _, _ -> null },
+            onOpenLink = shortTaps::add,
+            onLongPress = rowHolds::add,
+            uriHandler = uriHandler,
+        )
+
+        for (layout in LayoutDensity.entries) {
+            compose.runOnIdle { density.value = layout }
+            val body = compose.onNodeWithText(text, substring = true, useUnmergedTree = true)
+            val layouts = mutableListOf<TextLayoutResult>()
+            body.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val result = layouts.single()
+            val bodyText = result.layoutInput.text.text
+            val glyph = result.getBoundingBox(bodyText.indexOf(second) + 2)
+            val point = Offset(glyph.left + glyph.width * 0.75f, glyph.center.y)
+            val card = compose.onNodeWithText("Example preview")
+            card.assertIsDisplayed()
+
+            body.performTouchInput { longClick(point) }
+            assertCopiedLink(second)
+            card.performTouchInput { longClick() }
+            assertCopiedLink(first)
+            body.performTouchInput { click(point) }
+            card.performTouchInput { click() }
+
+            compose.runOnIdle {
+                assertEquals(listOf(second, first), shortTaps)
+                assertTrue(rowHolds.isEmpty())
+                shortTaps.clear()
+            }
+        }
+    }
+
+    @Test
+    fun openBrowserBypassesAppLinkAndNeverFallsBackToIt() {
+        val url = "https://github.com/owner/repo?ref=docs%2Fapi#readme"
+        val app = RuntimeEnvironment.getApplication()
+        val packageShadow = shadowOf(app.packageManager)
+        val appShadow = shadowOf(app)
+
+        fun registerHandler(
+            name: String,
+            host: String? = null,
+        ): ComponentName {
+            val component = ComponentName(name, "$name.OpenLink")
+            packageShadow.addActivityIfNotPresent(component)
+            packageShadow.addIntentFilterForActivity(
+                component,
+                IntentFilter(Intent.ACTION_VIEW).apply {
+                    addCategory(Intent.CATEGORY_DEFAULT)
+                    addCategory(Intent.CATEGORY_BROWSABLE)
+                    addDataScheme("https")
+                    if (host != null) addDataAuthority(host, null)
+                },
+            )
+            return component
+        }
+
+        val github = registerHandler("test.github", "github.com")
+        val showing = mutableStateOf(true)
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                if (showing.value) LinkActionsSheet(listOf(url)) { showing.value = false }
+            }
+        }
+
+        compose.onNodeWithTag("link_action_open_default").performClick()
+        val implicit = requireNotNull(appShadow.nextStartedActivity)
+        assertEquals(Intent.ACTION_VIEW, implicit.action)
+        assertEquals(url, implicit.dataString)
+        assertNull(implicit.component)
+        assertEquals(github.packageName, implicit.resolveActivity(app.packageManager)?.packageName)
+
+        compose.runOnIdle { showing.value = true }
+        compose.onNodeWithTag("link_action_open_browser").performClick()
+        assertNull(appShadow.nextStartedActivity)
+        assertEquals(app.getString(R.string.chat_link_no_browser), ShadowToast.getTextOfLatestToast())
+
+        val browser = registerHandler("test.browser")
+        compose.runOnIdle { showing.value = true }
+        compose.onNodeWithTag("link_action_open_browser").performClick()
+        val explicit = requireNotNull(appShadow.nextStartedActivity)
+        assertEquals(Intent.ACTION_VIEW, explicit.action)
+        assertEquals(url, explicit.dataString)
+        assertEquals(browser, explicit.component)
+
+        val otherBrowser = registerHandler("test.otherbrowser")
+        packageShadow.setShouldShowActivityChooser(true)
+        compose.runOnIdle { showing.value = true }
+        compose.onNodeWithTag("link_action_open_browser").performClick()
+        val chooser = requireNotNull(appShadow.nextStartedActivity)
+        assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+        val first = requireNotNull(IntentCompat.getParcelableExtra(chooser, Intent.EXTRA_INTENT, Intent::class.java))
+        val alternatives = requireNotNull(IntentCompat.getParcelableArrayExtra(chooser, Intent.EXTRA_ALTERNATE_INTENTS, Intent::class.java))
+        val candidates = listOf(first) + alternatives.filterIsInstance<Intent>()
+        assertEquals(2, candidates.size)
+        assertEquals(setOf(browser, otherBrowser), candidates.map { it.component }.toSet())
+        for (candidate in candidates) {
+            assertEquals(Intent.ACTION_VIEW, candidate.action)
+            assertEquals(url, candidate.dataString)
         }
     }
 
@@ -328,6 +471,10 @@ class RemoteMediaTimelineTest {
                             assertEquals(emptyList<Long>(), fixture.selectedNetworks.toList())
                             assertEquals(emptyList<String>(), openedImages)
                         }
+                        if (messageKind == MessageKind.PRIVMSG) {
+                            caption.performTouchInput { longClick() }
+                            assertCopiedLink(images[index])
+                        }
                         preview.assertIsDisplayed()
                     }
                     prose.performTouchInput { longClick() }
@@ -509,6 +656,17 @@ class RemoteMediaTimelineTest {
                     )
                 }
             }
+        }
+    }
+
+    private fun assertCopiedLink(expected: String) {
+        compose.onNodeWithTag("link_action_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("link_action_copy").performClick()
+        compose.onNodeWithTag("link_action_sheet").assertDoesNotExist()
+        compose.runOnIdle {
+            val clipboard = RuntimeEnvironment.getApplication().getSystemService(ClipboardManager::class.java)
+            val clip = clipboard.primaryClip
+            assertEquals(expected, clip?.getItemAt(0)?.text?.toString())
         }
     }
 

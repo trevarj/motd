@@ -1229,6 +1229,11 @@
     <string name="chat_link_preview_loading">Downloading link preview</string>
     <string name="chat_link_preview_failed">Preview failed. Tap to retry.</string>
     <string name="chat_link_preview_unavailable">Preview unavailable. Tap to open link.</string>
+    <string name="chat_link_actions">Link actions</string>
+    <string name="chat_link_open_default">Open in default app</string>
+    <string name="chat_link_open_browser">Open in browser</string>
+    <string name="chat_link_no_app">No app is available to open this link.</string>
+    <string name="chat_link_no_browser">No browser is available to open this link.</string>
     <string name="settings_show_shared_avatars">Show shared user avatars</string>
     <string name="settings_show_shared_avatars_desc">Experimental · Receive HTTPS avatar URLs shared through IRCv3 metadata</string>
     <string name="network_settings_avatar_section">Your shared avatar</string>

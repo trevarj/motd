@@ -3514,22 +3514,26 @@ class ComposerSendClearUiTest {
             }
         val urlCenter = olderLayouts.single().getBoundingBox(older.text.indexOf("https://") + 2).center
         olderBody.performTouchInput { longClick(urlCenter) }
-        compose.onNodeWithTag("message_action_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("link_action_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf("body-peer"), profileClicks) }
         compose
             .onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss), useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.Dismiss) { it() }
-        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+        compose.onNodeWithTag("link_action_sheet").assertDoesNotExist()
         olderBody.performTouchInput { longClick(olderMentionCenter) }
         compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf("body-peer", "other-peer"), profileClicks) }
-        olderBody.performTouchInput { longClick(urlCenter) }
+        val plainCenter = olderLayouts.single().getBoundingBox(older.text.indexOf("Previous") + 2).center
+        olderBody.performTouchInput { longClick(plainCenter) }
         compose.onNodeWithTag("message_action_sheet").assertIsDisplayed()
         compose.onNodeWithTag("message_action_select_text").performScrollTo().performClick()
         compose.onNodeWithTag("message_selection_text").assertTextEquals(older.text)
         val selectedLayouts = mutableListOf<TextLayoutResult>()
         compose.onNodeWithTag("message_selection_text").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(selectedLayouts) }
         assertTrue("Selected body uses plain native text", selectedLayouts.single().placeholderRects.isEmpty())
+        val selectedText = selectedLayouts.single().layoutInput.text
+        assertTrue("Selected body does not expose clickable links", selectedText.getLinkAnnotations(0, selectedText.length).isEmpty())
         val nativeHandles =
             SemanticsMatcher("native selection handle") { node ->
                 node.config.any { it.key.name == "SelectionHandleInfo" }
