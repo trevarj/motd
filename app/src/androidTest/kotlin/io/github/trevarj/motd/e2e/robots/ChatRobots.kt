@@ -6,6 +6,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
@@ -21,6 +22,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.test.platform.app.InstrumentationRegistry
@@ -130,8 +132,19 @@ internal class ChatRobot(
     }
 
     fun openEmojiPicker() {
-        click("chat_composer_tools")
-        click("chat_composer_emoji")
+        awaitTag("chat_composer_tools")
+        compose
+            .onNodeWithTag("chat_composer_tools", useUnmergedTree = true)
+            .assertIsDisplayed()
+            .assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+            .assertIsSelected()
+        awaitTag("chat_composer_emoji")
+        compose
+            .onNodeWithTag("chat_composer_emoji", useUnmergedTree = true)
+            .assertIsDisplayed()
+            .assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         compose.waitUntil("Downloaded-font emoji grid is visible", 30_000) {
             runCatching {
                 compose.onNodeWithTag("chat_composer_emoji_grid", useUnmergedTree = true).assertIsDisplayed()
