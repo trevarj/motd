@@ -127,6 +127,31 @@
           packages = [ pkgs.nodejs_22 pkgs.imagemagick pkgs.ffmpeg pkgs.chromium ];
           FONTCONFIG_FILE = pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; };
         };
+        devShells.sound-authoring = let
+          release = "https://raw.githubusercontent.com/sgossner/VCSL/c1ea7bcc3c7309650ab0da9d15c9cd1fbc4a4c7e";
+          clip = name: path: hash: {
+            name = "${name}.wav";
+            path = pkgs.fetchurl {
+              name = "vcsl-${name}.wav";
+              url = "${release}/${path}";
+              inherit hash;
+            };
+          };
+          recordings = pkgs.linkFarm "motd-vcsl-recordings" [
+            (clip "woodblock-soft" "Idiophones/Struck%20Idiophones/Woodblock/wood_click_pp_rr1.wav" "sha256-LCGl3m893VHOhRMlumyqShh0IsUSmdp7L9xPUa5enuE=")
+            (clip "woodblock-answer" "Idiophones/Struck%20Idiophones/Woodblock/wood_click3_vl1.wav" "sha256-s4oG8DfecLss+Y/YnwavjRBNQSN3PS5iVpEYmmdJW+U=")
+            (clip "zither-low" "Chordophones/Zithers/Psaltery%2C%20Bowed%20and%20Plucked/Pluck/BowedPsaltery_E4_Main_Pluck_rr2.wav" "sha256-C9lWUxDYUcoe7qeUlhuf9wGoObUGT+Qld18Xo7vSBKo=")
+            (clip "zither-high" "Chordophones/Zithers/Psaltery%2C%20Bowed%20and%20Plucked/Pluck/BowedPsaltery_C5_Main_Pluck_rr1.wav" "sha256-0+3/S2gI4fExk1bNURXFdAhhs0NVFKvjLEal2YMg/xQ=")
+            (clip "vibes-low" "Idiophones/Struck%20Idiophones/Vibraphone/Soft%20Mallets/Vibes_soft_F4_v1_rr1_Main.wav" "sha256-lbfW7rcdd8zmB8DFKwpt/SPQ7u3C6zk/uabFpXaPSqU=")
+            (clip "vibes-high" "Idiophones/Struck%20Idiophones/Vibraphone/Soft%20Mallets/Vibes_soft_A4_v2_rr1_Main.wav" "sha256-+1B8XLLyAjKJ/fE4QJLzxeE/A6K1scOfZ5LMV6p31Y0=")
+            (clip "xylo-low" "Idiophones/Struck%20Idiophones/Xylophone/Soft%20Mallets/Xylo_Soft_G4_pp_01_far.wav" "sha256-ubhsNuPLOTHxX9gAYA+jaNl9iVbfmPkuClICx8whKqo=")
+            (clip "xylo-high" "Idiophones/Struck%20Idiophones/Xylophone/Soft%20Mallets/Xylo_Soft_C5_pp_01_far.wav" "sha256-buZ2IITvbfOocuYVNvkh3Qx7A5iO2FEiwXRh3m9vNlk=")
+          ];
+        in pkgs.mkShell {
+          packages = [ pkgs.nodejs_22 pkgs.ffmpeg pkgs.fluidsynth ];
+          FLUID_R3_GM = "${pkgs.soundfont-fluid}/share/soundfonts/FluidR3_GM2-2.sf2";
+          VCSL_AUDIO = "${recordings}";
+        };
         devShells.emulator = pkgs.mkShell {
           packages = [ pkgs.jdk21 emulatorSdk ];
           JAVA_HOME = pkgs.jdk21.home;

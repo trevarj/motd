@@ -78,3 +78,13 @@ footer { font-size: .73rem; margin: 24px 0 0; }
 [hidden] { display: none !important; }
 @media (max-width: 1050px) { .candidate-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .workbench { grid-template-columns: minmax(0, 1fr); } .chat-log { height: 340px; } }
 @media (max-width: 600px) { .shell { width: calc(100% - 28px); padding-top: 24px; } .masthead, .reference { align-items: start; flex-direction: column; gap: 16px; } .masthead { margin-bottom: 32px; } .section-heading { align-items: start; gap: 10px; } .section-heading > span { max-width: 45%; text-align: right; } .candidate-grid { grid-template-columns: minmax(0, 1fr); } .candidate { padding: 18px; } .candidate .description { min-height: 0; } .panel { padding: 18px; } .cue-controls { gap: 14px; } .stop { margin-left: 0; } .nav-link { margin-top: 0; } }
+.polished-volume { width: min(15rem, 100%); }
+.polished-volume .slider-label { margin-top: 0; }
+.polished-volume input, .polished .enable { margin-bottom: 0; }
+.polished-options { display: grid; gap: 10px; }
+.polished #playback { align-self: center; margin: 0; }
+.polished .candidate-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 218px), 1fr)); }
+.polished .candidate { display: flex; flex-direction: column; gap: 10px; }
+.polished .candidate :is(.pack, h3) { margin-bottom: 0; }
+.polished .description { flex: 1; }
+.polished .candidate button { min-height: 44px; }

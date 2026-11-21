@@ -26,7 +26,7 @@ function makeMelodies({motif, degrees, scale}) {
   });
 }
 
-function candidate(config) {
+export function candidate(config) {
   const melodies = makeMelodies(config);
   const original = melodies[0];
   // Keep the original top-level phrase fields for manifest consumers from the

@@ -47,4 +47,24 @@ class ChatSoundsRepositoryTest {
             assertEquals(3, restored.receive.pitch)
             assertFalse(repository.settings.first().chatSoundsEnabled)
         }
+
+    @Test
+    fun factory_uses_soft_vibes_but_explicit_soft_glass_is_retained() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val prefs = ChatSoundPrefs(context)
+            val factory = prefs.config.first()
+            assertEquals(ChatSoundVoice.SOFT_VIBES, factory.send.voice)
+            assertEquals(ChatSoundVoice.SOFT_VIBES, factory.receive.voice)
+
+            val selected =
+                factory.copy(
+                    send = factory.send.copy(voice = ChatSoundVoice.SOFT_GLASS, pitch = -2, tone = ChatSoundTone.WARM),
+                    receive = factory.receive.copy(voice = ChatSoundVoice.SOFT_GLASS, pitch = 3, tone = ChatSoundTone.BRIGHT),
+                    receiveMelody = ChatSoundMelody.RELAY,
+                )
+            prefs.replace(selected)
+
+            assertEquals(selected, ChatSoundPrefs(context).config.first())
+        }
 }

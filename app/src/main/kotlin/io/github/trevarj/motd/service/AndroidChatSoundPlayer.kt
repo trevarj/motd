@@ -184,9 +184,14 @@ internal class ChatSoundSequence(
                 ChatSoundMelody.BEACON to intArrayOf(0, 2, 7, 4, 0),
                 ChatSoundMelody.VICTORY to intArrayOf(0, 4, 5, 7, 0),
             )
+        private val sharedHomecoming = intArrayOf(0, 4, 7, 2, 0)
         private val homecoming =
             mapOf(
-                ChatSoundVoice.SOFT_GLASS to intArrayOf(0, 4, 7, 2, 0),
+                ChatSoundVoice.SOFT_VIBES to sharedHomecoming,
+                ChatSoundVoice.WIRE_ZITHER to sharedHomecoming,
+                ChatSoundVoice.MALLET_XYLOPHONE to sharedHomecoming,
+                ChatSoundVoice.DRY_WOODBLOCK to sharedHomecoming,
+                ChatSoundVoice.SOFT_GLASS to sharedHomecoming,
                 ChatSoundVoice.TERMINAL_TICK to intArrayOf(0, 7, 4, 2, 0),
                 ChatSoundVoice.ARCADE_PLUCK to intArrayOf(0, 4, 2, 7, 0),
                 ChatSoundVoice.SYNTH_16_BIT to intArrayOf(0, 4, 7, 4, 0),

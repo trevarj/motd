@@ -3,12 +3,26 @@ import {execFileSync} from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
+import {POLISHED_FAMILIES, synthesizePolished} from "./polished.mjs";
 import {CANDIDATES, DEFAULT_SETTINGS, ReceiveBurstGate, SAMPLE_RATE, TONES, VariantPicker, sanitizeSettings, synthesize} from "./studies.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const output = path.join(root, "build/sound-previews");
 const rms = (samples) => Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
 const peak = (samples) => Math.max(...samples.map(Math.abs));
+
+for (const { id } of POLISHED_FAMILIES) {
+  const send = synthesizePolished(id, "send");
+  const receive = synthesizePolished(id, "receive");
+  const mention = synthesizePolished(id, "mention");
+  for (const samples of [send, receive, mention]) {
+    assert.ok(samples.length >= SAMPLE_RATE * 0.07 && samples.length <= SAMPLE_RATE * 0.22);
+    assert.ok(Math.abs(samples[0]) === 0 && Math.abs(samples.at(-1)) === 0);
+    assert.ok(peak(samples) <= 0.13 && rms(samples) >= 0.015 && rms(samples) <= 0.021);
+  }
+  assert.ok(mention.length - receive.length >= SAMPLE_RATE * 0.05, `${id}: mention retains a distinct pickup`);
+  assert.deepEqual(mention, synthesizePolished(id, "mention"));
+}
 
 for (const candidate of CANDIDATES) {
   for (const cue of ["send", "receive"]) {
@@ -99,7 +113,9 @@ execFileSync("node", ["tools/chat-sounds/generate-studies.mjs"], {cwd: root, std
 const manifest = JSON.parse(fs.readFileSync(path.join(output, "manifest.json"), "utf8"));
 const androidOutput = path.join(root, "app/src/main/assets/chat-sounds");
 const androidCatalog = JSON.parse(fs.readFileSync(path.join(androidOutput, "catalog.json"), "utf8"));
-assert.deepEqual(androidCatalog, manifest, "Android must ship the same voice and melody catalog as the gallery");
+const syntheticIds = new Set(CANDIDATES.map(({id}) => id));
+assert.deepEqual(androidCatalog.candidates.filter(({id}) => syntheticIds.has(id)), manifest.candidates);
+assert.deepEqual(androidCatalog.assets.filter(({candidate}) => syntheticIds.has(candidate)), manifest.assets);
 assert.equal(manifest.assets.length, 120);
 for (const asset of manifest.assets) {
   const sample = fs.readFileSync(path.join(output, asset.file));

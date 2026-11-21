@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import {loadRecordedAppVoices} from "./recorded.mjs";
 import {CANDIDATES, SAMPLE_RATE, TONES, synthesize} from "./studies.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
@@ -9,7 +10,7 @@ const flags = new Set(process.argv.slice(2));
 if ([...flags].some(flag => !["--check", "--android"].includes(flag))) {
   throw new Error("Usage: generate-studies.mjs [--android] [--check]");
 }
-// Both destinations use identical synthesis and PCM encoding so auditions match the app.
+// The original browser workbench uses only the synthetic voices.
 const android = flags.has("--android");
 const outputDirectory = path.join(root, android ? "app/src/main/assets/chat-sounds" : "build/sound-previews");
 const manifestName = android ? "catalog.json" : "manifest.json";
@@ -48,7 +49,20 @@ function metrics(samples) {
   return {peak: Number(peak.toFixed(6)), rms: Number(Math.sqrt(squares / samples.length).toFixed(6))};
 }
 
+function wavMetrics(audio) {
+  let peak = 0;
+  let squares = 0;
+  const frames = (audio.length - 44) / 2;
+  for (let offset = 44; offset < audio.length; offset += 2) {
+    const sample = audio.readInt16LE(offset) / 32768;
+    squares += sample * sample;
+    peak = Math.max(peak, Math.abs(sample));
+  }
+  return {durationMs: Math.round(frames / SAMPLE_RATE * 1000), peak: Number(peak.toFixed(6)), rms: Number(Math.sqrt(squares / frames).toFixed(6))};
+}
+
 const assets = [];
+const candidates = [...CANDIDATES];
 const files = new Map();
 for (const candidate of CANDIDATES) {
   for (const cue of ["send", "receive"]) {
@@ -63,7 +77,18 @@ for (const candidate of CANDIDATES) {
     }
   }
 }
-const manifest = Buffer.from(`${JSON.stringify({version: 1, candidates: CANDIDATES, assets}, null, 2)}\n`);
+if (android) {
+  for (const {catalog, assets: variations} of loadRecordedAppVoices(process.env.VCSL_AUDIO, TONES)) {
+    candidates.push(catalog);
+    for (const {cue, tone, take, audio} of variations) {
+      const id = `${catalog.id}-${cue}-${tone}-${take}`;
+      const file = `${id}.wav`;
+      assets.push({id, candidate: catalog.id, cue, take, tone, file, ...wavMetrics(audio)});
+      files.set(file, audio);
+    }
+  }
+}
+const manifest = Buffer.from(`${JSON.stringify({version: 1, candidates, assets}, null, 2)}\n`);
 files.set(manifestName, manifest);
 
 let stale = false;
@@ -71,7 +96,7 @@ if (!check) {
   const previousManifestPath = path.join(outputDirectory, manifestName);
   try {
     const previous = JSON.parse(fs.readFileSync(previousManifestPath, "utf8"));
-    const activeCandidates = new Set(CANDIDATES.map(({id}) => id));
+    const activeCandidates = new Set(candidates.map(({id}) => id));
     for (const asset of previous.assets ?? []) {
       if (activeCandidates.has(asset.candidate) || typeof asset.file !== "string") continue;
       // Only remove names recorded by our previous manifest, never arbitrary files.

@@ -327,7 +327,15 @@ fun ChatSoundCueEditorContent(
         SingleChoiceSheet(
             title = stringResource(R.string.settings_chat_sounds_voice),
             selected = cue.voice,
-            options = ChatSoundVoice.entries.map { voice -> ChoiceOption(voice, chatSoundVoiceLabel(voice), tag = "chat_sound_${cueKind.name.lowercase()}_voice_${voice.name.lowercase()}") },
+            options =
+                ChatSoundVoice.entries.map { voice ->
+                    ChoiceOption(
+                        voice,
+                        chatSoundVoiceLabel(voice),
+                        summary = if (voice == ChatSoundVoice.SOFT_VIBES) stringResource(R.string.settings_chat_sounds_voice_recommended) else null,
+                        tag = "chat_sound_${cueKind.name.lowercase()}_voice_${voice.name.lowercase()}",
+                    )
+                },
             onSelect = { voice -> updateCue { it.copy(voice = voice) } },
             onDismiss = { voiceSheetOpen = false },
             tag = "chat_sound_${cueKind.name.lowercase()}_voice_sheet",
@@ -412,6 +420,10 @@ private fun chatSoundCueSummary(cue: ChatSoundCueConfig): String =
 private fun chatSoundVoiceLabel(value: ChatSoundVoice): String =
     stringResource(
         when (value) {
+            ChatSoundVoice.SOFT_VIBES -> R.string.settings_chat_sounds_voice_soft_vibes
+            ChatSoundVoice.WIRE_ZITHER -> R.string.settings_chat_sounds_voice_wire_zither
+            ChatSoundVoice.MALLET_XYLOPHONE -> R.string.settings_chat_sounds_voice_mallet_xylophone
+            ChatSoundVoice.DRY_WOODBLOCK -> R.string.settings_chat_sounds_voice_dry_woodblock
             ChatSoundVoice.SOFT_GLASS -> R.string.settings_chat_sounds_voice_soft_glass
             ChatSoundVoice.TERMINAL_TICK -> R.string.settings_chat_sounds_voice_terminal_tick
             ChatSoundVoice.ARCADE_PLUCK -> R.string.settings_chat_sounds_voice_arcade_pluck

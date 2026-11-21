@@ -107,13 +107,15 @@ class ChatSoundDecisionTest {
     }
 
     @Test
-    fun `five approved melodies preserve their configured phrases`() {
+    fun `five approved melodies preserve their configured phrases for every voice`() {
         val sequence = ChatSoundSequence()
-        ChatSoundMelody.entries.forEach { melody ->
-            val config = ChatSoundConfig(receive = ChatSoundConfig().receive.copy(voice = ChatSoundVoice.SYNTH_16_BIT), receiveMelody = melody)
-            val actual = (0 until 5).map { sequence.next(ChatSoundCue.RECEIVE, config).semitones }
-            assertEquals(ChatSoundSequence.motifs.getValue(ChatSoundVoice.SYNTH_16_BIT to melody).toList(), actual)
-            sequence.reset()
+        for (voice in ChatSoundVoice.entries) {
+            for (melody in ChatSoundMelody.entries) {
+                val config = ChatSoundConfig(receive = ChatSoundConfig().receive.copy(voice = voice), receiveMelody = melody)
+                val actual = (0 until 5).map { sequence.next(ChatSoundCue.RECEIVE, config).semitones }
+                assertEquals("$voice $melody", ChatSoundSequence.motifs.getValue(voice to melody).toList(), actual)
+                sequence.reset()
+            }
         }
     }
 

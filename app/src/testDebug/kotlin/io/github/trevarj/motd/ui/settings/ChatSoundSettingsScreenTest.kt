@@ -1,14 +1,18 @@
 package io.github.trevarj.motd.ui.settings
 
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.prefs.ChatSoundConfig
 import io.github.trevarj.motd.data.prefs.ChatSoundMelody
@@ -85,6 +89,7 @@ class ChatSoundSettingsScreenTest {
         }
 
         compose.onNodeWithTag("chat_sound_send_voice").performClick()
+        compose.onNodeWithTag("chat_sound_send_voice_sheet_options").performScrollToNode(hasTestTag("chat_sound_send_voice_terminal_tick"))
         compose.onNodeWithTag("chat_sound_send_voice_terminal_tick").performClick()
         compose.onNodeWithTag("chat_sound_send_tone").performClick()
         compose.onNodeWithTag("chat_sound_send_tone_bright").performClick()
@@ -96,7 +101,7 @@ class ChatSoundSettingsScreenTest {
         compose.runOnIdle {
             assertEquals(ChatSoundVoice.TERMINAL_TICK, config.value.send.voice)
             assertEquals(ChatSoundTone.BRIGHT, config.value.send.tone)
-            assertEquals(ChatSoundVoice.SOFT_GLASS, config.value.receive.voice)
+            assertEquals(ChatSoundVoice.SOFT_VIBES, config.value.receive.voice)
             assertEquals(1, previews)
             assertEquals(2, stops)
             assertEquals(1, backs)
@@ -104,8 +109,9 @@ class ChatSoundSettingsScreenTest {
     }
 
     @Test
-    fun receiveEditorOwnsMelodyAndLeavesSendSelectionUntouched() {
-        val config = mutableStateOf(ChatSoundConfig(send = ChatSoundConfig().send.copy(voice = ChatSoundVoice.ARCADE_PLUCK)))
+    fun receiveEditorSwitchesAcousticVoicesWithoutChangingTuningOrSend() {
+        val original = ChatSoundConfig(send = ChatSoundConfig().send.copy(voice = ChatSoundVoice.ARCADE_PLUCK))
+        val config = mutableStateOf(original)
         compose.setContent {
             MotdTheme(dynamicColor = false) {
                 ChatSoundCueEditorContent(
@@ -118,15 +124,38 @@ class ChatSoundSettingsScreenTest {
             }
         }
 
-        compose.onNodeWithTag("chat_sound_receive_voice").performClick()
-        compose.onNodeWithTag("chat_sound_receive_voice_synth_16_bit").performClick()
+        compose.onNodeWithTag("chat_sound_receive_tone").performClick()
+        compose.onNodeWithTag("chat_sound_receive_tone_warm").performClick()
+        compose
+            .onNodeWithTag("chat_sound_receive_pitch")
+            .performScrollTo()
+            .performSemanticsAction(SemanticsActions.SetProgress) { it(2f) }
         compose.onNodeWithTag("chat_sound_receive_melody").performScrollTo().performClick()
         compose.onNodeWithTag("chat_sound_receive_melody_victory").performClick()
 
-        compose.runOnIdle {
-            assertEquals(ChatSoundVoice.ARCADE_PLUCK, config.value.send.voice)
-            assertEquals(ChatSoundVoice.SYNTH_16_BIT, config.value.receive.voice)
-            assertEquals(ChatSoundMelody.VICTORY, config.value.receiveMelody)
+        val tuned =
+            original.copy(
+                receive = original.receive.copy(tone = ChatSoundTone.WARM, pitch = 2),
+                receiveMelody = ChatSoundMelody.VICTORY,
+            )
+        val voices =
+            listOf(
+                ChatSoundVoice.WIRE_ZITHER,
+                ChatSoundVoice.MALLET_XYLOPHONE,
+                ChatSoundVoice.DRY_WOODBLOCK,
+                ChatSoundVoice.SOFT_VIBES,
+                ChatSoundVoice.SOFT_GLASS,
+                ChatSoundVoice.ARCADE_PLUCK,
+                ChatSoundVoice.SYNTH_16_BIT,
+            )
+        for (voice in voices) {
+            val option = "chat_sound_receive_voice_${voice.name.lowercase()}"
+            compose.onNodeWithTag("chat_sound_receive_voice").performScrollTo().performClick()
+            compose.onNodeWithTag("chat_sound_receive_voice_sheet_options").performScrollToNode(hasTestTag(option))
+            compose.onNodeWithTag(option).performClick()
+            compose.runOnIdle {
+                assertEquals(tuned.copy(receive = tuned.receive.copy(voice = voice)), config.value)
+            }
         }
     }
 

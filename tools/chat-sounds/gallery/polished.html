@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MOTD · Message tones</title>
+  <link rel="stylesheet" href="/sounds/style.css">
+</head>
+<body>
+  <main class="shell polished">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">MOTD / Sound studies <span>03</span></p>
+        <h1>Small sounds for busy chats.</h1>
+        <p class="lede">Original synthesized instrument and material studies, alongside the previous Soft Glass default.</p>
+      </div>
+      <div class="button-row">
+        <a class="nav-link" href="/sounds/sampled">Sampled-instrument auditions ↗</a>
+        <a class="nav-link" href="/sounds">Original sound workbench ↗</a>
+      </div>
+    </header>
+    <section class="reference" aria-label="Playback controls">
+      <div class="polished-volume">
+        <label class="slider-label" for="volume">Preview volume <output id="volume-display" for="volume">70%</output></label>
+        <input id="volume" type="range" min="0" max="100" value="70">
+      </div>
+      <div class="polished-options">
+        <label class="enable"><input id="phone-band" type="checkbox"> Approximate phone speaker</label>
+        <label class="enable"><input id="ease-repeats" type="checkbox" checked> Soften rapid repeats</label>
+      </div>
+      <div class="button-row">
+        <button id="stop" type="button" disabled>Stop</button>
+        <p id="playback" class="live-state" role="status">Ready</p>
+      </div>
+    </section>
+    <section class="collection" aria-labelledby="audition-title">
+      <div class="section-heading"><h2 id="audition-title">Compare by ear</h2><span>Matched nominal level · no autoplay</span></div>
+      <div id="families" class="candidate-grid"></div>
+    </section>
+    <template id="family">
+      <article class="candidate">
+        <p class="pack"></p>
+        <h3></h3>
+        <p class="description"></p>
+        <div class="button-row polished-roles">
+          <button data-play="send" type="button">Send</button>
+          <button data-play="receive" type="button">Receive</button>
+          <button data-play="mention" type="button">Mention</button>
+        </div>
+        <div class="button-row polished-scenes">
+          <button data-play="conversation" type="button">Conversation</button>
+          <button data-play="burst" type="button">Rapid receive</button>
+        </div>
+      </article>
+    </template>
+    <footer>These are auditions, not app settings. Mention is a proposed cue; Android notification channels are unchanged. The phone filter approximates bandwidth, not any specific speaker.</footer>
+  </main>
+  <script type="module" src="/sounds/gallery/polished-player.mjs"></script>
+</body>
+</html>

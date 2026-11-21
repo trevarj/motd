@@ -1326,6 +1326,11 @@
     <string name="settings_chat_sounds_burst_hint">Receive sounds play up to five times in a burst and restart after two quiet seconds.</string>
     <string name="settings_chat_sounds_preview_send">Preview send</string>
     <string name="settings_chat_sounds_preview_receive">Preview receive melody</string>
+    <string name="settings_chat_sounds_voice_soft_vibes">Soft Vibes</string>
+    <string name="settings_chat_sounds_voice_wire_zither">Wire Zither</string>
+    <string name="settings_chat_sounds_voice_mallet_xylophone">Mallet Xylophone</string>
+    <string name="settings_chat_sounds_voice_dry_woodblock">Dry Woodblock</string>
+    <string name="settings_chat_sounds_voice_recommended">Recommended</string>
     <string name="settings_chat_sounds_voice_soft_glass">Soft glass</string>
     <string name="settings_chat_sounds_voice_terminal_tick">Terminal tick</string>
     <string name="settings_chat_sounds_voice_arcade_pluck">Arcade pluck</string>

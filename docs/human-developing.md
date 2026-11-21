@@ -251,6 +251,43 @@ matrix in [`../.agents/testing.md`](../.agents/testing.md) describes which
 suite fits which task. Those harnesses have their own shell requirements
 documented alongside them.
 
+## Message sound auditions
+
+```sh
+nix develop .#sprite-studies -c node tools/wallpapers/gallery/server.mjs
+```
+
+Open [Message tones](http://127.0.0.1:4173/sounds/polished) to compare the previous
+Soft Glass default with the synthetic studies. Try Muted Nylon, then play a receive
+burst with **Soften rapid repeats** on and off to compare the level change.
+Then check a favorite on an actual phone speaker. The browser filter approximates
+speaker bandwidth; it is not a device recording.
+
+The [sampled-instrument audition](http://127.0.0.1:4173/sounds/sampled) compares
+direct recordings from the CC0 Versilian Community Sample Library against the
+earlier MIDI cues rendered through FluidSynth and Frank Wen's FluidR3 GM2 bank.
+Soft Vibes is the new app default. Wire Zither, Mallet Xylophone, and Dry Woodblock
+are selectable for send or receive. Previously saved voices remain available.
+
+```sh
+nix develop .#sound-authoring -c node tools/chat-sounds/generate-sampled-audition.mjs
+```
+
+You can also open `build/sound-previews/sampled.html` directly in a browser.
+It includes the rendered clips and does not need the server or the SoundFont.
+
+To regenerate or check the bundled Android send/receive assets:
+
+```sh
+nix develop .#sound-authoring -c node tools/chat-sounds/generate-studies.mjs --android
+nix develop .#sound-authoring -c node tools/chat-sounds/generate-studies.mjs --android --check
+```
+
+The selected CC0 recordings retain their native pitch. Warm and Bright are
+alternate EQ renders; Natural mode varies the decay. Android still applies the
+user’s pitch offset and the receive melody during playback. The audition’s
+notification clips are not used by Android notification channels.
+
 ## Architecture
 
 For data flow, connection ownership, and module boundaries, see

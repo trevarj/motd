@@ -7,9 +7,13 @@ const validId = /^[a-z0-9-]{1,100}$/;
 const staticFiles = new Map([
   ["/sounds", ["gallery/index.html", "text/html; charset=utf-8"]],
   ["/sounds/", ["gallery/index.html", "text/html; charset=utf-8"]],
+  ["/sounds/polished", ["gallery/polished.html", "text/html; charset=utf-8"]],
+  ["/sounds/polished/", ["gallery/polished.html", "text/html; charset=utf-8"]],
   ["/sounds/style.css", ["gallery/style.css", "text/css; charset=utf-8"]],
   ["/sounds/app.mjs", ["gallery/app.mjs", "text/javascript; charset=utf-8"]],
   ["/sounds/gallery/player.mjs", ["gallery/player.mjs", "text/javascript; charset=utf-8"]],
+  ["/sounds/gallery/polished-player.mjs", ["gallery/polished-player.mjs", "text/javascript; charset=utf-8"]],
+  ["/sounds/polished.mjs", ["polished.mjs", "text/javascript; charset=utf-8"]],
   ["/sounds/studies.mjs", ["studies.mjs", "text/javascript; charset=utf-8"]],
 ]);
 
@@ -105,6 +109,10 @@ export function handleSoundRoute(root, pathname, response, headOnly) {
     try { id = decodeURIComponent(pathname.slice("/api/sound/".length)); }
     catch { send(400, "text/plain; charset=utf-8", "Invalid sound id\n"); return true; }
     sendFile(resolveSound(root, id), "audio/wav");
+  } else if (pathname === "/sounds/sampled") {
+    const page = confinedFile(root, studyDirectory, "sampled.html");
+    if (page) sendFile(page, "text/html; charset=utf-8");
+    else send(404, "text/plain; charset=utf-8", "Run: nix develop .#sound-authoring -c node tools/chat-sounds/generate-sampled-audition.mjs\n");
   } else if (staticFiles.has(pathname)) {
     const [file, type] = staticFiles.get(pathname);
     sendFile(confinedFile(root, "tools/chat-sounds", file), type);

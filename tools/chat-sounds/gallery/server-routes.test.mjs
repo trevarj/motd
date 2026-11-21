@@ -73,5 +73,13 @@ test("HTTP serves audio and metadata with GET/HEAD only and keeps wallpaper rout
   assert.equal((await fetch(`${base}/api/sound/%zz`)).status, 400);
   assert.equal((await fetch(`${base}/api/sound/..%2Foutside`)).status, 404);
   assert.equal((await (await fetch(`${base}/api/sounds`)).json()).assets.length, 1);
-  assert.equal((await (await fetch(`${base}/api/gallery`)).json()).themes.length, 7);
+  assert.equal((await fetch(`${base}/sounds/sampled`)).status, 404);
+  const audition = "<title>Sampled instrument auditions</title>";
+  fs.writeFileSync(path.join(directory, "sampled.html"), audition);
+  const sampled = await fetch(`${base}/sounds/sampled`);
+  assert.equal(sampled.headers.get("content-type"), "text/html; charset=utf-8");
+  assert.equal(await sampled.text(), audition);
+  const wallpaper = await fetch(`${base}/api/gallery`);
+  assert.equal(wallpaper.status, 200);
+  assert.ok((await wallpaper.json()).themes.some(theme => theme.id === "motd"));
 });

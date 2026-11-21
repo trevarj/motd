@@ -16,6 +16,10 @@ import javax.inject.Singleton
 enum class ChatSoundVoice(
     val assetId: String,
 ) {
+    SOFT_VIBES("soft-vibes"),
+    WIRE_ZITHER("wire-zither"),
+    MALLET_XYLOPHONE("mallet-xylophone"),
+    DRY_WOODBLOCK("dry-woodblock"),
     SOFT_GLASS("soft-glass"),
     TERMINAL_TICK("terminal-tick"),
     ARCADE_PLUCK("arcade-pluck"),
@@ -33,7 +37,7 @@ enum class ChatSoundMelody { HOMECOMING, CLIMB, RELAY, BEACON, VICTORY }
 
 @Serializable
 data class ChatSoundCueConfig(
-    val voice: ChatSoundVoice = ChatSoundVoice.SOFT_GLASS,
+    val voice: ChatSoundVoice = ChatSoundVoice.SOFT_VIBES,
     val enabled: Boolean = true,
     val volume: Int = 100,
     val pitch: Int = 0,
