@@ -176,6 +176,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
@@ -220,6 +221,8 @@ import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.db.ircTarget
+import io.github.trevarj.motd.data.db.isSchedulableMessage
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
@@ -429,7 +432,21 @@ fun ChatScreen(
     onOpenConversationList: (() -> Unit)? = null,
     pageCache: io.github.trevarj.motd.data.repo.ChatPageCache? = null,
     presentations: ChatPresentationRegistry? = null,
+    onOpenScheduledMessages: ((Long) -> Unit)? = null,
 ) {
+    val scheduledComposer =
+        if (onOpenScheduledMessages == null) {
+            null
+        } else {
+            val scheduledViewModel = hiltViewModel<ScheduledMessagesViewModel>()
+            ScheduledComposerActions(
+                capture = viewModel::captureScheduledDraft,
+                enqueue = { draft, timing ->
+                    viewModel.scheduleDraft(draft) { persisted -> scheduledViewModel.enqueue(draft, persisted, timing) }
+                },
+                openList = onOpenScheduledMessages,
+            )
+        }
     val dickordEnabled = LocalDickordLabsEnabled.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -784,6 +801,7 @@ fun ChatScreen(
         consumeAttachmentRequest = viewModel::consumeAttachmentRequest,
         attachmentSheetRequests = viewModel.attachmentSheetRequests,
         composerDraft = composerDraft,
+        scheduledComposer = scheduledComposer,
         aiTextState = aiTextState,
         aiTextEnabled = AiFeature.TEXT_TOOLS in aiLabsState.enabledFeatures,
         onTranslateMessage =
@@ -1346,6 +1364,7 @@ internal fun ChatContent(
     onReadAloudSaveOptions: (ReadAloudSelection) -> Unit = {},
     onReadAloudPreview: (ReadAloudSelection) -> Unit = {},
     composerStyle: ComposerStyle = ComposerStyle.COMFORTABLE,
+    scheduledComposer: ScheduledComposerActions? = null,
 ) {
     val globalCompactNickBrackets = LocalCompactNickBrackets.current
     val wallpaperSource = rememberSurfaceBackdropSource()
@@ -1714,6 +1733,54 @@ internal fun ChatContent(
         }
         var longDraftPrompt by rememberSaveable { mutableStateOf(false) }
         var overflowOpen by rememberSaveable { mutableStateOf(false) }
+        val scheduleFocus = LocalFocusManager.current
+        val scheduleKeyboard = LocalSoftwareKeyboardController.current
+        var scheduledDraft by remember(traceBufferId) { mutableStateOf<ScheduledDraft?>(null) }
+        val showScheduleActions =
+            scheduledComposer != null && buffer != null &&
+                (buffer.type == BufferType.CHANNEL || buffer.type == BufferType.QUERY)
+        val scheduleAttachmentPending =
+            attachmentSheetOpen || sharedFile != null ||
+                voiceState.recording != null || voiceState.staged != null || voiceState.sending
+        val openSchedule: () -> Unit = {
+            if (scheduledComposer != null) {
+                val text = composerText.text
+                val reason =
+                    when {
+                        scheduleAttachmentPending -> {
+                            R.string.scheduled_attachment_unsupported
+                        }
+
+                        state.replyTo != null -> {
+                            R.string.scheduled_reply_unsupported
+                        }
+
+                        plainIrcText(text).isBlank() -> {
+                            R.string.scheduled_text_required
+                        }
+
+                        !isSchedulableMessage(text) || isEbooksSearchOnly(text) -> {
+                            R.string.scheduled_text_unsupported
+                        }
+
+                        else -> {
+                            when (val capture = scheduledComposer.capture(text)) {
+                                is ScheduledDraftCapture.Refused -> {
+                                    capture.reason
+                                }
+
+                                is ScheduledDraftCapture.Captured -> {
+                                    scheduleFocus.clearFocus()
+                                    scheduleKeyboard?.hide()
+                                    scheduledDraft = capture.draft
+                                    null
+                                }
+                            }
+                        }
+                    }
+                if (reason != null) scope.launch { snackbarHostState.showSnackbar(resources.getString(reason)) }
+            }
+        }
         var conversationLayoutSheetOpen by rememberSaveable { mutableStateOf(false) }
         var notificationSheetOpen by rememberSaveable { mutableStateOf(false) }
         var presenceModeSheetOpen by rememberSaveable { mutableStateOf(false) }
@@ -3469,7 +3536,7 @@ internal fun ChatContent(
             }
         }
         val conversationActionsMenu: @Composable () -> Unit = {
-            DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.testTag("chat_overflow_menu")) {
+            DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("chat_overflow_menu")) {
                 if (compactHeader) {
                     if (titleClickLabel != null) {
                         DropdownMenuItem(
@@ -3502,6 +3569,26 @@ internal fun ChatContent(
                         },
                     )
                     HorizontalDivider()
+                }
+                if (showScheduleActions && buffer != null && scheduledComposer != null) {
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("scheduled_open_composer"),
+                        text = { Text(stringResource(R.string.scheduled_open)) },
+                        onClick = {
+                            overflowOpen = false
+                            openSchedule()
+                        },
+                    )
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("scheduled_open_chat"),
+                        text = { Text(stringResource(R.string.scheduled_title)) },
+                        onClick = {
+                            overflowOpen = false
+                            scheduleFocus.clearFocus()
+                            scheduleKeyboard?.hide()
+                            scheduledComposer.openList(buffer.id)
+                        },
+                    )
                 }
                 if (buffer?.type == BufferType.CHANNEL && buffer.joined) {
                     val inviteEnabled = state.connState is IrcClientState.Ready
@@ -3713,7 +3800,16 @@ internal fun ChatContent(
                             }
                         }
                     },
-            snackbarHost = { SnackbarHost(snackbarHostState) },
+            snackbarHost = {
+                SnackbarHost(snackbarHostState) { data ->
+                    if (data.visuals is ScheduledConfirmation) {
+                        ScheduledConfirmationSnackbar(data)
+                    } else {
+                        io.github.trevarj.motd.ui.components
+                            .EmojiSnackbar(data)
+                    }
+                }
+            },
             contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
             topBar = {
                 Column {
@@ -4156,6 +4252,11 @@ internal fun ChatContent(
                                         },
                                         enabled = composerEnabled,
                                         sendEnabled = !isEbooksSearchOnly(composerText.text),
+                                        onSchedule =
+                                            openSchedule.takeIf {
+                                                showScheduleActions && buffer?.canScheduleMessage() == true && plainIrcText(composerText.text).isNotBlank() &&
+                                                    !isEbooksSearchOnly(composerText.text)
+                                            },
                                         composerStyle = composerStyle,
                                         currentNick = state.composerNick,
                                         onFieldPositioned = { flightAnchors.composerField = it },
@@ -4863,6 +4964,31 @@ internal fun ChatContent(
                 title = { Text("Cannot open results ZIP") },
                 text = { Text(selectedEbooksError) },
                 confirmButton = { TextButton(onClick = { ebooksResultsError = null }, colors = readableTextButtonColors()) { Text("Close") } },
+            )
+        }
+
+        val schedule = scheduledDraft
+        if (schedule != null && scheduledComposer != null) {
+            ScheduleMessageSheet(
+                target = schedule.room.ircTarget,
+                initialText = schedule.text,
+                onDismiss = { scheduledDraft = null },
+                onSave = { _, timing ->
+                    if (scheduleAttachmentPending) R.string.scheduled_attachment_unsupported else scheduledComposer.enqueue(schedule, timing)
+                },
+                onSaved = {
+                    scheduledDraft = null
+                    scope.launch {
+                        val result =
+                            snackbarHostState.showSnackbar(
+                                ScheduledConfirmation(
+                                    resources.getString(R.string.scheduled_queued_confirmation),
+                                    resources.getString(R.string.scheduled_view),
+                                ),
+                            )
+                        if (result == SnackbarResult.ActionPerformed) scheduledComposer.openList(schedule.room.id)
+                    }
+                },
             )
         }
 

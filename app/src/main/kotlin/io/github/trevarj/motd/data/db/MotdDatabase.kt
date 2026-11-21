@@ -24,6 +24,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TimelineEventEntity::class,
         TimelineEventFtsEntity::class,
         ComposerDraftEntity::class,
+        ScheduledMessageEntity::class,
         EventAliasEntity::class,
         EventRedirectEntity::class,
         EventObservationEntity::class,
@@ -38,7 +39,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 53,
+    version = 54,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -56,6 +57,8 @@ abstract class MotdDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
 
     abstract fun composerDraftDao(): ComposerDraftDao
+
+    abstract fun scheduledMessageDao(): ScheduledMessageDao
 
     abstract fun memberDao(): MemberDao
 
@@ -1160,6 +1163,29 @@ val MIGRATION_52_53 =
         }
     }
 
+val MIGRATION_53_54 =
+    object : Migration(53, 54) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS scheduled_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    bufferId INTEGER NOT NULL,
+                    networkId INTEGER NOT NULL,
+                    networkName TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    membershipCycle INTEGER,
+                    text TEXT NOT NULL,
+                    dueAt INTEGER,
+                    zoneId TEXT,
+                    state TEXT NOT NULL
+                )
+                """.trimIndent(),
+            )
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1225,6 +1251,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_50_51,
         MIGRATION_51_52,
         MIGRATION_52_53,
+        MIGRATION_53_54,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"
@@ -1262,6 +1289,7 @@ internal val OBSERVED_TABLES =
         "network_ignores",
         "networks",
         "reactions",
+        "scheduled_messages",
         "users",
     )
 

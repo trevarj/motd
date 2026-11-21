@@ -5,6 +5,7 @@ import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
+import io.github.trevarj.motd.data.db.ScheduledMessageEntity
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IRC_COLOR
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
@@ -23,6 +24,39 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class OutgoingMessagePlanTest {
+    @Test
+    fun scheduledDestinationRejectsChangedTargetAndMembershipCycle() {
+        val room =
+            BufferEntity(
+                id = 42,
+                networkId = 7,
+                name = "#room",
+                displayName = "#Room",
+                type = BufferType.CHANNEL,
+                joined = true,
+                membershipCycle = 3,
+            )
+        val message =
+            ScheduledMessageEntity(
+                bufferId = 42,
+                networkId = 7,
+                networkName = "network",
+                target = "#Room",
+                membershipCycle = 3,
+                text = "hello",
+                dueAt = null,
+                zoneId = null,
+            )
+
+        assertTrue(scheduledDestinationMatches(message, room))
+        assertFalse(scheduledDestinationMatches(message, room.copy(membershipCycle = 4)))
+        assertFalse(scheduledDestinationMatches(message, room.copy(displayName = "#room")))
+        assertFalse(scheduledDestinationMatches(message, room.copy(pendingCloseAt = 1)))
+        assertFalse(scheduledDestinationMatches(message, room.copy(redirectToRoomId = 12)))
+        assertFalse(scheduledDestinationMatches(message, room.copy(dismissed = true)))
+        assertFalse(scheduledDestinationMatches(message, room.copy(joined = false)))
+    }
+
     @Test
     fun `utf8 chunks respect byte limit and never split a code point`() {
         val chunks = splitUtf8("hello 😀 world café", maxBytes = 10)

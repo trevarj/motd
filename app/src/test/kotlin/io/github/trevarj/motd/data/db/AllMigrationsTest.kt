@@ -521,10 +521,10 @@ class AllMigrationsTest {
         const val DB_NAME = "all-migrations-test.db"
 
         /**
-         * Mirrors `version = 53` on `@Database`. Room's annotation is CLASS-retained, so the
+         * Mirrors `version = 54` on `@Database`. Room's annotation is CLASS-retained, so the
          * declared version cannot be read reflectively; the exported schema JSON is the runtime
          * witness for it instead.
          */
-        const val DECLARED_VERSION = 53
+        const val DECLARED_VERSION = 54
     }
 }

@@ -213,6 +213,13 @@
             </intent-filter>
         </service>
         <service android:name=".service.NotificationActionService" android:exported="false" />
+        <service
+            android:name=".service.ScheduledMessageJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+        <receiver android:name=".service.ScheduledMessageClockReceiver" android:exported="false">
+            <intent-filter><action android:name="android.intent.action.TIME_SET" /></intent-filter>
+        </receiver>
         <receiver android:name=".service.BootReceiver" android:exported="false">
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
         </receiver>

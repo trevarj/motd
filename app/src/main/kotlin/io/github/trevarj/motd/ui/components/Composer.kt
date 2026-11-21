@@ -20,6 +20,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.content.consume
 import androidx.compose.foundation.content.contentReceiver
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -143,6 +144,7 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.selected
@@ -472,6 +474,7 @@ fun Composer(
     ircFormattingEnabled: Boolean = false,
     composerStyle: ComposerStyle = ComposerStyle.COMFORTABLE,
     currentNick: String? = null,
+    onSchedule: (() -> Unit)? = null,
 ) {
     val initialEditor = remember { IrcEditorDocument.fromRaw(value.text, value.selection.start, value.selection.end) }
     val textFieldState =
@@ -915,36 +918,28 @@ fun Composer(
         ) {
             // Inset only the paint: Material semantics and pointer bounds stay 48.dp.
             Crossfade(
-                targetState = canSend || !voiceEnabled,
+                targetState = canSend || onSchedule != null || !voiceEnabled,
                 animationSpec = MotdMotion.microFadeIn,
                 label = "composer_action",
             ) { showSend ->
                 if (showSend) {
-                    FilledIconButton(
-                        onClick = {
+                    val send: () -> Unit = {
+                        if (canSend) {
                             dismissEmojiPicker()
                             toolsOpen = false
                             expanded = false
                             onSend()
-                        },
-                        enabled = canSend,
-                        modifier = Modifier.size(48.dp).testTag("chat_composer_send"),
-                        shape = CircleShape,
-                        colors =
-                            IconButtonDefaults.filledIconButtonColors(
-                                containerColor = Color.Transparent,
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                                disabledContainerColor = Color.Transparent,
-                                disabledContentColor = composerInk.copy(alpha = 0.42f),
-                            ),
-                    ) {
+                        }
+                    }
+                    val buttonModifier = Modifier.size(48.dp).testTag("chat_composer_send")
+                    val content: @Composable () -> Unit = {
                         Box(
                             modifier =
                                 Modifier
                                     .fillMaxSize()
                                     .padding(primaryVisualInset)
                                     .background(
-                                        if (canSend) MaterialTheme.colorScheme.primary else composerFill,
+                                        if (canSend || onSchedule != null) MaterialTheme.colorScheme.primary else composerFill,
                                         CircleShape,
                                     ),
                             contentAlignment = Alignment.Center,
@@ -953,8 +948,37 @@ fun Composer(
                                 Icons.AutoMirrored.Filled.Send,
                                 stringResource(R.string.chat_composer_send),
                                 modifier = Modifier.size(24.dp),
+                                tint =
+                                    if (canSend || onSchedule != null) {
+                                        MaterialTheme.colorScheme.onPrimary
+                                    } else {
+                                        composerInk.copy(alpha = 0.42f)
+                                    },
                             )
                         }
+                    }
+                    if (onSchedule == null) {
+                        FilledIconButton(
+                            onClick = send,
+                            enabled = canSend,
+                            modifier = buttonModifier,
+                            shape = CircleShape,
+                            colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.Transparent, disabledContainerColor = Color.Transparent),
+                        ) { content() }
+                    } else {
+                        Box(
+                            buttonModifier.clip(CircleShape).combinedClickable(
+                                role = Role.Button,
+                                onLongClickLabel = stringResource(R.string.scheduled_open),
+                                onLongClick = {
+                                    dismissEmojiPicker()
+                                    toolsOpen = false
+                                    expanded = false
+                                    onSchedule()
+                                },
+                                onClick = send,
+                            ),
+                        ) { content() }
                     }
                 } else {
                     VoiceRecordButton(

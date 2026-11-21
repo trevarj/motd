@@ -3912,6 +3912,7 @@ class EventProcessor
             replyToMsgid: String?,
             channelContext: String? = null,
             requireChannelMembership: Boolean = false,
+            scheduledDestinationMatches: ((BufferEntity) -> Boolean)? = null,
         ): List<DurableOutgoingEvent> {
             require(events.isNotEmpty()) { "outgoing plan is empty" }
             val networkId =
@@ -3925,6 +3926,9 @@ class EventProcessor
                             "missing buffer $bufferId"
                         }
                     check(canonicalBuffer.networkId == networkId) { "buffer network changed" }
+                    if (scheduledDestinationMatches?.invoke(canonicalBuffer) == false) {
+                        throw OutgoingChannelNotJoinedException()
+                    }
                     if (requireChannelMembership && canonicalBuffer.type == BufferType.CHANNEL &&
                         (!canonicalBuffer.joined || canonicalBuffer.pendingCloseAt != null)
                     ) {

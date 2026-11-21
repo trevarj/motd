@@ -277,6 +277,35 @@ class RequiredHeadlessE2eTest {
         TimelineRobot(compose).assertMessageVisible(after.tag())
         compose.onNode(canonicalSent, useUnmergedTree = true).assertIsDisplayed()
 
+        val scheduled = "$token scheduled"
+        val chat = ChatRobot(compose)
+        runBlocking { bootstrap.seams.connections().disconnect(network.childId) }
+        chat.replace("chat_composer_field", scheduled)
+        compose.onNodeWithTag("chat_composer_send", useUnmergedTree = true).performTouchInput { longClick() }
+        chat.assertDisplayed("scheduled_sheet")
+        chat.click("scheduled_confirm")
+        chat.awaitTagGone("scheduled_sheet")
+        compose
+            .onNodeWithTag("chat_composer_field", useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
+        chat.click("scheduled_view")
+        chat.assertDisplayed("scheduled_list")
+        compose
+            .onNode(hasText(scheduled) and hasAnyAncestor(hasTestTag("scheduled_list")), useUnmergedTree = true)
+            .assertIsDisplayed()
+        runBlocking {
+            val pending =
+                bootstrap.seams
+                    .search()
+                    .search(token, bufferId)
+                    .first()
+            assertTrue(pending.hits.none { it.message.text == scheduled })
+            bootstrap.seams.connections().connect(network.childId)
+        }
+        val scheduledEcho = runBlocking { probe.awaitCanonical(scheduled, bufferId) }
+        scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        TimelineRobot(compose).assertMessageVisible(scheduledEcho.tag())
+
         scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
         ChatListRobot(compose).awaitTag("chatlist_row_$bufferId")
         val context = InstrumentationRegistry.getInstrumentation().targetContext

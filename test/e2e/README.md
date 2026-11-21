@@ -235,9 +235,11 @@ data-clear failures abort before running cases against stale or uninitialized st
 The four journeys cover:
 
 - onboarding, self-signed fixture trust, soju login, and network import;
-- one real UI send whose canonical Room event remains visible after reconnect, plus
-  dispatch of the actual posted semantic reply/read PendingIntents while outside the chat:
-  reply reconnects the network and produces one echoed public-channel row; the captured
+- one real UI send whose canonical Room event remains visible after reconnect;
+  an offline Send hold saves a scheduled message outside the transcript, and
+  reconnect produces its canonical echo; dispatch of the actual posted reply
+  and mark-read PendingIntents while outside the chat reconnects for the
+  reply and produces one echoed public-channel row; the captured
   read action covers the mention but leaves a later ordinary event unread; and
 - a second-client offline gap crossing a Paging window, first-unread viewport placement,
   frozen read state, canonical ordering, exactly-once recovery, and deliberate read advancement; and

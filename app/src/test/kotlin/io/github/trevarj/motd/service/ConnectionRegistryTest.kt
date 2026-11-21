@@ -73,6 +73,38 @@ class ConnectionRegistryTest {
     )
 
     @Test
+    fun scopedConnectionStartsOnlyItsTargetAndIsKeptWhenAdopted() =
+        runTest {
+            val created = mutableListOf<FakeActor>()
+            val registry = ConnectionRegistry(backgroundScope, { _, _ -> FakeActor().also(created::add) }, { false })
+            val target = network()
+            val other = network(id = 2)
+
+            registry.ensureScoped(target, "primary", emptySet())
+            assertFalse(registry.snapshot.value.started)
+            assertEquals(setOf(1L), registry.snapshot.value.actors.keys)
+            val originalGeneration =
+                registry.snapshot.value.actors
+                    .getValue(1)
+                    .generation
+
+            registry.beginStart()
+            registry.reconcile(listOf(target to "primary", other to "other"), setOf(1, 2), emptySet())
+            assertEquals(setOf(1L, 2L), registry.snapshot.value.actors.keys)
+            assertEquals(
+                originalGeneration,
+                registry.snapshot.value.actors
+                    .getValue(1)
+                    .generation,
+            )
+            assertEquals(0, created.first().stops)
+
+            registry.reconcile(listOf(target to "primary", other to "other"), setOf(2), emptySet())
+            assertEquals(setOf(2L), registry.snapshot.value.actors.keys)
+            assertEquals(1, created.first().stops)
+        }
+
+    @Test
     fun connectionActivityPublishesLifecycleStateAndProgressAtomically() =
         runTest {
             val registry =

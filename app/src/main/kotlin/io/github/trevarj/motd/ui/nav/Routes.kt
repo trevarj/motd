@@ -17,6 +17,10 @@ import kotlinx.serialization.Serializable
     val jumpToEventId: Long? = null, // canonical local identity; notifications prefer this
 )
 
+@Serializable data class ScheduledMessagesRoute(
+    val bufferId: Long? = null,
+)
+
 @Serializable data object OnboardingRoute
 
 @Serializable data object QrInviteScannerRoute

@@ -21,6 +21,8 @@ class FakeTransport : IrcTransport {
 
     @Volatile var sendFailure: Throwable? = null
 
+    var beforeSend: (suspend (String) -> Unit)? = null
+
     override suspend fun connect() {
         connected = true
     }
@@ -28,6 +30,7 @@ class FakeTransport : IrcTransport {
     override val incoming: Flow<String> = inbound.consumeAsFlow()
 
     override suspend fun send(line: String) {
+        beforeSend?.invoke(line)
         sent.add(line)
         sendFailure?.let { throw it }
     }

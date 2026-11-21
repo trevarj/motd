@@ -506,6 +506,12 @@ flowchart TD
   waiting for transport. Ordered per-network service work retains lifecycle protection;
   immediate-wire consumers explicitly await its outcome. Pending rows show a spinner,
   then confirmation or failure with retry/delete. Forwarding closes on durable acceptance.
+- Scheduled text stays in a device-local Room queue, outside the transcript until its
+  registered network and current-session channel membership permit dispatch. A
+  persisted Android job requests a temporary connection for due timed messages;
+  explicit disconnects and the 24-hour overdue boundary suspend automatic sends.
+  A durable claim prevents simultaneous dispatch; interrupted or ambiguous writes
+  require review rather than automatic replay. A socket write is not delivery.
 - Inline reaction chips clip their press indication to the same capsule shape as
   their fill and border, independently of chat-shadow elevation.
   Reaction-window, saved-position and displayed-depth observers follow the current paging-items

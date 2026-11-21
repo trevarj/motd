@@ -169,6 +169,7 @@ import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -259,6 +260,7 @@ fun ChatListScreen(
     viewModel: ChatListViewModel = hiltViewModel(),
     audioViewModel: AudioPlaybackViewModel = hiltViewModel(),
     newConversationSheetActive: () -> Boolean = { true },
+    onOpenScheduledMessages: (() -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val community by viewModel.community.collectAsStateWithLifecycle()
@@ -357,6 +359,7 @@ fun ChatListScreen(
         onOpenAudioOrigin = onOpenAudioOrigin,
         onOpenBuffer = onOpenBuffer,
         onOpenSettings = onOpenSettings,
+        onOpenScheduledMessages = onOpenScheduledMessages,
         onOpenSearch = onOpenSearch,
         onOpenFeed = onOpenFeed,
         onOpenMentions = onOpenMentions,
@@ -496,6 +499,7 @@ fun ChatListContent(
     onActivityAction: (NetworkActivityIssue, NetworkActivityAction) -> Unit = { _, _ -> },
     onActivityNetworkAction: (Long, NetworkActivityAction) -> Unit = { _, _ -> },
     newConversationSheetActive: () -> Boolean = { true },
+    onOpenScheduledMessages: (() -> Unit)? = null,
 ) {
     var archiveMode by rememberSaveable { mutableStateOf(false) }
     val swipeAction = if (archiveMode) ChatListSwipeAction.ARCHIVE else state.chatListSwipeAction
@@ -984,7 +988,17 @@ fun ChatListContent(
                                                         Icon(Icons.Filled.MoreVert, stringResource(R.string.chatlist_more_actions))
                                                     }
                                                 }
-                                                DropdownMenu(moreOpen, { moreOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.testTag("chatlist_more_menu")) {
+                                                DropdownMenu(moreOpen, { moreOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("chatlist_more_menu")) {
+                                                    if (onOpenScheduledMessages != null) {
+                                                        DropdownMenuItem(
+                                                            text = { Text(stringResource(R.string.scheduled_title)) },
+                                                            modifier = Modifier.testTag("scheduled_open_global"),
+                                                            onClick = {
+                                                                moreOpen = false
+                                                                onOpenScheduledMessages()
+                                                            },
+                                                        )
+                                                    }
                                                     DropdownMenuItem(
                                                         text = { Text(networkActivityMenuTitle) },
                                                         leadingIcon = { Icon(Icons.Outlined.Lan, contentDescription = null, modifier = Modifier.testTag("chatlist_network_activity_icon")) },

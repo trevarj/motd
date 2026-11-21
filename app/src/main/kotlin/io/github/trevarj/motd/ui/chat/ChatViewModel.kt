@@ -8,6 +8,7 @@ import androidx.navigation.toRoute
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ai.isValidAiText
 import io.github.trevarj.motd.attachment.MetadataNotSupportedException
 import io.github.trevarj.motd.audio.AudioAttachment
@@ -2995,6 +2996,49 @@ class ChatViewModel
             }
         }
 
+        internal fun captureScheduledDraft(text: String): ScheduledDraftCapture =
+            synchronized(draftStateLock) {
+                val room = state.value.buffer
+                when {
+                    currentReplyToEventId != null -> {
+                        ScheduledDraftCapture.Refused(R.string.scheduled_reply_unsupported)
+                    }
+
+                    room == null || room.id != operationalBufferId.value || !room.canScheduleMessage() -> {
+                        ScheduledDraftCapture.Refused(R.string.scheduled_chat_unavailable)
+                    }
+
+                    !_composerDraft.value.hydrated || currentDraftText != text -> {
+                        ScheduledDraftCapture.Refused(R.string.scheduled_draft_changed)
+                    }
+
+                    else -> {
+                        ScheduledDraftCapture.Captured(ScheduledDraft(room, text, _composerDraft.value.revision))
+                    }
+                }
+            }
+
+        internal suspend fun scheduleDraft(
+            capture: ScheduledDraft,
+            enqueue: suspend (ComposerDraftEntity) -> Int?,
+        ): Int? {
+            val submission =
+                when (val prepared = prepareDraftSubmission(capture.text, capture)) {
+                    is DraftSubmissionOutcome.Prepared -> prepared.submission
+                    DraftSubmissionOutcome.PersistenceFailed -> return R.string.scheduled_save_failed
+                    else -> return R.string.scheduled_draft_changed
+                }
+            try {
+                return withContext(NonCancellable) {
+                    val error = enqueue(submission.persisted)
+                    if (error == null) synchronized(draftStateLock) { consumeDraftSubmissionLocked(submission) }
+                    error
+                }
+            } finally {
+                releaseDraftSubmission(submission.snapshot)
+            }
+        }
+
         override fun onCleared() {
             invalidateAiDraftTransform()
         }
@@ -3098,13 +3142,24 @@ class ChatViewModel
          * new edit used to recreate a draft just after an accepted send, which turned one rapid UI
          * activation into multiple real IRC messages.
          */
-        private suspend fun prepareDraftSubmission(raw: String): DraftSubmissionOutcome {
+        private suspend fun prepareDraftSubmission(
+            raw: String,
+            scheduled: ScheduledDraft? = null,
+        ): DraftSubmissionOutcome {
             draftHydrated.await()
             val result = CompletableDeferred<ComposerDraftEntity?>()
             var duplicate = false
             val snapshot =
                 synchronized(draftStateLock) {
                     if (currentDraftText != raw) return@synchronized null
+                    if (scheduled != null &&
+                        (
+                            scheduled.room.id != operationalBufferId.value || scheduled.revision != _composerDraft.value.revision ||
+                                currentReplyToEventId != null
+                        )
+                    ) {
+                        return@synchronized null
+                    }
                     val candidate =
                         DraftSnapshot(
                             roomId = operationalBufferId.value,
@@ -3218,18 +3273,21 @@ class ChatViewModel
             val command = DraftCommand.ClearSubmission(submission.persisted, result)
             val queued =
                 synchronized(draftStateLock) {
-                    // Acceptance transfers this revision to the outbox, even if disk cleanup loses a CAS.
-                    if (_composerDraft.value.revision == submission.snapshot.revision) {
-                        currentDraftText = ""
-                        currentReplyToEventId = null
-                        replyTo.value = null
-                        replySenderNotInChannel.value = false
-                        advanceDraftRevisionLocked(hydrated = true)
-                    }
+                    consumeDraftSubmissionLocked(submission)
                     draftCommands.trySend(command).isSuccess
                 }
             if (!queued) withContext(NonCancellable) { clearPersistedSubmission(command) }
             result.await()
+        }
+
+        private fun consumeDraftSubmissionLocked(submission: PreparedDraftSubmission) {
+            if (_composerDraft.value.revision == submission.snapshot.revision) {
+                currentDraftText = ""
+                currentReplyToEventId = null
+                replyTo.value = null
+                replySenderNotInChannel.value = false
+                advanceDraftRevisionLocked(hydrated = true)
+            }
         }
 
         // --- search deep-jump ---

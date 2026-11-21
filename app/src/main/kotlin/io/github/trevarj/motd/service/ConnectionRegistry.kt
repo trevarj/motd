@@ -69,6 +69,13 @@ internal class ConnectionRegistry(
             val result: CompletableDeferred<Unit>,
         ) : Command
 
+        data class EnsureScoped(
+            val row: NetworkEntity,
+            val fingerprint: String,
+            val awaitingCertTrust: Set<Long>,
+            val result: CompletableDeferred<Unit>,
+        ) : Command
+
         data class Disconnect(
             val networkId: Long,
             val result: CompletableDeferred<Unit>,
@@ -220,6 +227,8 @@ internal class ConnectionRegistry(
 
             is Command.Connect -> command.result.complete(Unit)
 
+            is Command.EnsureScoped -> command.result.complete(Unit)
+
             is Command.Disconnect -> command.result.complete(Unit)
 
             is Command.ActorState -> command.result.complete(Unit)
@@ -261,6 +270,12 @@ internal class ConnectionRegistry(
         row: NetworkEntity,
         fingerprint: String,
     ) = request<Unit> { Command.Connect(row, fingerprint, it) }
+
+    suspend fun ensureScoped(
+        row: NetworkEntity,
+        fingerprint: String,
+        awaitingCertTrust: Set<Long>,
+    ) = request<Unit> { Command.EnsureScoped(row, fingerprint, awaitingCertTrust, it) }
 
     suspend fun disconnect(networkId: Long) = request<Unit> { Command.Disconnect(networkId, it) }
 
@@ -404,6 +419,12 @@ internal class ConnectionRegistry(
                 terminalFingerprints.remove(command.row.id)
                 removeActor(command.row.id, clearTerminal = false)
                 ensureActor(command.row, command.fingerprint, emptySet())
+                publish()
+                command.result.complete(Unit)
+            }
+
+            is Command.EnsureScoped -> {
+                ensureActor(command.row, command.fingerprint, command.awaitingCertTrust)
                 publish()
                 command.result.complete(Unit)
             }

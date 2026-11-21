@@ -51,6 +51,7 @@ import io.github.trevarj.motd.ui.chat.ChatScreen
 import io.github.trevarj.motd.ui.chat.ChatViewModel
 import io.github.trevarj.motd.ui.chat.IrcLinkDialog
 import io.github.trevarj.motd.ui.chat.IrcLinkViewModel
+import io.github.trevarj.motd.ui.chat.ScheduledMessagesScreen
 import io.github.trevarj.motd.ui.chatlist.AutoGroupScreen
 import io.github.trevarj.motd.ui.chatlist.ChatListScreen
 import io.github.trevarj.motd.ui.chatlist.ChatListViewModel
@@ -341,6 +342,9 @@ fun MotdNavGraph(
                                 onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
                                 onOpenWallpaperWorkshop = { navController.navigate(WallpaperWorkshopRoute(it)) },
                                 onOpenSearch = { navController.navigate(SearchRoute(it)) },
+                                onOpenScheduledMessages = {
+                                    navController.navigate(ScheduledMessagesRoute(it)) { launchSingleTop = true }
+                                },
                                 onOpenImage = { url, networkId ->
                                     navController.navigate(ImageViewerRoute(url, networkId))
                                 },
@@ -370,6 +374,12 @@ fun MotdNavGraph(
                     },
                 )
             }
+        }
+        composable<ScheduledMessagesRoute> { entry ->
+            ScheduledMessagesScreen(
+                bufferId = entry.toRoute<ScheduledMessagesRoute>().bufferId,
+                onBack = { navController.popBackStack() },
+            )
         }
         composable<OnboardingRoute> {
             // Finish lands on a fresh ChatList and clears onboarding (plus any duplicate
@@ -883,6 +893,7 @@ private fun ChatListPane(
             )
         },
         onOpenSettings = { navController.navigate(SettingsRoute()) },
+        onOpenScheduledMessages = { navController.navigate(ScheduledMessagesRoute()) { launchSingleTop = true } },
         onOpenSearch = { navController.navigate(SearchRoute()) },
         onOpenFeed = { navController.navigate(GlobalFeedRoute) },
         onOpenMentions = { navController.navigate(MentionsRoute) },

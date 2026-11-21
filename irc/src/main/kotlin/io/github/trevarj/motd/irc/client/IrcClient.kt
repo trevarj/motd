@@ -261,6 +261,10 @@ class IrcClient(
     val state: StateFlow<IrcClientState> = _state.asStateFlow()
     private val _joinedChannels = MutableStateFlow<Set<String>>(emptySet())
     val joinedChannels: StateFlow<Set<String>> = _joinedChannels.asStateFlow()
+
+    @Volatile
+    var latestSelfMembershipEvent: IrcEvent? = null
+        private set
     private val _targetClassificationReady = MutableStateFlow(false)
 
     /** True once CHANTYPES is explicit or the registration burst confirms protocol defaults. */
@@ -372,6 +376,7 @@ class IrcClient(
 
     fun stop() {
         _joinedChannels.value = emptySet()
+        latestSelfMembershipEvent = null
         watchdog?.stop()
         watchdog = null
         lagMonitor?.stop()
@@ -701,7 +706,10 @@ class IrcClient(
         publish(criticalEvents, ev)
     }
 
-    private fun updateJoinedChannels(event: IrcEvent) {
+    private fun updateJoinedChannels(
+        event: IrcEvent,
+        publishedEvent: IrcEvent = event,
+    ) {
         val channel =
             when (event) {
                 is IrcEvent.Joined -> {
@@ -718,7 +726,7 @@ class IrcClient(
 
                 is IrcEvent.NetworkBatch -> {
                     if (event.historyMetadata?.isContext != true) {
-                        event.events.forEach(::updateJoinedChannels)
+                        event.events.forEach { updateJoinedChannels(it, publishedEvent) }
                     }
                     return
                 }
@@ -727,6 +735,7 @@ class IrcClient(
                     return
                 }
             } ?: return
+        latestSelfMembershipEvent = publishedEvent
         val normalized = isupport.normalize(channel)
         _joinedChannels.update { joined ->
             val containsChannel = joined.any { isupport.normalize(it) == normalized }
@@ -1067,6 +1076,7 @@ class IrcClient(
     ) {
         if (!disconnectedPublished.compareAndSet(false, true)) return
         _joinedChannels.value = emptySet()
+        latestSelfMembershipEvent = null
         publish(criticalEvents, IrcEvent.Disconnected(reason))
     }
 
@@ -1204,6 +1214,24 @@ class IrcClient(
         forceLegacy: Boolean = false,
         channelContext: String? = null,
         clientTags: Map<String, String> = emptyMap(),
+    ): Boolean = sendChatMessage(target, text, replyToMsgid, label, forceLegacy, channelContext, clientTags)
+
+    suspend fun sendGuardedMessage(
+        target: String,
+        text: String,
+        label: String,
+        beforeWrite: suspend () -> Boolean,
+    ): Boolean = sendChatMessage(target, text, replyToMsgid = null, label = label, forceLegacy = true, beforeWrite = beforeWrite)
+
+    private suspend fun sendChatMessage(
+        target: String,
+        text: String,
+        replyToMsgid: String?,
+        label: String,
+        forceLegacy: Boolean,
+        channelContext: String? = null,
+        clientTags: Map<String, String> = emptyMap(),
+        beforeWrite: (suspend () -> Boolean)? = null,
     ): Boolean {
         requireValidChatLabel(label)
         val t = transport ?: return false
@@ -1240,7 +1268,15 @@ class IrcClient(
                 if (plan.message.params.any { it.any { char -> char == '\r' || char == '\n' } }) {
                     return false
                 }
-                sendSerialized(t, plan.message)
+                if (beforeWrite == null) {
+                    sendSerialized(t, plan.message)
+                } else {
+                    val line = plan.message.serialize()
+                    outboundLock.withLock {
+                        if (transport !== t || !beforeWrite() || transport !== t) return false
+                        t.send(line)
+                    }
+                }
             }
 
             is MultilineSendPlan.Batch -> {

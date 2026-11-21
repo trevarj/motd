@@ -26,9 +26,11 @@ import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.db.ReactionEntity
+import io.github.trevarj.motd.data.db.ScheduledMessageEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.db.ircTarget
+import io.github.trevarj.motd.data.db.isSchedulableMessage
 import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
@@ -83,6 +85,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -111,6 +114,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -124,6 +128,26 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
+
+internal enum class ScheduledReadiness { READY, WAITING, PAUSED, UNAVAILABLE }
+
+internal enum class ScheduledDispatch { SENT, WAITING, OVERDUE, UNAVAILABLE, UNCERTAIN }
+
+internal fun scheduledDestinationMatches(
+    message: ScheduledMessageEntity,
+    buffer: BufferEntity,
+): Boolean =
+    buffer.id == message.bufferId &&
+        buffer.networkId == message.networkId &&
+        buffer.ircTarget == message.target &&
+        buffer.redirectToRoomId == null &&
+        !buffer.dismissed &&
+        buffer.pendingCloseAt == null &&
+        when (buffer.type) {
+            BufferType.CHANNEL -> buffer.joined && buffer.membershipCycle == message.membershipCycle
+            BufferType.QUERY -> message.membershipCycle == null
+            else -> false
+        }
 
 internal data class OutgoingMessageChunk(
     val wireText: String,
@@ -852,6 +876,53 @@ class ConnectionManagerImpl
         // manual disconnect/connect is not undone by the next DB write. Reset by stopAll (not persisted).
         private val userIntents = java.util.concurrent.ConcurrentHashMap<Long, Boolean>()
 
+        private val actorIntentLock = Mutex()
+        private val scheduledPauses = appContext.getSharedPreferences("scheduled_connection_pauses", Context.MODE_PRIVATE)
+        private val scheduledConnectionsInFlight = ConcurrentHashMap<Long, Int>()
+        private val scopedActorIds = ConcurrentHashMap.newKeySet<Long>()
+        private val processedMembershipEvents = ConcurrentHashMap<Long, IrcEvent>()
+        private val scheduledChanges = MutableStateFlow(0L)
+
+        @OptIn(ExperimentalCoroutinesApi::class)
+        internal val scheduledConnectionChanges: Flow<Unit> =
+            merge(
+                registry.connectionStates.map { },
+                scheduledChanges.map { },
+                db.invalidationTracker.createFlow("buffers", "networks").map { },
+                registry.snapshot
+                    .map { snapshot -> snapshot.actors.mapValues { (_, actor) -> (actor.connection as? IrcClientConnection)?.client } }
+                    .distinctUntilChanged()
+                    .flatMapLatest { clients ->
+                        val liveClients = clients.values.filterNotNull()
+                        if (liveClients.isEmpty()) {
+                            flowOf(Unit)
+                        } else {
+                            merge(
+                                *liveClients
+                                    .map { client ->
+                                        combine(client.state, client.joinedChannels, client.targetClassificationReady) { _, _, _ -> }
+                                    }.toTypedArray(),
+                            )
+                        }
+                    },
+            )
+
+        private fun scheduleConnectionPaused(networkId: Long): Boolean = scheduledPauses.getBoolean("all", false) || scheduledPauses.getBoolean(networkId.toString(), false)
+
+        private suspend fun setScheduledPause(
+            key: String,
+            paused: Boolean,
+        ) {
+            withContext(Dispatchers.IO + NonCancellable) {
+                val edit = scheduledPauses.edit()
+                if (paused) edit.putBoolean(key, true) else edit.remove(key)
+                if (!edit.commit()) {
+                    diagnostics.record("connections", "scheduled_pause_persistence_failed") { mapOf("paused" to paused) }
+                }
+                scheduledChanges.update { it + 1 }
+            }
+        }
+
         override val connectionStates: StateFlow<Map<Long, IrcClientState>> = registry.connectionStates
         override val connectionActivity: StateFlow<ConnectionActivitySnapshot> = registry.connectionActivity
 
@@ -932,11 +1003,11 @@ class ConnectionManagerImpl
             try {
                 val shouldStart =
                     sendLifecycle.quiesce {
-                        if (!registry.beginStart()) {
+                        if (scheduledPauses.getBoolean("all", false) || !registry.beginStart()) {
                             false
                         } else {
                             startBegan = true
-                            ensurePendingRecovered(force = true)
+                            ensurePendingRecovered()
                             true
                         }
                     }
@@ -1007,9 +1078,9 @@ class ConnectionManagerImpl
             }
         }
 
-        private suspend fun ensurePendingRecovered(force: Boolean = false) {
+        private suspend fun ensurePendingRecovered() {
             pendingRecoveryLock.withLock {
-                if (force || !pendingRecovered) {
+                if (!pendingRecovered) {
                     eventProcessor.recoverInterruptedPending()
                     pendingRecovered = true
                 }
@@ -1024,7 +1095,8 @@ class ConnectionManagerImpl
          * limitation).
          */
         private suspend fun maybeStopForPush() {
-            if (!shouldApplyDozePushHandoff(
+            if (!registry.snapshot.value.started ||
+                !shouldApplyDozePushHandoff(
                     appForeground = appForeground,
                     deviceIdle = deviceIdle,
                     deliveryMode = settings.settings.first().deliveryMode,
@@ -1062,6 +1134,9 @@ class ConnectionManagerImpl
          * new DM/channel target when the post-notification reconnect requests CHATHISTORY.
          */
         internal suspend fun onAppForegrounded() {
+            actorIntentLock.withLock {
+                if (scheduledPauses.getBoolean("all", false)) setScheduledPause("all", false)
+            }
             appForeground = true
             backgroundRetention.cancel()
             pushSuspendedIds.clear()
@@ -1305,6 +1380,7 @@ class ConnectionManagerImpl
         }
 
         private fun startForegroundKeeper() {
+            if (scheduledPauses.getBoolean("all", false)) return
             // A refused keeper silently loses the EMBEDDED_REALITY retention guarantee, so the refusal
             // is recorded and not only logged.
             startForegroundSafely(diagnostics, source = "keeper") {
@@ -1330,14 +1406,18 @@ class ConnectionManagerImpl
                         backgroundRetention.cancel()
                         // Disconnect first so in-flight writes cannot keep producing pending rows. This
                         // also cancels and joins every echo timeout before recovery scans Room.
-                        registry.stop()
+                        actorIntentLock.withLock {
+                            setScheduledPause("all", true)
+                            registry.stop()
+                            userIntents.clear()
+                            scopedActorIds.clear()
+                            processedMembershipEvents.clear()
+                        }
                     },
                 ) {
                     eventProcessor.recoverInterruptedPending()
                     pendingRecoveryLock.withLock { pendingRecovered = false }
                     localSocksProvider.stop()
-                    // Service teardown resets sticky user intent (in-memory only).
-                    userIntents.clear()
                     retiring.forEach { (networkId, client) ->
                         catchUpJobs.remove(networkId)?.job?.cancelAndJoin()
                         historyResyncCoordinator.retireNetwork(networkId, client)
@@ -1367,8 +1447,17 @@ class ConnectionManagerImpl
                 }
             }
 
-        override suspend fun connect(networkId: Long) {
-            val row = networkDao.byId(networkId) ?: return
+        override suspend fun connect(networkId: Long) = connect(networkId, deliberate = true)
+
+        private suspend fun connect(
+            networkId: Long,
+            deliberate: Boolean,
+        ) = actorIntentLock.withLock {
+            val row = networkDao.byId(networkId) ?: return@withLock
+            if (deliberate) {
+                setScheduledPause(networkId.toString(), false)
+                if (scheduledPauses.getBoolean("all", false)) setScheduledPause("all", false)
+            }
             // Seed the network snapshot so buildClient can resolve a child's root even before the
             // first reconcile emission (e.g. connecting a freshly imported BOUNCER_CHILD).
             if (row.role == NetworkRole.BOUNCER_CHILD && row.parentId != null && networksById[row.parentId] == null) {
@@ -1378,18 +1467,22 @@ class ConnectionManagerImpl
             }
             // Record the sticky intent BEFORE touching actors so a concurrent reconcile honors it.
             userIntents[networkId] = true
+            if (registry.snapshot.value.started) scopedActorIds.remove(networkId)
             registry.connect(row, fingerprint(row))
         }
 
         override suspend fun disconnect(networkId: Long) {
-            // Record intent before removal so the next reconcile does not re-create the actor.
-            userIntents[networkId] = false
-            // Captured before the actor is torn down: retirement names the exact connection whose
-            // catch-up pass may still be winding down inside the coordinator's own scope. Null when the
-            // actor is already gone, which retires the network's existing passes without naming one.
-            val client = clientFor(networkId)
-            completedCatchUps.remove(networkId)
-            registry.disconnect(networkId)
+            val client =
+                actorIntentLock.withLock {
+                    setScheduledPause(networkId.toString(), true)
+                    userIntents[networkId] = false
+                    val current = clientFor(networkId)
+                    completedCatchUps.remove(networkId)
+                    registry.disconnect(networkId)
+                    scopedActorIds.remove(networkId)
+                    processedMembershipEvents.remove(networkId)
+                    current
+                }
             // The verification loop is ours, not the actor's, so nothing else stops it; stop it before
             // retiring so it cannot start another attempt behind the retirement.
             catchUpJobs.remove(networkId)?.job?.cancelAndJoin()
@@ -1417,34 +1510,38 @@ class ConnectionManagerImpl
 
         /** Add/remove/restart actors so the live set matches the wanted set derived from [all] rows
          *  and the sticky user-intent map. */
-        private suspend fun reconcile(all: List<NetworkEntity>) {
-            val deletedIds = networksById.keys - all.mapTo(mutableSetOf()) { it.id }
-            // Keep a synchronous lookup so buildClient can resolve a child's root bouncer row.
-            networksById = all.associateBy { it.id }
-            val suspended = notificationReplySuspensions(pushSuspendedIds, notificationRepliesInFlight)
-            val wantedIds = wantedNetworkIds(all, userIntents) - suspended
-            diagnostics.record("connections", "reconcile") {
-                mapOf(
-                    "configured" to all.size,
-                    "wanted" to wantedIds.size,
-                    "deleted" to deletedIds.size,
-                    "push_suspended" to suspended.size,
+        private suspend fun reconcile(all: List<NetworkEntity>) =
+            actorIntentLock.withLock {
+                val deletedIds = networksById.keys - all.mapTo(mutableSetOf()) { it.id }
+                // Keep a synchronous lookup so buildClient can resolve a child's root bouncer row.
+                networksById = all.associateBy { it.id }
+                val suspended = notificationReplySuspensions(pushSuspendedIds, notificationRepliesInFlight)
+                val leased = scheduledConnectionsInFlight.keys.filterNotTo(mutableSetOf(), ::scheduleConnectionPaused)
+                val wantedIds = ((wantedNetworkIds(all, userIntents) - suspended) + leased).intersect(networksById.keys)
+                diagnostics.record("connections", "reconcile") {
+                    mapOf(
+                        "configured" to all.size,
+                        "wanted" to wantedIds.size,
+                        "deleted" to deletedIds.size,
+                        "push_suspended" to suspended.size,
+                    )
+                }
+                registry.reconcile(
+                    rows = all.map { it to fingerprint(it) },
+                    wantedIds = wantedIds,
+                    awaitingCertTrust = _certPrompts.value.mapTo(mutableSetOf()) { it.networkId },
                 )
+                scopedActorIds.retainAll(wantedIds)
+                // Reconcile is the only teardown path a deleted row or the Doze push hand-off takes, and
+                // neither goes through [disconnect] or [stopAll], the two places that used to be able to
+                // clear a tracked pass.
+                cancelCatchUpsOutside(wantedIds)
+                deletedIds.forEach {
+                    processedMembershipEvents.remove(it)
+                    eventProcessor.evictNetwork(it)
+                    _lagStates.update { states -> states - it }
+                }
             }
-            registry.reconcile(
-                rows = all.map { it to fingerprint(it) },
-                wantedIds = wantedIds,
-                awaitingCertTrust = _certPrompts.value.mapTo(mutableSetOf()) { it.networkId },
-            )
-            // Reconcile is the only teardown path a deleted row or the Doze push hand-off takes, and
-            // neither goes through [disconnect] or [stopAll], the two places that used to be able to
-            // clear a tracked pass.
-            cancelCatchUpsOutside(wantedIds)
-            deletedIds.forEach {
-                eventProcessor.evictNetwork(it)
-                _lagStates.update { states -> states - it }
-            }
-        }
 
         private fun createActor(
             row: NetworkEntity,
@@ -1541,6 +1638,10 @@ class ConnectionManagerImpl
         ) {
             avatarCoordinator.onEvent(networkId, event)
             eventProcessor.process(networkId, event)
+            if (clientFor(networkId)?.latestSelfMembershipEvent === event) {
+                processedMembershipEvents[networkId] = event
+                scheduledChanges.update { it + 1 }
+            }
             applySelfAway(networkId, event)
             channelJoinOutcome(networkId, event, clientFor(networkId)?.isupport?.identityRules ?: IrcIdentityRules())
                 ?.let { _channelJoinOutcomes.emit(it) }
@@ -1970,6 +2071,7 @@ class ConnectionManagerImpl
             rootId: Long,
             isCurrent: () -> Boolean = { true },
         ) {
+            if (!registry.snapshot.value.started) return
             val snapshot = registry.snapshot.value
             val actorAlive = snapshot.actors.mapValues { (_, registered) -> registered.isAlive }
             for (childId in childrenNeedingReconnect(
@@ -1980,7 +2082,7 @@ class ConnectionManagerImpl
                 states = snapshot.states,
             )) {
                 if (!isCurrent()) return
-                connect(childId)
+                connect(childId, deliberate = false)
             }
         }
 
@@ -2633,7 +2735,7 @@ class ConnectionManagerImpl
                         target = buffer.ircTarget,
                         snapshots = registry.snapshot,
                         start = ::startAll,
-                        reconnect = ::connect,
+                        reconnect = { connect(it, deliberate = false) },
                         submit = { client ->
                             sendMessageInternal(buffer.id, text, null, null, notificationClient = client)
                         },
@@ -2648,15 +2750,205 @@ class ConnectionManagerImpl
             }
         }
 
+        internal suspend fun withScheduledConnection(
+            networkId: Long,
+            block: suspend () -> Unit,
+        ) {
+            var leased = false
+            try {
+                actorIntentLock.withLock {
+                    if (scheduleConnectionPaused(networkId) || _certPrompts.value.any { it.networkId == networkId }) return@withLock
+                    val row = networkDao.byId(networkId) ?: return@withLock
+                    val parent = row.parentId?.let { networkDao.byId(it) }
+                    if (row.role == NetworkRole.BOUNCER_CHILD && parent == null) return@withLock
+                    retainNotificationReplyNetwork(scheduledConnectionsInFlight, networkId)
+                    leased = true
+                    networksById = networksById + (row.id to row)
+                    if (parent != null) networksById = networksById + (parent.id to parent)
+                    if (networkId !in registry.snapshot.value.actors) scopedActorIds += networkId
+                    registry.ensureScoped(
+                        row,
+                        networkFingerprint(row, parent),
+                        _certPrompts.value.mapTo(mutableSetOf()) { it.networkId },
+                    )
+                }
+                block()
+            } finally {
+                if (leased) {
+                    withContext(NonCancellable) {
+                        actorIntentLock.withLock {
+                            releaseNotificationReplyNetwork(scheduledConnectionsInFlight, networkId)
+                            if (!scheduledConnectionsInFlight.containsKey(networkId) && scopedActorIds.remove(networkId)) {
+                                val suspended =
+                                    !appForeground && networkId in pushSuspendedIds && !notificationRepliesInFlight.containsKey(networkId)
+                                val normallyWanted =
+                                    !suspended && registry.snapshot.value.started &&
+                                        networkId in wantedNetworkIds(networkDao.observeAll().first(), userIntents)
+                                if (!normallyWanted) {
+                                    registry.disconnect(networkId)
+                                    completedCatchUps.remove(networkId)
+                                    processedMembershipEvents.remove(networkId)
+                                }
+                            }
+                        }
+                        scope.launch { evaluatePushMode() }
+                    }
+                }
+            }
+        }
+
+        internal suspend fun scheduledReadiness(message: ScheduledMessageEntity): ScheduledReadiness = scheduledReadiness(message, clientFor(message.networkId))
+
+        private suspend fun scheduledReadiness(
+            message: ScheduledMessageEntity,
+            client: IrcClient?,
+            expectedNick: String? = null,
+        ): ScheduledReadiness {
+            // A PART followed by a rapid JOIN must not combine the old persisted cycle with the new live membership.
+            val startingMembership = client?.latestSelfMembershipEvent
+            val network = networkDao.byId(message.networkId) ?: return ScheduledReadiness.UNAVAILABLE
+            val root =
+                if (network.role == NetworkRole.BOUNCER_CHILD) {
+                    network.parentId?.let { networkDao.byId(it) } ?: return ScheduledReadiness.UNAVAILABLE
+                } else {
+                    null
+                }
+            val buffer = bufferDao.rawById(message.bufferId) ?: return ScheduledReadiness.UNAVAILABLE
+            if (!scheduledDestinationMatches(message, buffer) ||
+                message.target.isEmpty() || message.target.first() in ":$" ||
+                message.target.any { it.isISOControl() || it.isWhitespace() || it == ',' }
+            ) {
+                return ScheduledReadiness.UNAVAILABLE
+            }
+            if (scheduleConnectionPaused(message.networkId) || _certPrompts.value.any { it.networkId == message.networkId }) {
+                return ScheduledReadiness.PAUSED
+            }
+            val snapshot = registry.snapshot.value
+            val actor = snapshot.actors[network.id] ?: return ScheduledReadiness.WAITING
+            if (client == null || !actor.isAlive || (actor.connection as? IrcClientConnection)?.client !== client ||
+                !registry.isCurrent(network.id, actor.generation) || actor.fingerprint != networkFingerprint(network, root) ||
+                snapshot.states[network.id] !is IrcClientState.Ready || !client.targetClassificationReady.value
+            ) {
+                return ScheduledReadiness.WAITING
+            }
+            val ready = client.state.value as? IrcClientState.Ready ?: return ScheduledReadiness.WAITING
+            if (expectedNick != null && expectedNick != ready.nick) return ScheduledReadiness.WAITING
+            val isChannel = buffer.type == BufferType.CHANNEL
+            if (client.isupport.isChannel(message.target) != isChannel) return ScheduledReadiness.UNAVAILABLE
+            if (!isChannel) {
+                val statusPrefixes = client.isupport["STATUSMSG"].orEmpty()
+                val withoutStatus = message.target.trimStart { it in statusPrefixes }
+                if (client.isupport.isChannel(withoutStatus) || message.target.any { it in "@!%*?" }) {
+                    return ScheduledReadiness.UNAVAILABLE
+                }
+            }
+            if (isChannel) {
+                val rules = client.isupport.identityRules
+                val target = rules.normalize(message.target)
+                val joined = client.joinedChannels.value.any { rules.normalize(it) == target }
+                val latest = client.latestSelfMembershipEvent
+                if (!joined || latest == null || latest !== startingMembership || processedMembershipEvents[network.id] !== latest) {
+                    return ScheduledReadiness.WAITING
+                }
+            }
+            return ScheduledReadiness.READY
+        }
+
+        private class ScheduledAttempt(
+            val message: ScheduledMessageEntity,
+            val owner: Job?,
+        ) {
+            var blocked: ScheduledDispatch? = null
+            var wrote = false
+            var expectsEcho = false
+        }
+
+        private suspend fun scheduledWriteBlock(
+            attempt: ScheduledAttempt,
+            client: IrcClient?,
+            expectedNick: String? = null,
+        ): ScheduledDispatch? {
+            val message = attempt.message
+            val readiness = scheduledReadiness(message, client, expectedNick)
+            return when (scheduledTimeState(message.dueAt, System.currentTimeMillis())) {
+                ScheduledTimeState.FUTURE -> {
+                    ScheduledDispatch.WAITING
+                }
+
+                ScheduledTimeState.OVERDUE -> {
+                    ScheduledDispatch.OVERDUE
+                }
+
+                ScheduledTimeState.ELIGIBLE -> {
+                    when (readiness) {
+                        ScheduledReadiness.UNAVAILABLE -> ScheduledDispatch.UNAVAILABLE
+                        ScheduledReadiness.READY -> if (attempt.owner?.isActive == false) ScheduledDispatch.WAITING else null
+                        ScheduledReadiness.WAITING, ScheduledReadiness.PAUSED -> ScheduledDispatch.WAITING
+                    }
+                }
+            }
+        }
+
+        internal suspend fun sendScheduled(message: ScheduledMessageEntity): ScheduledDispatch {
+            if (!isSchedulableMessage(message.text)) return ScheduledDispatch.UNAVAILABLE
+            val attempt = ScheduledAttempt(message, currentCoroutineContext()[Job])
+            val scoped = message.networkId in scopedActorIds
+            val client = clientFor(message.networkId)
+            return when (val result = sendMessageInternal(message.bufferId, message.text, null, null, client, attempt)) {
+                is SendAcceptance.Rejected -> {
+                    attempt.blocked ?: when (result.reason) {
+                        SendRejectionReason.PERSISTENCE_FAILED -> ScheduledDispatch.UNCERTAIN
+                        else -> ScheduledDispatch.UNAVAILABLE
+                    }
+                }
+
+                is SendAcceptance.Accepted -> {
+                    when (result.wireOutcome.await()) {
+                        ImmediateWireAcceptance.ACCEPTED -> {
+                            if (scoped && attempt.expectsEcho && !awaitScopedScheduledEcho(result.eventIds)) {
+                                ScheduledDispatch.UNCERTAIN
+                            } else {
+                                ScheduledDispatch.SENT
+                            }
+                        }
+
+                        else -> {
+                            attempt.blocked?.takeIf { !attempt.wrote && it != ScheduledDispatch.WAITING }
+                                ?: ScheduledDispatch.UNCERTAIN
+                        }
+                    }
+                }
+            }
+        }
+
+        private suspend fun awaitScopedScheduledEcho(eventIds: List<Long>): Boolean =
+            withTimeoutOrNull(SCHEDULED_ECHO_WAIT_MS) {
+                val rows =
+                    db.invalidationTracker
+                        .createFlow("messages")
+                        .map { messageDao.byIds(eventIds) }
+                        .first { rows ->
+                            rows.size != eventIds.size || rows.any { it.failed } || rows.none { it.pendingLabel != null }
+                        }
+                rows.size == eventIds.size && rows.none { it.failed }
+            } == true
+
         private suspend fun sendMessageInternal(
             bufferId: Long,
             text: String,
             replyToEventId: Long?,
             channelContext: String?,
             notificationClient: IrcClient?,
+            scheduled: ScheduledAttempt? = null,
         ): SendAcceptance =
             sendLifecycle.sending {
                 ensurePendingRecovered()
+                if (scheduled != null) {
+                    scheduled.blocked = scheduledWriteBlock(scheduled, notificationClient)
+                    if (scheduled.blocked != null) {
+                        return@sending SendAcceptance.Rejected(SendRejectionReason.CONNECTION_UNAVAILABLE)
+                    }
+                }
                 val buffer =
                     bufferDao.observeById(bufferId)
                         ?: return@sending SendAcceptance.Rejected(SendRejectionReason.BUFFER_NOT_FOUND)
@@ -2696,7 +2988,8 @@ class ConnectionManagerImpl
                     )
                 val bouncerServConsole = buffer.isBouncerConsole
                 val preferLogicalMultiline =
-                    client != null &&
+                    scheduled == null &&
+                        client != null &&
                         ready != null &&
                         !bouncerServConsole &&
                         !delivery.text
@@ -2745,6 +3038,10 @@ class ConnectionManagerImpl
                                 replyToMsgid = parent?.msgid,
                                 channelContext = channelContext,
                                 requireChannelMembership = notificationClient != null,
+                                scheduledDestinationMatches =
+                                    scheduled?.let { attempt ->
+                                        { destination -> scheduledDestinationMatches(attempt.message, destination) }
+                                    },
                             )
                         }
                     } catch (_: OutgoingChannelNotJoinedException) {
@@ -2770,6 +3067,8 @@ class ConnectionManagerImpl
                                 eventIds = eventIds,
                                 replyToMsgid = delivery.wireReplyToMsgid,
                                 channelContext = channelContext,
+                                forceLegacy = scheduled != null,
+                                scheduled = scheduled,
                             )
                         }
                     },
@@ -2884,6 +3183,7 @@ class ConnectionManagerImpl
             replyToMsgid: String?,
             forceLegacy: Boolean = false,
             channelContext: String? = null,
+            scheduled: ScheduledAttempt? = null,
         ): ImmediateWireAcceptance {
             if (planned.size != eventIds.size) {
                 eventProcessor.failPendingEvents(eventIds)
@@ -2912,6 +3212,19 @@ class ConnectionManagerImpl
                 eventIds = eventIds,
                 write = { index ->
                     val item = planned[index]
+                    if (scheduled != null) {
+                        val accepted =
+                            client.sendGuardedMessage(scheduled.message.target, item.chunk.wireText, item.label) {
+                                scheduled.blocked = scheduledWriteBlock(scheduled, client, ready.nick)
+                                scheduled.blocked == null
+                            }
+                        if (accepted) scheduled.wrote = true
+                        return@transmitDurableOutgoingPlan if (accepted) {
+                            ImmediateWireAcceptance.ACCEPTED
+                        } else {
+                            ImmediateWireAcceptance.DISCONNECTED
+                        }
+                    }
                     if (
                         client.sendMessage(
                             target = buffer.ircTarget,
@@ -2931,6 +3244,7 @@ class ConnectionManagerImpl
                 onWritten = { index ->
                     val item = planned[index]
                     if (client.hasCap("echo-message")) {
+                        scheduled?.expectsEcho = true
                         armEchoTimeout(buffer.id, item.label)
                     } else {
                         eventProcessor.confirmIfStillPending(buffer.id, item.label)
@@ -3308,6 +3622,7 @@ class ConnectionManagerImpl
                     changed = ex.changed,
                 )
             _certPrompts.value = _certPrompts.value.filterNot { it.networkId == networkId } + prompt
+            scheduledChanges.update { it + 1 }
         }
 
         override suspend fun trustCert(prompt: CertPrompt) {
@@ -3324,13 +3639,15 @@ class ConnectionManagerImpl
             for (id in affected) {
                 _certPrompts.value = _certPrompts.value.filterNot { it.networkId == id }
                 certFailures.remove(id)
-                connect(id)
+                connect(id, deliberate = false)
             }
+            scheduledChanges.update { it + 1 }
         }
 
         override fun dismissCertPrompt(prompt: CertPrompt) {
             _certPrompts.value = _certPrompts.value.filterNot { it.networkId == prompt.networkId }
             certFailures.remove(prompt.networkId)
+            scheduledChanges.update { it + 1 }
             // Network stays disconnected; the actor already parked itself.
         }
 
@@ -3368,6 +3685,7 @@ class ConnectionManagerImpl
             const val ECHO_TIMEOUT_MS = 30_000L
             const val INVITE_READY_TIMEOUT_MS = 30_000L
             const val ROSTER_REQUEST_TIMEOUT_MS = 15_000L
+            private const val SCHEDULED_ECHO_WAIT_MS = 3_000L
             const val EMBEDDED_REALITY_BACKGROUND_GRACE_MS = 5 * 60 * 1000L
             const val MAX_BYTES = 400
 

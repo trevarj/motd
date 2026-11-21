@@ -8,6 +8,7 @@ import io.github.trevarj.motd.irc.ext.SearchResultKind
 import io.github.trevarj.motd.irc.ext.SearchResultMessage
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.transport.TransportFactory
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -72,6 +73,45 @@ class IrcClientTest {
     private fun responseLabel(line: String): String =
         checkNotNull(Regex("label=(motd-\\d+)").find(line)) { "missing response label in $line" }
             .groupValues[1]
+
+    @Test
+    fun guardedMessageRechecksMembershipAfterWaitingBehindAWrite() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registered(ft)
+            ft.feed(":motd!u@h JOIN #Room")
+            runCurrent()
+            val originalMembership = checkNotNull(client.latestSelfMembershipEvent)
+            val held = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            ft.beforeSend = { line ->
+                if (line.endsWith(" :held message")) {
+                    held.complete(Unit)
+                    release.await()
+                }
+            }
+            val ordinary = async { client.sendMessage("#Room", "held message", null, "motd-ordinary") }
+            held.await()
+            var checked = false
+            val scheduled =
+                async {
+                    client.sendGuardedMessage("#Room", "scheduled message", "motd-scheduled") {
+                        checked = true
+                        client.latestSelfMembershipEvent === originalMembership
+                    }
+                }
+            runCurrent()
+            assertFalse(checked)
+            ft.feed(":motd!u@h PART #Room :leaving")
+            ft.feed(":motd!u@h JOIN #Room")
+            runCurrent()
+            assertTrue("#Room" in client.joinedChannels.value)
+            release.complete(Unit)
+            assertTrue(ordinary.await())
+            assertFalse(scheduled.await())
+            assertTrue(checked)
+            assertFalse(ft.sent.any { it.endsWith(" :scheduled message") })
+        }
 
     @Test
     fun `joined channels track only self membership before event publication`() =

@@ -24,6 +24,7 @@ import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.push.PushInstanceCoordinator
 import io.github.trevarj.motd.push.PushLifecycleCoordinator
 import io.github.trevarj.motd.service.AutoAwayCoordinator
+import io.github.trevarj.motd.service.ScheduledMessageCoordinator
 import io.github.trevarj.motd.ui.ComposeFoundationWorkarounds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +47,8 @@ class MotdApplication :
 
     // Backgrounded-for-long-enough → AWAY on every connected network, and back on return.
     @Inject lateinit var autoAwayCoordinator: AutoAwayCoordinator
+
+    @Inject lateinit var scheduledMessages: ScheduledMessageCoordinator
 
     @Inject lateinit var diagnosticLogger: DiagnosticLogger
 
@@ -93,6 +96,7 @@ class MotdApplication :
         pushInstanceCoordinator.start()
         pushLifecycleCoordinator.start()
         autoAwayCoordinator.start()
+        scheduledMessages.start()
         historyPruner.start()
         applicationScope.launch(Dispatchers.IO) { database.keepObservedTablesTracked() }
         applicationScope.launch(Dispatchers.IO) {
