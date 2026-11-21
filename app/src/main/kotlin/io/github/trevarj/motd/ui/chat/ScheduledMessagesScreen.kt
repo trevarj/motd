@@ -73,6 +73,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -351,7 +353,9 @@ private fun ScheduledTimeDialog(
     onConfirm: (Int, Int) -> Unit,
 ) {
     val state = rememberTimePickerState(initial.hour, initial.minute, DateFormat.is24HourFormat(LocalContext.current))
-    val canShowDial = LocalConfiguration.current.screenHeightDp >= TimePickerDialogDefaults.MinHeightForTimePicker.value
+    val heightPx = LocalWindowInfo.current.containerSize.height
+    val windowHeight = with(LocalDensity.current) { heightPx.toDp() }
+    val canShowDial = windowHeight >= TimePickerDialogDefaults.MinHeightForTimePicker
     var typeTime by rememberSaveable { mutableStateOf(false) }
     val typed = typeTime || !canShowDial
     val mode = if (typed) TimePickerDisplayMode.Input else TimePickerDisplayMode.Picker

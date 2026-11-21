@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ui.chat.ChatLinkKind
 import io.github.trevarj.motd.ui.chat.IrcChannelLink
@@ -92,7 +93,7 @@ internal fun LinkActionsSheet(
         )
         when (kind) {
             ChatLinkKind.WEB -> {
-                val link = Uri.parse(url)
+                val link = url.toUri()
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.chat_link_open_default)) },
                     modifier =
@@ -139,11 +140,12 @@ internal fun LinkActionsSheet(
                 Unit
             }
         }
+        val copyLinkLabel = stringResource(R.string.upload_copy_link)
         ListItem(
-            headlineContent = { Text(stringResource(R.string.upload_copy_link)) },
+            headlineContent = { Text(copyLinkLabel) },
             modifier =
                 Modifier.testTag("link_action_copy").clickable {
-                    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(context.getString(R.string.upload_copy_link), url))
+                    context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(copyLinkLabel, url))
                     onDismiss()
                 },
         )
@@ -155,14 +157,14 @@ private fun browsableIntent(link: Uri): Intent = Intent(Intent.ACTION_VIEW, link
 private fun externalLinkIntent(url: String): Intent {
     val scheme = url.substringBefore(':')
     val normalized = scheme.lowercase()
-    return browsableIntent(Uri.parse(if (scheme == normalized) url else url.replaceRange(0, scheme.length, normalized)))
+    return browsableIntent((if (scheme == normalized) url else url.replaceRange(0, scheme.length, normalized)).toUri())
 }
 
 private fun browserLinkIntent(
     packageManager: PackageManager,
     link: Uri,
 ): Intent? {
-    val probe = browsableIntent(Uri.parse("${link.scheme?.lowercase()}://browser.invalid/"))
+    val probe = browsableIntent("${link.scheme?.lowercase()}://browser.invalid/".toUri())
     val candidates =
         packageManager
             .queryIntentActivities(probe, PackageManager.MATCH_DEFAULT_ONLY)
