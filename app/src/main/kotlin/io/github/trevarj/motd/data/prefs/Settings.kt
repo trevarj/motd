@@ -329,6 +329,8 @@ data class Settings(
     val customPresenceKinds: Set<MessageKind> = DEFAULT_CUSTOM_PRESENCE_KINDS,
     /** Keep visible accountability tombstones for messages deleted through IRCv3 redaction. */
     val showRedactedMessages: Boolean = true,
+    /** Limit overview previews without changing chat activity or timeline visibility. */
+    val chatListMessagesOnly: Boolean = true,
     /** Send IRCv3 +typing state to peers while composing. */
     val sendTypingIndicators: Boolean = true,
     /** Show IRCv3 +typing state received from peers. */
@@ -486,6 +488,8 @@ interface SettingsRepository {
     suspend fun toggleCustomPresenceKind(kind: MessageKind) {}
 
     suspend fun setShowRedactedMessages(show: Boolean) {}
+
+    suspend fun setChatListMessagesOnly(enabled: Boolean) {}
 
     suspend fun setSendTypingIndicators(enabled: Boolean) {}
 

@@ -87,6 +87,73 @@ class MessageVisibilityReaderTest {
         }
 
     @Test
+    fun messagesOnlyKeepsFoolAndRedactionFilteringWithoutChangingEntryOrSort() =
+        runTest {
+            val otherRoom = db.bufferDao().insert(buffer(networkId, "#other"))
+            db.messageDao().insertAll(
+                listOf(
+                    message(bufferId, "latest conversation", "bob", 100, "real"),
+                    message(bufferId, "fool message", "alice", 300, "fool", hasMention = true),
+                    message(bufferId, "mode change", "op", 400, "mode", kind = MessageKind.MODE),
+                    message(bufferId, "deleted", "bob", 500, "deleted", kind = MessageKind.REDACTED),
+                    message(bufferId, "nick change", "bob", 600, "nick", kind = MessageKind.NICK),
+                    message(otherRoom, "newer conversation", "bob", 200, "other"),
+                ),
+            )
+            val legacyRaw = db.bufferDao().observeChatList().first()
+            val raw = db.bufferDao().observeChatList(messagesOnly = true).first()
+            assertEquals("fool message", raw.first().lastMessageText)
+            for (showRedacted in listOf(false, true)) {
+                val spec = MessageVisibilitySpec(fools = setOf("alice"), foolsMode = FoolsMode.HIDE, showRedactedMessages = showRedacted)
+                val legacy = reader.resolveChatList(legacyRaw, spec)
+                val messages = reader.resolveChatList(raw, spec, messagesOnly = true)
+
+                assertEquals(listOf(bufferId, otherRoom), messages.map { it.bufferId })
+                assertEquals(legacy, listOf(checkNotNull(reader.chatListRow(bufferId, spec)), messages.last()))
+                val preview = messages.first()
+                val activity = legacy.first()
+                assertEquals(if (showRedacted) "deleted" else "mode change", activity.lastMessageText)
+                assertEquals(if (showRedacted) 500L else 400L, preview.lastMessageTime)
+                assertEquals("latest conversation", preview.lastMessageText)
+                assertEquals("bob", preview.lastMessageSender)
+                assertEquals(100L, preview.previewTime)
+                assertEquals(1, preview.unreadCount)
+                assertEquals(0, preview.mentionCount)
+                assertEquals(
+                    activity,
+                    preview.copy(
+                        lastMessageText = activity.lastMessageText,
+                        lastMessageSender = activity.lastMessageSender,
+                        previewTime = activity.previewTime,
+                    ),
+                )
+            }
+        }
+
+    @Test
+    fun roomDeletedBetweenOverviewReadsDoesNotFallBackToUnfilteredPreview() =
+        runTest {
+            val buffers = db.bufferDao()
+            val survivingRoom = buffers.insert(buffer(networkId, "#surviving"))
+            db.messageDao().insertAll(
+                listOf(
+                    message(bufferId, "hidden text", "alice", 200, "hidden"),
+                    message(bufferId, "mode change", "op", 300, "mode", kind = MessageKind.MODE),
+                    message(survivingRoom, "hello", "bob", 100, "hello"),
+                ),
+            )
+            val raw = buffers.observeChatList(messagesOnly = true).first()
+            assertEquals("hidden text", raw.single { it.bufferId == bufferId }.lastMessageText)
+            buffers.deleteBuffer(bufferId)
+
+            val spec = MessageVisibilitySpec(fools = setOf("alice"), foolsMode = FoolsMode.HIDE)
+            assertEquals(
+                listOf(raw.single { it.bufferId == survivingRoom }),
+                reader.resolveChatList(raw, spec, messagesOnly = true),
+            )
+        }
+
+    @Test
     fun mixedFoolsKeepSqlUnreadAttentionAndAnchorsAlignedDuringHiddenReveal() =
         runTest {
             val ids =

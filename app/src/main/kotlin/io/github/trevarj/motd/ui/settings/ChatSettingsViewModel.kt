@@ -102,6 +102,8 @@ class ChatSettingsViewModel
 
         fun setShowRedactedMessages(value: Boolean) = launch { settingsRepository.setShowRedactedMessages(value) }
 
+        fun setChatListMessagesOnly(enabled: Boolean) = launch { settingsRepository.setChatListMessagesOnly(enabled) }
+
         fun setAutoAwayEnabled(value: Boolean) = launch { settingsRepository.setAutoAwayEnabled(value) }
 
         fun setAutoAwayMinutes(value: Int) = launch { settingsRepository.setAutoAwayMinutes(value) }

@@ -89,6 +89,7 @@ class ChatSettingsComposerToolsTest {
                     onOpenDirectConnections = {},
                     onPresenceMode = {},
                     onShowRedactedMessages = {},
+                    onChatListMessagesOnly = {},
                     onChatListSwipeAction = {},
                     onAutoAwayEnabled = {},
                     onAutoAwayMinutes = {},
@@ -187,6 +188,7 @@ class ChatSettingsComposerToolsTest {
                     onOpenChatSounds = { opened = true },
                     onPresenceMode = {},
                     onShowRedactedMessages = {},
+                    onChatListMessagesOnly = {},
                     onChatListSwipeAction = {},
                     onAutoAwayEnabled = {},
                     onAutoAwayMinutes = {},
@@ -223,7 +225,7 @@ class ChatSettingsComposerToolsTest {
     }
 
     @Test
-    fun swipePickerRendersAndDispatchesEveryAction() {
+    fun chatListPreviewSwitchAndSwipePickerDispatchIndependently() {
         val settings = mutableStateOf(Settings())
         val selections = mutableListOf<ChatListSwipeAction>()
         compose.setContent {
@@ -240,6 +242,7 @@ class ChatSettingsComposerToolsTest {
                     onOpenDirectConnections = {},
                     onPresenceMode = {},
                     onShowRedactedMessages = {},
+                    onChatListMessagesOnly = { settings.value = settings.value.copy(chatListMessagesOnly = it) },
                     onChatListSwipeAction = {
                         selections += it
                         settings.value = settings.value.copy(chatListSwipeAction = it)
@@ -276,6 +279,10 @@ class ChatSettingsComposerToolsTest {
             }
         }
 
+        val previewSwitch = compose.onNodeWithTag("settings_switch_chat_list_messages_only_row").performScrollTo()
+        previewSwitch.assertIsOn().performClick().assertIsOff()
+        previewSwitch.performClick().assertIsOn()
+
         var selected = ChatListSwipeAction.ARCHIVE
         compose.onNodeWithTag("settings_chat_list_swipe_picker").performScrollTo().performClick()
         ChatListSwipeAction.entries.forEach { action ->
@@ -309,6 +316,7 @@ class ChatSettingsComposerToolsTest {
                     onOpenDirectConnections = {},
                     onPresenceMode = {},
                     onShowRedactedMessages = {},
+                    onChatListMessagesOnly = {},
                     onChatListSwipeAction = {},
                     onMentionsEnabled = { settings.value = settings.value.copy(mentionsEnabled = it) },
                     onMentionsPlacement = { settings.value = settings.value.copy(mentionsPlacement = it) },
@@ -408,6 +416,7 @@ class ChatSettingsComposerToolsTest {
                             onOpenDirectConnections = {},
                             onPresenceMode = {},
                             onShowRedactedMessages = {},
+                            onChatListMessagesOnly = {},
                             onChatListSwipeAction = {},
                             onAutoAwayEnabled = {},
                             onAutoAwayMinutes = {},

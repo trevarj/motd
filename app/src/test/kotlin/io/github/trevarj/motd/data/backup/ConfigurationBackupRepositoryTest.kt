@@ -59,6 +59,7 @@ import io.github.trevarj.motd.data.prefs.PaletteDocument
 import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.PaletteReadError
 import io.github.trevarj.motd.data.prefs.PaletteSelection
+import io.github.trevarj.motd.data.prefs.PrefKeys
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
@@ -1825,6 +1826,35 @@ class ConfigurationBackupRepositoryTest {
             settings.setShowComposerEmoji(true)
             settings.setShowComposerFormattingTools(true)
             settings.setShowRedactedMessages(true)
+        }
+
+    @Test
+    fun chatListPreviewSettingRoundTripsAndLegacyBackupsDefaultToMessagesOnly() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val settings = DataStoreSettingsRepository(context)
+            val original = context.settingsDataStore.data.first()[PrefKeys.CHAT_LIST_MESSAGES_ONLY]
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                settings.setChatListMessagesOnly(false)
+                val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+
+                settings.setChatListMessagesOnly(true)
+                backup.import(raw, importMode = BackupImportMode.MERGE)
+                assertFalse(settings.settings.first().chatListMessagesOnly)
+
+                val legacy = raw.replace(Regex(""""chatListMessagesOnly"\s*:\s*false\s*,"""), "")
+                assertFalse(legacy.contains("\"chatListMessagesOnly\""))
+                backup.import(legacy, importMode = BackupImportMode.MERGE)
+                assertTrue(settings.settings.first().chatListMessagesOnly)
+            } finally {
+                context.settingsDataStore.edit {
+                    val key = PrefKeys.CHAT_LIST_MESSAGES_ONLY
+                    if (original == null) it.remove(key) else it[key] = original
+                }
+                db.close()
+            }
         }
 
     @Test

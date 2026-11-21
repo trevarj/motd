@@ -49,10 +49,12 @@ class BufferRepositoryImpl
         private val bufferStore: io.github.trevarj.motd.data.sync.BufferStore,
     ) : BufferRepository {
         override fun observeChatList(): Flow<List<ChatListRow>> =
-            combine(
-                bufferDao.observeChatList(),
-                settings.settings.map(MessageVisibilitySpec::from).distinctUntilChanged(),
-            ) { rows, spec -> visibilityReader.resolveChatList(rows, spec) }
+            settings.settings.map { it.chatListMessagesOnly }.distinctUntilChanged().flatMapLatest { messagesOnly ->
+                combine(
+                    bufferDao.observeChatList(messagesOnly = messagesOnly),
+                    settings.settings.map(MessageVisibilitySpec::from).distinctUntilChanged(),
+                ) { rows, spec -> visibilityReader.resolveChatList(rows, spec, messagesOnly) }
+            }
 
         override fun observeQueryConversations(): Flow<List<MonitorQueryRow>> = bufferDao.observeMonitorQueryRows().distinctUntilChanged()
 

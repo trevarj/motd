@@ -483,7 +483,7 @@ fun ChatListRowItem(
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            row.lastMessageTime?.let { time ->
+            row.previewTime?.let { time ->
                 Text(
                     text =
                         if (timestampConfig.format == TimeFormat.CUSTOM) {

@@ -108,6 +108,7 @@ fun ChatSettingsScreen(
         onPresenceMode = viewModel::setPresenceMode,
         onCustomPresenceKind = viewModel::toggleCustomPresenceKind,
         onShowRedactedMessages = viewModel::setShowRedactedMessages,
+        onChatListMessagesOnly = viewModel::setChatListMessagesOnly,
         onChatListSwipeAction = viewModel::setChatListSwipeAction,
         onMentionsEnabled = viewModel::setMentionsEnabled,
         onMentionsPlacement = viewModel::setMentionsPlacement,
@@ -158,6 +159,7 @@ fun ChatSettingsContent(
     onPresenceMode: (PresenceMode) -> Unit,
     onCustomPresenceKind: (io.github.trevarj.motd.data.db.MessageKind) -> Unit = {},
     onShowRedactedMessages: (Boolean) -> Unit,
+    onChatListMessagesOnly: (Boolean) -> Unit,
     onChatListSwipeAction: (ChatListSwipeAction) -> Unit,
     onMentionsEnabled: (Boolean) -> Unit = {},
     onMentionsPlacement: (MentionsPlacement) -> Unit = {},
@@ -244,6 +246,16 @@ fun ChatSettingsContent(
                 targetName = SettingsTarget.DELETED_MESSAGES.name,
             )
             DeletedMessageExample(settings.showRedactedMessages, Modifier.padding(horizontal = 16.dp))
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_chat_list_messages_only),
+                subtitle = stringResource(R.string.settings_chat_list_messages_only_desc),
+                checked = settings.chatListMessagesOnly,
+                onCheckedChange = onChatListMessagesOnly,
+                switchTag = "settings_switch_chat_list_messages_only",
+                requestedTarget = target?.name,
+                targetName = SettingsTarget.CHAT_LIST_MESSAGES_ONLY.name,
+            )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsNavigationRow(
                 title = stringResource(R.string.settings_chat_list_swipe),
@@ -732,6 +744,7 @@ private fun ChatSettingsPreview() {
             onOpenDirectConnections = {},
             onPresenceMode = {},
             onShowRedactedMessages = {},
+            onChatListMessagesOnly = {},
             onChatListSwipeAction = {},
             onAutoAwayEnabled = {},
             onAutoAwayMinutes = {},

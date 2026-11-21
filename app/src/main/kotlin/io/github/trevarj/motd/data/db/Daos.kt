@@ -319,17 +319,14 @@ interface ChatFolderDao {
 
 @Dao
 interface BufferDao {
-    // Chat-list projection: each non-SERVER buffer joins one newest preview-eligible message by
-    // identity. Presence events are timeline-only and never become previews or activity.
-    // Unread/mention counts remain chat kinds only; self messages never count as unread.
+    // Chat-list projection: each non-SERVER buffer joins its newest activity row. Previews may
+    // instead show only conversation messages; unread/mention policy is independent of that choice.
     // Counts are capped at 1000 (the badge renders 999+) so a buffer holding a huge unread
     // backlog cannot turn every invalidation into a full-buffer scan.
     // Entry can scope this same projection to one canonical room before any counts or previews run;
     // the default null roomId retains the whole chat list.
-    // Sort: pinned first, then latest KNOWN activity DESC (nulls last), where "known" is the newer
-    // of the local preview row and what CHATHISTORY TARGETS last advertised. Discovery therefore
-    // re-sorts the list on its first response, before any per-room page has been fetched.
-    // `advertisedUnread` is the count-less companion of that: the server says this room moved past
+    // Sort by anchor/pin placement, then stored activity (never CHATHISTORY TARGETS).
+    // `advertisedUnread` is a badge: the server says this room moved past
     // both the read floor and everything held locally, but the rows are not here yet. It carries no
     // number because discovery reports a timestamp, not a count, and it extinguishes itself when
     // the fetched page or a mark-read catches the room up. Compared at SECOND granularity, exactly
@@ -341,11 +338,17 @@ interface BufferDao {
     // No @Transaction: one SELECT already reads one snapshot, and Room would run the transaction on
     // the writer, so every refresh during a history sync would queue behind its pages.
     @Query(CHAT_LIST_SQL)
-    fun observeChatList(roomId: Long? = null): Flow<List<ChatListRow>>
+    fun observeChatList(
+        roomId: Long? = null,
+        messagesOnly: Boolean = false,
+    ): Flow<List<ChatListRow>>
 
     /** One-shot [observeChatList] for a chat open, with no observer to register. Blocking; call it on IO. */
     @Query(CHAT_LIST_SQL)
-    fun chatListNow(roomId: Long? = null): List<ChatListRow>
+    fun chatListNow(
+        roomId: Long? = null,
+        messagesOnly: Boolean = false,
+    ): List<ChatListRow>
 
     // QUERY-only materialization keeps channel traffic from invalidating this always-on projection.
     @Query(
@@ -1189,6 +1192,7 @@ data class ChatListRow(
     val muted: Boolean,
     val lastMessageText: String?,
     val lastMessageSender: String?,
+    /** Stored activity for ordering, independent of the displayed preview. */
     val lastMessageTime: Long?,
     val unreadCount: Int,
     val mentionCount: Int,
@@ -1210,6 +1214,7 @@ data class ChatListRow(
      */
     val advertisedUnread: Boolean = false,
     val anchorOrder: Int? = null,
+    val previewTime: Long? = lastMessageTime,
 )
 
 /** Batched fool-aware replacement for chat-list preview and badge fields. */
@@ -1220,6 +1225,7 @@ data class ChatListVisibilityRow(
     val lastMessageTime: Long?,
     val unreadCount: Int,
     val mentionCount: Int,
+    val previewTime: Long?,
 )
 
 /** Minimal query-buffer projection for MONITOR target selection. */
@@ -3060,8 +3066,12 @@ internal const val CHAT_LIST_SQL =
         b.avatarOverrideModel AS avatarOverrideModel,
         b.folderId AS folderId,
         b.dickordChannelJson AS dickordChannelJson,
-        lm.text AS lastMessageText,
-        lm.sender AS lastMessageSender,
+        CASE WHEN NOT :messagesOnly OR lm.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+             THEN lm.text ELSE preview.text END AS lastMessageText,
+        CASE WHEN NOT :messagesOnly OR lm.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+             THEN lm.sender ELSE preview.sender END AS lastMessageSender,
+        CASE WHEN NOT :messagesOnly OR lm.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+             THEN lm.serverTime ELSE preview.serverTime END AS previewTime,
         lm.serverTime AS lastMessageTime,
         (SELECT COUNT(*) FROM (SELECT 1 FROM messages m WHERE m.bufferId = b.id
             AND (
@@ -3142,6 +3152,14 @@ internal const val CHAT_LIST_SQL =
         ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC
         LIMIT 1
     )
+    LEFT JOIN messages preview ON preview.id = CASE
+        WHEN :messagesOnly AND lm.kind NOT IN ('PRIVMSG', 'NOTICE', 'ACTION') THEN (
+            SELECT m.id FROM messages m
+            WHERE m.bufferId = b.id AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+            ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC
+            LIMIT 1
+        )
+    END
     ORDER BY (b.anchorOrder IS NULL), b.anchorOrder, b.pinned DESC,
              (COALESCE(lm.serverTime, 0) = 0) ASC,
              COALESCE(lm.serverTime, 0) DESC,

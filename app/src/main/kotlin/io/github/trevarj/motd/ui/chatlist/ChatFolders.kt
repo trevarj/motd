@@ -83,7 +83,7 @@ fun presentFolderTabs(
 }
 
 fun summarizeFolder(rows: List<ChatListRow>): ChatFolderSummary {
-    val latest = rows.maxWithOrNull(compareBy<ChatListRow> { it.lastMessageTime ?: Long.MIN_VALUE }.thenBy(ChatListRow::bufferId))
+    val latest = rows.maxWithOrNull(compareBy<ChatListRow> { it.previewTime ?: Long.MIN_VALUE }.thenBy(ChatListRow::bufferId))
     val badgeRows = rows.filterNot(ChatListRow::muted)
     val unread = badgeRows.sumOf { it.unreadCount.toLong() }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
     val mentions = badgeRows.sumOf { it.mentionCount.toLong() }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
@@ -91,7 +91,7 @@ fun summarizeFolder(rows: List<ChatListRow>): ChatFolderSummary {
         visibleCount = rows.size,
         previewText = latest?.lastMessageText,
         previewSender = latest?.lastMessageSender?.takeIf(String::isNotBlank),
-        previewTime = latest?.lastMessageTime,
+        previewTime = latest?.previewTime,
         unreadCount = unread,
         mentionCount = mentions,
         unreadIncomplete = badgeRows.any(ChatListRow::unreadCountIncomplete),

@@ -276,6 +276,7 @@ class MessageVisibilityReader
         suspend fun resolveChatList(
             rows: List<ChatListRow>,
             spec: MessageVisibilitySpec,
+            messagesOnly: Boolean = false,
         ): List<ChatListRow> {
             if ((spec.fools.isEmpty() && spec.showRedactedMessages) || rows.isEmpty()) return rows
             val replacements =
@@ -289,20 +290,21 @@ class MessageVisibilityReader
                                 group,
                                 spec,
                                 IrcIdentityRules.from(first.caseMapping, first.chanTypes),
+                                messagesOnly,
                             ),
                         )
                     }.associateBy { it.bufferId }
             val resolved =
-                rows.map { row ->
-                    replacements[row.bufferId]?.let { replacement ->
-                        row.copy(
-                            lastMessageText = replacement.lastMessageText,
-                            lastMessageSender = replacement.lastMessageSender,
-                            lastMessageTime = replacement.lastMessageTime,
-                            unreadCount = replacement.unreadCount,
-                            mentionCount = replacement.mentionCount,
-                        )
-                    } ?: row
+                rows.mapNotNull { row ->
+                    val replacement = replacements[row.bufferId] ?: return@mapNotNull null
+                    row.copy(
+                        lastMessageText = replacement.lastMessageText,
+                        lastMessageSender = replacement.lastMessageSender,
+                        lastMessageTime = replacement.lastMessageTime,
+                        unreadCount = replacement.unreadCount,
+                        mentionCount = replacement.mentionCount,
+                        previewTime = replacement.previewTime,
+                    )
                 }
             // Same key the SQL projection orders on (stored rows only, never the advertised high-water
             // mark), so hiding a fool re-sorts the list without changing what "most recent" means.
@@ -320,9 +322,27 @@ class MessageVisibilityReader
             rows: List<ChatListRow>,
             spec: MessageVisibilitySpec,
             identityRules: IrcIdentityRules,
+            messagesOnly: Boolean,
         ): SimpleSQLiteQuery {
             val selectedIds = rows.joinToString(",") { it.bufferId.toString() }
             val visibility = MessageVisibilitySql(spec, identityRules)
+            val newestOrder = "ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT 1"
+
+            fun previewColumn(column: String): String =
+                if (messagesOnly) {
+                    "CASE WHEN activity.kind IN ($CONVERSATION_KIND_SQL) THEN activity.$column ELSE preview.$column END"
+                } else {
+                    "activity.$column"
+                }
+
+            val previewJoin =
+                if (messagesOnly) {
+                    " LEFT JOIN messages preview ON preview.id = CASE WHEN activity.kind NOT IN ($CONVERSATION_KIND_SQL) THEN (" +
+                        "SELECT m.id FROM messages m WHERE m.bufferId = b.id AND ${visibility.preview(messagesOnly = true)} " +
+                        "$newestOrder) END"
+                } else {
+                    ""
+                }
             // Android routes only statements that start with SELECT to reader connections; a leading WITH
             // would run on the writer's connection and wait out every history write.
             return SimpleSQLiteQuery(
@@ -331,13 +351,14 @@ class MessageVisibilityReader
                     "AS localReadAnchorOrder FROM buffers b " +
                     "LEFT JOIN messages anchor ON anchor.id = b.localReadAnchorEventId " +
                     "WHERE b.id IN ($selectedIds)) " +
-                    "SELECT b.id AS bufferId, preview.text AS lastMessageText, " +
-                    "preview.sender AS lastMessageSender, preview.serverTime AS lastMessageTime, " +
+                    "SELECT b.id AS bufferId, ${previewColumn("text")} AS lastMessageText, " +
+                    "${previewColumn("sender")} AS lastMessageSender, ${previewColumn("serverTime")} AS previewTime, " +
+                    "activity.serverTime AS lastMessageTime, " +
                     cappedChatListCountSql(visibility.visibleUnread(), mentionsOnly = false) + " AS unreadCount, " +
                     cappedChatListCountSql(visibility.mentionAttention("b.type"), mentionsOnly = true) + " AS mentionCount " +
-                    "FROM selected b LEFT JOIN messages preview ON preview.id = (" +
+                    "FROM selected b LEFT JOIN messages activity ON activity.id = (" +
                     "SELECT m.id FROM messages m WHERE m.bufferId = b.id AND ${visibility.preview()} " +
-                    "ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT 1))",
+                    "$newestOrder)$previewJoin)",
             )
         }
 

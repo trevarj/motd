@@ -690,6 +690,59 @@ class BufferDaoTest {
         }
 
     @Test
+    fun chatListMessagesOnlyChangesPreviewWithoutChangingActivityOrBadges() =
+        runTest {
+            val dao = db.bufferDao()
+            val original = dao.insert(buffer(networkId, "#original"))
+            val notices = dao.insert(buffer(networkId, "#notices"))
+            val events = dao.insert(buffer(networkId, "#events"))
+            db.messageDao().insertAll(
+                listOf(
+                    message(original, "ordinary", serverTime = 1_000, dedupKey = "ordinary", hasMention = true),
+                    message(original, "earlier at same order", serverTime = 2_000, dedupKey = "earlier").copy(timelineOrder = 5),
+                    message(original, "waves", "me", 2_000, "action", kind = MessageKind.ACTION, isSelf = true).copy(timelineOrder = 5),
+                    message(original, "inserted last", serverTime = 2_000, dedupKey = "last").copy(timelineOrder = 4),
+                    message(original, "nick change", "nick", 5_000, "nick", kind = MessageKind.NICK),
+                    message(notices, "notice", "server", 3_000, "notice", kind = MessageKind.NOTICE),
+                    message(events, "file offer", "peer", 4_000, "offer", kind = MessageKind.DCC_TRANSFER).copy(eventPayload = "{}"),
+                ),
+            )
+            dao.advanceAdvertisedLatest(original, 5_640)
+
+            val legacy = dao.observeChatList().first()
+            val messages = dao.observeChatList(messagesOnly = true).first()
+            assertEquals(listOf(original, events, notices), messages.map(ChatListRow::bufferId))
+            assertEquals(
+                listOf(Triple("nick change", "nick", 5_000L), Triple("file offer", "peer", 4_000L), Triple("notice", "server", 3_000L)),
+                legacy.map { Triple(it.lastMessageText, it.lastMessageSender, it.previewTime) },
+            )
+            assertEquals(
+                listOf(Triple("waves", "me", 2_000L), Triple(null, null, null), Triple("notice", "server", 3_000L)),
+                messages.map { Triple(it.lastMessageText, it.lastMessageSender, it.previewTime) },
+            )
+            assertEquals(
+                legacy,
+                messages.zip(legacy) { current, before ->
+                    current.copy(
+                        lastMessageText = before.lastMessageText,
+                        lastMessageSender = before.lastMessageSender,
+                        previewTime = before.previewTime,
+                    )
+                },
+            )
+            assertEquals(listOf(3, 1, 1), messages.map(ChatListRow::unreadCount))
+            assertEquals(listOf(1, 0, 0), messages.map(ChatListRow::mentionCount))
+            assertFalse(messages.first().advertisedUnread)
+
+            dao.advanceAdvertisedLatest(original, 6_000)
+            val pending = dao.observeChatList(original, messagesOnly = true).first().single()
+            assertTrue(pending.advertisedUnread)
+            dao.clampAdvertisedLatestToVisible(original, provenLatest = 6_000)
+            assertEquals(5_000L, dao.rawById(original)?.advertisedLatestTime)
+            assertEquals(messages.first(), dao.observeChatList(original, messagesOnly = true).first().single())
+        }
+
+    @Test
     fun chatList_excludesServerBuffers_andSortsPinnedFirstThenActivity() =
         runTest {
             val bufDao = db.bufferDao()

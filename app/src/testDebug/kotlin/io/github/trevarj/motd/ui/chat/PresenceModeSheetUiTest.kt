@@ -66,6 +66,7 @@ class PresenceModeSheetUiTest {
                         settings.value = settings.value.copy(customPresenceKinds = if (kind in current) current - kind else current + kind)
                     },
                     onShowRedactedMessages = {},
+                    onChatListMessagesOnly = {},
                     onChatListSwipeAction = {},
                     onAutoAwayEnabled = {},
                     onAutoAwayMinutes = {},

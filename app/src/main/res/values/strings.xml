@@ -1101,6 +1101,8 @@
     <string name="settings_presence_title">Presence changes</string>
     <string name="settings_show_redacted_messages">Show deleted messages</string>
     <string name="settings_show_redacted_messages_desc">Keep accountability placeholders when messages are deleted</string>
+    <string name="settings_chat_list_messages_only">Messages only in chat-list previews</string>
+    <string name="settings_chat_list_messages_only_desc">Show only chat messages in previews. Turn off to also show system events as before.</string>
     <string name="settings_presence_all">Show all</string>
     <string name="settings_presence_all_desc">Every join, leave, rename, away, and back event.</string>
     <string name="settings_presence_smart">Smart</string>

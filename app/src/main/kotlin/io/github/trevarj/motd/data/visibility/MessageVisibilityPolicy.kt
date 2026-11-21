@@ -237,7 +237,15 @@ internal class MessageVisibilitySql(
 
     fun anchor(alias: String = "m"): String = allOf(timeline(alias), notHidden(alias))
 
-    fun preview(alias: String = "m"): String = allOf(notPresence(alias), redactionVisibility(alias), notFool(alias))
+    fun preview(
+        alias: String = "m",
+        messagesOnly: Boolean = false,
+    ): String =
+        if (messagesOnly) {
+            allOf("${column(alias, "kind")} IN ($CONVERSATION_KIND_SQL)", notFool(alias))
+        } else {
+            allOf(notPresence(alias), redactionVisibility(alias), notFool(alias))
+        }
 
     // The DCC disjunct mirrors the chat-list unreadCount SQL in Daos.kt: a payload-bearing
     // incoming offer is counted by the cue, so the unread anchor must see the same row.
@@ -661,4 +669,4 @@ private const val TRUE = "1"
 private const val HEX = "0123456789abcdef"
 private val PRESENCE_KIND_SQL = PRESENCE_KINDS.joinToString(",") { "'${it.name}'" }
 private val ACTOR_PRESENCE_KIND_SQL = ACTOR_PRESENCE_KINDS.joinToString(",") { "'${it.name}'" }
-private val CONVERSATION_KIND_SQL = CONVERSATION_KINDS.joinToString(",") { "'${it.name}'" }
+internal val CONVERSATION_KIND_SQL = CONVERSATION_KINDS.joinToString(",") { "'${it.name}'" }

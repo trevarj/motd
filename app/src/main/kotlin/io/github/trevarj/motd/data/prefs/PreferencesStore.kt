@@ -68,6 +68,7 @@ internal object PrefKeys {
     val PRESENCE_MODE = stringPreferencesKey("presence_mode")
     val CUSTOM_PRESENCE_KINDS = stringPreferencesKey("custom_presence_kinds")
     val SHOW_REDACTED_MESSAGES = stringPreferencesKey("show_redacted_messages")
+    val CHAT_LIST_MESSAGES_ONLY = stringPreferencesKey("chat_list_messages_only")
     val SEND_TYPING_INDICATORS = stringPreferencesKey("send_typing_indicators")
     val SHOW_TYPING_INDICATORS = stringPreferencesKey("show_typing_indicators")
     val AVATAR_STYLE = stringPreferencesKey("avatar_style")
@@ -218,6 +219,7 @@ class DataStoreSettingsRepository
                         ),
                     customPresenceKinds = customPresenceKindsFromPreference(prefs[PrefKeys.CUSTOM_PRESENCE_KINDS]),
                     showRedactedMessages = prefs[PrefKeys.SHOW_REDACTED_MESSAGES]?.toBooleanStrictOrNull() ?: true,
+                    chatListMessagesOnly = prefs[PrefKeys.CHAT_LIST_MESSAGES_ONLY]?.toBooleanStrictOrNull() ?: true,
                     sendTypingIndicators = prefs[PrefKeys.SEND_TYPING_INDICATORS]?.toBooleanStrictOrNull() ?: true,
                     showTypingIndicators = prefs[PrefKeys.SHOW_TYPING_INDICATORS]?.toBooleanStrictOrNull() ?: true,
                     typingIndicatorPlacement = typingIndicatorPlacementFromPreference(prefs[PrefKeys.TYPING_INDICATOR_PLACEMENT]),
@@ -501,6 +503,10 @@ class DataStoreSettingsRepository
 
         override suspend fun setShowRedactedMessages(show: Boolean) {
             store.edit { it[PrefKeys.SHOW_REDACTED_MESSAGES] = show.toString() }
+        }
+
+        override suspend fun setChatListMessagesOnly(enabled: Boolean) {
+            store.edit { it[PrefKeys.CHAT_LIST_MESSAGES_ONLY] = enabled.toString() }
         }
 
         override suspend fun setSendTypingIndicators(enabled: Boolean) {

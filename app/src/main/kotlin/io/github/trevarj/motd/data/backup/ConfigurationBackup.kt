@@ -1018,6 +1018,7 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setPresenceMode(it.restoredPresenceMode())
                 settingsRepository.setCustomPresenceKinds(it.customPresenceKinds)
                 settingsRepository.setShowRedactedMessages(it.showRedactedMessages)
+                settingsRepository.setChatListMessagesOnly(it.chatListMessagesOnly)
                 settingsRepository.setSendTypingIndicators(it.sendTypingIndicators)
                 settingsRepository.setShowTypingIndicators(it.showTypingIndicators)
                 settingsRepository.setTypingIndicatorPlacement(it.typingIndicatorPlacement)

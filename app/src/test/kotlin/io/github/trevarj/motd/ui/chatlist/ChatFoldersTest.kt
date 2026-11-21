@@ -88,15 +88,17 @@ class ChatFoldersTest {
     }
 
     @Test
-    fun collapsedSummaryUsesMutedPreviewButNotMutedBadges() {
+    fun collapsedSummaryUsesNewestPreviewWithoutChangingMutedBadgePolicy() {
         val mutedLatest = row(1, "#one", folderId = 7, muted = true, time = 20, unread = 9, mentions = 3)
-        val older = row(2, "#two", folderId = 7, time = 10, unread = 2, incomplete = true)
+        val newerActivity = row(2, "#two", folderId = 7, time = 30, unread = 2, incomplete = true).copy(previewTime = 10)
+        val eventsOnly = row(3, "#three", folderId = 7, time = 40).copy(lastMessageText = null, lastMessageSender = null, previewTime = null)
 
-        val summary = summarizeFolder(listOf(older, mutedLatest))
+        val summary = summarizeFolder(listOf(newerActivity, mutedLatest, eventsOnly))
 
-        assertEquals(2, summary.visibleCount)
+        assertEquals(3, summary.visibleCount)
         assertEquals("#one preview", summary.previewText)
         assertEquals("alice", summary.previewSender)
+        assertEquals(20L, summary.previewTime)
         assertEquals(2, summary.unreadCount)
         assertEquals(0, summary.mentionCount)
         assertTrue(summary.unreadIncomplete)
