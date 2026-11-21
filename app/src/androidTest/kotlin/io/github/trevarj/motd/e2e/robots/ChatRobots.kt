@@ -196,6 +196,9 @@ internal class TimelineRobot(
         // before Paging can present it. Use the journey's network-dependent timeout rather than the
         // generic 10s component wait, which is a cold-emulator flake edge for this row.
         awaitNewestRow(messageTag, rowId, timeoutMs = 30_000, diagnostics = diagnostics)
+        rule.waitUntil("Compact audio player is displayed in $messageTag", 30_000) {
+            runCatching { rule.onNode(playerMatcher, useUnmergedTree = true).assertIsDisplayed() }.isSuccess
+        }
         val players = rule.onAllNodes(playerMatcher, useUnmergedTree = true).assertCountEquals(1)
         players[0].assertIsDisplayed()
         rule.onAllNodes(detailsMatcher, useUnmergedTree = true).assertCountEquals(1)[0].performClick()
