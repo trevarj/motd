@@ -73,6 +73,7 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Anchor
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.DynamicFeed
@@ -992,6 +993,7 @@ fun ChatListContent(
                                                     if (onOpenScheduledMessages != null) {
                                                         DropdownMenuItem(
                                                             text = { Text(stringResource(R.string.scheduled_title)) },
+                                                            leadingIcon = { Icon(Icons.Outlined.DateRange, contentDescription = null) },
                                                             modifier = Modifier.testTag("scheduled_open_global"),
                                                             onClick = {
                                                                 moreOpen = false
