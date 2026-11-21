@@ -63,7 +63,7 @@ them in motion on the [landing page](https://trevs.site/motd/).
 - **CTCP VERSION** — identifies motd and the running app version when a request reaches the client
 - **Full-text search** — across all history or one buffer, with jump-to-message
 - **Theming** — Material You device colors, curated editor/terminal families (Ayu, Gruvbox, Catppuccin, Modus, and more), and editable, shareable local palettes with independent light and dark choices and System/Light/Dark mode; independent neutral/theme text and opt-in readability corrections; independent input, avatar, chat-card, and media shape presets with live previews; selectable Material (default) or Lucide interface icons
-- **Readable menus and settings** — palette-accented headings, neutral value pills, distinct selected options, and contextual notes; adaptive labels show resolved values, including the device’s current time format
+- **Readable menus and settings** — palette-accented headings, neutral value pills, distinct selected options, and contextual notes; adaptive labels show resolved values, including the device’s current time format. The chat overflow groups conversation actions, Read Aloud controls, and chat settings separately.
 - **Hardened transport** — TLS with SASL PLAIN/EXTERNAL, client certificates, IRCv3 STS pinning, and optional SOCKS5/Tor/VLESS obfuscation
 
 ## Install

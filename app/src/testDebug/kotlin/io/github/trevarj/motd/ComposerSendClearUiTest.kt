@@ -4158,15 +4158,25 @@ class ComposerSendClearUiTest {
         compose.runOnIdle { assertEquals(1, conversationLists) }
         compose.onNodeWithTag("chat_overflow_menu").assertDoesNotExist()
         actions.performClick()
-        listOf(
-            "chat_invite_user",
-            "chat_watch",
-            "chat_layout_menu",
-            "chat_read_aloud_toggle",
-            "chat_read_aloud_options",
-            "chat_history_sync_menu",
-            "chat_presence_menu",
-        ).forEach { tag ->
+        val menuOrder =
+            listOf(
+                "chat_open_conversation_list",
+                "chat_compact_search",
+                "chat_invite_user",
+                "chat_overflow_actions_divider",
+                "chat_read_aloud_toggle",
+                "chat_read_aloud_options",
+                "chat_overflow_settings_divider",
+                "chat_watch",
+                "chat_layout_menu",
+                "chat_history_sync_menu",
+                "chat_presence_menu",
+            )
+        val bounds = menuOrder.map { compose.onNodeWithTag(it).getUnclippedBoundsInRoot() }
+        bounds.zipWithNext().forEachIndexed { index, (above, below) ->
+            assertTrue("${menuOrder[index]} must precede ${menuOrder[index + 1]}", above.bottom <= below.top)
+        }
+        menuOrder.forEach { tag ->
             compose.onAllNodesWithTag(tag).assertCountEquals(1)
             compose.onNodeWithTag(tag).performScrollTo().assertIsDisplayed()
         }
@@ -4206,6 +4216,11 @@ class ComposerSendClearUiTest {
         compose.onNodeWithTag("chat_read_aloud_toggle").assertDoesNotExist()
         compose.onNodeWithTag("chat_history_sync_menu").assertDoesNotExist()
         compose.onNodeWithTag("chat_compact_search").assertIsDisplayed()
+        compose.onNodeWithTag("chat_overflow_settings_divider").assertDoesNotExist()
+        val search = compose.onNodeWithTag("chat_compact_search").getUnclippedBoundsInRoot()
+        val divider = compose.onNodeWithTag("chat_overflow_actions_divider").getUnclippedBoundsInRoot()
+        val layout = compose.onNodeWithTag("chat_layout_menu").getUnclippedBoundsInRoot()
+        assertTrue("The server action divider must separate Search and Layout", search.bottom <= divider.top && divider.bottom <= layout.top)
     }
 
     @Test

@@ -3559,7 +3559,6 @@ internal fun ChatContent(
                             buffer?.let { onOpenSearch(it.id) }
                         },
                     )
-                    HorizontalDivider()
                 }
                 if (showScheduleActions) {
                     val canScheduleDraft =
@@ -3580,7 +3579,8 @@ internal fun ChatContent(
                         },
                     )
                 }
-                if (buffer?.type == BufferType.CHANNEL && buffer.joined) {
+                val showInvite = buffer?.type == BufferType.CHANNEL && buffer.joined
+                if (showInvite) {
                     val inviteEnabled = state.connState is IrcClientState.Ready
                     DropdownMenuItem(
                         modifier = Modifier.testTag("chat_invite_user"),
@@ -3603,6 +3603,78 @@ internal fun ChatContent(
                         },
                     )
                 }
+                if (fools.isNotEmpty()) {
+                    val foolsShown = expandAllFools && !restoringHiddenFools
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_toggle_fools_visibility"),
+                        text = {
+                            Column {
+                                Text(stringResource(if (foolsShown) R.string.chat_fool_collapse_all else R.string.chat_fool_expand_all))
+                                Text(stringResource(R.string.settings_chat_visit_scope), style = MaterialTheme.typography.bodySmall)
+                            }
+                        },
+                        onClick = {
+                            overflowOpen = false
+                            if (!foolsShown) {
+                                restoreDispatched = false
+                                restoringHiddenFools = false
+                                onExpandAllFoolsChange(true)
+                            } else if (initialPositionSettled && entryVeilLifted && entryState is EntryPositionState.Settled &&
+                                initialTarget == null && jumpTarget == null && admittedDrawingSpec != null && presentationContextCompatible
+                            ) {
+                                restorePolicy = visibleSpec
+                                restoreIntent = entryPositionIntent
+                                temporaryFoolToggle = true
+                                restoreDispatched = false
+                                restoringHiddenFools = true
+                            } else {
+                                onExpandAllFoolsChange(false)
+                            }
+                            expandedFools = emptySet()
+                            collapsedFools = emptySet()
+                        },
+                        leadingIcon = {
+                            Icon(
+                                if (foolsShown) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = null,
+                            )
+                        },
+                    )
+                }
+
+                if (compactHeader || showScheduleActions || showInvite || fools.isNotEmpty()) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp).testTag("chat_overflow_actions_divider"))
+                }
+
+                val isConversation = buffer != null && (buffer.type == BufferType.CHANNEL || buffer.type == BufferType.QUERY)
+                if (isConversation) {
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_read_aloud_toggle").semantics { selected = readAloudState.enabled },
+                        text = {
+                            Column {
+                                Text(stringResource(if (readAloudState.enabled) R.string.read_aloud_stop else R.string.read_aloud_start))
+                                Text(stringResource(R.string.settings_chat_visit_scope), style = MaterialTheme.typography.bodySmall)
+                            }
+                        },
+                        leadingIcon = { Icon(Icons.Outlined.RecordVoiceOver, null) },
+                        onClick = {
+                            overflowOpen = false
+                            onReadAloudToggle()
+                        },
+                    )
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_read_aloud_options"),
+                        text = { Text(stringResource(R.string.read_aloud_options)) },
+                        leadingIcon = { Icon(Icons.Outlined.Tune, contentDescription = null) },
+                        onClick = {
+                            overflowOpen = false
+                            onReadAloudOptions()
+                            readAloudOptionsOpen = true
+                        },
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp).testTag("chat_overflow_settings_divider"))
+                }
+
                 if (buffer?.type == BufferType.CHANNEL) {
                     DropdownMenuItem(
                         modifier = Modifier.testTag("chat_watch").semantics { selected = !channelNotifications.loading && channelNotifications.available && channelNotifications.watch != null },
@@ -3648,7 +3720,7 @@ internal fun ChatContent(
                         conversationLayoutSheetOpen = true
                     },
                 )
-                if (onOpenWallpaperWorkshop != null && buffer != null && (buffer.type == BufferType.CHANNEL || buffer.type == BufferType.QUERY)) {
+                if (onOpenWallpaperWorkshop != null && isConversation) {
                     DropdownMenuItem(
                         modifier = Modifier.testTag("chat_wallpaper_menu"),
                         text = {
@@ -3667,31 +3739,7 @@ internal fun ChatContent(
                         },
                     )
                 }
-                if (buffer?.type == BufferType.CHANNEL || buffer?.type == BufferType.QUERY) {
-                    DropdownMenuItem(
-                        modifier = Modifier.testTag("chat_read_aloud_toggle").semantics { selected = readAloudState.enabled },
-                        text = {
-                            Column {
-                                Text(stringResource(if (readAloudState.enabled) R.string.read_aloud_stop else R.string.read_aloud_start))
-                                Text(stringResource(R.string.settings_chat_visit_scope), style = MaterialTheme.typography.bodySmall)
-                            }
-                        },
-                        leadingIcon = { Icon(Icons.Outlined.RecordVoiceOver, null) },
-                        onClick = {
-                            overflowOpen = false
-                            onReadAloudToggle()
-                        },
-                    )
-                    DropdownMenuItem(
-                        modifier = Modifier.testTag("chat_read_aloud_options"),
-                        text = { Text(stringResource(R.string.read_aloud_options)) },
-                        leadingIcon = { Icon(Icons.Outlined.Tune, contentDescription = null) },
-                        onClick = {
-                            overflowOpen = false
-                            onReadAloudOptions()
-                            readAloudOptionsOpen = true
-                        },
-                    )
+                if (isConversation) {
                     val historySync = state.conversationHistorySync
                     DropdownMenuItem(
                         modifier = Modifier.testTag("chat_history_sync_menu"),
@@ -3738,44 +3786,6 @@ internal fun ChatContent(
                         presenceModeSheetOpen = true
                     },
                 )
-                if (fools.isNotEmpty()) {
-                    val foolsShown = expandAllFools && !restoringHiddenFools
-                    DropdownMenuItem(
-                        modifier = Modifier.testTag("chat_toggle_fools_visibility"),
-                        text = {
-                            Column {
-                                Text(stringResource(if (foolsShown) R.string.chat_fool_collapse_all else R.string.chat_fool_expand_all))
-                                Text(stringResource(R.string.settings_chat_visit_scope), style = MaterialTheme.typography.bodySmall)
-                            }
-                        },
-                        onClick = {
-                            overflowOpen = false
-                            if (!foolsShown) {
-                                restoreDispatched = false
-                                restoringHiddenFools = false
-                                onExpandAllFoolsChange(true)
-                            } else if (initialPositionSettled && entryVeilLifted && entryState is EntryPositionState.Settled &&
-                                initialTarget == null && jumpTarget == null && admittedDrawingSpec != null && presentationContextCompatible
-                            ) {
-                                restorePolicy = visibleSpec
-                                restoreIntent = entryPositionIntent
-                                temporaryFoolToggle = true
-                                restoreDispatched = false
-                                restoringHiddenFools = true
-                            } else {
-                                onExpandAllFoolsChange(false)
-                            }
-                            expandedFools = emptySet()
-                            collapsedFools = emptySet()
-                        },
-                        leadingIcon = {
-                            Icon(
-                                if (foolsShown) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                contentDescription = null,
-                            )
-                        },
-                    )
-                }
             }
         }
         Scaffold(
