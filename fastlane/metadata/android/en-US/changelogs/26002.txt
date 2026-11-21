@@ -1,0 +1,5 @@
+- Schedule messages for a date and time or when connected. Edit or cancel them in Scheduled messages.
+- Chat menus group actions, voice controls, and settings. Chat previews show messages by default.
+- New acoustic message sounds, with Soft Vibes as the default.
+- Long-press links to open or copy them. Open more link types and confirm IRC channel joins.
+- Smoother sends in busy chats with media previews. A dismissed keyboard stays closed.
