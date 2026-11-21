@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -39,6 +40,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -427,7 +429,7 @@ internal fun Modifier.composerAutocompleteClick(onClick: () -> Unit): Modifier {
 }
 
 /** Modern chat composer with embedded tools and a stable, separate primary send action. */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun Composer(
     value: TextFieldValue,
@@ -707,6 +709,32 @@ fun Composer(
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
+    // Reset on opening the next picker, not on close: measure can still see the old session
+    // until recomposition and must not briefly fall back to its full captured height.
+    var collapsingResidual by remember { mutableStateOf(false) }
+    var pickerHidePending by remember { mutableStateOf(false) }
+    val imeVisible = WindowInsets.isImeVisible
+    var wasImeVisible by remember { mutableStateOf(imeVisible) }
+
+    fun clearEmojiPickerSession() {
+        emojiPickerSession = null
+        pickerHidePending = false
+    }
+
+    LaunchedEffect(imeVisible) {
+        if (wasImeVisible && !imeVisible) {
+            if (!pickerHidePending &&
+                emojiPickerSession?.phase != EmojiPickerPhase.OPEN &&
+                !colorSheetVisible &&
+                !restoreFocusAfterColor
+            ) {
+                clearEmojiPickerSession()
+                if (inputFocused) focusManager.clearFocus()
+            }
+            pickerHidePending = false
+        }
+        wasImeVisible = imeVisible
+    }
     LaunchedEffect(colorSheetVisible, restoreFocusAfterColor) {
         if (!colorSheetVisible && restoreFocusAfterColor) {
             focusRequester.requestFocus()
@@ -722,7 +750,6 @@ fun Composer(
     // once, which is also what keeps the inflated view alive between sessions.
     var pickerContentHeightPx by remember { mutableIntStateOf(0) }
     val restoringHeight = remember { Animatable(0f) }
-    var collapsingResidual by remember { mutableStateOf(false) }
     val closeEmojiPickerDescription = stringResource(R.string.chat_composer_emoji_close)
 
     // Follow the IME only while it is actually moving, and only from a coroutine: no composition
@@ -749,8 +776,8 @@ fun Composer(
                     keyboard?.hide()
                 }
             }
-            collapsingResidual = false
-            emojiPickerSession = closeEmojiPickerSession(session)
+            val restore = closeEmojiPickerSession(session)
+            if (restore == null) clearEmojiPickerSession() else emojiPickerSession = restore
         }
     }
 
@@ -765,7 +792,9 @@ fun Composer(
         // Measure the picker content once per session; the restore tail only shrinks the viewport.
         pickerContentHeightPx = session.capturedImeHeightPx
         emojiSearchOpen = false
+        collapsingResidual = false
         emojiPickerSession = session
+        pickerHidePending = imeVisible
         keyboard?.hide()
     }
 
@@ -775,9 +804,16 @@ fun Composer(
     LaunchedEffect(restoringIme) {
         if (!restoringIme) return@LaunchedEffect
         val session = emojiPickerSession ?: return@LaunchedEffect
+
+        suspend fun awaitRestoreFrame(): Boolean {
+            withFrameNanos { }
+            return emojiPickerSession === session
+        }
+
         restoringHeight.snapTo(session.capturedImeHeightPx.toFloat())
+        if (emojiPickerSession !== session) return@LaunchedEffect
         if (!latestInputFocused) focusRequester.requestFocus()
-        withFrameNanos { }
+        if (!awaitRestoreFrame()) return@LaunchedEffect
         keyboard?.show()
 
         suspend fun awaitRestoredHeight(): Int =
@@ -787,22 +823,25 @@ fun Composer(
                     .second
             } ?: 0
         var restoredHeightPx = awaitRestoredHeight()
+        if (emojiPickerSession !== session) return@LaunchedEffect
         if (restoredHeightPx <= 0 && imeInsetTracker.currentImeHeightPx == 0) {
             focusManager.clearFocus(force = true)
-            withFrameNanos { }
+            if (!awaitRestoreFrame()) return@LaunchedEffect
             focusRequester.requestFocus()
-            withFrameNanos { }
+            if (!awaitRestoreFrame()) return@LaunchedEffect
             keyboard?.show()
             restoredHeightPx = awaitRestoredHeight()
+            if (emojiPickerSession !== session) return@LaunchedEffect
         }
         if (restoredHeightPx <= 0) {
+            pickerHidePending = false
             emojiPickerSession = reopenEmojiPickerSession(session)
             return@LaunchedEffect
         }
         // The animation is consumed in measure; no per-frame session copies or composer recomposes.
         collapsingResidual = true
         restoringHeight.animateTo(restoredHeightPx.toFloat(), tween(durationMillis = 160))
-        emojiPickerSession = null
+        if (emojiPickerSession === session) clearEmojiPickerSession()
     }
 
     // Dismiss transient surfaces before leaving chat.
@@ -828,7 +867,7 @@ fun Composer(
     val attachmentAction =
         onAttachment?.let { attach ->
             {
-                emojiPickerSession = null
+                clearEmojiPickerSession()
                 keyboard?.hide()
                 focusManager.clearFocus(force = true)
                 attach()

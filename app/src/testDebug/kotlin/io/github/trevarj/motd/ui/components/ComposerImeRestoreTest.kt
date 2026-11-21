@@ -12,13 +12,23 @@ import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.ui.platform.PlatformTextInputSession
 import androidx.compose.ui.platform.SoftwareKeyboardController
+import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import org.junit.Assert.assertEquals
@@ -40,13 +50,42 @@ class ComposerImeRestoreTest {
     @get:Rule
     val compose = createComposeRule()
 
-    private val imeHeightPx = mutableStateOf(320)
+    private val imeHeightPx = mutableStateOf<Int?>(null)
+    private val ircFormattingEnabled = mutableStateOf(false)
     private var inputSessions = 0
     private var focusClears = 0
     private var keyboardShows = 0
     private var keyboardHides = 0
     private var originalInputSessions = 0
     private var originalKeyboardShows = 0
+
+    @Test
+    fun dismissedFloatingKeyboardStaysHiddenUntilEditorIsTappedAgain() {
+        setComposerContent()
+        val field = compose.onNodeWithTag("chat_composer_field").performClick().assertIsFocused()
+
+        dispatchImeInsets(visible = true, heightPx = 0)
+        field.assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(1, inputSessions)
+            originalInputSessions = inputSessions
+            originalKeyboardShows = keyboardShows
+        }
+
+        dispatchImeInsets(visible = false, heightPx = 0)
+        field.assertIsNotFocused().assertTextEquals("draft")
+        compose.mainClock.advanceTimeBy(15_000)
+        compose.runOnIdle { ircFormattingEnabled.value = true }
+        field.assertIsNotFocused().assertTextEquals("draft")
+        compose.runOnIdle {
+            assertEquals(1, focusClears)
+            assertEquals(originalInputSessions, inputSessions)
+            assertEquals(originalKeyboardShows, keyboardShows)
+        }
+
+        field.performTouchInput { click() }.assertIsFocused().assertTextEquals("draft")
+        compose.runOnIdle { assertEquals(originalInputSessions + 1, inputSessions) }
+    }
 
     @Test
     fun slowOpeningKeepsFocusAndTheExistingInputConnection() {
@@ -69,6 +108,52 @@ class ComposerImeRestoreTest {
         assertEquals(0, panelHeight())
         assertRestoreRequests(retries = 0)
         compose.onNodeWithTag("chat_composer_field").assertIsFocused()
+    }
+
+    @Test
+    fun dismissingVisibleImeDuringPickerRestoreCancelsRetry() {
+        openPickerOverFocusedKeyboard()
+        beginRestore()
+        assertRestoreRequests(retries = 0)
+
+        dispatchImeInsets(visible = true, heightPx = 0)
+        advanceFrames(2)
+        assertEquals(320, panelHeight())
+        dispatchImeInsets(visible = false, heightPx = 0)
+        advanceFrames(2)
+
+        val field = compose.onNodeWithTag("chat_composer_field")
+        field.assertIsNotFocused().assertTextEquals("draft")
+        assertEquals(0, panelHeight())
+        compose.mainClock.advanceTimeBy(3_500)
+        field.assertIsNotFocused().assertTextEquals("draft")
+        assertEquals(0, panelHeight())
+        compose.runOnIdle {
+            assertEquals(1, focusClears)
+            assertEquals(originalInputSessions, inputSessions)
+            assertEquals(originalKeyboardShows + 1, keyboardShows)
+        }
+    }
+
+    @Test
+    fun fastPickerRoundTripDoesNotConsumeTheNextImeDismissal() {
+        openPickerOverFocusedKeyboard(reportImeHidden = false)
+        beginRestore()
+        compose.mainClock.advanceTimeBy(400)
+        assertRestoreRequests(retries = 0)
+        val field = compose.onNodeWithTag("chat_composer_field").assertIsFocused()
+
+        compose.runOnIdle { imeHeightPx.value = 0 }
+        dispatchImeInsets(visible = false, heightPx = 0)
+        advanceFrames(2)
+
+        field.assertIsNotFocused().assertTextEquals("draft")
+        assertEquals(0, panelHeight())
+        compose.runOnIdle {
+            assertEquals(1, focusClears)
+            assertEquals(originalInputSessions, inputSessions)
+            assertEquals(originalKeyboardShows + 1, keyboardShows)
+        }
     }
 
     @Test
@@ -127,8 +212,8 @@ class ComposerImeRestoreTest {
         openPickerOverFocusedKeyboard()
         beginRestore()
         compose.mainClock.advanceTimeBy(200)
-        compose.onNodeWithTag("chat_composer_emoji").performClick()
-        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithTag("chat_composer_emoji").performSemanticsAction(SemanticsActions.OnClick)
+        advanceFrames(1)
 
         compose.mainClock.advanceTimeBy(3_500)
         assertEquals(320, panelHeight())
@@ -156,24 +241,27 @@ class ComposerImeRestoreTest {
             imeHeightPx.value = 120
             Snapshot.sendApplyNotifications()
         }
-        compose.mainClock.advanceTimeByFrame()
+        advanceFrames(1)
         compose.waitUntil(timeoutMillis = 5_000) { panelHeight() != 320 }
         assertEquals(320, 120 + panelHeight())
 
         val viewportHeights = mutableListOf(120 + panelHeight())
         for (frame in 1..60) {
-            compose.mainClock.advanceTimeByFrame()
+            advanceFrames(1)
             val height = panelHeight()
             viewportHeights += 120 + height
             if (height == 0) break
         }
-        assertTrue("The viewport must shrink continuously", viewportHeights.zipWithNext().all { (before, after) -> after <= before })
+        assertTrue(
+            "The viewport must shrink continuously: $viewportHeights",
+            viewportHeights.zipWithNext().all { (before, after) -> after <= before },
+        )
         assertTrue("The residual strip must animate, not disappear in one jump", viewportHeights.filter { it in 121..319 }.distinct().size >= 2)
         assertEquals(120, viewportHeights.last())
         assertRestoreRequests(retries = 0)
     }
 
-    private fun openPickerOverFocusedKeyboard() {
+    private fun setComposerContent() {
         val keyboard =
             object : SoftwareKeyboardController {
                 override fun show() {
@@ -217,17 +305,26 @@ class ComposerImeRestoreTest {
                             onSend = {},
                             enabled = true,
                             imeHeightPx = imeHeightPx.value,
+                            ircFormattingEnabled = ircFormattingEnabled.value,
                         )
                     }
                 }
             }
         }
+    }
+
+    private fun openPickerOverFocusedKeyboard(reportImeHidden: Boolean = true) {
+        imeHeightPx.value = 320
+        setComposerContent()
         compose.onNodeWithTag("chat_composer_field").performClick().assertIsFocused()
+        dispatchImeInsets(visible = true, heightPx = 320)
         compose.onNodeWithTag("chat_composer_tools").performClick()
         compose.onNodeWithTag("chat_composer_emoji").performClick()
-        compose.runOnIdle { imeHeightPx.value = 0 }
-        compose.waitForIdle()
-        assertEquals(320, panelHeight())
+        if (reportImeHidden) {
+            compose.runOnIdle { imeHeightPx.value = 0 }
+            dispatchImeInsets(visible = false, heightPx = 0)
+            assertEquals(320, panelHeight())
+        }
         compose.runOnIdle {
             assertEquals(1, inputSessions)
             assertEquals(0, focusClears)
@@ -238,13 +335,34 @@ class ComposerImeRestoreTest {
         compose.mainClock.autoAdvance = false
     }
 
+    private fun dispatchImeInsets(
+        visible: Boolean,
+        heightPx: Int,
+    ) {
+        val root = compose.onNodeWithTag("chat_composer_field").fetchSemanticsNode().root as ViewRootForTest
+        compose.runOnIdle {
+            ViewCompat.dispatchApplyWindowInsets(
+                root.view,
+                WindowInsetsCompat
+                    .Builder()
+                    .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, heightPx))
+                    .setVisible(WindowInsetsCompat.Type.ime(), visible)
+                    .build(),
+            )
+        }
+        compose.waitForIdle()
+    }
+
     private fun beginRestore() {
-        compose.onNodeWithTag("chat_composer_tools").performClick()
+        compose.onNodeWithTag("chat_composer_tools").performSemanticsAction(SemanticsActions.OnClick)
         advanceFrames(3)
     }
 
     private fun advanceFrames(count: Int) {
-        repeat(count) { compose.mainClock.advanceTimeByFrame() }
+        repeat(count) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+        }
     }
 
     private fun panelHeight(): Int =

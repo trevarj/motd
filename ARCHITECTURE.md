@@ -330,6 +330,9 @@ flowchart TD
   Nickname's network-owned identity is decoration, never submitted text.
   Live nickname roster updates recolor draft mentions without restarting the
   active keyboard input session.
+  Ordinary IME dismissal ends the editor's focus session without clearing the draft.
+  An explicit picker or color handoff can restore the keyboard; dismissing the
+  restored keyboard cancels any remaining picker retry.
   The input host overlays the full timeline; matching scroll padding keeps the
   newest row clear, and fully covered rows do not advance read state. Floating and
   Nickname keep tools/send/record inside their floating inputs; Large keeps its
