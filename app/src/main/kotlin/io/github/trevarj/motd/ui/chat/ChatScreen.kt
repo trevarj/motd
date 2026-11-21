@@ -219,6 +219,7 @@ import io.github.trevarj.motd.data.db.DccTransferEntity
 import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
@@ -1410,7 +1411,6 @@ internal fun ChatContent(
             }
         val rowContentMetrics = remember(items) { mutableStateMapOf<Long, TimelineRowContentMetrics>() }
         val autoFollow = remember { AutoFollowTracker(items.itemCount) }
-        var liveEntryIds by remember(state.buffer?.id) { mutableStateOf(emptySet<Long>()) }
         val presenceMode = state.conversationPresence.effective
         val visibleSpec =
             remember(
@@ -1433,6 +1433,17 @@ internal fun ChatContent(
                 )
             }
         val visibilityPolicy = remember(visibleSpec, identityRules) { MessageVisibilityPolicy(visibleSpec, identityRules) }
+        var liveEntryIds by remember(items, visibilityPolicy) { mutableStateOf(emptySet<Long>()) }
+        var awaitingLiveRender by remember(items, visibilityPolicy) { mutableStateOf<TimelineAnchor?>(null) }
+        val lastLivePresentation =
+            remember(items, visibilityPolicy) {
+                object {
+                    var rows = emptyList<MessageEntity>()
+                    var highWater = Long.MIN_VALUE
+                    var heldForFlight: Long? = null
+                    var heldIds = emptySet<Long>()
+                }
+            }
         val presentationContextCompatible =
             presentationLease == null ||
                 (
@@ -3103,25 +3114,44 @@ internal fun ChatContent(
                     if (anchor != null && (seen == null || anchor > seen)) renderedNewestAnchor = anchor
                 }
         }
+        val newestLiveEntryNotRendered by remember(items, visibilityPolicy) {
+            derivedStateOf {
+                awaitingLiveRender?.let { pending -> renderedNewestAnchor?.let { it < pending } != false } == true
+            }
+        }
 
         // Count nested programmatic scrolls rather than using a Boolean: an incoming pin may supersede
         // an explicit animation, and the cancelled animation must not briefly masquerade as a user drag.
         var programmaticScrolls by remember { mutableIntStateOf(0) }
         val autoScrolling = programmaticScrolls > 0
+        val userScrolling by remember(listState) {
+            derivedStateOf { listState.isScrollInProgress && programmaticScrolls == 0 }
+        }
+        val flightToken = outgoingFlight?.token
+        val flightStartedAtBottom =
+            remember(flightToken) { flightToken != null && initialPositionSettled && atBottom && !userScrolling }
+        var releasedFlightToken by remember { mutableStateOf<Long?>(null) }
+        val holdEntriesForFlight = flightToken.takeIf { flightStartedAtBottom && !userScrolling && it != releasedFlightToken }
+        SideEffect { if (userScrolling && flightToken != null) releasedFlightToken = flightToken }
 
         suspend fun scrollToNewest(
             animate: Boolean,
             reason: String,
         ) {
+            onViewportRefreshAnchor(if (presentationLease != null) ViewportRefreshAnchor.Newest else null)
+            autoFollow.requestFollow()
+            val settlingAdoption = presentationLease != null && !initialPositionSettled
+            if (!settlingAdoption && !listState.isScrollInProgress &&
+                listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+            ) {
+                return
+            }
             AutoFollowTrace.record("scroll_start", traceBufferId, traceSessionId) {
                 "reason=$reason animate=$animate index=${listState.firstVisibleItemIndex} " +
                     "offset=${listState.firstVisibleItemScrollOffset} following=${autoFollow.following}"
             }
-            onViewportRefreshAnchor(if (presentationLease != null) ViewportRefreshAnchor.Newest else null)
-            autoFollow.requestFollow()
             programmaticScrolls++
             try {
-                val settlingAdoption = presentationLease != null && !initialPositionSettled
                 if (settlingAdoption) {
                     // An explicit newest/send action owns this demand even while automatic hints are
                     // still gated. The old retained window may not contain index zero.
@@ -3229,11 +3259,6 @@ internal fun ChatContent(
                         }
                     } else {
                         val change = autoFollow.onTimelineChangedWithEntry(newCount, newestEffectiveId)
-                        val animatedEntryId =
-                            change.liveEntryId?.takeUnless {
-                                extendsSystemRun(it, newCount, items::peek)
-                            }
-                        liveEntryIds = appendLiveEntryId(liveEntryIds, animatedEntryId)
                         val newest = if (newCount > 0) items.peek(0) else null
                         AutoFollowTrace.record("follow_decision", traceBufferId, traceSessionId) {
                             "old_count=$oldCount new_count=$newCount at_bottom=$atBottom " +
@@ -3398,11 +3423,14 @@ internal fun ChatContent(
             initialPositionSettled,
             viewportReadEnabled,
             payloadAllowed,
+            holdEntriesForFlight,
+            newestLiveEntryNotRendered,
         ) {
             if (!viewportReadEnabled || !payloadAllowed || !currentPresentationCompatible || presentationLease?.isActive == false) {
                 pausedSinceLastRun.value = true
                 return@LaunchedEffect
             }
+            if (holdEntriesForFlight != null || newestLiveEntryNotRendered) return@LaunchedEffect
             val resumed = pausedSinceLastRun.value
             pausedSinceLastRun.value = false
             val newest =
@@ -4245,10 +4273,9 @@ internal fun ChatContent(
                                         // Keep the timeline's callbacks stable. A freshly allocated lambda on every
                                         // recomposition of this scope defeats MessageList's skipping, which is what
                                         // turned any surrounding state change into a full timeline recomposition.
-                                        // Keyed like `liveEntryIds` itself, which is re-remembered per buffer.
                                         val onLiveEntryConsumed =
-                                            remember(state.buffer?.id) {
-                                                { id: Long -> liveEntryIds = consumeLiveEntryId(liveEntryIds, id) }
+                                            remember(items, visibilityPolicy) {
+                                                { id: Long -> liveEntryIds -= id }
                                             }
                                         val onFlightRowPositioned =
                                             remember(flightAnchors) {
@@ -4326,6 +4353,60 @@ internal fun ChatContent(
                                                         blendMode = BlendMode.DstOut,
                                                     ).then(if (timelineVisible) Modifier else Modifier.clearAndSetSemantics {}),
                                         ) {
+                                            val snapshot = items.itemSnapshotList
+                                            val presented =
+                                                snapshot.items.takeIf {
+                                                    snapshot.placeholdersBefore == 0 && it.isNotEmpty() && it !== lastLivePresentation.rows
+                                                }
+                                            val arrivals =
+                                                if (presented != null && initialPositionSettled && payloadAllowed && !suppressNextAutoFollow &&
+                                                    autoFollow.following && !userScrolling
+                                                ) {
+                                                    leadingLiveEntries(
+                                                        lastLivePresentation.rows,
+                                                        lastLivePresentation.highWater,
+                                                        presented,
+                                                        visibilityPolicy,
+                                                        !isServerBuffer,
+                                                        outgoingFlight,
+                                                    )
+                                                } else {
+                                                    emptySet()
+                                                }
+                                            val retained =
+                                                lastLivePresentation.heldIds.takeIf { holdEntriesForFlight == lastLivePresentation.heldForFlight }.orEmpty()
+                                            val held =
+                                                when {
+                                                    holdEntriesForFlight == null -> emptySet()
+                                                    arrivals.isEmpty() -> retained
+                                                    retained.size + arrivals.size > MAX_LIVE_ENTRANCE_BATCH -> retained
+                                                    retained.isEmpty() -> arrivals
+                                                    else -> retained + arrivals
+                                                }
+                                            val previousEntries = liveEntryIds
+                                            val entries =
+                                                if (presented == null) previousEntries else liveEntriesInPresentation(previousEntries, arrivals, presented, held)
+                                            SideEffect {
+                                                lastLivePresentation.heldForFlight = holdEntriesForFlight
+                                                lastLivePresentation.heldIds = held
+                                                if (presented != null) {
+                                                    lastLivePresentation.rows = presented
+                                                    lastLivePresentation.highWater = maxOf(lastLivePresentation.highWater, presented.maxOf { it.id })
+                                                    awaitingLiveRender =
+                                                        presented
+                                                            .firstOrNull(visibilityPolicy::effectiveBottom)
+                                                            ?.takeIf { it.id in entries }
+                                                            ?.timelineAnchor()
+                                                    if (entries != previousEntries) {
+                                                        liveEntryIds =
+                                                            if (liveEntryIds === previousEntries) {
+                                                                entries
+                                                            } else {
+                                                                liveEntriesInPresentation(liveEntryIds, arrivals, presented, held)
+                                                            }
+                                                    }
+                                                }
+                                            }
                                             MessageList(
                                                 items = items,
                                                 listState = listState,
@@ -4343,9 +4424,10 @@ internal fun ChatContent(
                                                 onTranslateMessage = ::openTranslationPicker,
                                                 externalTranslations = externalTranslations,
                                                 onDismissExternalTranslation = onDismissExternalTranslation,
-                                                liveEntryIds = liveEntryIds,
+                                                liveEntryIds = entries,
                                                 onLiveEntryConsumed = onLiveEntryConsumed,
                                                 outgoingFlight = outgoingFlight,
+                                                heldLiveEntryIds = held,
                                                 flownRowIds = flownRowIds,
                                                 flightProgress = flightProgress,
                                                 onFlightRowPositioned = onFlightRowPositioned,

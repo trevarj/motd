@@ -744,17 +744,52 @@ internal data class TimelineChange(
     val liveEntryId: Long?,
 )
 
-/** Timeline invalidations must retain in-flight entries while independent burst rows arrive. */
-internal fun appendLiveEntryId(
-    current: Set<Long>,
-    arrived: Long?,
-): Set<Long> = if (arrived == null || arrived in current) current else current + arrived
+internal const val MAX_LIVE_ENTRANCE_BATCH = 24
 
-/** A disposed row consumes only its own entrance identity. */
-internal fun consumeLiveEntryId(
-    current: Set<Long>,
-    consumed: Long,
-): Set<Long> = current - consumed
+internal fun leadingLiveEntries(
+    previous: List<MessageEntity>,
+    previousHighWater: Long,
+    current: List<MessageEntity>,
+    policy: MessageVisibilityPolicy,
+    collapseSystemEvents: Boolean,
+    flight: OutgoingFlight?,
+): Set<Long> {
+    if (previous.isEmpty() || current.isEmpty() || previous[0].id == current[0].id) return emptySet()
+    val head = previous.firstOrNull(policy::effectiveBottom) ?: return emptySet()
+    val boundary = (0 until minOf(current.size, MAX_LIVE_ENTRANCE_BATCH + 1)).firstOrNull { current[it].id == head.id }
+    if (boundary == null || boundary == 0) return emptySet()
+    return buildSet {
+        var extendsOldRun = false
+        for (index in boundary - 1 downTo 0) {
+            val row = current[index]
+            if (collapseSystemEvents) {
+                val older = current[index + 1]
+                extendsOldRun =
+                    (index + 1 == boundary || extendsOldRun) && !isSystemRunChunkBoundary(older.id) && sameSystemRun(row, older)
+                val newer = current.getOrNull(index - 1)
+                if (isSystemKind(row.kind) && (extendsOldRun || !isSystemRunChunkHead(row.id, newer?.let { sameSystemRun(row, it) } == true))) continue
+            }
+            if (row.id <= previousHighWater || !policy.effectiveBottom(row) || flight?.matches(row) == true) continue
+            add(row.id)
+        }
+    }
+}
+
+internal fun liveEntriesInPresentation(
+    running: Set<Long>,
+    arrived: Set<Long>,
+    rows: List<MessageEntity>,
+    held: Set<Long> = emptySet(),
+): Set<Long> {
+    if (running.isEmpty() && held.isEmpty()) return arrived
+    return buildSet {
+        addAll(held)
+        for (index in 0 until minOf(rows.size, MAX_LIVE_ENTRANCE_BATCH)) {
+            val id = rows[index].id
+            if (id in running || id in arrived) add(id)
+        }
+    }
+}
 
 /**
  * A send in progress, presented as a bubble travelling from the composer into the timeline.
@@ -899,22 +934,6 @@ internal fun settleOutgoingFlight(
     current: OutgoingFlight?,
     token: Long,
 ): OutgoingFlight? = if (current?.token == token) null else current
-
-/** Replacing a collapsed system-run head is an in-place summary update, not a new visual row. */
-internal fun extendsSystemRun(
-    liveEntryId: Long?,
-    itemCount: Int,
-    peek: (Int) -> MessageEntity?,
-): Boolean {
-    liveEntryId ?: return false
-    val index =
-        (0 until minOf(itemCount, MAX_PLACEHOLDER_PROBES))
-            .firstOrNull { peek(it)?.id == liveEntryId } ?: return false
-    if (index + 1 >= itemCount) return false
-    val current = peek(index) ?: return false
-    val older = peek(index + 1) ?: return false
-    return isSystemKind(current.kind) && isSystemKind(older.kind)
-}
 
 fun newestEffectiveMessageId(
     itemCount: Int,

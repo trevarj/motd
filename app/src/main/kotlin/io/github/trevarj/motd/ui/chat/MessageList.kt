@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.tween
@@ -378,6 +379,7 @@ fun MessageList(
     // The send currently travelling from the composer, if any. Its row is hidden and reports its
     // bounds so the ghost knows where to land.
     outgoingFlight: OutgoingFlight? = null,
+    heldLiveEntryIds: Set<Long> = emptySet(),
     // Rows a ghost has already delivered. Their arrival was the flight, so they must never also
     // play the ordinary live-entrance reveal once the flight is gone.
     flownRowIds: Set<Long> = emptySet(),
@@ -550,6 +552,17 @@ fun MessageList(
                 MessagePlaceholderRow(placeholderHeight)
                 return@items
             }
+            if (msg.id in heldLiveEntryIds && outgoingFlight?.matches(msg) != true && msg.id !in flownRowIds) {
+                Spacer(Modifier.fillMaxWidth())
+                return@items
+            }
+            val liveEntry = msg.id in liveEntryIds
+            if (liveEntry) {
+                val latestOnConsumed by rememberUpdatedState(onLiveEntryConsumed)
+                DisposableEffect(msg.id) {
+                    onDispose { latestOnConsumed(msg.id) }
+                }
+            }
             val foolMode = foolPolicy.foolPreferences(msg)?.visibility
             val isFool = foolMode != null
             val requestedExpanded = foolExpanded(msg.id)
@@ -583,9 +596,8 @@ fun MessageList(
             if (msg.kind == MessageKind.INVITE) {
                 TimelineSeamAbove(rowSeam(msg, older, timelineSeams), onLoadGap, placementModifier) { seamModifier ->
                     LiveTimelineEntry(
-                        liveEntryIds,
+                        liveEntry,
                         msg,
-                        onLiveEntryConsumed,
                         outgoingFlight,
                         flownRowIds,
                         flightProgress,
@@ -610,9 +622,8 @@ fun MessageList(
             if (msg.kind == MessageKind.NETSPLIT || msg.kind == MessageKind.NETJOIN) {
                 TimelineSeamAbove(rowSeam(msg, older, timelineSeams), onLoadGap, placementModifier) { seamModifier ->
                     LiveTimelineEntry(
-                        liveEntryIds,
+                        liveEntry,
                         msg,
-                        onLiveEntryConsumed,
                         outgoingFlight,
                         flownRowIds,
                         flightProgress,
@@ -635,9 +646,8 @@ fun MessageList(
             if (msg.kind == MessageKind.DCC_TRANSFER) {
                 TimelineSeamAbove(rowSeam(msg, older, timelineSeams), onLoadGap, placementModifier) { seamModifier ->
                     LiveTimelineEntry(
-                        liveEntryIds,
+                        liveEntry,
                         msg,
-                        onLiveEntryConsumed,
                         outgoingFlight,
                         flownRowIds,
                         flightProgress,
@@ -675,9 +685,8 @@ fun MessageList(
                     return@items
                 }
                 LiveTimelineEntry(
-                    liveEntryIds,
+                    liveEntry,
                     msg,
-                    onLiveEntryConsumed,
                     outgoingFlight,
                     flownRowIds,
                     flightProgress,
@@ -857,9 +866,8 @@ fun MessageList(
                 }
             }
             LiveTimelineEntry(
-                liveEntryIds,
+                liveEntry,
                 msg,
-                onLiveEntryConsumed,
                 outgoingFlight,
                 flownRowIds,
                 flightProgress,
@@ -1284,9 +1292,8 @@ internal fun MessagePlaceholderRow(height: () -> Dp = { DEFAULT_TIMELINE_ROW_HEI
 /** Applies the one-shot entrance uniformly to every kind of rendered, meaningful timeline row. */
 @Composable
 private fun LiveTimelineEntry(
-    liveEntryIds: Set<Long>,
+    liveEntry: Boolean,
     message: MessageEntity,
-    onConsumed: (Long) -> Unit,
     outgoingFlight: OutgoingFlight?,
     flownRowIds: Set<Long>,
     flightProgress: () -> Float,
@@ -1309,8 +1316,9 @@ private fun LiveTimelineEntry(
             content(modifier)
         }
 
-        message.id in liveEntryIds -> {
-            LiveMessageEntry(message.id, onConsumed, onRunningChanged, modifier) { content(Modifier) }
+        liveEntry -> {
+            val animateSize = remember(message.text) { mayContainWebUrl(message.text) }
+            LiveMessageEntry(message.id, animateSize, onRunningChanged, modifier) { content(Modifier) }
         }
 
         else -> {
@@ -1371,19 +1379,13 @@ private fun FlightLandingEntry(
 @Composable
 private fun LiveMessageEntry(
     messageId: Long,
-    onConsumed: (Long) -> Unit,
+    animateSize: Boolean,
     onRunningChanged: (Boolean) -> Unit,
     modifier: Modifier,
     content: @Composable () -> Unit,
 ) {
     val reveal = remember(messageId) { Animatable(0f) }
     var complete by remember(messageId) { mutableStateOf(false) }
-    val latestOnConsumed = rememberUpdatedState(onConsumed)
-
-    DisposableEffect(messageId) {
-        onDispose { latestOnConsumed.value(messageId) }
-    }
-
     LaunchedEffect(messageId, onRunningChanged) {
         onRunningChanged(true)
         try {
@@ -1412,16 +1414,51 @@ private fun LiveMessageEntry(
                     }
                 }.graphicsLayer { alpha = reveal.value }
         }
+    val sizeMotion =
+        if (animateSize) {
+            remember(messageId, onRunningChanged) {
+                object {
+                    var lastHeight: Int? = null
+                    var running = false
+
+                    fun stop() {
+                        if (!running) return
+                        running = false
+                        onRunningChanged(false)
+                    }
+
+                    val modifier =
+                        Modifier
+                            .animateContentSize(MotdMotion.contentSize, alignment = Alignment.BottomStart, finishedListener = { _, _ -> stop() })
+                            .onSizeChanged {
+                                val previous = lastHeight
+                                lastHeight = it.height
+                                if (previous != null && it.height != previous && !running) {
+                                    running = true
+                                    onRunningChanged(true)
+                                }
+                            }
+                }
+            }
+        } else {
+            null
+        }
+    if (sizeMotion != null) {
+        DisposableEffect(sizeMotion) { onDispose(sizeMotion::stop) }
+    }
     Box(
         modifier =
             modifier
                 .fillMaxWidth()
                 .clipToBounds()
-                .then(motion),
+                .then(motion)
+                .then(sizeMotion?.modifier ?: Modifier),
     ) {
         content()
     }
 }
+
+private fun mayContainWebUrl(text: String): Boolean = text.contains("http://", ignoreCase = true) || text.contains("https://", ignoreCase = true)
 
 @Composable
 private fun NetworkBatchPill(
@@ -1948,10 +1985,7 @@ private fun MessageRow(
 
     // URL discovery is unnecessary for the overwhelming majority of IRC lines. Completed parses
     // come from a bounded process cache first; only a genuine miss waits for the fling to settle.
-    val mayContainUrl =
-        remember(msg.text) {
-            msg.text.contains("http://", ignoreCase = true) || msg.text.contains("https://", ignoreCase = true)
-        }
+    val mayContainUrl = remember(msg.text) { mayContainWebUrl(msg.text) }
     var richUrls by remember(msg.id, msg.text) {
         mutableStateOf(if (mayContainUrl) MessageUrlCache.get(msg.text) else MessageUrls.Empty)
     }

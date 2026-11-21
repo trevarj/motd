@@ -1211,6 +1211,64 @@ class MessageTimelineUiTest {
     }
 
     @Test
+    fun arrivedImageExpandsWithoutSnappingOlderBubble() {
+        val image = message(2, 2_000, MessageKind.PRIVMSG, "https://example.invalid/late-preview.png")
+        val older = message(1, 1_000, MessageKind.PRIVMSG, "older bubble")
+        MessageUrlCache.put(image.text, messageUrls(image.text))
+        val listState = LazyListState()
+        var showImages by mutableStateOf(false)
+        render(
+            flowOf(PagingData.from(listOf(image, older))),
+            listState = listState,
+            liveEntryIds = { setOf(image.id) },
+            richContentReady = true,
+            showImages = { showImages },
+            automaticRemoteMedia = false,
+        )
+
+        fun sample() =
+            Triple(
+                compose.runOnIdle {
+                    listState.layoutInfo
+                        .visibleItemsInfo
+                        .single { it.key == image.id }
+                        .size
+                },
+                bounds(messageTag(image.id)),
+                bounds(messageTag(older.id)),
+            )
+
+        compose.mainClock.autoAdvance = false
+        // Keep the live ID registered, but finish its one-shot entrance before revealing the image.
+        compose.mainClock.advanceTimeBy(1_000)
+        val (beforeHeight, _, beforeOlder) = sample()
+        compose.runOnIdle { showImages = true }
+        compose.mainClock.advanceTimeByFrame()
+        val (immediateHeight, _, immediateOlder) = sample()
+        compose.mainClock.advanceTimeBy(96)
+        val (intermediateHeight, intermediateImage, intermediateOlder) = sample()
+        compose.mainClock.advanceTimeBy(1_000)
+        val (settledHeight, _, settledOlder) = sample()
+
+        assertEquals("The image slot must not snap open", beforeHeight, immediateHeight)
+        assertEquals("The older bubble must not jump on the first frame", beforeOlder.top, immediateOlder.top, 1f)
+        assertTrue("The image slot must expand through an intermediate height", intermediateHeight in (beforeHeight + 1) until settledHeight)
+        assertTrue("The growing image must not overlap the older bubble", intermediateOlder.bottom <= intermediateImage.top + 1f)
+        assertEquals(
+            "The older bubble must move with the growing slot, not lag behind it",
+            beforeOlder.top - (intermediateHeight - beforeHeight),
+            intermediateOlder.top,
+            1f,
+        )
+        assertEquals(
+            "The older bubble must make room for the full expansion",
+            beforeOlder.top - (settledHeight - beforeHeight),
+            settledOlder.top,
+            1f,
+        )
+    }
+
+    @Test
     fun sendLandingKeepsItsWindowAnchorWhileTheGapOpens() {
         val sent = message(2, 2_000, MessageKind.PRIVMSG, "outgoing", self = true, pending = true)
         val previous = message(1, 1_000, MessageKind.PRIVMSG, "previous")
@@ -1902,6 +1960,7 @@ class MessageTimelineUiTest {
         listState: LazyListState? = null,
         liveEntryIds: () -> Set<Long> = { emptySet() },
         timelineSeams: () -> TimelineSeamState = { TimelineSeamState() },
+        showImages: () -> Boolean = { false },
         showLinkPreviews: Boolean = false,
         loadPreview: suspend (String, Long?) -> LinkPreview? = { _, _ -> null },
         cachedPreview: (String, Long?) -> io.github.trevarj.motd.data.repo.CachedLinkPreview? = { _, _ -> null },
@@ -1989,7 +2048,7 @@ class MessageTimelineUiTest {
                         flightProgress = flightProgress,
                         onFlightRowPositioned = onFlightRowPositioned,
                         richContentReady = richContentReady,
-                        showImages = false,
+                        showImages = showImages(),
                         showLinkPreviews = showLinkPreviews,
                         onOpenLink = {},
                         onOpenPalette = onOpenPalette,

@@ -15,6 +15,7 @@ import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
+import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.repo.MESSAGE_PAGING_CONFIG
 import io.github.trevarj.motd.data.sync.GapFillProgress
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
@@ -444,32 +445,40 @@ class ChatModelsTest {
         assertNull(tracker.onTimelineChangedWithEntry(13, 9).liveEntryId)
     }
 
-    @Test fun `burst arrivals retain every in-flight live entry`() {
-        val first = appendLiveEntryId(emptySet(), 8L)
-        val burst = appendLiveEntryId(first, 9L)
+    @Test fun `one presentation reveals new leading rows but not the flight or a reordered echo`() {
+        val head = message(id = 7)
+        val echo = message(id = 8)
+        val previous = listOf(head, echo)
+        val outgoing = message(id = 9)
+        val image = message(id = 10)
+        val link = message(id = 11)
+        val current = listOf(link, image, echo, outgoing, head, message(id = 12))
+        val policy = MessageVisibilityPolicy(MessageVisibilitySpec())
+        val flight = OutgoingFlight(token = 1, text = outgoing.text, launchedAtMs = 0, eventIds = setOf(outgoing.id))
 
-        assertEquals(setOf(8L, 9L), appendLiveEntryId(burst, null))
+        val arrivals = leadingLiveEntries(previous, echo.id, current, policy, collapseSystemEvents = true, flight = flight)
+
+        assertEquals(setOf(link.id, image.id), arrivals)
+        assertEquals(setOf(head.id, link.id, image.id), liveEntriesInPresentation(setOf(head.id, 123L), arrivals, current))
+        assertTrue(
+            leadingLiveEntries(listOf(head), echo.id, listOf(echo, head), policy, collapseSystemEvents = true, flight = null).isEmpty(),
+        )
+        assertTrue(
+            leadingLiveEntries(previous, echo.id, current.filterNot { it.id == head.id }, policy, collapseSystemEvents = true, flight = flight).isEmpty(),
+        )
     }
 
-    @Test fun `live entry disposal consumes only its own identity`() {
-        val burst = setOf(8L, 9L)
+    @Test fun `system run extension does not animate as a new row`() {
+        val older = message(id = 7L)
+        val olderEvent = message(id = (8L..24L).first { !isSystemRunChunkBoundary(it) }, kind = MessageKind.PART)
+        val newest = message(id = 25L, kind = MessageKind.JOIN)
+        val current = listOf(newest, olderEvent, older)
+        val policy = MessageVisibilityPolicy(MessageVisibilitySpec(presenceMode = PresenceMode.ALL))
 
-        assertEquals(setOf(9L), consumeLiveEntryId(current = burst, consumed = 8L))
-        assertEquals(emptySet<Long>(), consumeLiveEntryId(current = setOf(9L), consumed = 9L))
-    }
-
-    @Test fun `system run extension updates its existing pill without entry motion`() {
-        val rows =
-            listOf(
-                message(id = 9L, kind = MessageKind.JOIN),
-                message(id = 8L, kind = MessageKind.PART),
-                message(id = 7L),
-            )
-
-        assertTrue(extendsSystemRun(9L, rows.size, rows::getOrNull))
-        assertFalse(extendsSystemRun(7L, rows.size, rows::getOrNull))
-        assertFalse(extendsSystemRun(9L, 1) { rows.getOrNull(it) })
-        assertFalse(extendsSystemRun(null, rows.size, rows::getOrNull))
+        assertEquals(setOf(newest.id), leadingLiveEntries(listOf(older), older.id, current, policy, collapseSystemEvents = true, flight = null))
+        val existingRun = listOf(olderEvent, older)
+        assertTrue(leadingLiveEntries(existingRun, olderEvent.id, current, policy, collapseSystemEvents = true, flight = null).isEmpty())
+        assertEquals(setOf(newest.id), leadingLiveEntries(existingRun, olderEvent.id, current, policy, collapseSystemEvents = false, flight = null))
     }
 
     @Test fun `paging invalidation cannot break following live arrivals`() {

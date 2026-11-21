@@ -193,6 +193,7 @@ import io.github.trevarj.motd.ui.chat.VoiceRecordingUi
 import io.github.trevarj.motd.ui.chat.clickEmoji
 import io.github.trevarj.motd.ui.chat.externalTranslationText
 import io.github.trevarj.motd.ui.chat.findEmoji
+import io.github.trevarj.motd.ui.chat.messageUrls
 import io.github.trevarj.motd.ui.chat.pickEmojiVariant
 import io.github.trevarj.motd.ui.chat.swipeEmojiBody
 import io.github.trevarj.motd.ui.chat.tapEmojiCategory
@@ -5251,6 +5252,123 @@ class ComposerSendClearUiTest {
             assertTrue("Quick persistence must not truncate the running morph", settledAt - startedAt >= morphDurationMs)
         }
         compose.onNodeWithContentDescription("Sending…").assertIsDisplayed()
+    }
+
+    @Test
+    fun richBurstWaitsForSendLandingThenAppearsInOrder() {
+        val launchedAt = 1_000L
+        val history =
+            MessageEntity(
+                id = 41,
+                bufferId = buffer.id,
+                serverTime = launchedAt - 1,
+                sender = "alice",
+                kind = MessageKind.PRIVMSG,
+                text = "Already at the live bottom",
+                dedupKey = "rich-burst-history",
+                timelineOrder = 41,
+            )
+        val pending =
+            history.copy(
+                id = 42,
+                serverTime = launchedAt + 1,
+                sender = "me",
+                text = "My outgoing message",
+                isSelf = true,
+                pendingLabel = "rich-burst-pending",
+                dedupKey = "rich-burst-pending",
+                serverTimeAuthoritative = false,
+                timelineOrder = 42,
+            )
+        val image =
+            history.copy(
+                id = 43,
+                serverTime = launchedAt + 2,
+                text = "https://example.invalid/send-flight/photo.png",
+                dedupKey = "rich-burst-image",
+                timelineOrder = 43,
+            )
+        val web =
+            history.copy(
+                id = 44,
+                serverTime = launchedAt + 3,
+                sender = "bob",
+                text = "https://example.invalid/send-flight/article",
+                dedupKey = "rich-burst-web",
+                timelineOrder = 44,
+            )
+        // Seed only the parsed URLs: the test harness leaves remote media off, so the image and
+        // web card use their offline affordances without waiting for any fetch.
+        MessageUrlCache.put(image.text, messageUrls(image.text))
+        MessageUrlCache.put(web.text, messageUrls(web.text))
+        val pages = MutableStateFlow(PagingData.from(listOf(history)))
+        var flight by mutableStateOf<OutgoingFlight?>(null)
+        var settled = 0
+        setContent(
+            draft = { ComposerDraftState(pending.text, hydrated = true, revision = 1) },
+            pages = pages,
+            layoutDensity = { LayoutDensity.COMFORTABLE },
+            outgoingFlight = { flight },
+            onFlightSettled = { token ->
+                assertEquals(7L, token)
+                settled++
+                flight = null
+            },
+            onSubmit = { text ->
+                assertEquals(pending.text, text)
+                flight = OutgoingFlight(token = 7, text = text, launchedAtMs = launchedAt)
+            },
+        )
+
+        fun row(message: MessageEntity) = compose.onNodeWithTag(timelineMessageTag(message.msgid, message.id), useUnmergedTree = true)
+        val field = compose.onNodeWithTag("chat_composer_field")
+        val emptyDraft = SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(""))
+        row(history).assertIsDisplayed()
+        field.assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(pending.text)))
+
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithTag("chat_composer_send").performClick()
+        compose.mainClock.advanceTimeBy(64)
+        compose.runOnIdle {
+            flight = checkNotNull(flight).copy(eventIds = setOf(pending.id))
+            pages.value = PagingData.from(listOf(web, image, pending, history))
+        }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(112)
+
+        row(pending).assertExists() // The burst has reached the timeline; this is not a Paging delay.
+        row(image).assertDoesNotExist()
+        row(web).assertDoesNotExist()
+        field.assert(emptyDraft)
+        compose.runOnIdle { assertEquals(0, settled) }
+
+        compose.runOnIdle { pages.value = PagingData.from(emptyList()) }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(64)
+        row(pending).assertDoesNotExist()
+        compose.runOnIdle { pages.value = PagingData.from(listOf(web, image, pending, history)) }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(64)
+        row(pending).assertExists()
+        row(image).assertDoesNotExist()
+        row(web).assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, settled) }
+
+        compose.mainClock.advanceTimeBy(2_000)
+        val tops =
+            listOf(history, pending, image, web).map {
+                row(it)
+                    .assertIsDisplayed()
+                    .fetchSemanticsNode()
+                    .boundsInRoot
+                    .top
+            }
+        assertTrue("History, outgoing, image and web must remain in transcript order: $tops", tops.zipWithNext().all { (older, newer) -> older < newer })
+        compose.onNodeWithTag("inline_media_awaiting", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("link_preview_awaiting", useUnmergedTree = true).assertIsDisplayed()
+        compose.onAllNodesWithText(pending.text, useUnmergedTree = true).assertCountEquals(1)
+        field.assert(emptyDraft)
+        compose.runOnIdle { assertEquals(1, settled) }
     }
 
     @Test

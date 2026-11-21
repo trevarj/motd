@@ -498,6 +498,10 @@ flowchart TD
   Landing geometry updates stay in layout and drawing; the status lookup observes only the
   landing ID until acceptance supplies canonical event IDs. Updating a room's read anchor
   does not resubscribe to its roster; member queries switch only when the resolved room ID changes.
+  A send launched at the live bottom holds a bounded batch of new leading rows at zero height
+  until handoff, token replacement, or user scrolling. Paging and transcript order stay live;
+  only entrance rendering waits. The held rows survive transient empty windows and cannot advance
+  MARKREAD until rendered. Late preview growth owns row placement while its size animates.
 - Outgoing acceptance transfers ownership from the draft to durable transcript rows before
   waiting for transport. Ordered per-network service work retains lifecycle protection;
   immediate-wire consumers explicitly await its outcome. Pending rows show a spinner,
