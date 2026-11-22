@@ -59,6 +59,9 @@ val libboxNdkVersion =
         ?.takeIf(String::isNotBlank)
         ?: error("third_party/sing-box/source.lock must pin ANDROID_NDK_VERSION")
 
+val benchmarkAbi = providers.gradleProperty("motdBenchmarkAbi").getOrElse("arm64-v8a")
+require(benchmarkAbi in setOf("arm64-v8a", "x86_64")) { "motdBenchmarkAbi must be arm64-v8a or x86_64" }
+
 // The release/debug APKs ship the pinned arm64 native core. Hermetic UI tests exercise plain IRC
 // on an x86_64 emulator, so derive an AAR that retains the generated Java API but omits JNI. This
 // keeps the E2E build installable without pretending that embedded obfuscation supports x86_64.
@@ -416,6 +419,21 @@ android {
             matchingFallbacks += listOf("debug")
             ndk { abiFilters += "x86_64" }
         }
+        // Release twin for :benchmark: not debuggable, shell-profileable, debug-signed and installed
+        // beside other builds. -PmotdBenchmarkAbi=x86_64 targets an emulator without libbox JNI.
+        create("benchmark") {
+            initWith(getByName("release"))
+            isDebuggable = false
+            isProfileable = true
+            applicationIdSuffix = ".benchmark"
+            versionNameSuffix = "-benchmark"
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+            ndk {
+                abiFilters.clear()
+                abiFilters += benchmarkAbi
+            }
+        }
     }
     // Production APKs remain arm64-only while this is the only packaged libbox artifact. The
     // debuggable E2E variant is deliberately x86_64 and contains no libbox JNI (see above).
@@ -504,6 +522,7 @@ dependencies {
     debugImplementation(files(libboxAar))
     releaseImplementation(files(libboxAar))
     add("e2eImplementation", files(libboxE2eAar))
+    add("benchmarkImplementation", files(if (benchmarkAbi == "x86_64") libboxE2eAar else libboxAar))
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)

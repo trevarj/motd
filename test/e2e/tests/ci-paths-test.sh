@@ -33,6 +33,7 @@ assert_paths "$none" tools/palette-catalog.py tools/test_palette_catalog.py
 assert_paths "$production_app" palettes/index.json app/src/main/kotlin/MainActivity.kt
 assert_paths "$irc_test" irc/src/test/kotlin/ParserTest.kt
 assert_paths "$app_test" app/src/test/kotlin/RepoTest.kt app/src/testDebug/kotlin/UiTest.kt
+assert_paths "$app_test" benchmark/build.gradle.kts benchmark/src/main/kotlin/StartupBenchmark.kt
 assert_paths "$production_irc" irc/src/main/kotlin/IrcClient.kt
 assert_paths "$production_app" app/src/main/kotlin/MainActivity.kt
 assert_paths "$device_only" app/src/androidTest/kotlin/RequiredHeadlessE2eTest.kt
