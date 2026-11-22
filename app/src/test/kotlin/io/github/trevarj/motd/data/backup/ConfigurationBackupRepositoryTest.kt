@@ -1608,6 +1608,29 @@ class ConfigurationBackupRepositoryTest {
         }
 
     @Test
+    fun recentsPrivacyStaysOnThisDeviceWhenReplacingSettings() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val settings = DataStoreSettingsRepository(context)
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                assertFalse(settings.hideRecentsPreviews.first())
+                settings.setHideRecentsPreviews(true)
+                val reloaded = DataStoreSettingsRepository(context)
+                assertTrue(reloaded.hideRecentsPreviews.first())
+                assertTrue(reloaded.settings.first().hideRecentsPreviews)
+
+                val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                assertFalse(raw.contains("\"hideRecentsPreviews\""))
+                backup.import(raw, importMode = BackupImportMode.REPLACE)
+                assertTrue(reloaded.hideRecentsPreviews.first())
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
     fun contentPreviewAutomaticLoadingRoundTripsAndOldBackupsDefaultOn() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()

@@ -355,8 +355,11 @@
     <!-- Settings category submenu summaries (top-level Settings list). -->
     <string name="settings_appearance_summary">Personalize themes, text size, chat layout, avatars, and wallpaper.</string>
     <string name="settings_chat_summary">Control message previews, composer options, sounds, friends, and fools.</string>
-    <string name="settings_security">Security</string>
+    <string name="settings_security">Security &amp; privacy</string>
     <string name="settings_security_summary">Control typing, remote content, transfers, and encryption.</string>
+    <string name="settings_device_privacy_section">Device privacy</string>
+    <string name="settings_hide_recents_previews">Hide previews in Recents</string>
+    <string name="settings_hide_recents_previews_desc">Hide new previews in the Android task switcher. You can still take screenshots.</string>
     <string name="settings_typing_section">Typing</string>
     <string name="settings_send_typing_indicators">Send typing indicators</string>
     <string name="settings_send_typing_indicators_desc">Share when you are composing through IRCv3 typing</string>
@@ -598,9 +601,9 @@
     <string name="settings_upload_limit">Maximum size (MiB)</string>
     <string name="settings_upload_limit_desc">App limit: 1–%1$d MiB. The service may allow less.</string>
     <string name="settings_upload_limit_error">Enter a whole number from 1 to %1$d MiB. The saved limit is unchanged.</string>
-    <string name="settings_upload_crafterbin_guidance">CrafterBin hosts files, photos, and text. Configure secret URLs and expiry in Security.</string>
-    <string name="settings_upload_litterbox_guidance">Litterbox hosts temporary files, photos, and text. Choose how long uploads remain available in Security.</string>
-    <string name="settings_upload_custom_guidance">Custom uploads use your configured service. Secret URL and expiry requests are in Security; support depends on the endpoint.</string>
+    <string name="settings_upload_crafterbin_guidance">CrafterBin hosts files, photos, and text. Configure secret URLs and expiry in Security &amp; privacy.</string>
+    <string name="settings_upload_litterbox_guidance">Litterbox hosts temporary files, photos, and text. Choose how long uploads remain available in Security &amp; privacy.</string>
+    <string name="settings_upload_custom_guidance">Custom uploads use your configured service. Secret URL and expiry requests are in Security &amp; privacy; support depends on the endpoint.</string>
     <string name="settings_upload_about_soju">About Soju</string>
     <string name="settings_upload_open_endpoint">Open endpoint</string>
     <string name="settings_github">GitHub</string>

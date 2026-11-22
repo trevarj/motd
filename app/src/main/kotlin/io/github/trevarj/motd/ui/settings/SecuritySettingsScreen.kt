@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.settings
 
+import android.os.Build
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -33,8 +34,8 @@ import io.github.trevarj.motd.avatar.AvatarController
 import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.Settings
-import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
@@ -58,7 +59,7 @@ data class SecuritySettingsUiState(
 class SecuritySettingsViewModel
     @Inject
     constructor(
-        private val settingsRepository: SettingsRepository,
+        private val settingsRepository: DataStoreSettingsRepository,
         private val contentPreviewPrefs: ContentPreviewPrefs,
         private val voicePrefs: VoicePrefs,
         private val avatarPrefs: AvatarPrefs,
@@ -74,6 +75,8 @@ class SecuritySettingsViewModel
                 attachmentPrefs.config,
                 ::SecuritySettingsUiState,
             ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SecuritySettingsUiState())
+
+        fun setHideRecentsPreviews(value: Boolean) = launch { settingsRepository.setHideRecentsPreviews(value) }
 
         fun setSendTypingIndicators(value: Boolean) = launch { settingsRepository.setSendTypingIndicators(value) }
 
@@ -115,6 +118,7 @@ fun SecuritySettingsScreen(
             target = target,
             onOpenDirectConnections = onOpenDirectConnections,
             onOpenUploads = onOpenUploads,
+            onHideRecentsPreviews = viewModel::setHideRecentsPreviews,
             onSendTypingIndicators = viewModel::setSendTypingIndicators,
             onShowTypingIndicators = viewModel::setShowTypingIndicators,
             onShowImages = viewModel::setShowImages,
@@ -134,6 +138,7 @@ fun SecuritySettingsContent(
     target: SettingsTarget? = null,
     onOpenDirectConnections: () -> Unit,
     onOpenUploads: () -> Unit,
+    onHideRecentsPreviews: (Boolean) -> Unit,
     onSendTypingIndicators: (Boolean) -> Unit,
     onShowTypingIndicators: (Boolean) -> Unit,
     onShowImages: (Boolean) -> Unit,
@@ -144,6 +149,19 @@ fun SecuritySettingsContent(
     onVoiceEncryptionDefault: (Boolean) -> Unit,
     onUpdateUploads: ((PasteBackendConfig) -> PasteBackendConfig) -> Unit,
 ) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        SettingsGroup(title = stringResource(R.string.settings_device_privacy_section)) {
+            SwitchRow(
+                title = stringResource(R.string.settings_hide_recents_previews),
+                subtitle = stringResource(R.string.settings_hide_recents_previews_desc),
+                checked = state.settings.hideRecentsPreviews,
+                onCheckedChange = onHideRecentsPreviews,
+                switchTag = "settings_switch_hide_recents_previews",
+                requestedTarget = target?.name,
+                targetName = SettingsTarget.HIDE_RECENTS_PREVIEWS.name,
+            )
+        }
+    }
     SettingsGroup(title = stringResource(R.string.settings_typing_section)) {
         SwitchRow(
             title = stringResource(R.string.settings_send_typing_indicators),

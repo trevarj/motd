@@ -45,9 +45,9 @@ import io.github.trevarj.motd.data.prefs.AppearanceConfig
 import io.github.trevarj.motd.data.prefs.AppearancePrefs
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.Settings
-import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.customPalette
 import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.data.prefs.resolveWallpaper
@@ -86,6 +86,7 @@ import io.github.trevarj.motd.ui.theme.TimestampConfig
 import io.github.trevarj.motd.ui.theme.rememberEmojiRenderer
 import io.github.trevarj.motd.ui.theme.resolvedMode
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
@@ -96,7 +97,7 @@ import javax.inject.Inject
 class MainActivity :
     ComponentActivity(),
     SystemBarThemeHost {
-    @Inject lateinit var settingsRepository: SettingsRepository
+    @Inject lateinit var settingsRepository: DataStoreSettingsRepository
 
     @Inject lateinit var appearancePrefs: AppearancePrefs
 
@@ -175,6 +176,14 @@ class MainActivity :
         // Swap the launch/splash theme for the app theme before drawing Compose content.
         setTheme(R.style.Theme_Motd)
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            setRecentsScreenshotEnabled(false)
+            lifecycleScope.launch {
+                settingsRepository.hideRecentsPreviews
+                    .catch { emit(true) }
+                    .collect { hide -> setRecentsScreenshotEnabled(!hide) }
+            }
+        }
         enableEdgeToEdge()
         configureStartupSplash(isFirstActivityCreation = savedInstanceState == null)
 

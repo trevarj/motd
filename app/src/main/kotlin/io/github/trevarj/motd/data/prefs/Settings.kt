@@ -395,6 +395,7 @@ data class Settings(
     /** Presentation location retained while [mentionsEnabled] is off. */
     val mentionsPlacement: MentionsPlacement = MentionsPlacement.DRAWER,
     @Transient val notificationPreview: NotificationPreview = NotificationPreview.FULL,
+    @Transient val hideRecentsPreviews: Boolean = false,
 )
 
 /** Canonical key for friends/fools/override lookups: trimmed + lowercased.

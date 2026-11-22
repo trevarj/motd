@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.settings
 
+import android.os.Build
 import androidx.annotation.StringRes
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.attachment.AttachmentBackend
@@ -61,7 +62,10 @@ fun buildSettingsSearchEntries(
     networkTitle: (String, String) -> String,
     uploads: PasteBackendConfig = PasteBackendConfig(),
 ): List<SettingsSearchEntry> =
-    (STATIC_SEARCH_SPECS + uploadSearchSpecs(uploads.backend)).map { spec ->
+    (STATIC_SEARCH_SPECS + uploadSearchSpecs(uploads.backend)).mapNotNull { spec ->
+        if (spec.target == SettingsTarget.HIDE_RECENTS_PREVIEWS && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            return@mapNotNull null
+        }
         SettingsSearchEntry(
             title = resolve(spec.title),
             summary = resolve(spec.summary),
@@ -185,6 +189,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_show_redacted_messages, R.string.settings_show_redacted_messages_desc, "deleted accountability", SettingsSearchPage.CHAT, SettingsTarget.DELETED_MESSAGES),
         spec(R.string.settings_chat_list_messages_only, R.string.settings_chat_list_messages_only_desc, "last message preview system events nick rename", SettingsSearchPage.CHAT, SettingsTarget.CHAT_LIST_MESSAGES_ONLY),
         spec(R.string.settings_chat_list_swipe, R.string.settings_chat_list_swipe_desc, "left swipe gesture archive read mute unmute pin unpin delete nothing chat list", SettingsSearchPage.CHAT, SettingsTarget.CHAT_LIST_SWIPE),
+        spec(R.string.settings_hide_recents_previews, R.string.settings_hide_recents_previews_desc, "recents task switcher privacy", SettingsSearchPage.SECURITY, SettingsTarget.HIDE_RECENTS_PREVIEWS),
         spec(R.string.settings_show_images, R.string.settings_show_images_desc, "media photos", SettingsSearchPage.SECURITY, SettingsTarget.IMAGES),
         spec(R.string.settings_show_link_previews, R.string.settings_show_link_previews_desc, "url metadata", SettingsSearchPage.SECURITY, SettingsTarget.LINK_PREVIEWS),
         spec(R.string.settings_auto_media_unmetered, R.string.settings_auto_media_unmetered_desc, "wifi download", SettingsSearchPage.SECURITY, SettingsTarget.MEDIA_UNMETERED),

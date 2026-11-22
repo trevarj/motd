@@ -3,6 +3,7 @@ package io.github.trevarj.motd.data.prefs
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -38,6 +39,7 @@ internal object PrefKeys {
     val DYNAMIC_COLOR = stringPreferencesKey("dynamic_color")
     val DELIVERY_MODE = stringPreferencesKey("delivery_mode")
     val NOTIFICATION_PREVIEW = stringPreferencesKey("notification_preview")
+    val HIDE_RECENTS_PREVIEWS = booleanPreferencesKey("hide_recents_previews")
     val PUSH_ENDPOINTS = stringPreferencesKey("push_endpoints")
     val PUSH_KEYS = stringPreferencesKey("push_keys")
     val STS_POLICIES = stringPreferencesKey("sts_policies")
@@ -180,6 +182,9 @@ class DataStoreSettingsRepository
         override val notificationPreview: Flow<NotificationPreview> =
             store.data.map { notificationPreviewFromPreference(it[PrefKeys.NOTIFICATION_PREVIEW]) }.distinctUntilChanged()
 
+        internal val hideRecentsPreviews: Flow<Boolean> =
+            store.data.map { it[PrefKeys.HIDE_RECENTS_PREVIEWS] ?: false }.distinctUntilChanged()
+
         override val settings: Flow<Settings> =
             store.data.map { prefs ->
                 val fools = decodeNickSet(prefs[PrefKeys.FOOL_NICKS])
@@ -193,6 +198,7 @@ class DataStoreSettingsRepository
                         prefs[PrefKeys.DELIVERY_MODE]?.let { runCatching { DeliveryMode.valueOf(it) }.getOrNull() }
                             ?: DeliveryMode.PERSISTENT_SOCKET,
                     notificationPreview = notificationPreviewFromPreference(prefs[PrefKeys.NOTIFICATION_PREVIEW]),
+                    hideRecentsPreviews = prefs[PrefKeys.HIDE_RECENTS_PREVIEWS] ?: false,
                     // Round 4: invalid enum strings fall back to defaults.
                     layoutDensity =
                         prefs[PrefKeys.LAYOUT_DENSITY]?.let { runCatching { LayoutDensity.valueOf(it) }.getOrNull() }
@@ -270,6 +276,10 @@ class DataStoreSettingsRepository
 
         override suspend fun setNotificationPreview(preview: NotificationPreview) {
             store.edit { it[PrefKeys.NOTIFICATION_PREVIEW] = preview.name }
+        }
+
+        internal suspend fun setHideRecentsPreviews(hide: Boolean) {
+            store.edit { it[PrefKeys.HIDE_RECENTS_PREVIEWS] = hide }
         }
 
         private fun notificationPreviewFromPreference(value: String?): NotificationPreview =
