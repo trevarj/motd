@@ -173,9 +173,11 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -5945,6 +5947,8 @@ internal fun ScrollToBottomFab(
     // current mention/bottom resolution, even as mentionTarget updates between recompositions.
     val latestOnClick by rememberUpdatedState(onClick)
     val latestOnLongClick by rememberUpdatedState(onLongClick)
+    val newestLabel = stringResource(R.string.chat_jump_to_newest)
+    val jumpLabel = if (mentionPending) stringResource(R.string.chat_next_unread_mention) else newestLabel
     // Hold progress 0..1: fills a ring around the FAB while pressed, so the user can see how long
     // to hold before the long-press fires. The same value gently compresses the arrow so progress
     // and completion read as one continuous motion rather than two competing animations.
@@ -5997,7 +6001,18 @@ internal fun ScrollToBottomFab(
                 modifier =
                     Modifier
                         .testTag("chat_scroll_to_bottom_fab")
-                        .pointerInput(Unit) {
+                        .semantics {
+                            contentDescription = jumpLabel
+                            if (mentionPending) {
+                                customActions =
+                                    listOf(
+                                        CustomAccessibilityAction(newestLabel) {
+                                            latestOnLongClick()
+                                            true
+                                        },
+                                    )
+                            }
+                        }.pointerInput(Unit) {
                             awaitEachGesture {
                                 awaitFirstDown(requireUnconsumed = false)
                                 val holdJob =
@@ -6075,7 +6090,7 @@ internal fun ScrollToBottomFab(
             ) {
                 Icon(
                     Icons.Filled.KeyboardArrowDown,
-                    contentDescription = stringResource(R.string.chat_scroll_to_bottom),
+                    contentDescription = null,
                     modifier = Modifier.scale(scrollToBottomFabIconScale(holdProgress.value)),
                 )
             }
@@ -6089,9 +6104,8 @@ internal fun ScrollToBottomFab(
  * not. Only this small badge subtree recomposes at message boundaries.
  *
  * When an unread @mention of our nick sits below the viewport, the badge shows "@" and a tap jumps
- * to the nearest such mention (recomputed each tap, so repeated taps walk through mentions newest-
- * to-oldest before falling through to the bottom). Otherwise the badge shows the unread count and a
- * tap scrolls to the newest row.
+ * to the nearest such mention, walking toward newer messages on successive taps. Otherwise the
+ * badge shows the unread count and a tap scrolls to the newest row.
  */
 @Composable
 private fun ViewportScrollToBottomFab(
