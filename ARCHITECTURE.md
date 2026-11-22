@@ -332,6 +332,9 @@ flowchart TD
   Received typing indicators default to the header; Above composer uses a localized
   animated surface rather than timeline rows. One author's arrival clears only
   that author, expiry collapses the surface, and idle layout reserves no gap.
+- When a single sender group fills the readable IRC timeline and its native nickname
+  has scrolled out of view, a passive nick and avatar overlay follows the group.
+  It respects avatar settings and never reserves message space or intercepts gestures.
 - Appearance's input style is an IRC-only preference shared by channel, query,
   and server buffers. Floating, Large, and Nickname use one editor/draft path;
   Nickname's network-owned identity is decoration, never submitted text.

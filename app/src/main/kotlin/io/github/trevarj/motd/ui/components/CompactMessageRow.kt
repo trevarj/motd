@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
@@ -53,6 +54,7 @@ import io.github.trevarj.motd.ui.theme.NickColorScheme
 import io.github.trevarj.motd.ui.theme.cornerRadius
 import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readingInk
+import kotlin.math.ceil
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 /** Alpha for the per-nick row background wash in COMPACT density: strong enough to band messages
@@ -115,6 +117,7 @@ internal fun CompactMessageRow(
     containerModifier: Modifier = Modifier,
     sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? = null,
     trailingContent: (@Composable (Color) -> Unit)? = null,
+    onSenderPositioned: ((LayoutCoordinates, Int) -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val selecting = LocalMessageSelection.current != null
@@ -248,6 +251,19 @@ internal fun CompactMessageRow(
                         .weight(1f)
                         // The inline sender link, not the paragraph, owns nickname gestures.
                         .let { if (onSenderClick != null) it.padding(end = 6.dp) else it },
+                onTextPositioned =
+                    if (showSender && onSenderPositioned != null) {
+                        { coordinates, layout ->
+                            val openingLength = if (kind == MessageKind.NOTICE) 1 else brackets.opening.length
+                            val lastNickCharacter =
+                                (openingLength + botDisplayName(displaySender, isBot).length - 1)
+                                    .coerceIn(0, (layout.layoutInput.text.length - 1).coerceAtLeast(0))
+                            val bottom = ceil(layout.getLineBottom(layout.getLineForOffset(lastNickCharacter))).toInt()
+                            onSenderPositioned(coordinates, bottom.coerceAtMost(coordinates.size.height))
+                        }
+                    } else {
+                        null
+                    },
             )
             // Trailing timestamp keeps the IRC "right gutter" feel without a bubble.
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {

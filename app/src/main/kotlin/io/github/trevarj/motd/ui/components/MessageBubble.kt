@@ -52,7 +52,9 @@ import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.testTag
@@ -395,6 +397,8 @@ internal fun botDisplayName(
     isBot: Boolean,
 ): String = if (isBot) "$sender 🤖" else sender
 
+private fun Modifier.reportSenderPosition(onPositioned: ((LayoutCoordinates, Int) -> Unit)?): Modifier = if (onPositioned == null) this else onGloballyPositioned { onPositioned(it, it.size.height) }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MessageBubble(
@@ -451,6 +455,8 @@ fun MessageBubble(
     containerModifier: Modifier = Modifier,
     sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? = null,
     trailingContent: (@Composable (Color) -> Unit)? = null,
+    // Native nickname text coordinates and visible height in pixels; omitted when no nick is shown.
+    onSenderPositioned: ((LayoutCoordinates, Int) -> Unit)? = null,
 ) {
     // Production timelines pass a string from one list-scoped formatter. The fallback keeps
     // previews/direct callers source-compatible without making every real row query system time
@@ -611,6 +617,7 @@ fun MessageBubble(
             containerModifier = containerModifier,
             sourceWrapper = sourceWrapper,
             trailingContent = trailingContent,
+            onSenderPositioned = onSenderPositioned,
         )
         return
     }
@@ -663,6 +670,7 @@ fun MessageBubble(
             containerModifier = containerModifier,
             sourceWrapper = sourceWrapper,
             trailingContent = trailingContent,
+            onSenderPositioned = onSenderPositioned,
         )
         return
     }
@@ -813,7 +821,7 @@ fun MessageBubble(
                         fontWeight = FontWeight.Bold,
                         // Friend tint: a subtle theme-primary rounded background behind the name,
                         // layered under the nick color.
-                        modifier = if (senderIsFriend) Modifier.senderNickTint() else Modifier,
+                        modifier = (if (senderIsFriend) Modifier.senderNickTint() else Modifier).reportSenderPosition(onSenderPositioned),
                     )
                     if (senderIsFriend) {
                         Icon(
@@ -970,7 +978,8 @@ fun MessageBubble(
                             Modifier
                                 .weight(1f, fill = false)
                                 .padding(end = 6.dp)
-                                .testTag("self_sender_label"),
+                                .testTag("self_sender_label")
+                                .reportSenderPosition(onSenderPositioned),
                     )
                 }
                 MessageStatusIcon(
@@ -1763,6 +1772,7 @@ private fun TwoLineMessageRow(
     containerModifier: Modifier = Modifier,
     sourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? = null,
     trailingContent: (@Composable (Color) -> Unit)? = null,
+    onSenderPositioned: ((LayoutCoordinates, Int) -> Unit)? = null,
 ) {
     val actionsLabel = stringResource(R.string.chat_bubble_actions)
     val hideAvatar = avatarsHidden()
@@ -1850,7 +1860,8 @@ private fun TwoLineMessageRow(
                     modifier =
                         Modifier
                             .weight(1f, fill = false)
-                            .nicknameClicks(onSenderClick, onSenderLongClick),
+                            .nicknameClicks(onSenderClick, onSenderLongClick)
+                            .reportSenderPosition(onSenderPositioned),
                 )
                 if (senderIsFriend) {
                     Icon(

@@ -62,11 +62,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -145,6 +147,7 @@ import io.github.trevarj.motd.ui.components.RemoteMediaConsent
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.components.SwipeToReplyContainer
 import io.github.trevarj.motd.ui.components.SystemEventPill
+import io.github.trevarj.motd.ui.components.botDisplayName
 import io.github.trevarj.motd.ui.components.dayStart
 import io.github.trevarj.motd.ui.components.linkifiedBody
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
@@ -159,6 +162,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 import androidx.compose.ui.semantics.testTag as semanticsTestTag
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -195,6 +199,32 @@ internal fun systemRunPresentationLines(run: List<MessageEntity>): List<String> 
 class TimelineRowContentMetrics {
     var leadingGapPx by mutableIntStateOf(0)
     var fullHeightPx by mutableIntStateOf(0)
+    internal var senderRow by mutableStateOf<TimelineSenderRow?>(null)
+    internal var senderBody by mutableStateOf<IntRange?>(null)
+    internal var senderNick by mutableStateOf<IntRange?>(null)
+    internal var senderCoordinates: LayoutCoordinates? = null
+
+    internal fun positionSenderBody(coordinates: LayoutCoordinates) {
+        senderBody = senderBounds(coordinates, coordinates.size.height, senderBody)
+    }
+
+    internal fun positionSenderNick(
+        coordinates: LayoutCoordinates,
+        height: Int,
+    ) {
+        senderNick = senderBounds(coordinates, height, senderNick)
+    }
+
+    private fun senderBounds(
+        coordinates: LayoutCoordinates,
+        height: Int,
+        previous: IntRange?,
+    ): IntRange? {
+        val row = senderCoordinates?.takeIf { it.isAttached } ?: return null
+        val top = row.localPositionOf(coordinates, Offset.Zero).y.roundToInt()
+        val bottom = top + height
+        return if (previous != null && previous.first == top && previous.last == bottom) previous else top..bottom
+    }
 }
 
 /** Reuse lazy compositions only across rows with the same structural layout. */
@@ -753,15 +783,22 @@ fun MessageList(
             val rowContent: @Composable (Modifier, Boolean) -> Unit = { rowModifier, renderExpanded ->
                 // Outgoing AnimatedContent branches must not overwrite the current row's metrics.
                 val activeMetrics = contentMetrics.takeIf { !isFool || renderExpanded == expanded }
+                val senderMetrics = activeMetrics.takeIf { msg.kind == MessageKind.PRIVMSG || msg.kind == MessageKind.NOTICE }
                 Column(
                     modifier =
                         rowModifier
                             .fillMaxWidth()
                             .background(highlightColor)
-                            .then(if (activeMetrics != null) Modifier.onSizeChanged { activeMetrics.fullHeightPx = it.height } else Modifier),
+                            .then(if (activeMetrics != null) Modifier.onSizeChanged { activeMetrics.fullHeightPx = it.height } else Modifier)
+                            .then(if (senderMetrics != null) Modifier.onGloballyPositioned { senderMetrics.senderCoordinates = it } else Modifier),
                 ) {
                     if ((foolMode == FoolsMode.COLLAPSE || foolMode == FoolsMode.HIDE) && !renderExpanded) {
-                        activeMetrics?.let { metrics -> SideEffect { metrics.leadingGapPx = 0 } }
+                        activeMetrics?.let { metrics ->
+                            SideEffect {
+                                metrics.leadingGapPx = 0
+                                metrics.senderRow = null
+                            }
+                        }
                         FoolPlaceholderRow(
                             msg = msg,
                             modifier = Modifier,
@@ -782,7 +819,12 @@ fun MessageList(
                     ) {
                         var expanded by rememberSaveable(msg.id) { mutableStateOf(false) }
                         if (!expanded) {
-                            activeMetrics?.let { metrics -> SideEffect { metrics.leadingGapPx = 0 } }
+                            activeMetrics?.let { metrics ->
+                                SideEffect {
+                                    metrics.leadingGapPx = 0
+                                    metrics.senderRow = null
+                                }
+                            }
                             QuietEbooksMessageRow(
                                 msg = msg,
                                 older = older,
@@ -862,6 +904,7 @@ fun MessageList(
                         translation = translation,
                         onDismissTranslation = onDismissExternalTranslation,
                         contentMetrics = activeMetrics,
+                        senderMetrics = senderMetrics,
                     )
                 }
             }
@@ -1897,6 +1940,7 @@ private fun MessageRow(
     translation: InlineTranslation? = null,
     onDismissTranslation: (Long) -> Unit = {},
     contentMetrics: TimelineRowContentMetrics? = null,
+    senderMetrics: TimelineRowContentMetrics? = null,
 ) {
     // The lazy list reverses item order, not a row's children. Render the divider before the first
     // unread bubble so the boundary is visually above that message.
@@ -2161,6 +2205,22 @@ private fun MessageRow(
         }
     val bodyConcealment = io.github.trevarj.motd.ui.components.LocalFoolBodyConcealment.current
     val sourceSwipeEnabled = swipeToReplyEnabled && !bodyConcealment.concealed && !selecting
+    val measureSender = senderMetrics.takeIf { rawSender.isNotBlank() && !bodyConcealment.concealed }
+    if (senderMetrics != null) {
+        val senderRow =
+            if (measureSender == null) {
+                null
+            } else {
+                TimelineSenderRow(
+                    TimelineSender(rawSender, botDisplayName(displaySender, msg.isBot), msg.normalizedActor, msg.senderAccount, msg.isSelf),
+                    opensGroup = showSender,
+                    hasNick = showSender && !standaloneAudio,
+                    hasLeadingDecoration = seam != null || showDay || showNewDivider || onCollapseFool != null,
+                )
+            }
+        SideEffect { senderMetrics.senderRow = senderRow }
+    }
+    val measureNick = remember(measureSender) { measureSender?.let { it::positionSenderNick } }
     val translatedSourceWrapper: (@Composable (content: @Composable () -> Unit) -> Unit)? =
         if (translation != null) {
             { content ->
@@ -2175,7 +2235,12 @@ private fun MessageRow(
         translation?.let { result -> { color -> InlineMessageTranslation(result, color) { onDismissTranslation(result.eventId) } } }
     val translationHostModifier = if (translation != null) Modifier.testTag("message_translation_host_${msg.id}") else Modifier
     val source: @Composable (Modifier) -> Unit = { rowModifier ->
-        Column(modifier = rowModifier.fillMaxWidth()) {
+        Column(
+            modifier =
+                rowModifier.fillMaxWidth().then(
+                    if (measureSender != null) Modifier.onGloballyPositioned { measureSender.positionSenderBody(it) } else Modifier,
+                ),
+        ) {
             val messageBubble: @Composable () -> Unit = {
                 CompositionLocalProvider(
                     LocalChatLinksEnabled provides linksEnabled,
@@ -2202,6 +2267,7 @@ private fun MessageRow(
                         isBot = msg.isBot,
                         kind = msg.kind,
                         showSender = showSender,
+                        onSenderPositioned = measureNick,
                         hasMention = mentionAttention,
                         highlightNick = msg.highlightNick,
                         highlightCaseMapping = msg.highlightCaseMapping,

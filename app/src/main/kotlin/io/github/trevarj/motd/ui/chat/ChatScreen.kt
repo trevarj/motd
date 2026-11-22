@@ -158,6 +158,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.Clipboard
@@ -4806,6 +4807,23 @@ internal fun ChatContent(
                                             onDismiss = onHistorySyncDismiss,
                                         )
                                     },
+                                    senderContext = { precedingHeightPx ->
+                                        if (timelineVisible && !isServerBuffer && activeSelectionId == null && outgoingFlight == null) {
+                                            val edgeSlackPx =
+                                                with(LocalDensity.current) {
+                                                    (8.dp + conversationSpacing.bubbleBurstGap).roundToPx()
+                                                }
+                                            TimelineSenderContext(
+                                                listState = listState,
+                                                metrics = rowContentMetrics,
+                                                networkId = state.buffer?.networkId,
+                                                readTopHostHeightPx = readTopHostHeightPx,
+                                                readBottomHostHeightPx = readBottomHostHeightPx,
+                                                precedingHeightPx = precedingHeightPx,
+                                                edgeSlackPx = edgeSlackPx,
+                                            )
+                                        }
+                                    },
                                 )
                             }
                         }
@@ -5687,6 +5705,7 @@ internal fun BoxScope.TimelineTopOverlays(
     historyFailure: @Composable () -> Unit,
     staleChip: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    senderContext: (@Composable (Int) -> Unit)? = null,
 ) {
     Column(
         modifier =
@@ -5695,11 +5714,16 @@ internal fun BoxScope.TimelineTopOverlays(
                 .fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Keep playback controls stationary when a delayed sync failure becomes visible.
-        audioPlayer()
-        historyFailure()
-        // Column child, not a sibling overlay: the staleness chip must never cover the player.
-        staleChip()
+        var precedingHeightPx by remember { mutableStateOf<Int?>(null) }
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = if (senderContext == null) Modifier else Modifier.onSizeChanged { precedingHeightPx = it.height },
+        ) {
+            audioPlayer()
+            historyFailure()
+            staleChip()
+        }
+        precedingHeightPx?.let { senderContext?.invoke(it) }
     }
 }
 

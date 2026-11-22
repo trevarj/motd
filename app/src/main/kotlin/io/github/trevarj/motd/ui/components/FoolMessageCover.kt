@@ -49,6 +49,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -142,12 +143,13 @@ internal fun FoolBodyText(
     onLinkLongPress: (() -> Unit)? = null,
     onSenderLongClick: (() -> Unit)? = null,
     onMentionLongClick: ((String) -> Unit)? = null,
+    onTextPositioned: ((LayoutCoordinates, TextLayoutResult) -> Unit)? = null,
 ) {
     val selecting = LocalMessageSelection.current != null
     val nativeLayout = remember(text, selecting) { mutableStateOf<TextLayoutResult?>(null) }
     val chips = remember(text) { text.getStringAnnotations(NICK_CHIP_RANGE, 0, text.length) }
     if (chips.isEmpty()) {
-        FoolBodyTextHost(text, modifier, color, style, maxLines, overflow, concealment, inlineBody, onLinkLongPress, nativeLayout, onSenderLongClick = onSenderLongClick, onMentionLongClick = onMentionLongClick)
+        FoolBodyTextHost(text, modifier, color, style, maxLines, overflow, concealment, inlineBody, onLinkLongPress, nativeLayout, onSenderLongClick = onSenderLongClick, onMentionLongClick = onMentionLongClick, onTextPositioned = onTextPositioned)
         return
     }
     val density = LocalDensity.current
@@ -205,7 +207,7 @@ internal fun FoolBodyText(
                 }
                 builder.toAnnotatedString() to content
             }
-        FoolBodyTextHost(prepared.first, Modifier, color, style, maxLines, overflow, concealment, inlineBody, onLinkLongPress, nativeLayout, prepared.second, onSenderLongClick, onMentionLongClick)
+        FoolBodyTextHost(prepared.first, Modifier, color, style, maxLines, overflow, concealment, inlineBody, onLinkLongPress, nativeLayout, prepared.second, onSenderLongClick, onMentionLongClick, onTextPositioned)
     }
 }
 
@@ -224,6 +226,7 @@ private fun FoolBodyTextHost(
     inlineContent: Map<String, InlineTextContent> = emptyMap(),
     onSenderLongClick: (() -> Unit)? = null,
     onMentionLongClick: ((String) -> Unit)? = null,
+    onTextPositioned: ((LayoutCoordinates, TextLayoutResult) -> Unit)? = null,
 ) {
     val ranges = remember(text) { text.getStringAnnotations(FOOL_BODY_RANGE, 0, text.length) }
     val start = ranges.minOfOrNull { it.start } ?: if (inlineBody) text.length else 0
@@ -412,7 +415,15 @@ private fun FoolBodyTextHost(
             onTextLayout = { layout = it },
             modifier =
                 textModifier
-                    .then(linkLongPressModifier)
+                    .let {
+                        if (onTextPositioned == null) {
+                            it
+                        } else {
+                            it.onGloballyPositioned { coordinates ->
+                                layout?.let { onTextPositioned(coordinates, it) }
+                            }
+                        }
+                    }.then(linkLongPressModifier)
                     .then(if (accessibilityActions.isEmpty() || concealed) Modifier else Modifier.semantics { customActions = accessibilityActions })
                     .then(
                         if (!concealed) {
