@@ -5,8 +5,10 @@ import androidx.benchmark.macro.StartupMode
 import androidx.benchmark.macro.StartupTimingMetric
 import androidx.benchmark.macro.junit4.MacrobenchmarkRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.uiautomator.By
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -17,7 +19,15 @@ class StartupBenchmark {
 
     private val fixture = BenchmarkFixture.read()
 
-    /** Cold start of an onboarded, synced account until the chat list is on screen. */
+    @Before
+    fun clearTargetData() {
+        // Start each invocation with no saved trust decision, even when the APK is reused.
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        val result = device.executeShellCommand("pm clear $TARGET_PACKAGE").trim()
+        check(result == "Success") { "pm clear $TARGET_PACKAGE failed: $result" }
+    }
+
+    /** Cold start of an onboarded account until its fixture channel is shown in the chat list. */
     @Test
     fun coldStartToChatList() =
         rule.measureRepeated(
@@ -28,6 +38,8 @@ class StartupBenchmark {
             setupBlock = { ensureOnboarded(fixture) },
         ) {
             startActivityAndWait()
-            check(device.wait(Until.hasObject(By.res("screen_chat_list")), 10_000)) { "chat list not shown" }
+            check(device.wait(Until.hasObject(fixture.chatListRow()), 10_000)) {
+                "fixture channel ${fixture.channel} not shown in the chat list"
+            }
         }
 }

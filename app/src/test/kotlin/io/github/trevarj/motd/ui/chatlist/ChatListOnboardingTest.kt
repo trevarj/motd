@@ -9,44 +9,47 @@ import org.junit.Test
 class ChatListOnboardingTest {
     @Test
     fun freshEmptyInstallOpensOnboardingAfterLoading() {
-        assertTrue(shouldOpenOnboarding(ChatListState(loading = false)))
+        val state = ChatListState(loading = false)
+        assertTrue(shouldOpenOnboarding(state))
+        assertFalse(state.isNormalChatListReady)
     }
 
     @Test
     fun pendingInviteSuppressesManualOnboardingRace() {
-        assertFalse(shouldOpenOnboarding(ChatListState(loading = false), suppressed = true))
+        val state = ChatListState(loading = false)
+        assertFalse(shouldOpenOnboarding(state, suppressed = true))
+        assertFalse(state.isNormalChatListReady)
     }
 
     @Test
     fun completedOnboardingKeepsEmptyMainScreen() {
-        assertFalse(
-            shouldOpenOnboarding(
-                ChatListState(loading = false, onboardingComplete = true),
-            ),
-        )
+        val state = ChatListState(loading = false, onboardingComplete = true)
+        assertFalse(shouldOpenOnboarding(state))
+        assertTrue(state.isNormalChatListReady)
     }
 
     @Test
     fun configuredOrStillLoadingStateDoesNotOpenOnboarding() {
-        assertFalse(shouldOpenOnboarding(ChatListState()))
-        assertFalse(
-            shouldOpenOnboarding(
-                ChatListState(
-                    networks =
-                        listOf(
-                            NetworkEntity(
-                                name = "Libera",
-                                role = NetworkRole.DIRECT,
-                                host = "irc.example",
-                                port = 6697,
-                                nick = "me",
-                                username = "me",
-                                realname = "Me",
-                            ),
+        val stillLoading = ChatListState()
+        assertFalse(shouldOpenOnboarding(stillLoading))
+        assertFalse(stillLoading.isNormalChatListReady)
+        val configured =
+            ChatListState(
+                networks =
+                    listOf(
+                        NetworkEntity(
+                            name = "Libera",
+                            role = NetworkRole.DIRECT,
+                            host = "irc.example",
+                            port = 6697,
+                            nick = "me",
+                            username = "me",
+                            realname = "Me",
                         ),
-                    loading = false,
-                ),
-            ),
-        )
+                    ),
+                loading = false,
+            )
+        assertFalse(shouldOpenOnboarding(configured))
+        assertTrue(configured.isNormalChatListReady)
     }
 }

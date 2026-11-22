@@ -139,6 +139,9 @@ class MainActivity :
     private var notificationTarget by mutableStateOf<NotificationTarget?>(null)
     private var notificationSource by mutableStateOf<Intent?>(null)
 
+    // Keep the launch classification even when routing consumes and clears an intent.
+    private var launcherStartup by mutableStateOf(false)
+
     private val incomingIntake: PaletteIntentIntake by viewModels()
 
     // The platform splash owns Android 12+ until its exit callback. Keep its exact measured icon
@@ -177,6 +180,7 @@ class MainActivity :
 
         requestPostNotificationsIfNeeded()
         maybeStartForegroundService()
+        launcherStartup = savedInstanceState == null && intent.isLauncherEntry()
         // Cold start: the launcher created the activity with the notification's content intent.
         notificationTarget = parseNotificationTarget(intent)
         notificationSource = intent.takeIf { notificationTarget != null }
@@ -301,6 +305,7 @@ class MainActivity :
                                     showComposerEmoji = settings.showComposerEmoji,
                                     showComposerFormattingTools = settings.showComposerFormattingTools,
                                     appContentVisible = !startupSplashLoading && startupSplashOverlay == null,
+                                    launcherStartupReady = launcherStartup && uiState.rootReady,
                                     navController = navController,
                                     notificationTarget = notificationTarget,
                                     notificationSource = notificationIntent,
@@ -381,6 +386,7 @@ class MainActivity :
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        launcherStartup = launcherStartup && intent.isLauncherEntry()
         notificationTarget = null
         notificationSource = null
         warmNotificationEntry(
@@ -460,6 +466,8 @@ class MainActivity :
         }
     }
 }
+
+private fun Intent.isLauncherEntry(): Boolean = action == Intent.ACTION_MAIN && hasCategory(Intent.CATEGORY_LAUNCHER)
 
 /** Null means unrelated intent; empty means matching motd invite with invalid untrusted data. */
 internal fun parseJoinInvitePayload(intent: Intent?): String? {

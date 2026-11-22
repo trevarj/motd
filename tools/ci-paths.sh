@@ -33,7 +33,7 @@ for path in "${paths[@]}"; do
     irc/src/main/*|irc/build.gradle.kts)
       runtime=true; irc=true; app=true; device=true
       ;;
-    # Device-only Macrobenchmark journeys; CI covers them through root ktlintCheck in the app job.
+    # Compile the Macrobenchmark source in the app job; run timings on device.
     benchmark/*)
       runtime=true; app=true
       ;;

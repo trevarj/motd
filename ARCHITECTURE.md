@@ -283,6 +283,9 @@ flowchart TD
   callback cannot restart the overlay.
   Tapping either app-owned cover dismisses it immediately, even before local data is
   ready; loading continues in the app. The OS launch window still waits for the first frame.
+  Only a normal launcher start reports fully drawn for the active chat list, after the
+  root preferences and local list state load and the cover is gone. An onboarded empty
+  list counts; onboarding, incoming content and deep links do not. No IRC or history wait.
 - Community discovery offers one inline chat-list invitation across new and existing
   installations, plus a permanent About action for `#motd` on Libera.Chat. The
   invitation is handled only when actually visible or known membership suppresses it;

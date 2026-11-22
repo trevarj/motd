@@ -266,7 +266,7 @@ fun ChatListScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val community by viewModel.community.collectAsStateWithLifecycle()
     val communityLifecycle = LocalLifecycleOwner.current
-    val communityAllowed = appContentVisible && !suppressOnboarding && selectedBufferId == null && !state.loading && (state.onboardingComplete || state.networks.isNotEmpty())
+    val communityAllowed = appContentVisible && !suppressOnboarding && selectedBufferId == null && state.isNormalChatListReady
     DisposableEffect(communityLifecycle, communityAllowed) {
         fun update() = viewModel.setCommunityVisitActive(communityAllowed && communityLifecycle.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
         val observer = LifecycleEventObserver { _, _ -> update() }
@@ -1407,6 +1407,9 @@ internal fun shouldOpenOnboarding(
     state: ChatListState,
     suppressed: Boolean = false,
 ): Boolean = !suppressed && !state.loading && state.networks.isEmpty() && !state.onboardingComplete
+
+internal val ChatListState.isNormalChatListReady: Boolean
+    get() = !loading && !shouldOpenOnboarding(this)
 
 @Composable
 private fun ScopeChip(

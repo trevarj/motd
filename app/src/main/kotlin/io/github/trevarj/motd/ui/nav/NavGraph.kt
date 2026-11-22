@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.nav
 
+import androidx.activity.compose.ReportDrawn
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
 import androidx.compose.animation.EnterTransition
@@ -13,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +59,7 @@ import io.github.trevarj.motd.ui.chatlist.ChatListScreen
 import io.github.trevarj.motd.ui.chatlist.ChatListViewModel
 import io.github.trevarj.motd.ui.chatlist.FolderEditorScreen
 import io.github.trevarj.motd.ui.chatlist.ManageFoldersScreen
+import io.github.trevarj.motd.ui.chatlist.isNormalChatListReady
 import io.github.trevarj.motd.ui.components.LocalOpenIrcChannelLink
 import io.github.trevarj.motd.ui.feed.GlobalFeedScreen
 import io.github.trevarj.motd.ui.feed.MentionsScreen
@@ -129,8 +132,10 @@ fun MotdNavGraph(
     incomingIntake: PaletteIntentIntake? = null,
     onIncomingShare: (PendingShare) -> Unit = {},
     onIncomingConsumed: (android.content.Intent) -> Unit = {},
+    launcherStartupReady: Boolean = false,
 ) {
     val incomingActive = incomingIntake?.active?.collectAsStateWithLifecycle()?.value == true
+    val chatListVisible = appContentVisible && notificationTarget == null && !incomingActive
     // Route a notification tap to ChatRoute so the existing jump path (local resolve → CHATHISTORY
     // AROUND fallback) scrolls to and highlights the message. Runs for both cold start (target
     // seeded before first composition) and warm start (target updated by onNewIntent). Clearing the
@@ -205,7 +210,7 @@ fun MotdNavGraph(
                     ChatListPane(
                         navController = navController,
                         viewModel = chatListViewModel,
-                        appContentVisible = appContentVisible && notificationTarget == null && !incomingActive,
+                        appContentVisible = chatListVisible,
                         suppressOnboarding = incomingActive,
                         onDefaultBufferAvailable = { bufferId ->
                             if (twoPane && !openedDefault) {
@@ -782,12 +787,24 @@ fun MotdNavGraph(
     // The actual chat-list entry owns data; this root composition owns native presentation objects.
     // Neither the host nor this stable registry belongs to a disposable ChatRoute composition.
     val currentEntry by navController.currentBackStackEntryAsState()
+    var leftStartupChatList by remember(navController) { mutableStateOf(false) }
     if (currentEntry != null) {
         val listEntry =
             remember(navController, currentEntry) {
                 navController.getBackStackEntry(requireNotNull(ChatListRoute::class.qualifiedName))
             }
         val owner: ChatListViewModel = hiltViewModel(listEntry)
+        if (!leftStartupChatList) {
+            if (currentEntry != listEntry) {
+                // Returning from onboarding or another route is not the launcher startup.
+                SideEffect { leftStartupChatList = true }
+            } else if (launcherStartupReady && chatListVisible) {
+                val listState by owner.state.collectAsStateWithLifecycle()
+                if (listState.isNormalChatListReady && navController.currentBackStackEntry == listEntry) {
+                    ReportDrawn()
+                }
+            }
+        }
         owner.chatPageCache?.let { ChatPresentationHost(it, presentations) }
     }
 }
