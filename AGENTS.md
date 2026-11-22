@@ -125,6 +125,7 @@ live beside the harness in [`test/e2e/`](test/e2e/README.md).
 - Do not rewrite, discard, or reformat unrelated changes. Avoid destructive Git
   commands. Device installation for the UI check above is authorized; do not
   commit, push, tag, publish, or cut a release unless the user requests it.
+- Require [GPG-signed pull request commits](docs/human-developing.md#contributing).
 - Do not add "Co-Authored-By:" trailer when LLMs have assisted with commits.
 - Keep commits narrowly scoped and report the verification performed. A request
   to release authorizes the documented release workflow, not unrelated cleanup

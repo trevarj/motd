@@ -239,6 +239,11 @@ Users must review every result; original IRC formatting is not retained.
 These limited device samples are not a quality/performance benchmark; Android
 RAM, latency, thermals and battery remain unmeasured.
 
+## Contributing
+
+Sign every commit in a pull request with GPG (`git commit -S`). Check that
+GitHub marks your commits **Verified** before requesting review.
+
 ## Device and E2E testing
 
 Do not run the headless emulator suite during routine local development; it
