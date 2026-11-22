@@ -29,9 +29,13 @@ The pattern repeats every 512dp in chat and full previews, every 256dp in Starte
 cards so the icons are easier to recognize, and every 128dp in other artwork cards.
 Theme backgrounds use the guarded MOTD gradient (black in AMOLED);
 custom backgrounds remain exact opaque sRGB. Pattern intensity changes only motif ink.
-Packing fits to the stroke footprint and considers neighboring tiles across both axes.
-The widest gaps can fit medium copies of Auto-sized leads; smaller gaps take fillers.
-Higher density keeps earlier placements and fills smaller gaps.
+Packing uses circles that enclose each SVG's visible strokes, with clearance across
+both seams and at corners. Leads keep their layout anchors. The widest gaps can
+fit medium copies of Auto-sized leads; Auto fillers fit to the remaining space
+and can shift slightly to fit better. After placement, up to two refinement passes
+use a small raster of the actual strokes to move fillers into the largest visible gaps.
+Fixed sizes are never enlarged past their setting. Changing density may move fillers,
+but the main lead composition stays anchored.
 
 Historical PNG studies and source atlases are separate from the app's pattern renderer.
 The legacy generator writes finished studies to `build/wallpaper-previews/legacy-finals/`

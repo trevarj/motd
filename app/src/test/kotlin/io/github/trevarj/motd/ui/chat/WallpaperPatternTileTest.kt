@@ -189,7 +189,8 @@ class WallpaperPatternTileTest {
             val mediumFillerInk = medium.count { AndroidColor.green(it) > AndroidColor.red(it) }
             assertTrue("Medium density must add visible filler ink", mediumFillerInk > 500)
             assertTrue("Maximum density must close more gaps", dense.count { AndroidColor.green(it) > AndroidColor.red(it) } > mediumFillerInk)
-            assertTrue("Increasing density must keep already fitted motifs", medium.indices.all { medium[it] == 0 || medium[it] == dense[it] })
+            val changedLeadPixelsAtMedium = sparse.indices.count { (sparse[it].isLeadInk() || medium[it].isLeadInk()) && sparse[it] != medium[it] }
+            assertEquals("Refinement must also preserve lead artwork at medium density", 0, changedLeadPixelsAtMedium)
             val fillersOnly = renderFixture(recipe.copy(icons = listOf(filler))).pixels()
             assertTrue("A mix of fillers alone still draws at minimum density", fillersOnly.any { it != 0 })
 
@@ -198,6 +199,42 @@ class WallpaperPatternTileTest {
             val automaticDense = renderFixture(automaticLead.copy(density = 100)).pixels()
             assertTrue("Larger gaps should fit medium copies of Auto leads", automaticDense.count { it.isLeadInk() } > automaticSparse.count { it.isLeadInk() })
             assertTrue("Gap filling must preserve the original Auto leads", automaticSparse.indices.all { automaticSparse[it] == 0 || automaticSparse[it] == automaticDense[it] })
+        }
+
+    @Test fun automaticFillersUseOpenSpaceWithoutOverpainting() =
+        runBlocking {
+            val filler = WallpaperPatternIcon(imports[1].id, filler = true)
+            // Same seed, 72 filler stamps and 512dp tile. Alpha mass measures actual
+            // vector coverage, not the area of the disks used for collision checks.
+            val recipe = WallpaperPattern(seed = 73, density = 0, icons = listOf(filler))
+            val auto = renderFixture(recipe).pixels().sumOf(AndroidColor::alpha)
+            val fixed = renderFixture(recipe.copy(icons = listOf(filler.copy(scale = 100)))).pixels().sumOf(AndroidColor::alpha)
+            assertTrue("Auto underfilled open gaps: $auto vs $fixed", auto > fixed * 1.85)
+
+            // Each imported motif is a single drawPath. Two half-opacity stamps
+            // on the same sample exceed alpha 128, even if they're the same icon.
+            val mixed = listOf(WallpaperPatternIcon(imports[0].id), filler)
+            for (layout in WallpaperPatternLayout.entries.filterNot { it == WallpaperPatternLayout.RINGS }) {
+                val dense = recipe.copy(layout = layout, size = 175, density = 100, icons = mixed)
+                val key = wallpaperPatternTileKey(dense, Color(0x80FFFFFF), 1024f)
+                val tile = requireNotNull(renderWallpaperPatternTile(context, key, imports))
+                assertEquals("Overlapping stamps or wrapped copies in $layout", 128, tile.pixels().maxOf(AndroidColor::alpha))
+            }
+        }
+
+    @Test fun refinementFillsTheVisibleGapInDeepSpaceAtMediumDensity() =
+        runBlocking {
+            val recipe = checkNotNull(WallpaperStarters.find("deep-space")).pattern.copy(density = 50)
+            val key = wallpaperPatternTileKey(recipe, Color.White, 512f)
+            val tile = requireNotNull(renderWallpaperPatternTile(context, key, emptyList()))
+            val pixels = tile.pixels()
+            val nearestInk =
+                pixels.indices.minOf { i ->
+                    val dx = i % tile.width - 305
+                    val dy = i / tile.width - 181
+                    if (AndroidColor.alpha(pixels[i]) > 31) dx * dx + dy * dy else Int.MAX_VALUE
+                }
+            assertTrue("The original open gap was left unfilled: squared distance $nearestInk", nearestInk <= 17 * 17)
         }
 
     @Test fun largerScaleAddsVisibleInkAndExplicitAnglesIgnoreRandomRotation() =
