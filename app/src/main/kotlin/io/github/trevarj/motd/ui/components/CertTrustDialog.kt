@@ -12,6 +12,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -37,7 +39,8 @@ fun CertTrustDialog(
     onCancel: () -> Unit,
 ) {
     AlertDialog(
-        modifier = Modifier.testTag("cert_trust_dialog"),
+        // Dialog windows do not inherit the activity root's opt-in; UiAutomator journeys need the tags.
+        modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("cert_trust_dialog"),
         onDismissRequest = onCancel,
         title = {
             Text(
