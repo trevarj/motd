@@ -92,6 +92,8 @@ use the x86_64 `:app:assembleE2e` APK instead.
 App test JVMs export `java.base/jdk.internal.access` to unnamed modules in
 `app/build.gradle.kts` so Robolectric 4.17's FileDescriptor interceptor can use
 `SharedSecrets` on JDK 21. No broader module opens are needed for this access.
+Robolectric fetches instrumented Android SDKs from Maven Central at
+`repo.maven.apache.org`; its default `repo1.maven.org` returned HTTP 429 in CI.
 
 Native text-selection gesture tests use SDK 26: Robolectric's API 28+ magnifier can fail during
 surface teardown. Keep production selection unchanged. Use `ShadowWindowManagerImpl.views`

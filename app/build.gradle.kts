@@ -610,6 +610,7 @@ tasks.configureEach {
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     // Robolectric 4.17's FileDescriptor interceptor uses SharedSecrets on JDK 21.
     jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED")
+    systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
     // Native Compose state degrades paging within ten shared Robolectric classes.
     if (name == "testDebugUnitTest") forkEvery = 5
     listOf(
