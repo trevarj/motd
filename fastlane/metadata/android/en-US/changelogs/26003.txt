@@ -1,0 +1,4 @@
+- Wallpaper Workshop packs fillers more tightly without overlapping, and size controls go up to 400%.
+- Color pickers include current theme swatches. Color wheels are easier to use in scrolling forms.
+- Chat shows command argument hints and supports /op and /deop. Attachments move into the + menu while typing.
+- Improved unread positioning after history loads. Scheduled messages has an icon in the chat list menu.
