@@ -76,6 +76,7 @@ val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢")
 /**
  * Long-press action sheet: quick reactions and compact actions. More opens the native full picker.
  * Selecting an already-owned reaction toggles it off in the mutation layer.
+ * [initialReactionsTab] applies only when the sheet opens, not after the user switches tabs.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,9 +99,10 @@ fun MessageActionSheet(
     onForward: (() -> Unit)? = null,
     canSelectText: Boolean = false,
     onSelectText: () -> Unit = {},
+    initialReactionsTab: Boolean = false,
 ) {
     val hasReactions = reactions.isNotEmpty()
-    var selectedTab by remember(hasReactions) { mutableIntStateOf(0) }
+    var selectedTab by remember { mutableIntStateOf(if (initialReactionsTab) 1 else 0) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,

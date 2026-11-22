@@ -375,6 +375,7 @@ fun MessageList(
     // React to a message; the whole entity is passed so a still-pending own row (msgid == null) is
     // queued by the VM instead of silently dropped (bug: react on a just-sent message did nothing).
     onReact: (MessageEntity, String) -> Unit,
+    onOpenReactions: ((MessageEntity) -> Unit)? = null,
     onImageClick: (String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
     bufferId: Long? = null,
@@ -871,6 +872,7 @@ fun MessageList(
                         onReply = onReply,
                         swipeToReplyEnabled = swipeToReplyEnabled,
                         onReact = onReact,
+                        onOpenReactions = onOpenReactions,
                         onImageClick = onImageClick,
                         onRetry = onRetry,
                         canRetry = canRetry(msg),
@@ -1905,6 +1907,7 @@ private fun MessageRow(
     onReply: (MessageEntity) -> Unit,
     swipeToReplyEnabled: Boolean,
     onReact: (MessageEntity, String) -> Unit,
+    onOpenReactions: ((MessageEntity) -> Unit)?,
     onImageClick: (String) -> Unit,
     onRetry: (MessageEntity) -> Unit,
     canRetry: Boolean,
@@ -2160,6 +2163,7 @@ private fun MessageRow(
     val previewFailed = linkUrl != null && previewState is PreviewState.Failed
     val previewResolved = linkUrl != null && (previewState is PreviewState.Done || previewFailed)
     val formattedTime = remember(msg.serverTime, formatTime) { formatTime(msg.serverTime) }
+    val openReactions = if (reactions.isNotEmpty()) onOpenReactions?.let { open -> { open(msg) } } else null
     // Ordinary rows stay on the hot scrolling path without even resolving the accessibility
     // string; mention state is immutable for a stored row and only the sparse highlighted rows
     // need it.
@@ -2297,6 +2301,7 @@ private fun MessageRow(
                         onClickLabel = if (readMessage != null) stringResource(R.string.read_aloud_message) else null,
                         // Pass the entity, not just msgid: the VM handles pending reactions uniformly.
                         onReact = { emoji -> onReact(msg, emoji) },
+                        onOpenReactions = openReactions,
                         onImageClick = onImageClick,
                         onLinkPreviewClick = {
                             when (previewState) {
@@ -2400,6 +2405,7 @@ private fun MessageRow(
                 onClickLabel = if (standaloneAudio && readMessage != null) stringResource(R.string.read_aloud_message) else null,
                 reactions = if (standaloneAudio) reactions else emptyList(),
                 onReact = { emoji -> onReact(msg, emoji) },
+                onOpenReactions = openReactions,
                 trailingContent = translationContent.takeIf { standaloneAudio },
                 sourceWrapper =
                     if (translation != null) {

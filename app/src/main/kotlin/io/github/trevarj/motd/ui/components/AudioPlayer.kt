@@ -117,6 +117,7 @@ fun AudioAttachmentPlayers(
     onClickLabel: String? = null,
     reactions: List<ReactionChip> = emptyList(),
     onReact: (String) -> Unit = {},
+    onOpenReactions: (() -> Unit)? = null,
     transcripts: Map<String, VoiceTranscriptState> = emptyMap(),
     transcriptionEnabled: Boolean = false,
     transcriptionReady: Boolean = false,
@@ -188,7 +189,7 @@ fun AudioAttachmentPlayers(
                         Text("+${attachments.size - MAX_COLLAPSED_AUDIO_PLAYERS}")
                     }
                 }
-                ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf)
+                ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf, onOpenReactions = onOpenReactions)
             }
         }
     }

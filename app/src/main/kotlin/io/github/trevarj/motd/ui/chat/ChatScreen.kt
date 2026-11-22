@@ -364,6 +364,11 @@ private data class PendingDccAccept(
     val ebooksNetworkId: Long? = null,
 )
 
+private data class MessageActionRequest(
+    val message: MessageEntity,
+    val initialReactionsTab: Boolean = false,
+)
+
 /** How long (ms) the scroll-to-bottom FAB must be held to skip the mention walk and jump to newest. */
 internal const val SCROLL_TO_BOTTOM_FAB_HOLD_MS = 450
 private const val SCROLL_TO_BOTTOM_FAB_SETTLE_MS = 160
@@ -3092,8 +3097,7 @@ internal fun ChatContent(
                 }
         }
 
-        // Long-press action sheet target.
-        var sheetTarget by remember { mutableStateOf<MessageEntity?>(null) }
+        var sheetRequest by remember(state.buffer?.id) { mutableStateOf<MessageActionRequest?>(null) }
         var selectionTarget by remember(state.buffer?.id) { mutableStateOf<MessageEntity?>(null) }
         val latestSelectionBufferId by rememberUpdatedState(state.buffer?.id)
         var selectionBounds by remember { mutableStateOf(Rect.Zero) }
@@ -4455,7 +4459,14 @@ internal fun ChatContent(
                                             remember(state.buffer?.id) {
                                                 { message: MessageEntity ->
                                                     selectionTarget = null
-                                                    sheetTarget = message
+                                                    sheetRequest = MessageActionRequest(message)
+                                                }
+                                            }
+                                        val onTimelineOpenReactions =
+                                            remember(state.buffer?.id) {
+                                                { message: MessageEntity ->
+                                                    selectionTarget = null
+                                                    sheetRequest = MessageActionRequest(message, initialReactionsTab = true)
                                                 }
                                             }
                                         val canRetryMessage =
@@ -4624,6 +4635,7 @@ internal fun ChatContent(
                                                 onReply = timelineReply,
                                                 swipeToReplyEnabled = swipeToReplyEnabled,
                                                 onReact = onReact,
+                                                onOpenReactions = onTimelineOpenReactions,
                                                 onImageClick = onOpenImage,
                                                 onRetry = onRetry,
                                                 canRetry = canRetryMessage,
@@ -4831,6 +4843,8 @@ internal fun ChatContent(
                                                 readBottomHostHeightPx = readBottomHostHeightPx,
                                                 precedingHeightPx = precedingHeightPx,
                                                 edgeSlackPx = edgeSlackPx,
+                                                userScrolling = userScrolling,
+                                                visibleMessageAt = remember(items) { { index -> items.itemSnapshotList.getOrNull(index) } },
                                             )
                                         }
                                     },
@@ -5154,27 +5168,28 @@ internal fun ChatContent(
             )
         }
 
-        sheetTarget?.let { target ->
+        sheetRequest?.let { (target, initialReactionsTab) ->
             val selectionBufferId = state.buffer?.id
             // Dismiss with the M3 hide animation, clearing the target only once it settles.
             val hideThen: (() -> Unit) -> Unit = { after ->
                 scope.launch { sheetState.hide() }.invokeOnCompletion {
-                    sheetTarget = null
+                    sheetRequest = null
                     after()
                 }
             }
             MessageActionSheet(
                 sheetState = sheetState,
+                initialReactionsTab = initialReactionsTab,
                 isServerBuffer = isServerBuffer,
                 canSelectText = canSelectMessage(target),
                 onSelectText = {
                     scope.launch {
                         sheetState.hide()
-                        sheetTarget = null
+                        sheetRequest = null
                         if (selectionBufferId == latestSelectionBufferId && latestCanSelectMessage(target)) selectionTarget = target
                     }
                 },
-                onDismiss = { sheetTarget = null },
+                onDismiss = { sheetRequest = null },
                 onTranslate =
                     if (externalTranslationText(target) != null) {
                         { hideThen { openTranslationPicker(target) } }
@@ -5227,7 +5242,7 @@ internal fun ChatContent(
             )
         }
 
-        if (sheetTarget == null) {
+        if (sheetRequest == null) {
             forwardState?.let { request ->
                 MessageForwardSheet(
                     state = request,

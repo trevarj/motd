@@ -39,6 +39,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
@@ -84,6 +88,8 @@ private val REACTION_BURST_SIZE = 48.dp
 /** The chip's own overshoot, deliberately shorter than the sparks so the chip settles first. */
 private const val REACTION_POP_DURATION_MS = 280
 
+private const val INLINE_REACTION_LIMIT = 3
+
 /**
  * A single scale overshoot, defined here rather than in [MotdMotion]: it is this chip's own
  * gesture, not part of the app's shared vocabulary. Being an ordinary Compose spec, the platform
@@ -120,6 +126,8 @@ internal fun reactionBurstPlays(
  *
  * [isSelf] is the message's ownership, not the reaction's: it decides whether an incoming reaction
  * is worth a burst.
+ * [onOpenReactions] caps inline display and opens the full list. [reactions] contains one chip per
+ * emoji, in display order.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -129,8 +137,11 @@ fun ReactionRow(
     modifier: Modifier = Modifier,
     isSelf: Boolean = false,
     chipElevation: Dp = 0.dp,
+    onOpenReactions: (() -> Unit)? = null,
 ) {
     if (reactions.isEmpty()) return
+    val inlineCount = if (onOpenReactions == null) reactions.size else minOf(reactions.size, INLINE_REACTION_LIMIT)
+    val overflowCount = reactions.size - inlineCount
     // animateContentSize clips to its measured bounds, so keep the chip shadow inside them.
     val shadowPadding = chipElevation * 3
     FlowRow(
@@ -149,13 +160,53 @@ fun ReactionRow(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        reactions.forEach { chip ->
+        repeat(inlineCount) { index ->
+            val chip = reactions[index]
             key(chip.emoji) {
                 ReactionChipView(chip = chip, isSelf = isSelf, elevation = chipElevation, onClick = { onReact(chip.emoji) })
             }
         }
+        if (overflowCount > 0 && onOpenReactions != null) {
+            ReactionOverflowChip(overflowCount, chipElevation, onOpenReactions)
+        }
     }
 }
+
+@Composable
+private fun ReactionOverflowChip(
+    count: Int,
+    elevation: Dp,
+    onClick: () -> Unit,
+) {
+    val description = pluralStringResource(R.plurals.chat_reaction_overflow_description, count, count)
+    Box(
+        modifier =
+            Modifier
+                .testTag("chat_reaction_overflow")
+                .reactionChipSurface(elevation, MaterialTheme.colorScheme.surfaceContainerHighest)
+                .clickable(role = Role.Button, onClick = onClick)
+                .clearAndSetSemantics { contentDescription = description }
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "+$count",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+private fun Modifier.reactionChipSurface(
+    elevation: Dp,
+    background: Color,
+): Modifier =
+    wrapContentWidth()
+        .heightIn(min = 24.dp)
+        .then(if (elevation > 0.dp) Modifier.shadow(elevation, RoundedCornerShape(50)) else Modifier)
+        .clip(RoundedCornerShape(50))
+        .background(background)
 
 @Composable
 private fun ReactionChipView(
@@ -207,11 +258,7 @@ private fun ReactionChipView(
                     .graphicsLayer {
                         scaleX = pop.value
                         scaleY = pop.value
-                    }.wrapContentWidth()
-                    .heightIn(min = 24.dp)
-                    .then(if (elevation > 0.dp) Modifier.shadow(elevation, RoundedCornerShape(50)) else Modifier)
-                    .clip(RoundedCornerShape(50))
-                    .background(bg, RoundedCornerShape(50))
+                    }.reactionChipSurface(elevation, bg)
                     .then(
                         if (chip.mine) {
                             Modifier.border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(50))

@@ -440,6 +440,7 @@ fun MessageBubble(
     onClickLabel: String? = null,
     onLongPressLabel: String? = null,
     onReact: (String) -> Unit = {},
+    onOpenReactions: (() -> Unit)? = null,
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
     // Nickname taps and holds are independent of ordinary message actions.
@@ -512,6 +513,7 @@ fun MessageBubble(
                 onClickLabel = onClickLabel,
                 onLongPressLabel = onLongPressLabel,
                 onReact = onReact,
+                onOpenReactions = onOpenReactions,
                 onImageClick = onImageClick,
                 onLinkPreviewClick = onLinkPreviewClick,
                 onSenderClick = onSenderClick,
@@ -558,6 +560,7 @@ fun MessageBubble(
                 onClickLabel = onClickLabel,
                 onLongPressLabel = onLongPressLabel,
                 onReact = onReact,
+                onOpenReactions = onOpenReactions,
                 onImageClick = onImageClick,
                 onLinkPreviewClick = onLinkPreviewClick,
                 onSenderClick = onSenderClick,
@@ -608,6 +611,7 @@ fun MessageBubble(
             onClickLabel = onClickLabel,
             onLongPressLabel = onLongPressLabel,
             onReact = onReact,
+            onOpenReactions = onOpenReactions,
             onImageClick = onImageClick,
             onLinkPreviewClick = onLinkPreviewClick,
             onSenderClick = onSenderClick,
@@ -661,6 +665,7 @@ fun MessageBubble(
             onClickLabel = onClickLabel,
             onLongPressLabel = onLongPressLabel,
             onReact = onReact,
+            onOpenReactions = onOpenReactions,
             onImageClick = onImageClick,
             onLinkPreviewClick = onLinkPreviewClick,
             onSenderClick = onSenderClick,
@@ -998,7 +1003,13 @@ fun MessageBubble(
                 }
             }
 
-            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf, chipElevation = comfortableElevation(COMFORTABLE_CONTENT_ELEVATION))
+            ReactionRow(
+                reactions = reactions,
+                onReact = onReact,
+                isSelf = isSelf,
+                chipElevation = comfortableElevation(COMFORTABLE_CONTENT_ELEVATION),
+                onOpenReactions = onOpenReactions,
+            )
         }
     }
 }
@@ -1045,6 +1056,7 @@ private fun ComfortableActionBubble(
     onClickLabel: String? = null,
     onLongPressLabel: String? = null,
     onReact: (String) -> Unit = {},
+    onOpenReactions: (() -> Unit)? = null,
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
@@ -1294,7 +1306,13 @@ private fun ComfortableActionBubble(
                 }
             }
 
-            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf, chipElevation = comfortableElevation(COMFORTABLE_CONTENT_ELEVATION))
+            ReactionRow(
+                reactions = reactions,
+                onReact = onReact,
+                isSelf = isSelf,
+                chipElevation = comfortableElevation(COMFORTABLE_CONTENT_ELEVATION),
+                onOpenReactions = onOpenReactions,
+            )
         }
     }
 }
@@ -1336,6 +1354,7 @@ private fun ActionMessageRow(
     onClickLabel: String? = null,
     onLongPressLabel: String? = null,
     onReact: (String) -> Unit = {},
+    onOpenReactions: (() -> Unit)? = null,
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
@@ -1541,7 +1560,7 @@ private fun ActionMessageRow(
                 }
             }
 
-            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf)
+            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf, onOpenReactions = onOpenReactions)
         }
     }
 }
@@ -1763,6 +1782,7 @@ private fun TwoLineMessageRow(
     onClickLabel: String? = null,
     onLongPressLabel: String? = null,
     onReact: (String) -> Unit = {},
+    onOpenReactions: (() -> Unit)? = null,
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
@@ -2007,7 +2027,7 @@ private fun TwoLineMessageRow(
                 }
             }
 
-            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf)
+            ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf, onOpenReactions = onOpenReactions)
         }
     }
 }

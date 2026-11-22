@@ -108,6 +108,7 @@ internal fun CompactMessageRow(
     onClickLabel: String? = null,
     onLongPressLabel: String? = null,
     onReact: (String) -> Unit = {},
+    onOpenReactions: (() -> Unit)? = null,
     onImageClick: (String) -> Unit = {},
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
@@ -306,7 +307,7 @@ internal fun CompactMessageRow(
         }
 
         // Reactions on the next line (kept, just compact).
-        ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf)
+        ReactionRow(reactions = reactions, onReact = onReact, isSelf = isSelf, onOpenReactions = onOpenReactions)
     }
 }
 

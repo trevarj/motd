@@ -160,6 +160,24 @@ class MessageActionSheetUiTest {
     }
 
     @Test
+    fun initialReactionsTabDoesNotOverrideTheUsersSelection() {
+        var openOnReactions by mutableStateOf(true)
+        render(
+            reactions = listOf(ReactionChip("👍", 1, false, listOf("Alice"))),
+            initialReactionsTab = { openOnReactions },
+        )
+        val actions = compose.onNodeWithTag("message_action_tab_actions")
+        val reactions = compose.onNodeWithTag("message_action_tab_reactions")
+        reactions.assertIsSelected()
+        actions.performClick().assertIsSelected()
+        compose.runOnIdle { openOnReactions = false }
+        actions.assertIsSelected()
+        compose.runOnIdle { openOnReactions = true }
+        actions.assertIsSelected()
+        compose.onNodeWithTag("message_reaction_reactors").assertDoesNotExist()
+    }
+
+    @Test
     fun negotiatedRedactionActionInvokesConfirmationRequest() {
         var requested = false
         render(canRedact = true, onRedact = { requested = true })
@@ -428,6 +446,7 @@ class MessageActionSheetUiTest {
         themePreset: ColorThemePreset = ColorThemePreset.SYSTEM,
         canSelectText: () -> Boolean = { false },
         onSelectText: () -> Unit = {},
+        initialReactionsTab: () -> Boolean = { false },
     ) {
         compose.setContent {
             MotdTheme(themePreset = themePreset) {
@@ -477,6 +496,7 @@ class MessageActionSheetUiTest {
                         onForward = onForward,
                         canSelectText = canSelectText(),
                         onSelectText = onSelectText,
+                        initialReactionsTab = initialReactionsTab(),
                     )
                 }
             }

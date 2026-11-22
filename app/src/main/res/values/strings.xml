@@ -982,6 +982,10 @@
     <string name="chat_action_tab_actions">Actions</string>
     <string name="chat_action_tab_reactions">Reactions</string>
     <string name="chat_reaction_reactors_description">%1$s reacted: %2$s</string>
+    <plurals name="chat_reaction_overflow_description">
+        <item quantity="one">Show %d more reaction type</item>
+        <item quantity="other">Show %d more reaction types</item>
+    </plurals>
     <string name="chat_reaction_unavailable">This reaction cannot be sent on the current connection.</string>
     <string name="chat_action_delete_message">Delete message</string>
     <string name="chat_redaction_confirm_title">Delete this message?</string>

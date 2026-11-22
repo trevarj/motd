@@ -58,6 +58,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertHasNoClickAction
@@ -68,6 +69,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.assertTouchHeightIsEqualTo
 import androidx.compose.ui.test.assertTouchWidthIsEqualTo
@@ -2353,6 +2355,69 @@ class ComposerSendClearUiTest {
             assertEquals(1, picked.size)
             assertEquals(17L, draft.revision)
         }
+    }
+
+    @Test
+    fun reactionOverflowShowsHiddenTypesAndOpensTheFullReactionsTab() {
+        val message = translationMessage().copy(text = "React to this", msgid = "overflow-message")
+        val initialChips =
+            listOf(
+                ReactionChip("👍", 3, mine = false, reactorDisplayNames = listOf("Alice", "Bob", "Carol")),
+                ReactionChip("❤️", 1, mine = false, reactorDisplayNames = listOf("Dan")),
+                ReactionChip("😂", 1, mine = false, reactorDisplayNames = listOf("Eve")),
+            )
+        val hiddenChips =
+            listOf(
+                ReactionChip("😮", 2, mine = false, reactorDisplayNames = listOf("Frank", "Gloria")),
+                ReactionChip("😢", 1, mine = false, reactorDisplayNames = listOf("Helen")),
+            )
+        var chips by mutableStateOf(initialChips)
+        setContent(
+            draft = { ComposerDraftState("", hydrated = true) },
+            pages = flowOf(PagingData.from(listOf(message))),
+            connectionState = IrcClientState.Disconnected,
+            reactionChips = { msgid -> chips.takeIf { msgid == message.msgid }.orEmpty() },
+            onReact = { _, _ -> error("Opening reaction details must not send a reaction") },
+            onSubmit = { error("Opening reaction details must not submit the composer") },
+        )
+
+        compose
+            .onNodeWithTag("chat_timeline", useUnmergedTree = true)
+            .performScrollToNode(hasTestTag(timelineMessageTag(message.msgid, message.id)))
+        val overflow = compose.onNodeWithTag("chat_reaction_overflow", useUnmergedTree = true)
+        compose.onNodeWithTag("chat_reaction_chip_😂", useUnmergedTree = true).assertIsDisplayed()
+        overflow.assertDoesNotExist()
+        compose.runOnIdle { chips = initialChips + hiddenChips.first() }
+        overflow.assertContentDescriptionEquals("Show 1 more reaction type")
+        compose.runOnIdle { chips = initialChips + hiddenChips }
+        overflow.assertContentDescriptionEquals("Show 2 more reaction types").assertHasClickAction()
+        initialChips.forEach { chip ->
+            compose.onNodeWithTag("chat_reaction_chip_${chip.emoji}", useUnmergedTree = true).assertIsDisplayed()
+        }
+        hiddenChips.forEach { chip ->
+            compose.onNodeWithTag("chat_reaction_chip_${chip.emoji}", useUnmergedTree = true).assertDoesNotExist()
+        }
+
+        overflow.performClick()
+        compose.onNodeWithTag("message_action_tab_reactions").assertIsSelected()
+        chips.forEach { chip ->
+            compose.onNodeWithTag("message_reaction_reactors_${chip.emoji}").assertIsDisplayed()
+        }
+        compose.onNodeWithContentDescription("😮 reacted: Frank, Gloria").assertIsDisplayed()
+
+        compose
+            .onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss), useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.Dismiss) { it() }
+        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+        val actionLabel = RuntimeEnvironment.getApplication().getString(R.string.chat_bubble_actions)
+        val bubbleAction =
+            SemanticsMatcher("message actions long press") { node ->
+                node.config.contains(SemanticsActions.OnLongClick) && node.config[SemanticsActions.OnLongClick].label == actionLabel
+            }
+        compose
+            .onNode(hasAnyAncestor(hasTestTag(timelineMessageTag(message.msgid, message.id))) and bubbleAction, useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        compose.onNodeWithTag("message_action_tab_actions").assertIsSelected()
     }
 
     @Test

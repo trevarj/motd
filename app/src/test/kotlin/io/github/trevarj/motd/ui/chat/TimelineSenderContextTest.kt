@@ -1,9 +1,17 @@
 package io.github.trevarj.motd.ui.chat
 
 import androidx.compose.foundation.lazy.LazyListItemInfo
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MessageKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import java.time.Instant
+import java.util.TimeZone
 
 class TimelineSenderContextTest {
     private val alex = TimelineSender("Alex", "@Alex", "alex", "alex", false)
@@ -52,6 +60,72 @@ class TimelineSenderContextTest {
         assertNull(viewportSender(rows, 0, 110, 8, body::get))
         assertNull(viewportSender(listOf(item(0, 0, 100, key = "placeholder")), 0, 100, 8, body::get))
     }
+
+    @Test fun dateLooksUpOnlyThePhysicalTopRowOfTheUsableReverseViewport() {
+        val rows =
+            listOf(
+                item(5, 100, 32, key = "under-title"),
+                item(2, 50, 70),
+                item(4, 96, 0, key = "empty"),
+                item(0, -25, 35, key = "under-composer"),
+                item(1, 70, 5, key = "lower-skeleton"),
+            )
+        assertEquals(
+            3_000L,
+            viewportDateTime(rows, bottom = 10, top = 100) { index ->
+                assertEquals(2, index)
+                message(3)
+            },
+        )
+    }
+
+    @Test fun aLeadingSkeletonOrSyntheticRowSuppressesTheDate() {
+        for (key in listOf("placeholder", 0L, -1L)) {
+            val rows = listOf(item(0, 0, 50), item(1, 50, 50, key = key))
+            assertNull(viewportDateTime(rows, bottom = 0, top = 100) { error("No lookup for $key") })
+        }
+    }
+
+    @Test fun rejectsMissingOrStaleSnapshotsWithoutFallingBackToALowerRow() {
+        val rows = listOf(item(0, 0, 50), item(1, 50, 50))
+        assertNull(viewportDateTime(rows, bottom = 0, top = 100) { null })
+        assertNull(viewportDateTime(rows, bottom = 0, top = 100) { message(1) })
+        assertEquals(2_000L, viewportDateTime(rows, bottom = 0, top = 100) { message(2) })
+    }
+
+    @Test fun aFullyOccludedViewportDoesNotLookUpADate() {
+        val rows = listOf(item(0, 10, 100))
+        assertNull(viewportDateTime(rows, bottom = 50, top = 50) { error("Nothing is visible") })
+        assertNull(viewportDateTime(rows, bottom = 0, top = 10) { error("Nothing intersects") })
+    }
+
+    @Test fun dateStateRetainsItsTimestampWithinALocalDayAcrossDst() {
+        val first = Instant.parse("2024-03-10T05:00:00Z").toEpochMilli()
+        val last = Instant.parse("2024-03-11T03:59:59Z").toEpochMilli()
+        val next = Instant.parse("2024-03-11T04:00:00Z").toEpochMilli()
+        var time by mutableStateOf<Long?>(first)
+        val day by derivedStateOf(timelineDatePolicy(TimeZone.getTimeZone("America/New_York"))) { time }
+
+        assertEquals(first, day)
+        time = last
+        assertEquals(first, day)
+        time = next
+        assertEquals(next, day)
+        time = null
+        assertNull(day)
+    }
+
+    private fun message(id: Long): MessageEntity =
+        MessageEntity(
+            id = id,
+            bufferId = 1,
+            msgid = null,
+            serverTime = id * 1_000,
+            sender = "alice",
+            kind = MessageKind.PRIVMSG,
+            text = "message",
+            dedupKey = "d$id",
+        )
 
     private fun item(
         row: Int,

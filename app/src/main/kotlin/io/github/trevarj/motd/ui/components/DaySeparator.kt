@@ -37,14 +37,17 @@ fun DaySeparator(
     timeMs: Long,
     modifier: Modifier = Modifier,
 ) {
-    val (kind, date) = dayLabelKind(timeMs)
-    val label =
-        when (kind) {
-            DayLabelKind.TODAY -> stringResource(R.string.chat_day_today)
-            DayLabelKind.YESTERDAY -> stringResource(R.string.chat_day_yesterday)
-            DayLabelKind.DATE -> date
-        }
-    DaySeparator(label = label, modifier = modifier)
+    DaySeparator(label = localizedDayLabel(dayLabelKind(timeMs)), modifier = modifier)
+}
+
+@Composable
+internal fun localizedDayLabel(label: Pair<DayLabelKind, String>): String {
+    val (kind, date) = label
+    return when (kind) {
+        DayLabelKind.TODAY -> stringResource(R.string.chat_day_today)
+        DayLabelKind.YESTERDAY -> stringResource(R.string.chat_day_yesterday)
+        DayLabelKind.DATE -> date
+    }
 }
 
 /** Centered date chip separating days in the message list. [label] is a pre-formatted day string. */
