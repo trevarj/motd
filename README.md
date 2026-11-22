@@ -50,7 +50,7 @@ them in motion on the [landing page](https://trevs.site/motd/).
 
 ## Features
 
-- **Telegram-style chat** — unified chat list, grouped bubbles, day separators, event pills, inline images, and link previews
+- **Telegram-style chat** — unified chat list, grouped bubbles, day separators, event pills, inline images, and link previews. **Show unread chats** temporarily filters the current network or folder to chats with local unread messages.
 - **Infinite scrollback** — `draft/chathistory` paging through a bouncer, local-only history on plain networks; the timeline jump button names its destination and offers a separate accessible jump to newest when an unread mention is pending
 - **Cross-device read state** — `draft/read-marker` sync
 - **Multi-network** — several networks over one bouncer connection (`soju.im/bouncer-networks`)

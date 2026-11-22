@@ -32,6 +32,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -198,6 +200,7 @@ import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.service.unreadChatRows
 import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
 import io.github.trevarj.motd.ui.components.AudioPlaybackViewModel
@@ -432,7 +435,7 @@ private fun chatListTopBarMode(
         else -> ChatListTopBarMode.DEFAULT
     }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ChatListContent(
     state: ChatListState,
@@ -505,6 +508,8 @@ fun ChatListContent(
     var archiveMode by rememberSaveable { mutableStateOf(false) }
     val swipeAction = if (archiveMode) ChatListSwipeAction.ARCHIVE else state.chatListSwipeAction
     var invitationMode by rememberSaveable { mutableStateOf(false) }
+    var unreadOnly by rememberSaveable { mutableStateOf(false) }
+    val filterUnread = unreadOnly && !archiveMode && !invitationMode
     var showSheet by rememberSaveable { mutableStateOf(false) }
     val newConversationStateHolder = rememberSaveableStateHolder()
     val newConversationDraftKey = "new_conversation"
@@ -549,7 +554,7 @@ fun ChatListContent(
             selectedFolderId = effectiveFolderId
         }
     }
-    val displayedRows =
+    val scopedRows =
         if (!archiveMode && !invitationMode && state.folderDisplayMode == FolderDisplayMode.TABS) {
             effectiveFolderId?.let { id ->
                 state.rows.filter { it.folderId == id }
@@ -557,7 +562,20 @@ fun ChatListContent(
         } else {
             visibleRows
         }
-    var tabChangeSignal by rememberSaveable { mutableIntStateOf(0) }
+    val displayedRows = if (filterUnread) remember(scopedRows) { unreadChatRows(scopedRows) } else scopedRows
+    var scrollToTopSignal by rememberSaveable { mutableIntStateOf(0) }
+
+    fun setUnreadFilter(enabled: Boolean) {
+        if (unreadOnly == enabled) return
+        unreadOnly = enabled
+        scrollToTopSignal++
+    }
+
+    fun selectNetwork(id: Long?) {
+        if (id != state.selectedNetworkId) setUnreadFilter(false)
+        onSelectNetwork(id)
+    }
+
     var selectedIds by rememberSaveable(archiveMode, invitationMode, state.selectedNetworkId, effectiveFolderId) { mutableStateOf(emptyList<Long>()) }
     val selectedRows = orderedSelectedRows(displayedRows, selectedIds)
     val dottedSelectedRows = selectedRows.filter { chatListBadgeState(it).recoveryNeeded && it.bufferId !in recoveringActivityIds }
@@ -624,13 +642,14 @@ fun ChatListContent(
         if (confirmRemoval && orderedSelectedRows(displayedRows, selectedIds).isEmpty()) confirmRemoval = false
     }
 
-    // One ordered Back policy keeps drawer, transient selection, and archive mode independent.
-    BackHandler(enabled = !showActivitySheet && (drawerState.isOpen || selectionActive || archiveMode || invitationMode)) {
+    // Close the drawer and contextual modes before clearing the list filter.
+    BackHandler(enabled = !showActivitySheet && (drawerState.isOpen || selectionActive || archiveMode || invitationMode || filterUnread)) {
         when {
             drawerState.isOpen -> scope.launch { drawerState.close() }
             selectionActive -> selectedIds = emptyList()
             archiveMode -> archiveMode = false
-            else -> invitationMode = false
+            invitationMode -> invitationMode = false
+            else -> setUnreadFilter(false)
         }
     }
 
@@ -644,10 +663,10 @@ fun ChatListContent(
                     selectedNetworkId = state.selectedNetworkId,
                     allMentions = state.allMentions,
                     allMentionsIncomplete = state.allMentionsIncomplete,
-                    scopedUnreadCount = state.scopedUnreadCount,
+                    scopedUnreadCount = if (filterUnread) 0 else state.scopedUnreadCount,
                     allOffline = state.allOffline,
                     onSelectNetwork = { id ->
-                        onSelectNetwork(id)
+                        selectNetwork(id)
                         scope.launch { drawerState.close() }
                     },
                     onConnect = onConnect,
@@ -702,14 +721,20 @@ fun ChatListContent(
         ) {
             val folderTabsVisible = !archiveMode && !invitationMode && (folderTabs.isNotEmpty() || state.dickordEnabled || mentionsAsTab)
             val pinnedMentionsVisible =
-                !archiveMode && !invitationMode && state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.CHAT_LIST
+                !archiveMode && !invitationMode && !filterUnread && state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.CHAT_LIST
             val hasInvitationRoute = state.invitations.any(ChatListInvitation::actionable)
             val portalOnly =
                 !archiveMode &&
                     state.dickordEnabled &&
                     (state.dickordUnreadSummary?.visibleCount ?: 0) > 0
             val showEmptyState =
-                !invitationMode && !shouldRenderChatList(archiveMode, state.rows, state.archivedRows) && !hasInvitationRoute && !state.loading
+                !invitationMode &&
+                    !state.loading &&
+                    if (filterUnread) {
+                        displayedRows.isEmpty()
+                    } else {
+                        !shouldRenderChatList(archiveMode, state.rows, state.archivedRows) && !hasInvitationRoute
+                    }
             // The source lives exactly as long as the mounted scrolling list, including archive/no-folder modes.
             val folderBackdrop = pageBackdrop.takeUnless { showEmptyState }
             Scaffold(
@@ -990,6 +1015,16 @@ fun ChatListContent(
                                                     }
                                                 }
                                                 DropdownMenu(moreOpen, { moreOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("chatlist_more_menu")) {
+                                                    if (!unreadOnly) {
+                                                        DropdownMenuItem(
+                                                            text = { Text(stringResource(R.string.chatlist_show_unread)) },
+                                                            modifier = Modifier.testTag("chatlist_show_unread"),
+                                                            onClick = {
+                                                                moreOpen = false
+                                                                setUnreadFilter(true)
+                                                            },
+                                                        )
+                                                    }
                                                     if (onOpenScheduledMessages != null) {
                                                         DropdownMenuItem(
                                                             text = { Text(stringResource(R.string.scheduled_title)) },
@@ -1097,6 +1132,7 @@ fun ChatListContent(
                                 title =
                                     stringResource(
                                         when {
+                                            filterUnread -> R.string.chatlist_unread_empty
                                             portalOnly -> R.string.dickord_portal_list_hint
                                             !archiveMode && state.networks.isEmpty() -> R.string.chatlist_no_networks_title
                                             archiveMode -> R.string.chatlist_archived_empty_title
@@ -1106,23 +1142,36 @@ fun ChatListContent(
                                     ),
                                 message =
                                     when {
-                                        archiveMode || portalOnly -> null
+                                        filterUnread || archiveMode || portalOnly -> null
                                         state.networks.isEmpty() -> stringResource(R.string.chatlist_no_networks_message)
                                         state.selectedNetworkId != null -> stringResource(R.string.chatlist_scoped_empty_message)
                                         else -> stringResource(R.string.chatlist_empty_message)
                                     },
-                                modifier = Modifier.padding(top = headerOffset + if (folderTabsVisible) folderHeaderHeight else 0.dp),
-                                actionLabel = if (!archiveMode && state.networks.isEmpty()) stringResource(R.string.drawer_add_network) else null,
-                                onAction = if (!archiveMode && state.networks.isEmpty()) onOpenAddNetwork else null,
+                                modifier =
+                                    Modifier
+                                        .padding(top = headerOffset + if (folderTabsVisible) folderHeaderHeight else 0.dp)
+                                        .then(if (filterUnread) Modifier.testTag("chatlist_unread_empty") else Modifier),
+                                actionLabel =
+                                    when {
+                                        filterUnread -> stringResource(R.string.chatlist_show_all)
+                                        !archiveMode && state.networks.isEmpty() -> stringResource(R.string.drawer_add_network)
+                                        else -> null
+                                    },
+                                onAction =
+                                    when {
+                                        filterUnread -> ({ setUnreadFilter(false) })
+                                        !archiveMode && state.networks.isEmpty() -> onOpenAddNetwork
+                                        else -> null
+                                    },
                                 // The list that has no rows is exactly what the ghost rows stand in for.
-                                ghostRows = true,
+                                ghostRows = !filterUnread,
                             )
                         } else {
                             ChatList(
                                 rows = displayedRows,
-                                archivedRows = if (effectiveFolderId == null || archiveMode || invitationMode) state.archivedRows else emptyList(),
+                                archivedRows = if (!filterUnread && (effectiveFolderId == null || archiveMode || invitationMode)) state.archivedRows else emptyList(),
                                 folders = if (state.folderDisplayMode == FolderDisplayMode.INLINE) state.folders else emptyList(),
-                                invitations = if (effectiveFolderId == null || archiveMode || invitationMode) state.invitations else emptyList(),
+                                invitations = if (!filterUnread && (effectiveFolderId == null || archiveMode || invitationMode)) state.invitations else emptyList(),
                                 archiveMode = archiveMode,
                                 swipeAction = swipeAction,
                                 invitationMode = invitationMode,
@@ -1139,6 +1188,7 @@ fun ChatListContent(
                                 multiNetwork = showNetworkChip,
                                 onOpenBuffer = onOpenBuffer,
                                 onReorderAnchored = onReorderAnchored,
+                                allowAnchorReorder = !filterUnread,
                                 onSwipe = { row ->
                                     val ids = listOf(row.bufferId)
                                     when (swipeAction) {
@@ -1158,7 +1208,7 @@ fun ChatListContent(
                                 onToggleSelection = { id -> selectedIds = toggleSelectedId(selectedIds, id) },
                                 onStartSelection = { id -> selectedIds = addSelectedId(selectedIds, id) },
                                 onRemoveSelection = { ids -> selectedIds = selectedIds.filterNot(ids::contains) },
-                                scrollToTopSignal = tabChangeSignal,
+                                scrollToTopSignal = scrollToTopSignal,
                                 topContentPaddingPx = listTopPaddingPx,
                                 folderBackdrop = folderBackdrop,
                             )
@@ -1187,7 +1237,8 @@ fun ChatListContent(
                                         if (folderId != effectiveFolderId) {
                                             selectedIds = emptyList()
                                             selectedFolderId = folderId
-                                            tabChangeSignal++
+                                            unreadOnly = false
+                                            scrollToTopSignal++
                                         }
                                     },
                                     onOpenDickord = {
@@ -1212,12 +1263,32 @@ fun ChatListContent(
                                 .onSizeChanged { stationaryHeaderHeightPx = it.height },
                     ) {
                         // These headers remain sharp at their original coordinates; only rows scroll behind them.
-                        AnimatedVisibility(
-                            visible = state.selectedNetworkId != null,
-                            enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
-                            exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
-                        ) {
-                            ScopeChip(name = lastScopeName, onClear = { onSelectNetwork(null) })
+                        val clearNetworkLabel = stringResource(R.string.chatlist_scope_clear)
+                        if (filterUnread) {
+                            FlowRow(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                if (state.selectedNetworkId != null) {
+                                    ScopeChip(lastScopeName, clearNetworkLabel, onClear = { selectNetwork(null) })
+                                }
+                                ScopeChip(
+                                    name = stringResource(R.string.chatlist_unread),
+                                    clearLabel = stringResource(R.string.chatlist_unread_clear),
+                                    onClear = { setUnreadFilter(false) },
+                                    modifier = Modifier.testTag("chatlist_unread_chip"),
+                                )
+                            }
+                        } else {
+                            AnimatedVisibility(
+                                visible = state.selectedNetworkId != null,
+                                enter = fadeIn(MotdMotion.microFadeIn) + expandVertically(animationSpec = MotdMotion.contentSize),
+                                exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
+                            ) {
+                                Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                                    ScopeChip(lastScopeName, clearNetworkLabel, onClear = { selectNetwork(null) })
+                                }
+                            }
                         }
                         if (!folderTabsVisible && pinnedMentionsVisible) {
                             MentionsPinnedRow(state.allMentions, state.allMentionsIncomplete, onOpenMentions)
@@ -1330,7 +1401,7 @@ fun ChatListContent(
             }
         }
 
-        if (showMarkAllReadDialog) {
+        if (showMarkAllReadDialog && !filterUnread) {
             val networkName = state.selectedNetworkName
             AlertDialog(
                 onDismissRequest = { showMarkAllReadDialog = false },
@@ -1414,21 +1485,17 @@ internal val ChatListState.isNormalChatListReady: Boolean
 @Composable
 private fun ScopeChip(
     name: String,
+    clearLabel: String,
     onClear: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-        FilterChip(
-            selected = true,
-            onClick = onClear,
-            label = { Text(name) },
-            trailingIcon = {
-                Icon(
-                    Icons.Filled.Close,
-                    contentDescription = stringResource(R.string.chatlist_scope_clear),
-                )
-            },
-        )
-    }
+    FilterChip(
+        selected = true,
+        onClick = onClear,
+        label = { Text(name) },
+        trailingIcon = { Icon(Icons.Filled.Close, contentDescription = clearLabel) },
+        modifier = modifier,
+    )
 }
 
 @Composable
@@ -1792,6 +1859,7 @@ private fun ChatList(
     onOpenBuffer: (Long) -> Unit,
     onSwipe: (ChatListRow) -> Unit,
     onReorderAnchored: (List<Long>) -> Unit,
+    allowAnchorReorder: Boolean,
     onSetFolderExpanded: (Long, Boolean) -> Unit,
     onOpenFolderEditor: (Long) -> Unit,
     activeBufferId: Long?,
@@ -1811,7 +1879,7 @@ private fun ChatList(
         }
     val authoritativeAnchorIds = remember(presentation.anchored) { presentation.anchored.map(ChatListRow::bufferId) }
     // Discard pending moves when the visible anchor order changes, not when a row's content changes.
-    var anchoredIds by remember(authoritativeAnchorIds) { mutableStateOf(authoritativeAnchorIds) }
+    var anchoredIds by remember(authoritativeAnchorIds, allowAnchorReorder) { mutableStateOf(authoritativeAnchorIds) }
     val anchoredRows =
         remember(presentation.anchored, anchoredIds) {
             if (anchoredIds == authoritativeAnchorIds) {
@@ -2218,9 +2286,9 @@ private fun ChatList(
                                 bufferId = row.bufferId,
                                 canMoveUp = anchoredRows.first().bufferId != row.bufferId,
                                 canMoveDown = anchoredRows.last().bufferId != row.bufferId,
-                                enabled = !selectionActive,
+                                enabled = allowAnchorReorder && !selectionActive,
                                 onMove = { delta -> moveAnchor(row.bufferId, delta) },
-                                onCommit = { onReorderAnchored(anchoredIds) },
+                                onCommit = { if (allowAnchorReorder) onReorderAnchored(anchoredIds) },
                                 modifier =
                                     Modifier.animateItem(
                                         fadeInSpec = ChatListItemMotion.fadeInSpec,

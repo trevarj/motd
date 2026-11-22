@@ -1616,6 +1616,11 @@
     <string name="chatlist_scoped_empty_title">No chats here yet</string>
     <string name="chatlist_scoped_empty_message">This network has no conversations. Join a channel or start a message.</string>
     <string name="chatlist_scope_clear">Clear network filter</string>
+    <string name="chatlist_show_unread">Show unread chats</string>
+    <string name="chatlist_unread">Unread</string>
+    <string name="chatlist_unread_clear">Clear unread filter</string>
+    <string name="chatlist_unread_empty">No unread chats here</string>
+    <string name="chatlist_show_all">Show all chats</string>
 
     <!-- Network settings status header + connect controls (WP-V2, §5.3) -->
     <string name="network_settings_status_ready">Ready as %1$s</string>

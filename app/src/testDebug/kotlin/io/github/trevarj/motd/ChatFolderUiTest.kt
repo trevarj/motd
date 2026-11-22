@@ -159,6 +159,61 @@ class ChatFolderUiTest {
     }
 
     @Test
+    fun unread_filter_stays_in_selected_folder_until_cleared_or_switched() {
+        val readPin = row(1, "#read-pin", pinned = true)
+        val lowerBound = row(2, "#partial-unread", incomplete = true).copy(unreadCount = 2)
+        val advertisedOnly = row(3, "#advertised-only").copy(advertisedUnread = true)
+        val incompleteOnly = row(4, "#incomplete-only", incomplete = true)
+        val otherFolderUnread = row(5, "#elsewhere", folderId = 8).copy(unreadCount = 3)
+        val state =
+            mutableStateOf(
+                ChatListState(
+                    rows = listOf(readPin, lowerBound, advertisedOnly, incompleteOnly, otherFolderUnread),
+                    folders = listOf(folder(), folder(8, "Other")),
+                    folderDisplayMode = FolderDisplayMode.TABS,
+                    showFolderChatsInAll = false,
+                    loading = false,
+                ),
+            )
+        setContent(state)
+
+        compose.onNodeWithTag("chatlist_folder_tab_7").assertIsSelected()
+        compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_3").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_more").performClick()
+        compose.onNodeWithTag("chatlist_show_unread").performClick()
+
+        compose.onNodeWithTag("chatlist_unread_chip").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_2").assertIsDisplayed()
+        for (id in listOf(1, 3, 4, 5)) {
+            compose.onNodeWithTag("chatlist_row_$id").assertDoesNotExist()
+        }
+        compose.onNodeWithTag("chatlist_folder_tab_8").assertIsDisplayed()
+
+        compose.runOnIdle {
+            state.value = state.value.copy(rows = listOf(readPin, lowerBound.copy(unreadCount = 0), advertisedOnly, incompleteOnly, otherFolderUnread))
+        }
+        compose.onNodeWithTag("chatlist_folder_tab_7").assertIsSelected()
+        compose.onNodeWithTag("chatlist_unread_chip").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_unread_empty").assertIsDisplayed()
+        val strings = ApplicationProvider.getApplicationContext<Context>().resources
+        compose.onNodeWithText(strings.getString(R.string.chatlist_unread_empty)).assertIsDisplayed()
+        compose.onNodeWithText(strings.getString(R.string.chatlist_show_all)).performClick()
+
+        compose.onNodeWithTag("chatlist_unread_chip").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_folder_tab_7").assertIsSelected()
+        compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_2").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_3").assertIsDisplayed()
+
+        compose.onNodeWithTag("chatlist_more").performClick()
+        compose.onNodeWithTag("chatlist_show_unread").performClick()
+        compose.onNodeWithTag("chatlist_folder_tab_8").performClick().assertIsSelected()
+        compose.onNodeWithTag("chatlist_unread_chip").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_row_5").assertIsDisplayed()
+    }
+
+    @Test
     fun folder_badges_preserve_mention_lower_bounds() {
         val state =
             mutableStateOf(
