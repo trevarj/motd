@@ -572,14 +572,15 @@ fun Composer(
     var selectedBackground by remember { mutableStateOf<Int?>(null) }
     val hasDraftText = plainIrcText(editorValue.text).isNotEmpty()
     val relocatedTools = composerStyle != ComposerStyle.COMFORTABLE
+    val attachmentInToolbar = onAttachment != null && (relocatedTools || hasDraftText)
     val formattingToolsVisible = ircFormattingEnabled && (showFormattingTools || expanded)
     val expandAvailable = ircFormattingEnabled && (hasDraftText || expanded)
     val toolbarHasActions =
         showEmojiTool || formattingToolsVisible || ircFormattingEnabled && onUploadDraft != null ||
-            relocatedTools && (onAttachment != null || onAi != null || expandAvailable)
+            attachmentInToolbar || relocatedTools && (onAi != null || expandAvailable)
     val showToolsButton =
         when (composerStyle) {
-            ComposerStyle.COMFORTABLE -> composerToolsAvailable(showEmojiTool, showFormattingTools, ircFormattingEnabled)
+            ComposerStyle.COMFORTABLE -> attachmentInToolbar || composerToolsAvailable(showEmojiTool, showFormattingTools, ircFormattingEnabled)
             ComposerStyle.LARGE -> false
             ComposerStyle.COMPACT -> toolbarHasActions
         }
@@ -1168,7 +1169,7 @@ fun Composer(
                                             upload()
                                         }
                                     },
-                                onAttachment = if (relocatedTools) attachmentAction else null,
+                                onAttachment = attachmentAction.takeIf { attachmentInToolbar },
                                 onAi = if (relocatedTools) onAi else null,
                                 onToggleExpanded = if (relocatedTools) toggleExpandedAction else null,
                                 expanded = expanded,
@@ -1360,7 +1361,7 @@ fun Composer(
                                                 )
                                             }
                                         }
-                                        if (!relocatedTools && attachmentAction != null) {
+                                        if (!attachmentInToolbar && attachmentAction != null) {
                                             IconButton(
                                                 onClick = attachmentAction,
                                                 modifier = Modifier.size(48.dp).testTag("chat_composer_attachment"),
@@ -1552,6 +1553,15 @@ private fun ComposerToolsToolbar(
                 onClick = onEmoji,
             )
         }
+        onAttachment?.let { attach ->
+            ToolButton(
+                label = stringResource(R.string.chat_composer_attachment),
+                description = stringResource(R.string.chat_composer_attachment_help),
+                icon = Icons.Outlined.AttachFile,
+                tag = "chat_composer_attachment",
+                onClick = attach,
+            )
+        }
         if (showFormatting) {
             FormatButton(
                 IrcTextStyle.BOLD,
@@ -1607,15 +1617,6 @@ private fun ComposerToolsToolbar(
             ) {
                 currentSelection.value?.let { onClear(currentDocument.value, it) }
             }
-        }
-        onAttachment?.let { attach ->
-            ToolButton(
-                label = stringResource(R.string.chat_composer_attachment),
-                description = stringResource(R.string.chat_composer_attachment_help),
-                icon = Icons.Outlined.AttachFile,
-                tag = "chat_composer_attachment",
-                onClick = attach,
-            )
         }
         onAi?.let { ai ->
             ToolButton(

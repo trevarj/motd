@@ -1846,6 +1846,7 @@ _showcase_capture_pass() {
 
   step "Capture the attachment source chooser ($suffix)"
   input_tag chat_composer_field "A small note for the next build"
+  tap_tag chat_composer_tools
   tap_tag chat_composer_attachment
   wait_for_text "Share something" 8 || true
   assert_text "Share something"

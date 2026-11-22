@@ -36,6 +36,8 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -326,22 +328,48 @@ class ComposerEditorStateTest {
         compose.onAllNodesWithTag("chat_composer_ai").assertCountEquals(1)
         assertInputTargets("chat_composer_format_expand")
         compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        val tools = compose.onNodeWithTag("chat_composer_tools")
+        tools.performClick().assertIsNotSelected()
         compose.runOnIdle { formatting.value = false }
-        compose.waitForIdle()
-        compose.onNodeWithTag("chat_composer_tools").assertDoesNotExist()
-        compose.onNodeWithTag("chat_composer_format_toolbar").assertDoesNotExist()
-        assertInputTargets("chat_composer_attachment")
-        compose.onNodeWithTag("chat_composer_ai").performClick()
-        compose.onNodeWithTag("chat_composer_attachment").performClick()
+
+        val attachment = compose.onNodeWithTag("chat_composer_attachment")
+        val ai = compose.onNodeWithTag("chat_composer_ai")
+        val toolbar = compose.onNodeWithTag("chat_composer_format_toolbar")
+        val typedDraft = compose.runOnIdle { draft.value }
+        tools.assertIsDisplayed().assertIsNotSelected()
+        toolbar.assertDoesNotExist()
+        attachment.assertDoesNotExist()
+        tools.performClick().assertIsSelected()
+        toolbar.assertIsDisplayed()
+        compose.onNodeWithTag("chat_composer_emoji").assertDoesNotExist()
+        compose.onNodeWithTag("chat_format_bold").assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_format_expand").assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_upload_draft").assertDoesNotExist()
+        ai
+            .assertIsDisplayed()
+            .assertIsEnabled()
+            .assert(hasAnyAncestor(hasTestTag("chat_composer_input_row")))
+            .performClick()
+        attachment
+            .assertIsDisplayed()
+            .assertIsEnabled()
+            .assert(hasAnyAncestor(hasTestTag("chat_composer_format_toolbar")))
+            .performClick()
         compose.runOnIdle {
             assertEquals(2, aiOpens)
             assertEquals(1, attachments)
+            assertEquals(typedDraft, draft.value)
             aiEnabled.value = false
         }
-        compose.waitForIdle()
-        compose.onNodeWithTag("chat_composer_ai").assertDoesNotExist()
-        compose.onNodeWithTag("chat_composer_tools").assertDoesNotExist()
-        compose.onNodeWithTag("chat_composer_attachment").assertIsDisplayed().assertIsEnabled()
+        ai.assertDoesNotExist()
+        tools.assertIsSelected()
+        attachment.assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithTag("chat_composer_send").assertIsNotEnabled()
+
+        compose.runOnIdle { draft.value = TextFieldValue() }
+        tools.assertDoesNotExist()
+        toolbar.assertDoesNotExist()
+        attachment.assertIsDisplayed().assertIsEnabled().assert(hasAnyAncestor(hasTestTag("chat_composer_input_row")))
         compose.onNodeWithTag("chat_composer_send").assertIsNotEnabled()
     }
 
@@ -396,13 +424,13 @@ class ComposerEditorStateTest {
             assertEquals(1, aiOpens)
             draft.value = TextFieldValue("hello", TextRange(5))
         }
-        assertActionBand("chat_composer_attachment", "chat_composer_format_expand")
+        assertActionBand("chat_composer_format_expand")
         compose.runOnIdle {
             draft.value = TextFieldValue("first\nsecond\nthird", TextRange(18))
         }
-        assertActionBand("chat_composer_attachment", "chat_composer_format_expand")
+        assertActionBand("chat_composer_format_expand")
         compose.onNodeWithTag("chat_composer_format_expand").performClick()
-        assertActionBand("chat_composer_attachment", "chat_composer_format_expand")
+        assertActionBand("chat_composer_format_expand")
     }
 
     @Test
@@ -452,6 +480,7 @@ class ComposerEditorStateTest {
         val toolbarTags =
             listOf(
                 "chat_composer_emoji",
+                "chat_composer_attachment",
                 "chat_format_bold",
                 "chat_format_italic",
                 "chat_format_underline",
@@ -489,7 +518,7 @@ class ComposerEditorStateTest {
             val rowTags =
                 toolbarTags +
                     if (selectedStyle == ComposerStyle.COMPACT) {
-                        listOf("chat_composer_attachment", "chat_composer_ai", "chat_composer_format_expand")
+                        listOf("chat_composer_ai", "chat_composer_format_expand")
                     } else {
                         emptyList()
                     }
@@ -509,6 +538,7 @@ class ComposerEditorStateTest {
                 actionTop = target.top
             }
             val rowBounds = rowTags.map { compose.onNodeWithTag(it).getUnclippedBoundsInRoot() }
+            assertTrue("Attachment sits between emoji and formatting", rowBounds[0].right <= rowBounds[1].left && rowBounds[1].right <= rowBounds[2].left)
             rowBounds.forEachIndexed { index, target ->
                 rowBounds.drop(index + 1).forEach {
                     assertTrue("Toolbar targets must remain disjoint", target.right <= it.left || it.right <= target.left)
@@ -516,7 +546,7 @@ class ComposerEditorStateTest {
             }
             val inputTags =
                 listOf("chat_composer_tools", "chat_composer_send") +
-                    if (selectedStyle == ComposerStyle.COMFORTABLE) listOf("chat_composer_ai", "chat_composer_attachment", "chat_composer_format_expand") else emptyList()
+                    if (selectedStyle == ComposerStyle.COMFORTABLE) listOf("chat_composer_ai", "chat_composer_format_expand") else emptyList()
             val inputBounds =
                 inputTags.map { tag ->
                     val target =
@@ -572,11 +602,14 @@ class ComposerEditorStateTest {
             field.assertIsFocused()
             assertEquals(TextRange(0, 5), field.fetchSemanticsNode().config[SemanticsProperties.TextSelectionRange])
             assertEquals(sessionsBeforeOpening, inputSessions)
-            if (selectedStyle == ComposerStyle.COMPACT) tools.performClick()
-            if (selectedStyle == ComposerStyle.COMPACT) compose.onNodeWithTag("chat_composer_attachment").performScrollTo()
-            compose.onNodeWithTag("chat_composer_attachment").assertIsDisplayed().performClick()
+            compose.onNodeWithTag("chat_composer_attachment").assertDoesNotExist()
+            tools.performClick()
+            compose
+                .onNodeWithTag("chat_composer_attachment")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
             field.assertIsNotFocused()
-            if (selectedStyle == ComposerStyle.COMFORTABLE) tools.performClick()
             compose
                 .onNodeWithTag("chat_composer_upload_draft")
                 .performScrollTo()
@@ -650,7 +683,7 @@ class ComposerEditorStateTest {
             val targetTags =
                 when (style.value) {
                     ComposerStyle.COMFORTABLE -> {
-                        listOf("chat_composer_tools", "chat_composer_ai", "chat_composer_format_expand", "chat_composer_attachment", "chat_composer_send")
+                        listOf("chat_composer_tools", "chat_composer_ai", "chat_composer_format_expand", "chat_composer_send")
                     }
 
                     ComposerStyle.COMPACT -> {
@@ -778,8 +811,11 @@ class ComposerEditorStateTest {
             assertTrue(fieldBounds.top >= pill.top && fieldBounds.bottom <= pill.bottom)
             assertTrue(fieldBounds.left >= pill.left && fieldBounds.right <= pill.right)
             assertTrue(fieldBounds.height >= 48 * pixelsPerDp - 0.5f)
+            val targetTags =
+                listOf("chat_composer_tools", "chat_composer_send") +
+                    if (toolsVisible) listOf("chat_composer_attachment") else emptyList()
             val targets =
-                listOf("chat_composer_tools", "chat_composer_send", "chat_composer_attachment").map {
+                targetTags.map {
                     compose
                         .onNodeWithTag(it)
                         .assertIsDisplayed()

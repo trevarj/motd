@@ -141,17 +141,16 @@ account `motd` / `motdtest`. Verify the fixture certificate with
 before trusting it. Observe the network switch and leave it selected for import;
 do not blindly toggle it. The current showcase run failed setup assumptions, so
 it is not a proven successful bootstrap: its import toggle deselected an already
-selected network, Settings required drawer/overflow navigation, and a nonempty
-draft hid `chat_composer_attachment`.
+selected network, and Settings required drawer/overflow navigation.
 
 If recovering that state, use `tap_desc 'Open navigation drawer'`, then
 `long_press_tag_prefix_containing_text drawer_network_row_ '127.0.0.1'`,
 `tap_text 'Bouncer Settings'`, and `tap_tag bouncer_overview_networks`. Inspect
 the fresh dump; tap `bouncer_switch_1` only if it is enabled and unchecked.
-Back twice returns to chats. Open `#guix` and empty only your fixture draft to
-expose the attachment button. Reuse existing dump/text/description/tag helpers;
-never guess tap coordinates. Navigate to the actual changed surface rather than
-assuming showcase left it open.
+Back twice returns to chats. In the default composer, the paperclip is inline
+when the draft is empty and in the `+` toolbar when typing. Reuse existing
+dump/text/description/tag helpers; never guess tap coordinates. Navigate to
+the actual changed surface rather than assuming showcase left it open.
 
 From the actual chat list, this exercised attachment example illustrates fresh
 before/after captures and a transition clip. Substitute the changed interaction
@@ -160,6 +159,8 @@ and its real selectors; confirm the current surface with a fresh dump first.
 ```sh
 dump
 tap_text '#guix'
+input_tag chat_composer_field "A small note for the next build"
+tap_tag chat_composer_tools
 wait_for_tag chat_composer_attachment 8
 tap_tag chat_composer_attachment
 wait_for_text 'Share something' 8

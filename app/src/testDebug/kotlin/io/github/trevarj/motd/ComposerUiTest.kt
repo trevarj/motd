@@ -45,6 +45,8 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
@@ -951,7 +953,7 @@ class ComposerUiTest {
     }
 
     @Test
-    fun attachmentStaysAlongsideExpandAndDraftUploadAfterTyping() {
+    fun attachmentMovesToToolsWhileTypingAndReturnsWhenDraftIsCleared() {
         val draft = mutableStateOf(TextFieldValue())
         var uploads = 0
         var attachments = 0
@@ -962,6 +964,7 @@ class ComposerUiTest {
                     onValueChange = { draft.value = it },
                     onSend = {},
                     enabled = true,
+                    composerStyle = ComposerStyle.COMFORTABLE,
                     showEmojiTool = false,
                     ircFormattingEnabled = true,
                     onAttachment = { attachments++ },
@@ -969,17 +972,28 @@ class ComposerUiTest {
                 )
             }
         }
-        compose.onNodeWithTag("chat_composer_attachment").assertIsDisplayed()
-        compose.onAllNodesWithTag("chat_composer_format_expand").assertCountEquals(0)
+        val field = compose.onNodeWithTag("chat_composer_field")
+        val attachment = compose.onNodeWithTag("chat_composer_attachment")
+        val expand = compose.onNodeWithTag("chat_composer_format_expand")
+        val toolbar = hasAnyAncestor(hasTestTag("chat_composer_format_toolbar"))
+        val inputRow = hasAnyAncestor(hasTestTag("chat_composer_input_row"))
+        attachment.assertIsDisplayed().assert(inputRow)
+        expand.assertDoesNotExist()
 
-        compose.runOnIdle { draft.value = TextFieldValue("x", TextRange(1)) }
-        compose.waitForIdle()
-        compose.onNodeWithTag("chat_composer_attachment").assertIsDisplayed().performClick()
-        compose.runOnIdle { assertEquals(1, attachments) }
-        val attachmentBounds = compose.onNodeWithTag("chat_composer_attachment").fetchSemanticsNode().boundsInRoot
-        val expandBounds = compose.onNodeWithTag("chat_composer_format_expand").fetchSemanticsNode().boundsInRoot
+        field.performTextInput("x")
+        val typedDraft = compose.runOnIdle { draft.value }
+        assertEquals("x", typedDraft.text)
+        attachment.assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_tools").performClick().assertIsSelected()
+        attachment.assertIsDisplayed().assert(toolbar).performClick()
+        compose.runOnIdle {
+            assertEquals(1, attachments)
+            assertEquals(typedDraft, draft.value)
+        }
+        val attachmentBounds = attachment.fetchSemanticsNode().boundsInRoot
+        val expandBounds = expand.assert(inputRow).fetchSemanticsNode().boundsInRoot
         assertTrue("Attachment and expand keep distinct targets", !attachmentBounds.overlaps(expandBounds))
-        compose.onNodeWithTag("chat_composer_format_expand").assertIsDisplayed().performClick()
+        expand.assertIsDisplayed().performClick()
         compose
             .onNodeWithTag("chat_composer_upload_draft")
             .performScrollTo()
@@ -987,13 +1001,17 @@ class ComposerUiTest {
             .performClick()
         compose.runOnIdle {
             assertEquals(1, uploads)
+            assertEquals(typedDraft, draft.value)
             draft.value = TextFieldValue()
         }
         compose.waitForIdle()
         compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
-        compose.onNodeWithTag("chat_composer_format_expand").assertIsDisplayed()
-        compose.onNodeWithTag("chat_composer_attachment").assertIsDisplayed().performClick()
-        compose.runOnIdle { assertEquals(2, attachments) }
+        expand.assertIsDisplayed()
+        attachment.assertIsDisplayed().assert(inputRow).performClick()
+        compose.runOnIdle {
+            assertEquals(2, attachments)
+            assertEquals(TextFieldValue(), draft.value)
+        }
     }
 
     @Test
