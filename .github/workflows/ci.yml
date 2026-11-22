@@ -103,6 +103,37 @@ jobs:
       - uses: ./.github/actions/setup-native-toolchain
       - name: Kotlin formatting
         run: ./gradlew ktlintCheck --stacktrace
+      - name: Restore instrumented Android SDKs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.m2/repository/org/robolectric/android-all-instrumented
+          key: robolectric-sdks-v1-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml', 'gradle/libs.versions.toml') }}
+          restore-keys: robolectric-sdks-v1-${{ runner.os }}-
+      - name: Fetch missing instrumented Android SDKs
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact=android-all-instrumented
+          repository=org/robolectric/$artifact
+          fetch() {
+            curl --fail --silent --show-error --location --retry 7 --retry-max-time 240 --connect-timeout 15 "$@"
+          }
+          for version in \
+            8.0.0_r4-robolectric-r1-i7 8.1.0-robolectric-4611349-i7 9-robolectric-4913185-2-i7 \
+            11-robolectric-6757853-i7 12-robolectric-7732740-i7 13-robolectric-9030017-i7 \
+            14-robolectric-10818077-i7 15-robolectric-13954326-i7 16-robolectric-13921718-i7; do
+            path=$repository/$version/$artifact-$version.jar
+            jar=$HOME/.m2/repository/$path
+            [[ ! -s "$jar" ]] || continue
+            echo "Fetching $artifact:$version"
+            url=https://repo.maven.apache.org/maven2/$path
+            mkdir -p "$(dirname "$jar")"
+            checksum=$(fetch "$url.sha512")
+            fetch --output "$jar.part" "$url"
+            printf '%s  %s\n' "$checksum" "$jar.part" | sha512sum --check --status
+            mv "$jar.part" "$jar"
+          done
       - name: App unit and Robolectric component tests
         timeout-minutes: 40
         run: ./gradlew :app:testDebugUnitTest --stacktrace
