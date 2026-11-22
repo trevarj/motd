@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chatlist
 
 import androidx.lifecycle.SavedStateHandle
+import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
@@ -318,6 +319,7 @@ class ChatListDeleteTest {
         cm: ConnectionManager,
         close: ChannelCloseCoordinator,
     ) = ChatListViewModel(
+        context = ApplicationProvider.getApplicationContext(),
         bufferRepository = buffers,
         networkRepository = FakeNetworkRepository(),
         connectionManager = cm,

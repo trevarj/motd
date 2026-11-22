@@ -200,6 +200,7 @@ import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.unreadChatRows
 import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
@@ -268,6 +269,8 @@ fun ChatListScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val community by viewModel.community.collectAsStateWithLifecycle()
+    val newConversationJoin by viewModel.newConversationJoin.collectAsStateWithLifecycle()
+    val newConversationChannelRules by viewModel.newConversationChannelRules.collectAsStateWithLifecycle()
     val communityLifecycle = LocalLifecycleOwner.current
     val communityAllowed = appContentVisible && !suppressOnboarding && selectedBufferId == null && state.isNormalChatListReady
     DisposableEffect(communityLifecycle, communityAllowed) {
@@ -382,6 +385,10 @@ fun ChatListScreen(
         onAcceptInvitation = viewModel::acceptInvitation,
         onIgnoreInvitation = viewModel::ignoreInvitation,
         onJoinChannel = viewModel::joinChannel,
+        newConversationJoin = newConversationJoin,
+        newConversationChannelRules = newConversationChannelRules,
+        onCancelNewConversationJoin = viewModel::cancelNewConversationJoin,
+        onConsumeNewConversationJoin = viewModel::consumeNewConversationJoin,
         onMessageUser = { networkId, nick -> viewModel.messageUser(networkId, nick, onOpenBuffer) },
         // Round 5: drawer selection + connectivity + nav.
         onSelectNetwork = viewModel::selectNetwork,
@@ -503,6 +510,10 @@ fun ChatListContent(
     onActivityAction: (NetworkActivityIssue, NetworkActivityAction) -> Unit = { _, _ -> },
     onActivityNetworkAction: (Long, NetworkActivityAction) -> Unit = { _, _ -> },
     newConversationSheetActive: () -> Boolean = { true },
+    newConversationJoin: NewConversationJoinState = NewConversationJoinState(),
+    newConversationChannelRules: Map<Long, IrcIdentityRules> = emptyMap(),
+    onCancelNewConversationJoin: () -> Unit = {},
+    onConsumeNewConversationJoin: (Long) -> Boolean = { false },
     onOpenScheduledMessages: (() -> Unit)? = null,
 ) {
     var archiveMode by rememberSaveable { mutableStateOf(false) }
@@ -1366,6 +1377,10 @@ fun ChatListContent(
 
         if (showSheet && newConversationSheetActive()) {
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            val cancelJoin by rememberUpdatedState(onCancelNewConversationJoin)
+            DisposableEffect(Unit) {
+                onDispose { if (showSheet) cancelJoin() }
+            }
 
             fun canAct() = showSheet && newConversationSheetActive() && sheetState.targetValue != SheetValue.Hidden
 
@@ -1379,11 +1394,19 @@ fun ChatListContent(
                     networks = state.networks,
                     preselectedNetworkId = state.selectedNetworkId,
                     sheetState = sheetState,
-                    onDismiss = { if (showSheet && newConversationSheetActive()) discardDraft() },
-                    onJoinChannel = { networkId, channel, key ->
-                        if (canAct()) {
+                    onDismiss = {
+                        if (showSheet && newConversationSheetActive()) {
+                            onCancelNewConversationJoin()
                             discardDraft()
-                            onJoinChannel(networkId, channel, key)
+                        }
+                    },
+                    onJoinChannel = { networkId, channel, key ->
+                        if (canAct()) onJoinChannel(networkId, channel, key)
+                    },
+                    onOpenJoinedChannel = { bufferId ->
+                        if (canAct() && onConsumeNewConversationJoin(bufferId)) {
+                            discardDraft()
+                            onOpenBuffer(bufferId)
                         }
                     },
                     onMessageUser = { networkId, nick ->
@@ -1397,6 +1420,9 @@ fun ChatListContent(
                     },
                     nickSuggestions = nickSuggestions,
                     onNickSuggestionQuery = onNickSuggestionQuery,
+                    channelRules = newConversationChannelRules,
+                    joinState = newConversationJoin,
+                    onCancelJoin = onCancelNewConversationJoin,
                 )
             }
         }

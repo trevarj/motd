@@ -40,6 +40,7 @@ import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
@@ -49,6 +50,8 @@ import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.ui.channellist.ChannelJoinFailure
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import org.junit.Assert.assertEquals
@@ -268,14 +271,14 @@ class NewConversationSheetUiTest {
     fun switchingTabsPreservesIndependentDraftsAndExpandedPassword() {
         setContent(networks = listOf(network()))
 
-        compose.onNodeWithTag("new_conversation_input").performTextInput("motd")
+        compose.onNodeWithTag("new_conversation_input").performTextInput("#motd")
         compose.onNodeWithTag("new_conversation_password_toggle").performClick()
         compose.onNodeWithTag("new_conversation_password").performTextInput("hunter2")
         compose.onNodeWithTag("new_conversation_message_tab").performClick()
         compose.onNodeWithTag("new_conversation_input").performTextInput("alice")
         compose.onNodeWithTag("new_conversation_join_tab").performClick()
 
-        compose.onNodeWithTag("new_conversation_input").assertInputText("motd")
+        compose.onNodeWithTag("new_conversation_input").assertInputText("#motd")
         compose.onNodeWithTag("new_conversation_password").assertInputText("hunter2")
         compose.onNodeWithTag("new_conversation_password_toggle").assert(
             SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Expanded"),
@@ -301,12 +304,12 @@ class NewConversationSheetUiTest {
             }
         }
 
-        compose.onNodeWithTag("new_conversation_input").performTextInput("motd")
+        compose.onNodeWithTag("new_conversation_input").performTextInput("#motd")
         compose.onNodeWithTag("new_conversation_password_toggle").performClick()
         compose.onNodeWithTag("new_conversation_password").performTextInput("temporary-key")
         restoration.emulateSavedInstanceStateRestore()
 
-        compose.onNodeWithTag("new_conversation_input").assertInputText("motd")
+        compose.onNodeWithTag("new_conversation_input").assertInputText("#motd")
         compose.onNodeWithTag("new_conversation_password").assertDoesNotExist()
         compose.onNodeWithTag("new_conversation_password_toggle").performClick()
         compose.onNodeWithTag("new_conversation_password").assertInputText("")
@@ -320,7 +323,7 @@ class NewConversationSheetUiTest {
             onJoinChannel = { networkId, channel, key -> joined = Triple(networkId, channel, key) },
         )
 
-        compose.onNodeWithTag("new_conversation_input").performTextInput("motd")
+        compose.onNodeWithTag("new_conversation_input").performTextInput("#motd")
         compose.onNodeWithTag("new_conversation_password_toggle").performClick()
         compose.onNodeWithTag("new_conversation_password").performTextInput("libera-test-key")
         compose.onNodeWithTag("new_conversation_network_selector").performClick()
@@ -340,7 +343,7 @@ class NewConversationSheetUiTest {
             onJoinChannel = { networkId, channel, key -> joined = Triple(networkId, channel, key) },
         )
 
-        compose.onNodeWithTag("new_conversation_input").performTextInput("motd")
+        compose.onNodeWithTag("new_conversation_input").performTextInput("#motd")
         val toggle = compose.onNodeWithTag("new_conversation_password_toggle")
         val input = compose.onNodeWithTag("new_conversation_password")
         val submit = compose.onNodeWithTag("new_conversation_submit")
@@ -366,7 +369,7 @@ class NewConversationSheetUiTest {
             onJoinChannel = { networkId, channel, key -> joined = Triple(networkId, channel, key) },
         )
 
-        compose.onNodeWithTag("new_conversation_input").performTextInput("motd")
+        compose.onNodeWithTag("new_conversation_input").performTextInput("#motd")
         compose.onNodeWithTag("new_conversation_input").performImeAction()
         compose.runOnIdle { assertEquals(Triple(1L, "#motd", null), joined) }
 
@@ -376,6 +379,136 @@ class NewConversationSheetUiTest {
         compose.onNodeWithTag("new_conversation_password").assertIsFocused().performTextInput("key")
         compose.onNodeWithTag("new_conversation_password").performImeAction()
         compose.runOnIdle { assertEquals(Triple(1L, "#motd", "key"), joined) }
+    }
+
+    @Test
+    fun channelFieldUsesOnlySelectedNetworkPrefixesAndSubmitsLiteralNames() {
+        val joined = mutableListOf<Pair<Long, String>>()
+        setContent(
+            networks = listOf(network(1, "First"), network(2, "Second"), network(3, "Third")),
+            channelRules =
+                mapOf(
+                    1L to IrcIdentityRules(advertisedChanTypes = "#&"),
+                    2L to IrcIdentityRules(advertisedChanTypes = "+"),
+                    3L to IrcIdentityRules(advertisedChanTypes = ""),
+                ),
+            onJoinChannel = { networkId, target, _ -> joined += networkId to target },
+        )
+
+        val input = compose.onNodeWithTag("new_conversation_input")
+        val submit = compose.onNodeWithTag("new_conversation_submit")
+        val guidance = compose.onNodeWithTag("new_conversation_input_guidance", useUnmergedTree = true)
+        guidance.assertTextEquals("Valid prefixes: #, &")
+        for (invalid in listOf("motd", "+motd", "#", "#motd,#other")) {
+            input.performTextReplacement(invalid)
+            submit.assertIsNotEnabled()
+        }
+        input.performImeAction()
+        compose.runOnIdle { assertTrue(joined.isEmpty()) }
+        for (target in listOf("#motd", "##Motd", "&Local")) {
+            input.performTextReplacement(target)
+            input.assertInputText(target)
+            submit.assertIsEnabled().performClick()
+        }
+
+        compose.onNodeWithTag("new_conversation_network_selector").performClick()
+        compose.onNodeWithTag("new_conversation_network_option_2").performClick()
+        guidance.assertTextEquals("Valid prefixes: +")
+        input.assertInputText("&Local")
+        submit.assertIsNotEnabled()
+        input.performTextReplacement("+Room")
+        submit.assertIsEnabled().performClick()
+
+        compose.onNodeWithTag("new_conversation_network_selector").performClick()
+        compose.onNodeWithTag("new_conversation_network_option_3").performClick()
+        guidance.assertTextEquals("This network does not advertise any channel prefixes.")
+        submit.assertIsNotEnabled()
+        compose.runOnIdle {
+            assertEquals(listOf(1L to "#motd", 1L to "##Motd", 1L to "&Local", 2L to "+Room"), joined)
+        }
+    }
+
+    @Test
+    fun joiningBlocksRepeatSubmitAndBadKeyRevealsMaskedRetryForSameTarget() {
+        val joinState = mutableStateOf(NewConversationJoinState())
+        val attempts = mutableListOf<Triple<Long, String, String?>>()
+        compose.setContent {
+            MotdTheme {
+                NewConversationSheetContent(
+                    networks = listOf(network()),
+                    channelRules = mapOf(1L to IrcIdentityRules(advertisedChanTypes = "+")),
+                    joinState = joinState.value,
+                    onJoinChannel = { id, channel, secret ->
+                        attempts += Triple(id, channel, secret)
+                        joinState.value = NewConversationJoinState(joining = true)
+                    },
+                    onMessageUser = { _, _ -> },
+                )
+            }
+        }
+
+        val input = compose.onNodeWithTag("new_conversation_input")
+        val submit = compose.onNodeWithTag("new_conversation_submit")
+        val key = compose.onNodeWithTag("new_conversation_password")
+        input.performTextInput("+LockedRoom")
+        input.performImeAction()
+        submit.assertTextEquals("Joining…").assertIsNotEnabled()
+        input.performImeAction()
+        compose.runOnIdle {
+            assertEquals(listOf(Triple(1L, "+LockedRoom", null)), attempts)
+            joinState.value = NewConversationJoinState(error = ChannelJoinFailure("Bad channel key", needsKey = true))
+        }
+
+        input.assertInputText("+LockedRoom")
+        compose.onNodeWithTag("new_conversation_join_error").assertTextEquals("Bad channel key")
+        key.assertIsFocused().assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password)).assertInputText("")
+        submit.assertIsNotEnabled()
+        key.performTextInput("retry-key")
+        key.performImeAction()
+        submit.assertTextEquals("Joining…").assertIsNotEnabled()
+        key.assertInputText("")
+        compose.runOnIdle {
+            assertEquals(listOf(Triple(1L, "+LockedRoom", null), Triple(1L, "+LockedRoom", "retry-key")), attempts)
+            joinState.value = NewConversationJoinState(error = ChannelJoinFailure("You cannot join this channel", needsKey = false))
+        }
+        input.assertInputText("+LockedRoom")
+        compose.onNodeWithTag("new_conversation_join_error").assertTextEquals("You cannot join this channel")
+    }
+
+    @Test
+    fun preselectionRetargetDiscardsQueuedOpenAndKeepsTheLiteralDraft() {
+        val preselection = mutableStateOf<Long?>(1L)
+        val joinState = mutableStateOf(NewConversationJoinState())
+        val opened = mutableListOf<Long>()
+        compose.setContent {
+            MotdTheme {
+                NewConversationSheetContent(
+                    networks = listOf(network(1, "First"), network(2, "Second")),
+                    preselectedNetworkId = preselection.value,
+                    channelRules = mapOf(1L to IrcIdentityRules(), 2L to IrcIdentityRules()),
+                    joinState = joinState.value,
+                    onCancelJoin = { joinState.value = NewConversationJoinState() },
+                    onOpenJoinedChannel = { opened += it },
+                    onJoinChannel = { _, _, _ -> joinState.value = NewConversationJoinState(joining = true) },
+                    onMessageUser = { _, _ -> },
+                )
+            }
+        }
+        val input = compose.onNodeWithTag("new_conversation_input")
+        val submit = compose.onNodeWithTag("new_conversation_submit")
+        input.performTextInput("##Room")
+        submit.performClick().assertIsNotEnabled()
+        compose.runOnIdle {
+            joinState.value = NewConversationJoinState(openBufferId = 10)
+            preselection.value = 2
+        }
+        input.assertInputText("##Room")
+        submit.assertIsEnabled()
+        compose.runOnIdle { assertTrue(opened.isEmpty()) }
+
+        submit.performClick().assertIsNotEnabled()
+        compose.runOnIdle { joinState.value = NewConversationJoinState(openBufferId = 20) }
+        compose.runOnIdle { assertEquals(listOf(20L), opened) }
     }
 
     @Test
@@ -486,6 +619,7 @@ class NewConversationSheetUiTest {
         onJoinChannel: (Long, String, String?) -> Unit = { _, _, _ -> },
         onMessageUser: (Long, String) -> Unit = { _, _ -> },
         onBrowseChannels: (Long) -> Unit = {},
+        channelRules: Map<Long, IrcIdentityRules> = networks.associate { it.id to IrcIdentityRules() },
     ) {
         compose.setContent {
             MotdTheme {
@@ -496,6 +630,7 @@ class NewConversationSheetUiTest {
                     onMessageUser = onMessageUser,
                     onBrowseChannels = onBrowseChannels,
                     nickSuggestions = nickSuggestions,
+                    channelRules = channelRules,
                 )
             }
         }

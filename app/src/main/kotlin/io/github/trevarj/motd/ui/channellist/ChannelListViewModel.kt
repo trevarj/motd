@@ -350,7 +350,7 @@ class ChannelListViewModel
                 return
             }
             if (normalized in current.pendingChannels) return
-            if (key != null && (!key.isIrcParameter() || channel.encodeToByteArray().size + key.encodeToByteArray().size > 400)) {
+            if (key != null && !isValidChannelJoinKey(channel, key)) {
                 failures[channel] = ChannelJoinFailure(context.getString(R.string.channel_list_join_invalid_key), needsKey = true)
                 publishMembership()
                 return

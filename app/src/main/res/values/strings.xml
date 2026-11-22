@@ -124,9 +124,13 @@
     <string name="new_sheet_network">Network</string>
     <string name="new_sheet_network_selected">Network: %1$s</string>
     <string name="new_sheet_no_networks">No eligible networks are available. Add a network before starting a conversation.</string>
-    <string name="new_sheet_channel_prefix">#</string>
-    <string name="new_sheet_channel_hint">Channel name</string>
-    <string name="new_sheet_channel_guidance">Enter a name without #. Include # to join a ## channel.</string>
+    <string name="new_sheet_channel_hint">Channel</string>
+    <string name="new_sheet_channel_guidance">Enter the full channel name, including its prefix.</string>
+    <string name="new_sheet_channel_prefixes">Valid prefixes: %1$s</string>
+    <string name="new_sheet_channel_no_prefixes">This network does not advertise any channel prefixes.</string>
+    <string name="new_sheet_joining">Joining…</string>
+    <string name="chatlist_join_invalid_channel">Enter one channel name with a prefix supported by this network.</string>
+    <string name="chatlist_join_connection_lost">The network isn\'t ready to join. Connect and try again.</string>
     <string name="new_sheet_channel_key_optional">Channel key (optional)</string>
     <string name="new_sheet_channel_key">Channel key</string>
     <string name="new_sheet_hide_channel_key">Hide channel key field</string>

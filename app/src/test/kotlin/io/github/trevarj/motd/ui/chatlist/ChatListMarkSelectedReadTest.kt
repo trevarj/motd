@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chatlist
 
 import androidx.lifecycle.SavedStateHandle
+import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
@@ -304,6 +305,7 @@ class ChatListMarkSelectedReadTest {
             val connectionManager = RecordingConnectionManager()
             val viewModel =
                 ChatListViewModel(
+                    context = ApplicationProvider.getApplicationContext(),
                     bufferRepository = FakeBufferRepository(rows),
                     networkRepository = FakeNetworkRepository(),
                     connectionManager = connectionManager,
@@ -376,6 +378,7 @@ class ChatListMarkSelectedReadTest {
             val connectionManager = RecordingConnectionManager()
             val viewModel =
                 ChatListViewModel(
+                    context = ApplicationProvider.getApplicationContext(),
                     bufferRepository = FakeBufferRepository(MutableStateFlow(emptyList())),
                     networkRepository = FakeNetworkRepository(),
                     connectionManager = connectionManager,

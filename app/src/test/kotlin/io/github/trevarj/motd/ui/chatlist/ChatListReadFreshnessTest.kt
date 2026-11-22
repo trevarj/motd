@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.chatlist
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
+import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
@@ -320,6 +321,7 @@ class ChatListReadFreshnessTest {
         buffers: BufferRepository = FakeBufferRepository(rows, invitations),
         resync: HistoryResyncController? = null,
     ) = ChatListViewModel(
+        context = ApplicationProvider.getApplicationContext(),
         bufferRepository = buffers,
         networkRepository = networks,
         connectionManager = connections,

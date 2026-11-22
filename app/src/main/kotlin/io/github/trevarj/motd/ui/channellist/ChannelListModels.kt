@@ -77,7 +77,7 @@ internal fun filterLoadedChannels(
     }
 }
 
-internal fun networkSearchTerm(input: String): String? = input.trim().takeIf(String::isIrcParameter)
+internal fun networkSearchTerm(input: String): String? = input.trim().takeIf { it.isIrcParameter() }
 
 internal fun exactChannelTarget(
     input: String,
@@ -87,6 +87,11 @@ internal fun exactChannelTarget(
         it.length > 1 && identityRules.isChannel(it) && it.isIrcParameter() && ':' !in it
     }
 
-internal fun String.isIrcParameter(): Boolean =
-    isNotEmpty() && length <= 400 && none { it == ',' || it.isWhitespace() || it.isISOControl() } &&
-        encodeToByteArray().size <= 400
+internal fun isValidChannelJoinKey(
+    channel: String,
+    key: String,
+): Boolean = key.isIrcParameter(maxBytes = 400 - channel.encodeToByteArray().size)
+
+private fun String.isIrcParameter(maxBytes: Int = 400): Boolean =
+    isNotEmpty() && length <= maxBytes && none { it == ',' || it.isWhitespace() || it.isISOControl() } &&
+        encodeToByteArray().size <= maxBytes

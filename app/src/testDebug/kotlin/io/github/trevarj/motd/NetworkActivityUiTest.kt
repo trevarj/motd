@@ -843,6 +843,7 @@ class NetworkActivityUiTest {
     private fun activityModel(
         connections: NoopConnectionManager,
     ) = ChatListViewModel(
+        context = ApplicationProvider.getApplicationContext(),
         bufferRepository = FakeBuffers(),
         networkRepository = FakeNetworks(listOf(network)),
         connectionManager = connections,

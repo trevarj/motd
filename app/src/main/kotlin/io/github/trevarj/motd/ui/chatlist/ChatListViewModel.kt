@@ -1,16 +1,21 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import android.content.Context
 import android.os.SystemClock
+import androidx.annotation.StringRes
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatFolderEntity
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.InvitationEventRow
 import io.github.trevarj.motd.data.db.InviteState
+import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -31,10 +36,13 @@ import io.github.trevarj.motd.data.sync.HistoryGapFiller
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.dickord.DickordLabsPrefs
 import io.github.trevarj.motd.dickord.isDickordPortalConversation
+import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.AppVisibility
 import io.github.trevarj.motd.service.ChannelCloseCoordinator
 import io.github.trevarj.motd.service.ChannelJoinOutcome
+import io.github.trevarj.motd.service.ChannelJoinRejectionKind
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.HistoryResyncController
 import io.github.trevarj.motd.service.HistoryResyncState
@@ -44,12 +52,16 @@ import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.service.ReadMarkerSnapshotter
 import io.github.trevarj.motd.service.markChatsRead
 import io.github.trevarj.motd.service.unreadBufferIds
+import io.github.trevarj.motd.ui.channellist.ChannelJoinFailure
+import io.github.trevarj.motd.ui.channellist.exactChannelTarget
+import io.github.trevarj.motd.ui.channellist.isValidChannelJoinKey
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -63,6 +75,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -128,6 +142,12 @@ data class NickSuggestions(
     val networkId: Long? = null,
     val prefix: String = "",
     val candidates: List<String> = emptyList(),
+)
+
+data class NewConversationJoinState(
+    val joining: Boolean = false,
+    val error: ChannelJoinFailure? = null,
+    val openBufferId: Long? = null,
 )
 
 private data class NickSuggestionRequest(
@@ -220,6 +240,7 @@ class ChatListViewModel
         private val appVisibility: AppVisibility,
         bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
         val chatPageCache: ChatPageCache? = null,
+        @ApplicationContext private val context: Context,
     ) : ViewModel() {
         init {
             // The coordinator is process-scoped and observes persisted pending closes, so creating a
@@ -227,6 +248,21 @@ class ChatListViewModel
             channelCloseCoordinator.start()
             chatPageCache?.start(viewModelScope, appVisibility, settingsRepository.settings)
         }
+
+        private val _newConversationJoin = MutableStateFlow(NewConversationJoinState())
+        val newConversationJoin: StateFlow<NewConversationJoinState> = _newConversationJoin.asStateFlow()
+        private var newConversationJoinAttempt: NewConversationJoinAttempt? = null
+
+        val newConversationChannelRules: StateFlow<Map<Long, IrcIdentityRules>> =
+            combine(networkRepository.observeNetworks(), connectionManager.connectionStates) { networks, connections ->
+                buildMap {
+                    for (network in networks) {
+                        if (network.role == NetworkRole.BOUNCER_ROOT) continue
+                        val state = connectionManager.clientFor(network.id)?.state?.value ?: connections[network.id]
+                        put(network.id, (state as? IrcClientState.Ready)?.identityRules() ?: IrcIdentityRules())
+                    }
+                }
+            }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
         private val _community = MutableStateFlow(CommunityState())
         val community: StateFlow<CommunityState> = _community.asStateFlow()
@@ -768,9 +804,185 @@ class ChatListViewModel
             networkId: Long,
             channel: String,
             key: String?,
-        ) = viewModelScope.launch {
-            connectionManager.joinChannel(networkId, channel, key)
+        ) {
+            cancelNewConversationJoin()
+            val client = connectionManager.clientFor(networkId)
+            val ready = client?.state?.value as? IrcClientState.Ready
+            if (client == null || ready == null) {
+                _newConversationJoin.value = newConversationJoinFailure(R.string.chatlist_join_connection_lost)
+                return
+            }
+            val target = exactChannelTarget(channel, ready.identityRules())
+            if (target == null) {
+                _newConversationJoin.value = newConversationJoinFailure(R.string.chatlist_join_invalid_channel)
+                return
+            }
+            if (key != null && !isValidChannelJoinKey(target, key)) {
+                _newConversationJoin.value = newConversationJoinFailure(R.string.channel_list_join_invalid_key, needsKey = true)
+                return
+            }
+            val attempt = NewConversationJoinAttempt(networkId, client, target)
+            val work = viewModelScope.launch(start = CoroutineStart.LAZY) { awaitNewConversationJoin(attempt, key) }
+            newConversationJoinAttempt = attempt
+            attempt.work = work
+            _newConversationJoin.value = NewConversationJoinState(joining = true)
+            work.start()
         }
+
+        fun cancelNewConversationJoin() {
+            val attempt = newConversationJoinAttempt
+            newConversationJoinAttempt = null
+            attempt?.work?.cancel()
+            _newConversationJoin.value = NewConversationJoinState()
+        }
+
+        fun consumeNewConversationJoin(bufferId: Long): Boolean {
+            if (_newConversationJoin.value.openBufferId != bufferId) return false
+            val canOpen = newConversationJoinAttempt?.joinedBufferId() == bufferId
+            cancelNewConversationJoin()
+            if (!canOpen) _newConversationJoin.value = newConversationJoinFailure(R.string.chatlist_join_connection_lost)
+            return canOpen
+        }
+
+        private suspend fun awaitNewConversationJoin(
+            attempt: NewConversationJoinAttempt,
+            key: String?,
+        ) {
+            val connectionLost = newConversationJoinFailure(R.string.chatlist_join_connection_lost)
+            try {
+                coroutineScope {
+                    val rows =
+                        launch(start = CoroutineStart.UNDISPATCHED) {
+                            bufferRepository.observeJoinedChannels(attempt.networkId).collect { attempt.rows.value = it }
+                        }
+                    val membership =
+                        combine(attempt.rows, attempt.client.joinedChannels, attempt.client.state, connectionManager.connectionStates) { _, _, _, _ ->
+                            attempt.joinedBufferId()
+                        }
+                    try {
+                        val result =
+                            withTimeoutOrNull(NEW_CONVERSATION_JOIN_TIMEOUT_MS) {
+                                sendAndAwaitNewConversationJoin(attempt, key, membership, connectionLost)
+                            } ?: newConversationJoinFailure(R.string.channel_list_join_timeout, needsKey = key != null)
+                        if (newConversationJoinAttempt !== attempt) return@coroutineScope
+                        val bufferId = result.openBufferId
+                        if (!attempt.isCurrentReadyClient() || (bufferId != null && attempt.joinedBufferId() != bufferId)) {
+                            _newConversationJoin.value = connectionLost
+                        } else {
+                            _newConversationJoin.value = result
+                            if (bufferId != null) {
+                                membership.first { it != bufferId }
+                                if (newConversationJoinAttempt === attempt) _newConversationJoin.value = connectionLost
+                            }
+                        }
+                    } finally {
+                        rows.cancel()
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (newConversationJoinAttempt === attempt) {
+                    _newConversationJoin.value = newConversationJoinFailure(R.string.channel_list_join_not_sent, needsKey = key != null)
+                }
+            } finally {
+                if (newConversationJoinAttempt === attempt) newConversationJoinAttempt = null
+            }
+        }
+
+        private suspend fun sendAndAwaitNewConversationJoin(
+            attempt: NewConversationJoinAttempt,
+            key: String?,
+            membership: Flow<Long?>,
+            connectionLost: NewConversationJoinState,
+        ): NewConversationJoinState =
+            coroutineScope {
+                if (!attempt.isCurrentReadyClient()) return@coroutineScope connectionLost
+                val needsJoin = !attempt.hasMembership()
+                val disconnected =
+                    async {
+                        combine(attempt.client.state, connectionManager.connectionStates) { _, _ -> attempt.isCurrentReadyClient() }.first { !it }
+                    }
+                // Subscribe before sending: an immediate 475 can arrive before the write returns.
+                val rejected =
+                    if (needsJoin) {
+                        async(start = CoroutineStart.UNDISPATCHED) {
+                            connectionManager.channelJoinOutcomes.filterIsInstance<ChannelJoinOutcome.Rejected>().first {
+                                it.networkId == attempt.networkId && attempt.isCurrentReadyClient() && attempt.matches(it.channel)
+                            }
+                        }
+                    } else {
+                        null
+                    }
+                val joined =
+                    async(start = CoroutineStart.UNDISPATCHED) {
+                        if (!attempt.isCurrentReadyClient()) {
+                            connectionLost
+                        } else if (needsJoin && !connectionManager.joinChannel(attempt.networkId, attempt.channel, key, rememberKey = false)) {
+                            newConversationJoinFailure(R.string.channel_list_join_not_sent, needsKey = key != null)
+                        } else {
+                            NewConversationJoinState(openBufferId = membership.filterNotNull().first())
+                        }
+                    }
+                try {
+                    select {
+                        disconnected.onAwait { connectionLost }
+                        rejected?.onAwait {
+                            if (it.kind == ChannelJoinRejectionKind.BAD_KEY) {
+                                newConversationJoinFailure(R.string.channel_list_join_bad_key, needsKey = true)
+                            } else {
+                                newConversationJoinFailure(R.string.channel_list_join_rejected)
+                            }
+                        }
+                        joined.onAwait { it }
+                    }
+                } finally {
+                    disconnected.cancel()
+                    rejected?.cancel()
+                    joined.cancel()
+                }
+            }
+
+        private fun newConversationJoinFailure(
+            @StringRes message: Int,
+            needsKey: Boolean = false,
+        ): NewConversationJoinState = NewConversationJoinState(error = ChannelJoinFailure(context.getString(message), needsKey))
+
+        private inner class NewConversationJoinAttempt(
+            val networkId: Long,
+            val client: IrcClient,
+            val channel: String,
+        ) {
+            val rows = MutableStateFlow(emptyList<JoinedChannelRow>())
+            var work: Job? = null
+
+            fun isCurrentReadyClient(): Boolean = connectionManager.clientFor(networkId) === client && client.state.value is IrcClientState.Ready
+
+            fun matches(other: String): Boolean {
+                val rules = (client.state.value as? IrcClientState.Ready)?.identityRules() ?: return false
+                return rules.normalize(other) == rules.normalize(channel)
+            }
+
+            fun hasMembership(): Boolean {
+                val rules = (client.state.value as? IrcClientState.Ready)?.identityRules() ?: return false
+                return hasMembership(rules, rules.normalize(channel))
+            }
+
+            private fun hasMembership(
+                rules: IrcIdentityRules,
+                target: String,
+            ): Boolean = client.joinedChannels.value.any { rules.normalize(it) == target }
+
+            fun joinedBufferId(): Long? {
+                if (connectionManager.clientFor(networkId) !== client) return null
+                val rules = (client.state.value as? IrcClientState.Ready)?.identityRules() ?: return null
+                val target = rules.normalize(channel)
+                if (!hasMembership(rules, target)) return null
+                return rows.value.firstOrNull { it.networkId == networkId && rules.normalize(it.displayName) == target }?.bufferId
+            }
+        }
+
+        private fun IrcClientState.Ready.identityRules(): IrcIdentityRules = IrcIdentityRules.from(isupport["CASEMAPPING"], isupport["CHANTYPES"])
 
         fun acceptInvitation(messageId: Long) =
             viewModelScope.launch {
@@ -1059,6 +1271,7 @@ class ChatListViewModel
 
         private companion object {
             const val KEY_SELECTED = "selected_network"
+            const val NEW_CONVERSATION_JOIN_TIMEOUT_MS = 20_000L
         }
     }
 

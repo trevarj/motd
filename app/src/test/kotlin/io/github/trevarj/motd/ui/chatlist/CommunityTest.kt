@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.chatlist
 
 import androidx.lifecycle.SavedStateHandle
+import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -121,6 +122,7 @@ class CommunityTest {
 
         fun vm(active: Boolean = true) =
             ChatListViewModel(
+                context = ApplicationProvider.getApplicationContext(),
                 bufferRepository = buffers,
                 networkRepository = networks,
                 connectionManager = connections,

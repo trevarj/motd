@@ -939,8 +939,10 @@ class RequiredHeadlessE2eTest {
             milestones.record("anchored_chats_reordered_and_restored", "channel=$roomId query=$queryId")
         }
         val directoryTarget = "#browse${bootstrap.args.runId.filter(Char::isLetterOrDigit).takeLast(16)}"
+        val literalTarget = "##literal${bootstrap.args.runId.filter(Char::isLetterOrDigit).takeLast(16)}"
         val directory = ChatListRobot(compose)
         directory.click("chatlist_new_conversation")
+        directory.replace("new_conversation_input", literalTarget)
         val messageDraft = "DirectoryDraft"
         directory.click("new_conversation_message_tab")
         directory.replace("new_conversation_input", messageDraft)
@@ -968,11 +970,38 @@ class RequiredHeadlessE2eTest {
         compose.onNodeWithTag("new_conversation_input", useUnmergedTree = true).assert(
             SemanticsMatcher.expectValue(SemanticsProperties.InputText, AnnotatedString(messageDraft)),
         )
+        directory.click("new_conversation_join_tab")
+        compose.onNodeWithTag("new_conversation_input", useUnmergedTree = true).assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.InputText, AnnotatedString(literalTarget)),
+        )
         val sheet = hasTestTag("new_conversation_sheet")
         val dismiss = SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and (sheet or hasAnyAncestor(sheet))
         compose.onAllNodes(dismiss, useUnmergedTree = true)[0].performSemanticsAction(SemanticsActions.Dismiss)
         directory.awaitTagGone("new_conversation_sheet")
         milestones.record("directory_search_and_exact_join", "buffer=$directoryRoom")
+
+        directory.click("chatlist_new_conversation")
+        directory.awaitTag("new_conversation_input")
+        val channelInput = compose.onNodeWithTag("new_conversation_input", useUnmergedTree = true)
+        channelInput.assert(SemanticsMatcher.expectValue(SemanticsProperties.InputText, AnnotatedString("")))
+        directory.replace("new_conversation_input", literalTarget)
+        directory.click("new_conversation_submit")
+        ChatRobot(compose).assertDisplayed("chat_timeline")
+        directory.awaitTagGone("new_conversation_sheet")
+        val literalTitle = hasText(literalTarget) and hasAnyAncestor(hasTestTag("chat_title"))
+        compose.waitUntil(15_000) { compose.onAllNodes(literalTitle, useUnmergedTree = true).fetchSemanticsNodes().size == 1 }
+        compose.onNode(literalTitle, useUnmergedTree = true).assertIsDisplayed()
+        val literalRoom =
+            runBlocking { BufferProbe(bootstrap.seams.buffers(), milestones).awaitJoinedChannel(network.childId, literalTarget) }
+        assertEquals(null, runBlocking { bootstrap.seams.buffers().joinedBufferId(network.childId, literalTarget.drop(1)) })
+        scenario.scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        directory.awaitTagGone("new_conversation_sheet")
+        directory.click("chatlist_new_conversation")
+        directory.awaitTag("new_conversation_input")
+        channelInput.assert(SemanticsMatcher.expectValue(SemanticsProperties.InputText, AnnotatedString("")))
+        compose.onAllNodes(dismiss, useUnmergedTree = true)[0].performSemanticsAction(SemanticsActions.Dismiss)
+        directory.awaitTagGone("new_conversation_sheet")
+        milestones.record("new_conversation_literal_join", "buffer=$literalRoom")
         assertEquals(originalSettings, runBlocking { settings.settings.first() })
         assertEquals(null, runBlocking { bootstrap.seams.buffers().joinedBufferId(network.childId, "#motd") })
         val communityNetwork =

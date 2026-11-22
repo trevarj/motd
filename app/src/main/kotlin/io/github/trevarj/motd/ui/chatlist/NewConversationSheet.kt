@@ -45,6 +45,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -59,10 +60,12 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -76,6 +79,8 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.ui.channellist.exactChannelTarget
 import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.popupEffectSurface
 import io.github.trevarj.motd.ui.settings.PasswordField
@@ -104,6 +109,10 @@ fun NewConversationSheet(
     onBrowseChannels: (networkId: Long) -> Unit = {},
     nickSuggestions: NickSuggestions = NickSuggestions(),
     onNickSuggestionQuery: (Long?, String) -> Unit = { _, _ -> },
+    channelRules: Map<Long, IrcIdentityRules> = emptyMap(),
+    joinState: NewConversationJoinState = NewConversationJoinState(),
+    onCancelJoin: () -> Unit = {},
+    onOpenJoinedChannel: (Long) -> Unit = {},
 ) {
     val drafts = rememberNewConversationDrafts(preselectedNetworkId)
     ModalBottomSheet(
@@ -123,6 +132,10 @@ fun NewConversationSheet(
             nickSuggestions = nickSuggestions,
             onNickSuggestionQuery = onNickSuggestionQuery,
             drafts = drafts,
+            channelRules = channelRules,
+            joinState = joinState,
+            onCancelJoin = onCancelJoin,
+            onOpenJoinedChannel = onOpenJoinedChannel,
         )
     }
 }
@@ -162,6 +175,10 @@ internal fun NewConversationSheetContent(
     nickSuggestions: NickSuggestions = NickSuggestions(),
     onNickSuggestionQuery: (Long?, String) -> Unit = { _, _ -> },
     drafts: NewConversationDrafts = rememberNewConversationDrafts(preselectedNetworkId),
+    channelRules: Map<Long, IrcIdentityRules> = emptyMap(),
+    joinState: NewConversationJoinState = NewConversationJoinState(),
+    onCancelJoin: () -> Unit = {},
+    onOpenJoinedChannel: (Long) -> Unit = {},
 ) {
     val selectableNetworks = remember(networks) { networks.filter { it.role != NetworkRole.BOUNCER_ROOT } }
     var networkExpanded by remember { mutableStateOf(false) }
@@ -169,15 +186,21 @@ internal fun NewConversationSheetContent(
     var lastPreselectedNetworkId by remember { mutableStateOf(preselectedNetworkId) }
     val passwordFocusRequester = remember { FocusRequester() }
 
-    LaunchedEffect(selectableNetworks.map(NetworkEntity::id), preselectedNetworkId) {
+    LaunchedEffect(selectableNetworks.map(NetworkEntity::id), preselectedNetworkId, joinState.openBufferId) {
+        if (selectableNetworks.size < 2) networkExpanded = false
         val preselectionChanged = preselectedNetworkId != lastPreselectedNetworkId
         if (preselectionChanged) lastPreselectedNetworkId = preselectedNetworkId
         if (preselectionChanged || selectableNetworks.none { it.id == drafts.networkId }) {
-            drafts.networkId =
+            val networkId =
                 preselectedNetworkId?.takeIf { id -> selectableNetworks.any { it.id == id } }
                     ?: selectableNetworks.firstOrNull()?.id
+            if (drafts.networkId != networkId) {
+                if (drafts.networkId != null || preselectionChanged) onCancelJoin()
+                drafts.networkId = networkId
+                return@LaunchedEffect
+            }
         }
-        if (selectableNetworks.size < 2) networkExpanded = false
+        if (drafts.joining && drafts.networkId != null) joinState.openBufferId?.let(onOpenJoinedChannel)
     }
 
     val selectedNetwork =
@@ -187,11 +210,27 @@ internal fun NewConversationSheetContent(
     var passwordExpanded by remember(selectedNetwork?.id) { mutableStateOf(false) }
     val joining = drafts.joining
     val activeDraft = if (joining) drafts.channel else drafts.nickname
-    val canSubmit = selectedNetwork != null && activeDraft.isNotBlank()
+    val rules = selectedNetwork?.id?.let(channelRules::get)
+    val advertisedPrefixes = rules?.advertisedChanTypes
+    val joinTarget = if (joining && rules != null) remember(activeDraft, rules) { exactChannelTarget(activeDraft, rules) } else null
+    val joinPending = joinState.joining || joinState.openBufferId != null
+    val needsKey = joinState.error?.needsKey == true
+    val canSubmit =
+        when {
+            selectedNetwork == null -> false
+            joining -> !joinPending && joinTarget != null && (!needsKey || password.isNotEmpty())
+            else -> activeDraft.isNotBlank()
+        }
     val nickPrefix = drafts.nickname.trim()
     val nickSuggestionIdentity = selectedNetwork?.id?.let { "$it\u0000$nickPrefix" }
     val currentQueryCallback by rememberUpdatedState(onNickSuggestionQuery)
 
+    LaunchedEffect(joinState.error) {
+        if (needsKey) passwordExpanded = true
+    }
+    LaunchedEffect(needsKey, passwordExpanded) {
+        if (needsKey && passwordExpanded) passwordFocusRequester.requestFocus()
+    }
     LaunchedEffect(joining, selectedNetwork?.id, selectedNetwork?.nick, nickPrefix) {
         if (!joining && selectedNetwork != null && nickPrefix.isNotEmpty()) {
             currentQueryCallback(selectedNetwork.id, nickPrefix)
@@ -219,13 +258,15 @@ internal fun NewConversationSheetContent(
         }
 
     fun submit() {
+        if (!canSubmit) return
         val network = selectedNetwork ?: return
-        val value = activeDraft.trim()
-        if (value.isEmpty()) return
         if (joining) {
-            onJoinChannel(network.id, channelJoinTarget(value), password.takeIf(String::isNotBlank))
+            val target = joinTarget ?: return
+            val key = password.takeIf(String::isNotEmpty)
+            password = ""
+            onJoinChannel(network.id, target, key)
         } else {
-            onMessageUser(network.id, value)
+            onMessageUser(network.id, activeDraft.trim())
         }
     }
 
@@ -266,12 +307,23 @@ internal fun NewConversationSheetContent(
                             selected = selectedNetwork,
                             expanded = networkExpanded,
                             onExpandedChange = { networkExpanded = it },
-                            onSelect = { drafts.networkId = it.id },
+                            onSelect = {
+                                if (drafts.networkId != it.id) {
+                                    onCancelJoin()
+                                    drafts.networkId = it.id
+                                }
+                            },
                         )
                     }
                 }
                 TextButton(
-                    onClick = { selectedNetwork?.let { onBrowseChannels(it.id) } },
+                    onClick = {
+                        selectedNetwork?.let {
+                            onCancelJoin()
+                            password = ""
+                            onBrowseChannels(it.id)
+                        }
+                    },
                     enabled = selectedNetwork != null,
                     colors = readableTextButtonColors(),
                     modifier = Modifier.heightIn(min = 48.dp).testTag("new_conversation_browse"),
@@ -285,9 +337,11 @@ internal fun NewConversationSheetContent(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 ConversationChoice(R.string.new_sheet_join_channel, "new_conversation_join_tab", joining, Modifier.weight(1f).fillMaxHeight()) {
+                    if (!drafts.joining) onCancelJoin()
                     drafts.joining = true
                 }
                 ConversationChoice(R.string.new_sheet_message_user, "new_conversation_message_tab", !joining, Modifier.weight(1f).fillMaxHeight()) {
+                    if (drafts.joining) onCancelJoin()
                     drafts.joining = false
                 }
             }
@@ -311,9 +365,11 @@ internal fun NewConversationSheetContent(
                 shape = MaterialTheme.shapes.small,
                 value = activeDraft,
                 onValueChange = {
-                    if (joining) {
+                    if (joining && drafts.channel != it) {
+                        onCancelJoin()
+                        password = ""
                         drafts.channel = it
-                    } else {
+                    } else if (!joining) {
                         drafts.nickname = it
                         dismissedNickSuggestion = null
                     }
@@ -324,10 +380,17 @@ internal fun NewConversationSheetContent(
                 leadingIcon = {
                     Icon(if (joining) Icons.Outlined.Forum else Icons.Outlined.Person, contentDescription = null)
                 },
-                prefix = if (joining) ({ Text(stringResource(R.string.new_sheet_channel_prefix)) }) else null,
                 label = { Text(stringResource(if (joining) R.string.new_sheet_channel_hint else R.string.new_sheet_nick_hint)) },
                 supportingText = {
-                    Text(stringResource(if (joining) R.string.new_sheet_channel_guidance else R.string.new_sheet_nick_guidance))
+                    Text(
+                        when {
+                            !joining -> stringResource(R.string.new_sheet_nick_guidance)
+                            advertisedPrefixes == null -> stringResource(R.string.new_sheet_channel_guidance)
+                            advertisedPrefixes.isEmpty() -> stringResource(R.string.new_sheet_channel_no_prefixes)
+                            else -> stringResource(R.string.new_sheet_channel_prefixes, advertisedPrefixes.asIterable().joinToString(", "))
+                        },
+                        modifier = Modifier.testTag("new_conversation_input_guidance"),
+                    )
                 },
                 keyboardOptions =
                     KeyboardOptions(
@@ -342,6 +405,14 @@ internal fun NewConversationSheetContent(
                     ),
             )
             if (joining) {
+                joinState.error?.let { error ->
+                    Text(
+                        error.message,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("new_conversation_join_error"),
+                    )
+                }
                 val scheme = MaterialTheme.colorScheme
                 val fill = scheme.surfaceContainer
                 val muted = scheme.readableForeground(lerp(scheme.onSurfaceVariant, fill, 0.30f), fill)
@@ -355,20 +426,22 @@ internal fun NewConversationSheetContent(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (passwordExpanded) {
-                        PasswordField(
-                            value = password,
-                            onValueChange = { password = it },
-                            label = stringResource(R.string.new_sheet_channel_key),
-                            imeAction = ImeAction.Done,
-                            keyboardActions = KeyboardActions(onDone = { if (canSubmit) submit() }),
-                            enabled = selectedNetwork != null,
-                            modifier =
-                                Modifier
-                                    .weight(1f)
-                                    .padding(start = 8.dp, top = 4.dp, bottom = 8.dp)
-                                    .focusRequester(passwordFocusRequester)
-                                    .testTag("new_conversation_password"),
-                        )
+                        key(joinPending) {
+                            PasswordField(
+                                value = password,
+                                onValueChange = { password = it },
+                                label = stringResource(R.string.new_sheet_channel_key),
+                                imeAction = ImeAction.Done,
+                                keyboardActions = KeyboardActions(onDone = { if (canSubmit) submit() }),
+                                enabled = selectedNetwork != null && !joinPending,
+                                modifier =
+                                    Modifier
+                                        .weight(1f)
+                                        .padding(start = 8.dp, top = 4.dp, bottom = 8.dp)
+                                        .focusRequester(passwordFocusRequester)
+                                        .testTag("new_conversation_password"),
+                            )
+                        }
                     } else {
                         Row(
                             modifier =
@@ -389,7 +462,7 @@ internal fun NewConversationSheetContent(
                         }
                     }
                     IconButton(
-                        enabled = selectedNetwork != null,
+                        enabled = selectedNetwork != null && !joinPending,
                         onClick = {
                             passwordExpanded = !passwordExpanded
                             if (!passwordExpanded) password = ""
@@ -424,7 +497,15 @@ internal fun NewConversationSheetContent(
             enabled = canSubmit,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("new_conversation_submit"),
         ) {
-            Text(stringResource(if (joining) R.string.new_sheet_join_channel else R.string.new_sheet_message_user))
+            Text(
+                stringResource(
+                    when {
+                        !joining -> R.string.new_sheet_message_user
+                        joinPending -> R.string.new_sheet_joining
+                        else -> R.string.new_sheet_join_channel
+                    },
+                ),
+            )
         }
     }
 }
@@ -457,8 +538,6 @@ private fun ConversationChoice(
         Text(stringResource(label), textAlign = TextAlign.Center)
     }
 }
-
-internal fun channelJoinTarget(channelName: String): String = "#${channelName.trim()}"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
