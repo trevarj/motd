@@ -64,6 +64,8 @@ import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MESSAGE_PAGING_CONFIG
 import io.github.trevarj.motd.data.repo.MessageRepository
 import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
+import io.github.trevarj.motd.data.repo.NetworkIgnoreCache
+import io.github.trevarj.motd.data.repo.NetworkIgnoreRepositoryImpl
 import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.GapFillProgress
@@ -203,6 +205,7 @@ class ChatViewModelTest {
                 bufferRepository = buffers,
                 networkDao = db.networkDao(),
                 networkIdentityDao = db.networkIdentityDao(),
+                networkIgnoreRepository = NetworkIgnoreRepositoryImpl(db, db.networkIgnoreDao(), db.bufferDao(), NetworkIgnoreCache(db.networkIgnoreDao())),
                 dccTransferDao = db.dccTransferDao(),
                 dccTransferController = dccTransfers,
                 connectionManager =
@@ -6947,6 +6950,7 @@ class ChatViewModelTest {
             bufferRepository = buffers,
             networkDao = db.networkDao(),
             networkIdentityDao = identities,
+            networkIgnoreRepository = NetworkIgnoreRepositoryImpl(db, db.networkIgnoreDao(), db.bufferDao(), NetworkIgnoreCache(db.networkIgnoreDao())),
             dccTransferDao = db.dccTransferDao(),
             dccTransferController = FakeDccTransferController(),
             connectionManager = manager,

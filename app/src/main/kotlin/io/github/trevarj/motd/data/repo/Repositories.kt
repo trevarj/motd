@@ -70,6 +70,13 @@ interface NetworkIgnoreRepository {
         pattern: String,
     ): Result<Unit>
 
+    suspend fun setExactNickIgnored(
+        networkId: Long,
+        nick: String,
+        rules: IrcIdentityRules,
+        ignored: Boolean,
+    ): Result<Unit>
+
     suspend fun setIgnoreEnabled(
         id: Long,
         enabled: Boolean,
@@ -95,6 +102,13 @@ object NoopNetworkIgnoreRepository : NetworkIgnoreRepository {
     override suspend fun addIgnore(
         networkId: Long,
         pattern: String,
+    ): Result<Unit> = Result.success(Unit)
+
+    override suspend fun setExactNickIgnored(
+        networkId: Long,
+        nick: String,
+        rules: IrcIdentityRules,
+        ignored: Boolean,
     ): Result<Unit> = Result.success(Unit)
 
     override suspend fun setIgnoreEnabled(

@@ -1,8 +1,28 @@
 package io.github.trevarj.motd.ui.chat
 
+import io.github.trevarj.motd.data.db.BufferEntity
+import io.github.trevarj.motd.data.db.NetworkDao
+import io.github.trevarj.motd.data.db.NetworkIdentityDao
+import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.UserEntity
+import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
+import io.github.trevarj.motd.data.repo.hasExactNickIgnore
+import io.github.trevarj.motd.data.repo.isExactIgnoreNick
+import io.github.trevarj.motd.dickord.isDickordRelayNick
+import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.service.PresenceState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 /**
  * Parsed WHOIS details for the nick sheet. Every field is optional because a server
@@ -29,8 +49,124 @@ data class NickSheetState(
     val cached: UserEntity? = null,
     val whois: WhoisInfo? = null,
     val presence: PresenceState? = null,
+    val ignore: NickIgnoreState? = null,
 ) {
     val details: WhoisInfo? get() = mergeUserDetails(nick, cached, whois)
+}
+
+class NickIgnoreState internal constructor(
+    val ignored: Boolean,
+    val saving: Boolean = false,
+    val failed: Boolean = false,
+)
+
+internal class NickSheetController(
+    private val scope: CoroutineScope,
+    private val connections: StateFlow<Map<Long, IrcClientState>>,
+    private val identities: NetworkIdentityDao,
+    private val networks: NetworkDao,
+    private val ignores: NetworkIgnoreRepository,
+    private val currentRoom: () -> BufferEntity?,
+) {
+    private val _state = MutableStateFlow<NickSheetState?>(null)
+    val state = _state.asStateFlow()
+    private var session: Session? = null
+    private var observation: Job? = null
+
+    fun open(
+        nick: String,
+        allowIgnore: Boolean = true,
+    ): Session {
+        dismiss()
+        val opened = Session(nick, currentRoom())
+        session = opened
+        _state.value = NickSheetState(nick)
+        if (allowIgnore && !isDickordRelayNick(nick)) observation = scope.launch { opened.observeIgnore() }
+        return opened
+    }
+
+    fun dismiss() {
+        observation?.cancel()
+        observation = null
+        session = null
+        _state.value = null
+    }
+
+    fun setIgnored(expected: NickIgnoreState) {
+        session?.setIgnored(expected)
+    }
+
+    fun networkFor(expected: NickIgnoreState): Long? = session?.networkFor(expected)
+
+    internal inner class Session(
+        private val nick: String,
+        private val room: BufferEntity?,
+    ) {
+        private var persisted: NetworkIdentityEntity? = null
+        private var configuredNick: String? = null
+        private var observedRules: IrcIdentityRules? = null
+        private var saving = false
+        private var failed = false
+
+        fun update(transform: (NickSheetState) -> NickSheetState) {
+            if (session === this) _state.value = _state.value?.let(transform)
+        }
+
+        private fun eligibleRules(ready: IrcClientState.Ready?): IrcIdentityRules? {
+            val configured = configuredNick ?: return null
+            val rules =
+                IrcIdentityRules.from(
+                    ready?.isupport?.get("CASEMAPPING")
+                        ?: persisted?.caseMapping.takeUnless { ready?.removedIsupport?.contains("CASEMAPPING") == true },
+                    ready?.isupport?.get("CHANTYPES")
+                        ?: persisted?.chanTypes.takeUnless { ready?.removedIsupport?.contains("CHANTYPES") == true },
+                )
+            val selfNick = ready?.nick?.takeIf { it.isNotBlank() } ?: persisted?.selfNick?.takeIf { it.isNotBlank() } ?: configured
+            return rules.takeIf { isExactIgnoreNick(nick, it) && it.normalize(nick) != it.normalize(selfNick) }
+        }
+
+        suspend fun observeIgnore() {
+            val networkId = room?.networkId ?: return
+            combine(
+                connections.map { it[networkId] as? IrcClientState.Ready }.distinctUntilChanged(),
+                identities.observe(networkId),
+                networks.observeById(networkId).map { it?.nick }.distinctUntilChanged(),
+                ignores.observeIgnores(networkId),
+            ) { ready, identity, configured, rows ->
+                persisted = identity
+                configuredNick = configured
+                eligibleRules(ready)?.let { it to hasExactNickIgnore(rows, nick, it) }
+            }.distinctUntilChanged().collect { observation ->
+                observedRules = observation?.first
+                update { sheet -> sheet.copy(ignore = observation?.let { NickIgnoreState(it.second, saving, failed) }) }
+            }
+        }
+
+        fun networkFor(expected: NickIgnoreState): Long? {
+            val target = room ?: return null
+            val current = currentRoom() ?: return null
+            if (session !== this || current.id != target.id || current.networkId != target.networkId || _state.value?.ignore !== expected) return null
+            val liveRules = eligibleRules(connections.value[current.networkId] as? IrcClientState.Ready)
+            return current.networkId.takeIf { liveRules != null && liveRules == observedRules }
+        }
+
+        fun setIgnored(expected: NickIgnoreState) {
+            val networkId = networkFor(expected) ?: return
+            val rules = observedRules ?: return
+            if (saving) return
+            saving = true
+            failed = false
+            update { it.copy(ignore = NickIgnoreState(expected.ignored, saving = true)) }
+            scope.launch {
+                val result = ignores.setExactNickIgnored(networkId, nick, rules, ignored = !expected.ignored)
+                val error = result.exceptionOrNull()
+                if (error is CancellationException) throw error
+                saving = false
+                failed = result.isFailure
+                update { sheet -> sheet.copy(ignore = sheet.ignore?.let { NickIgnoreState(it.ignored, failed = failed) }) }
+            }
+        }
+    }
 }
 
 /** WHOIS is the fresher overlay; cached WHOX/NAMES data fills fields it did not return. */

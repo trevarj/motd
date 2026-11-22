@@ -438,6 +438,7 @@ fun ChatScreen(
     pageCache: io.github.trevarj.motd.data.repo.ChatPageCache? = null,
     presentations: ChatPresentationRegistry? = null,
     onOpenScheduledMessages: ((Long) -> Unit)? = null,
+    onOpenNetworkTools: ((Long) -> Unit)? = null,
 ) {
     val scheduledComposer =
         if (onOpenScheduledMessages == null) {
@@ -1018,7 +1019,14 @@ fun ChatScreen(
                 viewModel.dismissNickSheet()
                 editingFool = sheet.nick
             },
-            onIgnoreNetwork = { viewModel.ignoreNickOnNetwork(sheet.nick) },
+            ignoreActions =
+                sheet.ignore?.let { ignore ->
+                    NickIgnoreActions(
+                        state = ignore,
+                        onToggle = { viewModel.setNickIgnored(ignore) },
+                        onManage = onOpenNetworkTools?.let { open -> { viewModel.openNickIgnoreRules(ignore, open) } },
+                    )
+                },
             onInviteToChannel = {
                 viewModel.dismissNickSheet()
                 inviteNick = sheet.nick

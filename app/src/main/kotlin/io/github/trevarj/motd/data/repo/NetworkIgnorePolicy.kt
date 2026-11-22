@@ -44,6 +44,38 @@ fun parseIgnoreMask(pattern: String): IgnoreMask? {
     }
 }
 
+internal fun isExactIgnoreNick(
+    nick: String,
+    rules: IrcIdentityRules,
+): Boolean {
+    if (nick.isEmpty() || rules.isChannel(nick) || !nick[0].isIrcNickInitial()) return false
+    for (index in 1 until nick.length) {
+        val ch = nick[index]
+        if (!ch.isIrcNickInitial() && ch !in '0'..'9' && ch != '-') return false
+    }
+    return true
+}
+
+private fun Char.isIrcNickInitial(): Boolean = this in 'A'..'Z' || this in 'a'..'z' || this in "[]\\`_^{|}"
+
+internal fun hasExactNickIgnore(
+    ignores: List<NetworkIgnoreEntity>,
+    nick: String,
+    rules: IrcIdentityRules,
+): Boolean {
+    val normalizedNick = rules.normalize(nick)
+    return ignores.any { it.enabled && it.matchesExactIgnoreNick(normalizedNick, rules) }
+}
+
+internal fun NetworkIgnoreEntity.matchesExactIgnoreNick(
+    normalizedNick: String,
+    rules: IrcIdentityRules,
+): Boolean {
+    val mask = parseIgnoreMask(pattern) ?: return false
+    return mask.user == "*" && mask.host == "*" && mask.nick.none { it == '*' || it == '?' } &&
+        rules.normalize(mask.nick) == normalizedNick
+}
+
 fun ignoredBy(
     ignores: List<NetworkIgnoreEntity>,
     source: Prefix,

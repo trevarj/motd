@@ -1,9 +1,11 @@
 package io.github.trevarj.motd.ui.chat
 
 import android.content.Context
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
@@ -13,6 +15,7 @@ import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -23,12 +26,21 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.datastore.preferences.core.edit
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.UiDispatcherResetRule
+import io.github.trevarj.motd.data.db.BufferEntity
+import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.NetworkIdentityEntity
+import io.github.trevarj.motd.data.db.inMemoryDb
+import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.settingsDataStore
+import io.github.trevarj.motd.data.repo.NetworkIgnoreCache
+import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
+import io.github.trevarj.motd.data.repo.NetworkIgnoreRepositoryImpl
+import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.components.ReasonPresetChips
 import io.github.trevarj.motd.ui.settings.FoolPreferencesEditor
@@ -39,6 +51,7 @@ import io.github.trevarj.motd.ui.settings.NickListKind
 import io.github.trevarj.motd.ui.settings.foolEditorPreferences
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -249,7 +262,6 @@ class NickSheetKickUiTest {
             "Mention",
             "Add to friends",
             "Add to fools",
-            "Ignore on this network",
             "Give op",
             "Take op",
             "Give voice",
@@ -261,6 +273,107 @@ class NickSheetKickUiTest {
         compose.onNodeWithTag("nick_sheet_edit_avatar").assertExists()
         compose.onNodeWithTag("nick_sheet_invite_to_channel").performClick()
         compose.runOnIdle { assertEquals(1, invites) }
+    }
+
+    @Test
+    fun exactNickIgnore_updatesInPlaceAndKeepsTheActionOnFailure() {
+        val db = inMemoryDb()
+        try {
+            val networkId = runBlocking { db.networkDao().insert(network()) }
+            val room = BufferEntity(1, networkId, "#room", "#room", BufferType.CHANNEL)
+            val connections = MutableStateFlow<Map<Long, IrcClientState>>(emptyMap())
+            val repository = NetworkIgnoreRepositoryImpl(db, db.networkIgnoreDao(), db.bufferDao(), NetworkIgnoreCache(db.networkIgnoreDao()))
+            runBlocking {
+                repository.addIgnore(networkId, "Nick*!*@*").getOrThrow()
+            }
+            var failUnignore = true
+            var writes = 0
+            val ignoreRepository =
+                object : NetworkIgnoreRepository by repository {
+                    override suspend fun setExactNickIgnored(
+                        networkId: Long,
+                        nick: String,
+                        rules: IrcIdentityRules,
+                        ignored: Boolean,
+                    ): Result<Unit> {
+                        writes++
+                        return if (!ignored && failUnignore) {
+                            Result.failure(IllegalStateException("Write rejected"))
+                        } else {
+                            repository.setExactNickIgnored(networkId, nick, rules, ignored)
+                        }
+                    }
+                }
+            lateinit var controller: NickSheetController
+            compose.setContent {
+                val scope = rememberCoroutineScope()
+                controller = remember(scope) { NickSheetController(scope, connections, db.networkIdentityDao(), db.networkDao(), ignoreRepository) { room } }
+                val sheet by controller.state.collectAsState()
+                LaunchedEffect(controller) { controller.open("Nick{") }
+                MotdTheme {
+                    sheet?.let { target ->
+                        NickActionSheet(
+                            nick = target.nick,
+                            isSelf = false,
+                            isFriend = false,
+                            isFool = false,
+                            canModerate = false,
+                            whois = null,
+                            onDismiss = controller::dismiss,
+                            onMessage = {},
+                            onMention = {},
+                            onToggleFriend = {},
+                            onToggleFool = {},
+                            onOpenFoolSettings = {},
+                            ignoreActions = target.ignore?.let { NickIgnoreActions(it, { controller.setIgnored(it) }, null) },
+                            onOp = {},
+                            onVoice = {},
+                            onKick = {},
+                            onBan = { _, _ -> },
+                        )
+                    }
+                }
+            }
+            awaitNickSheetTag("nick_sheet_ignore_network")
+            compose.runOnIdle {
+                val stale = checkNotNull(controller.state.value?.ignore)
+                controller.open("Nick{")
+                controller.setIgnored(stale)
+                assertEquals(0, writes)
+            }
+            awaitNickSheetTag("nick_sheet_ignore_network")
+            compose.onNodeWithTag("nick_sheet_ignore_network").performScrollTo().performClick()
+            awaitNickSheetTag("nick_sheet_unignore_network", enabled = true)
+            compose.onNodeWithTag("nick_sheet").assertExists()
+            compose.onNodeWithTag("nick_sheet_ignore_network").assertDoesNotExist()
+
+            compose.onNodeWithTag("nick_sheet_unignore_network").performClick()
+            awaitNickSheetTag("nick_sheet_ignore_failed")
+            compose.onNodeWithTag("nick_sheet").assertExists()
+            compose.onNodeWithTag("nick_sheet_unignore_network").assertExists()
+
+            compose.runOnIdle { failUnignore = false }
+            compose.onNodeWithTag("nick_sheet_unignore_network").performClick()
+            awaitNickSheetTag("nick_sheet_ignore_network", enabled = true)
+            compose.onNodeWithTag("nick_sheet_ignore_failed").assertDoesNotExist()
+            compose.runOnIdle { assertEquals(3, writes) }
+            runBlocking { db.networkIdentityDao().upsert(NetworkIdentityEntity(networkId, selfNick = "NICK[")) }
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("nick_sheet_ignore_network").fetchSemanticsNodes().isEmpty() }
+            compose.onNodeWithTag("nick_sheet").assertExists()
+            compose.onNodeWithTag("nick_sheet_ignore_network").assertDoesNotExist()
+            compose.onNodeWithTag("nick_sheet_unignore_network").assertDoesNotExist()
+            compose.runOnIdle { controller.dismiss() }
+        } finally {
+            db.close()
+        }
+    }
+
+    private fun awaitNickSheetTag(
+        tag: String,
+        enabled: Boolean = false,
+    ) {
+        val matcher = if (enabled) hasTestTag(tag) and isEnabled() else hasTestTag(tag)
+        compose.waitUntil(10_000) { compose.onAllNodes(matcher).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test
@@ -282,7 +395,7 @@ class NickSheetKickUiTest {
                     onToggleFriend = { callbacks += "friend" to rawNick },
                     onToggleFool = { callbacks += "fool" to rawNick },
                     onOpenFoolSettings = {},
-                    onIgnoreNetwork = { callbacks += "ignore" to rawNick },
+                    ignoreActions = NickIgnoreActions(NickIgnoreState(ignored = false), { callbacks += "ignore" to rawNick }, null),
                     onInviteToChannel = { callbacks += "invite" to rawNick },
                     onOp = { callbacks += "op" to rawNick },
                     onVoice = { callbacks += "voice" to rawNick },
@@ -298,7 +411,7 @@ class NickSheetKickUiTest {
         compose.onNodeWithText("Alice").assertExists()
         compose.onNodeWithText(rawNick).assertDoesNotExist()
         compose.onNodeWithText("Discord relay identity").assertExists()
-        listOf("Mention", "Add to friends", "Add to fools", "Ignore on this network").forEach {
+        listOf("Mention", "Add to friends", "Add to fools").forEach {
             compose.onNodeWithText(it).performClick()
         }
         compose.runOnIdle {
@@ -307,7 +420,6 @@ class NickSheetKickUiTest {
                     "mention" to rawNick,
                     "friend" to rawNick,
                     "fool" to rawNick,
-                    "ignore" to rawNick,
                 ),
                 callbacks,
             )
@@ -317,6 +429,8 @@ class NickSheetKickUiTest {
         compose.onNodeWithTag("nick_sheet_avatar").assertDoesNotExist()
         compose.onNodeWithTag("nick_sheet_edit_avatar").assertDoesNotExist()
         compose.onNodeWithTag("nick_sheet_invite_to_channel").assertDoesNotExist()
+        compose.onNodeWithTag("nick_sheet_ignore_network").assertDoesNotExist()
+        compose.onNodeWithTag("nick_sheet_unignore_network").assertDoesNotExist()
         listOf(
             "Message",
             "Invite to channel",

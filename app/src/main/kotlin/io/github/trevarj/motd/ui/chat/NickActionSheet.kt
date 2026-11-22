@@ -37,6 +37,8 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
@@ -56,15 +58,15 @@ import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTe
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
-/**
- * Shared nick bottom sheet, used from the chat timeline and ChannelInfo. Stateless:
- * the header normally shows WHOIS details when available; the moderation block appears only when
- * [canModerate] and the nick is not self (Confirmed #7). [relayIdentity] keeps only actions Motd
- * can honor for a synthetic relay nick.
- */
+internal data class NickIgnoreActions(
+    val state: NickIgnoreState,
+    val onToggle: () -> Unit,
+    val onManage: (() -> Unit)?,
+)
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
-fun NickActionSheet(
+internal fun NickActionSheet(
     nick: String,
     networkId: Long? = null,
     isSelf: Boolean,
@@ -79,7 +81,7 @@ fun NickActionSheet(
     onToggleFriend: () -> Unit,
     onToggleFool: () -> Unit,
     onOpenFoolSettings: () -> Unit,
-    onIgnoreNetwork: () -> Unit = {},
+    ignoreActions: NickIgnoreActions? = null,
     onInviteToChannel: (() -> Unit)? = null,
     onOp: (grant: Boolean) -> Unit,
     onVoice: (grant: Boolean) -> Unit,
@@ -102,7 +104,12 @@ fun NickActionSheet(
     val canEditAvatar = canEditConversationAvatar && !relayIdentity
 
     // Root tag disambiguates from MessageActionSheet when both could be open.
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag("nick_sheet")) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("nick_sheet"),
+    ) {
         SheetSystemBars()
         Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
             // Header: avatar + nick + whois summary (or the fallback line when whois is unavailable).
@@ -181,7 +188,39 @@ fun NickActionSheet(
                         tag = "nick_sheet_fool_settings",
                     )
                 }
-                NickAction(Icons.Outlined.Block, stringResource(R.string.nick_sheet_ignore_network), onIgnoreNetwork)
+            }
+            if (!relayIdentity && !isSelf && ignoreActions != null) {
+                val ignore = ignoreActions.state
+                NickAction(
+                    Icons.Outlined.Block,
+                    stringResource(if (ignore.ignored) R.string.nick_sheet_unignore_network else R.string.nick_sheet_ignore_network),
+                    ignoreActions.onToggle,
+                    tag = if (ignore.ignored) "nick_sheet_unignore_network" else "nick_sheet_ignore_network",
+                    enabled = !ignore.saving,
+                )
+                Text(
+                    stringResource(R.string.nick_sheet_ignore_help),
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (ignore.failed) {
+                    Text(
+                        stringResource(R.string.nick_sheet_ignore_failed),
+                        modifier =
+                            Modifier
+                                .padding(horizontal = 16.dp)
+                                .testTag("nick_sheet_ignore_failed")
+                                .semantics { liveRegion = LiveRegionMode.Polite },
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                ignoreActions.onManage?.let { manage ->
+                    TextButton(
+                        colors = readableTextButtonColors(),
+                        onClick = manage,
+                        modifier = Modifier.padding(horizontal = 8.dp).testTag("nick_sheet_manage_ignore_rules"),
+                    ) { Text(stringResource(R.string.nick_sheet_manage_ignore_rules)) }
+                }
             }
 
             if (!relayIdentity && canModerate && !isSelf) {
@@ -338,6 +377,7 @@ private fun NickAction(
     label: String,
     onClick: () -> Unit,
     tag: String? = null,
+    enabled: Boolean = true,
 ) {
     Row(modifier = Modifier.fillMaxWidth()) {
         ListItem(
@@ -346,7 +386,7 @@ private fun NickAction(
                     .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
             headlineContent = { Text(label) },
             leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0)) },
-            modifier = Modifier.then(tag?.let(Modifier::testTag) ?: Modifier).clickable(onClick = onClick),
+            modifier = Modifier.then(tag?.let(Modifier::testTag) ?: Modifier).clickable(enabled = enabled, onClick = onClick),
         )
     }
 }

@@ -1,0 +1,169 @@
+package io.github.trevarj.motd.data.repo
+
+import android.content.Context
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkIgnoreDao
+import io.github.trevarj.motd.data.db.NetworkIgnoreEntity
+import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.irc.proto.IrcCaseMapping
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.test.runTest
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+
+@RunWith(RobolectricTestRunner::class)
+class NetworkIgnoreRepositoryTest {
+    private lateinit var db: MotdDatabase
+    private lateinit var dao: NetworkIgnoreDao
+    private lateinit var cache: NetworkIgnoreCache
+    private lateinit var repository: NetworkIgnoreRepositoryImpl
+
+    @Before
+    fun setUp() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        db = Room.inMemoryDatabaseBuilder(context, MotdDatabase::class.java).allowMainThreadQueries().build()
+        dao = db.networkIgnoreDao()
+        cache = NetworkIgnoreCache(dao)
+        repository = NetworkIgnoreRepositoryImpl(db, dao, db.bufferDao(), cache)
+    }
+
+    @After
+    fun tearDown() {
+        db.close()
+    }
+
+    @Test
+    fun `RFC1459 disable clears all enabled equivalents without changing broader rules or other networks`() =
+        runTest {
+            val network = network("first")
+            val other = network("second")
+            val first = seed(network, "[lice!*@*")
+            val second = seed(network, "{Lice!*@*")
+            val disabled = seed(network, "[LICE!*@*", enabled = false)
+            val wildcard = seed(network, "?lice!*@*")
+            val user = seed(network, "[lice!ident@*")
+            val host = seed(network, "[lice!*@*.example.net")
+            val unrelated = seed(other, "[lice!*@*")
+            val rules = IrcIdentityRules(IrcCaseMapping.Rfc1459)
+            assertTrue(hasExactNickIgnore(cache.enabledForNetwork(network), "{lice", rules))
+            val otherCache = cache.enabledForNetwork(other)
+
+            repository.setExactNickIgnored(network, "{lice", rules, ignored = false).getOrThrow()
+
+            assertEquals(
+                listOf(first.copy(enabled = false), second.copy(enabled = false), disabled, wildcard, user, host),
+                dao.allForNetwork(network),
+            )
+            assertEquals(listOf(wildcard, user, host), cache.enabledForNetwork(network))
+            assertEquals(listOf(unrelated), dao.allForNetwork(other))
+            assertSame(otherCache, cache.enabledForNetwork(other))
+        }
+
+    @Test
+    fun `enable reuses a disabled RFC1459 equivalent and is idempotent once one is enabled`() =
+        runTest {
+            val network = network()
+            val disabled = seed(network, "[lice!*@*", enabled = false)
+            val duplicate = seed(network, "{LICE!*@*", enabled = false)
+            val rules = IrcIdentityRules(IrcCaseMapping.Rfc1459)
+            assertFalse(hasExactNickIgnore(cache.enabledForNetwork(network), "{lice", rules))
+
+            repository.setExactNickIgnored(network, "{lice", rules, ignored = true).getOrThrow()
+
+            val enabled = disabled.copy(enabled = true)
+            val enabledCache = cache.enabledForNetwork(network)
+            assertEquals(listOf(enabled), enabledCache)
+            repository.setExactNickIgnored(network, "{LICE", rules, ignored = true).getOrThrow()
+            assertEquals(listOf(enabled, duplicate), dao.allForNetwork(network))
+            assertSame(enabledCache, cache.enabledForNetwork(network))
+        }
+
+    @Test
+    fun `ASCII casemap keeps bracket nick spellings distinct when creating and disabling an exact rule`() =
+        runTest {
+            val network = network()
+            val existing = seed(network, "[lice!*@*")
+            val rules = IrcIdentityRules(IrcCaseMapping.Ascii)
+
+            repository.setExactNickIgnored(network, "{lice", rules, ignored = true).getOrThrow()
+
+            val created = dao.allForNetwork(network).last()
+            assertEquals("{lice!*@*", created.pattern)
+            assertTrue(created.enabled)
+            repository.setExactNickIgnored(network, "{LICE", rules, ignored = false).getOrThrow()
+            assertEquals(listOf(existing, created.copy(enabled = false)), dao.allForNetwork(network))
+        }
+
+    @Test
+    fun `exact actions reject glob masks separators and channels without changing persisted rules`() =
+        runTest {
+            val network = network()
+            val existing = seed(network, "Alice!*@*")
+            val rules = IrcIdentityRules(advertisedChanTypes = "#[")
+            for (nick in listOf("Al*", "Al?ce", "Alice!user", "Alice@host", "Alice,Bob", ":Alice", "Ali\tce", "[chat")) {
+                assertTrue(nick, repository.setExactNickIgnored(network, nick, rules, ignored = true).isFailure)
+                assertTrue(nick, repository.setExactNickIgnored(network, nick, rules, ignored = false).isFailure)
+            }
+            assertEquals(listOf(existing), dao.allForNetwork(network))
+        }
+
+    @Test
+    fun `cancellation rolls back partially disabled equivalents and propagates to the caller`() =
+        runTest {
+            val network = network()
+            val first = seed(network, "[lice!*@*")
+            val second = seed(network, "{lice!*@*")
+            val cancelled = CancellationException("Interrupted disable")
+            val backingDao = dao
+            val cancellingDao =
+                object : NetworkIgnoreDao by backingDao {
+                    override suspend fun setEnabled(
+                        id: Long,
+                        enabled: Boolean,
+                    ): Int {
+                        if (id == second.id) throw cancelled
+                        return backingDao.setEnabled(id, enabled)
+                    }
+                }
+            val repo = NetworkIgnoreRepositoryImpl(db, cancellingDao, db.bufferDao(), cache)
+
+            val thrown = runCatching { repo.setExactNickIgnored(network, "{lice", IrcIdentityRules(), ignored = false) }.exceptionOrNull()
+
+            assertTrue(thrown is CancellationException)
+            assertEquals(cancelled.message, thrown?.message)
+            assertEquals(listOf(first, second), dao.allForNetwork(network))
+        }
+
+    private suspend fun network(name: String = "network"): Long =
+        db.networkDao().insert(
+            NetworkEntity(
+                name = name,
+                role = NetworkRole.DIRECT,
+                host = "h",
+                port = 6697,
+                nick = "me",
+                username = "me",
+                realname = "Me",
+            ),
+        )
+
+    private suspend fun seed(
+        networkId: Long,
+        pattern: String,
+        enabled: Boolean = true,
+    ): NetworkIgnoreEntity {
+        val row = NetworkIgnoreEntity(networkId = networkId, pattern = pattern, enabled = enabled, createdAt = 1)
+        return row.copy(id = dao.upsert(row))
+    }
+}

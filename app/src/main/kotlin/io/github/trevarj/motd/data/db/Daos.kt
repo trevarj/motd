@@ -198,6 +198,9 @@ interface NetworkIgnoreDao {
     @Query("SELECT * FROM network_ignores WHERE networkId = :networkId ORDER BY enabled DESC, createdAt DESC, id DESC")
     fun observeForNetwork(networkId: Long): Flow<List<NetworkIgnoreEntity>>
 
+    @Query("SELECT * FROM network_ignores WHERE networkId = :networkId ORDER BY id")
+    suspend fun allForNetwork(networkId: Long): List<NetworkIgnoreEntity>
+
     @Query("SELECT * FROM network_ignores WHERE networkId = :networkId AND enabled = 1 ORDER BY id")
     suspend fun enabledForNetwork(networkId: Long): List<NetworkIgnoreEntity>
 

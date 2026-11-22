@@ -21,6 +21,8 @@ import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.data.repo.BufferRepository
+import io.github.trevarj.motd.data.repo.NetworkIgnoreCache
+import io.github.trevarj.motd.data.repo.NetworkIgnoreRepositoryImpl
 import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -505,6 +507,9 @@ class ChannelInfoTopicMutationTest {
         settingsRepository = settings,
         userDao = database.userDao(),
         networkIdentityDao = database.networkIdentityDao(),
+        networkDao = database.networkDao(),
+        networkIgnoreRepository =
+            NetworkIgnoreRepositoryImpl(database, database.networkIgnoreDao(), database.bufferDao(), NetworkIgnoreCache(database.networkIgnoreDao())),
         notificationSettings = notificationSettings,
         clock = clock,
     )

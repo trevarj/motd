@@ -56,6 +56,35 @@ class NetworkIgnorePolicyTest {
         )
     }
 
+    @Test fun `exact ignore requires a single IRC nickname outside current channel types`() {
+        val rules = IrcIdentityRules(advertisedChanTypes = "#[")
+        for (nick in listOf("Alice", "_alice-9", "{lice", "\\lice", "`lice")) {
+            assertTrue(nick, isExactIgnoreNick(nick, rules))
+        }
+        for (nick in listOf("", "[lice", "#chat", "irc.example.net", "9alice", "-alice", "a b", " a", "a\u0000", "a\u0085", "a\n")) {
+            assertFalse(nick, isExactIgnoreNick(nick, rules))
+        }
+        assertTrue(isExactIgnoreNick("[lice", IrcIdentityRules()))
+    }
+
+    @Test fun `exact ignore state counts only enabled unrestricted nick masks under the network casemap`() {
+        val rules = IrcIdentityRules(IrcCaseMapping.Rfc1459)
+        val nonExact =
+            listOf(
+                ignore("[lice!*@*", enabled = false),
+                ignore("?lice!*@*"),
+                ignore("[li*!*@*"),
+                ignore("[lice!user@*"),
+                ignore("[lice!*@*.example.net"),
+                ignore("[lice!**@*"),
+                ignore("[lice"),
+            )
+        assertFalse(hasExactNickIgnore(nonExact, "{lice", rules))
+        val exact = nonExact + ignore("[LICE!*@*")
+        assertTrue(hasExactNickIgnore(exact, "{lice", rules))
+        assertFalse(hasExactNickIgnore(exact, "{lice", IrcIdentityRules(IrcCaseMapping.Ascii)))
+    }
+
     private fun ignore(
         pattern: String,
         enabled: Boolean = true,

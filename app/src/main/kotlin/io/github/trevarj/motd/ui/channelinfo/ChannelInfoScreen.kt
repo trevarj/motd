@@ -85,6 +85,7 @@ import io.github.trevarj.motd.ui.chat.InviteSheetTarget
 import io.github.trevarj.motd.ui.chat.InviteUserSheet
 import io.github.trevarj.motd.ui.chat.LagTone
 import io.github.trevarj.motd.ui.chat.NickActionSheet
+import io.github.trevarj.motd.ui.chat.NickIgnoreActions
 import io.github.trevarj.motd.ui.chat.lagTone
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AvatarEditorSheet
@@ -119,6 +120,7 @@ fun ChannelInfoScreen(
     onOpenBuffer: (Long) -> Unit = {},
     onCreateInvite: (Long) -> Unit = {},
     onOpenNetworkSettings: (Long) -> Unit = {},
+    onOpenNetworkTools: ((Long) -> Unit)? = null,
     viewModel: ChannelInfoViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(bufferId) { viewModel.init(bufferId) }
@@ -372,7 +374,14 @@ fun ChannelInfoScreen(
                 viewModel.dismissNickSheet()
                 editingFool = sheet.nick
             },
-            onIgnoreNetwork = { viewModel.ignoreNickOnNetwork(sheet.nick) },
+            ignoreActions =
+                sheet.ignore?.let { ignore ->
+                    NickIgnoreActions(
+                        state = ignore,
+                        onToggle = { viewModel.setNickIgnored(ignore) },
+                        onManage = onOpenNetworkTools?.let { open -> { viewModel.openNickIgnoreRules(ignore, open) } },
+                    )
+                },
             onInviteToChannel = {
                 viewModel.dismissNickSheet()
                 inviteNick = sheet.nick

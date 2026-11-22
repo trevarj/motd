@@ -62,7 +62,6 @@ import io.github.trevarj.motd.data.repo.LinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreviewRepository
 import io.github.trevarj.motd.data.repo.MessageRepository
 import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
-import io.github.trevarj.motd.data.repo.NoopNetworkIgnoreRepository
 import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
 import io.github.trevarj.motd.data.repo.entryAnchorPagingKey
 import io.github.trevarj.motd.data.sync.HistoryGapFiller
@@ -315,10 +314,10 @@ class ChatViewModel
         private val visibilityReader: MessageVisibilityReader,
         private val historyResyncCoordinator: HistoryResyncController,
         private val userDao: UserDao,
+        private val networkIgnoreRepository: NetworkIgnoreRepository,
         // Narrow seam over HistoryGapFillCoordinator; the Noop default keeps hand-built call sites
-        // (tests) free of a live history transport, exactly as networkIgnoreRepository does below.
+        // (tests) free of a live history transport.
         private val gapFiller: HistoryGapFiller = NoopHistoryGapFiller,
-        private val networkIgnoreRepository: NetworkIgnoreRepository = NoopNetworkIgnoreRepository,
         private val avatarController: AvatarController = NoopAvatarController,
         private val accountReminderStore: AccountReminderStore = NoopAccountReminderStore,
         // The app's own decision journal, handed to the screen so the timeline's Paging generations can
@@ -2739,8 +2738,9 @@ class ChatViewModel
 
         // --- nick sheet + whois ---
 
-        private val _nickSheet = MutableStateFlow<NickSheetState?>(null)
-        val nickSheet: StateFlow<NickSheetState?> = _nickSheet.asStateFlow()
+        private val nickSheets =
+            NickSheetController(viewModelScope, connectionManager.connectionStates, networkIdentityDao, networkDao, networkIgnoreRepository) { buffer.value }
+        val nickSheet: StateFlow<NickSheetState?> = nickSheets.state
         private var nickDetailsJob: Job? = null
 
         /**
@@ -2753,7 +2753,7 @@ class ChatViewModel
         ) {
             nickDetailsJob?.cancel()
             nickDetailsJob = null
-            _nickSheet.value = NickSheetState(nick = nick)
+            val sheet = nickSheets.open(nick, allowIgnore = loadIrcDetails)
             if (!loadIrcDetails) return
             // Moderation visibility depends on our prefixes in the channel roster. Load it on this
             // explicit interaction, not on every channel entry.
@@ -2764,8 +2764,7 @@ class ChatViewModel
             nickDetailsJob =
                 viewModelScope.launch {
                     userDao.observeByNick(networkId, normalizedNick).collect { cached ->
-                        val current = _nickSheet.value
-                        if (current?.nick == nick) _nickSheet.value = current.copy(cached = cached)
+                        sheet.update { it.copy(cached = cached) }
                     }
                 }
             if (client == null) return
@@ -2777,17 +2776,14 @@ class ChatViewModel
             viewModelScope.launch {
                 val lines = runCatching { client.whois(nick) }.getOrNull().orEmpty()
                 val info = parseWhois(lines)
-                // Only fold in if the sheet is still open for this nick.
-                if (info != null && _nickSheet.value?.nick == nick) {
-                    _nickSheet.value = _nickSheet.value?.copy(whois = info)
-                }
+                if (info != null) sheet.update { it.copy(whois = info) }
             }
         }
 
         fun dismissNickSheet() {
             nickDetailsJob?.cancel()
             nickDetailsJob = null
-            _nickSheet.value = null
+            nickSheets.dismiss()
         }
 
         private val _avatarEvents = MutableSharedFlow<ConversationAvatarOutcome>(extraBufferCapacity = 1)
@@ -2896,12 +2892,16 @@ class ChatViewModel
             foolPreferencesEditor.update(nick, identityRules.value, transform)
         }
 
-        fun ignoreNickOnNetwork(nick: String) =
-            viewModelScope.launch {
-                val networkId = state.value.buffer?.networkId ?: return@launch
-                networkIgnoreRepository.addIgnore(networkId, nick)
-                dismissNickSheet()
-            }
+        fun setNickIgnored(expected: NickIgnoreState) = nickSheets.setIgnored(expected)
+
+        fun openNickIgnoreRules(
+            expected: NickIgnoreState,
+            onOpen: (Long) -> Unit,
+        ) {
+            val networkId = nickSheets.networkFor(expected) ?: return
+            dismissNickSheet()
+            onOpen(networkId)
+        }
 
         fun inviteToChannel(
             channel: JoinedChannelRow,

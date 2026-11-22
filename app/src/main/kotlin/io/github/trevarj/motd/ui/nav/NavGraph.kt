@@ -374,6 +374,7 @@ fun MotdNavGraph(
                                 onOpenNetworkSettings = {
                                     navController.navigate(NetworkSettingsRoute(it, NetworkSettingsTarget.CONNECTION))
                                 },
+                                onOpenNetworkTools = { navController.navigate(NetworkToolsRoute(it)) },
                             )
                         }
                     },
@@ -689,6 +690,7 @@ fun MotdNavGraph(
                 onOpenNetworkSettings = {
                     navController.navigate(NetworkSettingsRoute(it, NetworkSettingsTarget.CONNECTION))
                 },
+                onOpenNetworkTools = { navController.navigate(NetworkToolsRoute(it)) },
             )
         }
         composable<CreateInviteRoute> { entry ->

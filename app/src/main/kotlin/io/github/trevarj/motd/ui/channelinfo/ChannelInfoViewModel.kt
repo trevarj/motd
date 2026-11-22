@@ -12,6 +12,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MemberEntity
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
+import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.data.db.identityRules
@@ -22,7 +23,6 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
-import io.github.trevarj.motd.data.repo.NoopNetworkIgnoreRepository
 import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
@@ -34,6 +34,8 @@ import io.github.trevarj.motd.service.NotificationSettings
 import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chat.ComposerPrefill
+import io.github.trevarj.motd.ui.chat.NickIgnoreState
+import io.github.trevarj.motd.ui.chat.NickSheetController
 import io.github.trevarj.motd.ui.chat.NickSheetState
 import io.github.trevarj.motd.ui.chat.WhoisInfo
 import io.github.trevarj.motd.ui.chat.parseWhois
@@ -181,7 +183,8 @@ class ChannelInfoViewModel
         private val settingsRepository: SettingsRepository,
         private val userDao: UserDao,
         private val networkIdentityDao: NetworkIdentityDao,
-        private val networkIgnoreRepository: NetworkIgnoreRepository = NoopNetworkIgnoreRepository,
+        private val networkDao: NetworkDao,
+        private val networkIgnoreRepository: NetworkIgnoreRepository,
         private val avatarController: AvatarController = NoopAvatarController,
         private val notificationSettings: NotificationSettings = NotificationSettings.Noop,
         private val clock: AppClock = AppClock(System::currentTimeMillis),
@@ -201,6 +204,7 @@ class ChannelInfoViewModel
         val muteBacklogSuppressions: SharedFlow<MuteBacklogSuppression> = _muteBacklogSuppressions.asSharedFlow()
 
         fun init(bufferId: Long) {
+            if (bufferIdFlow.value != bufferId) dismissNickSheet()
             bufferIdFlow.value = bufferId
             viewModelScope.launch { connectionManager.requestMembers(bufferId) }
         }
@@ -533,27 +537,35 @@ class ChannelInfoViewModel
             foolPreferencesEditor.update(nick, state.value.identityRules, transform)
         }
 
-        fun ignoreNickOnNetwork(nick: String) =
-            viewModelScope.launch {
-                val networkId = state.value.buffer?.networkId ?: return@launch
-                networkIgnoreRepository.addIgnore(networkId, nick)
-                dismissNickSheet()
-            }
+        fun setNickIgnored(expected: NickIgnoreState) = nickSheets.setIgnored(expected)
+
+        fun openNickIgnoreRules(
+            expected: NickIgnoreState,
+            onOpen: (Long) -> Unit,
+        ) {
+            val networkId = nickSheets.networkFor(expected) ?: return
+            dismissNickSheet()
+            onOpen(networkId)
+        }
 
         // --- nick sheet + whois ---
 
-        private val _nickSheet = MutableStateFlow<NickSheetState?>(null)
-        val nickSheet: StateFlow<NickSheetState?> = _nickSheet
+        private val nickSheets =
+            NickSheetController(viewModelScope, connectionManager.connectionStates, networkIdentityDao, networkDao, networkIgnoreRepository) {
+                state.value.buffer
+            }
+        val nickSheet: StateFlow<NickSheetState?> = nickSheets.state
         private var nickDetailsJob: Job? = null
 
         /** Open the nick sheet for [nick]; WHOIS via labeled-response when available (see ChatViewModel). */
         fun openNickSheet(nick: String) {
-            _nickSheet.value = NickSheetState(nick = nick)
+            nickDetailsJob?.cancel()
+            nickDetailsJob = null
+            val sheet = nickSheets.open(nick)
             val networkId = state.value.buffer?.networkId ?: return
             viewModelScope.launch { state.value.buffer?.let { connectionManager.requestMembers(it.id) } }
             val client = connectionManager.clientFor(networkId)
             val normalized = client?.isupport?.normalize(nick) ?: state.value.identityRules.normalize(nick)
-            nickDetailsJob?.cancel()
             nickDetailsJob =
                 viewModelScope.launch {
                     combine(
@@ -566,8 +578,7 @@ class ChannelInfoViewModel
                                     .PresenceKey(networkId, normalized),
                             ]
                     }.collect { (cached, presence) ->
-                        val current = _nickSheet.value
-                        if (current?.nick == nick) _nickSheet.value = current.copy(cached = cached, presence = presence)
+                        sheet.update { it.copy(cached = cached, presence = presence) }
                     }
                 }
             if (client == null) return
@@ -576,9 +587,7 @@ class ChannelInfoViewModel
                 viewModelScope.launch {
                     val lines = runCatching { client.sendLabeled(whoisMsg) }.getOrNull().orEmpty()
                     val info: WhoisInfo? = parseWhois(lines)
-                    if (info != null && _nickSheet.value?.nick == nick) {
-                        _nickSheet.value = _nickSheet.value?.copy(whois = info)
-                    }
+                    if (info != null) sheet.update { it.copy(whois = info) }
                 }
             } else {
                 viewModelScope.launch { client.send(whoisMsg) }
@@ -588,7 +597,7 @@ class ChannelInfoViewModel
         fun dismissNickSheet() {
             nickDetailsJob?.cancel()
             nickDetailsJob = null
-            _nickSheet.value = null
+            nickSheets.dismiss()
         }
 
         // --- moderation executors ---
@@ -813,7 +822,7 @@ class ChannelInfoViewModel
             val client = connectionManager.clientFor(networkId)
             val normalize: (String) -> String =
                 { client?.isupport?.normalize(it) ?: state.value.identityRules.normalize(it) }
-            _nickSheet.value
+            nickSheet.value
                 ?.takeIf { normalize(it.nick) == normalize(nick) }
                 ?.details
                 ?.host

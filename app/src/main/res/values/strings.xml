@@ -1891,6 +1891,10 @@
     <string name="nick_sheet_remove_fool">Remove from fools</string>
     <string name="nick_sheet_fool_settings">Fool settings</string>
     <string name="nick_sheet_ignore_network">Ignore on this network</string>
+    <string name="nick_sheet_unignore_network">Unignore on this network</string>
+    <string name="nick_sheet_ignore_help">Filters new incoming messages from this exact nickname in MOTD only. Other rules may still match after unignoring. Dropped messages aren’t restored.</string>
+    <string name="nick_sheet_ignore_failed">Couldn’t change the ignore rule. Try again.</string>
+    <string name="nick_sheet_manage_ignore_rules">Manage ignore rules</string>
     <string name="nick_sheet_give_op">Give op</string>
     <string name="nick_sheet_take_op">Take op</string>
     <string name="nick_sheet_give_voice">Give voice</string>

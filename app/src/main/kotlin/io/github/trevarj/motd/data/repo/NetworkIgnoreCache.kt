@@ -13,12 +13,15 @@ class NetworkIgnoreCache
     constructor(
         private val dao: NetworkIgnoreDao,
     ) {
-        private val entries = ConcurrentHashMap<Long, List<NetworkIgnoreEntity>>()
+        private class Entry {
+            @Volatile var enabled: List<NetworkIgnoreEntity>? = null
+        }
+
+        private val entries = ConcurrentHashMap<Long, Entry>()
 
         suspend fun enabledForNetwork(networkId: Long): List<NetworkIgnoreEntity> {
-            entries[networkId]?.let { return it }
-            val loaded = dao.enabledForNetwork(networkId)
-            return entries.putIfAbsent(networkId, loaded) ?: loaded
+            val entry = entries.computeIfAbsent(networkId) { Entry() }
+            return entry.enabled ?: dao.enabledForNetwork(networkId).also { entry.enabled = it }
         }
 
         fun invalidate(networkId: Long) {
