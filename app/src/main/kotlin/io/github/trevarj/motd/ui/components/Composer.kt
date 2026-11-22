@@ -9,6 +9,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.rememberTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -44,6 +45,7 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -135,9 +137,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.LastBaseline
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onLayoutRectChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
@@ -271,6 +275,8 @@ private fun composerSelectionBackground(
     }
     return Color.Transparent
 }
+
+private val AutocompleteVerticalPadding = 4.dp
 
 internal fun autocompletePopupPosition(
     anchorBounds: IntRect,
@@ -1022,6 +1028,7 @@ fun Composer(
     var retainedAutocomplete by remember { mutableStateOf<ComposerAutocompleteContent?>(null) }
     val autocompleteVisibility = remember { MutableTransitionState(false) }
     autocompleteVisibility.targetState = visiblePanel == ComposerPanel.AUTOCOMPLETE
+    val autocompleteTransition = rememberTransition(autocompleteVisibility, label = "composerAutocomplete")
     val autocompleteEnabled by rememberUpdatedState(enabled)
     val latestAutocomplete by rememberUpdatedState(autocomplete)
     val latestEmojiSuggestions by rememberUpdatedState(emojiSuggestions)
@@ -1065,8 +1072,8 @@ fun Composer(
         modifier = modifier.fillMaxWidth(),
         overlay = {
             // Candidate-count changes must not change an in-flight slide's travel distance.
-            AnimatedVisibility(
-                visibleState = autocompleteVisibility,
+            autocompleteTransition.AnimatedVisibility(
+                visible = { it },
                 enter =
                     fadeIn(MotdMotion.fadeIn) +
                         slideInVertically(animationSpec = MotdMotion.rowPlacement) { with(density) { 8.dp.roundToPx() } },
@@ -1077,7 +1084,7 @@ fun Composer(
                 val content = retainedAutocomplete
                 val active = autocompleteVisibility.targetState
                 val semantics = if (active) Modifier else Modifier.semantics { hideFromAccessibility() }
-                Box(Modifier.padding(horizontal = 8.dp, vertical = 4.dp).then(semantics)) {
+                Box(Modifier.padding(horizontal = 8.dp, vertical = AutocompleteVerticalPadding).then(semantics)) {
                     if (content != null) {
                         val canPick = if (active) content.canPick else ({ false })
                         CompositionLocalProvider(LocalAutocompleteCanPick provides canPick, content = content.panel)
@@ -2022,9 +2029,14 @@ private fun AutocompleteOverlayLayout(
     anchor: @Composable () -> Unit,
 ) {
     var anchorWidthPx by remember { mutableIntStateOf(0) }
-    val density = LocalDensity.current
+    var anchorTopPx by remember { mutableIntStateOf(0) }
+    val safeDrawingInsets = WindowInsets.safeDrawing
     Box(
-        modifier = modifier.onSizeChanged { anchorWidthPx = it.width },
+        modifier =
+            modifier.onLayoutRectChanged(throttleMillis = 0, debounceMillis = 0) {
+                anchorTopPx = it.positionInWindow.y
+                anchorWidthPx = it.width
+            },
     ) {
         anchor()
         if (anchorWidthPx > 0) {
@@ -2035,11 +2047,19 @@ private fun AutocompleteOverlayLayout(
                         focusable = false,
                         dismissOnBackPress = false,
                         dismissOnClickOutside = false,
-                        clippingEnabled = false,
                     ),
             ) {
-                Box(Modifier.width(with(density) { anchorWidthPx.toDp() })) {
-                    overlay()
+                SubcomposeLayout { constraints ->
+                    val maxHeight = minOf(constraints.maxHeight, anchorTopPx - safeDrawingInsets.getTop(this))
+                    val minHeight = 48.dp.roundToPx() + 2 * AutocompleteVerticalPadding.roundToPx()
+                    if (maxHeight < minHeight) {
+                        layout(constraints.minWidth, constraints.minHeight) {}
+                    } else {
+                        val width = anchorWidthPx.coerceIn(constraints.minWidth, constraints.maxWidth)
+                        val popupConstraints = constraints.copy(minWidth = width, maxWidth = width, maxHeight = maxHeight)
+                        val panel = subcompose(Unit) { Box { overlay() } }.single().measure(popupConstraints)
+                        layout(panel.width, panel.height) { panel.placeRelative(0, 0) }
+                    }
                 }
             }
         }

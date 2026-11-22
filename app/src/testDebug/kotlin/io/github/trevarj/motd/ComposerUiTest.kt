@@ -28,6 +28,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.SoftwareKeyboardController
+import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -57,6 +59,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
@@ -65,8 +68,12 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
@@ -635,28 +642,125 @@ class ComposerUiTest {
     }
 
     @Test
+    @Config(sdk = [35])
     fun autocompletePopup_rowIsClickableOutsideComposerBounds() {
+        val anchorY = mutableStateOf(126.dp)
+        val draft = mutableStateOf(TextFieldValue("ali", TextRange(3)))
+        val candidates = List(20) { "alice$it" }
+        val showAutocomplete = mutableStateOf(true)
         var picked: String? = null
         compose.setContent {
             MotdTheme {
                 Composer(
-                    value = TextFieldValue("ali"),
-                    onValueChange = {},
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
                     onSend = {},
                     enabled = true,
-                    autocomplete = {
-                        AutocompletePanel(
-                            candidates = listOf("alice"),
-                            onPick = { picked = it },
-                        )
-                    },
+                    modifier = Modifier.offset { IntOffset(0, anchorY.value.roundToPx()) }.testTag("composer_anchor"),
+                    autocomplete =
+                        if (showAutocomplete.value) {
+                            {
+                                AutocompletePanel(
+                                    candidates = candidates,
+                                    onPick = { picked = it },
+                                )
+                            }
+                        } else {
+                            null
+                        },
                 )
             }
         }
 
-        compose.onNodeWithText("alice").assertIsDisplayed().performClick()
+        val anchor = compose.onNodeWithTag("composer_anchor")
+        val field = compose.onNodeWithTag("chat_composer_field")
+        field.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+        val hostView = (checkNotNull(anchor.fetchSemanticsNode().root) as ViewRootForTest).view
+        val safeTop = with(compose.density) { 30.dp.roundToPx() }
+
+        fun dispatchSafeTop(pixels: Int) {
+            compose.runOnIdle {
+                ViewCompat.dispatchApplyWindowInsets(
+                    hostView,
+                    WindowInsetsCompat
+                        .Builder()
+                        .setInsets(WindowInsetsCompat.Type.statusBars(), Insets.of(0, pixels, 0, 0))
+                        .setVisible(WindowInsetsCompat.Type.statusBars(), true)
+                        .build(),
+                )
+            }
+        }
+
+        dispatchSafeTop(safeTop)
+        val panel = compose.onNodeWithTag("autocomplete_panel")
+        val firstRow = compose.onNodeWithTag("autocomplete_item_0")
+        val lastRow = compose.onNodeWithTag("autocomplete_item_${candidates.lastIndex}")
+        val initialAnchor = anchor.fetchSemanticsNode().boundsInRoot
+
+        fun assertPopupFitsAboveAnchor() {
+            val anchorCoordinates = anchor.fetchSemanticsNode().layoutInfo.coordinates
+            val panelCoordinates =
+                panel
+                    .assertIsDisplayed()
+                    .fetchSemanticsNode()
+                    .layoutInfo.coordinates
+            val anchorOrigin = anchorCoordinates.localToScreen(Offset.Zero)
+            val topInWindow = anchorCoordinates.localToWindow(Offset.Zero).y
+            val safeTopOnScreen = anchorOrigin.y - topInWindow + safeTop
+            val panelOrigin = panelCoordinates.localToScreen(Offset.Zero)
+            val padding = with(compose.density) { 4.dp.roundToPx() }
+            assertEquals("Constrained menu starts below the safe top", safeTopOnScreen + padding, panelOrigin.y, 1f)
+            assertEquals("Menu remains above the composer", anchorOrigin.y - padding, panelOrigin.y + panelCoordinates.size.height, 1f)
+            val sidePadding = with(compose.density) { 8.dp.roundToPx() }
+            assertEquals(anchorOrigin.x + sidePadding, panelOrigin.x, 1f)
+            assertEquals(anchorCoordinates.size.width - 2 * sidePadding, panelCoordinates.size.width)
+        }
+
+        assertPopupFitsAboveAnchor()
+        firstRow.assertIsDisplayed()
+        lastRow.assertIsNotDisplayed()
+        dispatchSafeTop(with(compose.density) { 90.dp.roundToPx() })
+        assertEquals(initialAnchor, anchor.fetchSemanticsNode().boundsInRoot)
+        panel.assertDoesNotExist()
+        dispatchSafeTop(safeTop)
+        assertPopupFitsAboveAnchor()
+
+        compose.runOnIdle { anchorY.value = 65.dp }
+        assertEquals(initialAnchor.width, anchor.fetchSemanticsNode().boundsInRoot.width)
+        panel.assertDoesNotExist()
+        firstRow.assertDoesNotExist()
+        field.assertIsFocused().assertTextEquals("ali")
+
+        compose.runOnIdle { anchorY.value = 126.dp }
+        assertEquals(initialAnchor, anchor.fetchSemanticsNode().boundsInRoot)
+        assertPopupFitsAboveAnchor()
+        compose
+            .onNode(
+                SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollToIndex) and hasAnyAncestor(hasTestTag("autocomplete_panel")),
+                useUnmergedTree = true,
+            ).performScrollToIndex(candidates.lastIndex)
+        lastRow.assertIsDisplayed().performTouchInput { click() }
+        field.assertIsFocused().assertTextEquals("ali")
         compose.runOnIdle {
-            assertEquals("alice", picked)
+            assertEquals(candidates.last(), picked)
+            assertEquals(TextRange(3), draft.value.selection)
+        }
+
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.runOnIdle { anchorY.value = 65.dp }
+            repeat(2) { compose.mainClock.advanceTimeByFrame() }
+            panel.assertDoesNotExist()
+            compose.runOnIdle { showAutocomplete.value = false }
+            compose.mainClock.advanceTimeBy(500)
+            compose.runOnIdle { anchorY.value = 126.dp }
+            repeat(2) {
+                compose.mainClock.advanceTimeByFrame()
+                panel.assertDoesNotExist()
+            }
+            field.assertIsFocused().assertTextEquals("ali")
+        } finally {
+            compose.mainClock.autoAdvance = true
         }
     }
 
@@ -796,6 +900,7 @@ class ComposerUiTest {
                     onValueChange = { draft.value = it },
                     onSend = {},
                     enabled = true,
+                    modifier = Modifier.offset(y = 320.dp),
                 )
             }
         }

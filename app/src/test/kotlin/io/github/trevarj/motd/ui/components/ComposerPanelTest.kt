@@ -103,6 +103,14 @@ class ComposerPanelTest {
                 layoutDirection = LayoutDirection.Ltr,
             ),
         )
+        assertEquals(
+            IntOffset(92, 456),
+            autocompletePopupPosition(
+                anchorBounds = IntRect(left = 12, top = 600, right = 412, bottom = 668),
+                popupContentSize = IntSize(width = 320, height = 144),
+                layoutDirection = LayoutDirection.Rtl,
+            ),
+        )
     }
 
     @Test fun emojiTakesPriorityOverAutocomplete() {
