@@ -7,8 +7,10 @@ main composition; fillers occupy the gaps between them. **Pattern → Density** 
 without shrinking the leads. Without fillers, it adjusts lead spacing instead.
 The MOTD starter uses hand-drawn graffiti lettering and doodles with small pen marks
 between the larger subjects. It starts at maximum density; lower it to open up the pattern.
-Overall and fixed per-icon size range from 25% to 250%. **Auto** varies size and rotation
-per placement using the design's seed. Choose **Fixed** to set a motif's own size or angle.
+Overall and fixed per-icon size range from 25% to 400%. Above 250%, the pattern
+allows larger motifs and opens lead spacing when the overall size or all lead sizes
+are high. **Auto** varies size and rotation per placement using the design's seed.
+Choose **Fixed** to set a motif's own size or angle.
 Saved Rings designs now render as Scattered.
 In **Color → Texture**, choose None, Specks, Comic paper, Grain, Linen, Scanline, or Stars.
 Texture layers under the icons, works with theme or custom colors, and saves with the design.
@@ -34,6 +36,10 @@ both seams and at corners. Leads keep their layout anchors. The widest gaps can
 fit medium copies of Auto-sized leads; Auto fillers fit to the remaining space
 and can shift slightly to fit better. After placement, up to two refinement passes
 use a small raster of the actual strokes to move fillers into the largest visible gaps.
+Finally, a wrapped stroke mask lets fillers grow into the space between outlines.
+Auto fillers may try a radius up to 25% larger than their initial target, subject
+to the same maximum radius and clearance. Vector outlines are checked for overlap
+independently of the tile's output resolution.
 Fixed sizes are never enlarged past their setting. Changing density may move fillers,
 but the main lead composition stays anchored.
 

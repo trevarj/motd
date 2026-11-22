@@ -104,7 +104,7 @@ internal const val MAX_WALLPAPER_IMPORTS = 128
 internal const val MAX_WALLPAPER_LIBRARY_BYTES = 512 * 1024
 internal const val MAX_WALLPAPER_ICONS = 24
 internal const val MIN_WALLPAPER_SCALE = 25
-internal const val MAX_WALLPAPER_SCALE = 250
+internal const val MAX_WALLPAPER_SCALE = 400
 internal val wallpaperJson = Json { encodeDefaults = true }
 
 internal fun isCanonicalWallpaperUuid(id: String): Boolean = id.length == 36 && runCatching { UUID.fromString(id).toString() == id }.getOrDefault(false)

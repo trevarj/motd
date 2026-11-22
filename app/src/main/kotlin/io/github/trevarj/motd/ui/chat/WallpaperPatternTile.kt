@@ -6,6 +6,8 @@ import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
 import android.graphics.Shader
 import android.util.LruCache
 import androidx.compose.runtime.Composable
@@ -44,7 +46,9 @@ import kotlin.coroutines.coroutineContext
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan
+import kotlin.math.ceil
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.min
 import kotlin.math.pow
@@ -59,6 +63,7 @@ private const val STAMP_GAP = 1.75
 private const val FILLER_GAP = 1.1
 private const val MAX_LEAD_RADIUS = 42.0
 private const val MAX_FILLER_RADIUS = 20.0
+private const val STANDARD_SCALE_LIMIT = 250
 private const val MAX_VIEWPORT_SCALE_GAIN = 1.55
 private const val WRAP_SLOP = 0.001f // Allow for the float canvas transform at the seam.
 private const val FILLER_GRID = 64
@@ -67,6 +72,10 @@ private const val REFINEMENT_STEP = PERIOD / REFINEMENT_EDGE
 private const val REFINEMENT_GAPS = 3
 private const val NO_INK = REFINEMENT_EDGE * REFINEMENT_EDGE
 private const val INK_THRESHOLD = 32
+private const val GROWTH_EDGE = 512
+private const val GROWTH_WRAP = GROWTH_EDGE - 1
+private const val GROWTH_STEP = 0.5
+private const val GROWTH_FINE_STEP = 0.0625
 private const val TURN = 2 * PI
 
 /** Geometry is normalized to omit all paint-only values, including ink on individual icons. */
@@ -296,9 +305,10 @@ private fun drawWrappedStamp(
     ink: Int,
     paint: Paint,
     stamp: Stamp,
+    inkRadius: Double = stamp.orbit.radius,
 ) {
-    val radius = stamp.orbit.radius.toFloat() + WRAP_SLOP
-    val scale = (stamp.orbit.radius / glyph.inkRadius).toFloat()
+    val radius = inkRadius.toFloat() + WRAP_SLOP
+    val scale = (inkRadius / glyph.inkRadius).toFloat()
     val xWrap = wrapOffset(stamp.x, radius)
     val yWrap = wrapOffset(stamp.y, radius)
     drawStamp(canvas, glyph, ink, paint, stamp, scale, 0f, 0f)
@@ -556,6 +566,7 @@ private suspend fun refineFillers(
     firstFiller: Int,
     stampsPerOrbit: Int,
     glyphs: Array<WallpaperGlyph>,
+    maxFillerRadius: Double,
 ) {
     if (firstFiller == stamps.size) return
     val symmetric = stampsPerOrbit > 1
@@ -694,7 +705,7 @@ private suspend fun refineFillers(
                         val y = (py + 0.5f) * step
                         val offset = step * sqrt((dx * dx + dy * dy).toDouble())
                         val minimum = maxOf(smallest, offset - step)
-                        var free = min(MAX_FILLER_RADIUS, fillerSelfClearance(x, y, symmetric))
+                        var free = min(maxFillerRadius, fillerSelfClearance(x, y, symmetric))
                         var next = free
                         if (next < minimum) continue
                         var blocker: Orbit? = null
@@ -749,6 +760,324 @@ private suspend fun refineFillers(
     }
 }
 
+private class GrowthInk(
+    val pixels: IntArray,
+    var size: Int = 0,
+    var alpha: Int = 0,
+) {
+    fun compactCopy(): GrowthInk = GrowthInk(pixels.copyOf(size), size, alpha)
+}
+
+private class GrowthMask(
+    private val bitmap: Bitmap,
+    maxSpan: Int,
+) {
+    private val pixels = IntArray(maxSpan * maxSpan)
+    private val clear = IntArray(pixels.size)
+    private val halo = IntArray(GROWTH_EDGE * GROWTH_EDGE)
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val canvas =
+        Canvas(bitmap).apply {
+            scale(GROWTH_EDGE / PERIOD, GROWTH_EDGE / PERIOD)
+        }
+
+    fun raster(
+        stamp: Stamp,
+        glyph: WallpaperGlyph,
+        radius: Double,
+        result: GrowthInk,
+    ) {
+        // Include AA and float transform slop in the rectangles we read and clear.
+        val scale = GROWTH_EDGE / PERIOD
+        val pad = radius * scale + 2.0
+        val left = floor(stamp.x * scale - pad).toInt()
+        val right = ceil(stamp.x * scale + pad).toInt()
+        val top = floor(stamp.y * scale - pad).toInt()
+        val bottom = ceil(stamp.y * scale + pad).toInt()
+        var size = 0
+        var alpha = 0
+        drawWrappedStamp(canvas, glyph, android.graphics.Color.WHITE, paint, stamp, radius)
+        for (dy in -GROWTH_EDGE..GROWTH_EDGE step GROWTH_EDGE) {
+            val y = maxOf(0, top + dy)
+            val h = minOf(GROWTH_EDGE, bottom + dy) - y
+            if (h <= 0) continue
+            for (dx in -GROWTH_EDGE..GROWTH_EDGE step GROWTH_EDGE) {
+                val x = maxOf(0, left + dx)
+                val w = minOf(GROWTH_EDGE, right + dx) - x
+                if (w <= 0) continue
+                bitmap.getPixels(pixels, 0, w, x, y, w, h)
+                bitmap.setPixels(clear, 0, w, x, y, w, h)
+                var src = 0
+                for (row in y until y + h) {
+                    val base = row * GROWTH_EDGE + x
+                    for (col in 0 until w) {
+                        val a = pixels[src++] ushr 24
+                        if (a == 0) continue
+                        result.pixels[size++] = base + col
+                        alpha += a
+                    }
+                }
+            }
+        }
+        result.size = size
+        result.alpha = alpha
+    }
+
+    fun isClear(ink: GrowthInk): Boolean {
+        for (i in 0 until ink.size) {
+            if (halo[ink.pixels[i]] != 0) return false
+        }
+        return true
+    }
+
+    fun mark(
+        ink: GrowthInk,
+        delta: Int,
+    ) {
+        for (i in 0 until ink.size) {
+            val pixel = ink.pixels[i]
+            val x = pixel and GROWTH_WRAP
+            val y = pixel / GROWTH_EDGE
+            val left = (x - 1) and GROWTH_WRAP
+            val right = (x + 1) and GROWTH_WRAP
+            for (dy in -1..1) {
+                val row = ((y + dy) and GROWTH_WRAP) * GROWTH_EDGE
+                halo[row + left] += delta
+                halo[row + x] += delta
+                halo[row + right] += delta
+            }
+        }
+    }
+}
+
+private class PlacedOutline {
+    val path = Path()
+    val bounds = RectF()
+}
+
+private class GrowthCollision(
+    private val stamps: List<Stamp>,
+    private val glyphs: Array<WallpaperGlyph>,
+    private val outlines: Map<WallpaperGlyph, Path?>,
+) {
+    private val installed = arrayOfNulls<PlacedOutline>(stamps.size)
+    private val candidate = PlacedOutline()
+    private val neighborImage = PlacedOutline()
+    private val intersection = Path()
+    private val matrix = Matrix()
+
+    @Suppress("DEPRECATION") // computeBounds(RectF, Boolean) is available at minSdk.
+    private fun place(
+        result: PlacedOutline,
+        outline: Path,
+        stamp: Stamp,
+        glyph: WallpaperGlyph,
+        radius: Double,
+        dx: Float,
+        dy: Float,
+    ) {
+        val scale = (radius / glyph.inkRadius).toFloat()
+        // Match drawStamp's Canvas transform, including the center of a wrapped image.
+        matrix.setTranslate(stamp.x + dx, stamp.y + dy)
+        matrix.preRotate(stamp.rotation)
+        matrix.preScale(scale, if (stamp.mirror) -scale else scale)
+        matrix.preTranslate(-glyph.width / 2f, -glyph.height / 2f)
+        outline.transform(matrix, result.path)
+        result.path.computeBounds(result.bounds, true)
+    }
+
+    private fun imageOffset(distance: Float): Float =
+        when {
+            distance > PERIOD / 2 -> -PERIOD
+            distance < -PERIOD / 2 -> PERIOD
+            else -> 0f
+        }
+
+    fun isClear(
+        index: Int,
+        first: Int,
+        end: Int,
+        radius: Double,
+    ): Boolean {
+        val stamp = stamps[index]
+        val glyph = glyphs[stamp.orbit.icon]
+        var placed = false
+        // ponytail: scan the small stamp list only after raster fit; most pairs need no path.
+        for (i in stamps.indices) {
+            if (i >= index && i < end) continue // Check each pair of trial members just once.
+            val other = stamps[i]
+            val sameOrbit = i >= first && i < end
+            val otherRadius = if (sameOrbit) radius else other.orbit.radius
+            val distanceX = other.x - stamp.x
+            val distanceY = other.y - stamp.y
+            val dx = imageOffset(distanceX)
+            val dy = imageOffset(distanceY)
+            val x = distanceX.toDouble() + dx
+            val y = distanceY.toDouble() + dy
+            val reach = radius + otherRadius + 2 * WRAP_SLOP
+            if (x * x + y * y >= reach * reach) continue
+
+            // A missing outline can only pass when the conservative circles are clear.
+            if (!placed) {
+                val outline = outlines[glyph] ?: return false
+                place(candidate, outline, stamp, glyph, radius, 0f, 0f)
+                placed = true
+            }
+            val otherGlyph = glyphs[other.orbit.icon]
+            val otherOutline = outlines[otherGlyph] ?: return false
+            val neighbor =
+                if (sameOrbit || dx != 0f || dy != 0f) {
+                    neighborImage.also { place(it, otherOutline, other, otherGlyph, otherRadius, dx, dy) }
+                } else {
+                    installed[i] ?: PlacedOutline().also {
+                        place(it, otherOutline, other, otherGlyph, otherRadius, 0f, 0f)
+                        installed[i] = it
+                    }
+                }
+            if (!RectF.intersects(candidate.bounds, neighbor.bounds)) continue
+            if (!intersection.op(candidate.path, neighbor.path, Path.Op.INTERSECT) || !intersection.isEmpty) return false
+        }
+        return true
+    }
+
+    fun invalidate(
+        first: Int,
+        end: Int,
+    ) {
+        installed.fill(null, first, end)
+    }
+}
+
+private suspend fun growFillers(
+    pattern: WallpaperPattern,
+    stamps: List<Stamp>,
+    firstFiller: Int,
+    stampsPerOrbit: Int,
+    glyphs: Array<WallpaperGlyph>,
+    autoRadiusLimit: Double,
+) {
+    fun cap(orbit: Orbit): Double {
+        val icon = pattern.icons[orbit.icon]
+        return if (icon.filler && icon.scale == null) minOf(autoRadiusLimit, orbit.intendedRadius * 1.25) else orbit.intendedRadius
+    }
+
+    if ((firstFiller until stamps.size step stampsPerOrbit).none { cap(stamps[it].orbit) > stamps[it].orbit.radius }) return
+    val context = coroutineContext
+    val outlines = HashMap<WallpaperGlyph, Path?>()
+    for (stamp in stamps) {
+        val glyph = glyphs[stamp.orbit.icon]
+        if (glyph in outlines) continue
+        context.ensureActive()
+        outlines[glyph] = glyph.copyCollisionOutline()
+    }
+    val collision = GrowthCollision(stamps, glyphs, outlines)
+    val maxRadius = stamps.maxOf { maxOf(it.orbit.radius, cap(it.orbit)) }
+    val span = ceil(2 * maxRadius * (GROWTH_EDGE / PERIOD)).toInt() + 6
+    val bitmap = createBitmap(GROWTH_EDGE, GROWTH_EDGE)
+    try {
+        val mask = GrowthMask(bitmap, span)
+        var trial = Array(stampsPerOrbit) { GrowthInk(IntArray(span * span)) }
+        var winner = Array(stampsPerOrbit) { GrowthInk(IntArray(span * span)) }
+        val installed = arrayOfNulls<GrowthInk>(stamps.size)
+
+        fun tryOrbit(
+            first: Int,
+            end: Int,
+            radius: Double,
+            oldAlpha: Int,
+        ): Boolean {
+            var staged = 0
+            var alpha = 0
+            try {
+                for (i in first until end) {
+                    context.ensureActive()
+                    val stamp = stamps[i]
+                    val ink = trial[i - first]
+                    mask.raster(stamp, glyphs[stamp.orbit.icon], radius, ink)
+                    if (!mask.isClear(ink)) return false
+                    // Stage all but the last member so later copies see their halo.
+                    if (i < end - 1) {
+                        mask.mark(ink, 1)
+                        staged++
+                    }
+                    alpha += ink.alpha
+                }
+                if (alpha <= oldAlpha) return false
+                for (i in first until end) {
+                    context.ensureActive()
+                    if (!collision.isClear(i, first, end, radius)) return false
+                }
+            } finally {
+                for (i in 0 until staged) mask.mark(trial[i], -1)
+            }
+            val previous = winner
+            winner = trial
+            trial = previous
+            return true
+        }
+
+        for (i in stamps.indices) {
+            if (i % 16 == 0) context.ensureActive()
+            val stamp = stamps[i]
+            val ink = trial[0]
+            mask.raster(stamp, glyphs[stamp.orbit.icon], stamp.orbit.radius, ink)
+            mask.mark(ink, 1)
+            if (i >= firstFiller && cap(stamp.orbit) > stamp.orbit.radius) installed[i] = ink.compactCopy()
+        }
+        for (first in firstFiller until stamps.size step stampsPerOrbit) {
+            context.ensureActive()
+            val orbit = stamps[first].orbit
+            val start = orbit.radius
+            val cap = cap(orbit)
+            if (cap <= start) continue
+            val end = first + stampsPerOrbit
+            var oldAlpha = 0
+            for (i in first until end) {
+                val ink = checkNotNull(installed[i])
+                mask.mark(ink, -1)
+                oldAlpha += ink.alpha
+            }
+            try {
+                // ponytail: scan down by 1/2 px, then try 1/16 px samples in
+                // the top successful bracket. Raster fit is not monotonic.
+                var radius = cap
+                var accepted = false
+                while (radius > start) {
+                    if (tryOrbit(first, end, radius, oldAlpha)) {
+                        accepted = true
+                        break
+                    }
+                    radius -= GROWTH_STEP
+                }
+                if (radius < cap) {
+                    val lower = maxOf(start, radius)
+                    var fine = radius + GROWTH_STEP - GROWTH_FINE_STEP
+                    while (fine > lower) {
+                        if (tryOrbit(first, end, fine, oldAlpha)) {
+                            accepted = true
+                            radius = fine
+                            break
+                        }
+                        fine -= GROWTH_FINE_STEP
+                    }
+                }
+                if (accepted) {
+                    orbit.radius = radius
+                    collision.invalidate(first, end)
+                }
+            } finally {
+                for (i in first until end) {
+                    val ink = if (orbit.radius > start) winner[i - first] else checkNotNull(installed[i])
+                    mask.mark(ink, 1)
+                    installed[i] = null
+                }
+            }
+        }
+    } finally {
+        bitmap.recycle()
+    }
+}
+
 // The closest D4 copy is across a horizontal, diagonal, or periodic vertical edge of the wedge.
 private fun fillerSelfClearance(
     x: Float,
@@ -761,6 +1090,8 @@ private fun fillerSelfClearance(
     return (distance - FILLER_GAP) / 2
 }
 
+private fun oversizeFactor(percent: Int): Double = if (percent <= STANDARD_SCALE_LIMIT) 1.0 else (percent.toDouble() / STANDARD_SCALE_LIMIT).pow(0.65)
+
 private suspend fun layout(
     pattern: WallpaperPattern,
     glyphs: Array<WallpaperGlyph>,
@@ -772,6 +1103,9 @@ private suspend fun layout(
     val leads = if (leadIndices.isEmpty()) null else WeightedIcons(pattern, leadIndices)
     val mode = pattern.layout.effective
     var n = if (fillers == null) 7 + (8 * pattern.density / 100.0).roundToInt() else 12
+    val spacingIcons = leadIndices.ifEmpty { fillerIndices }
+    val spacingScale = maxOf(pattern.size, spacingIcons.minOfOrNull { pattern.icons[it].scale ?: 100 } ?: 100)
+    n = (n / oversizeFactor(spacingScale)).roundToInt().coerceAtLeast(4)
     if (n % 2 != 0 && (mode == WallpaperPatternLayout.DIAGONAL || mode == WallpaperPatternLayout.KALEIDOSCOPE)) n++
     val c = PERIOD.toDouble() / n
     val center = PERIOD / 2.0
@@ -789,6 +1123,7 @@ private suspend fun layout(
         }
     val stamps = ArrayList<Stamp>(leadCount + fillerTarget * stampsPerOrbit)
     val sizes = DoubleArray(pattern.icons.size) { (pattern.size * (pattern.icons[it].scale ?: 100) / 10000.0).pow(0.65) }
+    val radiusLimits = DoubleArray(pattern.icons.size) { oversizeFactor(maxOf(pattern.size, pattern.icons[it].scale ?: 100)) }
     // A nominal radius used to fit half the viewport diagonal, transparent margins included.
     // Fit the visible envelope now, but tiny centered artwork may grow by at most 1.55× at the same nominal size.
     val inkFractions =
@@ -819,7 +1154,7 @@ private suspend fun layout(
         val rotation = angle(random, icon, baseAngle)
         val sample = random.nextDouble()
         val radiusFactor = if (pattern.icons[icon].scale == null) 0.23 + 0.48 * sample else 0.43
-        val radius = min(MAX_LEAD_RADIUS, c * radiusFactor * sizes[icon]) * inkFractions[icon]
+        val radius = min(MAX_LEAD_RADIUS * radiusLimits[icon], c * radiusFactor * sizes[icon]) * inkFractions[icon]
         val orbit = Orbit(icon, rotation, radius)
         if (symmetric) mirrorOrbit(x, y, orbit, stamps) else stamps += Stamp(wrapped(x), wrapped(y), rotation, false, orbit)
     }
@@ -973,7 +1308,7 @@ private suspend fun layout(
             // Auto picks a size from the space actually available: don't spend a
             // large hole on a tiny random accent. Retain some variety in open space.
             val factor = if (automatic) 0.26 + 0.07 * sample else 0.20
-            val intended = min(MAX_FILLER_RADIUS, unit * factor) * inkFractions[icon]
+            val intended = min(MAX_FILLER_RADIUS * radiusLimits[icon], unit * factor) * inkFractions[icon]
             val minimum = min(6.0, if (automatic) unit * 0.10 * inkFractions[icon] * 0.67 else intended * 0.67)
             val tie = (fillerRandom.nextInt().toLong() shl 32) + index++
             val self = fillerSelfClearance(cx, cy, symmetric)
@@ -1035,6 +1370,8 @@ private suspend fun layout(
         }
         added++
     }
-    refineFillers(stamps, firstFiller, stampsPerOrbit, glyphs)
+    val maxFillerRadius = MAX_FILLER_RADIUS * fillerIndices.maxOf { radiusLimits[it] }
+    refineFillers(stamps, firstFiller, stampsPerOrbit, glyphs, maxFillerRadius)
+    growFillers(pattern, stamps, firstFiller, stampsPerOrbit, glyphs, MAX_FILLER_RADIUS * oversizeFactor(pattern.size))
     return stamps
 }

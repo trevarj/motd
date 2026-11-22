@@ -351,7 +351,7 @@ class WallpaperWorkshopUiTest {
         reveal("wallpaper_icon_size_auto").assertIsSelected()
         node("wallpaper_icon_size").assertDoesNotExist()
         click("wallpaper_icon_size_fixed")
-        setProgress("wallpaper_icon_size", 250f)
+        setProgress("wallpaper_icon_size", 400f)
         click("wallpaper_icon_size_auto")
         val sizedIcons = requireNotNull(state.draft).pattern.icons
         assertNull(sizedIcons.single().scale)
@@ -377,6 +377,8 @@ class WallpaperWorkshopUiTest {
         click("wallpaper_layout_waves")
         node("wallpaper_layout_rings").assertDoesNotExist()
         setProgress("wallpaper_size", 25f)
+        assertEquals(25, requireNotNull(state.draft).pattern.size)
+        setProgress("wallpaper_size", 400f)
         click("wallpaper_tab_color")
         setProgress("wallpaper_intensity", 0f)
         click("wallpaper_background_custom")
@@ -384,11 +386,11 @@ class WallpaperWorkshopUiTest {
         click("settings_wallpaper_color_apply")
         val pattern = requireNotNull(state.draft).pattern
         assertEquals(WallpaperPatternLayout.WAVES, pattern.layout)
-        assertEquals(25, pattern.size)
+        assertEquals(400, pattern.size)
         assertEquals(0, pattern.intensity)
         assertEquals(WHITE, pattern.background)
         assertEquals(SPARK, pattern.icons.single().assetId)
-        assertEquals(250, pattern.icons.single().scale)
+        assertEquals(400, pattern.icons.single().scale)
         assertEquals(-35, pattern.icons.single().rotation)
         assertTrue(pattern.icons.single().filler)
     }

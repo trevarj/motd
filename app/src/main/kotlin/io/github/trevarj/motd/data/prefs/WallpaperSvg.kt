@@ -172,7 +172,20 @@ internal class WallpaperGlyph private constructor(
     /** Conservative radius of clipped stroke ink about the viewport center, in viewBox units. */
     val inkRadius: Double,
     private val content: SvgDrawing,
+    collisionOutlineAllowed: Boolean,
 ) {
+    private val collisionOutline: Path? by lazy(LazyThreadSafetyMode.NONE) {
+        if (!collisionOutlineAllowed) {
+            null
+        } else {
+            val viewport = Path().apply { addRect(0f, 0f, width, height, Path.Direction.CW) }
+            val outline = Path()
+            outline.takeIf {
+                content.unionOutline(outline) && outline.op(viewport, Path.Op.INTERSECT) && !outline.isEmpty
+            }
+        }
+    }
+
     // Android Path can memoize native bounds; a cached glyph may be drawn by both tile workers.
     @Synchronized
     fun draw(
@@ -191,6 +204,13 @@ internal class WallpaperGlyph private constructor(
         }
     }
 
+    /**
+     * Returns an independent copy of the clipped stroke geometry in normalized viewBox units.
+     * If unavailable, callers needing a safe bound must use the circular [inkRadius] envelope.
+     */
+    @Synchronized
+    internal fun copyCollisionOutline(): Path? = collisionOutline?.let { Path(it) }
+
     companion object {
         internal fun parse(svg: String): WallpaperGlyph {
             val xml = svg.removePrefix("\uFEFF")
@@ -204,7 +224,13 @@ internal class WallpaperGlyph private constructor(
                     }
                 val decoder = SvgDecoder(parser)
                 val content = decoder.read()
-                return WallpaperGlyph(decoder.width, decoder.height, decoder.inkRadius, content)
+                return WallpaperGlyph(
+                    decoder.width,
+                    decoder.height,
+                    decoder.inkRadius,
+                    content,
+                    collisionOutlineAllowed = decoder.segmentCount <= MAX_COLLISION_SEGMENTS,
+                )
             } catch (error: XmlPullParserException) {
                 throw WallpaperSvgException(WallpaperSvgError.UNSUPPORTED, error)
             } catch (error: IOException) {
@@ -224,6 +250,8 @@ private sealed interface SvgDrawing {
         paint: Paint,
     )
 
+    fun unionOutline(destination: Path): Boolean
+
     class Stroke(
         private val outline: Path,
         private val alpha: Int,
@@ -235,6 +263,13 @@ private sealed interface SvgDrawing {
         ) {
             paint.color = (ink and 0x00FFFFFF) or ((((ink ushr 24) * alpha + 127) / 255) shl 24)
             canvas.drawPath(outline, paint)
+        }
+
+        override fun unionOutline(destination: Path): Boolean {
+            // Each stroke is filled independently; adding contours could cancel mirrored ink.
+            if (!destination.isEmpty) return destination.op(outline, Path.Op.UNION)
+            destination.set(outline)
+            return true
         }
     }
 
@@ -252,6 +287,11 @@ private sealed interface SvgDrawing {
             for (node in nodes) node.draw(canvas, ink, paint)
             if (layer >= 0) canvas.restoreToCount(layer)
         }
+
+        override fun unionOutline(destination: Path): Boolean {
+            for (node in nodes) if (!node.unionOutline(destination)) return false
+            return true
+        }
     }
 }
 
@@ -266,7 +306,8 @@ private class SvgDecoder(
         private set
     private var namespace = ""
     private var shapeCount = 0
-    private var segmentCount = 0
+    var segmentCount = 0
+        private set
     private var hasVisibleStroke = false
     private val bounds = RectF()
     private val matrixValues = FloatArray(9)
@@ -1018,6 +1059,9 @@ private const val MAX_BYTES = 16_384
 private const val MAX_COORDINATE = 16_384f
 private const val MAX_SHAPES = 96
 private const val MAX_SEGMENTS = 1_024
+
+// PathOps can split stroked curves at intersections; give packing a tighter budget than rendering.
+private const val MAX_COLLISION_SEGMENTS = 256
 private const val MAX_DEPTH = 8
 private const val SVG_NS = "http://www.w3.org/2000/svg"
 private const val SQRT_HALF = 0.7071067811865476

@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.prefs
 
 import android.content.Context
+import android.graphics.Path
 import android.net.Uri
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -64,6 +65,32 @@ class WallpaperWorkshopTest {
         }
     }
 
+    @Test fun collisionOutlineKeepsMirroredInkAndClipsToViewport() {
+        val svg =
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="black" stroke-width="2">
+              <circle cx="10" cy="10" r="4"/>
+              <circle cx="10" cy="10" r="4" transform="translate(20 0) scale(-1 1)"/>
+              <line x1="-6" y1="2" x2="3" y2="2"/>
+            </svg>
+            """.trimIndent()
+        val ink = requireNotNull(WallpaperGlyph.parse(svg).copyCollisionOutline())
+
+        fun hasInk(
+            x: Float,
+            y: Float,
+        ): Boolean {
+            val sample = Path().apply { addRect(x - 0.25f, y - 0.25f, x + 0.25f, y + 0.25f, Path.Direction.CW) }
+            check(sample.op(ink, Path.Op.INTERSECT))
+            return !sample.isEmpty
+        }
+
+        assertTrue("Oppositely oriented strokes still paint the same ring", hasInk(14f, 10f))
+        assertFalse("The ring center remains transparent", hasInk(10f, 10f))
+        assertTrue("The visible part of the line remains", hasInk(1f, 2f))
+        assertFalse("The line is clipped outside the viewport", hasInk(-2f, 2f))
+    }
+
     @Test fun oldRingRecipesAndExplicitAnglesRemainPortable() {
         val legacy =
             """{"designs":[{"id":"00000000-0000-4000-8000-000000000011","name":"Old design","pattern":{"layout":"RINGS","seed":42,"variation":30,"icons":[{"assetId":"builtin:rocket","scale":100,"rotation":0},{"assetId":"builtin:comet","scale":150,"rotation":-15}]}}]}"""
@@ -80,14 +107,16 @@ class WallpaperWorkshopTest {
             old.copy(
                 pattern =
                     old.pattern.copy(
-                        size = 250,
+                        size = 400,
                         texture = WallpaperTexture.LINEN,
-                        icons = listOf(rocket.copy(scale = 225), comet.copy(scale = null, rotation = null, filler = true)),
+                        icons = listOf(rocket.copy(scale = 400), comet.copy(scale = null, rotation = null, filler = true)),
                     ),
             )
         val modern = library.copy(designs = listOf(authored))
         val encoded = encodeWallpaperLibrary(modern)
         assertEquals(modern, decodeWallpaperLibrary(encoded))
+        assertTrue(runCatching { decodeWallpaperLibrary(encoded.replace("\"size\":400", "\"size\":401")) }.isFailure)
+        assertTrue(runCatching { decodeWallpaperLibrary(encoded.replace("\"scale\":400", "\"scale\":401")) }.isFailure)
         assertTrue(runCatching { decodeWallpaperLibrary(encoded.replace("\"filler\":true", "\"filler\":\"true\"")) }.isFailure)
         assertTrue(runCatching { decodeWallpaperLibrary(encoded.replace("\"LINEN\"", "\"unsupported\"")) }.isFailure)
     }

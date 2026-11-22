@@ -216,9 +216,11 @@ class WallpaperPatternTileTest {
             val mixed = listOf(WallpaperPatternIcon(imports[0].id), filler)
             for (layout in WallpaperPatternLayout.entries.filterNot { it == WallpaperPatternLayout.RINGS }) {
                 val dense = recipe.copy(layout = layout, size = 175, density = 100, icons = mixed)
-                val key = wallpaperPatternTileKey(dense, Color(0x80FFFFFF), 1024f)
-                val tile = requireNotNull(renderWallpaperPatternTile(context, key, imports))
-                assertEquals("Overlapping stamps or wrapped copies in $layout", 128, tile.pixels().maxOf(AndroidColor::alpha))
+                for (edge in listOf(512f, 1536f)) {
+                    val key = wallpaperPatternTileKey(dense, Color(0x80FFFFFF), edge)
+                    val tile = requireNotNull(renderWallpaperPatternTile(context, key, imports))
+                    assertEquals("Overlapping stamps or wrapped copies in $layout at $edge px", 128, tile.pixels().maxOf(AndroidColor::alpha))
+                }
             }
         }
 
@@ -253,6 +255,38 @@ class WallpaperPatternTileTest {
             assertTrue("A fixed zero angle must stay upright even at full variation", upright.sameAs(renderFixture(fullVariation)))
             val auto = fullVariation.copy(icons = listOf(largeIcon.copy(rotation = null)))
             assertFalse("Automatic rotation must vary the asymmetric glyph", upright.sameAs(renderFixture(auto)))
+        }
+
+    @Test fun fourHundredPercentMakesIndividualMotifsLargerThanTheOldMaximum() =
+        runBlocking {
+            val stroke = outline("M3 12H21")
+            val icon = WallpaperPatternIcon(stroke.id, rotation = 0)
+            val recipe = WallpaperPattern(layout = WallpaperPatternLayout.ROWS, seed = 42, density = 0, variation = 0, icons = listOf(icon))
+
+            suspend fun longestStroke(pattern: WallpaperPattern): Int {
+                val key = wallpaperPatternTileKey(pattern, Color.White, 512f)
+                val bitmap = requireNotNull(renderWallpaperPatternTile(context, key, listOf(stroke)))
+                val pixels = bitmap.pixels()
+                var longest = 0
+                for (y in 0 until bitmap.height) {
+                    var run = 0
+                    for (x in 0 until bitmap.width) {
+                        run = if (AndroidColor.alpha(pixels[y * bitmap.width + x]) > 127) run + 1 else 0
+                        longest = maxOf(longest, run)
+                    }
+                }
+                return longest
+            }
+
+            for (filler in listOf(false, true)) {
+                val fixed = icon.copy(filler = filler)
+                val previous = longestStroke(recipe.copy(icons = listOf(fixed.copy(scale = 250))))
+                val larger = longestStroke(recipe.copy(icons = listOf(fixed.copy(scale = 400))))
+                assertTrue("400% fixed scale must make larger motifs (filler=$filler): $previous → $larger", larger > previous * 1.15)
+            }
+            val previous = longestStroke(recipe.copy(size = 250))
+            val larger = longestStroke(recipe.copy(size = 400))
+            assertTrue("400% overall scale must make larger motifs: $previous → $larger", larger > previous * 1.15)
         }
 
     @Test fun paintUsesExactFixedColorsAndDoesNotBakeIntensityOrBackground() =
@@ -366,7 +400,8 @@ class WallpaperPatternTileTest {
                     val covered = pixels.count { AndroidColor.alpha(it) > 31 }
                     assertTrue("${starter.id} lacked visible strokes", covered > pixels.size / 150)
                     if (starter.id == "motd") {
-                        assertTrue("MOTD's default tile lost its dense ink coverage: $covered pixels", covered * 8 > pixels.size)
+                        val inkCoverage = pixels.sumOf { AndroidColor.alpha(it).toLong() } / (255.0 * pixels.size)
+                        assertTrue("MOTD's default tile must use at least 20.5% ink: $inkCoverage", inkCoverage >= 0.205)
                     }
                     assertTrue("${starter.id} covered the entire backdrop", pixels.count { it == AndroidColor.TRANSPARENT } > pixels.size / 2)
                     val ink = wallpaperPatternPaint(bitmap, period, starter.pattern.intensity)
