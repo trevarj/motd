@@ -25,10 +25,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -95,11 +98,13 @@ data class SearchUiState(
     /** True when this screen was launched scoped to a buffer (enables the "current" chip). */
     val hasBufferScope: Boolean = false,
     /**
-     * Channel/DM name matches ("smart" results): shown as a row above the message-content groups
-     * below, so a query matching a room's name surfaces it even when no message matches. Populated
-     * only for [SearchScope.ALL] searches.
+     * Local channel/DM name matches, only for [SearchScope.ALL]. The preview includes up to
+     * [BUFFER_MATCH_LIMIT] visible rows plus one overflow sentinel; the expanded projection has
+     * no cap. Both follow the chat list's order.
      */
     val bufferMatches: List<ChatListRow> = emptyList(),
+    /** Whether [bufferMatches] is the ready, uncapped projection, even when it is empty. */
+    val bufferMatchesExpanded: Boolean = false,
     val groups: List<SearchGroup> = emptyList(),
     val searching: Boolean = false,
     /** What the searched corpus covers for the active scope; null until the first emission. */
@@ -169,6 +174,17 @@ private data class KeyedSearchState(
     val state: SearchUiState,
 )
 
+private data class SearchInput(
+    val key: SearchKey = SearchKey(),
+    val bufferMatchesExpanded: Boolean = false,
+)
+
+private data class KeyedBufferMatches(
+    val key: SearchKey,
+    val matches: List<ChatListRow> = emptyList(),
+    val expanded: Boolean = false,
+)
+
 /** Availability plus the transient server-search result, kept outside the keyed local pipeline. */
 private data class ServerSection(
     val available: Boolean = false,
@@ -187,7 +203,8 @@ class SearchViewModel
          * State changes atomically by logical query and scope. This clears old results before any
          * debounce and blocks late emissions from superseded keys.
          */
-        private val searchKey = MutableStateFlow(SearchKey())
+        private val searchInput = MutableStateFlow(SearchInput())
+        private val searchKeys = searchInput.map { it.key }.distinctUntilChanged()
 
         private val serverSection = MutableStateFlow(ServerSection())
 
@@ -199,7 +216,7 @@ class SearchViewModel
 
         fun init(bufferId: Long?) {
             cancelServerSearch()
-            searchKey.update { key ->
+            updateSearchKey { key ->
                 val scoped = bufferId != null
                 key.copy(
                     bufferId = bufferId,
@@ -222,8 +239,8 @@ class SearchViewModel
                             buffer != null &&
                                 buffer.type != BufferType.SERVER &&
                                 connectionManager.serverSearchAvailable(buffer.networkId)
-                        if (!available && searchKey.value.scope == SearchScope.SERVER) {
-                            searchKey.update { it.copy(scope = SearchScope.CURRENT) }
+                        if (!available && searchInput.value.key.scope == SearchScope.SERVER) {
+                            updateSearchKey { it.copy(scope = SearchScope.CURRENT) }
                             cancelServerSearch()
                         }
                         serverSection.update { it.copy(available = available) }
@@ -232,7 +249,7 @@ class SearchViewModel
         }
 
         fun onServerSearchSubmit() {
-            val key = searchKey.value
+            val key = searchInput.value.key
             if (key.scope != SearchScope.SERVER) return
             val buffer =
                 serverBuffer ?: run {
@@ -272,7 +289,7 @@ class SearchViewModel
                         ) {
                             ServerSearchState.Failed(ServerSearchError.UNAVAILABLE)
                         }
-                    if (serverGeneration == generation && searchKey.value == key && serverBuffer?.id == buffer.id) {
+                    if (serverGeneration == generation && searchInput.value.key == key && serverBuffer?.id == buffer.id) {
                         serverSection.update { it.copy(state = outcome) }
                     }
                 }
@@ -316,7 +333,7 @@ class SearchViewModel
 
         @OptIn(ExperimentalCoroutinesApi::class)
         private val localState: Flow<KeyedSearchState> =
-            searchKey
+            searchKeys
                 .flatMapLatest { key ->
                     val states =
                         when {
@@ -348,7 +365,7 @@ class SearchViewModel
                     searchRepository.search(parsed.text, scopeId),
                     searchRepository.coverage(scopeId),
                 ) { result, coverage -> result to coverage }.collect { (result, coverage) ->
-                    if (searchKey.value == key) {
+                    if (searchInput.value.key == key) {
                         val filtered =
                             parsed.fromNick?.let { nick ->
                                 result.hits.filter { it.message.sender.equals(nick, ignoreCase = true) }
@@ -365,19 +382,25 @@ class SearchViewModel
             }
 
         @OptIn(ExperimentalCoroutinesApi::class)
-        private val bufferMatches: Flow<Pair<SearchKey, List<ChatListRow>>> =
-            searchKey.flatMapLatest { key ->
-                val parsed = parseSearchQuery(key.rawQuery)
-                if (key.scope != SearchScope.ALL || parsed.text.isBlank()) {
-                    flowOf(key to emptyList())
+        private val bufferMatches: Flow<KeyedBufferMatches> =
+            searchKeys.flatMapLatest { key ->
+                val query = parseSearchQuery(key.rawQuery).text
+                if (key.scope != SearchScope.ALL || query.isBlank()) {
+                    flowOf(KeyedBufferMatches(key))
                 } else {
-                    bufferRepository.observeChatList().map { rows -> key to matchingBufferRows(rows, parsed.text) }
+                    combine(
+                        bufferRepository.observeChatList(),
+                        searchInput.filter { it.key == key }.map { it.bufferMatchesExpanded }.distinctUntilChanged(),
+                    ) { rows, expanded ->
+                        val limit = if (expanded) null else BUFFER_MATCH_LIMIT + 1
+                        KeyedBufferMatches(key, matchingBufferRows(rows, query, limit), expanded)
+                    }.onStart { emit(KeyedBufferMatches(key)) }
                 }
             }
 
         val state: StateFlow<SearchUiState> =
-            combine(localState, serverSection, bufferMatches, searchKey, searchRepository.visibility) { keyed, server, match, current, visibility ->
-                val (matchKey, matches) = match
+            combine(localState, serverSection, bufferMatches, searchInput, searchRepository.visibility) { keyed, server, match, input, visibility ->
+                val current = input.key
                 val local =
                     if (keyed.key == current) {
                         keyed.state
@@ -386,11 +409,12 @@ class SearchViewModel
                     }
                 local.copy(
                     bufferMatches =
-                        if (matchKey == current) {
-                            matches
-                        } else {
-                            emptyList()
+                        when {
+                            match.key != current -> emptyList()
+                            !input.bufferMatchesExpanded && match.matches.size > BUFFER_MATCH_LIMIT + 1 -> match.matches.take(BUFFER_MATCH_LIMIT + 1)
+                            else -> match.matches
                         },
+                    bufferMatchesExpanded = match.key == current && match.expanded && input.bufferMatchesExpanded,
                     visibility = visibility,
                     serverSearchAvailable = server.available,
                     server = if (local.scope == SearchScope.SERVER) server.state else ServerSearchState.Idle,
@@ -401,13 +425,31 @@ class SearchViewModel
                 initialValue = SearchUiState(),
             )
 
+        fun setBufferMatchesExpanded(expanded: Boolean) {
+            searchInput.update { input ->
+                if (input.bufferMatchesExpanded == expanded) return@update input
+                if (!expanded || (input.key.scope == SearchScope.ALL && parseSearchQuery(input.key.rawQuery).text.isNotBlank())) {
+                    input.copy(bufferMatchesExpanded = expanded)
+                } else {
+                    input
+                }
+            }
+        }
+
+        private fun updateSearchKey(transform: (SearchKey) -> SearchKey) {
+            searchInput.update { input ->
+                val key = transform(input.key)
+                if (key == input.key) input else SearchInput(key)
+            }
+        }
+
         fun onQueryChange(q: String) {
-            searchKey.update { it.copy(rawQuery = q) }
+            updateSearchKey { it.copy(rawQuery = q) }
             cancelServerSearch()
         }
 
         fun onScopeChange(scope: SearchScope) {
-            searchKey.update { it.copy(scope = scope) }
+            updateSearchKey { it.copy(scope = scope) }
             cancelServerSearch()
         }
 
@@ -416,27 +458,26 @@ class SearchViewModel
         }
     }
 
-/** Cap on the "smart" channel/DM match row: a handful of best fits, not a second results list. */
+/** Number of visible channel/DM chips in the preview row. */
 internal const val BUFFER_MATCH_LIMIT = 5
 
 /**
- * Room-name matches for the "smart" results row: non-archived, non-server rows whose display name
- * contains [query] (case-insensitive substring — this is name matching, not FTS). Pure and ordered
- * by the chat list's own order (already pinned/recency-sorted), so no extra ranking logic is needed
- * here.
+ * Local channel/DM name matches: non-archived, non-server rows whose display name contains
+ * [query] (case-insensitive substring — this is name matching, not FTS). Preserves the chat
+ * list's order (already pinned/recency-sorted). A null [limit] returns all matches.
  */
 internal fun matchingBufferRows(
     rows: List<ChatListRow>,
     query: String,
-    limit: Int = BUFFER_MATCH_LIMIT,
+    limit: Int? = BUFFER_MATCH_LIMIT,
 ): List<ChatListRow> {
     if (query.isBlank()) return emptyList()
-    return rows
-        .asSequence()
-        .filter { it.type != BufferType.SERVER && !it.archived }
-        .filter { it.displayName.contains(query, ignoreCase = true) }
-        .take(limit)
-        .toList()
+    val matches =
+        rows
+            .asSequence()
+            .filter { it.type != BufferType.SERVER && !it.archived }
+            .filter { it.displayName.contains(query, ignoreCase = true) }
+    return (if (limit == null) matches else matches.take(limit)).toList()
 }
 
 /** Group hits by buffer, preserving overall recency order (hits already time-ordered by DAO). */

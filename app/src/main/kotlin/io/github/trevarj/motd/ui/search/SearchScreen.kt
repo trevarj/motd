@@ -11,10 +11,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -30,22 +33,28 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.SearchOff
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,8 +65,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -100,11 +112,13 @@ import io.github.trevarj.motd.ui.theme.LocalTimestampConfig
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdShapes
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.ensureContrast
 import io.github.trevarj.motd.ui.theme.readableFilledTextFieldColors
 import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.theme.readingInk
+import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.components.EmojiTextField as TextField
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -195,6 +209,7 @@ fun SearchScreen(
         // A name match carries no message target — same "open the buffer, no jump" shape as a
         // server hit missing both a time and an id would need, just without that ever happening.
         onOpenBufferMatch = { bufferId -> onOpenHit(bufferId, null, 0L, null) },
+        onBufferMatchesExpandedChange = viewModel::setBufferMatchesExpanded,
         onTranslateLocalHit =
             if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures) {
                 { hit -> aiTextViewModel.openStoredMessage(hit.message.bufferId, hit.message.id) }
@@ -227,6 +242,7 @@ fun SearchContent(
     onOpenBufferMatch: (Long) -> Unit = {},
     onTranslateLocalHit: ((SearchHit) -> Unit)? = null,
     onTranslateServerHit: ((ServerHitUi, Long, Int) -> Unit)? = null,
+    onBufferMatchesExpandedChange: (Boolean) -> Unit = {},
 ) {
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -237,6 +253,21 @@ fun SearchContent(
     var text by rememberSaveable(stateSaver = TextFieldValue.Saver) {
         mutableStateOf(TextFieldValue(state.rawQuery))
     }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val setMatchesExpanded by rememberUpdatedState(onBufferMatchesExpandedChange)
+    var matchesSheetOpen by remember(state.rawQuery, state.scope) { mutableStateOf(false) }
+
+    fun closeMatchesSheet() {
+        if (!matchesSheetOpen) return
+        matchesSheetOpen = false
+        setMatchesExpanded(false)
+    }
+
+    fun changeScope(scope: SearchScope) {
+        if (scope != state.scope) closeMatchesSheet()
+        onScopeChange(scope)
+    }
+
     // The ViewModel publishes a new key immediately, but Compose may render this local edit one
     // frame before the collected state advances. Never let that frame show old rows or highlights.
     val visibleState =
@@ -246,6 +277,7 @@ fun SearchContent(
             state.copy(
                 rawQuery = text.text,
                 bufferMatches = emptyList(),
+                bufferMatchesExpanded = false,
                 groups = emptyList(),
                 truncated = false,
                 searching = !isEmptySearchQuery(text.text),
@@ -268,6 +300,7 @@ fun SearchContent(
                     TextField(
                         value = text,
                         onValueChange = {
+                            if (text.text != it.text) closeMatchesSheet()
                             text = it
                             onQueryChange(it.text)
                         },
@@ -287,6 +320,7 @@ fun SearchContent(
                             ) {
                                 IconButton(
                                     onClick = {
+                                        closeMatchesSheet()
                                         text = clearedSearchText()
                                         onQueryChange("")
                                     },
@@ -334,20 +368,20 @@ fun SearchContent(
                 ) {
                     FilterChip(
                         selected = visibleState.scope == SearchScope.ALL,
-                        onClick = { onScopeChange(SearchScope.ALL) },
+                        onClick = { changeScope(SearchScope.ALL) },
                         label = { Text(stringResource(R.string.search_chip_all)) },
                         leadingIcon = if (visibleState.scope == SearchScope.ALL) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
                     )
                     FilterChip(
                         selected = visibleState.scope == SearchScope.CURRENT,
-                        onClick = { onScopeChange(SearchScope.CURRENT) },
+                        onClick = { changeScope(SearchScope.CURRENT) },
                         label = { Text(stringResource(R.string.search_chip_current)) },
                         leadingIcon = if (visibleState.scope == SearchScope.CURRENT) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
                     )
                     if (visibleState.serverSearchAvailable) {
                         FilterChip(
                             selected = visibleState.scope == SearchScope.SERVER,
-                            onClick = { onScopeChange(SearchScope.SERVER) },
+                            onClick = { changeScope(SearchScope.SERVER) },
                             label = { Text(stringResource(R.string.search_chip_server)) },
                             leadingIcon = if (visibleState.scope == SearchScope.SERVER) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
                             modifier = Modifier.testTag("search_scope_server"),
@@ -423,12 +457,40 @@ fun SearchContent(
                             truncated = visibleState.truncated,
                             onOpenHit = onOpenHit,
                             onOpenBufferMatch = onOpenBufferMatch,
+                            onShowAllBufferMatches =
+                                if (visibleState.scope == SearchScope.ALL && visibleState.bufferMatches.size > BUFFER_MATCH_LIMIT) {
+                                    {
+                                        if (!matchesSheetOpen && text.text == state.rawQuery) {
+                                            keyboard?.hide()
+                                            matchesSheetOpen = true
+                                            setMatchesExpanded(true)
+                                        }
+                                    }
+                                } else {
+                                    null
+                                },
                             onTranslateHit = onTranslateLocalHit,
                         )
                     }
                 }
             }
         }
+    }
+
+    if (matchesSheetOpen && text.text == state.rawQuery && state.scope == SearchScope.ALL) {
+        // Also release the full projection if this visit disappears externally (e.g. rotation).
+        DisposableEffect(Unit) {
+            onDispose { if (matchesSheetOpen) setMatchesExpanded(false) }
+        }
+        BufferMatchesSheet(
+            matches = state.bufferMatches,
+            expanded = state.bufferMatchesExpanded,
+            onDismiss = { closeMatchesSheet() },
+            onOpen = { bufferId ->
+                closeMatchesSheet()
+                onOpenBufferMatch(bufferId)
+            },
+        )
     }
 }
 
@@ -492,19 +554,40 @@ private fun SearchResults(
     truncated: Boolean,
     onOpenHit: (SearchHit) -> Unit,
     onOpenBufferMatch: (Long) -> Unit = {},
+    onShowAllBufferMatches: (() -> Unit)? = null,
     onTranslateHit: ((SearchHit) -> Unit)? = null,
 ) {
     val dickordEnabled = LocalDickordLabsEnabled.current
     LazyColumn(modifier = Modifier.fillMaxSize().testTag("search_results")) {
         if (bufferMatches.isNotEmpty()) {
             item(key = "buffer_matches_header") {
-                Text(
-                    text = stringResource(R.string.search_section_buffers),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
-                )
+                FlowRow(
+                    modifier =
+                        Modifier.fillMaxWidth().padding(
+                            start = 16.dp,
+                            end = 8.dp,
+                            top = if (onShowAllBufferMatches == null) 16.dp else 4.dp,
+                            bottom = 4.dp,
+                        ),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.Start),
+                    itemVerticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.search_section_buffers),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (onShowAllBufferMatches != null) {
+                        TextButton(
+                            colors = readableTextButtonColors(),
+                            onClick = onShowAllBufferMatches,
+                            modifier = Modifier.testTag("search_buffer_matches_see_all"),
+                        ) {
+                            Text(stringResource(R.string.search_buffer_matches_see_all))
+                        }
+                    }
+                }
             }
             item(key = "buffer_matches_row") {
                 LazyRow(
@@ -512,7 +595,8 @@ private fun SearchResults(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     contentPadding = PaddingValues(horizontal = 16.dp),
                 ) {
-                    items(bufferMatches, key = { it.bufferId }) { row ->
+                    items(count = minOf(bufferMatches.size, BUFFER_MATCH_LIMIT), key = { bufferMatches[it].bufferId }) { index ->
+                        val row = bufferMatches[index]
                         BufferMatchChip(row = row, onClick = { onOpenBufferMatch(row.bufferId) })
                     }
                 }
@@ -579,6 +663,75 @@ private fun SearchResults(
                             .padding(16.dp)
                             .testTag("search_truncated_footer"),
                 )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BufferMatchesSheet(
+    matches: List<ChatListRow>,
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onOpen: (Long) -> Unit,
+) {
+    val dickordEnabled = LocalDickordLabsEnabled.current
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        modifier = Modifier.testTag("search_buffer_matches_sheet"),
+    ) {
+        SheetSystemBars()
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.85f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.search_buffer_matches_title),
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f).semantics { heading() },
+                )
+                IconButton(onClick = onDismiss, modifier = Modifier.testTag("search_buffer_matches_close")) {
+                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_dismiss))
+                }
+            }
+            when {
+                !expanded || matches.isEmpty() -> {
+                    Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+                        if (expanded) {
+                            Text(stringResource(R.string.search_buffer_matches_empty))
+                        } else {
+                            CircularProgressIndicator(Modifier.testTag("search_buffer_matches_loading"))
+                        }
+                    }
+                }
+
+                else -> {
+                    LazyColumn(Modifier.fillMaxSize().testTag("search_buffer_matches_list")) {
+                        items(matches, key = { it.bufferId }) { row ->
+                            ListItem(
+                                headlineContent = { Text(dickordChannelLabel(row.displayName, dickordEnabled)) },
+                                supportingContent = { Text(row.networkName) },
+                                leadingContent = {
+                                    Avatar(
+                                        name = row.displayName,
+                                        isChannel = row.type == BufferType.CHANNEL,
+                                        networkId = row.networkId,
+                                        conversationModel = row.avatarOverrideModel,
+                                        size = 40.dp,
+                                    )
+                                },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                modifier =
+                                    Modifier
+                                        .clickable { onOpen(row.bufferId) }
+                                        .testTag("search_buffer_match_sheet_row_${row.bufferId}"),
+                            )
+                        }
+                    }
+                }
             }
         }
     }

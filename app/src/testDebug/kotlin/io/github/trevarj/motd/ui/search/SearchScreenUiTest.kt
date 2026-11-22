@@ -29,6 +29,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
@@ -511,6 +512,100 @@ class SearchScreenUiTest {
         compose.onAllNodesWithTag("search_result_alpha").assertCountEquals(0)
         compose.onAllNodesWithTag("search_result_beta").assertCountEquals(1)
         compose.onAllNodesWithText("beta-only result").assertCountEquals(1)
+    }
+
+    @Test
+    fun sixthChatMatchOffersSheetAndOpensAnOffscreenMatchById() {
+        val matches =
+            (1L..20L).map { id ->
+                bufferMatch("#kotlin-$id").copy(bufferId = id, networkName = if (id == 20L) "OFTC" else "Libera")
+            }
+        var state by mutableStateOf(SearchUiState(rawQuery = "kotlin", bufferMatches = matches.take(5)))
+        var requested = false
+        var opened: Long? = null
+        compose.setContent {
+            MotdTheme {
+                SearchContent(
+                    state = state,
+                    onQueryChange = {},
+                    onScopeChange = {},
+                    onBack = {},
+                    onOpenHit = {},
+                    onOpenBufferMatch = {
+                        assertTrue(!requested)
+                        opened = it
+                    },
+                    onBufferMatchesExpandedChange = { requested = it },
+                )
+            }
+        }
+
+        val seeAll = compose.onNodeWithTag("search_buffer_matches_see_all")
+        val sheet = compose.onNodeWithTag("search_buffer_matches_sheet")
+        seeAll.assertDoesNotExist()
+        sheet.assertDoesNotExist()
+        compose.onNodeWithTag("search_buffer_matches").performScrollToIndex(4)
+        compose.onNodeWithTag("search_buffer_match_5").assertIsDisplayed()
+
+        compose.runOnIdle { state = state.copy(bufferMatches = matches.take(6)) }
+        compose.onNodeWithTag("search_buffer_match_6").assertDoesNotExist()
+        seeAll.assertIsDisplayed().performClick()
+        sheet.assertIsDisplayed()
+        compose.onNodeWithTag("search_buffer_matches_loading").assertIsDisplayed()
+        compose.onNodeWithTag("search_buffer_matches_list").assertDoesNotExist()
+        compose.runOnIdle {
+            assertTrue(requested)
+            state = state.copy(bufferMatches = matches, bufferMatchesExpanded = true)
+        }
+
+        val lastRow = compose.onNodeWithTag("search_buffer_match_sheet_row_20")
+        lastRow.assertDoesNotExist()
+        compose.onNodeWithTag("search_buffer_matches_list").performScrollToIndex(matches.lastIndex)
+        compose.onNodeWithText("OFTC").assertIsDisplayed()
+        compose.onNodeWithText("#kotlin-20").assertIsDisplayed()
+        lastRow.performClick()
+        sheet.assertDoesNotExist()
+        compose.runOnIdle { assertEquals(20L, opened) }
+    }
+
+    @Test
+    fun dismissMatchingChatsPreservesQueryAndMessageHitAfterLiveRemoval() {
+        val preview = (1L..6L).map { id -> bufferMatch("#kotlin-$id").copy(bufferId = id) }
+        var state by mutableStateOf(
+            SearchUiState(
+                rawQuery = "kotlin",
+                bufferMatches = preview,
+                groups = listOf(group(hit(1, "kotlin", "a kotlin message"))),
+            ),
+        )
+        var requested = false
+        compose.setContent {
+            MotdTheme {
+                SearchContent(
+                    state = state,
+                    onQueryChange = {},
+                    onScopeChange = {},
+                    onBack = {},
+                    onOpenHit = {},
+                    onBufferMatchesExpandedChange = { requested = it },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("search_buffer_matches_see_all").performClick()
+        compose.runOnIdle {
+            assertTrue(requested)
+            state = state.copy(bufferMatchesExpanded = true)
+        }
+        compose.onNodeWithTag("search_buffer_match_sheet_row_1").assertIsDisplayed()
+        compose.runOnIdle { state = state.copy(bufferMatches = emptyList()) }
+        compose.onNodeWithText("No matching chats").assertIsDisplayed()
+        compose.onNodeWithTag("search_buffer_matches_close").performClick()
+
+        compose.onNodeWithTag("search_buffer_matches_sheet").assertDoesNotExist()
+        compose.onNodeWithTag("search_field").assertTextEquals("kotlin")
+        compose.onNodeWithTag("search_result_kotlin").assertIsDisplayed()
+        compose.runOnIdle { assertTrue(!requested) }
     }
 
     @Test

@@ -711,6 +711,9 @@
     <string name="search_prompt_title">Search your history</string>
     <string name="search_prompt_message">Type to search. Use from:nick to filter by sender.</string>
     <string name="search_section_buffers">Channels &amp; DMs</string>
+    <string name="search_buffer_matches_see_all">See all matching chats</string>
+    <string name="search_buffer_matches_title">Matching chats</string>
+    <string name="search_buffer_matches_empty">No matching chats</string>
 
     <!-- Global feed: unified cross-buffer conversation stream -->
     <string name="feed_title">Global Feed</string>

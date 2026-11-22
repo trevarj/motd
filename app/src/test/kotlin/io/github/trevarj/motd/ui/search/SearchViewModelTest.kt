@@ -31,7 +31,9 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -192,11 +194,14 @@ class SearchViewModelTest {
 
     private class FakeBufferRepository(
         initial: BufferEntity? = null,
-        private val chatList: List<ChatListRow> = emptyList(),
+        chatList: List<ChatListRow>? = emptyList(),
     ) : BufferRepository {
         val buffers = MutableStateFlow(initial)
+        val chats = MutableStateFlow(chatList)
+        var chatListCollections = 0
+            private set
 
-        override fun observeChatList(): Flow<List<ChatListRow>> = flowOf(chatList)
+        override fun observeChatList(): Flow<List<ChatListRow>> = chats.filterNotNull().onStart { chatListCollections++ }
 
         override fun observeBuffer(id: Long): Flow<BufferEntity?> = buffers
 
@@ -928,11 +933,18 @@ class SearchViewModelTest {
     }
 
     @Test
-    fun buffer_matches_populate_only_for_all_scope() =
+    fun buffer_matches_expand_in_place_and_reset_when_query_or_scope_changes() =
         runTest {
-            val repo = ControlledSearchRepository()
-            repo.emit("motd", null, emptyList())
-            val buffers = FakeBufferRepository(buffer(), chatList = listOf(chatListRow(9, "#motd")))
+            val repo = FakeSearchRepository(listOf(hit(1, "message result")))
+            val ids = listOf(7L, 2L, 5L, 6L, 4L, 3L, 1L)
+            val matchingRows = ids.map { chatListRow(it, "#motd-$it") }
+            val excludedRows =
+                listOf(
+                    chatListRow(9, "#motd-archived", archived = true),
+                    chatListRow(10, "motd-server", type = BufferType.SERVER),
+                    chatListRow(11, "#other"),
+                )
+            val buffers = FakeBufferRepository(buffer(), chatList = null)
             val vm = viewModel(repo, buffers = buffers).also { it.init(BUFFER_ID) }
 
             vm.state.test {
@@ -942,16 +954,64 @@ class SearchViewModelTest {
                 runCurrent()
                 advanceTimeBy(250)
                 runCurrent()
-                val allScope = awaitStateWhere { it.bufferMatches.isNotEmpty() }
-                assertEquals(listOf(9L), allScope.bufferMatches.map(ChatListRow::bufferId))
+                val messagesOnly = awaitStateWhere { it.rawQuery == "motd" && it.groups.isNotEmpty() }
+                assertTrue(messagesOnly.bufferMatches.isEmpty())
+
+                buffers.chats.value = excludedRows + matchingRows
+                val preview = awaitStateWhere { it.groups.isNotEmpty() && it.bufferMatches.isNotEmpty() }
+                assertEquals(ids.take(6), preview.bufferMatches.map(ChatListRow::bufferId))
+                assertEquals(false, preview.bufferMatchesExpanded)
+
+                vm.setBufferMatchesExpanded(true)
+                val expanded = awaitStateWhere { it.bufferMatchesExpanded }
+                assertEquals(ids, expanded.bufferMatches.map(ChatListRow::bufferId))
+                assertEquals(preview.groups, expanded.groups)
+                assertEquals(1, buffers.chatListCollections)
+                assertEquals(1, repo.calls.get())
+
+                vm.setBufferMatchesExpanded(false)
+                val collapsed = awaitStateWhere { !it.bufferMatchesExpanded }
+                assertEquals(preview, collapsed)
+                assertEquals(1, buffers.chatListCollections)
+                assertEquals(1, repo.calls.get())
+
+                vm.setBufferMatchesExpanded(true)
+                awaitStateWhere { it.bufferMatchesExpanded }
+                buffers.chats.value = excludedRows
+                awaitStateWhere { it.bufferMatchesExpanded && it.bufferMatches.isEmpty() }
+
+                buffers.chats.value = excludedRows + matchingRows
+                awaitStateWhere { it.bufferMatchesExpanded && it.bufferMatches.size == ids.size }
+                vm.onQueryChange("other")
+                val other = awaitStateWhere { it.rawQuery == "other" && it.bufferMatches.isNotEmpty() }
+                assertEquals(listOf(11L), other.bufferMatches.map(ChatListRow::bufferId))
+                assertEquals(false, other.bufferMatchesExpanded)
+
+                vm.onQueryChange("motd")
+                val returnedPreview = awaitStateWhere { it.rawQuery == "motd" && it.bufferMatches.isNotEmpty() }
+                assertEquals(preview.bufferMatches, returnedPreview.bufferMatches)
+                assertEquals(false, returnedPreview.bufferMatchesExpanded)
+                vm.setBufferMatchesExpanded(true)
+                awaitStateWhere { it.bufferMatchesExpanded }
+                val chatListCollections = buffers.chatListCollections
 
                 vm.onScopeChange(SearchScope.CURRENT)
                 runCurrent()
-                assertEquals(emptyList<ChatListRow>(), awaitStateWhere { it.scope == SearchScope.CURRENT }.bufferMatches)
+                val currentScope = awaitStateWhere { it.scope == SearchScope.CURRENT }
+                assertEquals(emptyList<ChatListRow>(), currentScope.bufferMatches)
+                assertEquals(false, currentScope.bufferMatchesExpanded)
 
                 vm.onScopeChange(SearchScope.SERVER)
                 runCurrent()
-                assertEquals(emptyList<ChatListRow>(), awaitStateWhere { it.scope == SearchScope.SERVER }.bufferMatches)
+                val serverScope = awaitStateWhere { it.scope == SearchScope.SERVER }
+                assertEquals(emptyList<ChatListRow>(), serverScope.bufferMatches)
+                assertEquals(false, serverScope.bufferMatchesExpanded)
+                assertEquals(chatListCollections, buffers.chatListCollections)
+
+                vm.onScopeChange(SearchScope.ALL)
+                val allScope = awaitStateWhere { it.scope == SearchScope.ALL && it.bufferMatches.isNotEmpty() }
+                assertEquals(preview.bufferMatches, allScope.bufferMatches)
+                assertEquals(false, allScope.bufferMatchesExpanded)
                 cancelAndIgnoreRemainingEvents()
             }
         }
