@@ -62,10 +62,10 @@ Apache-2.0, at source revision
 with the Maven Central JAR's fixed SHA-256 in `flake.nix`. Client
 `instructions: false` avoids importing third-party server guidance as policy.
 
-Use the connected server's actual schemas: `gradle_docs` for this project's
-Gradle **9.8.0** (set `version: "9.8.0"`), `inspect_dependencies` for a narrow
-module/configuration (`checkUpdates: false` unless requested), and
-`read_dependency_sources` / `search_dependency_sources` for library APIs.
+Use the connected server's actual schemas: `gradle_docs` with the version in
+[`gradle-wrapper.properties`](../gradle/wrapper/gradle-wrapper.properties),
+`inspect_dependencies` for a narrow module/configuration (`checkUpdates: false`
+unless requested), and `read_dependency_sources` / `search_dependency_sources` for library APIs.
 Supply the absolute repository `projectRoot` explicitly; the launcher also sets
 `GRADLE_MCP_PROJECT_ROOT` from its working directory when unset. `gradle` can run
 scoped tasks, with `query_build` / `wait_build` for results. Build/model tools
@@ -74,7 +74,7 @@ read-only by default. Do not publish public Build Scans, automatically run full
 builds/suites, install server skills, or change global client configuration.
 [`testing.md`](testing.md) and all existing Required CI rules still govern checks.
 
-Verified with Gradle 9.8.0: version-specific docs, all five project modules,
+Verified with Gradle 9.8.0: version-specific docs, the project model,
 `:irc` dependency resolution, and resolved Okio source access. This does not
 establish IDE-style Kotlin reference/refactoring support.
 
