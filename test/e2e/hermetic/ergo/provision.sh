@@ -240,6 +240,19 @@ do_seed() {
     printf 'PRIVMSG %s :\001ACTION waves at the room\001\r\n' "$TEST_CHANNEL"
     printf 'PRIVMSG %s :check this link https://example.com/page\r\n' "$TEST_CHANNEL"
     printf 'PRIVMSG %s :and an image https://example.com/cat.png\r\n' "$TEST_CHANNEL"
+    if [ "${1:-}" = --benchmark-scroll ]; then
+      i=1
+      while [ "$i" -le 90 ]; do
+        case $((i % 3)) in
+          0) text='A wrapped timeline row with plain words that run across several lines so the fixture exercises text layout as well as scrolling. Every third row has the same longer body.' ;;
+          *) text='A short timeline row.' ;;
+        esac
+        sleep 0.02
+        printf 'PRIVMSG %s :Timeline row %03d: %s\r\n' "$TEST_CHANNEL" "$i" "$text"
+        i=$((i + 1))
+      done
+      sleep 0.02
+    fi
     printf 'PRIVMSG %s :%s: welcome to the seed channel\r\n' "$TEST_CHANNEL" "$APP_NICK"
     printf 'PRIVMSG %s :hi from the seeded member\r\n' "$APP_NICK"
     # Device checks can keep the second identity visible in Channel info without a separate
@@ -408,7 +421,7 @@ fi
 wait_for_ergo
 case "$MODE" in
   register) do_register ;;
-  seed)     do_seed ;;
+  seed)     do_seed "${2:-}" ;;
   showcase) do_showcase_seed ;;
   showcase-hold) do_showcase_hold ;;
   burst)    do_burst ;;

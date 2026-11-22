@@ -306,6 +306,9 @@ stop_pids() {
 }
 
 up() {
+  if [ "${MOTD_BENCHMARK_SCROLL:-0}" = 1 ] && [ "$STACK_PROFILE" != default ]; then
+    die "MOTD_BENCHMARK_SCROLL=1 requires the default stack profile"
+  fi
   stop_pids
   # Guard: a stale/foreign ergo/soju on these ports would silently hijack the run
   # (provisioning would talk to the wrong daemon). Fail loudly instead.
@@ -366,6 +369,11 @@ up() {
   log "seeding history for profile $STACK_PROFILE"
   if [ "$STACK_PROFILE" = showcase ]; then
     sh "$PROVISION" showcase
+  elif [ "${MOTD_BENCHMARK_SCROLL:-0}" = 1 ]; then
+    sh "$PROVISION" seed --benchmark-scroll
+    log "proving the retained timeline benchmark fixture"
+    python3 "$REPO/test/e2e/fixtures/chathistory-probe.py" --port "$SOJU_PORT" \
+      --channel "$TEST_CHANNEL" --seed-text "$APP_NICK: welcome to the seed channel" --benchmark-scroll
   else
     sh "$PROVISION" seed
   fi

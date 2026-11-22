@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import base64
 import datetime
+import re
 import select
 import socket
 import ssl
@@ -161,6 +162,39 @@ def wait_for_batch_end(client: Client, start: int, label: str) -> None:
     )
 
 
+def verify_benchmark_scroll(client: Client, start: int, channel: str, welcome: str) -> None:
+    opener = re.compile(rf"(?:@\S+ )?(?::\S+ )?BATCH \+(\S+) chathistory :?{re.escape(channel)}$", re.I)
+    opening = client.wait_for(lambda line: opener.match(line) is not None, "timeline LATEST batch start", start=start)
+    batch_id = opener.match(opening)[1]
+    start = client.lines.index(opening, start) + 1
+    closer = re.compile(rf"(?:@\S+ )?(?::\S+ )?BATCH -{re.escape(batch_id)}$")
+    closing = client.wait_for(lambda line: closer.match(line) is not None, "timeline LATEST batch end", start=start)
+
+    ordinals: list[int] = []
+    previous_time = ""
+    last_body = ""
+    for line in client.lines[start:client.lines.index(closing, start)]:
+        tag_text, _, message = line.partition(" ")
+        if not tag_text.startswith("@"):
+            continue
+        tags = dict(tag.split("=", 1) for tag in tag_text[1:].split(";") if "=" in tag)
+        command, _, body = message.partition(" :")
+        if tags.get("batch") != batch_id or not command.lower().endswith(f" privmsg {channel.lower()}"):
+            continue
+        last_body = body
+        row = re.match(r"^Timeline row ([0-9]{3}): \S", body)
+        if row is None and body != welcome:
+            continue
+        stamp = timestamp(datetime.datetime.strptime(tags.get("time", ""), "%Y-%m-%dT%H:%M:%S.%fZ"))
+        if stamp <= previous_time:
+            raise AssertionError(f"non-increasing timeline millisecond timestamp: {line}")
+        previous_time = stamp
+        ordinals.append(int(row[1]) if row else 91)
+    if ordinals != list(range(1, 92)) or last_body != welcome:
+        raise AssertionError(f"expected retained rows 001–090 followed by the welcome; got {ordinals}, last={last_body!r}")
+    print("TIMELINE_HISTORY_OK: 90 numbered rows and the final welcome in strict millisecond order")
+
+
 def smoke(
     host: str,
     port: int,
@@ -171,6 +205,7 @@ def smoke(
     seed_text: str,
     socks_host: str | None,
     socks_port: int | None,
+    benchmark_scroll: bool,
 ) -> None:
     client = connect(host, port, username, password, network, socks_host, socks_port)
     try:
@@ -192,7 +227,10 @@ def smoke(
             "seeded retained message",
             start=start,
         )
-        wait_for_batch_end(client, start, "LATEST")
+        if benchmark_scroll:
+            verify_benchmark_scroll(client, start, channel, seed_text)
+        else:
+            wait_for_batch_end(client, start, "LATEST")
 
         print("CHATHISTORY_SMOKE_OK")
         print("target=" + target_line)
@@ -212,6 +250,7 @@ def main() -> int:
     parser.add_argument("--seed-text", default="hello, this is a seeded plain line")
     parser.add_argument("--socks-host")
     parser.add_argument("--socks-port", type=int)
+    parser.add_argument("--benchmark-scroll", action="store_true")
     args = parser.parse_args()
     if (args.socks_host is None) != (args.socks_port is None):
         parser.error("--socks-host and --socks-port must be used together")
@@ -225,6 +264,7 @@ def main() -> int:
         args.seed_text,
         args.socks_host,
         args.socks_port,
+        args.benchmark_scroll,
     )
     return 0
 
