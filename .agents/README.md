@@ -88,6 +88,15 @@ for now: their current backend/KMP/migration triggers do not match this task.
 Skip the [MCP Kotlin SDK](https://kotlinlang.org/docs/kotlin-ai-apps-development-overview.html#model-context-protocol-mcp-kotlin-sdk):
 it implements clients/servers, not Kotlin code intelligence; no app dependency is needed.
 
+Use these official Android skills as on-demand references, not project policy:
+
+- [Edge-to-edge](https://github.com/android/skills/tree/main/system/edge-to-edge)
+  for keyboard and system-bar inset bugs. MOTD already runs edge-to-edge;
+  use the troubleshooting guidance, not the migration checklist.
+- [Compose performance](https://github.com/android/skills/tree/main/jetpack-compose/jetpack-compose-performance)
+  for diagnosing measured chat scrolling or rendering bottlenecks. Keep release
+  minification disabled unless the maintainer explicitly scopes a change to it.
+
 ## Task guides
 
 - [`testing.md`](testing.md) — targeted local checks and hosted verification gates.
