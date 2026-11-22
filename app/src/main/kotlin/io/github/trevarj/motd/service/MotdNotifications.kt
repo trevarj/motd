@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.service
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,6 +8,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.content.pm.ShortcutManager
 import android.net.Uri
 import android.os.Build
@@ -15,6 +17,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
+import androidx.core.content.ContextCompat
 import androidx.core.content.LocusIdCompat
 import androidx.core.content.edit
 import androidx.core.content.pm.ShortcutInfoCompat
@@ -83,6 +86,15 @@ fun shouldPostNotification(
     alreadyRead: Boolean = false,
     watched: Boolean = false,
 ): Boolean = !alreadyRead && !foreground && !(muted && !watched) && senderAllowsNotification
+
+internal enum class TestAlertCategory(
+    val channelId: String,
+) {
+    MESSAGES(MotdNotifications.CHANNEL_MESSAGES),
+    MENTIONS(MotdNotifications.CHANNEL_MENTIONS),
+}
+
+internal enum class TestAlertResult { SENT, APP_BLOCKED, CATEGORY_BLOCKED, UNAVAILABLE }
 
 /**
  * MessagingStyle notifications. Owns the notification channels and applies the final
@@ -182,7 +194,7 @@ class MotdNotifications
                     db.withTransaction {
                         if (db.appStateDao().contains(V10_NOTIFICATION_RESET) > 0) {
                             manager.activeNotifications
-                                .filter { it.notification.baseChannelId in RESETTABLE_CHANNELS }
+                                .filter { it.notification.baseChannelId in RESETTABLE_CHANNELS && !isTestAlert(it.tag, it.id) }
                                 .forEach { manager.cancel(it.tag, it.id) }
                             db.appStateDao().delete(V10_NOTIFICATION_RESET)
                         }
@@ -211,6 +223,7 @@ class MotdNotifications
             dickordBatches.clear()
             manager.activeNotifications
                 .filter {
+                    if (isTestAlert(it.tag, it.id)) return@filter false
                     val notification = it.notification
                     val channel = notification.baseChannelId
                     if (channel !in RESETTABLE_CHANNELS) return@filter false
@@ -300,9 +313,8 @@ class MotdNotifications
          * Retire message notifications posted by a build that used the raw `bufferId` as the
          * notification id. The new code only ever cancels ids in the [messageNotificationId] namespace,
          * so an upgrade would otherwise strand those old notifications forever. A notification on a
-         * message/mention channel whose id is outside the namespace cannot have been posted by this
-         * build, which makes the sweep unconditional, idempotent, and harmless on a fresh install: it
-         * never inspects, and therefore never retires, the pinned status notification.
+         * message/mention channel whose id is outside the namespace and is not an explicit test
+         * alert or watch-ended notice is legacy. The pinned status channel is not inspected.
          */
         internal fun retireLegacyMessageNotifications() {
             runCatching {
@@ -310,7 +322,8 @@ class MotdNotifications
                     .filter {
                         it.notification.baseChannelId in MESSAGE_CHANNELS &&
                             !isMessageNotificationId(it.id) &&
-                            !isWatchEndedNotificationId(it.id)
+                            !isWatchEndedNotificationId(it.id) &&
+                            !isTestAlert(it.tag, it.id)
                     }.forEach { legacy ->
                         manager.cancel(legacy.tag, legacy.id)
                         diagnostics.record("notifications", "legacy_message_id_retired") {
@@ -438,6 +451,32 @@ class MotdNotifications
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_SEND_FAILURES, "Failed sends", NotificationManager.IMPORTANCE_HIGH),
             )
+        }
+
+        internal fun postTestAlert(category: TestAlertCategory): TestAlertResult {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                return TestAlertResult.APP_BLOCKED
+            }
+            if (!manager.areNotificationsEnabled()) return TestAlertResult.APP_BLOCKED
+            val nativeManager = context.getSystemService(NotificationManager::class.java) ?: return TestAlertResult.UNAVAILABLE
+            val channel = nativeManager.getNotificationChannel(category.channelId) ?: return TestAlertResult.UNAVAILABLE
+            if (channel.importance == NotificationManager.IMPORTANCE_NONE) return TestAlertResult.CATEGORY_BLOCKED
+            val notification =
+                NotificationCompat
+                    .Builder(context, channel.id)
+                    .setSmallIcon(R.drawable.ic_notification_motd)
+                    .setContentTitle(context.getText(R.string.notification_local_test_title))
+                    .setContentText(context.getText(R.string.notification_local_test_body))
+                    .build()
+            return try {
+                nativeManager.cancel(TEST_ALERT_TAG, TEST_ALERT_ID)
+                nativeManager.notify(TEST_ALERT_TAG, TEST_ALERT_ID, notification)
+                TestAlertResult.SENT
+            } catch (_: SecurityException) {
+                TestAlertResult.APP_BLOCKED
+            }
         }
 
         // -- MessageNotifier (message/mention notifications) --
@@ -1713,6 +1752,13 @@ class MotdNotifications
             private const val NAMESPACE_MASK = -0x10000000 // 0xf0000000
             private const val WATCH_ENDED_NAMESPACE = 0x30000000
             private const val INVITATION_ID_NAMESPACE = 0x40000000
+            private const val TEST_ALERT_TAG = "local_test_alert"
+            private const val TEST_ALERT_ID = 0x60000001
+
+            private fun isTestAlert(
+                tag: String?,
+                id: Int,
+            ): Boolean = tag == TEST_ALERT_TAG && id == TEST_ALERT_ID
         }
     }
 

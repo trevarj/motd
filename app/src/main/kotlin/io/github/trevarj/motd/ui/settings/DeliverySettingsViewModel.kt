@@ -6,6 +6,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.push.PushDistributorController
 import io.github.trevarj.motd.service.DeliveryMode
+import io.github.trevarj.motd.service.MotdNotifications
+import io.github.trevarj.motd.service.TestAlertCategory
+import io.github.trevarj.motd.service.TestAlertResult
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
@@ -24,6 +27,7 @@ class DeliverySettingsViewModel
         private val settingsRepository: SettingsRepository,
         private val pushAvailability: PushAvailabilityProvider,
         private val pushDistributorController: PushDistributorController,
+        private val notifications: MotdNotifications,
     ) : ViewModel() {
         val state =
             combine(settingsRepository.settings, pushAvailability.availability()) { settings, availability ->
@@ -37,4 +41,6 @@ class DeliverySettingsViewModel
         fun retryPushSetup() = viewModelScope.launch { runCatching { pushDistributorController.retry() } }
 
         fun refreshNotificationPermission() = pushAvailability.refreshNotificationPermission()
+
+        internal fun postTestAlert(category: TestAlertCategory): TestAlertResult = notifications.postTestAlert(category)
     }

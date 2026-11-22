@@ -326,6 +326,17 @@
     <string name="settings_delivery_push_fix_notifications">Enable notifications</string>
     <string name="settings_delivery_notifications_blocked">Notifications are blocked</string>
     <string name="settings_delivery_notifications_blocked_desc">Synchronization may continue while message and status alerts are blocked. Enable notifications in Android settings to receive alerts.</string>
+    <string name="settings_test_alert">Test this alert</string>
+    <string name="settings_test_alert_explanation">Post a local Android notification on this device. This does not check IRC, push delivery, or sound.</string>
+    <string name="settings_test_alert_messages">Messages</string>
+    <string name="settings_test_alert_sent">Test alert sent to Android. Check the notification shade; Android may not display it.</string>
+    <string name="settings_test_alert_app_blocked">Test alert not sent. Notifications for this app are blocked in Android settings.</string>
+    <string name="settings_test_alert_category_blocked">Test alert not sent. The %1$s notification category is blocked in Android settings.</string>
+    <string name="settings_test_alert_unavailable">Test alert unavailable. Android could not post it, or notification access changed. Try again.</string>
+    <string name="settings_test_alert_category_settings">Open category settings</string>
+    <string name="settings_test_alert_settings_unavailable">Android notification settings could not be opened on this device.</string>
+    <string name="notification_local_test_title">Local test alert</string>
+    <string name="notification_local_test_body">This is an Android notification test, not an IRC message.</string>
     <string name="settings_delivery_push_status_choose">Choose a push distributor</string>
     <string name="settings_delivery_push_status_endpoint">Requesting an endpoint…</string>
     <string name="settings_delivery_push_status_server">Endpoint received — waiting for the bouncer…</string>

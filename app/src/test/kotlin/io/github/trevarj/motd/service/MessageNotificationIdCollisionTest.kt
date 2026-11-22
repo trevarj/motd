@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.service
 
 import android.app.Notification
+import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -180,6 +181,31 @@ class MessageNotificationIdCollisionTest {
                 shadowManager.activeNotifications.map { it.id },
             )
         }
+
+    @Test
+    fun localAlertUsesOnlyTheSelectedEnabledAndroidCategory() {
+        postStatusNotification()
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val mentions = MotdNotifications.CHANNEL_MENTIONS
+        manager.deleteNotificationChannel(mentions)
+        assertEquals(TestAlertResult.UNAVAILABLE, notifications.postTestAlert(TestAlertCategory.MENTIONS))
+        manager.createNotificationChannel(NotificationChannel(mentions, "Mentions", NotificationManager.IMPORTANCE_NONE))
+        assertEquals(TestAlertResult.CATEGORY_BLOCKED, notifications.postTestAlert(TestAlertCategory.MENTIONS))
+        assertEquals(listOf(IrcForegroundService.STATUS_ID), shadowManager.activeNotifications.map { it.id })
+
+        shadowManager.setNotificationsEnabled(false)
+        assertEquals(TestAlertResult.APP_BLOCKED, notifications.postTestAlert(TestAlertCategory.MESSAGES))
+        shadowManager.setNotificationsEnabled(true)
+        assertEquals(TestAlertResult.SENT, notifications.postTestAlert(TestAlertCategory.MESSAGES))
+        notifications.retireLegacyMessageNotifications()
+
+        val active = shadowManager.activeNotifications
+        assertEquals(2, active.size)
+        val testAlert = active.single { it.notification.channelId == MotdNotifications.CHANNEL_MESSAGES }.notification
+        assertNull(testAlert.contentIntent)
+        assertNull(NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(testAlert))
+        assertTrue(testAlert.actions.isNullOrEmpty())
+    }
 
     @Test
     fun watchEndedNotificationsKeepIndependentTapTargetsThroughStartupCleanup() =

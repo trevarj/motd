@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.settings
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.PowerManager
 import android.text.format.DateUtils
@@ -23,12 +24,17 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -39,6 +45,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.service.DeliveryMode
+import io.github.trevarj.motd.service.TestAlertCategory
+import io.github.trevarj.motd.service.TestAlertResult
 import io.github.trevarj.motd.service.isBootReceiverEnabled
 import io.github.trevarj.motd.service.setBootReceiverEnabled
 import io.github.trevarj.motd.ui.nav.SettingsTarget
@@ -75,6 +83,7 @@ fun DeliverySettingsScreen(
         pushAvailability = state.pushAvailability,
         onBack = onBack,
         onDeliveryMode = viewModel::setDeliveryMode,
+        onPostTestAlert = viewModel::postTestAlert,
         startOnBoot = startOnBoot,
         onStartOnBoot = { enabled ->
             setBootReceiverEnabled(context, enabled)
@@ -87,11 +96,12 @@ fun DeliverySettingsScreen(
 }
 
 @Composable
-fun DeliverySettingsContent(
+internal fun DeliverySettingsContent(
     deliveryMode: DeliveryMode,
     pushAvailability: PushAvailability,
     onBack: () -> Unit,
     onDeliveryMode: (DeliveryMode) -> Unit,
+    onPostTestAlert: (TestAlertCategory) -> TestAlertResult,
     startOnBoot: Boolean = true,
     onStartOnBoot: (Boolean) -> Unit = {},
     onSelectDistributor: (String) -> Unit = {},
@@ -100,6 +110,7 @@ fun DeliverySettingsContent(
 ) {
     val context = LocalContext.current
     var showDistributorChooser by remember { mutableStateOf(false) }
+    var showTestAlert by rememberSaveable { mutableStateOf(false) }
     SettingsScaffold(title = stringResource(R.string.settings_delivery), onBack = onBack) {
         val distributorUrl = stringResource(R.string.settings_delivery_push_distributor_url)
         SettingsGroup(title = stringResource(R.string.settings_delivery_method)) {
@@ -120,14 +131,14 @@ fun DeliverySettingsContent(
                 exit = fadeOut(MotdMotion.microFadeOut) + shrinkVertically(animationSpec = MotdMotion.contentSize),
             ) {
                 NotificationPermissionWarning(
-                    onFixNotifications = {
-                        context.startActivity(
-                            Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS)
-                                .putExtra(AndroidSettings.EXTRA_APP_PACKAGE, context.packageName),
-                        )
-                    },
+                    onFixNotifications = { context.startActivity(notificationSettingsIntent(context.packageName)) },
                 )
             }
+            SettingsNavigationRow(
+                title = stringResource(R.string.settings_test_alert),
+                modifier = Modifier.testTag("settings_test_alert"),
+                onClick = { showTestAlert = true },
+            )
         }
         SettingsGroup(title = stringResource(R.string.settings_background_reliability)) {
             SettingsTarget(target?.name, SettingsTarget.START_ON_BOOT.name) { targetModifier ->
@@ -173,6 +184,9 @@ fun DeliverySettingsContent(
             }
         }
     }
+    if (showTestAlert) {
+        TestAlertDialog(onPost = onPostTestAlert, onDismiss = { showTestAlert = false })
+    }
     if (showDistributorChooser) {
         AlertDialog(
             onDismissRequest = { showDistributorChooser = false },
@@ -195,6 +209,122 @@ fun DeliverySettingsContent(
             },
             confirmButton = {},
         )
+    }
+}
+
+@Composable
+private fun TestAlertDialog(
+    onPost: (TestAlertCategory) -> TestAlertResult,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    var outcome by rememberSaveable { mutableStateOf<Pair<TestAlertCategory, TestAlertResult>?>(null) }
+    var settingsUnavailable by rememberSaveable { mutableStateOf(false) }
+    val posted = outcome
+    val actionLabel =
+        when (posted?.second) {
+            TestAlertResult.APP_BLOCKED -> R.string.settings_delivery_push_fix_notifications
+            TestAlertResult.CATEGORY_BLOCKED -> R.string.settings_test_alert_category_settings
+            else -> null
+        }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("settings_test_alert_dialog"),
+        title = { Text(stringResource(R.string.settings_test_alert)) },
+        text = {
+            if (posted == null) {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(stringResource(R.string.settings_test_alert_explanation))
+                    for (category in TestAlertCategory.entries) {
+                        TextButton(
+                            onClick = { outcome = category to onPost(category) },
+                            colors = readableTextButtonColors(),
+                            modifier = Modifier.testTag("settings_test_alert_${category.name.lowercase()}"),
+                        ) {
+                            Text(stringResource(category.label))
+                        }
+                    }
+                }
+            } else {
+                val message =
+                    if (settingsUnavailable) {
+                        stringResource(R.string.settings_test_alert_settings_unavailable)
+                    } else {
+                        when (posted.second) {
+                            TestAlertResult.SENT -> {
+                                stringResource(R.string.settings_test_alert_sent)
+                            }
+
+                            TestAlertResult.APP_BLOCKED -> {
+                                stringResource(R.string.settings_test_alert_app_blocked)
+                            }
+
+                            TestAlertResult.CATEGORY_BLOCKED -> {
+                                stringResource(R.string.settings_test_alert_category_blocked, stringResource(posted.first.label))
+                            }
+
+                            TestAlertResult.UNAVAILABLE -> {
+                                stringResource(R.string.settings_test_alert_unavailable)
+                            }
+                        }
+                    }
+                Text(
+                    message,
+                    modifier =
+                        Modifier
+                            .testTag("settings_test_alert_result")
+                            .semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
+        },
+        confirmButton = {
+            if (actionLabel != null && posted != null) {
+                TextButton(
+                    onClick = {
+                        val channelId = posted.first.channelId.takeIf { posted.second == TestAlertResult.CATEGORY_BLOCKED }
+                        try {
+                            context.startActivity(notificationSettingsIntent(context.packageName, channelId))
+                            onDismiss()
+                        } catch (_: ActivityNotFoundException) {
+                            settingsUnavailable = true
+                        } catch (_: SecurityException) {
+                            settingsUnavailable = true
+                        }
+                    },
+                    colors = readableTextButtonColors(),
+                    modifier = Modifier.testTag("settings_test_alert_open_settings"),
+                ) {
+                    Text(stringResource(actionLabel))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = readableTextButtonColors(),
+                modifier = Modifier.testTag("settings_test_alert_dismiss"),
+            ) {
+                Text(stringResource(if (posted == null) R.string.action_cancel else R.string.action_dismiss))
+            }
+        },
+    )
+}
+
+private val TestAlertCategory.label: Int
+    get() =
+        when (this) {
+            TestAlertCategory.MESSAGES -> R.string.settings_test_alert_messages
+            TestAlertCategory.MENTIONS -> R.string.mentions_title
+        }
+
+private fun notificationSettingsIntent(
+    packageName: String,
+    channelId: String? = null,
+): Intent {
+    val action =
+        if (channelId == null) AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS else AndroidSettings.ACTION_CHANNEL_NOTIFICATION_SETTINGS
+    return Intent(action).putExtra(AndroidSettings.EXTRA_APP_PACKAGE, packageName).apply {
+        if (channelId != null) putExtra(AndroidSettings.EXTRA_CHANNEL_ID, channelId)
     }
 }
 
@@ -405,6 +535,7 @@ private fun DeliverySettingsPreview() {
             pushAvailability = PushAvailability(),
             onBack = {},
             onDeliveryMode = {},
+            onPostTestAlert = { TestAlertResult.SENT },
         )
     }
 }
